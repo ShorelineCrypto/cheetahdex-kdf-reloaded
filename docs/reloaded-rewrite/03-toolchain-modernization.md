@@ -105,9 +105,10 @@ attributes are concentrated in four source files:
 | `mm2src/mm2_state_machine/src/lib.rs` | `negative_impls`, `auto_traits` |
 | `mm2src/mm2_main/src/docker_tests.rs` | `custom_test_frameworks`, `test` |
 
-These four files (plus two vendored test-mocking crates,
-`mocktopus` and `mocktopus_macros`) need nightly-only behaviour
-that has no equivalent on stable:
+These four files (plus two external test-mocking dependencies,
+`mocktopus` and `mocktopus_macros`, which themselves require
+nightly features) need nightly-only behaviour that has no
+equivalent on stable:
 
 - `auto_traits` plus `negative_impls` express an
   "if-T-is-not-already-X-then-treat-it-as-Y" pattern that the
@@ -161,9 +162,15 @@ The current distribution is:
 | 2018 | 2 |
 | 2015 | 1 |
 
-The two surviving 2018 crates and the single 2015 crate are
-vendored upstream code preserved at the edition of their origin.
-Every first-party workspace crate is now on edition 2021.
+Two of the surviving non-2021 crates are vendored upstream code
+preserved at the edition of their origin (`testcontainers-vendored`
+on 2018 and `ethabi-vendored` on 2015); a third (`sia-rust-patched`,
+on 2018) is the local patched copy of an external crate. One
+first-party crate (`trading_api`) remains on edition 2018 because
+it was added post-baseline against an external service whose
+generated bindings were authored against that edition; migrating
+it is tracked as a low-priority follow-up. Every other first-party
+workspace crate is on edition 2021.
 
 The edition bump is a per-crate operation: change
 `edition = "2018"` to `edition = "2021"` in the crate's
@@ -253,8 +260,10 @@ were at the baseline:
 
 The project's `rustfmt.toml` (present at the baseline and retained
 since) uses formatting options that are nightly-only as of this
-writing (`unstable_features = true`, `inline_attribute_width`,
-`overflow_delimited_expr`). Stable `rustfmt` rejects these options
+writing — `unstable_features = true` (the enabling switch), and
+several options it gates on, including `fn_single_line`,
+`imports_indent = "Visual"`, `inline_attribute_width`, and
+`overflow_delimited_expr`. Stable `rustfmt` rejects these options
 with an error rather than ignoring them, which means a stable
 toolchain cannot run the configured formatting check.
 
