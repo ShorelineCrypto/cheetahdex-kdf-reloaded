@@ -82,7 +82,7 @@ under which post-baseline work was added to the project are set out in
 - [01 — Clean-Room Rules and Methodology](01-clean-room-rules.md)
 - [02 — The Baseline State at the June 2022 Commit](02-baseline-state.md)
 - [03 — Toolchain Modernization](03-toolchain-modernization.md)
-- [04 — Error-Aggregation Type Adaptation to the Modern Trait Solver](04-error-type-adaptation.md)
+- [04 — Error-Aggregation Type Adaptation to the Modern Trait Solver](04-error-aggregation-type-adaptation.md)
 - [05 — Hierarchical-Deterministic Wallet Support](05-hd-wallet-support.md)
 - [06 — Network-Identifier & Seed-Node Decoupling](06-network-id-seed-node.md)
 - [07 — Wallet Lifecycle & Private-Key Export RPCs](07-wallet-lifecycle-and-key-export.md)
