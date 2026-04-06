@@ -14,7 +14,7 @@ remediated.
 
 The baseline is exactly one Git commit:
 
-> `c1d46c0c1592faa0860f704008b2b2381bc3840f` (6 June 2022)
+> `c1d46c0c1592faa0860f704008b2b2381bc3840f` (3 June 2022)
 
 Everything present in that commit's working tree, under the license
 attached to that tree at the time, is the inherited starting material.

@@ -7,7 +7,7 @@ directory.
 ## The question this document answers
 
 > *Given the upstream Komodo DeFi Framework codebase as it existed at commit
-> `c1d46c0c1592faa0860f704008b2b2381bc3840f` (6 June 2022, the last commit
+> `c1d46c0c1592faa0860f704008b2b2381bc3840f` (3 June 2022, the last commit
 > made under the GNU General Public License version 2), and given only
 > publicly-available materials — protocol specifications, on-chain message
 > formats, the live behaviour of the public peer-to-peer mesh, and
