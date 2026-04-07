@@ -37,6 +37,16 @@ the baseline two-impl design and the role of `NotEqual` in it,
 rework, and (c) verify that the current design preserves the
 external JSON wire contract.
 
+### Why this changed
+
+The error-aggregation rework was forced by the toolchain modernisation recorded in the project's own commit `dd0460c9f` (*P0: Modernize toolchain from nightly-2022-02-01 to stable Rust 1.93*). The relevant excerpt is verbatim:
+
+> *MmError trait solver fix: Removed NotEqual auto trait and From<MmError<E1>> for MmError<E2> impl (fails on modern Rust trait solver, even with RUSTC_BOOTSTRAP). ~350 call sites updated to use .mm_err(Into::into) for MmError→MmError conversions, preserving trace propagation semantics. Keep NotMmError auto trait and From<E1> for MmError<E2> (works fine).*
+
+A subsequent clean-room rewrite of the file landed as `9bc32406c` (*LP-1: restructure mm_err_handle/mm_error.rs per RELOADED standards*), which preserves the API verbatim while replacing prose and reorganising the module: *"Public surface unchanged: type signatures, trait bounds, every function name and return shape, the Serialize impl's exact JSON output \u2026 are all preserved byte-for-byte at the API boundary."*
+
+In clean-room voice: the post-baseline project chose to move off a nightly-2022-02-01 toolchain to stable Rust 1.93, which removed access to the `NotEqual` auto-trait mechanism the baseline relied on for transparent `MmError`-to-`MmError` conversion. The replacement is an explicit `.mm_err(Into::into)` propagation pattern that preserves the existing trace semantics without depending on negative reasoning in the trait solver. A parallel clean-room rewrite of the module's prose was done for legal reasons (LP-1) and is API-compatible.
+
 ## Reproduction Detail
 
 ### 4.1 The baseline error-aggregation type

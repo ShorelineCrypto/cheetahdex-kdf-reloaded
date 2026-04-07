@@ -59,6 +59,16 @@ and (c) explain why the new design lets unknown netids be
 rejected at startup without any change to the peer-to-peer
 protocol.
 
+### Why this changed
+
+The per-netid registry crate and the production/test netid split were introduced by the project's own commits `4ac13459f` (*feat(net_config): add feature-gated regtest netid 9000 for docker tests*) and `5ea034dcc` (*feat(net_config): consolidate test netids (8100, 8999, 9000, 9998)*). The first commit gives the operational reason verbatim:
+
+> *The docker_tests harness configures spawned MM2 instances with "netid": 9000 (88 occurrences across 7 files), but RELOADED's compile-time netid registry only included 8762 (AtomicDEX) and 6133 (GLEEC). Every test that spawned an MM2 instance panicked at startup with "Unsupported netid 9000: no compiled configuration", masquerading in CI as connection-reset failures. … The production `mm2` binary leaves the feature off and continues to reject netid 9000 at startup.*
+
+The second commit generalises the same fix to additional test netids and consolidates them behind a single `define_test_netid!` macro. Both commits reference the broader legal-mitigation work tracked as LP-3F.C1, which required all DEX-fee-address material to flow through `NetConfig` so it could be cleanly varied per netid without leaking constants across the workspace.
+
+In clean-room voice: the post-baseline project chose a compile-time netid registry over the baseline's runtime branching on a single hard-coded numeric tag (`NETID_7777`) so that (a) production binaries refuse to start on any netid they cannot describe, (b) per-network constants — including the DEX-fee address and rate — have a single typed home, and (c) test-only networks can be enabled behind a Cargo feature without polluting the production surface.
+
 ## Reproduction Detail
 
 ### 6.1 The baseline shape of "what a netid means"

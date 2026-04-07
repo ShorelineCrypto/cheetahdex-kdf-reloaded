@@ -38,6 +38,16 @@ degenerate split inputs. It does not document the specific numeric values used
 on any production network — those are network-policy, not fee-engine, and live
 in the per-netid configuration modules described in chapter 06.
 
+### Why this changed
+
+The fee-routing engine was rebuilt across three project commits: `ac64c7ee0` (*P2.1: DexFee burn infrastructure*), `631fd0a92` (*P5.4: wire pre-burn address outputs into UTXO and EVM transactions*), and `85584d8a0` (*lp_swap: extract dex_fee helpers into dedicated submodule*). The primary commit `ac64c7ee0` states the design intent verbatim:
+
+> *Add DexFee enum with Standard/WithBurn/NoFee variants to support split fee transactions where a portion is sent to the DEX fee address and a portion is burned (OP_RETURN for KMD, pre-burn address for other coins). … Add ValidateFeeArgs struct to replace positional parameter lists in SwapOps::validate_fee. … Burn is configured per-network via NetConfig: netid 8762: burn_enabled=false (Standard fees only); netid 6133: burn_enabled=true, dex_fee_share=3/4 (75% fee, 25% burn).*
+
+The follow-on commit `85584d8a0` declares its intent as `"Pure restructure, no behavior change. … the new module carries a header explaining that all fee parameters are sourced from NetConfig and that this module is purely arithmetic — destination addresses are resolved coin-side."` The submodule extraction was, additionally, a deliberate step toward the legal-mitigation goal recorded in the project as LP-3F: removing every hard-coded fee constant from the swap module so per-netid configuration could be varied cleanly.
+
+In clean-room voice: the post-baseline project chose to widen the fee path from a single-output, single-address transaction into a typed, multi-variant descriptor so it could support burn-share economics; collapse positional `validate_fee` argument lists into a named-field struct to eliminate a class of swap-side errors; and route every numeric fee parameter through `NetConfig` (chapter 06) so the swap module is purely arithmetic.
+
 ## Reproduction Detail
 
 ### 8.1 Baseline shape

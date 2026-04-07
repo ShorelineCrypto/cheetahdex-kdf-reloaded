@@ -53,6 +53,16 @@ which public specification each new type is derived from, and
 (c) explain how legacy-Iguana and HD policies coexist behind a
 single `CryptoCtx`.
 
+### Why this changed
+
+The HD-wallet stack was introduced by the project's own commit `d681168bd` (*P1.1: Crypto crate HD wallet core — BIP39/BIP32/SLIP-10/SLIP-21*), whose message explicitly enumerates the goals of the change. The motivation in the project's own words:
+
+> *New crypto modules: encrypt.rs (AES-256-CBC + HMAC-SHA256 authenticated encryption); decrypt.rs (HMAC-verify-first); key_derivation.rs (Argon2/SLIP-0021 framework); slip21.rs (SLIP-0021 hierarchical symmetric); mnemonic.rs (BIP39 generation + password-based encrypt/decrypt); global_hd_ctx.rs (GlobalHDAccountCtx with BIP32 secp256k1 + SLIP-10 ed25519); standard_hd_path.rs (Type-safe BIP-44/49/84 HD paths with Bip43Purpose); xpub.rs (XPub prefix conversion); secret_hash_algo.rs (DHASH160/SHA256 secret hash selection for HTLCs).*
+
+The same commit message records the architectural switch to `KeyPairPolicy { Iguana | GlobalHDAccount }` on `CryptoCtx`, the renaming of `iguana_ctx()` callers to `mm2_internal_*` for narrower key access, and the new dependency surface (`aes, argon2, bip39, bs58, cbc, ed25519-dalek-bip32, hmac, sha2, zeroize`). The post-baseline EVM extension lands as commit `2de8718bf` (*P9.9: ETH/EVM HD wallet derivation*).
+
+In clean-room voice: the post-baseline project chose to gain industry-standard HD wallets — including hardware-wallet-compatible derivation, encrypted-at-rest mnemonics, and dual-curve (secp256k1 + ed25519) master keys — while keeping the legacy passphrase model alive behind the same `CryptoCtx` façade so existing call sites would not need to fork.
+
 ## Reproduction Detail
 
 ### 5.1 The baseline crypto crate

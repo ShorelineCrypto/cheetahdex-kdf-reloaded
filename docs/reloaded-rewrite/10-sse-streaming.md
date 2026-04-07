@@ -29,6 +29,18 @@ RPC dispatcher, the concrete streamers shipped in this tree (heartbeat,
 balance, swap status, order status, orderbook), and the runtime invariants
 the design relies on.
 
+### Why this changed
+
+The SSE backbone landed in three project commits as the corresponding event sources came online: `c3ae7fe40` (*P3: SSE event streaming — infrastructure, heartbeat, and balance streamers*), `5c32c4705` (*feat(ordermatch): P4.4 SSE order/orderbook event streamers*), and `0b6c233ea` (*P6.6+P6.7: V2 swap RPCs, SSE events, kickstart recovery, DB storage*).
+
+The foundational commit `c3ae7fe40` describes the layer verbatim:
+
+> *New crate mm2_event_stream with Event, StreamingManager, EventStreamer trait. SSE endpoint at GET /event-stream?id=<client_id> with chunked transfer. stream:: namespace routing in dispatcher for streaming RPCs. Heartbeat streamer (stream::heartbeat::enable) — periodic alive signal. Balance streamer (stream::balance::enable) — polls coin balance, emits on change. Multi-client fan-out with shared streamer tasks and graceful shutdown.*
+
+The order/orderbook commit `5c32c4705` adds an external data-push channel to the trait (`data_rx`) so per-pair streamers can receive their feed from the ordermatch loop. The V2-swap commit `0b6c233ea` introduces `SwapStatusStreamer` plus `SwapStatusEvent` and ties them into both live `on_event()` and kickstart-recovery emission.
+
+In clean-room voice: the post-baseline project chose to replace polling-based GUI synchronisation with a push channel for the categories where polling was either expensive (per-coin balance), latency-sensitive (order/orderbook updates), or fundamentally rate-sensitive (swap state transitions). The design picks SSE over WebSockets because it is one-directional, runs over the existing HTTP server, and degrades gracefully (slow clients are dropped per-stream rather than blocking the broadcaster). The streamer trait is in a standalone crate so non-RPC subsystems (ordermatch, swap state machines) can publish without depending on `mm2_main`.
+
 ## Reproduction Detail
 
 ### 10.1 Baseline shape (no SSE)

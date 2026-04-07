@@ -31,6 +31,16 @@ The chapter documents the new types, files, error taxonomy and startup
 sequence so an implementer can rebuild the wallet layer from the baseline
 without reading the post-baseline implementation.
 
+### Why this changed
+
+The wallet lifecycle layer was introduced by the project's own commit `4dcfbf2a6` (*P1.4: Wallet management — create, list, delete wallets with encrypted mnemonic storage*). The commit message states the scope verbatim:
+
+> *Add wallet_name field (Constructible<Option<String>>) to MmCtx; add wallets_dir() method: DB/wallets/ (above per-identity dbdir); new lp_wallet module with encrypted mnemonic persistence: Storage: {wallet_name}.wallet files (JSON EncryptedMnemonicData); create_wallet RPC: encrypt mnemonic via Argon2+AES-256-CBC, persist; get_wallet_names RPC: list wallets, show active wallet; delete_wallet RPC: verify password by decryption, then remove file; initialize_wallet_passphrase(): startup integration (auto-persist or verify when wallet_name+wallet_password provided in config).*
+
+This commit explicitly composes on top of `d681168bd` (P1.1 — chapter 05): P1.1 supplied the BIP-39 mnemonic + encrypt/decrypt primitives; P1.4 wraps them into a persistent, named identity model.
+
+In clean-room voice: the post-baseline project chose to give the daemon a first-class identity store (multiple named wallets, encrypted at rest, switchable at runtime) rather than continuing the baseline pattern of one plaintext-in-memory passphrase per process. The new RPCs are deliberately additive — the existing read-only key-export endpoints (`get_public_key`, `get_public_key_hash`) are left unchanged on the wire.
+
 ## Reproduction Detail
 
 ### 7.1 Baseline shape (one passphrase, no persistence)

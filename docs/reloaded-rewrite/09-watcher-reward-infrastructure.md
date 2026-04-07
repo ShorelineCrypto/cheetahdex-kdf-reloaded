@@ -34,6 +34,14 @@ wired in our tree. Any reader expecting a per-swap economic reward to flow
 to watcher operators in this tree will find none: the watcher service is
 voluntary and unpaid.
 
+### Why this changed
+
+The watcher infrastructure was introduced by the project's own commit `f5434b078` (*P2.2: watcher node infrastructure*). The commit message describes both the protocol and the safety model verbatim:
+
+> *Add swap watcher infrastructure allowing third-party nodes to monitor and intervene in ongoing taker swaps. … WatcherOps trait (lp_coins.rs): is_supported_by_watchers(), watcher_validate_taker_fee/payment(), create preimages for maker_payment_spend and taker_payment_refund, and watcher_search_for_swap_tx_spend(). Default impls return unsupported-error; UTXO coins (utxo_standard, qtum, bch) override is_supported_by_watchers() to return true. … swap_watcher.rs (new, ~700 lines): complete watcher state machine using common::state_machine with compile-time validated transitions: ValidateTakerFee -> ValidateTakerPayment -> WaitForTakerPaymentSpend -> SpendMakerPayment/RefundTakerPayment -> Stopped. … Taker broadcast: taker_swap.rs broadcasts TakerSwapWatcherData with precomputed spend/refund preimages after sending taker payment.*
+
+In clean-room voice: the post-baseline project chose to allow third-party nodes on the gossip overlay to complete a taker's in-flight swap if the taker disappears. The protocol uses precomputed signed preimages broadcast by the taker itself, so a watcher needs no private-key material from either party; the state machine is the same `common::state_machine` framework used elsewhere in the swap layer. The watcher_reward field is part of the same broader interface, but as documented above, it is uniformly hard-coded `false` in this tree — no on-chain economic reward currently flows to watcher operators.
+
 ## Reproduction Detail
 
 ### 9.1 Baseline shape (no watcher concept)
