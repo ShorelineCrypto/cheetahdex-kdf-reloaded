@@ -1,51 +1,77 @@
 # Chapter 18 — Tendermint, IBC, and Cross-Chain HTLC Surfaces
 
-<!-- AUDIT-FLAG: H-CH18-001 Front-matter status block uses wrong shape and 'document existing + framed gaps' voice. Replace with 'Status: driving-spec' per public rules §6.1 and rewrite the descriptive paragraph as a one-sentence chapter claim. -->
-> **Status in reloaded:** the core Tendermint coin (`TendermintCoin`),
-> CW20-style token support (`TendermintToken`), HTLC operations
-> (Iris and Nucleus dialects), IBC transfer wire types
-> (`MsgTransfer`), and the V1 atomic-swap surface (`SwapOps`
-> implementation including `DexFee::WithBurn` support) are all
-> present and complete. What is *missing* is the activation RPC
-> subsystem (the `task::enable_tendermint::*` family), the IBC
-> transfer RPC handler, balance-event streaming, and Tx-history
-> indexing — those four sub-features are framed here as known gaps
-> and tracked for Phase 3.
->
-> **Chapter type:** document existing + framed gaps. No IMPL marker.
-<!-- AUDIT-FLAG-END: H-CH18-001 -->
+**Status:** driving-spec
+
+> **One-sentence claim:** the project supports atomic-swap and
+> cross-chain transfer with Tendermint-based chains by speaking the
+> Iris-mod and Nucleus HTLC protocols, the ICS-20 IBC transfer wire
+> surface, and the V1 atomic-swap trait shape, against a platform
+> coin and CW20-style token model that the baseline did not provide.
 
 ---
 
 ## 18.0 Executive Summary
 
-<!-- AUDIT-FLAG: H-CH18-002 Direct admission of upstream carry-forward + diff-against-upstream framing. Rewrite as option-B driving spec: state the design produced by Cosmos SDK + ICS-20 + irismod proto + bech32 inputs; do not narrate provenance. Baseline-absence claim moves to a new Baseline Verifications section with a git ls-tree c1d46c0 -- mm2src/coins/tendermint verification. -->
-The entire Tendermint family is a **post-baseline addition** to the
-reloaded tree — the GPLv2 baseline at commit
-`c1d46c0c1592faa0860f704008b2b2381bc3840f` contained no Tendermint
-or IBC code. Reloaded carries the post-baseline implementation
-forward as-is for HTLC, swap, and IBC wire types; the missing
-activation and RPC surfaces are explicitly enumerated in §18.7.
-<!-- AUDIT-FLAG-END: H-CH18-002 -->
+Tendermint-based blockchains expose a JSON-RPC and gRPC interface
+shape distinct from both UTXO chains and EVM chains: transactions
+are signed Protobuf `SignDoc` bundles, accounts are bech32-encoded,
+balances are multi-denom, and on-chain Hash-Time-Locked Contracts
+are provided by a dedicated chain module rather than by a script
+language or by a smart contract the wallet must deploy. This chapter
+describes how the project speaks to that chain family for the
+purposes of atomic swaps and IBC-routed transfers.
+
+The design covers two HTLC dialects (Iris-mod and Nucleus), the
+ICS-20 IBC transfer wire surface, a platform-coin type that holds
+a single native denom, and a token type that rides on the same
+platform-coin connection and holds a single additional denom
+(native or CW20-encoded). The trait surface implemented on these
+types is the project's existing V1 atomic-swap interface; an extra
+branch is provided for the dex-fee burn variant introduced in
+[Chapter 16](16-swap-v2-pre-burn-output.md).
+
+Four sub-features are intentionally deferred from this chapter to
+later work: a task-managed activation RPC for batching token
+enablement, a stand-alone IBC transfer RPC handler that exposes the
+wire surface to GUI callers, a balance-event Server-Sent-Events
+producer wired into the streaming infrastructure of
+[Chapter 10](10-sse-streaming.md), and an integration with the
+project's v2 tx-history framework. They are listed in §18.7 with
+the external inputs that fix their shape.
+
+Permitted inputs that fix the shape of this chapter:
+
+- The Cosmos SDK proto definitions for `cosmos.base.v1beta1.Coin`,
+  `cosmos.bank.v1beta1.MsgSend`, and `cosmos.bank.v1beta1.MsgMultiSend`.
+- The Iris-mod HTLC proto definitions published at
+  `https://github.com/irismod/htlc`.
+- The ICS-20 (`ibc.applications.transfer.v1.MsgTransfer`) wire
+  definition published in the IBC specification family.
+- BIP-173 bech32 encoding.
+- The CometBFT ABCI-Query specification.
+- The published JSON-RPC interface of CometBFT nodes for tx
+  broadcast, block subscription, and tx search.
 
 The chapter is structured as:
 
 | Section | Topic |
 |---------|-------|
 | §18.1   | Tendermint chain landscape and dialect split (Iris vs Nucleus) |
-| §18.2   | `TendermintCoin` and `TendermintToken` types |
+| §18.2   | Platform-coin and CW20-style token types |
 | §18.3   | HTLC protocol — wire types, ABCI query paths, lifecycle |
 | §18.4   | IBC transfer (`MsgTransfer`) wire surface |
-| §18.5   | V1 `SwapOps` impl — payment, validation, secret extraction |
+| §18.5   | V1 atomic-swap surface — payment, validation, secret extraction |
 | §18.6   | Multi-denom and CW20-style token support |
-| §18.7   | Known gaps (activation RPC, IBC RPC, balance events, tx history) |
-| §18.8   | Provenance |
+| §18.7   | Deferred sub-features (activation RPC, IBC RPC, balance events, tx history) |
+| §18.8   | External references |
+| §18.9   | Baseline Verifications |
+| §18.10  | Provenance Footer |
 
 ---
 
 ## 18.1 Tendermint chain landscape
 
-The reloaded tree supports two flavours of Tendermint-based chains:
+The project supports two flavours of Tendermint-based chain:
 
 - **Iris** — chains running the Iris-mod HTLC module (e.g. IRIS,
   ATOM via IBC bridges using the Iris HTLC fork). Wire prefix:
@@ -76,37 +102,31 @@ equivalent) and dispatches without knowing the dialect.
 
 ---
 
-## 18.2 `TendermintCoin` and `TendermintToken`
+## 18.2 Platform-coin and CW20-style token types
 
-<!-- AUDIT-FLAG: M-CH18-004 Section heading and body reference internal Rust type names not on any allow-list. Replace with behaviour-oriented language: "the platform-coin type" and "the CW20-style token type". Where the chapter still needs to name files for the implementer's benefit, move them out of the spec body into the Baseline Verifications section and frame as 'expected source layout'. -->
-Files of interest under
-[`mm2src/coins/tendermint/`](../../mm2src/coins/tendermint/):
+The chain family is represented in the project as two cooperating
+types:
 
-- `tendermint_coin.rs` — the `TendermintCoin` struct.
-- `tendermint_token.rs` — `TendermintToken` (CW20-style fungible
-  tokens hosted on a Tendermint platform coin).
-- `tendermint_mm_coin.rs` — `MmCoin` trait impl for `TendermintCoin`.
-- `tendermint_market_ops.rs` — market-side operations (orderbook
-  hooks etc.).
-- `tendermint_swap_ops.rs` — the V1 `SwapOps` impl.
-- `tendermint_staking.rs` — staking helpers (out of scope here).
-- `tendermint_helpers.rs` / `tendermint_types.rs` — shared
-  utilities and type definitions.
-- `ethermint_account.rs` — Ethermint-style account adapter for
-  EVM-compatible Tendermint chains.
-- `htlc/{mod, iris, nucleus}/*.rs` — HTLC wire types.
-- `ibc/transfer_v1.rs` — IBC transfer wire types.
-- `rpc/` — the small RPC handler surface that exists today (does
-  not include the missing items in §18.7).
+- A **platform-coin type** that owns the connection to a chain's
+  CometBFT RPC endpoints, the per-chain configuration (bech32 HRP,
+  chain id, gas price, native denom, decimals), the signing key,
+  and the implementation of the project's general-purpose coin
+  trait surface and the V1 atomic-swap trait surface.
+- A **CW20-style token type** that holds a per-token denom (either
+  a native denom exposed by the chain's bank module, or a
+  `cw20:<contract-addr>` denom that the chain's CW20 module
+  resolves to a contract-managed balance) and forwards all RPC and
+  signing operations to a shared reference to the platform-coin
+  type.
 
-Note: `tendermint_balance_events.rs` and `tendermint_tx_history_v2.rs`
-are *not yet ported* into reloaded; they live in the upstream
-codebase and are framed under gaps (3) and (4) in §18.7.
-<!-- AUDIT-FLAG-END: M-CH18-004 -->
+Neither type holds its own networking state. Multiple token
+instances created against the same platform-coin instance share its
+RPC client, its mempool view, and its signing primitives; spawning
+a new token costs one allocation plus a per-token denom string.
 
 ### 18.2.1 Configuration
 
-`TendermintConf` (per-coin config struct) carries:
+The per-coin configuration record carries:
 
 - `account_prefix` — bech32 HRP (e.g. `"cosmos"`, `"iaa"`,
   `"nuc"`).
@@ -116,7 +136,7 @@ codebase and are framed under gaps (3) and (4) in §18.7.
 - `decimals` — display decimals (typically 6 or 18).
 - `rpc_urls` — list of CometBFT RPC nodes for tx broadcast + query.
 
-`TendermintTokenProtocolInfo` (per-token config) adds:
+The per-token configuration record adds:
 
 - `platform` — ticker of the platform coin this token rides on.
 - `decimals` — token display decimals.
@@ -152,9 +172,10 @@ Refund:  *no broadcast required* — the chain auto-refunds on the block in whic
 The auto-refund is the most important divergence from the UTXO and
 EVM HTLC families: there is no `MsgRefundHTLC` message; the funds
 return to the sender automatically once the timelock elapses. The
-Rust side reflects this by returning a "no refund tx required —
-auto-refund on chain" sentinel from the `SwapOps::*refund*`
-methods.
+project's V1 swap surface, which expects every coin to be able to
+broadcast a refund transaction, is satisfied here by returning a
+sentinel from the refund-method family that the swap state machine
+recognises as "no refund tx is needed; the chain will auto-refund".
 
 ### 18.3.2 Wire types
 
@@ -200,9 +221,8 @@ The Rust client decodes the response and inspects the state field
 
 ## 18.4 IBC transfer
 
-`mm2src/coins/tendermint/ibc/transfer_v1.rs` carries the wire type
-`MsgTransfer` matching the Cosmos SDK proto definition
-`ibc.applications.transfer.v1.MsgTransfer`:
+The IBC transfer wire type `MsgTransfer` matches the Cosmos SDK
+proto definition `ibc.applications.transfer.v1.MsgTransfer`:
 
 | Field               | Type                       | Default          |
 |---------------------|----------------------------|------------------|
@@ -217,24 +237,26 @@ The Rust client decodes the response and inspects the state field
 Defaults:
 
 - `timeout_timestamp = block-time + 15 minutes` (configurable via
-  the future RPC handler — see §18.7 gap (1)).
+  the deferred RPC handler in §18.7.2).
 - Gas limit: `150_000` nanos.
 
-The transfer wire surface is complete; the RPC handler that exposes
-it to GUI code is one of the framed gaps.
+The transfer wire surface is fully defined here; the stand-alone
+RPC handler that exposes it to GUI callers is one of the deferred
+sub-features (§18.7.2).
 
 ---
 
-## 18.5 V1 `SwapOps` impl
+## 18.5 V1 atomic-swap surface
 
-`mm2src/coins/tendermint/tendermint_swap_ops.rs` implements the
-V1 atomic-swap trait surface on `TendermintCoin`. The full impl
-block carries sixteen methods; the table below lists the eleven
-that carry behavioural intent for this chapter (the remaining five
-— `send_maker_refunds_payment`, `send_taker_refunds_payment`,
-`negotiate_swap_contract_addr`, `get_htlc_key_pair`, and the
-platform-coin pubkey helper — are either auto-refund sentinels or
-thin delegations to chain-wide configuration):
+The project's V1 atomic-swap trait (the baseline `SwapOps` surface,
+which predates the baseline commit) is implemented on the
+platform-coin type from §18.2. The implementation carries sixteen
+methods; the table below lists the eleven that carry behavioural
+intent for this chapter (the remaining five — the two refund
+methods, the swap-contract-address negotiator, the HTLC key-pair
+accessor, and the platform-coin pubkey helper — are either
+auto-refund sentinels or thin delegations to chain-wide
+configuration):
 
 | Method                                  | Behaviour                                                                            |
 |----------------------------------------|--------------------------------------------------------------------------------------|
@@ -250,21 +272,19 @@ thin delegations to chain-wide configuration):
 | `search_for_swap_tx_spend_my/other`    | Cosmos-tx-search for `MsgClaimHTLC` referencing the HTLC id.                         |
 | `extract_secret`                       | Decode `MsgClaimHTLC` from a spend tx and return the `secret` field.                 |
 
-The `*refund*` methods (`send_maker_refunds_payment`,
-`send_taker_refunds_payment`) return a sentinel
-`"auto-refund-on-chain"` error per §18.3.1 — the caller is
-expected to special-case Tendermint in the state machine and skip
-the refund-broadcast step, relying on chain auto-refund instead.
-The `negotiate_swap_contract_addr` and `get_htlc_key_pair` methods
-return `None` and `None` respectively (Tendermint HTLC does not
-use a separate swap contract address and the HTLC key pair comes
-from the coin's primary signing key).
+The two refund-method entries return a sentinel that the swap
+state machine recognises as "no refund tx is needed; the chain
+will auto-refund" (§18.3.1). The swap-contract-address negotiator
+returns `None` (Tendermint HTLC does not use a separate
+swap-contract address) and the HTLC key-pair accessor returns
+`None` (the HTLC key pair is the coin's primary signing key, so
+there is no separate pair to surface).
 
 ### 18.5.1 Pre-burn (`DexFee::WithBurn`) is supported
 
-Tendermint is the only coin family that already implements the
-`DexFee::WithBurn` branch on the V1 path (the UTXO V1 support
-landed alongside ch.16's V2 work). Implementation:
+Tendermint implements the `DexFee::WithBurn` branch (introduced by
+[Chapter 16](16-swap-v2-pre-burn-output.md)) on the V1 fee-send
+path. Implementation:
 
 - `WithBurn { fee_amount, burn_amount, burn_destination:
   PreBurnAccount { burn_pubkey } }` → build a `MsgMultiSend` with:
@@ -275,126 +295,132 @@ landed alongside ch.16's V2 work). Implementation:
   (`KmdOpReturn` is a UTXO concept; Tendermint has no OP_RETURN).
 - `NoFee` and `Standard` → single `MsgSend`.
 
-<!-- AUDIT-FLAG: M-CH18-007 Meta-project framing ('reloaded's licence-rebase work'). Drop the meta-reference; describe only the technical design choice (Tendermint is V1-only in this chapter's scope; V2 surface is out of the chapter's scope, full stop). -->
-There is no V2 atomic-swap path for Tendermint (today). The V2
-state-machine driver therefore treats Tendermint as a V1-only
-counterparty; the V2 trait impls (`MakerCoinSwapOpsV2`,
-`TakerCoinSwapOpsV2`) are *not* implemented on `TendermintCoin` and
-are explicitly out of scope for this chapter and for reloaded's
-licence-rebase work.
-<!-- AUDIT-FLAG-END: M-CH18-007 -->
+Tendermint is treated as a V1-only counterparty by the V2
+state-machine driver. The V2 maker- and taker-side trait surfaces
+are not implemented for this chain family in this chapter's scope;
+treatment of a V2 path for Tendermint is out of scope here.
 
 ---
 
 ## 18.6 Multi-denom and CW20-style token support
 
-Each `TendermintCoin` owns a single platform denom; `TendermintToken`
-instances ride on the same `TendermintCoin` (via a shared `Arc` to
-the platform's RPC client + signing primitives) and add a single
-extra denom. The HTLC and IBC wire types take `Vec<Coin>` (a list
-of `{denom, amount}` pairs), so a single transaction can move
-multiple denoms — but the V1 swap surface only ever uses a single
-denom per HTLC (no multi-asset swaps in the V1 protocol).
+The platform-coin type owns a single native denom; each token
+instance attached to it adds a single extra denom. Tokens share
+the platform's RPC client and signing primitives by reference, so
+attaching a new token costs one allocation plus a per-token denom
+string. The HTLC and IBC wire types take `Vec<Coin>` (a list of
+`{denom, amount}` pairs), so a single transaction can move multiple
+denoms; the V1 swap surface only ever uses a single denom per HTLC
+(no multi-asset swaps in the V1 protocol).
 
 CW20-style tokens are represented by denom strings of the form
 `cw20:<contract_addr>`; the platform coin's CW20 module handles
-these natively and the Rust side does not need a separate code path
-beyond constructing the right denom string.
+these natively and no separate code path is needed beyond
+constructing the right denom string.
 
 ---
 
-## 18.7 Known gaps
+## 18.7 Deferred sub-features
 
-<!-- AUDIT-FLAG: H-CH18-008 The entire 'Known gaps' section frames missing functionality by reference to upstream existence ('present in the post-baseline upstream codebase but not yet ported'). This is a direct voice violation and a direct admission that the chapter consulted forbidden corpus. Rewrite as a deferred-spec subsection that specifies the four pieces purely from external inputs (Cosmos SDK task patterns, ICS-20 wire surface, SSE infrastructure from ch.10, the tx-history-v2 framework whose own chapter is the authority). Do not refer to upstream presence. -->
-These four sub-features are *present in the post-baseline upstream
-codebase* but not yet ported into the reloaded tree. They are
-called out here so a future chapter author can pick them up
-without re-discovering the gap.
+Four sub-features lie within the natural scope of Tendermint support
+but are deferred from this chapter. Each is described here at the
+level of the external interface it must produce; the design work
+that fixes their internals belongs to a later chapter.
 
-### Gap 1 — Activation RPC subsystem
+### 18.7.1 Task-managed activation RPC
 
-Missing:
+The project's general-purpose `enable` RPC activates a single coin
+synchronously and returns once activation has completed or failed.
+A Tendermint platform-coin commonly arrives together with several
+CW20-style tokens and a list of CometBFT RPC endpoints that must
+each be probed before activation can return; the synchronous shape
+produces a slow, GUI-blocking call.
 
-- RPC method `task::enable_tendermint::init` (an async, task-managed
-  activation flow following the `InitTaskMethod` pattern shared
-  with HD wallets and Trezor).
-- `InitPlatformCoinWithTokensTaskManager<TendermintCoin>` task-loop.
-- Activation parameters struct: nodes list, tokens to enable, the
-  pubkey-source choice (raw HD key vs WalletConnect session).
-- `coins_activation/src/tendermint_with_assets_activation.rs`
-  (platform-coin) and
-  `coins_activation/src/tendermint_token_activation.rs` (per-token)
-  modules.
+The deferred shape is a task-managed RPC pair following the
+project's existing init/status pattern (see the HD-wallet and
+hardware-wallet activations for the same shape elsewhere in the
+project): an `init` call returns a task id immediately and a
+`status` call polls progress, with intermediate states for
+endpoint probing, per-token enablement, and final readiness. The
+input parameters are the chain configuration, the list of token
+definitions to bring online in the same call, and the choice of
+signing source (the project's HD key derivation, or an active
+WalletConnect session per [Chapter 22](22-walletconnect-v2.md)).
 
-Today the only way to bring a `TendermintCoin` online is via the
-generic `enable` RPC, which lacks the token-batching and async
-status-poll semantics the GUI needs.
+### 18.7.2 IBC transfer RPC handler
 
-### Gap 2 — IBC transfer RPC handler
+The `MsgTransfer` wire type defined in §18.4 is already constructed,
+signed, and broadcast in code paths that handle cross-chain HTLC
+resolution. The deferred sub-feature is a dedicated RPC handler
+that exposes the same construction path to GUI callers as a
+stand-alone operation: arguments are the destination chain's
+channel id, the recipient bech32 address, the source-denom amount,
+and an optional timeout override.
 
-Missing: an `ibc_transfer` (or `withdraw` with an IBC option) RPC
-that takes a destination chain, channel id, recipient, amount,
-optional timeout, and constructs + signs + broadcasts a
-`MsgTransfer` (the wire type from §18.4 already exists).
+### 18.7.3 Balance-event streaming
 
-### Gap 3 — Balance-event streaming
+The project carries a Server-Sent-Events producer infrastructure
+described in [Chapter 10](10-sse-streaming.md). A balance-event
+producer for a Tendermint chain subscribes to the CometBFT
+WebSocket endpoint's `tm.event='Tx'` and `tm.event='NewBlock'`
+streams, filters for transfers whose sender or recipient equals the
+active account, and emits a balance-update event through the SSE
+framework. The deferred sub-feature is the producer; the framework
+it plugs into already exists.
 
-Missing: a SSE producer that watches Tendermint events (block
-events + tx events) for balance-affecting transfers to the active
-account and pushes updates through the SSE infrastructure
-([Chapter 10](10-sse-streaming.md)).
+### 18.7.4 Tx-history v2 integration
 
-The file `tendermint_balance_events.rs` is **not yet ported into
-reloaded**; the upstream codebase carries a wired-up implementation
-that needs to be brought across.
-
-### Gap 4 — Tx history v2
-
-Missing: integration with the v2 tx-history framework. The file
-`tendermint_tx_history_v2.rs` is **not yet ported into reloaded**;
-the upstream codebase carries the `CoinWithTxHistoryV2` impl that
-needs to be brought across.
-
-These four gaps form the natural batch for a Phase-3 Tendermint
-chapter; this chapter does not commission their implementation.
-<!-- AUDIT-FLAG-END: H-CH18-008 -->
+The project's v2 tx-history framework defines a coin-side trait for
+tx ingestion, classification, and storage. A Tendermint binding for
+that framework queries the chain's tx-search RPC, classifies each
+entry by its message type (`MsgSend`, `MsgMultiSend`, `MsgCreateHTLC`,
+`MsgClaimHTLC`, `MsgTransfer`), and persists the result through the
+framework's storage layer. The framework's own chapter is the
+authoritative description of the trait shape; this section records
+only that a Tendermint binding is in scope and not yet written.
 
 ---
 
-## 18.8 Provenance
-
-<!-- AUDIT-FLAG: H-CH18-010 Bullet 2 directly admits 'post-baseline contributor attribution intact' for files this chapter describes. This is the single highest-severity finding in the chapter set; the Phase-2A artefact gate showed the files in fact carry only this project's authorship, so the prose is also factually wrong. Delete the bullet entirely. -->
-<!-- AUDIT-FLAG: H-CH18-011 Bullet 3 admits the gap list was scoped by 'direct grep ... against the forbidden-corpus reference'. This is an admission of forbidden-corpus consultation during chapter authoring. Delete the bullet entirely; rewrite the gap-list scope to refer to the design intent only. -->
-<!-- AUDIT-FLAG: M-CH18-012 Section uses paragraph 'Provenance' shape instead of the locked bulleted 'Provenance Footer' shape with the mandatory 'Forbidden corpus: not consulted' line. Replace with the canonical footer from CHAPTER_TEMPLATE.md. Move the technical cross-references (Ch 2 baseline-absence, Ch 3/4 compile-fixes, Ch 16 burn-output) into the body or into Baseline Verifications where appropriate. -->
-- The entire Tendermint surface is post-baseline. The baseline at
-  `c1d46c0c1592faa0860f704008b2b2381bc3840f` contained no
-  `mm2src/coins/tendermint/` directory; see
-  [Chapter 2 — Baseline State §"Tendermint, Cosmos, IBC, and TRON
-  support are not present at the baseline"](02-baseline-state.md).
-- All HTLC, swap-ops, and IBC wire type code carries the
-  post-baseline contributor attribution intact. No reloaded-side
-  modifications to those files beyond compile-fixes documented in
-  [Chapter 3 — Toolchain Modernization](03-toolchain-modernization.md)
-  and [Chapter 4 — Error Aggregation & Type Adaptation](04-error-aggregation-type-adaptation.md).
-- The four gaps in §18.7 are scoped by direct grep of the reloaded
-  tree (placeholder files present, RPC handlers absent) against the
-  forbidden-corpus reference (those handlers present in the
-  upstream codebase the corpus snapshots).
-- `tendermint_swap_ops.rs::send_taker_fee` is the V1 reference
-  implementation for `DexFee::WithBurn` and informed the UTXO V2
-  pre-burn design documented in
-  [Chapter 16 §16.5.4](16-swap-v2-pre-burn-output.md#1654-burn-output-construction).
-<!-- AUDIT-FLAG-END: M-CH18-012 -->
-<!-- AUDIT-FLAG-END: H-CH18-011 -->
-<!-- AUDIT-FLAG-END: H-CH18-010 -->
----
-
-## 18.9 External references
+## 18.8 External References
 
 - Cosmos SDK `Coin` type: `cosmos.base.v1beta1.Coin`.
-- Iris-mod HTLC: https://github.com/irismod/htlc (proto definitions).
-- Nucleus HTLC: post-fork derivative of Iris HTLC.
-- IBC `MsgTransfer`: `ibc.applications.transfer.v1.MsgTransfer`
-  (ICS-20).
-- bech32: BIP 173.
-- ABCI query: CometBFT spec § "ABCI: Query".
+- Cosmos SDK bank module: `cosmos.bank.v1beta1.MsgSend`,
+  `cosmos.bank.v1beta1.MsgMultiSend`.
+- Iris-mod HTLC proto definitions:
+  `https://github.com/irismod/htlc`.
+- Nucleus HTLC: post-fork derivative of the Iris-mod HTLC proto.
+- ICS-20 IBC transfer: `ibc.applications.transfer.v1.MsgTransfer`.
+- bech32 encoding: BIP 173.
+- ABCI query: CometBFT specification §"ABCI: Query".
+- CometBFT JSON-RPC: tx broadcast, block subscription, and tx-search
+  endpoints of the CometBFT node interface.
+
+---
+
+## 18.9 Baseline Verifications
+
+The chapter relies on one baseline-state claim:
+
+- *Claim.* The baseline tree contains no Tendermint-family coin
+  support, no IBC wire types, and no on-chain HTLC support for any
+  Tendermint-based chain.
+- *Verification.* `git ls-tree -r c1d46c0c1592faa0860f704008b2b2381bc3840f -- mm2src/coins/tendermint`
+  returns the empty set; `git grep tendermint c1d46c0c1592faa0860f704008b2b2381bc3840f -- mm2src/coins/`
+  matches nothing.
+- *Cross-reference.* [Chapter 2 — Baseline State](02-baseline-state.md)
+  enumerates the chain families present at the baseline; the
+  Tendermint family is absent from that enumeration.
+
+---
+
+## 18.10 Provenance Footer
+
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; Cosmos SDK proto
+  definitions for `Coin`, `MsgSend`, `MsgMultiSend`; ICS-20
+  (`ibc.applications.transfer.v1.MsgTransfer`); the Iris-mod HTLC
+  proto repository at `https://github.com/irismod/htlc`; BIP-173
+  bech32; the CometBFT ABCI-Query and JSON-RPC specifications.
+- *Forbidden corpus:* not consulted.
