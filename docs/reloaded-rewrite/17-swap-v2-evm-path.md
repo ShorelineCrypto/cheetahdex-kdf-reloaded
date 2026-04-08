@@ -1,74 +1,102 @@
 # Chapter 17 — Atomic-Swap V2 EVM Path & Contract Interaction
 
-> **Status in reloaded:** *fully implemented; this chapter documents
-> the existing surface.* All V2 EVM functionality landed in baseline
-> (commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`) and is carried
-> forward unchanged except for one removed `TODO add burnFee` comment
-> ([§17.7](#177-dexfee-delivery)) and the addition of a maker-side
-> NFT state-machine bridge ([§17.9](#179-nft-variant)).
->
-> No IMPL marker — no code changes are commissioned by this chapter.
+**Status:** driving-spec
+
+> **One-sentence claim:** the project's V2 atomic-swap protocol
+> reaches EVM-native assets (ETH, ERC-20, ERC-721, ERC-1155) by
+> driving two deployed Solidity contracts whose entry points
+> implement the protocol's funding/payment split, on-chain
+> reveal-on-spend, and atomic dex-fee delivery; the asset surface
+> is integrated as the maker-side and taker-side branches of the
+> project's V2 coin-trait families.
 
 ---
 
 ## 17.0 Executive Summary
 
-The V2 EVM atomic-swap path delivers a two-party trustless trade
-between an EVM-native asset (ETH, ERC-20, ERC-721, ERC-1155) and any
-counterparty asset (UTXO, Tendermint, another EVM chain) using two
-deployed Solidity contracts:
+The V2 atomic-swap protocol (described at chain-neutral level in
+[Chapter 13](13-swap-version-negotiation.md) and the UTXO binding
+in [Chapter 15](15-swap-v2-utxo-path.md)) needs a chain-side
+representation on EVM chains. Unlike UTXO scripts, EVM gives no
+in-transaction script slot for arbitrary commit/reveal logic, so
+the protocol is realised by two purpose-built Solidity contracts
+deployed once per supported EVM chain:
 
-- `EtomicSwapMakerV2` — holds the maker's locked payment.
-- `EtomicSwapTakerV2` — holds the taker's funding (which carries the
-  dex fee) and the taker's payment.
+- A **maker-side payment contract** that locks the maker's funds
+  under a payment id keyed on the protocol's lock time and secret
+  hashes, and releases them either by reveal-of-secret (the taker
+  spending) or by timelock (the maker reclaiming).
+- A **taker-side payment contract** that holds the taker's deposit
+  (which carries the dex fee) and the taker's payment, with a
+  funding-vs-payment state split that lets the taker reclaim
+  cheaply before the maker has confirmed the trade.
 
-Each contract maintains a `(swapId -> state)` mapping; swap state
-transitions happen by calling typed entry points that take the
-`swapId`, the secret hashes, the participant addresses, the lock
-times, and the amounts. Reveal-on-spend (the EVM equivalent of
-SIGHASH_ALL cooperative-branch script_sig) is implemented as a
-contract method that requires the spender to pass the maker secret
-(or taker secret, on the symmetric path); the contract recomputes
-the hash and accepts the call iff it matches the value committed at
-payment time.
+Both contracts expose typed entry points (one per asset class:
+native coin, ERC-20, ERC-721, ERC-1155) that take the protocol
+identifiers as call arguments. The contract recomputes the payment
+id from those arguments so both sides converge on the same key in
+the contract's payment-state mapping. Spend calls require the
+caller to pass the counterparty's secret; the contract recomputes
+its hash and rejects the call when it does not match the value
+committed at payment time.
 
-The Rust surface lives in
-[`mm2src/coins/eth/eth_swap_v2/`](../../mm2src/coins/eth/eth_swap_v2/)
-(four files: `mod.rs`, `eth_maker_swap_v2.rs`, `eth_taker_swap_v2.rs`,
-`nft_swap_v2.rs`) and implements the cross-coin traits
-`MakerCoinSwapOpsV2` (5 methods) and `TakerCoinSwapOpsV2` (14 methods)
-on `EthCoin`. The state-machine driver in
-[`mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs`](../../mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs)
-and
-[`mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs`](../../mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs)
-dispatches to these trait methods symmetrically with the UTXO V2
-path ([Chapter 15](15-swap-v2-utxo-path.md)).
+The Rust side of this chapter implements the project's V2 coin
+traits (one for the maker side, one for the taker side) on the
+project's EVM-coin type, dispatching each trait method to the
+appropriate contract entry point through the ABI-encoded calldata
+path that already exists for the V1 EVM swap surface. NFT support
+is realised as a maker-side branch only: NFT-for-fungible-token
+swaps use the NFT entry points on the maker side and the standard
+fungible entry points on the taker side.
+
+Permitted inputs that fix the shape of this chapter:
+
+- EIP-20 (ERC-20 fungible-token interface).
+- EIP-721 (ERC-721 non-fungible-token interface).
+- EIP-1155 (ERC-1155 multi-token interface).
+- The Solidity Contract ABI Specification (function selectors,
+  argument encoding, event topic encoding).
+- The Ethereum JSON-RPC `eth_call`, `eth_sendRawTransaction`,
+  `eth_getLogs`, `eth_estimateGas`, and `eth_blockNumber` methods.
+- The keccak-256 hash function (used for ABI selector derivation,
+  event topic derivation, and the protocol's secret-hash check).
+- The V2 atomic-swap protocol's chain-neutral state-machine shape,
+  fixed in [Chapter 13](13-swap-version-negotiation.md) and
+  reproduced for UTXO in [Chapter 15](15-swap-v2-utxo-path.md).
 
 ---
 
-## 17.1 Why this exists
+## 17.1 Why an EVM-specific V2 path exists
 
-The V1 EVM swap path relied on a single legacy contract whose
-fee-handling semantics could not express the V2 protocol's
-funding-vs-payment split. V2 EVM adds:
+The V1 EVM atomic-swap path relies on a legacy contract whose
+state model conflates funding with payment: there is no point at
+which the taker can reclaim a deposit before the maker has acted.
+The V2 protocol's funding-vs-payment split (necessary for early
+abort, watcher rewards, and the dex-fee atomic-delivery property
+fixed by [Chapter 8](08-fee-routing-engine.md) and
+[Chapter 9](09-watcher-reward-infrastructure.md)) cannot be
+expressed against the V1 contract; a new contract pair was
+necessary.
 
-1. **Separation of funding and payment** on the taker side. The
-   taker first deposits funds (including the dex fee) into
-   `EtomicSwapTakerV2`, and only later promotes them to a "payment"
-   state once the maker has confirmed the trade. This makes early
-   abort (before the maker's payment is observed) reclaim-safe by
-   timelock without involving the maker.
-2. **Reveal-on-spend on-chain** via the two contracts' `spend*`
-   methods. Each spend call requires the spender to pass the
-   counterparty's secret; the contract enforces the hash check.
-3. **Dex-fee delivery in the same transaction** as the taker payment.
-   The fee amount is encoded as a contract argument (ETH path) or as
-   an explicit ERC-20 allowance + transfer (ERC-20 path) and is
-   forwarded by the contract to the network's fee-collection address
-   atomically with the payment lock.
-4. **NFT support** for maker-side ERC-721 and ERC-1155 payments via
-   `nft_swap_v2.rs`, with NFT-for-fungible-token swaps (the taker
-   uses the fungible-token V2 path).
+The new contracts add, beyond the funding split:
+
+1. **On-chain reveal-on-spend.** Each spend entry point takes the
+   secret as a parameter; the contract recomputes the hash and
+   accepts the call only when the recomputed hash matches the
+   value committed at payment time. The secret is then visible
+   in the spend transaction's calldata for the counterparty (and
+   for any watcher) to recover.
+
+2. **Dex-fee delivery in the same transaction as the taker
+   payment claim.** The taker payment contract forwards the
+   payment amount to the maker and the dex-fee amount to the
+   network's fee-collection address atomically inside the same
+   call frame, eliminating the V1 race between fee payment and
+   payment release.
+
+3. **NFT maker payments.** EIP-721 and EIP-1155 are supported as
+   maker-side asset classes through dedicated entry points on
+   the maker contract; the taker side remains fungible.
 
 ---
 
@@ -77,41 +105,41 @@ funding-vs-payment split. V2 EVM adds:
 Two contracts back the protocol; both are deployed once per EVM
 chain and addressed from coin configuration.
 
-### 17.2.1 `EtomicSwapMakerV2`
+### 17.2.1 The maker payment contract — `EtomicSwapMakerV2`
 
 State map: `mapping(bytes32 => MakerPayment) public makerPayments;`
 
-Lifecycle methods (signatures, plain ABI types):
+Entry points (signatures given by plain ABI types):
 
-| Method                            | Behaviour                                                                 |
-|-----------------------------------|---------------------------------------------------------------------------|
-| `ethMakerPayment`                 | Lock `msg.value` into a new `makerPayments[id]` entry (ETH).              |
-| `erc20MakerPayment`               | Pull `amount` via `transferFrom` and lock under `makerPayments[id]`.     |
-| `erc721MakerPayment`              | Receive an ERC-721 token; lock under `makerPayments[id]`.                |
-| `erc1155MakerPayment`             | Receive an ERC-1155 token (`amount` units); lock under `makerPayments[id]`.|
-| `spendMakerPayment`               | Caller passes `makerSecret`; contract recomputes the hash, releases funds to caller (the taker). |
-| `refundMakerPaymentTimelock`      | After `paymentLockTime`, maker reclaims.                                 |
-| `refundMakerPaymentSecret`        | Cooperative abort: maker reclaims by revealing `takerSecret`.            |
+| Entry point                        | Behaviour                                                                 |
+|------------------------------------|---------------------------------------------------------------------------|
+| `ethMakerPayment`                  | Lock `msg.value` into a new `makerPayments[id]` entry (native coin).      |
+| `erc20MakerPayment`                | Pull `amount` via `transferFrom` and lock under `makerPayments[id]`.      |
+| `erc721MakerPayment`               | Receive an ERC-721 token; lock under `makerPayments[id]`.                 |
+| `erc1155MakerPayment`              | Receive an ERC-1155 token (`amount` units); lock under `makerPayments[id]`.|
+| `spendMakerPayment`                | Caller passes `makerSecret`; contract recomputes the hash, releases funds to caller (the taker). |
+| `refundMakerPaymentTimelock`       | After `paymentLockTime`, maker reclaims.                                  |
+| `refundMakerPaymentSecret`         | Cooperative abort: maker reclaims by revealing `takerSecret`.             |
 
 Common arguments across all `*MakerPayment` entry points:
 `(bytes32 id, address taker, bytes32 takerSecretHash, bytes32 makerSecretHash,
 uint256 paymentLockTime)` plus the amount/token parameters
 appropriate to the asset class.
 
-### 17.2.2 `EtomicSwapTakerV2`
+### 17.2.2 The taker payment contract — `EtomicSwapTakerV2`
 
 State map: `mapping(bytes32 => TakerPayment) public takerPayments;`
 
-Lifecycle methods:
+Entry points:
 
-| Method                            | Behaviour                                                                                       |
-|-----------------------------------|-------------------------------------------------------------------------------------------------|
-| `ethTakerPayment`                 | Lock `msg.value = paymentAmount + dexFee` into `takerPayments[id]` (ETH).                       |
-| `erc20TakerPayment`               | Pull `paymentAmount + dexFee` via `transferFrom` and lock.                                      |
-| `takerPaymentApprove`             | (ERC-20 only) Confirm allowance; updates `takerPayments[id]` to *approved* state.               |
-| `spendTakerPayment`               | Caller (the maker) passes `takerSecret`; contract sends `paymentAmount` to caller and `dexFee` to the network's fee-collection address.|
-| `refundTakerPaymentTimelock`      | After `paymentLockTime`, taker reclaims everything.                                             |
-| `refundTakerPaymentSecret`        | Cooperative abort: taker reclaims by revealing `makerSecret`.                                   |
+| Entry point                        | Behaviour                                                                                       |
+|------------------------------------|-------------------------------------------------------------------------------------------------|
+| `ethTakerPayment`                  | Lock `msg.value = paymentAmount + dexFee` into `takerPayments[id]` (native coin).               |
+| `erc20TakerPayment`                | Pull `paymentAmount + dexFee` via `transferFrom` and lock.                                      |
+| `takerPaymentApprove`              | (ERC-20 only) Confirm allowance; updates `takerPayments[id]` to *approved* state.               |
+| `spendTakerPayment`                | Caller (the maker) passes `takerSecret`; contract sends `paymentAmount` to caller and `dexFee` to the network's fee-collection address. |
+| `refundTakerPaymentTimelock`       | After `paymentLockTime`, taker reclaims everything.                                             |
+| `refundTakerPaymentSecret`         | Cooperative abort: taker reclaims by revealing `makerSecret`.                                   |
 
 Common arguments across `*TakerPayment` entry points:
 `(bytes32 id, uint256 dexFee, uint256 paymentAmount, address maker,
@@ -121,8 +149,8 @@ address for the ERC-20 variant.
 
 ### 17.2.3 Events
 
-Both contracts emit per-action events that the Rust side consumes
-via topic filters:
+Both contracts emit per-action events that consumers filter by
+topic:
 
 - `MakerPaymentSent(bytes32 id)`
 - `MakerPaymentSpent(bytes32 id, bytes32 makerSecret)`
@@ -134,81 +162,72 @@ via topic filters:
 - `TakerPaymentRefundedTimelock(bytes32 id)`
 - `TakerPaymentRefundedSecret(bytes32 id, bytes32 makerSecret)`
 
-These appear in
-[`mm2src/coins/eth/maker_swap_v2_abi.json`](../../mm2src/coins/eth/maker_swap_v2_abi.json)
-and
-[`mm2src/coins/eth/taker_swap_v2_abi.json`](../../mm2src/coins/eth/taker_swap_v2_abi.json).
+The on-disk ABI JSON files (one per contract) carry the canonical
+ABI shape and are loaded at coin activation to drive calldata
+encoding and event decoding.
 
 ---
 
 ## 17.3 ABI files
 
-The two JSON files referenced above are factual contract
-specifications (function signatures, event signatures, parameter
-types). They are loaded by `ethabi::Contract::load()` at coin
-activation and used to encode calldata and decode events.
+Two JSON files capture the maker- and taker-contract ABIs
+(function signatures, event signatures, parameter types). They
+are loaded at coin activation by the project's standard ABI loader
+and used to encode calldata and decode event payloads.
 
-The files are bit-identical with the baseline; this chapter does
-not modify them. They are *factual content* (machine-derived from
-the Solidity sources) and ride under the same Conditions E/F
-licensing rationale used for other contract ABIs in the tree —
-see [Chapter 29 — License conditions E and F](29-license-conditions-e-f.md).
+The files are *factual content* (machine-derivable from the
+Solidity source) and ride under the same Conditions E/F licensing
+treatment used for other contract ABIs in the tree — see
+[Chapter 29 — License conditions E and F](29-license-conditions-e-f.md).
 
 ---
 
-## 17.4 Maker side — `MakerCoinSwapOpsV2 for EthCoin`
+## 17.4 Maker-side coin-trait implementation
 
-Five trait methods, all delegating to corresponding `*_impl`
-functions in
-[`mm2src/coins/eth/eth_swap_v2/eth_maker_swap_v2.rs`](../../mm2src/coins/eth/eth_swap_v2/eth_maker_swap_v2.rs):
+The project's V2 maker-side coin trait carries five methods
+(payment send, payment validate, payment spend, payment refund by
+timelock, payment refund by secret); the trait's chain-neutral
+shape is set by [Chapter 15](15-swap-v2-utxo-path.md) and shared
+across all V2-capable coin families.
 
-| Trait method                          | Impl function                              |
-|--------------------------------------|--------------------------------------------|
-| `send_maker_payment_v2`              | `send_maker_payment_v2_impl`               |
-| `validate_maker_payment_v2`          | `validate_maker_payment_v2_impl`           |
-| `refund_maker_payment_v2_timelock`   | `refund_maker_payment_v2_timelock_impl`    |
-| `refund_maker_payment_v2_secret`     | `refund_maker_payment_v2_secret_impl`      |
-| `spend_maker_payment_v2`             | `spend_maker_payment_v2_impl`              |
+The EVM implementation of each method:
 
-### 17.4.1 `send_maker_payment_v2_impl`
+### 17.4.1 Payment send
 
-1. Derive `swapId = etomic_swap_id_v2(paymentLockTime, makerSecretHash)`
-   — an internal helper that hashes the lock time (big-endian) with
-   the maker secret hash. The contract recomputes the same id from
-   the call arguments so both sides converge on the same
-   `mapping` key.
-2. Branch on `coin_type`:
-   - `EthCoinType::Eth` → call `ethMakerPayment(id, taker,
+1. Derive `swapId` from the protocol-fixed combination of
+   `paymentLockTime` (big-endian) and `makerSecretHash`. The
+   contract recomputes the same id from the call arguments so
+   both sides converge on the same key in `makerPayments`.
+2. Branch on the EVM asset class:
+   - Native coin → call `ethMakerPayment(id, taker,
      takerSecretHash, makerSecretHash, paymentLockTime)` with
      `msg.value = paymentAmount`.
-   - `EthCoinType::Erc20 { token_addr }` → call
-     `erc20MakerPayment(id, token_addr, amount, taker,
+   - ERC-20 → call `erc20MakerPayment(id, token, amount, taker,
      takerSecretHash, makerSecretHash, paymentLockTime)` after the
      usual `approve` flow.
-   - `EthCoinType::Nft { contract_addr }` → dispatch to
-     `nft_swap_v2.rs::erc721MakerPayment` or `erc1155MakerPayment`
-     per token standard.
-3. Sign and broadcast; return the `SignedEthTx`.
+   - NFT → dispatch to the maker contract's `erc721MakerPayment`
+     or `erc1155MakerPayment` entry point per token standard
+     (§17.9).
+3. Sign and broadcast; return the signed transaction.
 
-### 17.4.2 `validate_maker_payment_v2_impl`
+### 17.4.2 Payment validate
 
-Given a `SignedEthTx` and the negotiation parameters, the maker
-side (the validator is actually the taker, but in trait terms it's
-the "maker payment validator") performs:
+Given a signed transaction and the negotiation parameters, the
+validator (the taker, in protocol terms):
 
-1. Decode the tx input via the loaded ABI; assert the method
+1. Decodes the tx input via the loaded ABI; asserts the method
    selector matches one of the four `*MakerPayment` selectors.
-2. Assert decoded arguments match negotiation:
+2. Asserts decoded arguments match negotiation:
    `(takerSecretHash, makerSecretHash, paymentLockTime, taker)`.
-3. Assert `msg.value` (ETH path) or `amount` (ERC-20 path) equals
+3. Asserts `msg.value` (native coin) or `amount` (ERC-20) equals
    the expected payment amount.
-4. Read `makerPayments[id]` via an `eth_call` and assert the state
-   is `Sent` (i.e. funds are locked and not yet spent / refunded).
+4. Reads `makerPayments[id]` via `eth_call` and asserts the state
+   is `Sent` (funds locked, not yet spent or refunded).
 
-### 17.4.3 `spend_maker_payment_v2_impl`
+### 17.4.3 Payment spend
 
 Called by the taker once they observe a valid maker payment and
-have learned the maker secret (from the cooperative-spend tx — see
+have learned the maker secret (from the cooperative-spend tx —
 §17.5.7). Builds and broadcasts a `spendMakerPayment(id, amount,
 makerSecret, taker, ...)` call. The contract recomputes
 `keccak256(makerSecret)` and accepts the call iff it equals the
@@ -216,111 +235,108 @@ committed `makerSecretHash`.
 
 ### 17.4.4 Refund paths
 
-- `refund_maker_payment_v2_timelock_impl` — `block.timestamp >=
-  paymentLockTime` precondition; the contract releases funds back
-  to the maker.
-- `refund_maker_payment_v2_secret_impl` — cooperative abort. The
-  maker passes the *taker* secret (which the maker learned via the
-  cooperative-spend protocol); contract recomputes the hash and
-  releases.
+- *Timelock refund* — precondition `block.timestamp >=
+  paymentLockTime`; the contract releases funds to the maker.
+- *Secret refund* — cooperative abort. The maker passes the
+  *taker* secret (which the maker learned via the cooperative-spend
+  protocol); the contract recomputes the hash and releases.
 
 ---
 
-## 17.5 Taker side — `TakerCoinSwapOpsV2 for EthCoin`
+## 17.5 Taker-side coin-trait implementation
 
-15 trait methods. The taker side has more surface because of the
-funding-vs-payment split and the EVM-specific approval step.
+The project's V2 taker-side coin trait carries 15 methods; the
+taker side has more surface than the maker side because of the
+funding-vs-payment split and the EVM-specific approval step. Each
+method's role:
 
-| Trait method                                | Impl / behaviour                                                |
-|--------------------------------------------|------------------------------------------------------------------|
-| `send_taker_funding`                        | `send_taker_funding_impl` — call `*TakerPayment` entry point.   |
-| `validate_taker_funding`                    | `validate_taker_funding_impl` — decode + state-check.           |
-| `refund_taker_funding_timelock`             | `refund_taker_payment_with_timelock_impl`.                      |
-| `refund_taker_funding_secret`               | `refund_taker_funding_secret_impl`.                             |
-| `search_for_taker_funding_spend`            | `search_for_taker_funding_spend_impl` — locate the spend tx.    |
-| `gen_taker_funding_spend_preimage`          | EVM-specific: returns RLP-encoded funding tx as "preimage", dummy sig. The approve flow replaces the preimage exchange. |
-| `validate_taker_funding_spend_preimage`     | Always returns `Ok` (no real preimage to validate).             |
-| `sign_and_send_taker_funding_spend`         | (ERC-20 only) Promote funding → payment by calling `takerPaymentApprove(id)`; for ETH this is a no-op-equivalent path. |
-| `refund_combined_taker_payment`             | EVM-specific timelock refund that handles the combined funding+payment state in a single call (no separate funding refund needed on the EVM contract). |
-| `gen_taker_payment_spend_preimage`          | EVM-specific stub (returns `Ok` with empty preimage).           |
-| `validate_taker_payment_spend_preimage`     | Always returns `Ok`.                                            |
-| `skip_taker_payment_spend_preimage`         | Returns `true` — the state machine skips the preimage exchange. |
-| `sign_and_broadcast_taker_payment_spend`    | `sign_and_broadcast_taker_payment_spend_impl` — maker calls `spendTakerPayment`. |
-| `find_taker_payment_spend_tx`               | `find_taker_payment_spend_tx_impl` — log polling for `TakerPaymentSpent`. |
-| `extract_secret_v2`                         | `extract_secret_v2_impl` — decode `takerSecret` from the spend tx's calldata. |
+| Trait role                                  | EVM behaviour                                                                |
+|--------------------------------------------|-------------------------------------------------------------------------------|
+| Send funding                                | Call the `*TakerPayment` entry point appropriate to the asset class.          |
+| Validate funding                            | Decode calldata + read `takerPayments[id]` state.                             |
+| Refund funding by timelock                  | Use the consolidated funding+payment timelock-refund path (§17.5.4).          |
+| Refund funding by secret                    | Cooperative abort by revealing the maker secret.                              |
+| Search for funding spend                    | Poll `eth_getLogs` for the matching state-transition event (§17.5.5).         |
+| Generate funding-spend preimage             | EVM stub: return the RLP-encoded funding tx as the "preimage"; dummy signature (§17.5.1). |
+| Validate funding-spend preimage             | EVM stub: always `Ok` (§17.5.1).                                              |
+| Sign and send funding spend                 | ERC-20 only: call `takerPaymentApprove(id)` to promote funding → payment (§17.5.2). Native-coin path is a no-op-equivalent. |
+| Refund combined funding+payment             | EVM-specific timelock refund that handles both states in a single call (§17.5.4). |
+| Generate payment-spend preimage             | EVM stub: returns `Ok` with empty preimage.                                   |
+| Validate payment-spend preimage             | EVM stub: always `Ok`.                                                        |
+| Skip payment-spend preimage                 | Returns `true` — the state machine skips the preimage exchange.               |
+| Sign and broadcast payment spend            | Maker action: call `spendTakerPayment(id, amount, takerSecret, ...)` (§17.5.6).|
+| Find payment-spend tx                       | Log polling for `TakerPaymentSpent` (§17.8).                                  |
+| Extract secret from payment-spend tx        | Decode `takerSecret` from the spend tx calldata (§17.5.7).                    |
 
 ### 17.5.1 EVM "no real preimage" optimisation
 
-The UTXO V2 protocol uses a preimage-exchange round so the taker can
-partial-sign a transaction that the maker completes. EVM cannot work
-the same way because every signed tx is already broadcast-ready —
-there is no "preimage + partial sig" intermediate. The Rust
-implementation handles this by:
-
-- `gen_taker_funding_spend_preimage` returns the RLP-encoded funding
-  tx as a stand-in "preimage" and an empty signature vector.
-- `validate_taker_funding_spend_preimage` always succeeds.
-- `skip_taker_payment_spend_preimage` returns `true`, instructing
-  the state machine to skip the preimage round entirely.
-
-This is the correct behaviour for EVM and is intentional, not a
-stub.
+The UTXO V2 protocol uses a preimage-exchange round so the taker
+can partial-sign a transaction that the maker completes. EVM
+cannot work the same way because every signed tx is already
+broadcast-ready — there is no "preimage + partial sig" intermediate.
+The trait implementation handles this by returning the RLP-encoded
+funding tx as a stand-in preimage, accepting any value at validate
+time, and instructing the state machine (via the
+skip-payment-spend-preimage trait method returning `true`) to skip
+the preimage round entirely. This is the correct behaviour for
+EVM and is intentional, not a stub.
 
 ### 17.5.2 The `takerPaymentApprove` step (ERC-20 only)
 
-For ERC-20 tokens, `erc20TakerPayment` deposits the funds into the
+For ERC-20 tokens, `erc20TakerPayment` deposits funds into the
 contract but leaves them in a *funding* state. The taker must
-follow up with `takerPaymentApprove(id)` to promote the funds to a
-*payment* state (which the maker can then claim via
-`spendTakerPayment`). For ETH the funding and payment states are
-unified — no separate approval call is needed.
+follow up with `takerPaymentApprove(id)` to promote the funds to
+a *payment* state, which the maker can then claim via
+`spendTakerPayment`. For native coin the funding and payment
+states are unified — no separate approval call is needed.
 
 The approval call exists because the ERC-20 path requires an
 explicit allowance update before the contract can move tokens to
 the fee-collection address inside `spendTakerPayment`.
 
-This call is reached through the `sign_and_send_taker_funding_spend`
-trait method, not through a dedicated `taker_payment_approve` trait
-entry — the trait surface uses a single "funding → payment
-advancement" method that branches on `coin_type`.
+In trait terms this is reached through the
+"sign and send funding spend" entry from §17.5's table, which
+branches on the asset class internally rather than being a
+distinct trait method.
 
-### 17.5.3 `send_taker_funding_impl` / `validate_taker_funding_impl`
+### 17.5.3 Funding-send and funding-validate
 
-`send_taker_funding_impl` selects the `*TakerPayment` ABI entry
-point per `coin_type`, packs the arguments
-`(id, dexFee, paymentAmount, maker, takerSecretHash,
-makerSecretHash, fundingLockTime, paymentLockTime[, tokenAddr])`,
-signs the transaction, and broadcasts it. For ETH,
-`msg.value = paymentAmount + dexFee`; for ERC-20, `msg.value = 0`
-and the contract pulls tokens via `transferFrom` (the taker's
-allowance must already cover `paymentAmount + dexFee`).
+*Funding send* selects the `*TakerPayment` ABI entry point per
+asset class, packs the arguments `(id, dexFee, paymentAmount,
+maker, takerSecretHash, makerSecretHash, fundingLockTime,
+paymentLockTime[, tokenAddr])`, signs the transaction, and
+broadcasts it. For native coin, `msg.value = paymentAmount +
+dexFee`; for ERC-20, `msg.value = 0` and the contract pulls
+tokens via `transferFrom` (the taker's allowance must already
+cover `paymentAmount + dexFee`).
 
-`validate_taker_funding_impl` decodes the broadcast tx's calldata,
-asserts the method selector and arguments match negotiation, and
-reads `takerPayments[id]` via `eth_call` to confirm the on-chain
-state is `Sent`.
+*Funding validate* decodes the broadcast tx's calldata, asserts
+the method selector and arguments match negotiation, and reads
+`takerPayments[id]` via `eth_call` to confirm the on-chain state
+is `Sent`.
 
 ### 17.5.4 Refund paths
 
-- `refund_taker_payment_with_timelock_impl` — invoked when
-  `block.timestamp >= paymentLockTime` and no spend has been
-  observed. Calls the contract's `refundTakerPaymentTimelock(id)`
-  (or, on EVM, the consolidated `refund_combined_taker_payment`
-  entry that handles both funding-only and funding+payment states).
-- `refund_taker_funding_secret_impl` — cooperative abort. The
-  taker calls `refundTakerPaymentSecret(id, makerSecret)` (or the
-  funding-specific equivalent); the contract recomputes the hash
-  and releases.
+- *Combined timelock refund* — invoked when `block.timestamp >=
+  paymentLockTime` and no spend has been observed. Calls the
+  contract's `refundTakerPaymentTimelock(id)`. On EVM the
+  funding and payment states share a single refund path; the
+  contract handles both cases (funding-only and funding+payment)
+  from one entry.
+- *Secret refund* — cooperative abort. The taker calls
+  `refundTakerPaymentSecret(id, makerSecret)`; the contract
+  recomputes the hash and releases.
 
-### 17.5.5 `search_for_taker_funding_spend_impl`
+### 17.5.5 Searching for the funding spend
 
 Given a funding tx hash, polls `eth_getLogs` for the matching
-`TakerPaymentApproved` event (ERC-20) or scans subsequent blocks
-for a state transition (ETH). Returns `Some(FundingTxSpend)` when
-found, `None` otherwise. The lookback range is bounded by the
-funding tx's confirmation block.
+`TakerPaymentApproved` event (ERC-20 path) or scans subsequent
+blocks for the state transition (native-coin path). Returns a
+funding-spend descriptor when found; `None` otherwise. The
+lookback range is bounded by the funding tx's confirmation
+block.
 
-### 17.5.6 `sign_and_broadcast_taker_payment_spend_impl`
+### 17.5.6 Payment spend (maker action)
 
 Called by the **maker** to claim the taker's payment. Builds and
 broadcasts `spendTakerPayment(id, paymentAmount, takerSecret, ...)`.
@@ -329,100 +345,86 @@ equals `takerSecretHash`, then forwards `paymentAmount` to the
 caller and `dexFee` to the network fee-collection address — both
 transfers happen atomically in the same call frame.
 
-### 17.5.7 Reveal-on-spend and `extract_secret_v2`
+### 17.5.7 Reveal-on-spend and secret extraction
 
 When the taker calls `spendMakerPayment(id, ..., makerSecret, ...)`,
 the maker observes the broadcast tx, decodes its calldata via the
 loaded ABI, and extracts the `makerSecret` argument. This is the
-EVM equivalent of UTXO's "secret-in-script_sig" reveal. The Rust
-implementation lives in `extract_secret_v2_impl` and decodes either
-the `makerSecret` (when called from the taker-side spending the
-maker's payment) or `takerSecret` (symmetric).
+EVM analogue of the UTXO "secret-in-script_sig" reveal. The
+symmetric path extracts the `takerSecret` from a maker-issued
+`spendTakerPayment` calldata.
 
 ---
 
-## 17.6 ETH vs ERC-20 differentiation
+## 17.6 Native-coin vs ERC-20 differentiation
 
-| Aspect                       | ETH                                                | ERC-20                                                                                  |
-|------------------------------|----------------------------------------------------|-----------------------------------------------------------------------------------------|
-| Funds movement               | `msg.value` carries amount                         | `approve()` + `transferFrom()` inside the contract                                       |
-| Maker payment entry          | `ethMakerPayment(...)`                             | `erc20MakerPayment(...)` with `token_addr`                                              |
-| Taker payment entry          | `ethTakerPayment(...)`, `msg.value = amt + fee`    | `erc20TakerPayment(...)`, no `msg.value`; tokens pulled via `transferFrom`              |
-| Approval round               | None                                               | `takerPaymentApprove(id)` between funding and payment states                            |
+| Aspect                       | Native coin                                          | ERC-20                                                                                  |
+|------------------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| Funds movement               | `msg.value` carries amount                           | `approve()` + `transferFrom()` inside the contract                                       |
+| Maker payment entry          | `ethMakerPayment(...)`                               | `erc20MakerPayment(...)` with `token` argument                                          |
+| Taker payment entry          | `ethTakerPayment(...)`, `msg.value = amt + fee`      | `erc20TakerPayment(...)`, no `msg.value`; tokens pulled via `transferFrom`              |
+| Approval round               | None                                                 | `takerPaymentApprove(id)` between funding and payment states                            |
 | Fee delivery                 | Contract forwards from `msg.value` on `spendTakerPayment` | Contract `transferFrom` taker's allowance, then `transfer` to fee address          |
-| Dust / minimum               | Network-level gas floor                            | Token-contract-specific (no on-chain dust rule)                                          |
+| Dust / minimum               | Network-level gas floor                              | Token-contract-specific (no on-chain dust rule)                                          |
 
-The branches are explicit `match coin_type { Eth => ..., Erc20 { .. } => ..., Nft { .. } => ... }`
-in each impl function.
+Each trait method's implementation branches on the EVM asset
+class to select the appropriate entry point and pack the matching
+argument list.
 
 ---
 
-## 17.7 DexFee delivery
+## 17.7 Dex-fee delivery
 
 The V2 EVM contracts accept a flat `dexFee` `uint256` argument on
-`*TakerPayment` and forward the entire amount to the network's
-fee-collection address on `spendTakerPayment`.
-
-Today the V2 EVM path handles **only `DexFee::Standard`**.
-[Chapter 16 — V2 Pre-Burn Output](16-swap-v2-pre-burn-output.md)
-documents that `EthCoin`'s `MmCoin::should_burn_dex_fee()` returns
-`false`, which means the factory `DexFee::new_from_taker_coin`
-always yields `Standard` for EVM-side dex-fee delivery. Adding
-pre-burn to EVM requires the contract ABI to grow `burnAmount` and
-`burnAddress` parameters; that change is on the V2 contract roadmap
-and is out of scope for reloaded's licence-rebase work.
-
-The baseline carried a `// TODO add burnFee support` comment on the
-single line that converts `dex_fee.fee_amount()` into a `U256`;
-reloaded removed the TODO because the structured `DexFee` type now
-correctly returns the full fee under `fee_amount()` for the
-`Standard` variant, and the factory ensures EVM never sees `WithBurn`.
-There is no behavioural delta.
+the `*TakerPayment` entry points and forward the entire amount to
+the network's fee-collection address on `spendTakerPayment`. The
+EVM path delivers only the `Standard` dex-fee shape;
+[Chapter 16](16-swap-v2-pre-burn-output.md) fixes that the
+factory used to construct the dex-fee value returns `Standard`
+for an EVM taker coin, so the `WithBurn` variant never reaches an
+EVM contract argument. Extending pre-burn to the EVM contracts
+requires the ABI to grow `burnAmount` and `burnAddress`
+parameters; that change is out of scope here.
 
 ---
 
 ## 17.8 Event monitoring
 
-`find_taker_payment_spend_tx_impl` polls `eth_getLogs` filtered by:
+Finding a taker-payment spend uses an `eth_getLogs` filter over:
 
-- contract address (`EtomicSwapTakerV2` deployment),
+- the deployed taker-payment contract address,
 - topic 0 = `keccak256("TakerPaymentSpent(bytes32,bytes32)")`,
 - topic 1 = the `swapId`,
-- block range starting at the funding-tx confirmation block.
+- a block range starting at the funding-tx confirmation block.
 
-Once a matching log is found, the txhash is fetched and the calldata
-decoded for the secret. Confirmations are tracked via the standard
-`eth_blockNumber` polling mechanism shared with V1.
-
-The same pattern (different topic, different contract address)
-covers `MakerPaymentSpent` for the symmetric path.
+Once a matching log is found, the txhash is fetched and the
+calldata decoded for the secret. Confirmations are tracked via
+the standard `eth_blockNumber` polling mechanism shared with the
+V1 EVM path. The symmetric pattern (a different topic, the
+maker-payment contract address) covers `MakerPaymentSpent`.
 
 ---
 
 ## 17.9 NFT variant
 
-[`mm2src/coins/eth/eth_swap_v2/nft_swap_v2.rs`](../../mm2src/coins/eth/eth_swap_v2/nft_swap_v2.rs)
-implements maker-side ERC-721 and ERC-1155 payment construction.
-The corresponding ABI selectors `erc721MakerPayment` and
-`erc1155MakerPayment` are part of `EtomicSwapMakerV2`.
+The maker-side coin-trait implementation includes a branch for
+EIP-721 and EIP-1155 maker payments through the
+`erc721MakerPayment` and `erc1155MakerPayment` entry points on
+the maker contract. A small bridge layer wires the NFT branch
+into the maker state-machine driver and exposes a decision
+helper with three outcomes:
 
-A small bridge layer
-[`mm2src/mm2_main/src/lp_swap/nft_maker_swap_v2.rs`](../../mm2src/mm2_main/src/lp_swap/nft_maker_swap_v2.rs)
-(added post-baseline) wires the NFT path into the maker
-state-machine driver, including a `should_use_nft_swap_v2()`
-decision helper with outcomes:
-
-- `Use` — both sides advertise NFT V2 and the chain has a deployed
-  NFT-aware contract.
-- `VersionMismatch` — protocol version mismatch; fall back to
+- *NFT V2 in use* — both sides advertise NFT V2 and the chain has
+  a deployed NFT-aware contract.
+- *Version mismatch* — protocol version mismatch; fall back to
   fungible.
-- `NoNftContract` — chain has no NFT-aware contract; refuse the
+- *No NFT contract* — chain has no NFT-aware contract; refuse the
   trade.
 
 NFT *taker-side* support is intentionally absent: NFT swaps are
-NFT-for-fungible (the taker always uses the fungible-token V2 path
-above). This keeps the taker surface small and avoids a
-2x2 maker/taker × NFT/fungible matrix.
+NFT-for-fungible (the taker always uses the fungible-token V2
+path described in §17.5). This keeps the taker surface small and
+avoids a 2×2 maker/taker × NFT/fungible matrix.
 
 See [Chapter 19 — NFT Module Layout](19-nft-module-layout.md) for
 the broader NFT activation and storage surface.
@@ -431,9 +433,7 @@ the broader NFT activation and storage surface.
 
 ## 17.10 State-machine integration
 
-The maker-side state machine (`MakerSwapEvent` enum in
-[`maker_swap_v2.rs:63`](../../mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs#L63))
-walks the sequence:
+The V2 maker-side state machine walks the sequence:
 
 ```
 Initialized
@@ -452,9 +452,7 @@ with the error branch:
 ... (pre-payment) → Aborted
 ```
 
-The taker-side state machine (`TakerSwapEvent` enum in
-[`taker_swap_v2.rs:56`](../../mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs#L56))
-walks:
+The V2 taker-side state machine walks:
 
 ```
 Initialized
@@ -470,74 +468,93 @@ Initialized
 
 with parallel error/abort branches.
 
-Both state machines dispatch through the `MakerCoinSwapOpsV2` and
-`TakerCoinSwapOpsV2` traits — the same dispatch surface used by the
-UTXO V2 path ([§15.5](15-swap-v2-utxo-path.md#155-protocol-surface)).
-This means a single state-machine driver supports both UTXO×UTXO,
-EVM×EVM, and cross-asset (UTXO×EVM, EVM×Tendermint, etc) trades.
+Both state machines dispatch through the V2 maker- and taker-side
+coin traits — the same dispatch surface used by the UTXO V2 path
+([Chapter 15 §15.5](15-swap-v2-utxo-path.md#155-protocol-surface)).
+A single state-machine driver therefore supports UTXO×UTXO,
+EVM×EVM, and cross-asset combinations (UTXO×EVM, EVM×Tendermint,
+and so on).
 
 ---
 
 ## 17.11 Watcher reward
 
-`watcher_reward: false` for V2 EVM swaps today (visible in the
-state-machine driver). The V2 EVM contracts do not have a
-watcher-reward field; the watcher-reward feature
-([Chapter 9 — Watcher-Reward Infrastructure](09-watcher-reward-infrastructure.md))
-remains a V1-only opt-in. Extending it to V2 EVM would require
-contract redeployment with a `watcherReward` parameter.
+The V2 EVM contracts have no `watcherReward` parameter; the
+watcher-reward feature (see
+[Chapter 9](09-watcher-reward-infrastructure.md)) is therefore a
+V1-only opt-in on the EVM path. Extending it to V2 EVM requires
+contract redeployment with a `watcherReward` argument across the
+relevant entry points.
 
 ---
 
 ## 17.12 Tests
 
-Unit tests live alongside each impl function in
-`mm2src/coins/eth/eth_swap_v2/eth_*_v2.rs`. Integration tests live
-in `mm2src/mm2_main/tests/docker_tests/swap_v2_*.rs` (gated behind
-`docker_tests` feature). End-to-end V2 EVM coverage against an
-Anvil node is part of the docker test fleet; this chapter does
-not enumerate per-test specs.
+Unit tests are collocated with each EVM-side V2 implementation
+module. End-to-end V2 EVM coverage runs against an Anvil node as
+part of the docker test fleet (gated behind the `docker_tests`
+feature). This chapter does not enumerate per-test specs.
 
 ---
 
 ## 17.13 Out of scope / known limitations
 
-1. **Pre-burn on EVM** — see [Chapter 16 §16.10](16-swap-v2-pre-burn-output.md#1610-evm-and-tendermint).
+1. **Pre-burn on EVM** — see [Chapter 16](16-swap-v2-pre-burn-output.md).
    Requires contract ABI extension.
 2. **Watcher reward on V2 EVM** — requires contract redeployment.
-3. **NFT taker side** — intentional design decision; NFT trades are
-   maker-NFT-for-taker-fungible only.
+3. **NFT taker side** — intentional design decision; NFT trades
+   are maker-NFT-for-taker-fungible only.
 4. **Cross-EVM-chain swap atomicity** — each side runs its own
    contract; cross-chain finality is at-most-once per chain's
    confirmation policy.
-5. **Gas estimation** — the impl uses `eth_estimateGas` with the
-   standard +10% safety margin shared with V1; documented in
-   [Chapter 8 — Fee-Routing Engine](08-fee-routing-engine.md).
+5. **Gas estimation** — gas estimates use `eth_estimateGas` with
+   the standard +10% safety margin shared with the V1 EVM path;
+   documented in [Chapter 8](08-fee-routing-engine.md).
 
 ---
 
-## 17.14 External references
+## 17.14 External References
 
-- Ethereum ABI v2 encoding: Solidity docs §"Contract ABI Specification".
-- `eth_getLogs` filter semantics: JSON-RPC method documented at
-  ethereum.org/developers/docs/apis/json-rpc.
-- ERC-20: EIP-20. ERC-721: EIP-721. ERC-1155: EIP-1155.
-- `keccak256` hash: SHA-3 candidate, used as Ethereum's canonical
-  hash.
+- EIP-20 (ERC-20 fungible-token standard).
+- EIP-721 (ERC-721 non-fungible-token standard).
+- EIP-1155 (ERC-1155 multi-token standard).
+- Solidity Contract ABI Specification (function selectors,
+  argument encoding, event topic encoding).
+- Ethereum JSON-RPC: `eth_call`, `eth_sendRawTransaction`,
+  `eth_getLogs`, `eth_estimateGas`, `eth_blockNumber`. Reference:
+  `https://ethereum.org/developers/docs/apis/json-rpc`.
+- keccak-256 hash (used for ABI selector derivation, event topic
+  derivation, and the protocol secret-hash check).
 
 ---
 
-## 17.15 Provenance
+## 17.15 Baseline Verifications
 
-- The `eth_swap_v2/` module structure, both contract ABIs, the 19
-  trait method implementations on `EthCoin`, and the state-machine
-  event enums are all carried forward from the GPLv2 baseline at
-  commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`.
-- The maker-side NFT state-machine bridge in
-  `mm2src/mm2_main/src/lp_swap/nft_maker_swap_v2.rs` was added in
-  reloaded to wire the pre-existing NFT calldata builders to the
-  state-machine driver; that file is the only material addition to
-  the V2 EVM surface in this chapter.
-- The `// TODO add burnFee` comment removal is documented in
-  §17.7 with the rationale (factory ensures EVM never sees
-  `WithBurn`, so the TODO is moot).
+The chapter relies on one baseline-state claim:
+
+- *Claim.* The baseline tree contains no V2 EVM swap surface —
+  no V2 maker-side or taker-side coin-trait family, no V2 EVM
+  module, no V2 EVM contract ABIs, and no V2 maker/taker state
+  machines.
+- *Verification.* `git ls-tree -r c1d46c0c1592faa0860f704008b2b2381bc3840f -- mm2src/coins/eth/eth_swap_v2/`
+  returns the empty set;
+  `git ls-tree c1d46c0c1592faa0860f704008b2b2381bc3840f -- mm2src/mm2_main/src/lp_swap/`
+  shows only the V1 `maker_swap.rs` and `taker_swap.rs` (no
+  `*_v2.rs` entries); `git grep -l 'MakerCoinSwapOpsV2\|TakerCoinSwapOpsV2\|EtomicSwapMakerV2\|EtomicSwapTakerV2'
+  c1d46c0c1592faa0860f704008b2b2381bc3840f` returns nothing.
+- *Cross-reference.* [Chapter 2 — Baseline State](02-baseline-state.md)
+  enumerates the V1-only swap surface present at the baseline.
+
+---
+
+## 17.16 Provenance Footer
+
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; EIP-20, EIP-721,
+  EIP-1155; the Solidity Contract ABI Specification; the
+  Ethereum JSON-RPC method definitions for `eth_call`,
+  `eth_sendRawTransaction`, `eth_getLogs`, `eth_estimateGas`,
+  `eth_blockNumber`; keccak-256.
+- *Forbidden corpus:* not consulted.
