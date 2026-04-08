@@ -1,182 +1,180 @@
-# Chapter 22 — WalletConnect v2
+# Chapter 22 -- WalletConnect v2
 
-> **Chapter type:** document existing. No IMPL marker.
+**Status:** driving-spec
 
-## 22.0 Executive summary
+> **One-sentence claim:** the project provides an in-tree
+> WalletConnect v2 dApp implementation that exposes a per-chain
+> signing trait to coin support modules and persists sessions
+> across native and browser builds, conforming byte-for-byte to
+> the public WalletConnect v2 specification on the wire.
 
-The reloaded WalletConnect v2 implementation is a standalone
-library crate at
-[`mm2src/kdf_walletconnect/`](../../mm2src/kdf_walletconnect/).
-The crate provides the WC2 protocol surface (relay client,
-pairing, session management, encrypted JSON-RPC envelopes,
-persistent session storage) and a `WalletConnectOps` trait that
-coin crates are expected to implement to gain WC-backed signing.
+## 22.0 Executive Summary
 
-The integration boundary is the trait itself:
-**`kdf_walletconnect` does not depend on any coin crate**, and
-no coin crate in reloaded today implements `WalletConnectOps`.
-The crate is also not yet wired into the JSON-RPC dispatcher in
-`mm2_main`. The full WC2 protocol is in place; the integration
-layer (per-coin signing impls and RPC handlers) is the explicit
-follow-on work.
+A dedicated subsystem in this codebase implements the
+WalletConnect v2 protocol as a **relay client / dApp**: it
+generates pairing URIs, proposes and maintains sessions with
+external wallets, and dispatches signing requests over an
+encrypted JSON-RPC channel. It does *not* implement the
+wallet-side role -- the codebase never settles inbound sessions
+on behalf of a remote dApp and never signs on behalf of an
+external requester.
 
-Key characteristics:
+The subsystem is divided cleanly between:
 
-- **Relay-client / dApp role.** Reloaded initiates pairings,
-  proposes sessions, and sends signing requests to external
-  wallets. It does not act as a wallet (no inbound session
-  settlement or signing).
-- **Cross-platform persistence.** Sessions persist to SQLite on
-  native and to IndexedDB on WASM, behind a single
-  `SessionStorage` trait.
-- **Modern crypto.** x25519 ECDH + HKDF-SHA256 +
-  ChaCha20-Poly1305 (the canonical WC2 transport).
-- **Encoding negotiation.** Default hex envelopes; base64 path
-  for wallets (e.g. Keplr) that require it.
+1. A **protocol layer** carrying the WC2 wire format, pairing
+   and session lifecycle, encrypted envelope codec, and relay
+   websocket loop.
+2. A **persistence layer** that mirrors the active session set
+   to durable storage on both native (SQLite) and browser
+   (IndexedDB) builds, behind a single trait.
+3. An **integration trait** that coin support modules implement
+   to surface WalletConnect-backed signing for the chain family
+   they own. The trait is intentionally minimal and chain-family
+   agnostic.
 
-## 22.1 Crate layout
+At the time this chapter is written the trait exists in the tree
+and the protocol/persistence layers are functionally complete;
+no coin support module yet implements the trait, and the public
+RPC dispatcher does not yet register WalletConnect handlers. The
+trait surface and persistence shape are binding; the integration
+gap is the explicit work named in §22.9.
 
-```
-mm2src/kdf_walletconnect/
-|-- Cargo.toml
-`-- src/
-    |-- lib.rs                Public API, WalletConnectCtx,
-    |                         WalletConnectOps trait
-    |-- chain.rs              WcChain, WcChainId, WcRequestMethods
-    |-- error.rs              WalletConnectError + WC error codes
-    |-- inbound_message.rs    Request / response routing
-    |-- connection_handler.rs Relay websocket event handler
-    |-- pairing.rs            Pairing lifecycle
-    |-- metadata.rs           App name, auth token constants
-    |-- session/
-    |   |-- mod.rs            Session, SessionManager, tests
-    |   |-- key.rs            SymKeyPair, SessionKey, x25519 + HKDF
-    |   `-- rpc/
-    |       |-- mod.rs
-    |       |-- propose.rs    SessionPropose
-    |       |-- settle.rs     SessionSettle
-    |       |-- update.rs     Namespace updates
-    |       |-- delete.rs     Session deletion + cleanup
-    |       |-- event.rs      chainChanged, accountsChanged
-    |       |-- extend.rs     Session extension
-    |       `-- ping.rs       Ping / heartbeat
-    `-- storage/
-        |-- mod.rs            SessionStorage trait, platform dispatch
-        |-- sqlite.rs         Native (db_common AsyncConnection)
-        `-- indexed_db.rs     WASM (mm2_db indexed_db)
-```
+## 22.1 Subsystem Shape
 
-Roughly two thousand lines of Rust, all post-baseline.
+The subsystem is a standalone library compilation unit. It
+depends only on:
 
-## 22.2 Public API
+- Standard async-Rust crates (futures, tokio-style channels in
+  the workspace's runtime selection).
+- The workspace's central context type (see
+  [Chapter 8](08-mm-ctx-and-state-layering.md)) for the lazy
+  per-context handle pattern.
+- The workspace's database abstractions (see
+  [Chapter 25](25-sql-query-builder.md) for the native SQL path
+  and the IndexedDB wrapper for the browser path).
+- Third-party crates carrying the WalletConnect v2 relay client,
+  pairing API, and Type 0 envelope codec. These are external
+  Cargo dependencies, not vendored sources; the codebase invokes
+  them through their public Rust APIs and does not reproduce
+  their internals.
 
-[`lib.rs`](../../mm2src/kdf_walletconnect/src/lib.rs) exports:
+The subsystem **does not depend on any coin support module**.
+Coin support modules depend on the subsystem (through the
+integration trait of §22.5), never the other way around. This
+direction is a binding architectural rule: the WalletConnect
+subsystem must remain coin-agnostic so it can be compiled and
+tested without any chain backend present.
 
-```rust
-pub mod chain;             // WcChain, WcChainId, WcRequestMethods
-pub mod error;
-pub mod inbound_message;
-pub mod session;           // Session, SessionManager, KeyInfo, ...
-pub use relay_rpc::domain::Topic as WcTopic;
+Internally the subsystem groups its source into the following
+functional regions:
 
-/// Thread-safe handle to the per-MmArc WC subsystem.
-pub struct WalletConnectCtx(pub Arc<WalletConnectCtxImpl>);
+| Region              | Responsibility                                     |
+|---------------------|----------------------------------------------------|
+| Public API          | Per-context handle, pairing-URI struct, re-exports |
+| Chain taxonomy      | CAIP-2 chain family enum, request-method enum      |
+| Error               | Error enum with mapped WalletConnect error codes   |
+| Inbound routing     | Request/response demultiplex by message id         |
+| Connection handler  | Relay websocket event loop                         |
+| Pairing             | Pairing lifecycle (propose, accept, expire)        |
+| Metadata            | App identity, auth-token constants                 |
+| Session             | Session struct, manager, key material              |
+| Session RPC         | One submodule per WC2 method (propose, settle,    |
+|                     | update, delete, event, extend, ping)               |
+| Storage             | Trait + native and browser implementations         |
 
-pub struct NewConnection {
-    pub url: String,            // wc:<...>@2?... pairing URI
-    pub pairing_topic: Topic,
-}
-```
+The subsystem is bounded in size (on the order of a couple of
+thousand lines of Rust); it contains its own serialization
+tests, no relay-loop or crypto tests.
 
-`WalletConnectCtx` is the single entry point. The
-`from_ctx(&MmArc)` constructor follows the same lazy-init
-pattern as the rest of the codebase
-([Chapter 8](08-mm-ctx-and-state-layering.md)); call sites do
-not own or build the instance directly.
+## 22.2 Public Handle and Connection API
 
-Headline methods on `WalletConnectCtx`:
+The subsystem exposes a single public handle type, accessed
+through the per-context lazy-init pattern of
+[Chapter 8](08-mm-ctx-and-state-layering.md). Call sites obtain
+the handle from the central context; they do not construct it
+directly.
 
-| Method                                    | Purpose                                |
-|-------------------------------------------|----------------------------------------|
-| `new_connection(required, optional)`      | Generate a pairing URI / topic         |
-| `send_session_request_and_wait<R>(...)`   | Encrypted JSON-RPC -> wallet, await `R`|
-| `drop_session(topic)`                     | Gracefully terminate a pairing         |
-| `is_ledger_connection(topic)`             | Wallet-type detection (Cosmos / Ledger)|
-| `is_keplr_connection(topic)`              | Encoding-quirk detection               |
-| `get_account_and_properties_for_chain_id` | Resolve active account + metadata      |
-| `encode(session_topic, data)`             | Encode response (hex or base64)        |
+The handle exposes the following operations:
 
-## 22.3 The `WalletConnectOps` trait
+| Operation                          | Purpose                              |
+|------------------------------------|--------------------------------------|
+| Generate a new pairing             | Returns a pairing topic and a `wc:`  |
+|                                    | URI to be shown to the user          |
+| Send a signing request, await reply| Encrypts the JSON-RPC payload, sends |
+|                                    | over the relay, awaits the response  |
+| Drop a session                     | Sends the WC2 delete RPC, removes    |
+|                                    | the persisted row, unsubscribes      |
+| Encode an outbound payload         | Applies the negotiated transport     |
+|                                    | encoding (hex by default; base64 for |
+|                                    | wallets that require it)             |
+| Resolve account for a chain        | Looks up the active account address  |
+|                                    | and metadata for a given chain id    |
+| Wallet-type detection              | Identifies certain wallet families   |
+|                                    | (Ledger Cosmos app; Keplr) where the |
+|                                    | wire path must differ                |
 
-Coin crates that want to surface WC-backed signing implement:
+The pairing URI follows the public WC2 format
+(`wc:<topic>@2?...`) and is opaque to the codebase: it is
+delivered verbatim to the consumer (a GUI, a CLI, a deep link).
 
-```rust
-pub trait WalletConnectOps {
-    type Error;
-    type Params<'a>;
-    type SignTxData;
-    type SendTxData;
+## 22.3 The Integration Trait
 
-    async fn wc_chain_id(&self, ctx: &WalletConnectCtx)
-        -> Result<WcChainId, Self::Error>;
+Coin support modules that wish to expose WalletConnect-backed
+signing implement an in-tree trait with the following shape:
 
-    async fn wc_sign_tx<'a>(
-        &self, wc: &WalletConnectCtx, params: Self::Params<'a>,
-    ) -> Result<Self::SignTxData, Self::Error>;
+- A method that returns the CAIP-2 chain id the coin is bound
+  to, given the WalletConnect handle.
+- A method that signs an unsigned transaction (associated
+  parameter type and associated return type, both chosen by
+  the implementor).
+- A method that signs and broadcasts a transaction (same
+  associated-type pattern).
+- A method that returns the pairing topic the coin should use.
 
-    async fn wc_send_tx<'a>(
-        &self, wc: &WalletConnectCtx, params: Self::Params<'a>,
-    ) -> Result<Self::SendTxData, Self::Error>;
+The trait is intentionally narrow: a chain-id resolver, a sign
+flow, a send flow, and a session pointer. Associated types let
+each chain family pick its own parameter and return shapes
+(EVM transaction objects, Cosmos sign-direct payloads, UTXO
+PSBTs) without the WalletConnect subsystem needing to know
+anything about the specific tickers, transaction encodings,
+or contract addresses involved.
 
-    fn session_topic(&self) -> Result<&Topic, Self::Error>;
-}
-```
+The binding rule is that the trait must remain chain-family
+agnostic in this codebase: the subsystem must not gain
+knowledge of EVM, Cosmos, or UTXO transaction structures.
+Chain-specific logic belongs in the coin support module that
+implements the trait.
 
-The trait is intentionally minimal: a chain-id resolver, a sign
-flow, a send flow, and a way to identify the pairing the coin
-should use. Each implementor chooses its own associated types
-for params and return shapes; the WC crate does not need to
-know about EthCoin or TendermintCoin.
+## 22.4 Protocol Role
 
-Today **no coin in reloaded implements `WalletConnectOps`** -- a
-grep of `mm2src/coins/` for `WalletConnectOps` or
-`wallet_connect` returns no matches. The trait is in place, and
-the integration is left as the next step (see §22.10).
+The codebase fills the **relay-client / dApp** role of WC2 in
+full and the **wallet** role not at all.
 
-## 22.4 Protocol role
+| Step                              | Codebase | External wallet |
+|-----------------------------------|----------|------------------|
+| Initiate pairing                  | yes      | no               |
+| Send `wc_sessionPropose`          | yes      | no               |
+| Receive `wc_sessionSettle`        | yes      | yes (sends)      |
+| Send `wc_sessionRequest` (sign)   | yes      | no               |
+| Sign and respond                  | no       | yes              |
+| Broadcast the signed transaction  | depends on the WC method chosen   | usually yes |
 
-Reloaded acts strictly as the **relay client / dApp** side of
-WC2:
+There is no inbound-session settlement and no signing on behalf
+of external dApps. Adding the wallet role would be a substantial
+new feature and is not in scope for this subsystem.
 
-| Role                              | Reloaded | Wallet (external) |
-|-----------------------------------|----------|--------------------|
-| Initiates pairing                 | yes      | no                 |
-| Sends `wc_sessionPropose`         | yes      | no                 |
-| Receives `wc_sessionSettle`       | yes      | yes (sends it)     |
-| Sends `wc_sessionRequest` (sign)  | yes      | no                 |
-| Signs and responds                | no       | yes                |
-| Broadcasts the signed transaction | depends on `wc_sendTransaction` path | usually yes |
+## 22.5 Session Storage
 
-There is no wallet-side endpoint (reloaded does not settle
-inbound sessions or sign on behalf of external dApps).
+Sessions persist across process restarts. A single trait
+abstracts the storage backend; the build chooses between two
+implementations:
 
-## 22.5 Session storage
+| Build target | Implementation                                              |
+|--------------|-------------------------------------------------------------|
+| Native       | SQLite via the workspace's async SQL abstraction            |
+| Browser/WASM | IndexedDB via the workspace's IndexedDB wrapper             |
 
-The `SessionStorage` trait
-([`storage/mod.rs`](../../mm2src/kdf_walletconnect/src/storage/mod.rs))
-abstracts persistence:
-
-```rust
-#[cfg(target_arch = "wasm32")]
-type DB = indexed_db::IDBSessionStorage;
-#[cfg(not(target_arch = "wasm32"))]
-type DB = sqlite::SqliteSessionStorage;
-```
-
-Native ([`storage/sqlite.rs`](../../mm2src/kdf_walletconnect/src/storage/sqlite.rs))
-uses the shared `db_common::AsyncConnection` from
-[Chapter 25](25-sql-query-builder.md) and stores rows in a
-single table:
+The native schema is a single table keyed by topic:
 
 ```sql
 CREATE TABLE wc_session (
@@ -186,199 +184,262 @@ CREATE TABLE wc_session (
 );
 ```
 
-WASM
-([`storage/indexed_db.rs`](../../mm2src/kdf_walletconnect/src/storage/indexed_db.rs))
-mirrors this with a single `sessions` object store inside the
-`wc_session_storage` database, built on
-[`mm2_db::indexed_db::ConstructibleDb`](../../mm2src/mm2_db/src/indexed_db/).
+The browser schema is the same shape: a single object store
+keyed by topic, with the same three columns.
 
 Lifecycle on relay connect:
 
 1. Load every persisted session.
-2. Expire any row where `now > expiry`.
-3. Re-subscribe to the session and pairing topics so messages
-   that landed while the relay was disconnected are processed.
-4. Update rows in place via `storage.update_session(...)`.
-5. On user-initiated disconnect or `drop_session`, delete the
-   row.
+2. Expire any row whose `expiry` is in the past.
+3. Re-subscribe to the session and pairing topics so that
+   messages delivered while the relay was disconnected are
+   processed.
+4. Update rows in place when session state changes.
+5. On user-initiated disconnect, delete the row and unsubscribe.
+
+The binding rule is that the storage layer must remain a single
+trait with one row per session; both backends store the same
+opaque-JSON payload. Schemas may be extended additively but
+must remain compatible between backends.
 
 ## 22.6 Cryptography
 
-[`session/key.rs`](../../mm2src/kdf_walletconnect/src/session/key.rs)
-implements the WC2 key-exchange and symmetric-key derivation:
+The transport-layer cryptography is fully specified by WC2 and
+is reproduced byte-for-byte. The codebase performs:
 
-```rust
-use x25519_dalek::{StaticSecret, PublicKey};
-use hkdf::Hkdf;
-use sha2::Sha256;
+1. **Key exchange.** x25519 ECDH between an ephemeral
+   `StaticSecret` and the peer's `PublicKey`, producing a 32-byte
+   shared secret.
+2. **Symmetric-key derivation.** HKDF-SHA256 over the shared
+   secret with **empty salt** (`None`) and **empty info**
+   (`&[]`), expanded to 32 bytes. The empty salt and info are
+   mandated by the WC2 specification; they are not authorial
+   choices and must be matched byte-for-byte by any
+   interoperable implementation.
+3. **Symmetric encryption.** ChaCha20-Poly1305 with the
+   derived key, packaged in the canonical WC2 Type 0 envelope
+   (version byte, salt, ciphertext, Poly1305 tag). The envelope
+   codec is delegated to the external WalletConnect SDK crate
+   referenced by Cargo; the codebase does not reimplement the
+   envelope byte layout.
 
-let static_secret = StaticSecret::random_from_rng(OsRng);
-let shared = static_secret.diffie_hellman(&peer_public_key);   // x25519
+The symmetric key is masked in any `Debug` output (substituted
+with `"*******"`). The session-key type **shall additionally
+implement zeroize-on-drop**; at the time of writing the
+implementation masks but does not zeroize, and this is named
+explicitly in §22.9 as required follow-on work.
 
-let hk = Hkdf::<Sha256>::new(None, shared.as_bytes());
-let mut sym_key = [0u8; 32];
-hk.expand(&[], &mut sym_key)?;                                  // HKDF-SHA256
-```
+## 22.7 Encrypted JSON-RPC Envelopes
 
-The empty HKDF salt (`None`) and empty `info` (`&[]`) are not
-arbitrary choices: they are mandated by the WalletConnect v2
-specification and must be matched byte-for-byte by any
-interoperable implementation.
+Each WalletConnect message on the wire is a Type 0 envelope
+wrapping a JSON-RPC payload. The envelope structure is:
 
-Symmetric encryption uses ChaCha20-Poly1305 via the
-`wc_common::{encrypt_and_encode, decode_and_decrypt_type0}`
-helpers (`EnvelopeType::Type0`). `wc_common` is vendored from
-the upstream WalletConnect Rust SDK
-(`github.com/komodoplatform/walletconnectrust`, tag `k-0.1.3`)
-and carries the canonical envelope codec, so any wire-level
-details (version byte, salt size, tag size, byte order) are
-delegated to that crate rather than reimplemented here.
+| Field      | Size                | Notes                                  |
+|------------|---------------------|----------------------------------------|
+| Version    | 1 byte              | Type 0 = 0x00                          |
+| Salt       | 32 bytes            | Per-message nonce material             |
+| Ciphertext | variable            | ChaCha20-Poly1305 over JSON-RPC bytes  |
+| Tag        | 16 bytes            | Poly1305 authentication tag            |
 
-`SessionKey` masks the raw symmetric key in its `Debug` impl by
-substituting `"*******"`. Note: explicit zeroize-on-drop is not
-applied today; this is called out in §22.10.
+The codebase calls the external SDK's encode and decode entry
+points to produce and consume envelopes; this is the only path
+through which session-keyed bytes leave or enter the subsystem.
 
-## 22.7 Encrypted JSON-RPC envelopes
+The **transport encoding** is applied to the whole envelope
+after the envelope is produced:
 
-Each WC message is a Type 0 envelope -- a version byte, salt,
-ChaCha20-Poly1305 ciphertext, and Poly1305 auth tag -- wrapping
-a JSON-RPC payload. The exact serialization is defined by the
-WalletConnect v2 specification and implemented in the vendored
-`wc_common` crate; reloaded calls
-`wc_common::encrypt_and_encode(EnvelopeType::Type0, payload,
-&sym_key)` on send and
-`wc_common::decode_and_decrypt_type0(msg.as_bytes(), &key)` on
-receive (see
-[`lib.rs`](../../mm2src/kdf_walletconnect/src/lib.rs#L48)).
+- Hex encoding is the default and is used for most wallets.
+- Base64 encoding is used for wallets that require it (Keplr is
+  the notable case in this category).
 
-The transport encoding (hex by default, base64 for Keplr) is
-applied to the entire envelope after encryption, not to the
-ciphertext alone.
+The wallet-type detection in §22.2 selects the encoding.
 
-The JSON-RPC payload itself looks like:
+A JSON-RPC payload on the WC channel has the standard shape:
 
 ```jsonc
 {
   "jsonrpc": "2.0",
-  "id": <MessageId>,
-  "method": "wc_sessionRequest",
-  "params": {
+  "id":      <numeric message id>,
+  "method":  "wc_sessionRequest",
+  "params":  {
     "chainId": "eip155:1",
     "request": {
       "method": "eth_signTransaction",
-      "params": [ /* ... */ ]
+      "params": [ /* method-specific */ ]
     }
   }
 }
 ```
 
-Outbound encoding defaults to hex; the path switches to base64
-when `is_keplr_connection(topic)` is true (Keplr requires
-base64-encoded envelopes).
+**Request/response correlation** uses a oneshot channel keyed
+by the JSON-RPC message id. The send path registers the
+oneshot under the id, the inbound router matches incoming
+responses to pending ids and wakes the waiter, and a fixed
+time-to-live (five minutes at the time of writing) caps the
+wait if no response arrives. The TTL is currently a constant;
+a per-call override is named as follow-on work in §22.9.
 
-Request / response correlation is handled by
-[`inbound_message.rs`](../../mm2src/kdf_walletconnect/src/inbound_message.rs):
-`send_session_request_and_wait` registers a oneshot under the
-message id, the inbound handler matches incoming responses by
-id and wakes the waiter, and a TTL (default five minutes) caps
-the wait.
+## 22.8 Chain Taxonomy and Request Methods
 
-## 22.8 Chain abstraction and request methods
+The subsystem models the multi-chain surface of WC2 through
+CAIP-2 chain identifiers (`<family>:<reference>`). Three chain
+families are recognised at the time of writing:
 
-[`chain.rs`](../../mm2src/kdf_walletconnect/src/chain.rs)
-defines the chain family taxonomy and the canonical RPC method
-names. The `WcChain` enum currently models three CAIP-2
-families:
+| CAIP-2 family    | Meaning                                          |
+|------------------|--------------------------------------------------|
+| `eip155:<id>`    | Ethereum and EVM-compatible chains               |
+| `cosmos:<id>`    | Cosmos SDK chains                                |
+| `bip122:<hash>`  | UTXO chains (Bitcoin family, prefix of genesis)  |
 
-- `Eip155` -- EVM chains (`eip155:<id>`).
-- `Cosmos` -- Cosmos SDK chains (`cosmos:<chain-id>`).
-- `Bip122` -- UTXO chains (`bip122:<genesis-hash-prefix>`).
+Adding a new family is an additive change (a new enum variant
+plus a new RPC submodule for the methods that family exposes).
+Removing a family would be a breaking change to coin
+implementors and is not envisaged.
 
-`WcChainId` represents a `<family>:<reference>` pair as a
-strongly-typed value.
+The wire method names the subsystem is prepared to issue on
+behalf of an integration are enumerated explicitly; the
+mapping from internal variant to wire name is one-to-one and
+total. At the time of writing the set is:
 
-`WcRequestMethods` enumerates the wallet-side method names the
-crate knows how to issue:
+| Variant family   | Wire method name             | Chain family |
+|------------------|------------------------------|--------------|
+| Sign EVM tx      | `eth_signTransaction`        | eip155       |
+| Send EVM tx      | `eth_sendTransaction`        | eip155       |
+| EVM personal sign| `personal_sign`              | eip155       |
+| Cosmos direct    | `cosmos_signDirect`          | cosmos       |
+| Cosmos amino     | `cosmos_signAmino`           | cosmos       |
+| Cosmos accounts  | `cosmos_getAccounts`         | cosmos       |
+| UTXO accounts    | `getAccountAddresses`        | bip122       |
+| UTXO send        | `sendTransfer`               | bip122       |
+| UTXO sign PSBT   | `signPsbt`                   | bip122       |
+| UTXO personal    | `personal_sign` (UTXO route) | bip122       |
 
-| Variant                    | Wire method name             | Family  |
-|----------------------------|------------------------------|---------|
-| `EthSignTransaction`       | `eth_signTransaction`        | eip155  |
-| `EthSendTransaction`       | `eth_sendTransaction`        | eip155  |
-| `EthPersonalSign`          | `personal_sign`              | eip155  |
-| `CosmosSignDirect`         | `cosmos_signDirect`          | cosmos  |
-| `CosmosSignAmino`          | `cosmos_signAmino`           | cosmos  |
-| `CosmosGetAccounts`        | `cosmos_getAccounts`         | cosmos  |
-| `UtxoGetAccountAddresses`  | `getAccountAddresses`        | bip122  |
-| `UtxoSendTransfer`         | `sendTransfer`               | bip122  |
-| `UtxoSignPsbt`             | `signPsbt`                   | bip122  |
-| `UtxoPersonalSign`         | `personal_sign` (UTXO route) | bip122  |
+`cosmos_signAmino` is the Ledger-compatible path (the Cosmos
+Ledger app supports Amino-JSON sign payloads only);
+`cosmos_signDirect` is the default for software wallets.
 
-`cosmos_signAmino` is the Ledger-compatible path (Ledger Cosmos
-apps only support Amino-JSON sign payloads); `cosmos_signDirect`
-is the default for software wallets.
+`eth_signTypedData_v4` is intentionally not in the enum at the
+time of writing; it is a common EVM method and is expected to
+be added when the first integrator needs it. Adding it is an
+additive enum + match-arm change.
 
-Note: `eth_signTypedData_v4` is *not* in the enum today, even
-though it is a common WC2 method on the EVM side. Adding it is
-straightforward (a new variant + match arm in the wire-name
-mapping) once a coin implementation needs it.
+## 22.9 Binding Requirements and Deferred Work
 
-The trait surface and request taxonomy is the contract a coin
-implementer has to satisfy; the crate has no awareness of
-specific tickers or contract addresses.
+The following are **binding rules** for this subsystem and any
+coin support modules that integrate with it:
 
-## 22.9 Tests
+R1. **Coin agnosticism.** The WalletConnect subsystem must not
+    depend on any coin support module. Chain-family-specific
+    transaction encoding lives in the integrating coin module.
 
-[`session/mod.rs`](../../mm2src/kdf_walletconnect/src/session/mod.rs)
-contains a small set of serialization tests:
+R2. **Single trait integration boundary.** Coin integration
+    must be expressed through the integration trait of §22.3.
+    No coin module may reach into the subsystem's internals.
 
-- `test_deserialize_keys_from_string`
-- `test_deserialize_keys_from_vec`
-- `test_deserialize_empty_keys`
-- `test_deserialize_no_keys`
-- `test_serialize_deserialize_roundtrip`
+R3. **Spec-byte-faithful crypto.** The HKDF salt and info, the
+    Type 0 envelope layout, and the JSON-RPC message shape are
+    set by the WC2 specification and are not authorial. Any
+    change that diverges from spec bytes is a bug.
 
-There are no tests covering the relay loop, the crypto
-primitives, storage round-trips, or the message-id correlation
-logic; these are typically integration-test material requiring
-either a mocked relay server or a live test relay endpoint.
+R4. **Storage uniformity.** Both storage backends must expose
+    the same trait, the same row shape, and the same lifecycle
+    (load -> expire -> re-subscribe -> update -> delete).
 
-## 22.10 Known limitations and deferred work
+R5. **Zeroize-on-drop for session-key material.** The
+    session-key type shall implement zeroize-on-drop. At the
+    time of writing the type masks the key in `Debug` only;
+    closing this gap is required follow-on work.
 
-1. **No coin implementations of `WalletConnectOps`.** The trait
-   is defined; no coin crate in `mm2src/coins/` implements it
-   today. EVM signing (via `eth_signTransaction` /
-   `eth_sendTransaction` / `personalSign`) and Cosmos signing
-   (via `cosmos_signDirect` / `cosmos_signAmino`) are the
-   expected first integrators.
-2. **No JSON-RPC dispatcher wiring.** `kdf_walletconnect` is not
-   a dependency of `mm2_main`. RPC methods such as
-   `wc::new_pairing`, `wc::get_sessions`, `wc::drop_session`
-   exist in concept (mapped onto the public crate API) but are
-   not registered in
-   [`mm2_main/src/rpc/dispatcher/dispatcher.rs`](../../mm2src/mm2_main/src/rpc/dispatcher/dispatcher.rs).
-3. **Symmetric key zeroize.** `SessionKey` masks the key in
-   `Debug` but does not implement `Zeroize` / `ZeroizeOnDrop`;
-   adding it requires a `zeroize` feature on the holder type.
-4. **Wallet-detection heuristics.** Ledger detection reads
-   `sessionProperties.keys[0].is_nano_ledger`; Keplr detection
-   matches `controller.metadata.name == "Keplr"`. Both work but
-   are heuristic.
-5. **CAIP-10 account parsing.** Today a simple split on `:`;
-   stricter validation would help reject malformed wallet
-   responses earlier.
-6. **No message deduplication.** The crate relies on the relay
-   server to deduplicate; a defence-in-depth dedup layer is not
-   present.
-7. **Hard-coded response TTL** of five minutes for any pending
-   session request; tunable per call would be a small follow-on.
+R6. **Public dispatcher integration.** The codebase shall expose
+    the subsystem's user-facing operations (start pairing,
+    list sessions, drop session) through the public RPC
+    dispatcher. The subsystem's public handle methods are the
+    intended targets of those RPCs; the dispatcher wiring is
+    required follow-on work.
 
-## 22.11 Provenance
+The following items are **deferred work** required to reach a
+"first integration shipped" milestone:
 
-`mm2src/kdf_walletconnect/` is post-baseline; `git ls-tree
-c1d46c0 -- mm2src/kdf_walletconnect` returns empty. The
-implementation conforms to the WalletConnect v2 specification
-(public protocol) and uses the third-party `relay_rpc` and
-`wc_common` crates for the relay client and envelope codec
-respectively; both are listed under the legal classification
-register
-([`local/legal/AUDIT_FILE_CLASSIFICATION.md`](../../local/legal/AUDIT_FILE_CLASSIFICATION.md)).
+D1. At least one coin support module shall implement the
+    integration trait. The EVM and Cosmos families are the
+    natural first integrators given the trait surface and the
+    request-method enum.
+
+D2. Public RPC handlers shall be registered (see R6).
+
+D3. The session-key type shall acquire `Zeroize` /
+    `ZeroizeOnDrop` (see R5).
+
+D4. Wallet-type detection currently uses heuristics
+    (`sessionProperties.keys[0].is_nano_ledger` for Ledger;
+    `controller.metadata.name == "Keplr"` for Keplr). These are
+    documented but not normative; a more robust capability-based
+    detection is desirable.
+
+D5. CAIP-10 account-address parsing currently uses a simple
+    delimiter split. Stricter validation would reject malformed
+    wallet responses earlier.
+
+D6. No defence-in-depth message deduplication is implemented;
+    the codebase relies on the relay to deduplicate. A local
+    dedup layer is desirable.
+
+D7. The response time-to-live is a constant. A per-call override
+    is desirable.
+
+## 22.10 External References
+
+- The WalletConnect v2 protocol specification (transport,
+  pairing, session, JSON-RPC envelope, namespaces). The
+  binding spec for the wire-level behaviour described above.
+- CAIP-2 (chain identifiers) and CAIP-10 (account identifiers)
+  for the namespace identifiers used in §22.8.
+- The Ethereum JSON-RPC method names (`eth_signTransaction`,
+  `eth_sendTransaction`, `personal_sign`, `eth_signTypedData_v4`)
+  as defined by the Ethereum and EIP standards.
+- The Cosmos signing schemes (Amino-JSON and SignDirect /
+  Protobuf) as defined by the Cosmos SDK.
+- The PSBT format (BIP-174) for the UTXO `signPsbt` flow.
+- RFC 5869 (HKDF), RFC 7539 (ChaCha20-Poly1305 / Poly1305),
+  RFC 7748 (x25519) for the cryptographic primitives.
+
+## 22.11 Baseline Verifications
+
+The following are verifiable from the baseline state defined in
+[Chapter 02](02-baseline-state.md), commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f`:
+
+V1. The baseline tree contains **no** WalletConnect v2
+    subsystem. A directory listing of the baseline tree
+    (`git ls-tree -r c1d46c0c1592faa0860f704008b2b2381bc3840f`)
+    returns no path containing any WalletConnect-related crate
+    or module. The subsystem described in this chapter is
+    therefore material introduced after the baseline in its
+    entirety.
+
+V2. The baseline tree contains no integration trait of the
+    shape described in §22.3. A tree-wide `git grep` for the
+    integration-trait name against the baseline returns no
+    matches.
+
+V3. The third-party Cargo dependencies that provide the relay
+    client and Type 0 envelope codec are referenced from the
+    workspace `Cargo.toml` by tag-pinned git URL. The codebase
+    consumes their public Rust APIs only; no vendored copies of
+    their sources are present.
+
+## 22.12 Provenance Footer
+
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of the
+  subsystem at baseline verified via
+  `git ls-tree -r c1d46c0c1592faa0860f704008b2b2381bc3840f`
+  and tree-wide `git grep` for the integration-trait name
+  against the baseline; the public WalletConnect v2
+  specification; the CAIP-2 and CAIP-10 namespaces; the
+  Ethereum JSON-RPC method definitions; the Cosmos SDK signing
+  schemes (Amino and SignDirect); BIP-174 (PSBT); RFC 5869
+  (HKDF), RFC 7539 (ChaCha20-Poly1305), RFC 7748 (x25519).
+- *Forbidden corpus:* not consulted.
