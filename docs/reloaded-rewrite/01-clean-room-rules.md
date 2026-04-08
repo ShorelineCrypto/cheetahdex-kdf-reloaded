@@ -141,7 +141,33 @@ is incomplete; the missing citation is a bug in the chapter.
 
 ## 6. Chapter shape
 
-Every chapter under this directory follows the same outline:
+Every chapter under this directory declares its status in a front-matter
+line immediately under the title, and follows the same outline below.
+
+### 6.1 Status
+
+The front-matter line takes the form:
+
+```
+**Status:** driving-spec
+```
+
+The published document set contains exactly two status values:
+
+- `driving-spec` — the chapter reads as a forward-looking design
+  brief: a competent engineer reading only this chapter, the baseline
+  at commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, and the
+  external inputs the chapter cites, could plausibly arrive at the
+  current behaviour of the corresponding part of the source tree.
+- `legal-position` — the chapter records a legal-methodology
+  statement (the rules themselves, the treatment of license
+  conditions, etc.) rather than a technical design.
+
+No chapter in the published set carries any other status. Internal
+working statuses (drafting, under review, blocked) are tracked
+outside this directory.
+
+### 6.2 Sections
 
 1. **Executive Summary.** Three to ten short paragraphs in plain
    language. A non-engineer reader can finish this section knowing
@@ -157,9 +183,22 @@ Every chapter under this directory follows the same outline:
    cites. Each reference is sufficient to locate the cited material
    without further hints.
 
-4. **Provenance Footer.** A one-paragraph note recording the chapter's
-   version and the materials it was checked against. (Not a changelog
-   — a single statement of the chapter's current state.)
+4. **Baseline Verifications.** A list of every claim in the chapter of
+   the form "X already existed in the baseline". Each claim is
+   accompanied by the `git ls-tree` / `git show` invocation against
+   commit `c1d46c0c1592faa0860f704008b2b2381bc3840f` that verifies it.
+   Omit the section entirely if the chapter makes no such claim.
+
+5. **Provenance Footer.** A short bulleted block recording the
+   chapter's current state:
+
+   - *Status:* one of the values from §6.1.
+   - *Version:* `vN`, incremented on material revision.
+   - *Verified against:* the baseline commit, plus the named external
+     specifications and sibling repositories used.
+   - *Forbidden corpus:* `not consulted` (this line is mandatory and
+     always reads exactly so; if the line cannot honestly be written,
+     the chapter is not ready to publish).
 
 ## 7. Principles the document set tries to embody
 
