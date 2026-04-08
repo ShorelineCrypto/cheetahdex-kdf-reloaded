@@ -1,5 +1,6 @@
 # Chapter 18 — Tendermint, IBC, and Cross-Chain HTLC Surfaces
 
+<!-- AUDIT-FLAG: H-CH18-001 Front-matter status block uses wrong shape and 'document existing + framed gaps' voice. Replace with 'Status: driving-spec' per public rules §6.1 and rewrite the descriptive paragraph as a one-sentence chapter claim. -->
 > **Status in reloaded:** the core Tendermint coin (`TendermintCoin`),
 > CW20-style token support (`TendermintToken`), HTLC operations
 > (Iris and Nucleus dialects), IBC transfer wire types
@@ -12,17 +13,20 @@
 > and tracked for Phase 3.
 >
 > **Chapter type:** document existing + framed gaps. No IMPL marker.
+<!-- AUDIT-FLAG-END: H-CH18-001 -->
 
 ---
 
 ## 18.0 Executive Summary
 
+<!-- AUDIT-FLAG: H-CH18-002 Direct admission of upstream carry-forward + diff-against-upstream framing. Rewrite as option-B driving spec: state the design produced by Cosmos SDK + ICS-20 + irismod proto + bech32 inputs; do not narrate provenance. Baseline-absence claim moves to a new Baseline Verifications section with a git ls-tree c1d46c0 -- mm2src/coins/tendermint verification. -->
 The entire Tendermint family is a **post-baseline addition** to the
 reloaded tree — the GPLv2 baseline at commit
 `c1d46c0c1592faa0860f704008b2b2381bc3840f` contained no Tendermint
 or IBC code. Reloaded carries the post-baseline implementation
 forward as-is for HTLC, swap, and IBC wire types; the missing
 activation and RPC surfaces are explicitly enumerated in §18.7.
+<!-- AUDIT-FLAG-END: H-CH18-002 -->
 
 The chapter is structured as:
 
@@ -74,6 +78,7 @@ equivalent) and dispatches without knowing the dialect.
 
 ## 18.2 `TendermintCoin` and `TendermintToken`
 
+<!-- AUDIT-FLAG: M-CH18-004 Section heading and body reference internal Rust type names not on any allow-list. Replace with behaviour-oriented language: "the platform-coin type" and "the CW20-style token type". Where the chapter still needs to name files for the implementer's benefit, move them out of the spec body into the Baseline Verifications section and frame as 'expected source layout'. -->
 Files of interest under
 [`mm2src/coins/tendermint/`](../../mm2src/coins/tendermint/):
 
@@ -97,6 +102,7 @@ Files of interest under
 Note: `tendermint_balance_events.rs` and `tendermint_tx_history_v2.rs`
 are *not yet ported* into reloaded; they live in the upstream
 codebase and are framed under gaps (3) and (4) in §18.7.
+<!-- AUDIT-FLAG-END: M-CH18-004 -->
 
 ### 18.2.1 Configuration
 
@@ -269,12 +275,14 @@ landed alongside ch.16's V2 work). Implementation:
   (`KmdOpReturn` is a UTXO concept; Tendermint has no OP_RETURN).
 - `NoFee` and `Standard` → single `MsgSend`.
 
+<!-- AUDIT-FLAG: M-CH18-007 Meta-project framing ('reloaded's licence-rebase work'). Drop the meta-reference; describe only the technical design choice (Tendermint is V1-only in this chapter's scope; V2 surface is out of the chapter's scope, full stop). -->
 There is no V2 atomic-swap path for Tendermint (today). The V2
 state-machine driver therefore treats Tendermint as a V1-only
 counterparty; the V2 trait impls (`MakerCoinSwapOpsV2`,
 `TakerCoinSwapOpsV2`) are *not* implemented on `TendermintCoin` and
 are explicitly out of scope for this chapter and for reloaded's
 licence-rebase work.
+<!-- AUDIT-FLAG-END: M-CH18-007 -->
 
 ---
 
@@ -297,6 +305,7 @@ beyond constructing the right denom string.
 
 ## 18.7 Known gaps
 
+<!-- AUDIT-FLAG: H-CH18-008 The entire 'Known gaps' section frames missing functionality by reference to upstream existence ('present in the post-baseline upstream codebase but not yet ported'). This is a direct voice violation and a direct admission that the chapter consulted forbidden corpus. Rewrite as a deferred-spec subsection that specifies the four pieces purely from external inputs (Cosmos SDK task patterns, ICS-20 wire surface, SSE infrastructure from ch.10, the tx-history-v2 framework whose own chapter is the authority). Do not refer to upstream presence. -->
 These four sub-features are *present in the post-baseline upstream
 codebase* but not yet ported into the reloaded tree. They are
 called out here so a future chapter author can pick them up
@@ -348,11 +357,15 @@ needs to be brought across.
 
 These four gaps form the natural batch for a Phase-3 Tendermint
 chapter; this chapter does not commission their implementation.
+<!-- AUDIT-FLAG-END: H-CH18-008 -->
 
 ---
 
 ## 18.8 Provenance
 
+<!-- AUDIT-FLAG: H-CH18-010 Bullet 2 directly admits 'post-baseline contributor attribution intact' for files this chapter describes. This is the single highest-severity finding in the chapter set; the Phase-2A artefact gate showed the files in fact carry only this project's authorship, so the prose is also factually wrong. Delete the bullet entirely. -->
+<!-- AUDIT-FLAG: H-CH18-011 Bullet 3 admits the gap list was scoped by 'direct grep ... against the forbidden-corpus reference'. This is an admission of forbidden-corpus consultation during chapter authoring. Delete the bullet entirely; rewrite the gap-list scope to refer to the design intent only. -->
+<!-- AUDIT-FLAG: M-CH18-012 Section uses paragraph 'Provenance' shape instead of the locked bulleted 'Provenance Footer' shape with the mandatory 'Forbidden corpus: not consulted' line. Replace with the canonical footer from CHAPTER_TEMPLATE.md. Move the technical cross-references (Ch 2 baseline-absence, Ch 3/4 compile-fixes, Ch 16 burn-output) into the body or into Baseline Verifications where appropriate. -->
 - The entire Tendermint surface is post-baseline. The baseline at
   `c1d46c0c1592faa0860f704008b2b2381bc3840f` contained no
   `mm2src/coins/tendermint/` directory; see
@@ -371,7 +384,9 @@ chapter; this chapter does not commission their implementation.
   implementation for `DexFee::WithBurn` and informed the UTXO V2
   pre-burn design documented in
   [Chapter 16 §16.5.4](16-swap-v2-pre-burn-output.md#1654-burn-output-construction).
-
+<!-- AUDIT-FLAG-END: M-CH18-012 -->
+<!-- AUDIT-FLAG-END: H-CH18-011 -->
+<!-- AUDIT-FLAG-END: H-CH18-010 -->
 ---
 
 ## 18.9 External references
