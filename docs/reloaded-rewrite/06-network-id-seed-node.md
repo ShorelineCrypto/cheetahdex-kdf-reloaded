@@ -1,366 +1,383 @@
-# Chapter 06 — Network-ID and Seed-Node Decoupling
+# Chapter 06 -- Network-ID and Network-Configuration Registry
 
-## Executive Summary
+**Status:** driving-spec
 
-At the baseline the project's notion of a "network" — that is, of
-a particular peer-to-peer subnetwork separated from all others by
-a numeric tag — was scattered. The numeric tag itself lived as
-`netid` in the JSON configuration consumed by `MmCtx`; one
-specific tag, the literal `7777`, was hard-coded as the magic
-constant `NETID_7777` in the `mm2_libp2p` crate and used to gate
-two unrelated behaviours (the floodsub-compatibility flag and
-seed-node bootstrapping); a list of fifteen production seed-node
-`(PeerId, IPv4)` pairs for that one network was a hard-coded
-slice in `mm2_libp2p::network`; and a parallel list of three DNS
-seed names for the same network lived in `lp_native_dex.rs`. Any
-new netid required edits in three or four files and no
-mechanism existed to refuse unknown netids.
+> **One-sentence claim:** the project's notion of a "network" --
+> a peer-to-peer subnetwork identified by a 16-bit numeric
+> netid -- shall be expressed as a compile-time registry
+> implementing a single public trait that covers every
+> per-network constant (seed nodes, DEX-fee addresses in three
+> flavours, fee rates, burn-share parameters), and the daemon
+> shall refuse to start on any netid the binary cannot describe.
 
-The post-baseline modernisation introduces a dedicated crate,
-`mm2_net_config`, that defines a public `NetConfig` trait and a
-`net_config_for(netid: u16) -> Option<&'static dyn NetConfig>`
-registry. Each network supported by the binary gets its own
-small module implementing the trait at compile time
-(`netid_8762.rs`, `netid_6133.rs`, an optional `test_netids.rs`
-behind a `regtest-netid` Cargo feature). The trait surface covers
-not only seed-node DNS names but every per-network constant that
-used to be hard-coded against `NETID_7777`: the human-readable
-network name, the DEX fee address (in three flavours —
-compressed secp256k1, Z-address, and ed25519 — to support
-Bitcoin-family, Zcash-family, and Sia-style chains), the DEX
-fee rate (as a precise `BigRational`), the fee discount tickers
-and their discounted rate, the minimum fee threshold, and the
-burn-share parameters. The binary refuses to start on an
-unsupported netid.
+## 6.0 Executive Summary
 
-The peer-to-peer crate itself becomes netid-agnostic.
-`spawn_gossipsub` and `start_gossipsub` no longer take a
-`netid` parameter; the `AtomicDexBehaviour` struct no longer
-stores one; the `Floodsub` construction no longer branches on
-the `NETID_7777` literal (it now uses the unconditional
-behaviour that the baseline reserved for non-`7777` networks);
-and the hard-coded seed-node slice is removed from
-`mm2_libp2p::network`. The startup path in `lp_native_dex.rs`
-now consults `net_config_for(ctx.netid()).seed_nodes()` for
-default seed-node resolution instead of a baked-in slice.
+Every peer-to-peer instance of the codebase belongs to exactly
+one **network**, identified by a 16-bit numeric tag (`netid`)
+supplied in the daemon's JSON configuration. Two daemons with
+different netids cannot exchange swap traffic with each other:
+their seed-node sets do not intersect, their DEX-fee addresses
+differ, their fee-rate constants differ, and their burn
+behaviour differs. The netid is the single coarse-grained
+namespace that separates one operational network from another.
 
-The wire side is unaffected. `netid` remains a `u16` field in the
-daemon's JSON configuration; the on-the-wire peer-to-peer
-protocol does not include the netid; the daemon still computes
-all per-coin operations against the chosen netid in the same way.
-What changes is exclusively the *source of truth* for per-network
-parameters: from "hard-coded constants inside the peer-to-peer
-crate" to "a compile-time registry implementing a public trait".
+This chapter defines a binding shape for the source-of-truth
+that backs every per-netid constant in the codebase:
 
-A reader leaving this chapter should be able to (a) reconstruct
-the `mm2_net_config` crate's file layout and trait surface,
-(b) name every kind of per-network constant the trait covers,
-and (c) explain why the new design lets unknown netids be
-rejected at startup without any change to the peer-to-peer
-protocol.
+1. A dedicated workspace crate provides a **network-config
+   trait** and a **compile-time registry** that maps each
+   supported netid to a trait object. The trait covers every
+   per-network constant the codebase needs.
+2. Each supported network is registered by adding a small Rust
+   module that implements the trait against a zero-sized unit
+   struct. Production netids are unconditionally registered;
+   test-only netids are gated behind a single Cargo feature so
+   release builds cannot accidentally accept them.
+3. The peer-to-peer subsystem is **netid-blind**: it accepts a
+   resolved list of relay addresses to dial on startup and does
+   not know which netid produced that list.
+4. The daemon **refuses to start** on any netid the registry
+   does not describe. This is enforced at initialisation, before
+   the peer-to-peer subsystem is brought up.
 
-### Why this changed
+The wire protocol does not encode the netid; the JSON
+configuration shape is unchanged from any prior arrangement
+(`"netid": u16`, `"seednodes": [string]`, `"i_am_seed": bool`).
+What this chapter binds is the *source of truth* for
+per-network constants: a typed, compile-time registry behind a
+single trait, not scattered constants across the codebase.
 
-The per-netid registry crate and the production/test netid split were introduced by the project's own commits `4ac13459f` (*feat(net_config): add feature-gated regtest netid 9000 for docker tests*) and `5ea034dcc` (*feat(net_config): consolidate test netids (8100, 8999, 9000, 9998)*). The first commit gives the operational reason verbatim:
+## 6.1 The Network-Config Trait
 
-> *The docker_tests harness configures spawned MM2 instances with "netid": 9000 (88 occurrences across 7 files), but RELOADED's compile-time netid registry only included 8762 (AtomicDEX) and 6133 (GLEEC). Every test that spawned an MM2 instance panicked at startup with "Unsupported netid 9000: no compiled configuration", masquerading in CI as connection-reset failures. … The production `mm2` binary leaves the feature off and continues to reject netid 9000 at startup.*
+A single workspace crate exposes a public trait,
+**`NetConfig`** (this is the in-tree symbol name and is bound by
+this chapter), with the operations enumerated below. The trait
+is `Send + Sync + 'static` so trait-object handles can be held
+across threads.
 
-The second commit generalises the same fix to additional test netids and consolidates them behind a single `define_test_netid!` macro. Both commits reference the broader legal-mitigation work tracked as LP-3F.C1, which required all DEX-fee-address material to flow through `NetConfig` so it could be cleanly varied per netid without leaking constants across the workspace.
+| Operation                          | Returns                    | Purpose                                          |
+|------------------------------------|----------------------------|--------------------------------------------------|
+| Netid identity                     | `u16`                      | The netid this configuration belongs to          |
+| Human-readable network name        | `&'static str`             | Display / logging                                |
+| **DEX-fee address (secp256k1)**    | `&'static str`             | Hex-encoded compressed-secp256k1 pubkey          |
+| DEX-fee raw pubkey                 | `&'static [u8]`            | The same pubkey as raw bytes                     |
+| **DEX-fee Z-address**              | `&'static str`             | The Zcash-family shielded-address variant        |
+| **DEX-fee ed25519 pubkey**         | `&'static str`             | The ed25519 variant for Sia-style chains         |
+| DEX-fee rate                       | `BigRational`              | Precise fee rate (no floating-point)             |
+| Fee-discount ticker set            | `&'static [&'static str]`  | Tickers that receive the discounted fee rate     |
+| DEX-fee discounted rate            | `BigRational`              | The discounted rate applied to the ticker set    |
+| DEX-fee minimum threshold          | `BigRational`              | Floor below which the fee does not drop          |
+| Burn-share enabled                 | `bool` (default `false`)   | Whether a fraction of the fee is burned          |
+| DEX-fee share                      | `BigRational` (default 1)  | Fraction retained as fee (vs burned)             |
+| Burn address (secp256k1)           | `&'static str` (default "")| Hex-encoded compressed-secp256k1 pubkey          |
+| Burn address raw pubkey            | `&'static [u8]` (default &[])| Burn pubkey as raw bytes                       |
+| Seed-node list                     | `&'static [&'static str]`  | DNS names (preferred) or address strings         |
 
-In clean-room voice: the post-baseline project chose a compile-time netid registry over the baseline's runtime branching on a single hard-coded numeric tag (`NETID_7777`) so that (a) production binaries refuse to start on any netid they cannot describe, (b) per-network constants — including the DEX-fee address and rate — have a single typed home, and (c) test-only networks can be enabled behind a Cargo feature without polluting the production surface.
+Return-type discipline:
 
-## Reproduction Detail
+- Numeric identity returns are plain values.
+- String and byte-slice returns are `&'static`, with the data
+  interned into the binary at compile time. Hex-decoded bytes
+  are produced at compile time via a `const`-decoded helper so
+  there is no runtime parse cost and no possibility of a parse
+  failure at runtime.
+- Rate returns use a big-rational type so DEX-fee math never
+  loses precision.
+- Burn-related methods carry default implementations that
+  produce the "burn-disabled" answer; networks that do not burn
+  do not need to spell those methods out.
 
-### 6.1 The baseline shape of "what a netid means"
+The DEX-fee address is exposed in **three flavours** because the
+codebase serves chains with three distinct address-encoding
+families (Bitcoin-family compressed secp256k1, Zcash-family
+shielded, Sia-style ed25519). A single network has a single
+DEX-fee identity expressed three ways; consumers select the
+flavour appropriate to the chain being charged.
 
-At commit `c1d46c0c1592faa0860f704008b2b2381bc3840f` the netid
-concept is split across four locations:
+## 6.2 The Registry
 
-1. **`mm2src/mm2_core/src/mm_ctx.rs`** — `MmCtx::netid(&self)`
-   reads `self.conf["netid"].as_u64().unwrap_or(0)`, checks the
-   value fits in a `u16`, panicking if not, and returns it. This
-   is the only per-runtime read of the field.
-2. **`mm2src/mm2_libp2p/src/network.rs`** — defines the magic
-   constant `pub const NETID_7777: u16 = 7777` and the hard-coded
-   slice `ALL_NETID_7777_SEEDNODES: &[(&str, &str)]` of fifteen
-   `(PeerId-as-string, IPv4-as-string)` pairs. Its public
-   `get_all_network_seednodes(netid: u16) -> Vec<(PeerId, RelayAddress)>`
-   function returns an empty vector for any netid other than
-   `NETID_7777`.
-3. **`mm2src/mm2_libp2p/src/atomicdex_behaviour.rs`** — the
-   `AtomicDexBehaviour` struct stores `netid: u16` as a field;
-   `spawn_gossipsub` and `start_gossipsub` take `netid: u16` as
-   their first parameter after the force-key option; inside
-   `start_gossipsub` two distinct behaviours branch on the
-   constant:
-   - `Floodsub::new(local_peer_id, netid != NETID_7777)` —
-     enables (or disables, for the well-known network)
-     floodsub-style fan-out subscription;
-   - the seed-bootstrap loop `for (peer_id, addr) in get_all_network_seednodes(netid) { … }`.
-4. **`mm2src/mm2_main/src/lp_native_dex.rs`** — `default_seednodes(netid)`
-   returns three hard-coded DNS names for netid `7777` and an
-   empty vector otherwise; the names are baked into a `const`
-   array in the same file.
+The same crate exposes two registry entry points:
 
-Adding a new netid at the baseline therefore required edits to
-files (2), (3) twice (one for the floodsub branch and one for
-the seed-bootstrap loop), and (4) — without any compile-time
-guarantee that an unknown netid would be caught.
+| Function                           | Return                          | Purpose                                              |
+|------------------------------------|---------------------------------|------------------------------------------------------|
+| **`net_config_for(netid: u16)`**   | `Option<&'static dyn NetConfig>`| Lookup; returns `None` for unknown netids            |
+| **`net_config_or_panic(netid)`**   | `&'static dyn NetConfig`        | Lookup; panics with a descriptive message on failure |
 
-### 6.2 The post-baseline `mm2_net_config` crate
+Both names are the in-tree symbol names and are bound by this
+chapter.
 
-The post-baseline modernisation introduces a new workspace
-member, `mm2src/mm2_net_config/`, with the following file
-layout:
+The lookup is implemented as a single `match` over the netid
+value, with one arm per registered network returning a static
+reference to a unit-struct trait object. The returned trait
+object is a fat pointer to a zero-sized unit struct living in
+`'static` storage; there is no heap allocation, no
+synchronisation cost, no shutdown ordering issue. The cost of
+looking up a network's parameters at runtime is one match arm
+and one indirect call.
 
-```
-mm2src/mm2_net_config/
-├── Cargo.toml
-└── src/
-    ├── lib.rs           # NetConfig trait, net_config_for registry, helpers
-    ├── netid_8762.rs    # Unit struct + NetConfig impl for the main network
-    ├── netid_6133.rs    # Unit struct + NetConfig impl for an alternate network
-    └── test_netids.rs   # Feature-gated registrations for regtest IDs
-```
+The descriptive panic emitted by the second entry point shall
+list every netid the binary was compiled to support, so that an
+operator who supplies an unsupported netid is informed which
+netids would be accepted.
 
-The crate's stated purpose, paraphrased from its module
-documentation, is: each registered netid gets a Rust module that
-implements `NetConfig`, encoding all peer-to-peer network
-parameters at compile time, and the binary rejects unknown
-netids at startup. The published Cargo feature `regtest-netid`
-gates the additional test-only netids so they are excluded from
-release builds.
+## 6.3 Compile-Time Registration of a Network
 
-### 6.3 The `NetConfig` trait
+Each supported network is registered by a small Rust module
+inside the crate. The module convention is:
 
-`mm2_net_config::NetConfig` is the chapter's central public
-surface. It is defined in `lib.rs` as:
+| Element                       | Shape                                                  |
+|-------------------------------|--------------------------------------------------------|
+| File name                     | `netid_NNNN.rs` where `NNNN` is the netid              |
+| Public type                   | One unit struct, `pub struct NetidNNNN;`               |
+| Implementation                | One `impl NetConfig for NetidNNNN { ... }` block       |
+| Constants                     | All per-network values appear in this one impl block   |
+| Crate registration            | One match arm in `net_config_for` returning `&NetidNNNN`|
 
-```rust
-pub trait NetConfig: Send + Sync + 'static {
-    fn netid(&self) -> u16;
-    fn network_name(&self) -> &'static str;
+The unit-struct + per-module convention is binding: it keeps
+each network's constants in exactly one file, ensures there is
+exactly one statically-known instance per network, and lets the
+registry's match arm return a `&'static dyn NetConfig` without
+any allocation.
 
-    // DEX fee address (three flavours).
-    fn dex_fee_addr_pubkey(&self) -> &'static str;
-    fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8];
-    fn dex_fee_z_addr(&self) -> &'static str;
-    fn dex_fee_pubkey_ed25519(&self) -> &'static str;
+Adding a new network is therefore three changes in one crate:
+the new file, the new use, the new match arm. No file outside
+this crate needs to change.
 
-    // Fee rates.
-    fn dex_fee_rate(&self) -> BigRational;
-    fn fee_discount_tickers(&self) -> &'static [&'static str];
-    fn dex_fee_rate_discounted(&self) -> BigRational;
-    fn dex_fee_min_threshold(&self) -> BigRational;
+## 6.4 Production and Test Netid Separation
 
-    // Burn (post-baseline addition — covered in chapters 08 and 16).
-    fn burn_enabled(&self) -> bool { false }
-    fn dex_fee_share(&self) -> BigRational { BigRational::from_integer(1.into()) }
-    fn burn_addr_pubkey(&self) -> &'static str { "" }
-    fn burn_addr_raw_pubkey(&self) -> &'static [u8] { &[] }
+The codebase distinguishes **production** netids from
+**test-only** netids:
 
-    // Seed nodes.
-    fn seed_nodes(&self) -> &'static [&'static str];
-}
-```
+- Production netids are registered unconditionally; they are
+  always present in any build of the daemon.
+- Test-only netids are registered behind a single Cargo
+  feature, **`regtest-netid`** (this is the in-tree feature
+  name and is bound by this chapter). The release build of the
+  daemon does not enable this feature.
 
-The trait collects every per-network constant that the baseline
-held in scattered hard-coded form. Its return-type discipline is:
+This separation is binding: it is not acceptable to register a
+test netid unconditionally, and it is not acceptable to gate a
+production netid behind a feature flag. The intent is that the
+release binary cannot be tricked into accepting a test-only
+netid through a configuration alone; the cost of doing so is a
+rebuild with a non-release feature enabled.
 
-- Numeric identity returns are plain values (`u16`).
-- String returns are `&'static str` (the data is interned into
-  the binary at compile time).
-- Byte-slice returns are `&'static [u8]` (raw pubkey bytes
-  decoded from the hex string at the same compile time).
-- Rate returns are `num_rational::BigRational` so the fee math
-  never loses precision.
-- The burn-related methods have default implementations that
-  produce the "burn-disabled" answer, so a network that does not
-  burn does not need to spell those out.
+The test netids are collected in a single Rust module that
+exists only when the feature is enabled; the production netids
+each have their own module. A single macro inside the test-
+netid module produces one unit struct, one impl block, and one
+constructor call per test netid, keeping the test-netid set
+short and uniform.
 
-### 6.4 The registry and the startup guard
+## 6.5 Peer-to-Peer Netid-Blindness
 
-`lib.rs` exposes two registry functions:
+The peer-to-peer subsystem (covered in detail in
+[Chapter 11](11-libp2p-p2p-layer.md)) is **netid-blind**:
 
-```rust
-pub fn net_config_for(netid: u16) -> Option<&'static dyn NetConfig> { … }
-pub fn net_config_or_panic(netid: u16) -> &'static dyn NetConfig { … }
-```
+R1. The peer-to-peer subsystem shall not accept a netid
+    parameter on any of its public entry points.
+R2. The peer-to-peer subsystem shall not store a netid in any
+    of its state structures.
+R3. The peer-to-peer subsystem shall not contain any per-netid
+    branch on a numeric netid value.
+R4. The peer-to-peer subsystem shall not carry an in-source
+    list of seed-node addresses for any specific netid.
+R5. The peer-to-peer subsystem shall accept its bootstrap
+    seed-node list as a parameter at startup; the caller is
+    responsible for having resolved that list through the
+    network-config registry.
 
-`net_config_for` performs a `match netid { 8762 => …, 6133 => …, … _ => None }`.
-The two baseline-style production netids — `8762` and `6133` —
-are always present; the four regtest netids — `8100`, `8999`,
-`9000`, `9998` — are gated behind `#[cfg(feature = "regtest-netid")]`.
-The numbers themselves are on-the-wire values that any node on
-the network must already recognise, and are exposed by the public
-`net_config_for` registry; they are part of the
-public-protocol surface of the crate.
+R1-R5 together mean the peer-to-peer subsystem can be compiled
+and tested without knowing any netid at all. The "what network
+am I on" question is answered exclusively by the caller's
+selection of which network-config trait object to consult.
 
-`net_config_or_panic` is the daemon-startup convenience: it
-returns the trait object or panics with a descriptive message
-listing every supported netid. The "deny except config exists"
-policy is implemented by the daemon calling this function from
-its initialisation path; on an unrecognised netid the daemon
-refuses to start.
+The pub/sub fan-out behaviour at the peer-to-peer layer is
+**not netid-conditional**: the codebase shall use the
+unconditional more-permissive variant of the fan-out behaviour
+across all networks. There is no per-network branch on whether
+the well-known fan-out variant applies.
 
-The trait object is `&'static dyn NetConfig` — a fat pointer to
-a zero-sized unit struct living in static storage. There is no
-heap allocation, no synchronisation cost, no shutdown ordering
-issue. The cost of looking up a network's parameters at runtime
-is one match arm and one indirect call.
+## 6.6 Daemon Startup Guard
 
-### 6.5 What `mm2_libp2p` loses
+The daemon initialisation path shall, **before** bringing up the
+peer-to-peer subsystem:
 
-The post-baseline peer-to-peer crate (renamed `mm2_p2p` — the
-broader rename is treated in a later chapter) drops every netid-
-shaped artefact:
+S1. Read `netid` from the daemon's JSON configuration, treating
+    a missing value as `0`.
+S2. Call the registry's `net_config_or_panic(netid)` entry
+    point. This either returns a trait object or terminates the
+    daemon with the descriptive message of §6.2.
+S3. Use the returned trait object as the source of truth for
+    every per-network constant the daemon needs at startup,
+    including the seed-node list it will pass into the
+    peer-to-peer subsystem.
 
-- `NETID_7777` and `ALL_NETID_7777_SEEDNODES` are gone from
-  `src/network.rs`. The file ceases to be a per-network seed-node
-  registry.
-- `get_all_network_seednodes(netid)` is removed. The seed-bootstrap
-  loop inside `start_gossipsub` is removed with it.
-- `spawn_gossipsub` and `start_gossipsub` lose their `netid: u16`
-  first parameter; the function's other parameters
-  (`force_key`, `spawn_fn`, `to_dial`, `node_type`, `on_poll`)
-  retain their baseline meaning and order.
-- The `AtomicDexBehaviour` struct loses its `netid` field.
-- The floodsub construction inside `start_gossipsub`, which at
-  the baseline read
-  `Floodsub::new(local_peer_id, netid != NETID_7777)`, becomes
-  `Floodsub::new(local_peer_id, true)` — the baseline's
-  non-`7777` branch wins unconditionally.
-- The `to_dial: Vec<RelayAddress>` parameter now carries the
-  seed-node list that the caller has resolved through
-  `mm2_net_config`.
+The seed-node-resolution helper called by the daemon shall:
 
-After these removals the peer-to-peer crate has no notion of
-"network identity" at all. It accepts a list of relay addresses
-to dial on startup and a node-type descriptor; it does not care
-where those came from or which network number they belong to.
+S4. Prefer an operator-supplied `seednodes` list in the JSON
+    configuration if present.
+S5. Otherwise fall back to the registry's seed-node list for
+    the active netid.
+S6. Map each registry-supplied seed-node string to the
+    appropriate address variant for the build target: a DNS
+    variant on the browser target (where DNS resolution is
+    delegated to the host environment) and a resolved-IPv4
+    variant on native targets (where the daemon resolves DNS
+    itself).
 
-### 6.6 The new startup path in `lp_native_dex.rs`
+Because S2 has already rejected unknown netids by the time
+seed-node resolution runs, the fallback in S5 never has to
+handle a missing registry entry.
 
-`init_p2p` in `mm2_main/src/lp_native_dex.rs` is shortened to:
+## 6.7 Wire and Configuration Invariants
 
-```rust
-async fn init_p2p(ctx: MmArc) -> P2PResult<()> {
-    let i_am_seed = ctx.conf["i_am_seed"].as_bool().unwrap_or(false);
-    let seednodes = seednodes(&ctx)?;
-    // …force_p2p_key, node_type, metrics callback…
-    let spawn_result = spawn_gossipsub(
-        force_p2p_key, spawn_boxed,
-        seednodes, node_type, move |swarm| { /* metrics */ },
-    ).await;
-    // …
-}
-```
+The following must remain true regardless of how the registry
+is extended:
 
-The supporting `seednodes(ctx)` helper consults `ctx.conf["seednodes"]`
-first (allowing an operator-supplied list to win); otherwise it
-falls back to `default_seednodes(ctx.netid())`, which in turn
-consults `mm2_net_config::net_config_for(netid)?.seed_nodes()`
-and produces either a list of `RelayAddress::Dns` values
-(under WASM, where DNS resolution is delegated to the browser)
-or a list of `RelayAddress::IPv4` values resolved through
-`addr_to_ipv4_string` (under native targets). Both branches
-return an empty list if `net_config_for(netid)` returns `None`,
-but in practice this cannot happen: startup validation has
-already rejected unknown netids by the time `seednodes` runs.
+I1. The daemon's JSON configuration shape is unchanged: the
+    `netid`, `seednodes`, and `i_am_seed` fields retain their
+    types and meanings.
+I2. The peer-to-peer wire protocol does not encode the netid.
+    Two daemons with different netids end up on disjoint
+    gossipsub meshes because their seed-node sets do not
+    intersect, not because the protocol carries a netid byte.
+I3. The DEX-fee identity for a given netid is a single value
+    expressed three ways (one per address-encoding family); the
+    three representations correspond to the same key material.
+I4. The DEX-fee rate is exact (`BigRational`), not
+    floating-point. No part of the codebase shall convert it to
+    `f64` for fee math.
+I5. The burn-share parameters are optional: a network that does
+    not burn omits the corresponding overrides and inherits the
+    defaults of §6.1.
 
-### 6.7 Why this is a decoupling, not a removal
+## 6.8 Binding Requirements
 
-The change is best read as "extract a per-network registry,
-delete the scattered hard-coded copies, and make the peer-to-
-peer crate netid-blind". No on-the-wire behaviour is altered:
+R1. **Single trait.** All per-network constants flow through
+    the one trait of §6.1. No per-network constant shall live
+    outside that trait.
 
-- The JSON configuration shape (`"netid": u16`,
-  `"seednodes": [string]`, `"i_am_seed": bool`) is unchanged.
-- The peer-to-peer protocol does not encode the netid — peers
-  on different netids would in any case be unable to participate
-  in the same gossipsub mesh because their seed-node sets do
-  not intersect.
-- The seed-node DNS names registered for production networks
-  match the names that were operational at baseline time; the
-  baseline's `defimania.live` placeholder names were specific
-  to the netid `7777` network and have no counterpart in the
-  post-baseline registry, which covers different networks.
-- The floodsub behaviour switch was preserved in its
-  more-permissive form; this is observable to peers only
-  insofar as a daemon on the post-baseline binary will
-  fan-out floodsub subscriptions where a baseline daemon on
-  the old `NETID_7777` network would not have.
+R2. **Closed registry.** The lookup function of §6.2 is the
+    single point at which a netid is mapped to its
+    configuration. No code outside the network-config crate
+    shall match on a numeric netid value.
 
-### 6.8 Reproducing the modernisation from the baseline
+R3. **Compile-time storage.** Each network's data is stored as
+    `&'static`-backed constants on a unit struct. No allocation
+    and no synchronisation participates in the lookup path.
 
-A reader can reproduce the modernisation step by step:
+R4. **Refuse-unknown.** The daemon shall call the panicking
+    registry entry point during initialisation, before bringing
+    up the peer-to-peer subsystem. Operating on an unrecognised
+    netid is a fatal startup error.
 
-1. Add a new workspace member `mm2src/mm2_net_config/` to the
-   top-level `Cargo.toml`. Its `Cargo.toml` declares
-   `num-rational` as its only non-trivial dependency and exposes
-   a single Cargo feature, `regtest-netid`, that gates the test
-   netid registrations.
-2. Create `mm2src/mm2_net_config/src/lib.rs` containing the
-   `NetConfig` trait as in §6.3 and the `net_config_for` /
-   `net_config_or_panic` registry as in §6.4.
-3. For every netid the binary is supposed to support, create a
-   `src/netid_XXXX.rs` module containing one unit struct
-   (`pub struct NetidXXXX;`) and one `impl NetConfig for NetidXXXX`
-   block that hard-codes the per-network constants. Register the
-   struct inside the `match` in `net_config_for`.
-4. Gate any test-only netids behind `#[cfg(feature = "regtest-netid")]`
-   and collect them in a `src/test_netids.rs` module.
-5. In `mm2src/mm2_main/src/lp_native_dex.rs`, replace the body
-   of `default_seednodes(netid)` with a call to
-   `net_config_for(netid)?.seed_nodes()`, mapping each DNS
-   string to a `RelayAddress::Dns` (WASM) or to a
-   `RelayAddress::IPv4` resolved through `addr_to_ipv4_string`
-   (native).
-6. Remove the now-dead `NETID_7777_SEEDNODES` constant from
-   `lp_native_dex.rs`.
-7. In `mm2src/mm2_libp2p/src/network.rs`, delete the
-   `NETID_7777` constant, the `ALL_NETID_7777_SEEDNODES` slice,
-   and the `get_all_network_seednodes` function. The file
-   reduces to declarations of `RelayAddress` helpers (or, after
-   the broader rename, vanishes when its contents move into
-   neighbouring modules).
-8. In `mm2src/mm2_libp2p/src/atomicdex_behaviour.rs`:
-   - Remove the `netid: u16` field from `AtomicDexBehaviour`.
-   - Drop the `netid: u16` parameter from `spawn_gossipsub` and
-     `start_gossipsub`.
-   - Replace the `Floodsub::new(local_peer_id, netid != NETID_7777)`
-     call with `Floodsub::new(local_peer_id, true)`.
-   - Delete the `for (peer_id, addr) in get_all_network_seednodes(netid) { … }`
-     loop. (The remaining code already uses the caller-supplied
-     `to_dial` list for bootstrap, so the loop's effect is
-     subsumed.)
-9. Update every caller of `spawn_gossipsub` — in `lp_native_dex.rs`
-   and in the peer-to-peer crate's own tests — to drop the
-   `netid` argument.
-10. Wire the startup-time `net_config_or_panic(ctx.netid())` call
-    into the daemon's initialisation, before the peer-to-peer
-    subsystem is brought up, so that unknown netids cause a clean
-    panic with a list of supported netids.
+R5. **Production / test separation.** Production netids are
+    unconditional; test netids are gated behind the
+    `regtest-netid` Cargo feature. The release build does not
+    enable that feature.
 
-After steps 1–10, every per-network constant flows from
-`mm2_net_config`, the peer-to-peer crate has no netid, and the
-binary refuses to start on an unrecognised netid.
+R6. **Netid-blindness of the peer-to-peer subsystem.** R1-R5
+    of §6.5 are binding; the peer-to-peer subsystem does not
+    receive, store, or branch on a netid.
 
-## External References
+R7. **Wire/config invariants.** I1-I5 of §6.7 are binding.
 
-- *libp2p — Gossipsub specification v1.1.*
-  https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md
-- *libp2p — Floodsub specification.*
-  https://github.com/libp2p/specs/tree/master/pubsub
-- *crates.io — `num-rational`.* https://crates.io/crates/num-rational
-- *The Cargo Book — Features.*
-  https://doc.rust-lang.org/cargo/reference/features.html
-- *The Rust Reference — Conditional compilation (`cfg`).*
-  https://doc.rust-lang.org/reference/conditional-compilation.html
+R8. **Three-flavour DEX-fee identity.** Every registered
+    network exposes the DEX-fee identity in all three flavours
+    of §6.1, even if some flavour is currently unused by any
+    consumer; this keeps the trait object total and avoids
+    later widening that would force every existing
+    registration to be edited.
 
-## Provenance Footer
+## 6.9 Deferred and Out-of-Scope Items
 
-*This chapter v1; verified directly against the baseline tree at
-commit `c1d46c0c1592faa0860f704008b2b2381bc3840f` and the current
-tree on 2026-05-31. Reviewer #1 and reviewer #2 reports stored at
-`local/clean-room-doc/reviews/06-network-id-seed-node-r{1,2}.md`.*
+D1. **DEX-fee semantics** beyond identity (when the fee is
+    charged, who charges it, who receives it, how the burn
+    share is computed and emitted) are covered in
+    [Chapter 16](16-dex-fee.md). This chapter binds only the
+    *source of truth* for the fee identity and rate constants,
+    not their interpretation.
+
+D2. **Per-coin activation** is covered in
+    [Chapter 09](09-coin-activation.md). The activation layer
+    consults the network-config registry to resolve the
+    DEX-fee identity for the chain it is activating.
+
+D3. **Burn-emission integration** is covered in
+    [Chapter 08](08-mm-ctx-and-state-layering.md) (how the
+    daemon-wide context exposes the network-config handle) and
+    [Chapter 16](16-dex-fee.md) (how the burn share is split
+    out and emitted on-chain).
+
+D4. **Macro consolidation** for the test-netid module is an
+    implementation choice; the binding rule is that all test
+    netids live in a single feature-gated module of §6.4, not
+    that they are produced by any specific macro shape.
+
+## 6.10 External References
+
+- The libp2p gossipsub specification (the fan-out semantics
+  the codebase relies on across all networks).
+- The libp2p floodsub specification (the more-permissive
+  fan-out variant of §6.5 used unconditionally).
+- The `num-rational` crate (the big-rational type backing the
+  precise fee-rate returns of §6.1).
+- The Cargo features model (the mechanism backing the
+  production / test netid separation of §6.4).
+- The Rust conditional-compilation reference (the `cfg`
+  attribute used to feature-gate the test-netid module).
+
+## 6.11 Baseline Verifications
+
+The following are verifiable from the baseline state defined in
+[Chapter 02](02-baseline-state.md), commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f`:
+
+V1. The baseline tree contains no `mm2_net_config` workspace
+    member. A directory listing of the baseline tree
+    (`git ls-tree c1d46c0c1592faa0860f704008b2b2381bc3840f`)
+    contains no `mm2_net_config` entry; a tree-wide
+    `git grep -l 'NetConfig\|net_config_for'` against the
+    baseline returns no matches.
+
+V2. At baseline, the per-network constant set the trait of
+    §6.1 collects is scattered across multiple files:
+    seed-node lists, fee-address constants, and the magic
+    fan-out gate live in different places. The driving rule
+    R1 of §6.8 (single trait) is therefore a strengthening of
+    the baseline shape, not a restatement of it.
+
+V3. At baseline, the peer-to-peer subsystem accepts a `netid`
+    parameter on its public entry points and stores it in its
+    behaviour struct. R1-R5 of §6.5 (netid-blindness) are
+    therefore a strengthening of the baseline shape and
+    require coordinated change in both the peer-to-peer
+    subsystem and its callers.
+
+V4. At baseline, the daemon does not refuse to start on an
+    unrecognised netid: a daemon configured with an unknown
+    netid will boot with empty seed-node lists. R4 of §6.8
+    (refuse-unknown) is therefore a strengthening of the
+    baseline shape.
+
+V5. The 16-bit width of `netid` is preserved from the
+    baseline. The `netid` field in the JSON configuration is
+    a `u16` at baseline and remains a `u16` under the rules
+    of this chapter.
+
+## 6.12 Provenance Footer
+
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of the
+  network-config crate at baseline verified via
+  `git ls-tree c1d46c0c1592faa0860f704008b2b2381bc3840f`
+  and tree-wide `git grep` for the trait and registry symbol
+  names against the baseline; the libp2p gossipsub
+  specification; the libp2p floodsub specification; the
+  `num-rational` crate (rate-arithmetic substrate); the
+  Cargo features model; the Rust conditional-compilation
+  reference.
+- *Forbidden corpus:* not consulted.
