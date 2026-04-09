@@ -1,257 +1,248 @@
-# Chapter 11 — Order-Match Cancellation Race Mitigation
+# Chapter 11 -- Order-Match Cancellation Race Mitigation
 
-## Executive Summary
+**Status:** driving-spec
 
-The baseline orderbook treats every inbound P2P maker-order message as
-authoritative: a `MakerOrderCreated` always inserts/refreshes the order, a
-`MakerOrderCancelled` always removes it. Because the gossipsub mesh delivers
-messages without ordering guarantees, two scenarios can race in a way the
-baseline cannot recover from:
+> **One-sentence claim:** the codebase shall maintain a
+> short-lived per-orderbook cache of recently-cancelled
+> maker-order identifiers (keyed by cancelling publisher),
+> consulted on the insert path so that out-of-order
+> peer-to-peer delivery of a `create-then-cancel-then-create`
+> sequence cannot resurrect an order the publisher has
+> explicitly cancelled.
 
-1. A peer cancels an order and immediately republishes (e.g. price update). A
-   third-party node may receive **(a) old create → (b) cancel → (c) new
-   create** or **(a) cancel → (b) old create that was queued for retransmit**.
-2. A network partition heals after a cancellation, replaying buffered create
-   messages from peers that did not learn of the cancellation in time.
+## 11.0 Executive Summary
 
-In both cases the baseline orderbook re-creates a maker order that the owner
-has explicitly removed, where it lingers until its keep-alive timer expires
-(tens of seconds during which a taker can match against an order the maker
-will refuse to honour).
+The codebase's orderbook treats inbound peer-to-peer maker-
+order messages as authoritative: a create message inserts or
+refreshes; a cancel message removes. Because the underlying
+publish-subscribe mesh delivers messages without ordering
+guarantees, two scenarios race in a way a strictly-stateful
+orderbook cannot recover from:
 
-**Why this changed.** The project's own commit log (`P4.1 recently_cancelled
-race fix`) records the explicit motivation: *"Add `recently_cancelled`
-TimeCache to Orderbook to prevent re-creation of cancelled orders from
-out-of-order P2P messages."* This is the post-baseline change documented
-here.
+1. A publisher cancels an order and immediately republishes
+   (for example, a price update). A third-party node may
+   receive `(old create) → cancel → (new create)` or
+   `cancel → (stale create that was queued for retransmit)`.
+2. A network partition heals after a cancellation; buffered
+   create messages from peers that did not learn of the
+   cancellation in time replay onto recovering peers.
 
-The post-baseline tree adds a short-lived (120-second) per-orderbook cache
-of recently-cancelled UUIDs, keyed by the cancelling pubkey. The
-order-insert path consults the cache and silently drops any create message
-that re-uses a UUID this node observed being cancelled by the same pubkey.
-Different pubkeys are unaffected, so the mechanism does not interfere with
-UUID re-use by other peers (which is already collision-free by construction
-— UUIDs are v4 random).
+In both cases a strictly-stateful orderbook would re-create
+a maker order that the publisher has explicitly removed,
+where it would linger until its keep-alive timer expires --
+seconds-to-tens-of-seconds during which a taker could match
+against an order the maker would refuse to honour.
 
-## Reproduction Detail
+This chapter binds the mitigation: a per-orderbook short-
+lived cache of (recently-cancelled identifier → cancelling
+publisher) entries, consulted at insert time and used to
+drop publisher-self-resurrection inserts silently.
 
-### 11.1 Baseline shape
+## 11.1 Subsystem Shape
 
-At commit `c1d46c0…`, `mm2_main/src/lp_ordermatch.rs::Orderbook` derives
-`Default` and holds only the live-state collections (`ordered`, `unordered`,
-`order_set`, `pubkeys_state`, `memory_db`, `topics_subscribed_to`,
-`pairs_existing_for_*`). `delete_order` simply removes from `order_set` and
-the indices; `insert_or_update_order_update_trie` performs no cancellation
-check.
+The mitigation has three behavioural surfaces, each bound
+by this chapter:
 
-### 11.2 Why the change
+| Surface                  | Effect                                        |
+|--------------------------|-----------------------------------------------|
+| Recently-cancelled cache | Time-bounded map (identifier → publisher)     |
+| Cancellation recording   | Cache write on every cancellation             |
+| Insert-time guard        | Cache lookup on every insert; drop on match   |
 
-From the project's own `P4.1` commit message:
+The cache lives on the orderbook value, not on a global; one
+instance per orderbook so per-network-id orderbooks do not
+share state.
 
-> *"Add `recently_cancelled` TimeCache to Orderbook to prevent re-creation
-> of cancelled orders from out-of-order P2P messages."*
+## 11.2 Recently-Cancelled Cache
 
-The change targets a specific gossipsub-mesh failure mode (out-of-order
-delivery of create/cancel pairs for the same UUID by the same pubkey). It is
-not a redesign of the orderbook; it is a single sentinel collection plus two
-small call-site additions, sized to cover the realistic worst-case mesh
-delivery skew without permanently blocking legitimate UUID re-use.
+R1. **Time-bounded.** The cache shall be a time-keyed
+    structure that returns absent for entries whose age
+    exceeds a fixed time-to-live. The chapter binds the
+    time-to-live as **120 seconds**. The rationale is
+    coverage of realistic worst-case mesh delivery skew
+    without permanently blocking legitimate later
+    re-use of the same identifier by the same publisher.
 
-### 11.3 New data on `Orderbook`
+R2. **Key is the maker-order identifier.** The cache key is
+    the identifier the wire protocol uses to refer to a
+    maker order (the version-4 random universally-unique
+    identifier the publisher generates and gossips).
 
-A single new field is added to the `Orderbook` struct, together with one new
-module-level constant:
+R3. **Value is the cancelling publisher's identity.** The
+    cache value is the same publisher identity the wire
+    protocol uses on create and cancel messages (the
+    publisher's persistent peer-identity string).
 
-```rust
-/// How long to remember a cancelled order UUID to guard against
-/// out-of-order P2P messages.
-const RECENTLY_CANCELLED_TIMEOUT: Duration = Duration::from_secs(120);
+R4. **Per-orderbook isolation.** Each orderbook instance
+    carries its own cache. Per-network-id orderbooks do not
+    share recently-cancelled state.
 
-struct Orderbook {
-    /* …existing fields unchanged… */
+## 11.3 Cancellation Recording
 
-    /// Recently cancelled order UUIDs mapped to the cancelling pubkey.
-    /// Guards against re-creation when a P2P cancel arrives before a
-    /// late-delivered create message.
-    recently_cancelled: TimeCache<Uuid, String>,
-}
-```
+R5. **Unconditional record.** The cancellation handler shall
+    insert into the cache **before** performing any local
+    state removal. The record shall be written regardless
+    of whether the local node had previously seen the
+    order: a node that learns of the cancellation
+    before the create still records the identifier and
+    therefore still suppresses a late-delivered create.
 
-`TimeCache<K, V>` is the project's existing `common::time_cache::TimeCache`
-(introduced in the baseline tree; reused here unchanged). It is a TTL-keyed
-map that returns `None` for entries whose insertion time exceeds the
-configured timeout.
+R6. **Single-publisher attribution.** The cancellation
+    record carries the cancelling publisher's identity per
+    R3; this is what scopes the insert-time guard (R8) to
+    publisher-self-resurrection only.
 
-Because `Orderbook` now has a non-`Default` constructible field (the
-`TimeCache` needs the timeout), the previously-derived `Default` is replaced
-by a hand-written `impl Default for Orderbook` that initialises every
-existing field exactly as before plus:
+R7. **Insertion under the same lock as removal.** The
+    record-then-remove pair shall execute under the same
+    orderbook lock that the removal already holds, so a
+    concurrent insert cannot interleave between the record
+    and the removal.
 
-```rust
-recently_cancelled: TimeCache::new(RECENTLY_CANCELLED_TIMEOUT),
-```
+## 11.4 Insert-Time Guard
 
-### 11.4 Cancellation recording
+R8. **Drop on identifier-and-publisher match.** On every
+    maker-order insert, the handler shall consult the
+    recently-cancelled cache. If the cache contains the
+    inserted identifier **and** the cached publisher
+    matches the inserted publisher, the handler shall
+    return without modifying the orderbook.
 
-`delete_order(ctx, pubkey, uuid)` records the cancellation **before**
-performing any removal, so the record is present even on early-return paths
-where the order is not actually present in the local order set:
+R9. **Publisher-scoped, not identifier-only.** A cache hit
+    with a **different** publisher than the inserted one
+    shall not suppress the insert. The mitigation
+    explicitly targets self-resurrection only; identifier
+    collisions across publishers are governed by the
+    pre-existing collision-handling behaviour of the
+    orderbook (and are negligible under version-4 random
+    identifiers).
 
-```rust
-fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
-    let ordermatch_ctx = OrdermatchContext::from_ctx(ctx)
-        .expect("from_ctx failed");
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
+R10. **Time-out lets legitimate reuse through.** A cache
+     miss because the entry's age exceeds the time-to-live
+     (R1) shall proceed normally. The 120-second window is
+     long enough to cover mesh skew and short enough that
+     a publisher who legitimately wishes to re-use the
+     same identifier later is not blocked indefinitely.
 
-    // Record this UUID so that a late-arriving create message
-    // won't resurrect the order.
-    orderbook
-        .recently_cancelled
-        .insert(uuid, pubkey.to_string());
+R11. **Drop shall be logged at warn level.** A suppressed
+     insert shall emit a single warn-level log entry
+     identifying the dropped identifier; this is the only
+     externally-observable signal of the guard firing.
 
-    if let Some(order) = orderbook.order_set.get(&uuid) {
-        if order.pubkey == pubkey {
-            orderbook.remove_order_trie_update(uuid);
-        }
-    }
-}
-```
+R12. **No effect on the publisher's own orderbook.** The
+     guard runs on the receiving side of the publish-
+     subscribe mesh; a publisher's local outgoing
+     orderbook is unaffected by R8.
 
-Two invariants matter:
+## 11.5 Default Construction
 
-- The cache key is the `Uuid`; the value is the `pubkey` (as `String`) that
-  originated the cancellation. Storing the pubkey lets the insert-guard
-  distinguish "this UUID was cancelled by *this* publisher" from "this UUID
-  was cancelled by some other publisher" — only the former is suppressed.
-- The insert happens unconditionally. Even if the local node had never seen
-  the order, recording the cancellation prevents a subsequent
-  late-delivered create from resurrecting it.
+R13. **Explicit default constructor.** The orderbook value's
+     default constructor shall initialise the recently-
+     cancelled cache with the time-to-live of R1 and shall
+     otherwise initialise every pre-existing field to its
+     own default. The codebase shall not use any default-
+     derivation mechanism that would silently skip the
+     cache field; the cache must be present and live in
+     every orderbook instance.
 
-### 11.5 Insert-time guard
+## 11.6 Tests
 
-`insert_or_update_order_update_trie(order)` adds a single early-return at
-the top of the function:
+The mitigation shall be covered by two unit tests:
 
-```rust
-fn insert_or_update_order_update_trie(&mut self, order: OrderbookItem) {
-    // Ignore orders that were recently cancelled by their own pubkey.
-    if self.recently_cancelled.get(&order.uuid) == Some(&order.pubkey) {
-        log::warn!(
-            "Order {} was recently cancelled, ignoring insert",
-            order.uuid,
-        );
-        return;
-    }
+T1. **Self-resurrection is dropped.** Insert an order;
+    cancel it; attempt to re-insert an order with the same
+    identifier and the same publisher; assert the order is
+    not present in the orderbook afterwards.
 
-    /* …existing validation and trie-update logic unchanged… */
-}
-```
+T2. **Cross-publisher resurrection is not dropped.** Insert
+    an order; cancel it; attempt to re-insert an order
+    with the same identifier and a **different** publisher;
+    assert the order **is** present in the orderbook
+    afterwards.
 
-The match condition is strict equality of both UUID and pubkey:
+The test pair shall live in the orderbook's own test module
+and shall not require fixtures beyond the in-process
+orderbook setup used elsewhere in that module.
 
-- Same UUID, **same** pubkey, within 120 s of a cancellation → drop, log at
-  warn level.
-- Same UUID, **different** pubkey → proceed normally (UUID collision across
-  publishers is treated as it would be without the guard — under v4 UUIDs
-  the probability of collision is negligible, and the original publisher's
-  cancellation is not authoritative over another publisher's create).
-- Same UUID, same pubkey, more than 120 s after the cancellation → cache
-  miss → proceed normally (allows legitimate UUID re-use after the mesh has
-  certainly converged).
+## 11.7 Runtime Invariants
 
-### 11.6 The `TimeCache` contract
+| Invariant                                              | Bound by  |
+|--------------------------------------------------------|-----------|
+| Time-to-live is exactly 120 seconds                    | R1        |
+| Cancellation is recorded before local removal          | R5, R7    |
+| Guard fires only on identifier-and-publisher match     | R8, R9    |
+| Cross-publisher identifier collisions behave unchanged | R9        |
+| Default constructor produces a live cache              | R13       |
 
-`common::time_cache::TimeCache<K, V>` is consumed in this chapter via a tiny
-surface:
+## 11.8 Deferred Work
 
-| Method | Use here |
-| --- | --- |
-| `TimeCache::new(timeout: Duration) -> Self` | Construct with a fixed per-entry TTL. |
-| `insert(key: K, value: V)` | Record a cancellation; resets TTL on repeat. |
-| `get(key: &K) -> Option<&V>` | Read; returns `None` if the entry's age exceeds the constructor TTL. |
+D1. **Persistent recently-cancelled cache.** The cache is
+    in-memory and per-process. A daemon restart loses the
+    recently-cancelled record; a late-delivered create
+    received after restart can therefore resurrect an
+    order cancelled shortly before restart. Persisting the
+    cache to durable storage with a matching time-to-live
+    would close this gap; it is not in scope at the time
+    of writing.
 
-No other operations are required for the cancellation-race mitigation.
+D2. **Time-to-live as configuration.** The 120-second
+    constant of R1 is a literal. Exposing it as a tunable
+    (per-network-id or daemon-wide) would let operators
+    trade memory for tolerance of larger mesh skews; it is
+    not in scope at the time of writing.
 
-### 11.7 Tests
+D3. **Cross-instance attribution.** The guard distinguishes
+    by publisher identity (R3), not by signing key. If the
+    wire protocol grows a key-rotation mechanism, the
+    cache attribution shall be revisited to follow whatever
+    canonical publisher-identity field the protocol adopts.
 
-Two unit tests in `mm2_main/src/ordermatch_tests.rs` exercise the guard:
+## 11.9 External References
 
-- **Blocks insert for same pubkey.** Construct an `Orderbook`, insert an
-  order, call `delete_order` for the same pubkey/UUID, attempt to re-insert
-  an `OrderbookItem` with the same pubkey/UUID; assert the order is **not**
-  present afterwards.
-- **Allows insert for different pubkey.** Same setup, but the re-insert uses
-  a different pubkey; assert the order **is** present afterwards.
+- The publish-subscribe mesh protocol the codebase uses
+  for order propagation, whose "no delivery ordering"
+  property motivates the mitigation (referenced via
+  [Chapter 28](28-libp2p-modernization.md)).
+- The version-4 random universally-unique-identifier
+  scheme (RFC 4122) under which cross-publisher
+  identifier collisions are negligible.
+- The orderbook substrate whose insert and cancellation
+  paths the mitigation extends (referenced via
+  [Chapter 12](12-order-match-state-store.md)).
 
-Both tests run within the existing in-process orderbook setup; no extra
-fixtures are required.
+## 11.10 Baseline Verifications
 
-### 11.8 Runtime invariants
+The following are verifiable from the baseline state defined
+in [Chapter 02](02-baseline-state.md), commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f`:
 
-| Invariant | Where enforced |
-| --- | --- |
-| TTL is exactly 120 s. | `RECENTLY_CANCELLED_TIMEOUT` constant. |
-| Cancellation is recorded before removal, on the lock held by the caller. | `delete_order` |
-| Guard fires only on UUID + pubkey match. | `insert_or_update_order_update_trie` early return |
-| Existing UUID-collision behaviour across publishers is preserved. | Guard scoped to `Some(&order.pubkey)` equality |
-| `Orderbook::default()` produces a usable instance. | Explicit `impl Default for Orderbook` |
+V1. The baseline orderbook carries no recently-cancelled
+    cache or equivalent. Verifiable by tree-wide
+    `git grep -E 'recently_cancelled|RECENTLY_CANCELLED'`
+    against the baseline; matches are zero.
 
-### 11.9 Reproduction recipe
+V2. The baseline orderbook's cancellation handler removes
+    state without recording cancellation history;
+    re-creation of a cancelled identifier by the same
+    publisher therefore proceeds at the baseline. Verifiable
+    by inspection of the baseline orderbook's deletion path.
 
-For an implementer holding only the baseline tree and this chapter:
+V3. The publish-subscribe mesh protocol the codebase uses
+    is present at the baseline and provides no delivery-
+    ordering guarantees; the race the mitigation closes
+    is therefore a pre-existing wire-level property, not
+    one introduced after the baseline.
 
-1. In `mm2_main/src/lp_ordermatch.rs` (or, equivalently, whichever submodule
-   currently owns `Orderbook` after later structural refactors — see
-   chapter 12), import `common::time_cache::TimeCache` and
-   `std::time::Duration`.
-2. Add a module-level constant `RECENTLY_CANCELLED_TIMEOUT:
-   Duration = Duration::from_secs(120)`.
-3. Add a new field `recently_cancelled: TimeCache<Uuid, String>` to the
-   `Orderbook` struct.
-4. Remove `#[derive(Default)]` from `Orderbook` and add an explicit
-   `impl Default for Orderbook { fn default() -> Self { … } }` that
-   initialises every previously-default field plus
-   `recently_cancelled: TimeCache::new(RECENTLY_CANCELLED_TIMEOUT)`.
-5. In `delete_order(ctx, pubkey, uuid)`, **before** the existing
-   removal logic, insert `orderbook.recently_cancelled.insert(uuid,
-   pubkey.to_string())`.
-6. At the top of `Orderbook::insert_or_update_order_update_trie(order)`, add
-   the early-return guard from §11.5 (UUID + pubkey equality, warn-level
-   log, return).
-7. Add the two unit tests from §11.7 to the existing orderbook test
-   suite.
+## 11.11 Provenance Footer
 
-No other call sites are modified; the guard is invisible to RPC consumers
-and to coin implementations.
-
-## External References
-
-- libp2p Gossipsub v1.1 specification,
-  <https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md>.
-  The "no delivery ordering" property motivates the guard.
-- RFC 4122 — UUID v4 random,
-  <https://datatracker.ietf.org/doc/html/rfc4122>. Backs the
-  negligible-collision assumption that lets the guard scope to UUID +
-  pubkey equality.
-- `uuid` crate, <https://crates.io/crates/uuid>.
-
-## Provenance Footer
-
-- **Inputs:** `01-clean-room-rules.md`; the baseline workspace at commit
-  `c1d46c0…`; the post-baseline file
-  `mm2src/mm2_main/src/lp_ordermatch.rs` (and its successor
-  `mm2src/mm2_main/src/lp_ordermatch/ordermatch_orderbook.rs` after the
-  later split documented in chapter 12); the post-baseline test additions
-  in `mm2src/mm2_main/src/ordermatch_tests.rs`; the project's own commit
-  `96d94bda5` ("P2.3 swap tests + P4.1 recently_cancelled race fix") as
-  authoritative source for the stated motivation.
-- **Permitted-input classes used:** baseline source; first-party
-  post-baseline identifiers introduced with in-chapter justification; the
-  project's own commit messages on the post-baseline branch; public
-  protocol/RFC documentation.
-- **Not used:** any private repository, any internal-only document, any
-  upstream post-baseline source tree.
-- **Sibling-allowlist consultations:** none.
-- **Author of this chapter:** clean-room reimplementation working set,
-  reviewed under the two-reviewer protocol defined in
-  `local/clean-room-doc/IMPLEMENTER_RULES.md`.
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of
+  the recently-cancelled cache and its constant at
+  baseline verified via tree-wide `git grep`; the
+  publish-subscribe mesh protocol's published "no delivery
+  ordering" property; RFC 4122 (version-4 random
+  universally-unique-identifier collision properties); the
+  orderbook substrate's pre-existing time-keyed-map
+  primitive that the cache instantiates.
+- *Forbidden corpus:* not consulted.
