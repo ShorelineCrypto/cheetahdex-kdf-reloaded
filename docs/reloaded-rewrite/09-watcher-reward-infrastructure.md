@@ -1,354 +1,356 @@
-# Chapter 09 — Third-Party Swap-Watcher Infrastructure
-
-## Executive Summary
-
-The baseline tree's atomic-swap protocol is strictly two-party: a maker and a
-taker exchange HTLC transactions, and if either side disappears mid-swap the
-remaining party must wait out the timelock and broadcast the refund itself.
-There is no concept of a third-party observer.
-
-The post-baseline tree adds a **swap-watcher layer**: any other node on the
-gossip overlay can volunteer to monitor a taker's in-flight swap, and if the
-taker disappears, the watcher can broadcast precomputed spend or refund
-transactions on the taker's behalf so the maker is paid and the taker is
-refunded without the taker process being online. This chapter documents the
-wire envelope, the gossipsub topic family, the watcher state machine, and the
-small surface every coin family needs to declare to participate.
-
-A separate, narrower change in the same direction is the **watcher-reward
-opt-in field** that has been added to V2 swap-argument structs:
-
-- A `watcher_reward: bool` field appears on `RefundMakerPaymentTimelockArgs`,
-  `RefundTakerPaymentArgs`, and `RefundFundingSecretArgs` in
-  `coins/lp_coins_types.rs`.
-- That field is currently **always constructed as `false`** in the three
-  call sites that populate V2 swap arguments (`maker_swap_v2.rs`,
-  `taker_swap_v2.rs`).
-- The downstream coin implementations therefore never see a `true`-valued
-  reward in this tree.
-
-This chapter documents the watcher-message protocol and the watcher state
-machine — both of which are fully functional — and the `watcher_reward`
-boolean as a coin-trait *interface* whose runtime activation is not currently
-wired in our tree. Any reader expecting a per-swap economic reward to flow
-to watcher operators in this tree will find none: the watcher service is
-voluntary and unpaid.
-
-### Why this changed
-
-The watcher infrastructure was introduced by the project's own commit `f5434b078` (*P2.2: watcher node infrastructure*). The commit message describes both the protocol and the safety model verbatim:
-
-> *Add swap watcher infrastructure allowing third-party nodes to monitor and intervene in ongoing taker swaps. … WatcherOps trait (lp_coins.rs): is_supported_by_watchers(), watcher_validate_taker_fee/payment(), create preimages for maker_payment_spend and taker_payment_refund, and watcher_search_for_swap_tx_spend(). Default impls return unsupported-error; UTXO coins (utxo_standard, qtum, bch) override is_supported_by_watchers() to return true. … swap_watcher.rs (new, ~700 lines): complete watcher state machine using common::state_machine with compile-time validated transitions: ValidateTakerFee -> ValidateTakerPayment -> WaitForTakerPaymentSpend -> SpendMakerPayment/RefundTakerPayment -> Stopped. … Taker broadcast: taker_swap.rs broadcasts TakerSwapWatcherData with precomputed spend/refund preimages after sending taker payment.*
-
-In clean-room voice: the post-baseline project chose to allow third-party nodes on the gossip overlay to complete a taker's in-flight swap if the taker disappears. The protocol uses precomputed signed preimages broadcast by the taker itself, so a watcher needs no private-key material from either party; the state machine is the same `common::state_machine` framework used elsewhere in the swap layer. The watcher_reward field is part of the same broader interface, but as documented above, it is uniformly hard-coded `false` in this tree — no on-chain economic reward currently flows to watcher operators.
-
-## Reproduction Detail
-
-### 9.1 Baseline shape (no watcher concept)
-
-Commit `c1d46c0…` does not contain a watcher module, a watcher gossipsub
-topic, a `is_supported_by_watchers` coin method, or a `watcher_reward` field
-anywhere. The baseline `lp_swap/` directory contains ten files and none of
-them mentions a watcher. Refunds are exclusively the responsibility of the
-original transaction sender.
-
-### 9.2 New module and re-exports
-
-A new module `mm2_main/src/lp_swap/swap_watcher.rs` is added under the
-existing `lp_swap` module tree (via `#[path = "lp_swap/swap_watcher.rs"]`).
-`lp_swap.rs` re-exports the four public items the rest of the binary needs:
-
-```rust
-pub use swap_watcher::{
-    process_watcher_msg, watcher_topic, SwapWatcherMsg, TakerSwapWatcherData,
-    WATCHER_PREFIX,
-};
-```
-
-The `SwapsContext` (also in `lp_swap.rs`) grows a `taker_swap_watchers:
-PaMutex<WatcherEntryMap>` field, where `WatcherEntryMap = HashMap<Vec<u8>,
-u64>` maps a per-swap deduplication key (the taker-fee transaction hash) to
-an entry expiry timestamp in seconds.
-
-### 9.3 Wire envelope and gossipsub topic
-
-```rust
-pub const WATCHER_PREFIX: TopicPrefix = "swpwtchr";
-
-pub fn watcher_topic(coin_ticker: &str) -> String {
-    mm2_p2p::pub_sub_topic(WATCHER_PREFIX, coin_ticker)
-}
-```
-
-Topics are per-taker-coin (e.g. `swpwtchr/BTC`); nodes subscribe to the
-watcher topic for every coin they have enabled and can therefore choose which
-swap families they are willing to watch.
-
-The message type is a versioned enum so additional watcher message shapes can
-be added without a topic split:
-
-```rust
-pub enum SwapWatcherMsg {
-    TakerSwapWatcherMsg(TakerSwapWatcherData),
-}
-```
-
-Wire payloads are wrapped in the project's signed-envelope format
-(`mm2_p2p::decode_signed::<SwapWatcherMsg>`), which authenticates the sender
-via libp2p key. A watcher only acts on a message whose signature verifies and
-whose embedded coin tickers it actually has enabled locally.
-
-### 9.4 `TakerSwapWatcherData`
-
-The payload the taker publishes after it has sent its taker payment on-chain:
-
-```rust
-pub struct TakerSwapWatcherData {
-    pub uuid: Uuid,
-    pub secret_hash: Vec<u8>,
-    pub maker_payment_spend_preimage:  Vec<u8>,  // taker's success-path tx
-    pub taker_payment_refund_preimage: Vec<u8>,  // taker's safety-net tx
-    pub swap_started_at:  u64,
-    pub lock_duration:    u64,
-    pub taker_coin:       String,
-    pub taker_fee_hash:   Vec<u8>,
-    pub taker_payment_hash: Vec<u8>,
-    pub taker_coin_start_block: u64,
-    pub taker_payment_confirmations: u64,
-    pub taker_payment_requires_nota: Option<bool>,
-    pub maker_coin:       String,
-    pub maker_pub:        Vec<u8>,                // 33-byte compressed secp256k1
-    pub maker_payment_hash: Vec<u8>,
-    pub maker_coin_start_block: u64,
-}
-```
-
-The two "preimage" fields are the *unsigned-or-presigned* transaction blobs
-the watcher will use to act on the taker's behalf:
-
-- `maker_payment_spend_preimage` is the transaction that, once augmented with
-  the secret revealed by the taker-payment spend, will let the maker claim
-  the maker payment.
-- `taker_payment_refund_preimage` is the transaction that, after the timelock,
-  refunds the taker payment back to the taker.
-
-Because both preimages are precomputed by the taker before its
-own private key is gone, the watcher never needs a taker private key.
-
-### 9.5 Watcher state machine
-
-The watcher is implemented as a state machine using the generic state-machine
-runtime (chapter 14):
-
-| State | Role |
-| --- | --- |
-| `ValidateTakerFee` | Locate the taker fee tx on-chain and run the coin's `validate_fee` over the watcher's `TakerSwapWatcherData`. Retries up to a fixed number of times before stopping. |
-| `ValidateTakerPayment` | Wait for the taker payment tx to appear on-chain with the configured confirmation count, then validate it. |
-| `WaitForTakerPaymentSpend` | Poll for either (a) a spend of the taker payment (normal completion path) or (b) the refund deadline being reached. |
-| `SpendMakerPayment { secret }` | Triggered by (a). Extract the secret from the taker-payment spend, plug it into `maker_payment_spend_preimage`, broadcast it. |
-| `RefundTakerPayment` | Triggered by (b). Broadcast `taker_payment_refund_preimage` once the refund deadline has elapsed. |
-| `Stopped { result: WatcherResult }` | Terminal. Logs the outcome. |
-
-`WatcherResult` is the four-variant enum
-
-```rust
-pub enum WatcherResult {
-    MakerPaymentSpent,
-    TakerPaymentRefunded,
-    CompletedNormally,
-    StoppedOnError(String),
-}
-```
-
-The transition table is fixed (the `TransitionFrom` implementations
-explicitly list the legal moves) so the machine cannot enter an unintended
-state. Per-coin tuning parameters are read once into a `WatcherConf` struct
-at machine construction:
-
-```rust
-pub struct WatcherConf {
-    pub wait_taker_payment:   f64,  // seconds
-    pub search_interval:      f64,  // seconds
-    pub refund_start_factor:  f64,  // multiplier on lock_duration
-}
-```
-
-These have defaults — see §9.7 — that are deliberately conservative so the
-watcher always loses the race to the original parties under normal latency.
-
-### 9.6 Lock-out and de-duplication
-
-`SwapWatcherLock` (RAII guard) prevents two parallel watcher state machines
-from spawning for the same taker fee hash on a single node:
-
-- `try_lock(swap_ctx, fee_hash)` returns `None` if the map currently contains
-  an unexpired entry for `fee_hash`; otherwise inserts an entry with expiry
-  `now + TAKER_SWAP_WATCHER_ENTRY_TIMEOUT_SECS` and returns the guard.
-- `Drop for SwapWatcherLock` removes the entry, so a panicking or
-  early-returning watcher releases its slot promptly.
-
-The expiry timeout (six hours in our tree) protects against forever-stuck
-entries if a process is killed before the `Drop` runs and the file-system
-lock is lost.
-
-### 9.7 Constants and defaults
-
-The current values in `swap_watcher.rs`:
-
-| Constant | Value | Purpose |
-| --- | --- | --- |
-| `WATCHER_PREFIX` | `"swpwtchr"` | gossipsub topic prefix |
-| `WATCHER_MSG_INTERVAL` | `10.0 s` | how often the taker re-broadcasts its watcher data |
-| `TAKER_FEE_VALIDATION_ATTEMPTS` | `6` | retries when validating the fee on-chain |
-| `TAKER_FEE_VALIDATION_RETRY_SECS` | `10.0 s` | delay between retries |
-| `WAIT_TAKER_PAYMENT_DEFAULT_SECS` | `60.0 s` | default for `WatcherConf::wait_taker_payment` |
-| `SEARCH_INTERVAL_DEFAULT_SECS` | `300.0 s` | default poll interval |
-| `REFUND_START_FACTOR` | `1.5` | refund window opens at `started_at + 1.5 * lock_duration` |
-| `TAKER_SWAP_WATCHER_ENTRY_TIMEOUT_SECS` | `21600` (6 h) | watcher-lock expiry |
-
-These are first-party tuning choices; nothing in the file is sourced from
-upstream literature.
-
-### 9.8 Coin-trait surface
-
-`SwapOps` (in `coins/lp_coins_traits.rs`) gains one read-only declaration:
-
-```rust
-fn is_supported_by_watchers(&self) -> bool { false }
-```
-
-A coin implementer flips this to `true` once both the on-chain spend and
-refund transactions can be reconstructed deterministically by a third party
-given the watcher payload. Today the UTXO-standard, BCH and QTUM coins
-declare `true`; everything else inherits the default `false`. The watcher
-short-circuits on any coin pair where either side reports `false`.
-
-### 9.9 The unactivated `watcher_reward` boolean
-
-The following V2 argument structs in `coins/lp_coins_types.rs` carry a
-`watcher_reward: bool` field:
-
-- `RefundMakerPaymentTimelockArgs`
-- `RefundTakerPaymentArgs`
-- `RefundFundingSecretArgs`
-
-The intent of this field is to signal to the coin implementation that the
-refund transaction should reserve some value to a watcher's address as
-compensation for having performed the broadcast. In our tree the field is
-**always assigned `false`** at the three sites that populate these
-structures (`maker_swap_v2.rs:2104`, `taker_swap_v2.rs:2430`,
-`taker_swap_v2.rs:2495`). Coin implementations may inspect the field; they
-will only ever see `false`.
-
-The field is therefore documented here as an *interface* — a coin
-implementor can rely on it being a stable parameter slot — without committing
-this tree to any particular reward economy. Adding a reward economy would
-require:
-
-- a per-network policy parameter (e.g. a new `NetConfig::watcher_reward_*`
-  method, parallel to the burn-related methods in chapter 06);
-- code paths at the three construction sites above that derive the boolean
-  from the policy;
-- coin-side handling for the `true` branch in each refund implementation.
-
-None of those exist in our tree, and this chapter does not document a design
-for them.
-
-### 9.10 Entry-point wiring
-
-- The libp2p incoming-message handler in `mm2_main/src/lp_network.rs` calls
-  `lp_swap::process_watcher_msg(ctx.clone(), &message.data).await` on every
-  message whose topic matches the watcher prefix.
-- A node subscribes to a watcher topic for a coin when the coin is enabled,
-  via `subscribe_to_topic(&ctx, watcher_topic(coin.ticker()))` in the legacy
-  `enable` / `electrum` RPCs (`rpc/lp_commands/lp_commands_legacy.rs`).
-- A taker broadcasts to its watcher topic from `taker_swap.rs` after sending
-  its payment (`watcher_topic(self.taker_coin.ticker())` + a published
-  `SwapWatcherMsg::TakerSwapWatcherMsg(data)`).
-
-### 9.11 Reproduction recipe
-
-For an implementer holding only the baseline tree and this chapter:
-
-1. Add `mm2_main/src/lp_swap/swap_watcher.rs`. Register it from
-   `lp_swap.rs` with `#[path = "lp_swap/swap_watcher.rs"] pub mod
-   swap_watcher;` and re-export the five public items in §9.2.
-2. In `lp_swap.rs`, add `pub type WatcherEntryMap = HashMap<Vec<u8>, u64>;`
-   and grow `SwapsContext` with `pub taker_swap_watchers:
-   PaMutex<WatcherEntryMap>`, initialised to `PaMutex::new(HashMap::new())`.
-3. Define `WATCHER_PREFIX: TopicPrefix = "swpwtchr"` and `pub fn
-   watcher_topic(coin_ticker: &str) -> String { mm2_p2p::pub_sub_topic(
-   WATCHER_PREFIX, coin_ticker) }`.
-4. Define `SwapWatcherMsg` (single variant `TakerSwapWatcherMsg`) and
-   `TakerSwapWatcherData` exactly as §9.4 lists. Derive `Clone`, `Debug`,
-   `Serialize`, `Deserialize`.
-5. Add `WatcherConf` (§9.5) with `serde(default = "…")` defaults pulling
-   from named module-level functions returning the constants in §9.7.
-6. Implement `WatcherStateMachineCtx` (§9.5) with helpers `taker_locktime`
-   and `refund_start_time`. Use the generic state-machine runtime (chapter
-   14) to define the six states and the eight legal transitions.
-7. Implement each state per §9.5: `ValidateTakerFee` calls the coin's
-   `validate_fee` (chapter 08 `ValidateFeeArgs`); `ValidateTakerPayment`
-   waits and calls `validate_taker_payment`; `WaitForTakerPaymentSpend`
-   polls; the two success/timeout branches broadcast the relevant preimage;
-   `Stopped` logs.
-8. Define `WatcherResult` (four variants per §9.5).
-9. Implement `SwapWatcherLock` as a `Drop`-guarded RAII type (§9.6).
-10. Add `pub async fn process_watcher_msg(ctx: MmArc, msg: &[u8])` that
-    decodes a signed `SwapWatcherMsg`, looks up both coins via `lp_coinfind`,
-    checks `is_supported_by_watchers()` on each, acquires the lock, and
-    spawns the state machine.
-11. In `coins/lp_coins_traits.rs`, add `fn is_supported_by_watchers(&self) ->
-    bool { false }` to `SwapOps`. Flip the default to `true` only in coin
-    implementations whose transaction format permits third-party rebroadcast
-    (UTXO-standard, BCH, QTUM in our tree; gate others as their authors
-    confirm).
-12. In `coins/lp_coins_types.rs`, add the `watcher_reward: bool` field to
-    the three V2 argument structs listed in §9.9. Initialise it as `false`
-    at every construction site.
-13. Hook `process_watcher_msg` from `lp_network.rs` on incoming gossipsub
-    messages whose topic begins with `WATCHER_PREFIX`.
-14. In `enable` / `electrum` RPCs, subscribe to `watcher_topic(ticker)` when
-    a coin is activated.
-15. In `taker_swap.rs`, after sending the taker payment, populate a
-    `TakerSwapWatcherData` and publish it via the topic returned by
-    `watcher_topic(taker_coin.ticker())` every `WATCHER_MSG_INTERVAL`
-    seconds until the swap concludes.
-16. Add a unit test `test_watcher_topic_format` asserting
-    `watcher_topic("BTC") == "swpwtchr/BTC"`.
-
-## External References
-
-- IETF *Atomic-cross-chain swap* informal references and Bitcoin Wiki entry,
-  <https://en.bitcoin.it/wiki/Atomic_swap>. Establishes the maker/taker /
-  secret-reveal HTLC pattern the watcher operates within.
-- libp2p Gossipsub v1.1 specification,
-  <https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md>.
-  Used for the watcher topic.
-- libp2p PeerId / cryptographic identities,
-  <https://github.com/libp2p/specs/blob/master/peer-ids/peer-ids.md>. Backs
-  the signed-envelope authentication of `SwapWatcherMsg`.
-- `uuid` crate, <https://crates.io/crates/uuid>.
-- `serde` and `serde_derive` crates, <https://crates.io/crates/serde>.
-- Rust `async-trait` crate, <https://crates.io/crates/async-trait>.
-
-## Provenance Footer
-
-- **Inputs:** `01-clean-room-rules.md`; the baseline `lp_swap/` directory at
-  commit `c1d46c0…`; the post-baseline files
-  `mm2_main/src/lp_swap/swap_watcher.rs`, `mm2_main/src/lp_swap.rs`,
-  `mm2_main/src/lp_network.rs`, `mm2_main/src/lp_swap/taker_swap.rs`,
-  `mm2_main/src/rpc/lp_commands/lp_commands_legacy.rs`,
-  `coins/lp_coins_traits.rs`, `coins/lp_coins_types.rs`, the per-coin
-  declarations of `is_supported_by_watchers`; chapter 06 (`NetConfig`),
-  chapter 08 (`ValidateFeeArgs`), chapter 14 (state-machine runtime).
-- **Permitted-input classes used:** baseline source; first-party post-baseline
-  identifiers introduced with in-chapter justification; public protocol
-  documentation (atomic swap, Gossipsub, libp2p peer IDs); public Rust
-  crates.
-- **Not used:** any private repository, any internal-only document, any
-  upstream post-baseline source tree (no kdf-analysis-2022 access).
-- **Sibling-allowlist consultations:** none.
-- **Author of this chapter:** clean-room reimplementation working set,
-  reviewed under the two-reviewer protocol defined in
-  `local/clean-room-doc/IMPLEMENTER_RULES.md`.
+# Chapter 09 -- Third-Party Swap-Watcher Infrastructure
+
+**Status:** driving-spec
+
+> **One-sentence claim:** the codebase shall carry a
+> third-party "watcher" substrate that lets any node on the
+> gossip overlay (a) subscribe to a per-coin watcher topic,
+> (b) receive a signed envelope from a taker carrying
+> precomputed spend and refund preimages, and (c) on the
+> taker's behalf broadcast the appropriate preimage if the
+> taker disappears mid-swap, so that the maker is paid and
+> the taker is refunded without the taker process being
+> online; watcher operation requires no private-key material
+> from either party.
+
+## 9.0 Executive Summary
+
+The atomic-swap protocol bound by this codebase is strictly
+two-party at the cryptographic layer: a maker and a taker
+exchange hash-time-locked-contract transactions, and if
+either side disappears mid-swap the remaining party must
+wait out the timelock and broadcast the refund itself.
+Without an additional substrate, a taker that disconnects
+between sending its payment and observing the maker's spend
+imposes a multi-hour delay on the maker before the
+maker-payment can be refunded.
+
+The watcher substrate closes that gap by allowing any
+volunteering node to monitor a specific in-flight swap and
+to broadcast the taker's own precomputed preimages on the
+taker's behalf. The substrate is **trustless**: the taker
+publishes signed transactions before going offline; the
+watcher only ever rebroadcasts them. A watcher does not
+need (and cannot derive) any signing key from either party.
+
+Two surfaces are bound:
+
+- A wire surface: a per-coin gossip topic, a versioned
+  message envelope, a signed-publish authentication
+  contract, and the watcher's broadcast triggers.
+- A coin-trait surface: a single per-coin opt-in predicate
+  declaring whether the coin family permits third-party
+  rebroadcast of its swap transactions.
+
+A separate placeholder surface, the per-refund
+`watcher_reward` boolean (§9.9), is present at the
+coin-trait level but **inactive** in the codebase at the
+time of writing: every construction site sets the field to
+`false`, so no on-chain reward is ever owed to a watcher.
+The watcher service in this codebase is voluntary and
+unpaid.
+
+## 9.1 Subsystem Shape
+
+The substrate has the following behavioural regions:
+
+| Region                        | Effect                                       |
+|-------------------------------|----------------------------------------------|
+| Per-coin gossip topic         | One topic per taker-coin ticker              |
+| Watcher message envelope      | Versioned enum; presently one variant        |
+| Taker-published payload       | Preimages + per-swap context                 |
+| Signed-publish authentication | Sender authenticated via the gossip key      |
+| Watcher state machine         | Six states; compile-time fixed transitions   |
+| Per-node de-duplication       | RAII lock keyed by the taker-fee transaction |
+| Coin-trait opt-in             | Single per-coin predicate                    |
+| Inactive reward field         | Boolean placeholder, always `false` today    |
+
+## 9.2 Wire Topic
+
+R1. **Per-coin watcher topic.** The substrate shall expose
+    one gossip topic per taker-coin ticker, derived from a
+    fixed prefix and the ticker:
+    `<watcher-prefix>/<TICKER>`.
+
+R2. **Bound prefix.** The watcher topic prefix is the
+    eight-byte ASCII string `swpwtchr`. The full topic for
+    Bitcoin would therefore be `swpwtchr/BTC`. The prefix
+    is a wire fact and shall not change without coordinated
+    update across every participating node.
+
+R3. **Subscription model.** A node shall subscribe to the
+    watcher topic for a given ticker when, and only when,
+    the corresponding coin is activated locally on that
+    node. This gives operators per-coin opt-out by simply
+    declining to activate the coin.
+
+## 9.3 Message Envelope
+
+R4. **Versioned envelope.** The watcher payload shall be
+    carried inside a versioned message enum so that
+    additional watcher message shapes can be added without
+    a topic split. At the time of writing exactly one
+    variant exists, carrying the taker-published payload.
+
+R5. **Signed publish.** Every watcher message shall be
+    wrapped in the codebase's standard signed-envelope
+    format and authenticated against the publisher's gossip
+    identity at decode time. A receiver shall discard any
+    message whose signature does not verify or whose
+    embedded coin tickers it does not have enabled locally.
+
+## 9.4 Taker-Published Payload
+
+R6. **Self-contained per-swap context.** The taker's payload
+    shall carry everything a watcher needs to act
+    autonomously: the swap identifier; the secret hash; the
+    two preimages (§9.5); the swap-start timestamp and lock
+    duration; both coin tickers; the maker's public key; the
+    transaction hashes for the taker-fee and the
+    taker-payment; per-coin start-block, required-
+    confirmations, and notarisation-required fields for the
+    taker coin; and the start-block for the maker coin.
+
+R7. **Public-key formats.** The maker's published public key
+    on the canonical taker payload shape shall be the
+    public-key format the underlying coin's swap script
+    uses (33-byte compressed secp256k1 for UTXO-family
+    coins, etc.). The substrate does not constrain the
+    public-key bytes further; the validator at the watcher
+    side delegates the format check to the coin family.
+
+## 9.5 Two Preimages
+
+R8. **Maker-payment-spend preimage.** The first preimage is
+    a transaction that, when augmented with the secret
+    revealed by the on-chain taker-payment spend, lets the
+    maker claim the maker payment. The watcher fills in
+    the secret and rebroadcasts.
+
+R9. **Taker-payment-refund preimage.** The second preimage
+    is the transaction that, after the timelock elapses,
+    refunds the taker payment back to the taker. The
+    watcher rebroadcasts it after the refund deadline.
+
+R10. **Both preimages are precomputed by the taker.** Both
+     preimages shall be authored and signed by the taker
+     **before** the taker can go offline. The watcher
+     therefore never holds or derives a taker private key.
+
+## 9.6 Watcher State Machine
+
+The watcher shall be implemented on top of the codebase's
+state-machine runtime ([Chapter 14](14-state-machine-runtime.md))
+with the following bound states and transitions:
+
+| State                       | Role                                                   |
+|-----------------------------|--------------------------------------------------------|
+| Validate-taker-fee          | Locate the taker-fee transaction on-chain; validate it |
+| Validate-taker-payment      | Wait for the taker-payment transaction with the        |
+|                             | configured confirmation count; validate it             |
+| Wait-for-taker-payment-spend| Poll for spend (success path) or refund deadline       |
+| Spend-maker-payment         | On spend: extract secret; broadcast first preimage     |
+| Refund-taker-payment        | On deadline: broadcast second preimage                 |
+| Stopped (with outcome)      | Terminal; log the outcome                              |
+
+R11. **Compile-time legal transitions.** The set of legal
+     transitions shall be fixed at compile time per the
+     state-machine runtime's contract; no runtime-only
+     transition decision is acceptable.
+
+R12. **Four-variant terminal outcome.** The Stopped state
+     shall carry a four-variant outcome: maker-payment-
+     spent, taker-payment-refunded, completed-normally
+     (the original parties beat the watcher to the
+     broadcast), or stopped-on-error (with diagnostic
+     payload).
+
+## 9.7 Bound Constants and Defaults
+
+R13. **Conservative timing defaults.** The substrate's
+     defaults shall be conservative so that, under normal
+     latency, the original parties always beat the watcher
+     to the broadcast and the watcher is a fallback rather
+     than a competitor. The bound defaults are:
+
+| Constant                              | Value      | Purpose                                                                 |
+|---------------------------------------|------------|-------------------------------------------------------------------------|
+| Watcher message re-broadcast interval | 10 s       | Taker re-publishes its watcher payload at this cadence                  |
+| Taker-fee validation attempts         | 6          | Validation retries before giving up                                     |
+| Taker-fee validation retry delay      | 10 s       | Delay between validation retries                                        |
+| Wait-for-taker-payment default        | 60 s       | Per-state wait before polling                                           |
+| Spend/refund search poll interval     | 300 s      | Default poll cadence for the wait-for-spend state                       |
+| Refund-start factor                   | 1.5 ×      | Refund window opens at `start + 1.5 × lock-duration`                    |
+| Per-fee-hash watcher lock timeout     | 6 h        | RAII lock expiry guarding against orphaned locks                        |
+
+These are first-party tuning choices; they are not derived
+from outside literature.
+
+## 9.8 Per-Node De-duplication
+
+R14. **One state machine per taker-fee hash per node.**
+     A node shall not spawn two parallel watcher state
+     machines for the same taker-fee transaction hash. The
+     substrate shall enforce this via an RAII lock keyed
+     by the fee hash and held in the swap context.
+
+R15. **Lock expiry to handle abrupt termination.** The lock
+     entry shall carry an expiry timestamp (R13: 6 hours)
+     so that an entry orphaned by a process kill before
+     its RAII drop ran is eventually reclaimed without
+     operator intervention.
+
+## 9.9 Coin-Trait Surface and the Inactive Reward Field
+
+R16. **Per-coin opt-in predicate.** The swap-operations
+     coin trait shall expose a single read-only predicate
+     declaring whether the coin family permits third-party
+     rebroadcast of its swap transactions. The default
+     shall be **opt-out** (no watcher activity); coin
+     families opt in by overriding the predicate to true.
+     The watcher substrate shall short-circuit on any coin
+     pair where either side reports opt-out.
+
+R17. **UTXO-style families are the eligible set today.**
+     At the time of writing the eligible families are
+     UTXO-standard, BCH (Bitcoin Cash), and QTUM. Other
+     coin families inherit the opt-out default.
+
+R18. **`watcher_reward` field placeholder.** The codebase
+     shall carry a `watcher_reward` boolean field on the
+     V2-swap refund-argument structures. At the time of
+     writing every construction site sets this field to
+     `false`; coin implementations may read it but shall
+     only ever observe `false`. The field is bound as an
+     **interface** so that adding a per-network reward
+     policy in the future is an additive change at known
+     construction sites; activating the field is deferred
+     work (D1).
+
+## 9.10 Entry-Point Wiring
+
+R19. **Inbound dispatch on prefix match.** The codebase's
+     incoming gossip-message handler shall route any
+     message whose topic begins with the watcher prefix
+     (R2) to the substrate's signed-envelope decoder.
+
+R20. **Outbound broadcast cadence.** A taker, after sending
+     its payment on-chain, shall populate the watcher
+     payload (§9.4) and publish it on the appropriate
+     watcher topic at the bound re-broadcast interval (R13:
+     10 s) until the swap concludes. The cadence ensures
+     newly-joining watchers can pick up an in-flight swap.
+
+R21. **Coin-activation-time subscription.** A node shall
+     subscribe to a coin's watcher topic at coin-activation
+     time, per R3.
+
+## 9.11 Tests
+
+T1. **Topic-shape test.** The substrate shall include a
+    unit test asserting that the topic constructor returns
+    the expected `<prefix>/<TICKER>` shape for at least
+    one well-known ticker (e.g. `swpwtchr/BTC` for the
+    Bitcoin ticker).
+
+T2. **Versioned-envelope round-trip.** The envelope shall
+    round-trip through the codebase's standard serde
+    format for all defined variants.
+
+T3. **State-machine transition table coverage.** Each
+    legal transition listed in §9.6 shall have at least
+    one unit test that exercises it; each illegal
+    transition shall be a compile-time error per R11.
+
+## 9.12 Deferred Work
+
+D1. **Activate the `watcher_reward` field.** Requires (a) a
+    per-network policy parameter on the registry of
+    [Chapter 6](06-network-id-seed-node.md) parallel to
+    the burn-related entries; (b) code at the three
+    refund-argument construction sites that derives the
+    boolean from the policy; (c) coin-side handling for
+    the `true` branch in each refund implementation. None
+    of this is in scope at the time of writing.
+
+D2. **Cryptographically-bound watcher attribution.** R5
+    authenticates the publisher of the watcher message,
+    not the watcher that subsequently broadcasts a
+    preimage. A receipt-style mechanism that lets the
+    network attribute a specific rebroadcast to a specific
+    watcher would be required before any reward economy
+    (D1) could distinguish honest watchers from
+    free-riders. Not in scope today.
+
+D3. **Eligible-coin-family expansion.** R17 lists the
+    three eligible families today. Adding a new family
+    requires the family's transaction format to permit
+    deterministic third-party rebroadcast given the
+    watcher payload; each new family is an additive
+    opt-in (R16).
+
+D4. **Operator-tunable timing.** R13's constants are
+    literals. Exposing them as operator-tunables (per-coin
+    or per-network) would let operators trade aggression
+    for safety margin in environments with non-default
+    latency profiles. Not in scope today.
+
+## 9.13 External References
+
+- The atomic-cross-chain-swap pattern (informal references
+  and public wiki) on which the maker/taker
+  secret-reveal protocol is based.
+- The publish-subscribe overlay protocol the substrate
+  uses for topic-based gossip (referenced via
+  [Chapter 28](28-libp2p-modernization.md)).
+- The gossip peer-identity scheme used by R5 for
+  signed-envelope authentication.
+- The state-machine runtime
+  ([Chapter 14](14-state-machine-runtime.md)) on which the
+  watcher state machine of §9.6 is built.
+- The per-network-id configuration registry
+  ([Chapter 6](06-network-id-seed-node.md)) on which D1's
+  reward-policy parameter would be added.
+- The fee-routing substrate
+  ([Chapter 8](08-fee-routing-engine.md)) whose
+  validate-fee surface the watcher invokes during the
+  validate-taker-fee state of §9.6.
+
+## 9.14 Baseline Verifications
+
+The following are verifiable from the baseline state defined
+in [Chapter 02](02-baseline-state.md), commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f`:
+
+V1. The baseline tree carries no watcher substrate. A
+    tree-wide
+    `git grep -E 'swap_watcher|swpwtchr|is_supported_by_watchers|watcher_reward'`
+    against the baseline returns no matches.
+
+V2. The baseline atomic-swap path treats refunds as the
+    exclusive responsibility of the original transaction
+    sender; the gap that R6-R10 close is therefore a
+    pre-existing operational property, not one introduced
+    after the baseline.
+
+V3. The publish-subscribe overlay the substrate rides on is
+    present at the baseline; the watcher substrate does
+    not introduce the overlay, only a new topic family on
+    it.
+
+## 9.15 Provenance Footer
+
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of
+  the watcher substrate and its identifiers at baseline
+  verified via tree-wide `git grep`; the
+  publicly-documented atomic-cross-chain-swap protocol
+  pattern; the publish-subscribe overlay protocol used
+  by the codebase; the state-machine runtime substrate
+  bound by Chapter 14; the per-network configuration
+  registry of Chapter 6 (referenced by D1); the fee-
+  routing substrate of Chapter 8 (referenced by §9.6's
+  validate-taker-fee state).
+- *Forbidden corpus:* not consulted.
