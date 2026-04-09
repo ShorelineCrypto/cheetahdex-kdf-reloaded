@@ -1,312 +1,378 @@
-# Chapter 23 — External Trading-API Client
+# Chapter 23 -- External Trading-API Client
 
-> **Chapter type:** document existing. No IMPL marker.
+**Status:** driving-spec
 
-## 23.0 Executive summary
+> **One-sentence claim:** the project carries a self-contained
+> binding crate for external trading-API providers; its first
+> provider binds the publicly-documented 1inch Swap API v6.0 and
+> the matching portfolio price-history endpoint, exposes typed
+> request and response shapes for both, and never embeds an
+> API key, default base URL, or production rate-limit policy.
 
-The reloaded tree carries an external trading-API binding crate
-at [`mm2src/trading_api/`](../../mm2src/trading_api/). It
-currently holds a single provider: a typed HTTP client for the
-**1inch Swap API v6.0** and a small portfolio price-history
-endpoint. The crate is post-baseline (the entire directory is
-absent at `c1d46c0`) and is built as a self-contained library:
-no coin crate depends on it, and no RPC handler in
-[`mm2_main`](../../mm2src/mm2_main/) routes to it yet.
+## 23.0 Executive Summary
 
-Concretely, the crate provides:
+A dedicated workspace crate carries bindings to external
+trading-API providers (price oracles, swap aggregators, route
+indexers). At the time of writing the crate contains exactly
+one provider binding: a typed client for the publicly-
+documented **1inch Swap API v6.0** plus the matching portfolio
+price-history endpoint. The crate is structured so that a
+second provider would live as a sibling module rather than
+replace the first.
 
-- a typed `ApiClient` that owns the 1inch base URL (taken from
-  `MmCtx.conf["1inch_api"]`),
-- a URL builder + chain-id router covering every
-  v6.0-supported EVM chain,
-- request/response structs for classic-swap **quote**, classic-
-  swap **create** (build-tx), **liquidity-sources**, **tokens**,
-  and **portfolio cross-prices** endpoints, and
-- an `ApiClientError` enum that distinguishes transport,
-  parse, generic API, and `AllowanceNotEnough` failures.
+The crate is **a library only**. It does not register any
+public JSON-RPC handler, does not depend on any coin support
+module, and is not consumed by the daemon's runtime path at the
+time of writing. The integration boundary (per-provider RPC
+handlers, allowance-check and transaction-submission wiring
+into EVM coin support) is named explicitly as deferred work in
+§23.9.
 
-What is **not** yet wired in reloaded:
+The bound surface for the 1inch provider covers:
 
-- per-coin RPC handlers (the `one_inch_v6_0_*` family),
-- dispatcher entries in
-  [`dispatcher.rs`](../../mm2src/mm2_main/src/rpc/dispatcher/dispatcher.rs)
-  (grep is empty for `one_inch` / `trading_api`),
-- any cross-talk with `coins::eth` (allowance checks, tx
-  submission),
-- Fusion-mode swap types,
-- production-side rate limiting.
+- A typed HTTP client that holds a caller-supplied base URL
+  and routes requests to the correct path-template per
+  endpoint and per chain id.
+- Builders for the **classic-swap quote** and **classic-swap
+  create** (transaction-build) requests, the **liquidity-
+  sources** and **tokens** discovery requests, and the
+  **portfolio cross-prices** OHLC request.
+- Typed response records for each of the above, including a
+  shared classic-swap response shape covering both quote and
+  create returns.
+- An error enum that distinguishes invalid-parameter, out-of-
+  bounds, transport, body-parse, generic API, and the
+  provider-specific `AllowanceNotEnough` failure (the last
+  carrying the required allowance and the current allowance as
+  256-bit integer values).
 
-The crate is therefore best described as a clean API binding
-with the integration surface (RPC + coin wiring) deliberately
-deferred.
+## 23.1 Subsystem Shape
 
-## 23.1 Crate layout
+The crate is organised by **provider**: each provider gets its
+own submodule containing its client, error type, URL builder,
+and typed request/response records. The crate's public surface
+re-exports one provider submodule per binding.
 
-```
-mm2src/trading_api/
-|-- Cargo.toml
-`-- src/
-    |-- lib.rs                        (re-exports one_inch_api)
-    |-- one_inch_api.rs               (module aggregator)
-    `-- one_inch_api/
-        |-- client.rs                 ApiClient, UrlBuilder, base URL
-        |-- errors.rs                 ApiClientError, NativeError
-        |-- classic_swap_types.rs     quote/create params + response types
-        `-- portfolio_types.rs        cross-prices types
-```
+| Region                  | Responsibility                                  |
+|-------------------------|-------------------------------------------------|
+| Crate-level public API  | Re-exports one provider submodule per binding   |
+| Provider submodule      | Client, URL builder, errors, typed records      |
+| Provider client         | Stateless HTTP entry point bound to a base URL  |
+| Provider URL builder    | Endpoint path + query-parameter composition     |
+| Provider error type     | Provider-specific error enum                    |
+| Provider request types  | Builder structs for each endpoint               |
+| Provider response types | Typed records for each endpoint                 |
 
-Roughly 950 lines of Rust, all of it 1inch-specific.
+The crate **does not** define a provider-agnostic trait. A
+second provider added later would live as a sibling submodule
+(`<provider>`) with its own client, its own error type, and
+its own URL builder. A provider-agnostic abstraction is an open
+question (§23.9 D1), not a binding rule at the time of writing.
 
-## 23.2 Public API
+## 23.2 1inch Provider -- Endpoints
 
-[`lib.rs`](../../mm2src/trading_api/src/lib.rs) re-exports a
-single module:
+The 1inch provider binds the following routes of the public
+1inch v6.0 API:
 
-```rust
-pub mod one_inch_api;
-```
+| Path template                                                            | Purpose                       |
+|--------------------------------------------------------------------------|-------------------------------|
+| `GET /swap/v6.0/{chainId}/quote`                                         | Indicative swap quote         |
+| `GET /swap/v6.0/{chainId}/swap`                                          | Build executable swap tx      |
+| `GET /swap/v6.0/{chainId}/liquidity-sources`                             | Enumerate router protocols    |
+| `GET /swap/v6.0/{chainId}/tokens`                                        | Enumerate supported tokens    |
+| `GET /portfolio/integrations/prices/v1/time_range/cross_prices`          | OHLC token-pair price history |
 
-Consumers therefore import via
-`trading_api::one_inch_api::{ApiClient, ApiClientError, ...}`.
-There is no provider-agnostic facade crate trait; the
-expectation is that a future second provider would live as a
-sibling module (`trading_api::<provider>`) with its own client.
+Chain ids accepted on the four `/swap/v6.0/{chainId}/...`
+endpoints correspond to the publicly-documented v6.0-supported
+EVM chains:
 
-The headline types are:
+| Chain id   | Chain ecosystem        |
+|-----------:|------------------------|
+| 1          | Ethereum               |
+| 10         | Optimism               |
+| 56         | BNB Smart Chain        |
+| 100        | Gnosis                 |
+| 137        | Polygon                |
+| 250        | Fantom                 |
+| 324        | zkSync Era             |
+| 8217       | Klaytn                 |
+| 8453       | Base                   |
+| 42161      | Arbitrum               |
+| 43114      | Avalanche              |
+| 1313161554 | Aurora                 |
 
-| Type                          | Role                                          |
-|-------------------------------|-----------------------------------------------|
-| `ApiClient`                   | Stateless HTTP client bound to the 1inch base |
-| `UrlBuilder`                  | Chain-id + query-param URL composer           |
-| `ClassicSwapQuoteParams`      | Builder for `/quote` requests                 |
-| `ClassicSwapCreateParams`     | Builder for `/swap` (build-tx) requests       |
-| `ClassicSwapData`             | Response shared by quote and create           |
-| `TxFields`                    | Embedded `tx` payload on create responses     |
-| `TokenInfo`, `ProtocolInfo`   | Sub-records on swap responses                 |
-| `CrossPriceParams`            | Portfolio price-history request               |
-| `CrossPricesData` / `Series`  | OHLC response                                 |
-| `ApiClientError`              | Crate error enum (see §23.6)                  |
+The chain id is interpolated into the path for the four swap
+routes; any chain id outside the set above is rejected with
+the `InvalidParam` variant of the provider error type.
 
-`ApiClient` exposes a single generic call site (a free associated
-function; no `self`):
+The portfolio route does **not** carry the chain id in the
+path; the chain id travels as a query parameter on the
+portfolio request type.
 
-```rust
-pub async fn call_api<T: DeserializeOwned>(
-    api_url: Url,
-) -> MmResult<T, ApiClientError>;
-```
+## 23.3 Configuration and Authentication
 
-There are no per-endpoint helper methods on `ApiClient` today.
-Callers compose a request manually: build typed params, lower
-them to query parameters via the params' `build_query_params()`,
-then construct a `Url` through `SwapUrlBuilder` (for
-classic-swap routes) or `PortfolioUrlBuilder` (for the
-price-history route) and pass that `Url` to `call_api::<R>`.
-Whether to grow per-endpoint convenience methods is an explicit
-open question -- see §23.10.
+R1. **No embedded base URL.** The 1inch base URL shall be
+    sourced from the daemon's JSON configuration field
+    `1inch_api`. If the field is absent, the client shall fail
+    fast at construction with the provider's `InvalidParam`
+    error variant. The crate shall not carry a compiled-in
+    default URL.
 
-## 23.3 1inch endpoints covered
+R2. **No embedded API key.** Production builds shall not carry
+    any API key for any provider. The public 1inch endpoints
+    do not require authentication; the binding shall therefore
+    issue unauthenticated requests on production builds.
 
-The crate binds to the following v6.0 routes:
+R3. **Test-only authentication path.** A test build path,
+    gated behind the **`test-ext-api`** Cargo feature, may
+    additionally:
+    - Read an authentication token from the environment
+      variable `ONE_INCH_API_TEST_AUTH` and attach it as an
+      `Authorization` header on every request.
+    - Serialise outbound requests through a one-request-per-
+      second lock so that test runs stay inside the test-tier
+      rate limit of the provider.
+    Neither behaviour shall be active in release builds.
 
-| Path                                                                    | Purpose                       |
-|-------------------------------------------------------------------------|-------------------------------|
-| `GET /swap/v6.0/{chainId}/quote`                                        | Indicative swap quote         |
-| `GET /swap/v6.0/{chainId}/swap`                                         | Build executable swap tx      |
-| `GET /swap/v6.0/{chainId}/liquidity-sources`                            | Enumerate router protocols    |
-| `GET /swap/v6.0/{chainId}/tokens`                                       | Enumerate supported tokens    |
-| `GET /portfolio/integrations/prices/v1/time_range/cross_prices`         | OHLC token-pair price history |
+R4. **Standard headers.** Every request carries the headers
+    `Accept: application/json` and `Content-Type:
+    application/json`. The conditional `Authorization` header
+    of R3 is added only on the test-only build path.
 
-Supported chain ids (per the chain table in
-[`client.rs`](../../mm2src/trading_api/src/one_inch_api/client.rs)):
-Ethereum (1), Optimism (10), BSC (56), Gnosis (100), Polygon
-(137), Fantom (250), ZkSync (324), Klaytn (8217), Base
-(8453), Arbitrum (42161), Avalanche (43114), Aurora
-(1313161554). The chain id is injected into the path by
-`SwapUrlBuilder`; unsupported ids surface as
-`ApiClientError::InvalidParam`. The portfolio route does *not*
-take the chain id in the path; `PortfolioUrlBuilder` instead
-forwards it as a query parameter sourced from
-`CrossPriceParams`.
+## 23.4 Request and Response Shapes
 
-## 23.4 Configuration and authentication
+The 1inch classic-swap **quote** request carries:
 
-The base URL is sourced from `MmCtx.conf["1inch_api"]` -- there
-is no compiled-in default. If the field is missing the client
-fails fast with `ApiClientError::InvalidParam` at construction.
+- *Required:* source token address, destination token address,
+  amount (as a wei-denominated decimal string).
+- *Optional:* fee, protocols filter, gas-price hint,
+  complexity-level hint, parts count, main-route parts count,
+  gas-limit hint, include-tokens-info flag, include-protocols
+  flag, include-gas flag, connector-tokens list.
 
-Production endpoints used here are the public 1inch endpoints
-and do not require an API key. Test builds gain a key path via
-the `test-ext-api` cargo feature:
+The 1inch classic-swap **create** request extends the quote
+request with:
 
-```rust
-#[cfg(feature = "test-ext-api")]
-lazy_static! {
-    static ref ONE_INCH_API_TEST_AUTH: String =
-        std::env::var("ONE_INCH_API_TEST_AUTH").unwrap_or_default();
-}
-```
+- *Required additionally:* sender address (`from`), slippage
+  percentage in the range 0..=50.
+- *Optional additionally:* excluded-protocols filter, permit
+  payload, compatibility flag, alternative receiver address,
+  referrer, disable-estimate flag, allow-partial-fill flag,
+  use-permit2 flag.
 
-When that feature is active, the client adds an
-`Authorization: <ONE_INCH_API_TEST_AUTH>` header and serialises
-requests through a `one_req_per_sec()` async lock to stay
-inside 1inch's test-tier rate limit. Outside of tests there is
-no throttle.
+Both endpoints return a shared classic-swap response shape
+carrying:
 
-Standard headers on every request are `Accept: application/json`
-and `Content-Type: application/json`. When the `test-ext-api`
-feature is active an `Authorization: <ONE_INCH_API_TEST_AUTH>`
-header is *also* sent; production builds (no feature) omit it
-entirely, since the public 1inch endpoints do not require it.
+| Field           | Type                            | Populated by             |
+|-----------------|---------------------------------|--------------------------|
+| `dst_amount`    | decimal string                  | quote and create         |
+| `src_token`     | optional token-info record      | quote and create         |
+| `dst_token`     | optional token-info record      | quote and create         |
+| `protocols`     | optional triple-nested protocol-info list | quote and create |
+| `tx`            | optional transaction-fields record | create only           |
+| `gas`           | optional 128-bit gas estimate   | quote only               |
 
-## 23.5 Request and response shapes
+The transaction-fields record on a create response carries the
+fields needed to sign and broadcast the swap transaction
+(sender, recipient, calldata, value, gas price, gas limit).
+Signing and broadcast are out of scope for this crate.
 
-`ClassicSwapQuoteParams`
-([`classic_swap_types.rs`](../../mm2src/trading_api/src/one_inch_api/classic_swap_types.rs))
-is a builder with:
+The portfolio cross-prices request carries chain id, token-0
+address, token-1 address, optional granularity, and optional
+limit. The response is a series of OHLC records keyed by
+timestamp; numeric fields use a big-decimal type so the
+response can be deserialised without precision loss.
 
-- required: `src`, `dst` (token addresses), `amount` (wei as
-  decimal string);
-- optional: `fee`, `protocols`, `gas_price`, `complexity_level`,
-  `parts`, `main_route_parts`, `gas_limit`, `include_tokens_info`,
-  `include_protocols`, `include_gas`, `connector_tokens`.
+R5. **Numeric precision.** Provider response shapes shall use
+    big-decimal or 256-bit-integer types for any field
+    representing an on-chain amount, an allowance, an OHLC
+    price, or a wei-denominated value. Floating-point types
+    shall not be used for any such field.
 
-`ClassicSwapCreateParams` extends quote params with:
+## 23.5 Error Model
 
-- required: `from` (sender address) and `slippage` (0--50%);
-- optional: `excluded_protocols`, `permit`, `compatibility`,
-  `receiver`, `referrer`, `disable_estimate`,
-  `allow_partial_fill`, `use_permit2`.
+The provider error enum distinguishes the following failure
+modes:
 
-The shared response is `ClassicSwapData`:
+| Variant               | Carries                                                    |
+|-----------------------|------------------------------------------------------------|
+| Invalid parameter     | Description of the violated invariant                      |
+| Out-of-bounds         | Parameter name, value, declared minimum, declared maximum  |
+| Transport             | Inner transport-layer error                                |
+| Parse body            | Body-decode message                                        |
+| General API           | Provider's `error` message, description, HTTP status code  |
+| Allowance not enough  | The provider's error/description/status code **plus**     |
+|                       | required allowance and current allowance, each as a       |
+|                       | 256-bit unsigned integer                                   |
 
-```rust
-pub struct ClassicSwapData {
-    pub dst_amount: String,
-    pub src_token: Option<TokenInfo>,
-    pub dst_token: Option<TokenInfo>,
-    pub protocols: Option<Vec<Vec<Vec<ProtocolInfo>>>>,
-    pub tx: Option<TxFields>,   // populated by /swap only
-    pub gas: Option<u128>,       // populated by /quote only
-}
-```
+R6. **Allowance shortfall carries machine-actionable data.**
+    The provider's 400-with-meta body for an
+    `allowance is not enough` failure shall be parsed into the
+    `AllowanceNotEnough` variant with the required and current
+    allowance promoted to the typed 256-bit unsigned integer
+    used by EVM coin support. The variant is the surface
+    through which an allowance-approval flow (deferred D5
+    below) reads the amounts it needs.
 
-`TxFields` carries the on-chain transaction the caller is meant
-to sign and broadcast (`from`, `to`, `data`, `value`,
-`gas_price`, `gas`); `coins::eth` is the expected signer, but
-that wiring is not present in reloaded today.
+R7. **No HTTP-status mapping in the crate.** The crate shall
+    not implement the codebase's
+    `HttpStatusCode` mapping trait. Mapping provider errors
+    to RPC-layer HTTP status codes is the responsibility of
+    the future RPC handlers (D2).
 
-Portfolio cross-prices use `CrossPriceParams { chain_id,
-token0_address, token1_address, granularity?, limit? }` and
-return a `CrossPricesSeries` of OHLC records keyed by
-timestamp; numerics are `BigDecimal`.
+## 23.6 Networking
 
-## 23.6 Error model
+R8. **Transport-layer indirection.** All outbound HTTP traffic
+    shall flow through the workspace's cross-platform HTTP
+    transport (see [Chapter 26](26-cross-platform-and-wasm.md))
+    rather than calling a concrete HTTP-client crate directly.
+    This is what allows the same client code to compile and
+    run on both native and browser targets.
 
-[`errors.rs`](../../mm2src/trading_api/src/one_inch_api/errors.rs)
-defines:
+R9. **GET-only wire surface.** Every endpoint bound by this
+    crate is a `GET` with query parameters. No `POST` body and
+    no streaming endpoint is in scope.
 
-```rust
-pub enum ApiClientError {
-    InvalidParam(String),                       // bad URL / config
-    OutOfBounds { param, value, min, max },      // builder validation
-    TransportError(SlurpError),                  // HTTP layer
-    ParseBodyError { error_msg },                // JSON decode
-    GeneralApiError { error_msg, description, status_code },
-    AllowanceNotEnough { error_msg, description, status_code,
-                         amount, allowance },
-}
-```
+The URL builder for each provider is responsible for:
 
-The crate does **not** implement `HttpStatusCode`; mapping API
-errors to HTTP status codes is left to the (future) RPC
-handlers. The 1inch-specific 400-with-meta body for
-`allowance is not enough` is parsed by `NativeError` and lifted
-into the strongly typed `AllowanceNotEnough` variant so the
-caller can read the required `amount` and current `allowance`
-as `U256`.
+- Prepending the configured base URL.
+- Interpolating the chain id into the path component where the
+  endpoint template requires it.
+- Serialising typed request parameters into URL query
+  parameters.
+- Validating that numeric parameters lie within their declared
+  bounds; out-of-bound values surface as the out-of-bounds
+  error variant of §23.5 before any network call is made.
 
-## 23.7 Networking
+## 23.7 Binding Requirements
 
-HTTP transport goes through
-`mm2_net::transport::slurp_url_with_headers`
-([Chapter 4](04-rust-and-tooling-baseline.md)), not
-`reqwest` directly. The `mm2_net` indirection lets the same
-client code run on both native and WASM without changes (see
-[Chapter 26](26-cross-platform-and-wasm.md)). On the wire it is
-plain GET requests with query parameters; there is no
-WebSocket / streaming path in 1inch v6.0.
+R1-R9 above are binding. In addition:
 
-The `UrlBuilder` is responsible for:
+R10. **Provider isolation.** Each provider's client, error
+     type, URL builder, and request/response types shall live
+     in a single submodule of the crate. No provider's types
+     shall depend on another provider's types.
 
-- prepending the configured base URL,
-- injecting the chain id into the path component,
-- serialising the typed params into URL query parameters,
-- validating that numeric params are within their declared
-  bounds (which surfaces as `OutOfBounds`).
+R11. **Library-only.** The crate shall not register any
+     JSON-RPC handler and shall not depend on any coin
+     support module. RPC integration and coin wiring live
+     outside the crate (D2, D5).
 
-## 23.8 RPC dispatcher status
+R12. **No vendored provider source.** The crate shall consume
+     each provider's public HTTP API only. No provider's
+     source code shall be vendored into the crate.
 
-Grepping `mm2src/mm2_main/src/rpc/dispatcher/dispatcher.rs` for
-`one_inch` / `oneinch` / `trading_api` returns no matches.
-There are no `one_inch_v6_0_classic_swap_*` handlers in
-`mm2src/mm2_main/src/rpc/lp_commands/` in reloaded.
+## 23.8 Tests
 
-The intended RPC surface (mirroring the upstream KDF layout)
-would be five handlers under a `one_inch_v6_0_` prefix:
+The crate ships unit tests colocated with each region. The
+unit-test set at the time of writing covers:
 
-- `one_inch_v6_0_classic_swap_contract_rpc` (router address)
-- `one_inch_v6_0_classic_swap_quote_rpc`
-- `one_inch_v6_0_classic_swap_create_rpc`
-- `one_inch_v6_0_classic_swap_liquidity_sources_rpc`
-- `one_inch_v6_0_classic_swap_tokens_rpc`
+- Anti-phishing URL validation on the provider client.
 
-These are explicitly future work; they require both the
-handler module and a coin resolver that bridges `ApiClient`
-results to `coins::eth` for allowance + tx submission.
+End-to-end tests against the live provider API are not in the
+test set at the time of writing; they require both the
+deferred RPC handlers (D2) and the test-only authentication
+build path (R3) configured with a valid test-tier token.
 
-## 23.9 Tests
+## 23.9 Deferred Work
 
-The crate ships a single unit test in
-[`classic_swap_types.rs`](../../mm2src/trading_api/src/one_inch_api/classic_swap_types.rs)
-covering anti-phishing URL validation:
+D1. **Provider-agnostic abstraction.** A trait covering the
+    common client surface across providers is an open
+    question. The current per-provider-submodule layout
+    leaves room for one but does not bind one.
 
-```rust
-#[test]
-fn test_validate_one_inch_link() { ... }
-```
+D2. **JSON-RPC handler registration.** The intended public
+    RPC surface for the 1inch provider is a set of five
+    handlers covering router-address resolution, classic-swap
+    quote, classic-swap create, liquidity-sources discovery,
+    and tokens discovery. None of these handlers exist at the
+    time of writing; the public RPC dispatcher carries no
+    entry for this provider.
 
-There are no end-to-end tests in reloaded; integration tests
-that call the live API would require the RPC handlers (see
-§23.8) and the `test-ext-api` feature with
-`ONE_INCH_API_TEST_AUTH` set.
+D3. **1inch Fusion mode.** Only the classic-swap surface is
+    bound at the time of writing. The intent-based, resolver-
+    filled Fusion variant of the provider's API is not
+    bound.
 
-## 23.10 Known limitations and deferred work
+D4. **Portfolio endpoint integration.** The portfolio cross-
+    prices request and response types are defined but no
+    consumer in the codebase calls them.
 
-1. **Provider count is one.** The module shape
-   (`trading_api::<provider>`) anticipates more providers; only
-   1inch is implemented today.
-2. **No Fusion-mode types.** Only classic-swap is modeled;
-   1inch Fusion (intent-based, resolver-filled) is absent.
-3. **Portfolio endpoint unused.** `CrossPrice*` types are
-   defined but no consumer in reloaded calls them.
-4. **No RPC handlers.** See §23.8.
-5. **No coin / allowance / submission wiring.** The
-   `TxFields` payload is returned to the caller; nothing in
-   reloaded signs and broadcasts it through `coins::eth`.
-6. **Production rate limiting absent.** Only the
-   `test-ext-api` build path serialises requests; production
-   builds can hammer 1inch and be rate-limited.
-7. **`AllowanceNotEnough` not threaded into an approval flow.**
-   The error is parsed but no handler reacts to it with an
-   automatic `approve` step.
+D5. **Allowance-approval flow.** The `AllowanceNotEnough`
+    error variant carries enough information (R6) for a
+    consumer to issue an ERC-20 `approve` call before
+    retrying. No such flow is wired at the time of writing;
+    the variant is a parse target without a handler.
 
-## 23.11 Provenance
+D6. **Production rate-limit policy.** Only the test-only
+    build path of R3 serialises requests. A production rate-
+    limit policy (per-provider, per-chain, or global) is a
+    deferred decision; the crate does not currently impose
+    one.
 
-`mm2src/trading_api/` is post-baseline (`git ls-tree c1d46c0
--- mm2src/trading_api` returns empty); the entire directory is
-new code in reloaded. The implementation binds to the public
-1inch Swap API v6.0 (an external HTTP API specification); no
-1inch source code is vendored. All transport goes through the
-in-tree [`mm2_net`](../../mm2src/mm2_net/) crate documented in
-[Chapter 4](04-rust-and-tooling-baseline.md).
+D7. **Transaction signing and broadcast.** The transaction-
+    fields record returned by the classic-swap create
+    endpoint is delivered to the caller. The crate does not
+    sign or broadcast; that wiring belongs in the integrating
+    RPC handler and the EVM coin support module.
+
+## 23.10 External References
+
+- The 1inch Swap API v6.0 specification (the public HTTP API
+  bound by the first provider).
+- The 1inch Portfolio Cross-Prices API specification (the
+  public OHLC endpoint bound by the same provider).
+- The publicly-documented EVM chain ids of the twelve chains
+  enumerated in §23.2.
+- The ERC-20 `approve`/`allowance` standard (the basis for
+  the typed allowance amounts of §23.5 and the deferred
+  approval flow of D5).
+- The big-decimal and 256-bit-integer numeric types of R5
+  (the workspace's standard numeric substrates for on-chain
+  amounts and allowance values).
+
+## 23.11 Baseline Verifications
+
+The following are verifiable from the baseline state defined
+in [Chapter 02](02-baseline-state.md), commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f`:
+
+V1. The baseline tree contains **no** trading-API binding
+    crate. A directory listing of the baseline tree
+    (`git ls-tree c1d46c0c1592faa0860f704008b2b2381bc3840f`)
+    contains no `trading_api` entry; a tree-wide
+    `git grep -l '1inch\|one_inch\|trading_api'` against the
+    baseline returns no matches.
+
+V2. The baseline tree contains no JSON-RPC handler for any
+    1inch endpoint. A tree-wide `git grep` for
+    `one_inch_v6_0` against the baseline returns no matches.
+    R11 of §23.7 ("library-only") is therefore consistent
+    with the baseline state and not a regression from it.
+
+V3. The twelve chain ids enumerated in §23.2 correspond to
+    the publicly-documented v6.0-supported EVM chains. The
+    list is the provider's published support set; chain ids
+    outside the list are out of scope by binding rule R1 of
+    §23.2.
+
+V4. The provider's HTTP API is a public specification.
+    No provider source code is vendored anywhere in the
+    workspace; the binding is via the public HTTP surface
+    only (R12).
+
+## 23.12 Provenance Footer
+
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of the
+  trading-API binding crate at baseline verified via
+  `git ls-tree c1d46c0c1592faa0860f704008b2b2381bc3840f`
+  and tree-wide `git grep` for the provider keywords against
+  the baseline; the public 1inch Swap API v6.0 specification;
+  the public 1inch Portfolio Cross-Prices API specification;
+  the publicly-documented EVM chain ids of the twelve chains
+  enumerated in §23.2; the ERC-20 `approve`/`allowance`
+  standard.
+- *Forbidden corpus:* not consulted.
