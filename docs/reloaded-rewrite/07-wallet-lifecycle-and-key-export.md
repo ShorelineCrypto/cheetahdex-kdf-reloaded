@@ -1,329 +1,350 @@
-# Chapter 07 — Wallet Lifecycle & Encrypted Mnemonic Persistence
+# Chapter 07 — Wallet Lifecycle and Encrypted Mnemonic Persistence
 
-## Executive Summary
+**Status:** driving-spec.
 
-In the baseline tree the node has no concept of a *wallet*. Whoever starts the
-binary supplies a passphrase through the `MM2.json` configuration (the field is
-literally named `passphrase`), the startup path derives a single secp256k1 key
-pair from it and stashes the derived material in the central context. The
-plaintext passphrase lives only in memory; nothing is persisted, nothing is
-encrypted at rest, and there is no way to switch identities at runtime.
+This chapter binds the named-wallet identity model: encrypted mnemonic blobs on
+disk, password-based key derivation, startup verification handshake, and the
+three management RPCs that operate the store while the node is running.
 
-The post-baseline tree introduces a complete wallet lifecycle on top of that
-passphrase plumbing without changing the on-the-wire RPC for already-existing
-read-only key-export endpoints (`get_public_key`, `get_public_key_hash` —
-baseline). The additions are:
+## 7.1 Executive Summary
 
-- a **named-wallet model** stored on the file system as encrypted blobs;
-- a **password-based encryption format** that protects the BIP-39 mnemonic at
-  rest using Argon2id key derivation plus AES-256-CBC + HMAC-SHA-256 (encrypt-
-  then-MAC);
-- a **startup integration hook** that lifts an optional `wallet_name` /
-  `wallet_password` pair out of the runtime configuration, encrypts the
-  passphrase on first use and verifies it on subsequent starts;
-- three new V2 RPCs — `create_wallet`, `get_wallet_names`, `delete_wallet` —
-  that let a front-end manage the wallet store while the node is running;
-- a write-once `wallet_name` slot on the central context that records the
-  active wallet, so the same RPC namespace can simultaneously list inactive
-  wallets and refuse to delete the one currently in use.
+The baseline daemon has no concept of a *wallet*. The operator supplies a
+passphrase in the runtime configuration, the startup path derives a single
+secp256k1 key pair from it and stashes the derived material in the central
+context. The plaintext passphrase lives only in process memory; nothing is
+persisted, nothing is encrypted at rest, and the running identity cannot be
+switched without restarting with a different configuration.
 
-The chapter documents the new types, files, error taxonomy and startup
-sequence so an implementer can rebuild the wallet layer from the baseline
-without reading the post-baseline implementation.
+This chapter binds a complete wallet-lifecycle substrate on top of the same
+passphrase-derived key pair, *without* changing the wire shape of the
+pre-existing read-only key-export endpoints `get_public_key` and
+`get_public_key_hash`. The new substrate has four bound pieces:
 
-### Why this changed
+- a **named-wallet store** consisting of one encrypted file per wallet under a
+  dedicated subdirectory of the per-node data directory;
+- a **password-based encryption envelope** that protects the BIP-39 mnemonic
+  at rest using Argon2id key derivation feeding AES-256-CBC encryption and an
+  HMAC-SHA-256 tag, in encrypt-then-MAC order;
+- a **startup verification handshake** that lifts an optional
+  `wallet_name` / `wallet_password` pair out of the runtime configuration,
+  encrypts-and-persists on first start with a given name, and decrypts-and-
+  compares on every subsequent start;
+- three **V2 RPCs** — `create_wallet`, `get_wallet_names`, `delete_wallet` —
+  plus a write-once active-wallet slot on the central context.
 
-The wallet lifecycle layer was introduced by the project's own commit `4dcfbf2a6` (*P1.4: Wallet management — create, list, delete wallets with encrypted mnemonic storage*). The commit message states the scope verbatim:
+## 7.2 Subsystem Shape
 
-> *Add wallet_name field (Constructible<Option<String>>) to MmCtx; add wallets_dir() method: DB/wallets/ (above per-identity dbdir); new lp_wallet module with encrypted mnemonic persistence: Storage: {wallet_name}.wallet files (JSON EncryptedMnemonicData); create_wallet RPC: encrypt mnemonic via Argon2+AES-256-CBC, persist; get_wallet_names RPC: list wallets, show active wallet; delete_wallet RPC: verify password by decryption, then remove file; initialize_wallet_passphrase(): startup integration (auto-persist or verify when wallet_name+wallet_password provided in config).*
+The wallet substrate spans three concerns: a cryptographic envelope (key
+derivation + symmetric encryption + authentication tag), a filesystem store
+(one file per named wallet), and a startup-time handshake that ties an
+externally supplied passphrase to a persisted wallet identity.
 
-This commit explicitly composes on top of `d681168bd` (P1.1 — chapter 05): P1.1 supplied the BIP-39 mnemonic + encrypt/decrypt primitives; P1.4 wraps them into a persistent, named identity model.
+The cryptographic envelope is self-describing: every persisted record carries
+the key-derivation parameters used to produce it, so a future parameter bump
+remains backward-compatible — old records decrypt under their own embedded
+parameters.
 
-In clean-room voice: the post-baseline project chose to give the daemon a first-class identity store (multiple named wallets, encrypted at rest, switchable at runtime) rather than continuing the baseline pattern of one plaintext-in-memory passphrase per process. The new RPCs are deliberately additive — the existing read-only key-export endpoints (`get_public_key`, `get_public_key_hash`) are left unchanged on the wire.
+The filesystem store is keyed by a constrained wallet name (see §7.6) that is
+also the file-stem portion of the on-disk record. The store is native-only;
+WASM builds do not register the three new RPCs and do not maintain the on-disk
+directory.
 
-## Reproduction Detail
+The handshake distinguishes four configuration cases (see §7.8) and
+deliberately fails closed: an inconsistent configuration refuses to start
+rather than silently degrading.
 
-### 7.1 Baseline shape (one passphrase, no persistence)
+## 7.3 Bound Wire Surface
 
-At commit `c1d46c0…` the dispatcher exposes only two key-related V2 methods,
-both pre-existing and unchanged through this rewrite:
+**R1.** The substrate adds exactly three new V2 RPC methods, registered on
+the version-2 dispatcher only on native targets:
 
-| Method | Handler module |
-| --- | --- |
-| `get_public_key` | `mm2_main/src/mm2/rpc/lp_commands` |
-| `get_public_key_hash` | same |
+- `create_wallet` — request fields `wallet_name: String`,
+  `password: String`, `mnemonic: String`; response field
+  `wallet_name: String`.
+- `get_wallet_names` — request body is an empty object; response fields
+  `wallet_names: Vec<String>` and `active_wallet: Option<String>`.
+- `delete_wallet` — request fields `wallet_name: String`,
+  `password: String`; response field `wallet_name: String`.
 
-There is no wallet RPC namespace, no `create_wallet` / `get_wallet_names` /
-`delete_wallet`, no `lp_wallet` module, and no encrypted-mnemonic type. The
-central context exposes a passphrase-derived key pair plus a RIPEMD-160 hash of
-the corresponding pubkey (`rmd160`), and that is the whole identity surface.
+**R2.** The two pre-existing read-only key-export methods `get_public_key`
+and `get_public_key_hash` MUST remain unchanged in request shape, response
+shape, dispatcher namespace and underlying key source (the passphrase-derived
+key pair on the central context). They MUST NOT be re-routed through the
+named-wallet store, irrespective of whether a wallet is currently active.
 
-Persistence: none. If the operator restarts the node they re-supply the
-passphrase in the JSON config.
+**R3.** No mnemonic-export RPC is introduced. The running node MUST NOT
+surrender the plaintext mnemonic over RPC under any method name; recovery of
+the mnemonic requires direct read access to the on-disk record and the
+correct password.
 
-### 7.2 Post-baseline data model
+**R4.** Two runtime-configuration field names are bound at the configuration
+boundary: `wallet_name` (optional string) and `wallet_password` (optional
+string). The pre-existing `passphrase` configuration field is preserved
+unchanged.
 
-A new top-level module `mm2_main/src/lp_wallet.rs` owns the wallet lifecycle.
-On-disk layout (native targets only — WASM targets do not persist wallets):
+## 7.4 Bound Error Surface
+
+**R5.** A single error enum is exposed by all three handlers, with eight
+named variants whose names are visible to clients through the standard
+type-tagged error envelope: `InvalidRequest`, `InvalidPassword`,
+`WalletAlreadyExists`, `WalletNotFound`, `CannotDeleteActiveWallet`,
+`StorageError`, `EncryptionError`, `Internal`.
+
+**R6.** HTTP status mapping is bound:
+
+| Variant                       | Status |
+| ----------------------------- | -----: |
+| `InvalidRequest`              |    400 |
+| `InvalidPassword`             |    400 |
+| `WalletAlreadyExists`         |    409 |
+| `WalletNotFound`              |    404 |
+| `CannotDeleteActiveWallet`    |    400 |
+| `StorageError`                |    500 |
+| `EncryptionError`             |    500 |
+| `Internal`                    |    500 |
+
+The enum implements the project-wide type-tagged error-serialization trait
+and the HTTP-status trait bound in Chapter 04.
+
+## 7.5 Bound On-Disk Layout
+
+**R7.** Persisted wallets MUST live in a single dedicated subdirectory of
+the per-node data directory, sibling to (and at a level *above*) any
+per-identity subdirectories. One regular file per wallet.
+
+**R8.** The on-disk file name MUST be `<wallet_name>.<extension>` where the
+extension is bound as `wallet`. The file content MUST be the
+JSON serialization of the persisted encryption envelope value defined in
+§7.7. JSON encoding (rather than a compact binary form) is bound so that the
+records remain operator-inspectable.
+
+**R9.** The on-disk store MUST NOT contain a separate password hash or
+verifier. Password verification is performed exclusively by attempting
+decryption and observing whether the authentication tag verifies; a wrong
+password produces a clean authentication failure mapped to `InvalidPassword`
+and never produces a usable-but-corrupt plaintext.
+
+## 7.6 Bound Wallet-Name Grammar
+
+**R10.** Wallet names accepted by `create_wallet` and `delete_wallet` MUST
+match the regular language `[A-Za-z0-9 _-]{1,64}` — between 1 and 64
+characters, drawn from the ASCII alphanumeric set plus space, underscore and
+hyphen. The grammar is bound for two reasons: it guarantees that a wallet
+name can be used directly as a single path component under the store
+directory without escaping, and it forbids names containing path separators,
+parent-directory tokens, or shell-significant characters.
+
+**R11.** `create_wallet` MUST additionally reject empty passwords with
+`InvalidRequest`, and MUST reject creation when a record under the requested
+name already exists, with `WalletAlreadyExists` (status 409). Replacing an
+existing wallet requires explicit deletion first.
+
+## 7.7 Bound Encryption Envelope
+
+**R12.** The persisted record carries two bound fields:
+
+- `encrypted_data` — a structure with three byte vectors: the ciphertext, the
+  initialization vector, and the authentication tag.
+- `key_derivation` — a self-describing key-derivation descriptor (see R15).
+
+**R13.** Encryption is AES-256-CBC with PKCS-7 padding under a 32-byte
+symmetric key. The initialization vector MUST be 16 fresh random bytes drawn
+per encryption from the project's secure random source.
+
+**R14.** Authentication is HMAC-SHA-256 under a separate 32-byte key,
+computed over the byte concatenation `iv || ciphertext`. The authentication
+order is bound as **encrypt-then-MAC**: decryption MUST verify the
+authentication tag (in constant time) *before* attempting any cipher
+operation on the ciphertext.
+
+**R15.** Key derivation is bound as a tagged enum with two variants:
+
+- *Password-derived (Argon2id).* Carries an `Argon2Params` record with three
+  fields — memory cost in kibibytes, iteration count, and parallelism — plus
+  a 32-byte salt drawn from the project's secure random source. The bound
+  parameter triple at substrate-introduction time is **(memory_cost: 65536
+  KiB, iterations: 3, parallelism: 1)**. The parameter triple travels with
+  every persisted record so future raises remain backward-compatible.
+- *Seed-derived (SLIP-0021).* Used by the higher-level mnemonic-from-seed
+  bootstrap flow described in Chapter 05; not exercised by the user-facing
+  RPCs bound in this chapter.
+
+**R16.** The 64 bytes of key material returned by the bound derivation MUST
+be split with the lower 32 bytes used as the AES encryption key and the
+upper 32 bytes used as the HMAC key. The substrate MUST NEVER use the same
+32-byte half for both encryption and authentication.
+
+**R17.** Inputs to `create_wallet` MUST be validated as English BIP-39
+mnemonics *before* the encryption envelope is constructed. Non-mnemonic
+input MUST be rejected with `InvalidRequest`; an invalid mnemonic MUST NOT
+produce a written `.wallet` file.
+
+## 7.8 Bound Startup Handshake
+
+**R18.** The startup integration point reads the optional pair
+(`wallet_name`, `wallet_password`) from the runtime configuration and
+distinguishes four cases. The behaviour for each case is bound:
+
+| Configuration                                            | Required behaviour                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `wallet_name` absent                                     | *Anonymous mode.* Pin the active-wallet slot to `None`. Write nothing. The node behaves identically to a baseline start. |
+| `wallet_name` present, `wallet_password` absent          | Fail with `InvalidRequest`. Refuse to start.                                                                              |
+| `wallet_name` present, password present, file absent     | Encrypt the configured passphrase, write `<wallet_name>.wallet`, pin the active-wallet slot to `Some(wallet_name)`.       |
+| `wallet_name` present, password present, file exists     | Decrypt the stored mnemonic with the supplied password. Reject password mismatch as `InvalidPassword`. Reject decrypted-text vs configured-passphrase mismatch as `InvalidRequest`. On success, pin the active-wallet slot to `Some(wallet_name)`. |
+
+**R19.** The active-wallet slot on the central context MUST be a write-once
+container: pinning a second value MUST fail. Runtime switching of the
+active wallet therefore requires a node restart with a different
+configuration.
+
+**R20.** The startup handshake MUST run *after* the passphrase has been
+ingested from configuration and *before* RPC dispatch is enabled, so the
+node never serves traffic with an inconsistent (`wallet_name` set but slot
+unpinned) state.
+
+## 7.9 Bound RPC Semantics
+
+**R21.** `get_wallet_names` MUST read both the on-disk directory listing
+(filtered by the `.wallet` extension and the bound name grammar) and the
+active-wallet slot from the central context, returning both. `wallet_names`
+MUST include the active wallet if one is set.
+
+**R22.** `delete_wallet` MUST first reject when the requested
+`wallet_name` equals the currently pinned active wallet, with
+`CannotDeleteActiveWallet` (status 400). It MUST then load the encrypted
+record, attempt decryption with the supplied password, and only on
+successful decryption unlink the file. The password check and the file
+removal MUST live in the same critical region: a leaked file name MUST NOT
+be usable to erase another operator's wallet without knowledge of the
+password.
+
+**R23.** `create_wallet` MUST be idempotent only on identical inputs to the
+extent that re-creating an existing wallet name is forbidden (see R11);
+there is no separate "upsert" semantics.
+
+## 7.10 Bound Platform Gating
+
+**R24.** The on-disk storage submodule, the three management RPCs, the
+active-wallet slot semantics that depend on disk presence, and the startup
+handshake MUST be gated to native targets. WASM targets MUST NOT register
+the three RPCs and MUST NOT advertise them on the V2 dispatcher.
+
+**R25.** The active-wallet slot field itself on the central context MAY
+exist on both targets so that downstream code can compile-link uniformly;
+on WASM it remains permanently in its anonymous (`None`) state.
+
+## 7.11 Tests (test invariants)
+
+**T1.** *Wallet-name validation.* For each of: empty string; a 65-character
+string; a string containing `/`, `\`, `..`, `:`; a string containing
+non-ASCII characters — `create_wallet` MUST reject with `InvalidRequest`
+without writing any file. For each of: a single character; a 64-character
+string drawn from the bound alphabet; a string containing each of space,
+underscore and hyphen — `create_wallet` MUST accept.
+
+**T2.** *Round-trip and isolation.* A `create_wallet` of (name *N*,
+password *P*, mnemonic *M*) followed by `get_wallet_names` MUST return *N*
+in `wallet_names`. A subsequent `delete_wallet` with password *P* MUST
+succeed and remove *N* from a second `get_wallet_names`. A
+`delete_wallet` with a password *P'* ≠ *P* MUST fail with
+`InvalidPassword` and MUST leave the on-disk record in place. A
+`delete_wallet` for a name that does not exist MUST fail with
+`WalletNotFound`.
+
+**T3.** *Active-wallet protection.* After a startup handshake that pins the
+active-wallet slot to *Some("alice")*, a `delete_wallet` request with
+`wallet_name="alice"` MUST fail with `CannotDeleteActiveWallet` regardless
+of whether the supplied password is correct, and MUST NOT unlink the file.
+
+**T4.** *Ciphertext tamper rejection.* Flipping a single byte of the
+on-disk record's ciphertext, IV, or authentication tag MUST cause the next
+`delete_wallet` decryption attempt (and the startup-handshake decryption)
+to fail with `InvalidPassword` (HMAC mismatch), not with a UTF-8 decode
+error and not with a panic.
+
+**T5.** *Startup handshake matrix.* Each of the four configuration cases
+listed in R18 MUST be exercised by an integration test or equivalent; the
+two failure cases (no password, mismatched passphrase) MUST be confirmed to
+keep the daemon from entering RPC-serving state.
+
+## 7.12 Deferred Work
+
+**D1.** A wallet-switch RPC that re-pins the active-wallet slot without
+restarting the process is deferred. The bound write-once semantics of the
+slot are not loosened in this chapter.
+
+**D2.** A mnemonic-export RPC is intentionally deferred indefinitely. R3
+forbids it under the current substrate.
+
+**D3.** An Argon2 parameter-bump migration helper that re-encrypts older
+records under stronger parameters is deferred. The self-describing
+parameter envelope (R15) makes such a helper additive when introduced.
+
+**D4.** A multi-process file-locking discipline (so two daemons sharing a
+data directory cannot race on the same `.wallet` file) is deferred; the
+current substrate documents the constraint that the data directory is
+single-tenant.
+
+## 7.13 External References
+
+- *BIP-39 — Mnemonic code for generating deterministic keys.* English
+  word-list is the bound dictionary.
+- *SLIP-0021 — Symmetric key derivation.* Referenced as the
+  non-password-derived variant of the bound key-derivation enum.
+- *RFC 9106 — Argon2 Memory-Hard Function for Password Hashing and Proof-
+  of-Work Applications.* Defines Argon2id and the parameter triple
+  (memory, iterations, parallelism) bound in §7.7.
+- *NIST SP 800-38A — Recommendation for Block Cipher Modes of Operation.*
+  Specifies CBC mode bound in R13.
+- *RFC 2104 — HMAC: Keyed-Hashing for Message Authentication* and
+  *RFC 6234 — US Secure Hash Algorithms.* Specify the HMAC-SHA-256
+  construction bound in R14.
+- Krawczyk, *The Order of Encryption and Authentication for Protecting
+  Communications.* Justification for encrypt-then-MAC ordering bound in
+  R14.
+- Chapter 04 (error-aggregation type adaptation) — bound error envelope
+  shape, type-tagged serialization trait, and HTTP-status trait used by
+  R5–R6.
+- Chapter 05 (HD wallet support) — bound mnemonic-and-encryption
+  primitives consumed by this chapter, including the SLIP-0021 variant
+  of the key-derivation enum.
+
+## 7.14 Baseline Verifications
+
+**V1.** The baseline tree MUST be confirmed to lack any wallet-RPC
+namespace: a search across the V2 dispatcher registrations for the three
+bound method names MUST return zero hits.
 
 ```
-<dbdir>/
-└── wallets/
-    ├── alice.wallet
-    ├── bob.wallet
-    └── …
+git -C <baseline> grep -nE '"(create_wallet|get_wallet_names|delete_wallet)"'
 ```
 
-Each `<name>.wallet` file is a pretty-printed JSON serialisation of an
-`EncryptedMnemonicData` value (defined in `crypto/src/mnemonic.rs`):
+**V2.** The baseline tree MUST be confirmed to lack a dedicated wallet
+module and the on-disk store directory name: searches for a `lp_wallet`
+source file and for the literal `wallets/` directory token in source MUST
+return zero hits.
 
-```rust
-pub struct EncryptedMnemonicData {
-    pub encrypted_data:  EncryptedData,         // ciphertext + IV + HMAC tag
-    pub key_derivation:  KeyDerivationDetails,  // Argon2 params + salt
-                                                // OR SLIP-0021 path marker
-}
-```
-
-`EncryptedData` (`crypto/src/encrypt.rs`) carries three byte-vectors:
-`encrypted` (AES-256-CBC ciphertext, PKCS-7 padded), `iv` (16 random bytes per
-encryption) and `hmac` (HMAC-SHA-256 over `IV || ciphertext`). The encryption
-key and HMAC key are derived independently — see §7.4.
-
-No password hash is stored. Password verification = attempting decryption and
-checking that the HMAC tag verifies; a wrong password produces a clean
-`InvalidPassword` failure rather than a usable but corrupt plaintext.
-
-### 7.3 New RPCs (V2)
-
-Three handlers are registered on the V2 dispatcher inside a native-only
-`cfg_native!` block:
-
-| Method | Request fields | Response fields | Status codes |
-| --- | --- | --- | --- |
-| `create_wallet` | `wallet_name: String`, `password: String`, `mnemonic: String` | `wallet_name: String` | 200; `409 Conflict` if the name already exists; `400` for invalid input |
-| `get_wallet_names` | (empty object) | `wallet_names: Vec<String>`, `active_wallet: Option<String>` | 200 |
-| `delete_wallet` | `wallet_name: String`, `password: String` | `wallet_name: String` | 200; `404` if missing; `400` if password wrong or wallet is active |
-
-A single error enum `WalletError` (eight variants: `InvalidRequest`,
-`InvalidPassword`, `WalletAlreadyExists`, `WalletNotFound`,
-`CannotDeleteActiveWallet`, `StorageError`, `EncryptionError`, `Internal`)
-implements both `SerializeErrorType` and `HttpStatusCode`, following the
-project pattern documented in chapter 04.
-
-`validate_wallet_name` constrains names to the regular language
-`[A-Za-z0-9 _-]{1,64}` so that wallet identifiers can safely become path
-components inside `<dbdir>/wallets/`.
-
-`create_wallet` also rejects empty passwords and refuses to overwrite a
-pre-existing wallet — callers must `delete_wallet` first if they want to
-replace one. `delete_wallet` decrypts the stored mnemonic before unlinking the
-file: the password check and the deletion live in the same critical section so
-a leaked file name cannot be used to erase another user's wallet.
-
-### 7.4 Encryption format
-
-`encrypt_mnemonic(mnemonic_str: &str, password: &str) ->
-Result<EncryptedMnemonicData, MnemonicError>` (in `crypto/src/mnemonic.rs`) does
-the following:
-
-1. Parse `mnemonic_str` as English BIP-39 to confirm it is a real mnemonic
-   before encrypting anything.
-2. Draw 32 random bytes as the Argon2 salt from `common::os_rng`.
-3. Pin the Argon2 parameters: Argon2id, 64 MiB memory cost, 3 iterations,
-   1 lane — wrapped in an `Argon2Params { memory_cost_kib, iterations,
-   parallelism }` struct so the on-disk record is self-describing.
-4. Call `derive_keys_for_mnemonic(password, KeyDerivationDetails::Argon2 {…})`,
-   which returns 64 bytes split into a 32-byte `encryption_key` and a 32-byte
-   `hmac_key`. Independent halves of the Argon2 output — never the same key
-   used for both purposes.
-5. Draw 16 random bytes as the AES-CBC IV.
-6. Encrypt the mnemonic bytes with AES-256-CBC under `encryption_key`/`iv`.
-7. Compute HMAC-SHA-256 over `iv || ciphertext` under `hmac_key`.
-8. Return `EncryptedMnemonicData { encrypted_data, key_derivation }` for
-   serialisation.
-
-`decrypt_mnemonic` reverses the process: rederive both keys from the password
-and the stored `KeyDerivationDetails`, verify the HMAC (constant-time), then
-decrypt and return the UTF-8 plaintext.
-
-`KeyDerivationDetails` is an enum with two variants — `Argon2 { params, salt }`
-for password-based wallets and `Slip21` for seed-bootstrapped key derivation
-(the latter is used by the higher-level mnemonic-from-seed flow but not by the
-user-facing RPCs). Storing parameters alongside the ciphertext means a future
-parameter bump (e.g. raising the memory cost) is backward-compatible: old files
-are still decryptable because their own parameters travel with them.
-
-### 7.5 Active-wallet slot on the central context
-
-`MmCtx` (in `mm2_core/src/mm_ctx.rs`) gains a public field
-
-```rust
-pub wallet_name: Constructible<Option<String>>,
-```
-
-`Constructible<T>` is the baseline-era write-once container (`pin` /
-`as_option`). The two non-trivial states are *anonymous* (`pin(None)` — node
-ran with no `wallet_name` configured) and *active* (`pin(Some("alice"))` — the
-named wallet is in use). Switching wallets at runtime requires a node restart
-because `Constructible` rejects a second `pin`.
-
-`get_wallet_names_rpc` reads this slot to populate the `active_wallet`
-response field; `delete_wallet_rpc` reads it to refuse deletion of the wallet
-currently in use.
-
-### 7.6 Startup integration
-
-`initialize_wallet_passphrase(ctx, passphrase, wallet_name, wallet_password) ->
-Result<Option<String>, MmError<WalletError>>` is the boundary between the new
-wallet layer and the existing passphrase initialisation. It is called from
-`lp_init` once the passphrase has been read from the configuration. Behaviour:
-
-- **No `wallet_name`** → `pin(None)` and return `Ok(None)`. This is *anonymous
-  mode*: the node behaves like the baseline (a passphrase floats only in
-  memory) and no file is ever written.
-- **`wallet_name` set, `wallet_password` missing** → fail with
-  `InvalidRequest`. The configuration is invalid; refusing to start prevents
-  silently degrading to anonymous mode.
-- **`wallet_name` set, `wallet_password` set, wallet file does not exist** →
-  encrypt the passphrase, write `<name>.wallet`, `pin(Some(name))`.
-- **`wallet_name` set, `wallet_password` set, wallet file exists** → decrypt
-  the stored mnemonic with the supplied password (`InvalidPassword` on
-  failure) and confirm that the decrypted text equals the passphrase the
-  operator just supplied. A mismatch returns `InvalidRequest` with the message
-  *"Passphrase doesn't match the stored wallet. Create a new wallet to use a
-  different passphrase"*. Then `pin(Some(name))`.
-
-This handshake means an operator who runs
+**V3.** The pre-existing read-only key-export methods MUST be confirmed
+present in the baseline dispatcher:
 
 ```
-mm2 '{"wallet_name":"alice","wallet_password":"…","passphrase":"…",…}'
+git -C <baseline> grep -nE '"(get_public_key|get_public_key_hash)"'
 ```
 
-twice produces the same wallet name with the same identity both times,
-provided the passphrase + password pair is consistent. There is no separate
-"register" RPC: the very first start writes the wallet, every subsequent start
-verifies it.
+This anchors R2: the baseline shape that the substrate is forbidden to
+disturb.
 
-### 7.7 Constraints worth being explicit about
+## 7.15 Provenance Footer
 
-- **Native-only.** The whole `storage` submodule sits behind
-  `#[cfg(not(target_arch = "wasm32"))]`. The three wallet RPCs are likewise
-  gated. WASM builds do not register them and therefore do not enable the
-  named-wallet model.
-- **Pre-existing key-export RPCs are untouched.** `get_public_key` and
-  `get_public_key_hash` keep their baseline request/response shape; they still
-  use the passphrase-derived key pair on the central context regardless of
-  which wallet (if any) is active.
-- **No mnemonic export RPC is introduced.** There is no `get_mnemonic` /
-  `export_mnemonic` handler. The encrypted blob can only be obtained by
-  reading the file directly off disk and supplying the password; the running
-  node will not surrender the plaintext mnemonic over RPC.
-- **Active-wallet protection is per-process.** Two nodes with separate
-  `dbdir`s have separate wallet stores; running the same operator's `dbdir`
-  with two nodes simultaneously is undefined.
-
-### 7.8 Reproduction recipe
-
-For an implementer holding only the baseline tree and this chapter:
-
-1. Add a new `mm2src/lp_wallet` source module (or, equivalently for the
-   layout shown, a new `mm2_main/src/lp_wallet.rs` file) and re-export it
-   from the binary crate's root.
-2. Extend the central context with a `wallet_name:
-   Constructible<Option<String>>` field; default-initialise it to
-   `Constructible::default()` in the builder.
-3. Add a `crypto/src/encrypt.rs` module exposing an `EncryptedData { encrypted,
-   iv, hmac }` value type and an `encrypt_data(data, key, iv, hmac_key) ->
-   EncryptedData` function implementing AES-256-CBC (PKCS-7 padding) followed
-   by an HMAC-SHA-256 tag over `iv || ciphertext`.
-4. Add a sibling `decrypt.rs` that performs the inverse, verifying the HMAC
-   with constant-time comparison **before** any decryption.
-5. Add `crypto/src/slip21.rs` implementing SLIP-0021 with two static
-   constant paths `["SLIP-0021", "Encryption key"]` and `["SLIP-0021",
-   "Authentication key"]`.
-6. Add `crypto/src/key_derivation.rs` defining
-   - `Argon2Params { memory_cost_kib: u32, iterations: u32, parallelism: u32 }`
-   - `KeyDerivationDetails::Argon2 { params, salt: Vec<u8> }` /
-     `::Slip21 { … }`
-   - `derive_keys_for_mnemonic(password_or_seed: &[u8], details:
-     &KeyDerivationDetails) -> Result<Mm2InternalKeys, KeyDerivationError>` that
-     returns `{ encryption_key: [u8; 32], hmac_key: [u8; 32] }` either via
-     Argon2id (`Algorithm::Argon2id`, `Version::V0x13`, 64 bytes of output, split
-     32/32) or via SLIP-0021 (one path for encryption, one for HMAC).
-7. Add `crypto/src/mnemonic.rs` exposing `generate_mnemonic(word_count:
-   usize)`, `encrypt_mnemonic(mnemonic_str, password)`,
-   `decrypt_mnemonic(encrypted, password)`, the `EncryptedMnemonicData` struct,
-   and a `MnemonicError` enum. Validate BIP-39 inputs via the public
-   `bip39::Mnemonic::parse_in_normalized(Language::English, …)` before
-   encrypting.
-8. In `lp_wallet.rs`, write a private `storage` submodule (native only) that
-   exposes `wallets_dir`, `wallet_path`, `save_encrypted_passphrase`,
-   `read_encrypted_passphrase`, `read_all_wallet_names` and `delete_wallet`,
-   all operating under `<dbdir>/wallets/`.
-9. In the same file, define a `WalletError` enum with the eight variants
-   listed in §7.3 and implement `HttpStatusCode` mapping each variant to the
-   status code shown in the table.
-10. Define request/response structs `CreateWalletRequest` /
-    `CreateWalletResponse`, `GetWalletNamesRequest` /
-    `GetWalletNamesResponse`, `DeleteWalletRequest` /
-    `DeleteWalletResponse`. Implement `validate_wallet_name` as
-    `1..=64` chars from `[A-Za-z0-9 _-]`.
-11. Implement the three RPC handlers as documented (`create_wallet_rpc`,
-    `get_wallet_names_rpc`, `delete_wallet_rpc`). For `delete_wallet_rpc`:
-    refuse if `ctx.wallet_name` currently holds `Some(name)`, then load the
-    encrypted blob, then `decrypt_mnemonic(…, &req.password)` and only on
-    success unlink the file.
-12. Implement `initialize_wallet_passphrase` per §7.6 with the four
-    `(wallet_name, wallet_password)` cases.
-13. Register the three new methods on the V2 dispatcher inside a native-only
-    `cfg_native!` block. Do not touch `get_public_key` or
-    `get_public_key_hash`.
-14. From `lp_init`, call `initialize_wallet_passphrase(&ctx, &passphrase,
-    ctx.conf["wallet_name"].as_str(), ctx.conf["wallet_password"].as_str()).await?`
-    immediately after reading the passphrase.
-15. Add unit tests covering: name validation; create→list→delete happy path;
-    duplicate-create returns `Conflict`; delete with wrong password returns
-    `BadRequest`/`InvalidPassword`; delete of non-existent wallet returns
-    `NotFound`; deletion of the currently active wallet is blocked.
-
-## External References
-
-- *BIP-39: Mnemonic code for generating deterministic keys*, Marek Palatinus
-  et al., <https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki>.
-- *SLIP-0021: Symmetric key derivation for HMAC-SHA512*, SatoshiLabs,
-  <https://github.com/satoshilabs/slips/blob/master/slip-0021.md>.
-- *RFC 9106 — Argon2 Memory-Hard Function for Password Hashing and Proof-of-
-  Work Applications*, <https://www.rfc-editor.org/rfc/rfc9106.html>. Defines
-  Argon2id and the parameter triple (memory, iterations, parallelism).
-- *NIST SP 800-38A — Recommendation for Block Cipher Modes of Operation*,
-  CBC mode, <https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf>.
-- *RFC 2104 — HMAC: Keyed-Hashing for Message Authentication*,
-  <https://www.rfc-editor.org/rfc/rfc2104.html>; *RFC 6234 — US Secure Hash
-  Algorithms*, <https://www.rfc-editor.org/rfc/rfc6234.html>.
-- Hugo Krawczyk, *The Order of Encryption and Authentication for Protecting
-  Communications (Or: How Secure Is SSL?)*, CRYPTO 2001 — justification for
-  encrypt-then-MAC.
-- `bip39` crate, <https://crates.io/crates/bip39>;
-  `argon2` crate, <https://crates.io/crates/argon2>;
-  `aes` and `cbc` crates from RustCrypto, <https://crates.io/crates/aes>,
-  <https://crates.io/crates/cbc>;
-  `hmac` and `sha2` crates from RustCrypto.
-
-## Provenance Footer
-
-- **Inputs:** `01-clean-room-rules.md`; the baseline dispatcher and central
-  context at commit `c1d46c0…`; the post-baseline files
-  `mm2_main/src/lp_wallet.rs`, `mm2_main/src/rpc/dispatcher/dispatcher.rs`,
-  `mm2_core/src/mm_ctx.rs`, `crypto/src/mnemonic.rs`,
-  `crypto/src/key_derivation.rs`, `crypto/src/encrypt.rs`,
-  `crypto/src/slip21.rs`; the external specifications listed above.
-- **Permitted-input classes used:** baseline source; first-party post-baseline
-  identifiers introduced with in-chapter justification; public Rust-language,
-  IETF and SLIP/BIP specifications; crates.io packages.
-- **Not used:** any private repository, any internal-only document, any
-  upstream post-baseline source tree (no kdf-analysis-2022 access).
-- **Sibling-allowlist consultations:** none.
-- **Author of this chapter:** clean-room reimplementation working set,
-  reviewed under the two-reviewer protocol defined in
-  `local/clean-room-doc/IMPLEMENTER_RULES.md`.
+- *Inputs consulted for this chapter:* the baseline tree at the project
+  baseline commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, Chapter 04
+  (error envelope), Chapter 05 (HD-wallet mnemonic primitives), and the
+  external specifications listed in §7.13.
+- *Permitted-input classes used:* baseline source; chapter-bound
+  protocol identifiers introduced here as wire contract (RPC method names,
+  configuration field names, on-disk file extension, error-variant names);
+  public IETF/BIP/SLIP specifications; standard cryptographic primitive
+  names.
+- *Sibling chapters cross-referenced:* Chapter 04, Chapter 05.
+- *Author of this chapter:* clean-room round-2 driving-spec working set.
+- *Forbidden corpus:* not consulted.
