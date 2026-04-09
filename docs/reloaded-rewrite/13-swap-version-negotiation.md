@@ -1,320 +1,319 @@
-# Chapter 13 — Atomic-Swap Version Negotiation Layer
+# Chapter 13 -- Atomic-Swap Version Negotiation
 
-## Executive Summary
+**Status:** driving-spec
 
-At the baseline tree there is exactly one atomic-swap protocol. Every
-maker and every taker speaks the same wire format, runs the same
-five-stage HTLC dance (taker fee → maker payment → taker payment →
-maker spend → taker spend), and the on-the-wire order, reservation
-and connection messages carry no protocol-version tag at all. Any
-future protocol change would therefore be a hard fork of the gossip
-overlay — old and new nodes would simply fail to deserialise each
-other's messages.
+> **One-sentence claim:** the codebase shall carry a single-
+> byte typed version tag on the two order-protocol messages
+> that initiate an atomic swap, with three bound numeric
+> values (`1` legacy, `2` trading-protocol-upgrade,
+> `3` non-fungible-token-extended), with element-wise-
+> minimum pair negotiation, and with the legacy value
+> omitted on the wire so that nodes that pre-date the tag
+> deserialise messages from version-aware nodes unchanged.
 
-The post-baseline tree introduces an **atomic-swap version
-negotiation layer**. A new module `mm2_main::lp_swap::swap_versioning`
-defines a single typed tag, `SwapVersion { version: u8 }`, exposes
-three named constants (`LEGACY_SWAP_VERSION = 1`,
-`TPU_SWAP_VERSION = 2`, `NFT_SWAP_V2_VERSION = 3`), and supplies
-four predicate/utility methods (`is_legacy`, `is_v2_or_higher`,
-`is_nft_v2`, `negotiate`). The tag is carried on two of the gossip
-order-protocol messages (the taker's `TakerRequest` and the
-maker's `MakerReserved`) as an optional, default-on-missing field,
-mirrored on the persisted `MakerOrder` / `TakerOrder` types, and
-the negotiation function picks the element-wise minimum of the two
-advertised versions so that a peer that only knows version `n` can
-still complete a swap with a peer that knows `n + 1`.
+## 13.0 Executive Summary
 
-The negotiation surface is deliberately a single `u8` with a typed
-wrapper; richer feature-vector negotiation was rejected because (a)
-the only consumers in this tree are the V2 state-machine swap path
-(`TPU`) and its NFT extension, (b) a `u8` keeps the wire envelope
-size identical for legacy peers thanks to
-`skip_serializing_if = "SwapVersion::is_legacy"`, and (c) the
-predicate methods give the dispatcher a single semantic gate
-(`is_v2_or_higher`) without exposing the numeric value to the rest
-of the daemon.
+The atomic-swap protocol carried on the wire is a five-stage
+hash-time-locked-contract dance: taker fee, then maker
+payment, then taker payment, then maker spend, then taker
+spend. Without an explicit version tag on the messages that
+initiate the dance, any future change to the protocol would
+be a hard fork of the gossip overlay: nodes that pre-date
+the change would simply fail to deserialise messages from
+nodes that have adopted it.
 
-The chapter documents the new module, the wire integration on
-order-protocol messages, the negotiation semantics, the tests that
-lock the behaviour, and the backward-compatibility guarantees that
-make a versioned node and a baseline node interoperate without code
-changes on the baseline side.
+This chapter binds the codebase's resolution: a typed
+single-byte version tag on the two order-initiation messages
+(the taker's order-request and the maker's reservation
+reply), carried under three bound numeric values, omitted
+from the wire when its value is the legacy default, with
+element-wise-minimum pair negotiation so peers that
+advertise different versions still complete a swap by
+falling back to the lower of the two.
 
-### Why this changed
+The single-byte choice over a richer capability-vector
+shape is bound by the constrained consumer set at the time
+of writing: a single legacy path, a single trading-
+protocol-upgrade path, and a single non-fungible-token
+extension of the upgrade path. The wrapper-struct shape
+over a bare integer leaves room for additive capability
+fields to land in the same on-the-wire envelope without
+breaking peers that already accept the present
+`{"version": N}` shape.
 
-The version-tag mechanism was introduced by the project's own commit
-`bbfb96ace` (*feat(P5.3+P5.5): SwapVersion on orders + clippy
-fixes*). The commit message states the design verbatim:
+## 13.1 Subsystem Shape
 
-> *Add SwapVersion struct (u8 wrapper: legacy=1, TPU=2) in
-> swap_versioning.rs. Add swap_version field to MakerOrder,
-> TakerRequest, MakerReserved. Wire through MakerOrderBuilder,
-> TakerOrderBuilder, P2P conversions. Backward-compatible: legacy
-> version omitted via skip_serializing_if. Default to V1 (legacy);
-> V2 dispatch requires P5.2 state machines.*
+The version negotiation layer has four behavioural surfaces:
 
-The NFT extension and the `negotiate()` helper were added later by
-commit `5b965f3e9` (*P10.3.7.d NFT swap V2 state-machine wiring +
-SwapVersion negotiation*):
+| Surface                          | Effect                                                        |
+|----------------------------------|---------------------------------------------------------------|
+| Typed version-tag value          | Single-byte wrapper carrying the version number               |
+| Bound numeric values             | Three fixed wire-stable values + default rule                 |
+| Wire-shape on order messages     | Field on order-request + order-reservation; legacy omitted    |
+| Negotiation function             | Pair-min, fixed at the order-request/reservation exchange     |
 
-> *Add NFT_SWAP_V2_VERSION = 3 plus SwapVersion::{is_v2_or_higher,
-> is_nft_v2, negotiate} helpers (negotiation = element-wise min).*
+The version-tag value type, the bound numeric values, the
+predicate set used at dispatch time, and the negotiation
+function form one substrate. The wire-shape integration on
+the two order-protocol messages is the other.
 
-A subsequent clean-room polish landed as `8f1d2e68b` (*lp4: T7 doc
-rewrite + test rename in swap_versioning.rs*), which rewrote the
-module documentation and renamed the unit tests to the project's
-`should_<behaviour>_when_<condition>` standard without touching the
-public API.
+## 13.2 Typed Version-Tag Value
 
-In clean-room voice: the post-baseline project chose to add a
-narrow, typed version tag to the order-protocol messages so that
-the V2 state-machine swap path (and, later, its NFT extension)
-could be dispatched at order-match time without breaking the
-existing wire format. The tag is wire-omitted when legacy, so old
-nodes deserialise new messages unchanged; the dispatch decision
-collapses to a single predicate call (`is_v2_or_higher`); and
-peers running different upgrade levels still complete a swap by
-falling back to the lower advertised version.
+R1. **Single-byte wrapper.** The version tag shall be a
+    typed wrapper around a single unsigned byte. The wire
+    shape of the wrapper shall be a JSON object with a
+    single `version` key whose value is the integer byte.
 
-## Reproduction Detail
+R2. **Additive-extension safety.** The wrapper-struct shape
+    (rather than a bare integer on the wire) shall be
+    preserved so that future additive fields (capability
+    flags, etc.) can land inside the wrapper without
+    breaking peers that already accept the present shape.
 
-### 13.1 Baseline shape (no version tag)
+R3. **Predicate surface.** The wrapper shall expose
+    predicate operations sufficient for the dispatcher to
+    decide which swap path to invoke without exposing the
+    underlying integer at the call site: at minimum
+    `is_legacy`, `is_v2_or_higher`, and `is_nft_v2` (or
+    equivalents in name).
 
-At commit `c1d46c0…` the swap protocol is implicit:
+## 13.3 Bound Numeric Values
 
-- No `swap_versioning.rs` module exists under `lp_swap/`.
-- The order-protocol message structs (`TakerRequest`, `MakerReserved`,
-  `MakerConnect`, `MakerConnected`, `TakerConnect` in
-  `lp_ordermatch/new_protocol.rs`) carry only the fields needed to
-  match orders; no `swap_version` field is present.
-- The persisted `MakerOrder` struct in
-  `lp_ordermatch/ordermatch_types.rs` similarly has no
-  `swap_version` field.
-- The dispatcher in `lp_ordermatch.rs` calls a single pair of
-  functions, `run_maker_swap` and `run_taker_swap`, after a match;
-  there is no branching on a protocol-version value.
+R4. **Three bound values.** The chapter binds the
+    following wire-stable values:
 
-A future protocol upgrade in this shape requires either (a) breaking
-the wire format and partitioning the network into "old" and "new"
-nodes, or (b) carrying a version tag out-of-band (for example in
-`base_protocol_info`/`rel_protocol_info` byte blobs), which would
-conflate a network-wide capability flag with per-coin protocol
-metadata. Both options are unattractive.
+    | Value | Meaning                                          |
+    |-------|--------------------------------------------------|
+    | `1`   | Legacy: the pre-upgrade five-stage HTLC swap     |
+    | `2`   | Trading-protocol-upgrade: the V2 state-machine   |
+    |       | swap path bound by [Chapter 14](14-state-machine-runtime.md) |
+    | `3`   | Non-fungible-token extension of value `2`        |
 
-### 13.2 The `swap_versioning` module
+R5. **Legacy is the default.** The wrapper's default
+    constructor shall return value `1`. Every code path
+    that constructs a version tag without a specific value
+    in mind shall rely on the default so that an
+    unspecified-version code path cannot accidentally
+    upgrade the wire format.
 
-The post-baseline tree adds the file
-`mm2src/mm2_main/src/lp_swap/swap_versioning.rs` (161 lines,
-including doc comments and tests) and registers it in
-`mm2src/mm2_main/src/lp_swap.rs` as:
+R6. **Numeric stability.** The three bound values shall not
+    change meaning. A future protocol revision adds a new
+    value above the highest in the table; it does not
+    reassign an existing one.
 
-```rust
-#[path = "lp_swap/swap_versioning.rs"] pub mod swap_versioning;
-```
+## 13.4 Wire-Shape Integration
 
-The module exports:
+R7. **Two carrier messages.** The version tag is carried on
+    exactly two messages of the order-protocol exchange:
+    the taker's order-request message and the maker's
+    order-reservation reply. The handshake-completion
+    messages (taker-connect, maker-connected) do not carry
+    the tag; by the time those are exchanged the
+    negotiated version is already fixed by the prior
+    request-and-reservation exchange.
 
-| Item | Kind | Wire-stable | Notes |
-|---|---|---|---|
-| `LEGACY_SWAP_VERSION` | `pub const u8 = 1` | yes | V1 protocol identifier |
-| `TPU_SWAP_VERSION` | `pub const u8 = 2` | yes | Trading-Protocol-Upgrade (V2) identifier |
-| `NFT_SWAP_V2_VERSION` | `pub const u8 = 3` | yes | NFT-extended V2 identifier |
-| `SwapVersion` | `pub struct` | yes | `{ version: u8 }` |
-| `SwapVersion::is_legacy` | `pub fn(&self) -> bool` | n/a | predicate |
-| `SwapVersion::is_v2_or_higher` | `pub fn(&self) -> bool` | n/a | dispatch gate |
-| `SwapVersion::is_nft_v2` | `pub fn(&self) -> bool` | n/a | NFT-only gate |
-| `SwapVersion::negotiate` | `pub fn(SwapVersion, SwapVersion) -> SwapVersion` | n/a | pair-min |
-| `impl Default for SwapVersion` | `fn default() -> Self` returning `LEGACY_SWAP_VERSION` | yes | default-on-missing |
+R8. **Legacy is omitted on the wire.** The tag field on
+    both carrier messages shall be serialised with
+    omit-if-legacy semantics: a serialiser shall not emit
+    the field when its value is the legacy default of R5.
+    A deserialiser that does not find the field shall
+    resolve it to the legacy default. This is the
+    backward-compatibility hinge that lets a version-aware
+    node and a pre-tag node interoperate without code
+    changes on the pre-tag side.
 
-The struct itself is the smallest possible wrapper:
+R9. **Persisted-order parity.** The same field with the
+    same omit-if-legacy serde behaviour shall be carried
+    on the persisted-order types so that orders authored
+    before the tag landed deserialise to legacy without
+    operator intervention. The persistence layer round-
+    trips the field unchanged alongside the order JSON.
 
-```rust
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SwapVersion {
-    pub version: u8,
-}
-```
+R10. **Fixed at single point.** The negotiated value shall
+     be fixed at the order-request / order-reservation
+     exchange and shall not be re-negotiated later in the
+     swap. A code path that mutates the tag after the
+     order-match envelope is built shall be rejected as
+     an attempted protocol downgrade.
 
-Wire shape: `{"version": N}`. The wrapper exists rather than a
-bare `u8` so that future fields (e.g. capability flags) could be
-added inside the struct without breaking peers that already know
-the JSON object shape.
+## 13.5 Negotiation Function
 
-### 13.3 Negotiation semantics
+R11. **Element-wise minimum.** The pair-negotiation
+     function shall be the element-wise minimum of the
+     two peers' advertised version values. A pair of
+     legacy peers settles on legacy; a V2 peer matched
+     with a legacy peer settles on legacy (the V2 peer
+     falls back to the old protocol rather than failing
+     the match, preserving the gossip overlay across the
+     upgrade); a V2 peer matched with another V2 peer
+     settles on V2; a non-fungible-token-extended peer
+     matched with a V2 peer settles on V2.
 
-The pair-negotiation function is element-wise min:
+R12. **Downgradability invariant.** R11's correctness
+     depends on every future version being a clean
+     downgrade target for every later version. Any
+     introduction of a value that is not a strict
+     downgrade of its successor invalidates R11 and
+     requires the richer capability-vector approach
+     deferred under D1.
 
-```rust
-pub fn negotiate(maker: SwapVersion, taker: SwapVersion) -> SwapVersion {
-    SwapVersion { version: maker.version.min(taker.version) }
-}
-```
+R13. **Single dispatch predicate.** The dispatch decision
+     "should the V2 state-machine path run?" shall reduce
+     to a single predicate call on the negotiated version
+     value (the `is_v2_or_higher` predicate of R3). The
+     dispatcher shall not switch on the underlying byte.
 
-Consequences in this tree:
+## 13.6 Tests
 
-- A pair of legacy peers (`1, 1`) settles on legacy: no change to
-  the historical wire format.
-- A `TPU` peer matched with a legacy peer (`2, 1`) settles on
-  legacy: the new peer falls back to the old protocol rather than
-  failing the match. This preserves the gossip overlay across the
-  upgrade.
-- A `TPU` peer matched with another `TPU` peer (`2, 2`) settles on
-  `TPU`: both sides enter the V2 state-machine swap path.
-- An `NFT_SWAP_V2` peer matched with a `TPU` peer (`3, 2`) settles
-  on `TPU`: the maker that knows the NFT extension still completes
-  a fungible swap with a non-NFT peer.
+The version-negotiation substrate shall be covered by
+unit tests including:
 
-The `is_v2_or_higher` predicate is the dispatch gate consumed by
-the ordermatch loop after negotiation: when it returns `true`, the
-state-machine swap path (chapters 14–17) is invoked; otherwise the
-V1 path runs unchanged.
+T1. **Default is legacy.** Constructing the wrapper via
+    its default constructor produces the legacy value.
 
-### 13.4 Wire integration on order-protocol messages
+T2. **Round-trip through JSON.** A wrapper containing each
+    of the three bound values serialises to the
+    `{"version": N}` shape and deserialises back to an
+    equal wrapper.
 
-The version tag is carried on two message types in
-`lp_ordermatch/new_protocol.rs`:
+T3. **Missing-field defaults to legacy.** Deserialising an
+    object that does not contain the `version` field into
+    a struct whose tag field carries omit-if-legacy semantics
+    resolves the tag to the legacy default.
 
-| Message | Field | Serde attribute |
-|---|---|---|
-| `TakerRequest` | `pub swap_version: SwapVersion` | `#[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]` |
-| `MakerReserved` | `pub swap_version: SwapVersion` | `#[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]` |
+T4. **Predicates classify correctly.** The legacy value is
+    classified as legacy; the V2 and the non-fungible-
+    token-extended values are both classified as V2-or-
+    higher; only the non-fungible-token-extended value is
+    classified as non-fungible-token-V2.
 
-The handshake-completion messages (`TakerConnect`, `MakerConnected`)
-do **not** carry the field — by the time those are exchanged, the
-dispatched version is already fixed by the prior `TakerRequest` /
-`MakerReserved` exchange.
+T5. **Pair-negotiation corners.** The pair-negotiation
+    function shall return the minimum for each of the
+    pairs `(1,1)`, `(2,1)`, `(2,2)`, `(3,2)`, `(3,1)`,
+    and `(3,3)`.
 
-The `skip_serializing_if = "SwapVersion::is_legacy"` attribute is
-the critical backward-compatibility hinge:
+These five tests are the negotiation contract; any
+implementation shall keep them passing.
 
-- A new node that runs only legacy swaps emits messages with the
-  `swap_version` field **omitted**, byte-for-byte identical to a
-  baseline node's messages.
-- A new node deserialising a baseline node's message has no
-  `swap_version` key; `#[serde(default)]` causes the field to
-  resolve to `SwapVersion::default()` → `LEGACY_SWAP_VERSION`, and
-  negotiation correctly falls back to V1.
+## 13.7 Cross-Subsystem Integration
 
-The persisted-order types in `ordermatch_types.rs`
-(`MakerOrder`, `TakerOrder`, the `TakerRequest`-equivalent
-in-process type, and the maker-match envelope) carry the field
-with the same serde attributes, so saved orders authored before
-the upgrade deserialise to legacy without operator intervention.
+The negotiated version is consumed by the following
+substrates:
 
-### 13.5 Builder and dispatch plumbing
+- The state-machine runtime
+  ([Chapter 14](14-state-machine-runtime.md)) is dispatched
+  when the negotiated version is V2-or-higher per R13.
+- The V2 UTXO swap path
+  ([Chapter 15](15-swap-v2-utxo-path.md)), the V2 pre-burn
+  output engine ([Chapter 16](16-swap-v2-pre-burn-output.md))
+  and the V2 EVM swap path
+  ([Chapter 17](17-swap-v2-evm-path.md)) are the
+  coin-family implementations on top of the state-machine
+  runtime.
+- The legacy fee-routing engine
+  ([Chapter 8](08-fee-routing-engine.md)) runs unchanged on
+  the legacy version.
+- The recent-swaps and stream-status surfaces expose the
+  negotiated version as a top-level field so that
+  consumers (GUIs, integrations) can branch on protocol
+  level without inspecting the swap's internal payload.
 
-The integration in `lp_ordermatch/ordermatch_types.rs` provides:
+R14. **Non-fungible-token outcome enum.** Where the
+     non-fungible-token-extended path is dispatched, the
+     dispatcher shall return a typed outcome enum with at
+     minimum the variants "use NFT V2 path",
+     "version mismatch (advertise maker+taker values)",
+     and "no NFT contract configured", so callers can
+     distinguish a downgrade decision from a
+     mis-configuration.
 
-- A `swap_version: SwapVersion` field on `MakerOrder` (line 1086 in
-  the post-baseline tree) and on the in-process `TakerOrder` /
-  `TakerRequest` family (lines 60, 154, 582, 597) with
-  `#[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]`
-  where the type is serialised.
-- A `with_swap_version(self, SwapVersion) -> Self` builder method
-  on `TakerOrderBuilder` (line 789) so the RPC entry can plumb the
-  caller's chosen version into the broadcast `TakerRequest`.
-- Default-construction sites (e.g. lines 234, 745, 875) use
-  `SwapVersion::default()` to keep legacy behaviour as the zero
-  state.
+## 13.8 Invariants
 
-Match resolution in the same file (lines 82, 128, 1007, 1031,
-1114, 1131) propagates the negotiated version through maker-match
-and connection envelopes, and the persistence layer
-(`my_orders_storage.rs`, lines 754, 774) round-trips the field
-with the order JSON.
+| Invariant                                                | Bound by  |
+|----------------------------------------------------------|-----------|
+| Single-byte typed wrapper with `{"version": N}` shape    | R1        |
+| Three bound numeric values: 1, 2, 3                      | R4        |
+| Default constructor returns legacy (= 1)                 | R5        |
+| Tag carried on order-request + order-reservation only    | R7        |
+| Legacy omitted on the wire; missing field = legacy       | R8        |
+| Field round-tripped on persisted orders                  | R9        |
+| Negotiation fixed at the request/reservation exchange    | R10       |
+| Element-wise-minimum pair negotiation                    | R11       |
+| Dispatch reduces to single predicate                     | R13       |
 
-### 13.6 Tests
+## 13.9 Deferred Work
 
-The module ships with seven unit tests covering:
+D1. **Capability-vector negotiation.** R11's element-wise-
+    minimum is a single-axis ordering. If a future
+    protocol revision introduces a capability that is not
+    strictly subsumed by later versions, the negotiation
+    substrate shall be extended to a capability-vector
+    form (each peer advertises a set; the substrate
+    negotiates the intersection). Not in scope at the time
+    of writing.
 
-- `should_default_to_legacy_when_constructed_via_default`
-- `should_report_not_legacy_when_version_is_v2`
-- `should_roundtrip_through_serde_json`
-- `should_default_to_legacy_when_field_missing_from_payload` — the
-  critical backward-compatibility test; deserialises `"{}"` into a
-  wrapper struct that contains an optional `swap_version: SwapVersion`
-  with `#[serde(default)]` and asserts the resulting value is
-  `LEGACY_SWAP_VERSION`.
-- `should_recognise_nft_v2_tag`
-- `should_classify_tpu_and_nft_as_v2_or_higher`
-- `should_negotiate_minimum_when_versions_differ` — exercises the
-  `(1,1)`, `(3,2)`, `(3,1)`, and `(3,3)` corners.
+D2. **Wire-tag in the order-match envelope itself.** The
+    tag presently rides on order-protocol messages, not
+    on the persisted match envelope's wire-shape footer.
+    Adding a tag to the envelope footer would let an
+    inspector reconstruct the negotiated version from a
+    persisted envelope alone without traversing back to
+    the original request/reservation. Not in scope at the
+    time of writing.
 
-These tests are the contract: any reimplementation must keep them
-passing without modification.
+D3. **Anti-downgrade challenge.** R10 prohibits mutation
+    after the order-match envelope is built but does not
+    cryptographically prevent a manipulated re-broadcast.
+    A signed-tag mechanism would close this gap; it is
+    not in scope at the time of writing.
 
-### 13.7 Integration boundaries (cross-references)
+## 13.10 External References
 
-The negotiation result is consumed downstream by:
+- The publish-subscribe overlay over which the order-
+  protocol messages travel; the per-network-id scoping is
+  bound by [Chapter 6](06-network-id-seed-node.md) and
+  the substrate by [Chapter 28](28-libp2p-modernization.md).
+- The published JSON serialisation framework's
+  omit-if-default and field-default attribute semantics,
+  on which R8's backward-compatibility hinge depends.
+- The hash-time-locked-contract atomic-swap protocol that
+  the version tag governs the dispatch of.
 
-- The state-machine runtime (chapter 14), which is dispatched when
-  `is_v2_or_higher()` returns `true` on the negotiated version.
-- The V2 UTXO swap path (chapter 15) and V2 EVM swap path (chapter
-  17), which are the two coin-family implementations of the state
-  machine in this tree.
-- The pre-burn output engine (chapter 16), which is only invoked
-  on the V2 path; legacy swaps use the chapter-08 fee-routing
-  engine unchanged.
-- The V2 swap RPCs (`swap_v2_rpcs.rs`), which expose the
-  negotiated `swap_version` as a `u8` column in DB rows (line 158)
-  and as part of `MyRecentSwap` reprs (lines 196, 267, 297).
-- The V2 P2P-message persistence in `swap_v2_common.rs` (lines
-  390, 400, 428), which writes the version into the
-  `other_p2p_pub`-indexed row alongside the swap UUID.
+## 13.11 Baseline Verifications
 
-The NFT extension layer (`nft_maker_swap_v2.rs`) defines
-`NftSwapV2NegotiationOutcome { Use | VersionMismatch { maker, taker }
-| NoNftContract }` and a pure-function dispatcher,
-`should_use_nft_swap_v2(maker, taker, has_contract)`, that wraps
-the `SwapVersion::is_nft_v2()` predicate and the maker coin's
-NFT-contract configuration check.
+The following are verifiable from the baseline state defined
+in [Chapter 02](02-baseline-state.md), commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f`:
 
-### 13.8 Invariants the design relies on
+V1. The baseline tree carries no version-negotiation
+    substrate. Verifiable by tree-wide
+    `git grep -E 'SwapVersion|swap_version|swap_versioning'`
+    against the baseline; matches are zero.
 
-1. **Single negotiation point.** The version is fixed at the
-   `TakerRequest` / `MakerReserved` exchange and never re-negotiated
-   later in the swap. Any change to `swap_version` after the maker-
-   match envelope is built must be treated as an attempted protocol
-   downgrade attack and rejected; in this tree the field is
-   `pub` but no code path mutates it after order construction.
-2. **Wire-omitted legacy.** The `skip_serializing_if` attribute
-   must remain on every `swap_version` field on every wire-typed
-   struct, on pain of breaking peers that have not upgraded.
-3. **Element-wise-min negotiation.** Any introduction of a version
-   that is *not* a strict superset of its predecessor (i.e. cannot
-   be cleanly downgraded) would invalidate the negotiation
-   semantics and require a richer capability-vector approach.
-4. **`Default = legacy`.** Every new code path that constructs a
-   `SwapVersion` without a specific version in mind must rely on
-   `Default` resolving to `LEGACY_SWAP_VERSION` so an
-   unspecified-version code path can never accidentally upgrade
-   the wire format.
+V2. The baseline order-protocol message shapes carry no
+    version-tag field. Verifiable by inspection of the
+    baseline order-protocol message types.
 
-## External References
+V3. The five-stage HTLC swap dance is present at the
+    baseline and is exactly the protocol the legacy value
+    `1` of R4 names; this chapter does not introduce a new
+    swap protocol, only the version-tag substrate that
+    allows additional swap protocols to coexist with the
+    legacy one in the same gossip overlay.
 
-- *libp2p gossipsub specification* — the transport over which
-  versioned order-protocol messages are exchanged (see chapter
-  06 for the netid registry that scopes the overlay).
-- *serde-json crate documentation* — the
-  `skip_serializing_if`/`default` attribute semantics on which
-  backward compatibility depends.
-- *Rust language reference* — `u8::min` is the underlying
-  operation in `SwapVersion::negotiate`.
+## 13.12 Provenance Footer
 
-## Provenance Footer
-
-- **Inputs:** `01-clean-room-rules.md`; the baseline workspace at
-  commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`; the public
-  serde-json documentation; the project's own commit messages
-  `bbfb96ace`, `5b965f3e9`, and `8f1d2e68b`.
-- **Sibling references:** chapter 06 (network-id registry), chapter
-  10 (SSE swap-status streamer that reports `swap_version`),
-  chapter 12 (maker-order state store that round-trips the field),
-  chapters 14–17 (downstream consumers).
-- **Forbidden corpus:** not consulted.
-- **Author of this chapter:** clean-room reimplementation working
-  set, see
-  `local/clean-room-doc/IMPLEMENTER_RULES.md`.
-- **Reviewers:** two-pass review at
-  `local/clean-room-doc/reviews/13-swap-version-negotiation-r{1,2}.md`.
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of
+  the version-negotiation substrate at baseline verified
+  via tree-wide `git grep`; absence of a version-tag field
+  on the baseline order-protocol messages verified by
+  inspection of the baseline message types; the
+  publicly-documented JSON serialisation attribute
+  semantics (omit-if-default, field-default) that R8
+  relies on; the publicly-documented hash-time-locked-
+  contract atomic-swap protocol that the legacy value of
+  R4 names.
+- *Forbidden corpus:* not consulted.
