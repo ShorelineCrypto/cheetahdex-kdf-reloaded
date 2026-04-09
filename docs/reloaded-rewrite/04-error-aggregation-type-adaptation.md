@@ -1,348 +1,342 @@
-# Chapter 04 — Error-Aggregation Type Adaptation to the Modern Trait Solver
+# Chapter 04 -- Error-Aggregation Type Adaptation to the Modern Trait Solver
 
-## Executive Summary
+**Status:** driving-spec
 
-The project carries an error-aggregation wrapper, `MmError<E>`,
-that pairs any inner error type `E` with an ordered list of
-source-code locations (`TraceLocation`s) recording the path the
-error took through the call stack. At the baseline this wrapper
-relied on two cooperating `From` implementations and on a custom
-nightly auto-trait, `NotEqual`, whose only job was to keep those
-two impls from overlapping when both type parameters happen to be
-the same.
+> **One-sentence claim:** the codebase shall carry an
+> error-aggregation envelope `MmError<E>` (inner error plus
+> ordered trace of source-code locations) built on a
+> negative auto-trait (`NotMmError`) that bars
+> `MmError`-of-`MmError` nesting, plus an explicit
+> trace-preserving lift extension (`MmResultExt::map_mm_err`)
+> for cross-error-type propagation; the historical
+> `From<MmError<E1>> for MmError<E2>` blanket impl gated on
+> a `(E1, E2): NotEqual` disjointness auto-trait shall not be
+> present, because modern Rust trait-solver behaviour
+> rejects the disjointness argument it relied on, and the
+> explicit lift extension is the bound replacement.
 
-The Rust trait solver was reworked between the baseline and the
-present day. The reworked solver no longer accepts the disjointness
-argument that `NotEqual` was used to express, and the
-`From<MmError<E1>> for MmError<E2>` impl that needed `NotEqual`
-ceased to compile on stable. The post-baseline adaptation removes
-the broken impl and the auxiliary auto-trait, leaving the simpler
-`From<E1> for MmError<E2>` blanket impl in place, and introduces a
-small explicit helper — `MmResultExt::map_mm_err()` — for the
-trace-preserving conversion between two `MmError` types that the
-removed impl used to drive.
+## 4.0 Executive Summary
 
-The wire shape of an `MmError<E>` (the `error`, `error_path`,
-`error_trace`, `error_type`, `error_data` fields of the
-`mmrpc` JSON envelope) is unchanged. The `NotMmError` auto-trait is
-unchanged. Every call site that used to write `?` to lift
-`MmResult<_, E1>` to `MmResult<_, E2>` either keeps that idiom
-(when `E1` is not itself wrapped by `MmError`) or now writes
-`.map_mm_err()?`. The change is mechanical and does not affect
-swap, order-match, or RPC behaviour.
+The codebase pairs every domain error with an ordered list
+of source-code locations recording the path the error took
+through the call stack. The envelope around this pairing,
+the result alias, and the lift combinators together form
+the codebase's standard error surface: every public RPC
+handler in the codebase returns either this envelope or a
+shape that is structurally indistinguishable from it on the
+wire ([Chapter 27](27-infrastructure-crate-carve-outs.md)
+R1).
 
-A reader leaving this chapter should be able to (a) reconstruct
-the baseline two-impl design and the role of `NotEqual` in it,
-(b) explain why the design ceased to compile after the trait-solver
-rework, and (c) verify that the current design preserves the
-external JSON wire contract.
+The wire shape of a serialised error envelope is part of
+the codebase's external contract and is bound verbatim
+here. The Rust-language-level shape, however, has been
+forced to evolve. A historical design used a negative auto-
+trait to express a disjointness constraint that let the
+question-mark operator transparently lift `MmError<E1>` to
+`MmError<E2>` whenever `E2: From<E1>`. Modern Rust trait-
+solver behaviour rejects that disjointness argument; the
+two `From` implementations the historical design depended
+on are no longer coherent.
 
-### Why this changed
+This chapter binds the adapted design: a single non-
+overlapping `From<E1> for MmError<E2>` impl, the
+`NotMmError` negative auto-trait kept unchanged, the
+disjointness auto-trait removed, and a single explicit
+extension method that performs the trace-preserving lift
+the historical design used to do automatically.
 
-The error-aggregation rework was forced by the toolchain modernisation recorded in the project's own commit `dd0460c9f` (*P0: Modernize toolchain from nightly-2022-02-01 to stable Rust 1.93*). The relevant excerpt is verbatim:
+The wire shape (R7 below) is unchanged through the
+adaptation. The call-site impact is mechanical: a small
+suffix added to call sites that previously relied on the
+removed implicit lift.
 
-> *MmError trait solver fix: Removed NotEqual auto trait and From<MmError<E1>> for MmError<E2> impl (fails on modern Rust trait solver, even with RUSTC_BOOTSTRAP). ~350 call sites updated to use .mm_err(Into::into) for MmError→MmError conversions, preserving trace propagation semantics. Keep NotMmError auto trait and From<E1> for MmError<E2> (works fine).*
+## 4.1 Subsystem Shape
 
-A subsequent clean-room rewrite of the file landed as `9bc32406c` (*LP-1: restructure mm_err_handle/mm_error.rs per RELOADED standards*), which preserves the API verbatim while replacing prose and reorganising the module: *"Public surface unchanged: type signatures, trait bounds, every function name and return shape, the Serialize impl's exact JSON output \u2026 are all preserved byte-for-byte at the API boundary."*
+The error substrate has the following surfaces, each bound
+by this chapter:
 
-In clean-room voice: the post-baseline project chose to move off a nightly-2022-02-01 toolchain to stable Rust 1.93, which removed access to the `NotEqual` auto-trait mechanism the baseline relied on for transparent `MmError`-to-`MmError` conversion. The replacement is an explicit `.mm_err(Into::into)` propagation pattern that preserves the existing trace semantics without depending on negative reasoning in the trait solver. A parallel clean-room rewrite of the module's prose was done for legal reasons (LP-1) and is API-compatible.
+| Surface                                  | Effect                                                       |
+|------------------------------------------|--------------------------------------------------------------|
+| Generic envelope `MmError<E>`            | Pairs domain error with ordered trace of locations           |
+| Result alias                             | Idiomatic result type parameterised over the inner error     |
+| Negative auto-trait `NotMmError`         | Bars `MmError`-of-`MmError` nesting at the type-checker level|
+| Single `From` blanket impl               | Lifts bare inner error into envelope of another inner type   |
+| Trace-preserving lift extension          | Explicit method that converts `MmError<E1>` → `MmError<E2>`  |
+| Caller-location capture                  | Records the source location of every conversion site         |
+| Wire-format serialisation envelope       | Five-field JSON shape consumed by integration clients        |
 
-## Reproduction Detail
+The five-field wire envelope (R7) is the external contract;
+every other surface is internal to the Rust API.
 
-### 4.1 The baseline error-aggregation type
+## 4.2 The Envelope and the Trace
 
-The baseline `mm2src/mm2_err_handle/src/mm_error.rs` defines an
-`MmError<E>` struct that pairs an inner error of type `E` with a
-`Vec<TraceLocation>`. The `Vec` is appended every time the wrapper
-crosses a `?` operator or one of the explicit lifting helpers
-(`map_to_mm`, `mm_err`, `or_mm_err`). Combined with
-`#[track_caller]` on the constructors, the list ends up containing
-one entry per conversion site, in stack order.
+R1. **Envelope shape.** `MmError<E>` shall pair an inner
+    error of type `E` with an ordered list of source-code
+    locations. The list shall be appended to on every
+    conversion that crosses the envelope, in stack order,
+    so that the first entry is the innermost call and the
+    last entry is the outermost.
 
-Two `From` impls drove the `?` operator at the baseline:
+R2. **Caller-location capture.** Every constructor and
+    every conversion site within the substrate shall use
+    the standard caller-location capture mechanism so that
+    the appended trace entry records the source location of
+    the call site, not of the conversion site inside the
+    substrate.
 
-```rust
-// Impl A — lift an inner error from one MmError to another, preserving trace.
-impl<E1, E2> From<MmError<E1>> for MmError<E2>
-where
-    E1: NotMmError,
-    E2: From<E1> + NotMmError,
-    (E1, E2): NotEqual,
-{
-    #[track_caller]
-    fn from(orig: MmError<E1>) -> Self { orig.map(E2::from) }
-}
+R3. **Result alias.** The substrate shall expose a result
+    alias parameterised over the inner error type, with
+    the envelope as the error variant. Every call site that
+    returns from the substrate's domain shall use this
+    alias rather than the bare result type.
 
-// Impl B — wrap a bare inner error into an MmError, starting a new trace.
-impl<E1, E2> From<E1> for MmError<E2>
-where
-    E1: NotMmError,
-    E2: From<E1> + NotMmError,
-{
-    #[track_caller]
-    fn from(e1: E1) -> Self { MmError::new(E2::from(e1)) }
-}
-```
+## 4.3 The Negative Auto-Trait Constraint
 
-Impl A is the interesting one: it allows a caller to write
+R4. **`NotMmError` is the substrate-defining negative
+    auto-trait.** The substrate shall expose an auto-trait
+    `NotMmError` with a negative implementation on
+    `MmError<E>` for every `E`. The auto-trait shall be the
+    sole declared constraint on the inner-error parameter
+    of every conversion impl on the envelope.
 
-```rust
-fn outer() -> MmResult<(), OuterError> {
-    let v = inner_call()?; // returns MmResult<_, InnerError>
-    ...
-}
-```
+R5. **`NotMmError` bars envelope nesting at the type
+    checker.** Because the auto-trait has a negative
+    implementation on the envelope itself, no `MmError<E>`
+    is ever a valid inner-error type; a typo or refactor
+    that would otherwise produce an `MmError<MmError<E>>`
+    is rejected at compile time. R5 is the invariant that
+    makes the substrate's flat-trace assumption (R1)
+    sound.
 
-and have the `?` operator do two things at once — convert
-`InnerError` into `OuterError` via `OuterError: From<InnerError>`,
-and append the call site to the trace stored in the existing
-`MmError<InnerError>` rather than discarding it and starting fresh.
+R6. **Auto-trait propagation compensations.** The
+    auto-trait shall carry the small fixed set of
+    additional positive implementations on standard-
+    library wrappers that are required because auto-traits
+    do not propagate through unsized wrappers. The bound
+    set at the time of writing is the standard library's
+    boxed-trait-object wrapper and its interior-mutability
+    cell wrapper.
 
-Without Impl A, the same `?` would fall through to Impl B, which
-treats the `MmError<InnerError>` as an opaque inner error and
-wraps it inside a *new* `MmError`, producing a value of type
-`MmError<MmError<InnerError>>`. The `NotMmError` auto-trait — also
-defined at the baseline — explicitly excludes any `MmError<_>`
-from being treated as a valid inner error, so this fallthrough is
-in fact disallowed by the type checker:
+## 4.4 The Single `From` Impl and the Explicit Lift
 
-```rust
-pub auto trait NotMmError {}
-impl<E> !NotMmError for MmError<E> {}
-```
+R7. **Single blanket `From` impl.** The substrate shall
+    expose exactly one blanket `From` impl on the envelope:
+    `From<E1> for MmError<E2>` where `E1: NotMmError`,
+    `E2: From<E1>`, `E2: NotMmError`. This impl wraps a
+    bare inner error of one type as an envelope of another
+    type, starting a fresh trace, and is what the
+    question-mark operator uses to lift any non-envelope
+    inner error into the substrate's envelope.
 
-This left exactly one disjointness problem to solve. When `E1`
-equals `E2`, both impls are applicable: Impl A trivially (`E2:
-From<E1>` reduces to `E1: From<E1>`, which `core` provides for
-every type), and Impl B vacuously. Rust's coherence rules reject
-overlapping `From` impls.
+R8. **No `From<MmError<E1>> for MmError<E2>` impl.** The
+    substrate shall **not** carry a `From<MmError<E1>> for
+    MmError<E2>` blanket impl. The historical
+    implementation of that impl required a disjointness
+    auto-trait (a negative implementation on the structural
+    pair `(X, X)`) to avoid overlapping with R7; modern
+    Rust trait-solver behaviour rejects that disjointness
+    argument. The absence of the impl is the wire-stable
+    consequence of that rejection.
 
-The baseline solution was the `NotEqual` auto-trait:
+R9. **Explicit trace-preserving lift extension.** The
+    substrate shall expose an extension trait on
+    `Result<T, MmError<E1>>` exposing a single method
+    (named `map_mm_err` at the time of writing) that, for
+    any `E2: From<E1>` and `E2: NotMmError`, returns
+    `Result<T, MmError<E2>>` by converting the inner error
+    with `E2::from` and preserving the existing trace
+    (plus appending the call site under R2).
 
-```rust
-pub auto trait NotEqual {}
-impl<X> !NotEqual for (X, X) {}
-impl<T: ?Sized> NotEqual for Box<T> {}
-```
+R10. **Non-`From` conversions use the pre-existing
+     mapping helper.** Where a caller's conversion is not
+     a `From` conversion (the target inner error is not
+     mechanically derivable from the source inner error),
+     the substrate's pre-existing per-call mapping helper
+     (named `mm_err` at the time of writing, taking a
+     closure `Fn(E1) -> E2`) shall be used. This helper
+     does not depend on the trait solver's disjointness
+     reasoning and was present before the adaptation.
 
-By bounding Impl A with `(E1, E2): NotEqual`, the impl was
-restricted to type-parameter pairs where the two members are
-distinct, and the overlap with Impl B disappeared. `NotEqual` was
-re-exported from the crate's `prelude` so that downstream code
-could express the same disjointness when it needed to write
-similar generic impls.
+## 4.5 Call-Site Impact
 
-### 4.2 Why the design ceased to compile
+R11. **Mechanical, additive impact.** The adaptation's
+     effect on call sites is mechanical: every call site
+     that previously relied on the implicit envelope-to-
+     envelope lift through the question-mark operator
+     shall now write `.map_mm_err()?` (where the
+     conversion is a `From` conversion) or
+     `.mm_err(|e| ...)?` (where it is not). Call sites
+     that lift a non-envelope inner error into the
+     envelope continue to work unchanged through R7.
 
-`auto trait` and the `impl !Trait for Type` syntax used to express
-"negative" implementations are both still nightly-only Rust
-features. The error crate at the baseline opted into both via:
+R12. **No swap, order-match, or RPC behaviour change.**
+     The adaptation shall not alter swap, order-match, or
+     RPC behaviour. The trace contents, the inner-error
+     types, and the wire envelope (§4.6) are identical
+     before and after. The only externally observable
+     change at the source level is the extra method call
+     at affected call sites.
 
-```rust
-#![feature(negative_impls)]
-#![feature(auto_traits)]
-```
+## 4.6 Wire Envelope
 
-Through the post-baseline toolchain migration (chapter 03), those
-two features stayed in use; they are among the small number of
-nightly-only language constructs that the project still needs and
-that it bridges to the stable toolchain through the
-`RUSTC_BOOTSTRAP` allowlist.
+R13. **Five-field JSON shape.** The substrate's standard
+     serialisation of `MmError<E>` shall produce a JSON
+     object with the following five fields (bound by
+     name):
 
-The relevant change is not in the features themselves but in the
-trait solver that consumes the impls. Between the baseline and the
-present day, the Rust language team reworked the trait solver. The
-reworked solver evaluates negative implementations and overlap
-arguments through a different procedure and, in particular,
-rejects the "negative impl over a structural pattern such as
-`(X, X)`" pattern that `NotEqual` relied on. After that rework
-the Impl A constraint `(E1, E2): NotEqual` no longer satisfies the
-compiler as a disjointness proof, and the two `From` impls are
-once again rejected for overlap.
+     | Field        | Source                                              |
+     |--------------|-----------------------------------------------------|
+     | `error`      | Display form of the inner error                     |
+     | `error_path` | Dot-separated, de-duplicated file chain of the trace|
+     | `error_trace`| Full `file:line` chain of the trace                 |
+     | `error_type` | Discriminator tag of the inner error's wire shape   |
+     | `error_data` | Payload of the inner error's wire shape             |
 
-The configuration comment in `.cargo/config.toml` records the
-proximate trigger:
+R14. **Tag/content shape for the inner error.** The
+     `error_type` / `error_data` field pair shall be
+     produced by the substrate's adjacent-tagged wire
+     shape gating mechanism (R15); the discriminator name
+     and the payload shape are owned by each domain error
+     enum, not by the envelope.
 
-```
-- mm2_err_handle: `auto trait NotMmError` + negative impls
-                  (NotEqual was removed in P0 — Rust 1.93 trait solver regression)
-```
+R15. **Sealed marker for the wire-shape derive.** The
+     substrate shall gate the derive of the
+     adjacent-tagged wire shape behind a sealed marker
+     trait emitted by a companion procedural-macro
+     substrate so that arbitrary types cannot accidentally
+     opt into the envelope's wire format without an
+     explicit derive on their enum.
 
-"P0" is a project-internal priority label; it identifies the
-remediation as a build-blocker fix rather than a feature change.
+## 4.7 Preserved API Surface
 
-### 4.3 The adaptation
+R16. **Construction surface.** The envelope's public
+     construction surface (`MmError::new` and equivalents
+     used to start a fresh trace; `MmError::err` returning
+     a result; `MmError::map` for inner-type substitution;
+     `MmError::split` for decomposing the envelope back to
+     its inner error and trace; and the constructor that
+     accepts an externally-provided trace prefix) shall
+     all be preserved across the adaptation.
 
-The adaptation has three pieces.
+R17. **Lift combinator surface.** The substrate's
+     pre-existing per-call lift combinators (`map_to_mm`,
+     `mm_err`, `or_mm_err`, and the futures-equivalents
+     `map_to_mm_fut` and equivalents) shall all be
+     preserved across the adaptation. The extension method
+     of R9 augments this surface; it does not replace it.
 
-**4.3.1 Removed Impl A.** The `From<MmError<E1>> for MmError<E2>`
-impl is no longer present in `mm_error.rs`. The `NotEqual`
-auto-trait is no longer defined and is no longer re-exported from
-the crate's `prelude`. A grep across the current tree
-(`grep -rn 'NotEqual' mm2src/`) finds zero occurrences.
+R18. **HTTP-status-mapping integration.** Every domain
+     error type that flows through the substrate to a
+     public RPC handler shall declare its HTTP-status
+     mapping at the handler boundary, per
+     [Chapter 27](27-infrastructure-crate-carve-outs.md) R2.
 
-**4.3.2 Kept Impl B.** The simpler `From<E1> for MmError<E2>` impl
-remains exactly as at the baseline:
+## 4.8 Tests
 
-```rust
-impl<E1, E2> From<E1> for MmError<E2>
-where
-    E1: NotMmError,
-    E2: From<E1> + NotMmError,
-{
-    #[track_caller]
-    fn from(e1: E1) -> Self { MmError::new(E2::from(e1)) }
-}
-```
+T1. **Trace appends on lift.** Every conversion path
+    through R7 and R9 shall be covered by a test that
+    asserts the resulting envelope's trace has one more
+    entry than the input, and that the new entry's source
+    location matches the call site.
 
-Because Impl A is gone, the `?` operator can no longer lift
-`MmResult<_, E1>` into `MmResult<_, E2>` directly when both are
-already `MmError`-wrapped — the type `MmError<E1>` is excluded
-from `E1: NotMmError` by the negative impl on `MmError<_>`. The
-bare `?` continues to work for converting any non-`MmError` inner
-error into an `MmError` of a different type, which is the more
-common pattern at call sites.
+T2. **Wire-shape round-trip.** Every field listed in R13
+    shall be exercised by a serde round-trip test against
+    at least one representative domain error.
 
-**4.3.3 Added `MmResultExt::map_mm_err()`.** The trace-preserving
-lift between two `MmError` types is provided as an extension
-method on `Result<T, MmError<E1>>`:
+T3. **Negative-impl coverage.** A compile-fail test (or
+    equivalent doc-test) shall demonstrate that
+    constructing an `MmError<MmError<E>>` is rejected at
+    the type-checker level by R5.
 
-```rust
-pub trait MmResultExt<T, E1> {
-    #[track_caller]
-    fn map_mm_err<E2>(self) -> Result<T, MmError<E2>>
-    where
-        E2: From<E1> + NotMmError;
-}
+## 4.9 Deferred Work
 
-impl<T, E1> MmResultExt<T, E1> for Result<T, MmError<E1>>
-where
-    E1: NotMmError,
-{
-    #[track_caller]
-    fn map_mm_err<E2>(self) -> Result<T, MmError<E2>>
-    where
-        E2: From<E1> + NotMmError,
-    {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err_e1) => Err(err_e1.map(E2::from)),
-        }
-    }
-}
-```
+D1. **Eventual return to a transparent lift impl.** Should
+    a future trait-solver mode (a recognised stable
+    alternative or its successor) admit the disjointness
+    proof that R8's rejected impl relied on, the substrate
+    may re-introduce the implicit lift impl, deprecate
+    the explicit extension (R9) for `From`-derived
+    conversions, and adjust call sites accordingly. The
+    wire shape (R13) would remain unchanged. Not in
+    scope at the time of writing.
 
-Call sites that used to read
+D2. **Doc-comment lift the contracted invariants.** The
+    bound invariants of §4.3 and §4.4 are presently
+    expressed at the type-checker level only. Adding
+    surface doc-comments that name them explicitly would
+    let a downstream reader confirm the design intent
+    without reading the trait-solver rules. Not in
+    scope at the time of writing.
 
-```rust
-let v = inner_call()?;
-```
+D3. **Per-error-class HTTP-status helper.** R18 delegates
+    HTTP-status mapping to each handler. Common error
+    classes recur across handlers; a per-class helper
+    (e.g. "this error class always maps to 400") would
+    reduce per-handler boilerplate. Not in scope at the
+    time of writing.
 
-now read
+## 4.10 External References
 
-```rust
-let v = inner_call().map_mm_err()?;
-```
+- The Rust language reference's auto-trait declaration
+  and negative-implementation syntax (the language
+  features on which R4 and R5 depend).
+- The Rust language reference's caller-location-capture
+  attribute (the mechanism R2 depends on).
+- The Rust language reference's coherence and overlap
+  rules (the basis for R8's coherence rejection).
+- The Rust language's standard adjacent-tagged
+  serialisation shape (the wire format R14 commits to).
+- The codebase's toolchain-modernisation chapter
+  ([Chapter 3](03-toolchain-modernization.md)), which
+  records the bootstrap mechanism that lets the
+  substrate retain the language features of R4 and R5
+  while the rest of the codebase compiles on the stable
+  toolchain.
 
-when `inner_call` returns `MmResult<_, E1>` and the enclosing
-function returns `MmResult<_, E2>` for some `E2: From<E1>`. The
-behaviour is identical: `MmError::map` is called with `E2::from`,
-which preserves the existing trace and appends the caller's source
-location (via `#[track_caller]`).
+## 4.11 Baseline Verifications
 
-For callers whose conversion is not a `From` conversion — i.e.
-whose `E2` cannot be derived mechanically from `E1` — the existing
-`MapMmError::mm_err(|e1| ...)` helper (present at the baseline and
-unchanged) remains the recommended idiom.
+The following are verifiable from the baseline state defined
+in [Chapter 02](02-baseline-state.md), commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f`:
 
-### 4.4 What did not change
+V1. The baseline tree carries the envelope, the negative
+    auto-trait `NotMmError`, and the historical
+    `From<MmError<E1>> for MmError<E2>` blanket impl gated
+    on a `NotEqual` disjointness auto-trait. Verifiable by
+    inspection of the baseline error substrate.
 
-The JSON wire shape of a serialised `MmError<E>` is unchanged. The
-`Serialize` implementation produces an object with the same five
-fields as at the baseline:
+V2. The baseline tree compiles against the historical
+    nightly toolchain pinned in
+    [Chapter 3](03-toolchain-modernization.md) but not
+    against the stable toolchain that
+    [Chapter 3](03-toolchain-modernization.md) binds the
+    codebase to move to. The R8 rejection is therefore
+    forced by a language-level change, not by a
+    substrate-level redesign.
 
-| Field | Source |
-|---|---|
-| `error` | `etype.to_string()` |
-| `error_path` | `MmError::path()` — dot-separated, de-duplicated file chain |
-| `error_trace` | `MmError::stack_trace()` — full `file:line]` chain |
-| `error_type` | `E`'s `#[serde(tag)]` discriminator |
-| `error_data` | `E`'s `#[serde(content)]` payload |
+V3. The substrate's wire-format envelope (R13) is present
+    at the baseline with the same field names; the
+    adaptation preserves it byte-for-byte at the API
+    boundary. Verifiable by inspection of the baseline
+    serialisation implementation.
 
-These are the field names the `mmrpc` JSON-RPC clients consume.
-They form part of the project's external interface and cannot
-change without breaking GUIs and integrations.
+## 4.12 Provenance Footer
 
-The `NotMmError` auto-trait is unchanged: it still has the same
-definition, the same negative impl on `MmError<E>`, and the same
-two opt-in impls on `Box<T: ?Sized>` and `UnsafeCell<T: ?Sized>`
-that the baseline used to compensate for auto-traits not propagating
-through unsized types.
-
-The `SerMmErrorType` blanket bound, the `SerializeErrorType`
-trait in the `ser_error` crate, the `#[derive(SerializeErrorType)]`
-attribute, the `HttpStatusCode` blanket impl, the
-`MmError::new` / `MmError::err` / `MmError::map` /
-`MmError::new_with_trace` / `MmError::split` API, and the
-`map_to_mm` / `mm_err` / `or_mm_err` / `map_to_mm_fut` extension
-traits are all preserved.
-
-### 4.5 Reproducing the adaptation from the baseline
-
-Starting from the baseline working tree at commit
-`c1d46c0c1592faa0860f704008b2b2381bc3840f`, an engineer aware of
-the trait-solver regression can reproduce the present state by:
-
-1. Open `mm2src/mm2_err_handle/src/mm_error.rs`.
-2. Delete the `From<MmError<E1>> for MmError<E2>` impl block.
-3. Delete the `pub auto trait NotEqual {}` declaration and its two
-   accompanying impls (`impl<X> !NotEqual for (X, X) {}` and
-   `impl<T: ?Sized> NotEqual for Box<T> {}`).
-4. Open `mm2src/mm2_err_handle/src/lib.rs`. Remove `NotEqual` from
-   the `prelude` re-export list.
-5. Open `mm2src/mm2_err_handle/src/map_mm_error.rs`. Add a new
-   trait `MmResultExt<T, E1>` with a single `map_mm_err<E2>()`
-   method, plus the blanket impl shown in §4.3.3 above. Re-export
-   `MmResultExt` from the crate's `prelude` if call sites use the
-   bare method name.
-6. For every call site in the workspace where the type checker now
-   complains that `?` cannot lift `MmResult<_, E1>` to
-   `MmResult<_, E2>`, change the call to
-   `.map_mm_err()?` (or, if the conversion is not a `From`
-   conversion, to `.mm_err(|e| ...)?`).
-
-The build should pass against stable Rust with the
-`mm_err_handle` crate present in `.cargo/config.toml`'s
-`RUSTC_BOOTSTRAP` allowlist (see chapter 03), because
-`negative_impls` and `auto_traits` are still required by the
-surviving `NotMmError` declaration.
-
-## External References
-
-- *The Rust Reference — auto traits.* Defines the `auto trait`
-  declaration and the negative-impl syntax used by `NotMmError`
-  and (at the baseline) `NotEqual`.
-  https://doc.rust-lang.org/reference/special-types-and-traits.html#auto-traits
-- *The Rust Reference — `#[track_caller]` attribute.* Documents
-  the mechanism that lets `From::from` record the caller's source
-  location, which is the basis of `MmError`'s trace.
-  https://doc.rust-lang.org/reference/attributes/codegen.html#the-track_caller-attribute
-- *The Rust Reference — coherence and overlap rules.* The basis
-  for the disjointness argument that `NotEqual` originally
-  expressed.
-  https://doc.rust-lang.org/reference/items/implementations.html#trait-implementation-coherence
-- *Rust language team — next-generation trait solver.* The
-  upstream effort that produced the trait-solver behaviour change
-  this chapter is responding to.
-  https://blog.rust-lang.org/inside-rust/2023/07/17/trait-system-refactor-initiative.html
-- *Cargo Reference — `RUSTC_BOOTSTRAP`.* The mechanism that lets
-  `mm_err_handle` keep its `auto_traits` and `negative_impls`
-  declarations while the rest of the project compiles on stable.
-  https://doc.rust-lang.org/cargo/reference/environment-variables.html
-
-## Provenance Footer
-
-*This chapter v1; verified directly against the baseline tree at
-commit `c1d46c0c1592faa0860f704008b2b2381bc3840f` and the current
-tree on 2026-05-31. Reviewer #1 and reviewer #2 reports stored at
-`local/clean-room-doc/reviews/04-error-aggregation-type-adaptation-r{1,2}.md`.*
+- *Status:* driving-spec.
+- *Version:* v2.
+- *Verified against:* baseline commit
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; presence at
+  baseline of the envelope, `NotMmError`, and the
+  historical impl gated on a disjointness auto-trait
+  verified by inspection of the baseline error substrate;
+  the publicly-documented Rust language features of
+  auto-traits and negative implementations on which R4-R5
+  depend; the publicly-documented Rust caller-location-
+  capture attribute on which R2 depends; the publicly-
+  documented Rust coherence and overlap rules on which
+  R8's rejection depends; the publicly-documented Rust
+  adjacent-tagged serialisation shape on which R14
+  depends; the toolchain modernisation contract of
+  Chapter 3 (the `RUSTC_BOOTSTRAP` allowlist mechanism
+  that keeps R4-R5's language features available).
+- *Forbidden corpus:* not consulted.
