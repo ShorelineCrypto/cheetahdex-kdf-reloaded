@@ -172,7 +172,7 @@ short and uniform.
 ## 6.5 Peer-to-Peer Netid-Blindness
 
 The peer-to-peer subsystem (covered in detail in
-[Chapter 11](11-libp2p-p2p-layer.md)) is **netid-blind**:
+[Chapter 28](28-libp2p-modernization.md)) is **netid-blind**:
 
 R1. The peer-to-peer subsystem shall not accept a netid
     parameter on any of its public entry points.
@@ -295,19 +295,18 @@ R8. **Three-flavour DEX-fee identity.** Every registered
 D1. **DEX-fee semantics** beyond identity (when the fee is
     charged, who charges it, who receives it, how the burn
     share is computed and emitted) are covered in
-    [Chapter 16](16-dex-fee.md). This chapter binds only the
+    [Chapter 08](08-fee-routing-engine.md). This chapter binds only the
     *source of truth* for the fee identity and rate constants,
     not their interpretation.
 
-D2. **Per-coin activation** is covered in
-    [Chapter 09](09-coin-activation.md). The activation layer
-    consults the network-config registry to resolve the
+D2. **Per-coin activation** is handled by the per-coin activation
+    layer, which consults the network-config registry to resolve the
     DEX-fee identity for the chain it is activating.
 
-D3. **Burn-emission integration** is covered in
-    [Chapter 08](08-mm-ctx-and-state-layering.md) (how the
-    daemon-wide context exposes the network-config handle) and
-    [Chapter 16](16-dex-fee.md) (how the burn share is split
+D3. **Burn-emission integration** is covered in the
+    daemon-wide central-context substrate (how that context
+    exposes the network-config handle) and
+    [Chapter 08](08-fee-routing-engine.md) (how the burn share is split
     out and emitted on-chain).
 
 D4. **Macro consolidation** for the test-netid module is an

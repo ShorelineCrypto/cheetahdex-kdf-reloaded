@@ -46,8 +46,7 @@ depends only on:
 
 - Standard async-Rust crates (futures, tokio-style channels in
   the workspace's runtime selection).
-- The workspace's central context type (see
-  [Chapter 8](08-mm-ctx-and-state-layering.md)) for the lazy
+- The workspace's central context substrate for the lazy
   per-context handle pattern.
 - The workspace's database abstractions (see
   [Chapter 25](25-sql-query-builder.md) for the native SQL path
@@ -89,8 +88,8 @@ tests, no relay-loop or crypto tests.
 ## 22.2 Public Handle and Connection API
 
 The subsystem exposes a single public handle type, accessed
-through the per-context lazy-init pattern of
-[Chapter 8](08-mm-ctx-and-state-layering.md). Call sites obtain
+through the per-context lazy-init pattern of the
+codebase's central-context substrate. Call sites obtain
 the handle from the central context; they do not construct it
 directly.
 

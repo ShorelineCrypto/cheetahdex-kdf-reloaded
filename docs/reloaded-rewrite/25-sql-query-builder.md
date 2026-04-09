@@ -269,8 +269,8 @@ component:
 
 - `mm2_core/src/mm_ctx.rs` -- `MmCtx` owns both
   `Constructible<SqliteConnShared>` and an
-  `AsyncMutex<AsyncConnection>`, see
-  [Chapter 8](08-mm-ctx-and-state-layering.md).
+  `AsyncMutex<AsyncConnection>`, behind the codebase's
+  central-context substrate.
 - `mm2_gui_storage` ([Chapter 24](24-gui-account-state.md))
   -- the three GUI-account tables go through the DSL.
 - `coins/sql_tx_history_storage.rs`, `coins/tx_history_db.rs`

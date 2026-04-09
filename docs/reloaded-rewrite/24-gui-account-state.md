@@ -59,7 +59,7 @@ The crate is organised into the following functional regions:
 | RPC handlers               | Eleven typed handlers, one per surface method |
 
 The per-context handle is obtained through the lazy-init
-pattern of [Chapter 8](08-mm-ctx-and-state-layering.md); call
+pattern of the codebase's central-context substrate; call
 sites acquire the handle from the central context and never
 construct the backend directly.
 
@@ -298,9 +298,9 @@ D6. **Bulk import / export.** A GUI-facing backup flow
   HD account index used by the HD identity variant of §24.2).
 - The codebase's standard error and HTTP-status mapping
   conventions referenced by R10.
-- The codebase's per-context handle pattern
-  ([Chapter 8](08-mm-ctx-and-state-layering.md)) referenced
-  by the lazy-init rule of §24.1.
+- The codebase's per-context handle pattern (lazy-init
+  under the central-context substrate) referenced by the
+  lazy-init rule of §24.1.
 - The codebase's cross-platform persistence approach
   ([Chapter 26](26-cross-platform-and-wasm.md)) referenced by
   the browser-target stub of §24.7.

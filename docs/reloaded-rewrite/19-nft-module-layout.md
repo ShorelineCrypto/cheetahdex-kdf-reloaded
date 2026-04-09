@@ -68,8 +68,8 @@ layout rule.
 ## 19.2 Public Handle
 
 The subsystem exposes a single handle type obtained via the
-per-context lazy-init pattern of
-[Chapter 8](08-mm-ctx-and-state-layering.md). Call sites
+per-context lazy-init pattern of the codebase's
+central-context substrate. Call sites
 acquire the handle from the central context; they do not
 construct it directly. The handle is the only path through
 which the RPC handlers, the withdrawal flow, and any future
