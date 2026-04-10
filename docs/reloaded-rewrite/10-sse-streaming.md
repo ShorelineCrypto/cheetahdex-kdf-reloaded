@@ -1,458 +1,429 @@
-# Chapter 10 — Server-Sent-Events Streaming Backbone
+# Chapter 10 — Server-Sent-Events Streaming Substrate
 
-## Executive Summary
+**Status:** driving-spec.
 
-The baseline tree has no first-class real-time event channel: GUIs poll
-JSON-RPC endpoints. The post-baseline tree adds a Server-Sent-Events (SSE)
-backbone so a GUI can subscribe to specific event categories (heartbeat,
-per-coin balance, swap status, order status, orderbook updates) and receive
-push notifications over a single long-lived HTTP response.
+A reusable in-process event-broker substrate plus a native-only HTTP
+transport adapter, together exposing five Server-Sent-Events streamers
+under a dedicated RPC namespace, structurally replacing the polling-only
+read model the baseline tree carried for live GUI updates.
 
-The backbone is split into two layers:
+## 10.1 Executive Summary
 
-- A reusable in-process pub/sub crate, `mm2_event_stream/`, that owns
-  per-streamer task lifecycles and per-client bounded channels.
-- A native-only HTTP handler at `GET /event-stream?id=<client_id>` that adapts
-  the crate's per-client event stream into the
-  `data: <json>\n\n` SSE wire format.
+The baseline tree carries no first-class real-time event channel:
+graphical consumers must poll the JSON-RPC surface for balances, swap
+status, order status, and orderbook updates. The substrate bound by this
+chapter introduces a structural split into two layers:
 
-Activation is via a new RPC namespace, `stream::*`, with one
-`<category>::enable` method per streamer. Disabling is implicit: when an SSE
-client connection drops, its bookkeeping is removed and any streamer that
-loses its last subscriber is shut down. Slow clients are individually
-back-pressured (events dropped per slow client) and never block the
-broadcaster or other clients.
+1. An in-process publish/subscribe broker exposed as a standalone crate
+   substrate (chapter-bound identifier: `mm2_event_stream`), owning
+   per-streamer task lifecycles and per-client bounded delivery channels.
+2. A native-only HTTP handler at the bound path `GET /event-stream`,
+   adapting the broker's per-client receiver into the
+   `text/event-stream` wire format.
 
-This chapter documents the public crate API, the streamer trait contract,
-the wire-stable `StreamerId` strings, the HTTP endpoint shape, the `stream::*`
-RPC dispatcher, the concrete streamers shipped in this tree (heartbeat,
-balance, swap status, order status, orderbook), and the runtime invariants
-the design relies on.
+Activation is bound to a new RPC namespace prefix (`stream::`) with
+exactly five `<category>::enable` methods. Deactivation is bound to be
+implicit: when an HTTP client connection drops, its bookkeeping is
+removed and any streamer that loses its last subscriber is shut down.
+Slow clients are bound to be individually back-pressured (events dropped
+per slow client) and never block the broadcaster or other clients.
 
-### Why this changed
+This chapter binds the broker's public crate surface, the streamer trait
+contract, the wire-stable streamer origin tags, the HTTP endpoint shape,
+the `stream::*` dispatcher routing, the five concrete streamer identities
+shipped by the substrate, and the runtime invariants the design relies
+on.
 
-The SSE backbone landed in three project commits as the corresponding event sources came online: `c3ae7fe40` (*P3: SSE event streaming — infrastructure, heartbeat, and balance streamers*), `5c32c4705` (*feat(ordermatch): P4.4 SSE order/orderbook event streamers*), and `0b6c233ea` (*P6.6+P6.7: V2 swap RPCs, SSE events, kickstart recovery, DB storage*).
+## 10.2 Subsystem Shape
 
-The foundational commit `c3ae7fe40` describes the layer verbatim:
+The substrate occupies a structural seam between three subsystems:
 
-> *New crate mm2_event_stream with Event, StreamingManager, EventStreamer trait. SSE endpoint at GET /event-stream?id=<client_id> with chunked transfer. stream:: namespace routing in dispatcher for streaming RPCs. Heartbeat streamer (stream::heartbeat::enable) — periodic alive signal. Balance streamer (stream::balance::enable) — polls coin balance, emits on change. Multi-client fan-out with shared streamer tasks and graceful shutdown.*
+- the central-context substrate (the broker handle is owned as a field
+  on the context and reachable from any subsystem holding the context);
+- the JSON-RPC dispatcher (the `stream::*` namespace prefix is bound as
+  a dispatcher branch routing to a streamer-activation table);
+- the native HTTP server (the `/event-stream` route is bound as an
+  additional handler beside the JSON-RPC handler, gated to native-only
+  targets).
 
-The order/orderbook commit `5c32c4705` adds an external data-push channel to the trait (`data_rx`) so per-pair streamers can receive their feed from the ordermatch loop. The V2-swap commit `0b6c233ea` introduces `SwapStatusStreamer` plus `SwapStatusEvent` and ties them into both live `on_event()` and kickstart-recovery emission.
+The substrate is *not* a redesign of the JSON-RPC surface. The five
+streamers add a push channel beside the existing pull surface; no
+pre-existing read RPC is removed, renamed, or repurposed. Bound rules
+(R1–R6) constrain the broker; (R7–R14) constrain the streamer trait
+contract and origin tags; (R15–R20) constrain the HTTP endpoint and
+namespace; (R21–R25) constrain the five concrete streamers.
 
-In clean-room voice: the post-baseline project chose to replace polling-based GUI synchronisation with a push channel for the categories where polling was either expensive (per-coin balance), latency-sensitive (order/orderbook updates), or fundamentally rate-sensitive (swap state transitions). The design picks SSE over WebSockets because it is one-directional, runs over the existing HTTP server, and degrades gracefully (slow clients are dropped per-stream rather than blocking the broadcaster). The streamer trait is in a standalone crate so non-RPC subsystems (ordermatch, swap state machines) can publish without depending on `mm2_main`.
+## 10.3 Bound Crate Surface
 
-## Reproduction Detail
+**R1.** The substrate MUST be a single crate. The chapter-bound
+identifier is `mm2_event_stream`. Its public surface MUST be exactly the
+following five names (any wider or narrower re-export set is a
+substrate-shape violation):
 
-### 10.1 Baseline shape (no SSE)
+- `Event`
+- `StreamingManager`
+- `Broadcaster`
+- `EventStreamer` (trait)
+- `NoDataIn`
+- `StreamerId`
 
-Commit `c1d46c0…` contains no `mm2_event_stream` crate, no
-`/event-stream` HTTP route, no `stream::` RPC namespace, and no event-broker
-field on `MmCtx`. All GUI updates are pull-mode via `my_balance`,
-`my_swap_status`, `orderbook`, etc.
+Plus a pass-through re-export of the asynchronous-channel primitives the
+trait surfaces (`mpsc` and `oneshot`), so consumers can implement the
+trait without a direct asynchronous-runtime dependency.
 
-### 10.2 Crate layout
+**R2.** The crate MUST be structured into four source modules:
 
-A new workspace member is added: `mm2src/mm2_event_stream/`.
+| Module    | Bound responsibility                                   |
+| --------- | ------------------------------------------------------ |
+| `lib`     | Re-export surface only.                                |
+| `event`   | The `Event` payload type and its constructors.        |
+| `streamer`| The `EventStreamer` trait, `StreamerId`, `Broadcaster`, `NoDataIn`. |
+| `manager` | `StreamingManager`, `ClientHandle`, lifecycle tests. |
+
+The four-module split is itself contract: an implementation that places
+the trait and the manager in the same module collapses the seam the
+substrate relies on for fan-out under a read lock.
+
+**R3.** The broker MUST be cheap-to-clone (an inner shared handle behind
+an interior-mutable lock). Cloning the broker MUST NOT copy its
+registry; all clones MUST observe the same set of running streamers and
+the same client map.
+
+## 10.4 Bound Event Payload
+
+**R4.** The `Event` payload MUST carry exactly three fields: an origin
+tag (typed `StreamerId`), a JSON message body, and a boolean error
+indicator. All other on-the-wire data (timestamps, ticker, payload
+shape) MUST live inside the JSON message body.
+
+**R5.** `Event` constructors MUST return a reference-counted handle
+(`Arc<Event>`), so fan-out cloning across many clients is reference-count
+increment only. Two constructor names are bound: `Event::new` (normal
+event) and `Event::err` (error event). Three reader-side helpers are
+bound: `is_error()`, `origin()` returning the wire-stable origin string,
+`get()` returning the `(origin, message)` pair.
+
+## 10.5 Bound Streamer Origin Tags
+
+**R6.** The streamer origin tag (`StreamerId`) MUST be an enumeration
+with exactly six variants and the following wire-stable display strings
+(GUI-visible, treated as part of the SSE contract surface):
+
+| Variant                                | Wire string             |
+| -------------------------------------- | ----------------------- |
+| Heartbeat                              | `HEARTBEAT`             |
+| Balance(ticker)                        | `BALANCE:<ticker>`      |
+| Network                                | `NETWORK`               |
+| SwapStatus                             | `SWAP_STATUS`           |
+| OrderStatus                            | `ORDER_STATUS`          |
+| OrderbookUpdate { topic }              | `ORDERBOOK:<topic>`     |
+
+These wire strings MUST be exact byte-for-byte: uppercase, colon
+separator before the dynamic component, no whitespace, no padding. They
+appear inside every SSE frame's JSON envelope as the `origin` field
+(R17).
+
+**R7.** The tag MUST derive equality, hashing, debug, serde, and clone.
+The hashable property is load-bearing: it is the registry key under
+which the broker deduplicates running streamers (R10).
+
+## 10.6 Bound Streamer Trait Contract
+
+**R8.** The `EventStreamer` trait MUST have the following shape (only
+two associated items: an associated input-data type and a
+`streamer_id()` accessor; one asynchronous method `handle`):
+
+- An associated `DataInType` constrained `Send`. For self-driven
+  streamers (timers, polls) this is the bound uninhabited type
+  `NoDataIn`.
+- An accessor `streamer_id()` returning `StreamerId`. It MUST be callable
+  before `handle` runs; it is the registry key the broker looks up to
+  decide spawn-vs-attach (R10).
+- An asynchronous method `handle(self, broadcaster, ready_tx,
+  shutdown_rx, data_rx)` consuming the streamer by value, taking a
+  `Broadcaster` handle, a single-shot `ready_tx` returning
+  `Result<(), String>`, a single-shot `shutdown_rx`, and the typed
+  data-input receiver.
+
+**R9.** Implementations MUST send exactly one value on `ready_tx`:
+`Ok(())` after initialisation succeeds, or `Err(reason)` to abort. A
+dropped `ready_tx` MUST be treated as failure by the broker.
+Implementations MUST return when `shutdown_rx` resolves; the broker
+fires shutdown once the last subscriber leaves.
+
+**R10.** The `NoDataIn` type MUST be an uninhabited enumeration (zero
+variants). The data-input receiver always exists for type-erasure
+uniformity inside the broker, but for self-driven streamers it can
+never yield a value.
+
+## 10.7 Bound Broker State and Lifecycle
+
+**R11.** The `StreamingManager` MUST maintain exactly two internal maps:
+
+- A streamer-registry map keyed by `StreamerId`. Each entry holds the
+  single-shot shutdown sender, the set of subscriber client identifiers,
+  and a type-erased asynchronous-sender (boxed as
+  `dyn Any + Send + Sync`) wrapping the streamer's `DataInType`
+  unbounded sender.
+- A client-registry map keyed by client identifier (an unsigned 64-bit
+  integer). Each entry holds the set of wire-stable origin strings the
+  client is subscribed to, plus a bounded asynchronous sender into the
+  per-client delivery channel.
+
+**R12.** The broker MUST expose the following methods with these exact
+contracts:
+
+| Method                           | Bound behaviour                                                                                                                                                                                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new_client(client_id)`          | Allocates a bounded asynchronous channel with capacity 256, inserts a client entry with empty subscription set, returns the receiver wrapped as `ClientHandle`.                                                                                                  |
+| `add(client_id, streamer)` async | If the streamer is already registered, subscribes the client and adds the origin to the client's subscription set. Otherwise spawns the streamer's `handle` task, records the registry entry with shutdown channel and type-erased data sender, and awaits `ready_rx`. Returns the streamer's ready-reported error verbatim, or maps a dropped `ready_tx` to failure. |
+| `stop(client_id, streamer_id)`   | Unsubscribes the client from the named streamer. If the streamer's subscriber set becomes empty, fires the shutdown signal and removes the registry entry.                                                                                                       |
+| `remove_client(client_id)`       | Removes the client entirely, calling `stop` for every streamer the client was subscribed to.                                                                                                                                                                     |
+| `send<T>(streamer_id, data)`     | Looks up the streamer, downcasts the type-erased data sender to the concrete `T` sender, forwards. Errors if the streamer is not running or the type does not match.                                                                                            |
+| `send_fn<T>(streamer_id, fn)`    | As `send`, but constructs the payload only after the running-streamer check.                                                                                                                                                                                    |
+| `is_active(streamer_id)`         | Pure registry lookup.                                                                                                                                                                                                                                          |
+
+**R13.** The per-client delivery channel capacity MUST be exactly 256
+entries. The fan-out path MUST use the non-blocking try-send variant: a
+full client buffer MUST cause the event to be dropped for that client
+only, with no effect on the broadcaster or any other client.
+
+**R14.** Fan-out MUST iterate the client map under a read-only lock and
+deliver the event to every client whose subscription set contains the
+event's origin string. The broker MUST use a non-asynchronous lock (one
+that does not yield across acquisition): every critical section that
+touches the registry maps is short and must not be held across
+asynchronous suspension points.
+
+## 10.8 Bound HTTP Endpoint and Wire Frame
+
+**R15.** The HTTP transport MUST be gated to native targets only.
+WebAssembly builds MUST instantiate the broker and accept subscriptions
+(so the same streamer activations can drive a WebAssembly-native
+delivery channel exposed elsewhere), but MUST NOT carry the HTTP
+endpoint.
+
+**R16.** The endpoint MUST be exactly `GET /event-stream` with a single
+query parameter `id`, an unsigned 64-bit integer. Missing or
+unparseable `id` MUST default to zero. The endpoint MUST respond with
+HTTP status 200 and the following header set:
+
+| Header                          | Bound value                                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `Content-Type`                  | `text/event-stream`                                                                              |
+| `Cache-Control`                 | `no-cache`                                                                                       |
+| `Connection`                    | `keep-alive`                                                                                     |
+| `Access-Control-Allow-Origin`   | Value read from a chapter-bound central-context accessor `event_stream_access_control()`. |
+
+**R17.** Each event frame MUST be the byte sequence:
 
 ```
-mm2_event_stream/
-├── Cargo.toml
-└── src/
-    ├── lib.rs       — re-exports + crate-level docs
-    ├── event.rs     — `Event` payload
-    ├── streamer.rs  — `EventStreamer` trait, `StreamerId`, `Broadcaster`, `NoDataIn`
-    └── manager.rs   — `StreamingManager`, `ClientHandle`
+data: {"origin":"<wire string>","payload":<message JSON>,"error":<bool>}\n\n
 ```
 
-Public re-exports from `lib.rs`:
+where `<wire string>` is exactly the R6 display string of the event's
+origin tag, `<message JSON>` is the event's JSON message body verbatim,
+and `<bool>` is the event's error indicator. No SSE event identifiers,
+no named SSE events, no retry directives, and no comment lines are part
+of the bound surface.
 
-```rust
-pub use event::Event;
-pub use manager::StreamingManager;
-pub use streamer::{Broadcaster, EventStreamer, NoDataIn, StreamerId};
-pub use tokio::sync::{mpsc, oneshot};
-```
+**R18.** The response body MUST be a chunked stream produced by
+unfolding over the per-client receiver returned by `new_client`. When
+the underlying connection drops, the substrate MUST call
+`remove_client` for the disconnecting identifier (this is the only
+deactivation path; there is no explicit unsubscribe RPC).
 
-The `tokio::sync::{mpsc, oneshot}` re-export lets consumer crates use the
-async channel primitives the `EventStreamer` trait surfaces without a direct
-`tokio` dependency.
+## 10.9 Bound RPC Namespace
 
-### 10.3 `Event` payload
+**R19.** A dedicated dispatcher branch MUST be added for the `stream::`
+namespace prefix. Methods whose name begins with the four-byte prefix
+`stream::` MUST be routed to a streamer-activation table; methods
+without the prefix MUST be routed unchanged through the existing v2
+dispatcher.
 
-```rust
-pub struct Event {
-    streamer_id: StreamerId,
-    message:     serde_json::Value,
-    error:       bool,
-}
-```
+**R20.** The streamer-activation table MUST contain exactly the
+following five entries (no aliases, no deprecated names, no additional
+methods):
 
-Constructors return `Arc<Self>` so fan-out cloning is cheap:
+| Method name                  | Streamer key                              |
+| ---------------------------- | ----------------------------------------- |
+| `stream::heartbeat::enable`  | `Heartbeat`                              |
+| `stream::balance::enable`    | `Balance(<request.coin>)`                |
+| `stream::swap_status::enable`| `SwapStatus`                             |
+| `stream::order_status::enable`| `OrderStatus`                            |
+| `stream::orderbook::enable`  | `OrderbookUpdate { topic: <request.topic> }` |
 
-- `Event::new(streamer_id, message) -> Arc<Self>` — normal event.
-- `Event::err(streamer_id, message) -> Arc<Self>` — error event.
-- `is_error()`, `origin() -> String`, `get() -> (String, &Json)` are the
-  reader-side helpers.
+A sixth `Network` origin tag is reserved (R6) without an activation
+entry: it is bound for future use by a streamer driven by the
+peer-discovery substrate (D2).
 
-`origin()` returns the wire-stable string form of the originating `StreamerId`.
+**R21.** All five activation handlers MUST share a common request and
+response envelope:
 
-### 10.4 `StreamerId` — wire-stable origin tags
+- Request: a generic envelope carrying a `client_id` field (the same
+  unsigned 64-bit integer the HTTP endpoint accepts) plus an
+  inner per-streamer request flattened beside it.
+- Response: a single boolean `active` field, returned `true` on
+  successful activation.
 
-```rust
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum StreamerId {
-    Heartbeat,
-    Balance(String),
-    Network,
-    SwapStatus,
-    OrderStatus,
-    OrderbookUpdate { topic: String },
-}
-```
+**R22.** The activation error type MUST be a single-variant enumeration
+with display string `Streamer initialization failed: <reason>` and HTTP
+status mapping 500. Any failure reported by the streamer's `ready_tx`
+MUST be wrapped into this variant verbatim.
 
-Wire strings (from the `Display` impl, part of the SSE contract):
+## 10.10 Bound Concrete Streamers
 
-| Variant | Wire form |
-| --- | --- |
-| `Heartbeat` | `HEARTBEAT` |
-| `Balance("KMD")` | `BALANCE:KMD` |
-| `Network` | `NETWORK` |
-| `SwapStatus` | `SWAP_STATUS` |
-| `OrderStatus` | `ORDER_STATUS` |
-| `OrderbookUpdate { topic: "KMD/BTC" }` | `ORDERBOOK:KMD/BTC` |
+**R23.** The substrate MUST ship exactly the following five concrete
+streamers, each in its own module under a single streamer-activation
+directory:
 
-These strings are GUI-visible and must not be renamed without coordinating
-consumers.
+| Streamer module | Activation method            | Streamer key                          |
+| --------------- | ---------------------------- | ------------------------------------- |
+| `heartbeat`     | `stream::heartbeat::enable`  | `Heartbeat`                          |
+| `balance`       | `stream::balance::enable`    | `Balance(<ticker>)`                  |
+| `swaps`         | `stream::swap_status::enable`| `SwapStatus`                         |
+| `orders`        | `stream::order_status::enable`| `OrderStatus`                        |
+| `orderbook`     | `stream::orderbook::enable`  | `OrderbookUpdate { topic }`          |
 
-### 10.5 `EventStreamer` trait
+**R24.** The balance streamer's activation request MUST carry exactly
+two fields: a coin ticker, and an interval in seconds defaulting to 30,
+floored at construction time to a minimum of 10. The streamer's
+`handle` MUST:
 
-```rust
-#[async_trait]
-pub trait EventStreamer: Sized + Send + 'static {
-    type DataInType: Send;
-
-    fn streamer_id(&self) -> StreamerId;
-
-    async fn handle(
-        self,
-        broadcaster: Broadcaster,
-        ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
-        shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-        data_rx: mpsc::UnboundedReceiver<Self::DataInType>,
-    );
-}
-```
-
-Contract:
-
-- `streamer_id()` is queried before `handle` to key the streamer in the
-  manager registry.
-- `handle` is the streamer's main task. It is spawned exactly once, on the
-  first subscribe.
-- The implementation **must** send exactly one value on `ready_tx`: `Ok(())`
-  to signal it is initialised, or `Err(String)` to abort. The manager treats
-  a dropped `ready_tx` as failure.
-- `handle` should return when `shutdown_rx` resolves; the manager fires
-  shutdown once the last subscriber leaves.
-- For self-driven streamers (e.g. timers, polls) that do not consume external
-  pushes, set `type DataInType = NoDataIn;`. `NoDataIn` is an uninhabited
-  enum, so the `data_rx` will never yield a value, but the channel still
-  exists for type-erasure uniformity inside the manager.
-
-### 10.6 `Broadcaster`
-
-Cheap-to-clone handle threaded into the running streamer:
-
-```rust
-pub struct Broadcaster {
-    pub(crate) inner: Arc<parking_lot::RwLock<StreamingManagerInner>>,
-}
-
-impl Broadcaster {
-    pub fn broadcast(&self, event: Arc<Event>) {
-        let inner = self.inner.read();
-        let origin = event.origin();
-        for client in inner.clients.values() {
-            if client.listening_to.contains(&origin) {
-                let _ = client.tx.try_send(event.clone());
-            }
-        }
-    }
-}
-```
-
-Two invariants matter:
-
-- `try_send` is best-effort. If a client's bounded channel is full, the event
-  is dropped for that client; the broadcast does not block.
-- The fan-out scans the full client map under a read lock; a client only
-  receives the event if its `listening_to` set contains the origin string.
-
-### 10.7 `StreamingManager`
-
-```rust
-#[derive(Clone, Default)]
-pub struct StreamingManager { inner: Arc<RwLock<StreamingManagerInner>> }
-
-pub struct ClientHandle { pub rx: mpsc::Receiver<Arc<Event>> }
-```
-
-The internal state holds two maps:
-
-- `streamers: HashMap<StreamerId, StreamerInfo>` — per running streamer:
-  `shutdown_tx: Option<oneshot::Sender<()>>`, `subscribers: HashSet<u64>`,
-  and `data_in: Box<dyn Any + Send + Sync>` (type-erased `mpsc::UnboundedSender<T>`).
-- `clients: HashMap<u64, ClientInfo>` — per SSE client: `listening_to:
-  HashSet<String>`, `tx: mpsc::Sender<Arc<Event>>`.
-
-Public methods:
-
-| Method | Behaviour |
-| --- | --- |
-| `new_client(client_id: u64) -> ClientHandle` | Creates a bounded `mpsc::channel(256)` for the client, inserts a `ClientInfo` with empty `listening_to`, returns the `rx`. |
-| `add<S: EventStreamer>(client_id, streamer) -> Result<(), String>` async | If the streamer is already running, subscribes `client_id` to it and adds the origin string to `client.listening_to`. Otherwise spawns the streamer task (`common::executor::spawn`), records it in the registry with a `oneshot` shutdown channel and a type-erased `mpsc::UnboundedSender<S::DataInType>`, and waits on `ready_rx`. Returns `Err` if the streamer's `ready_tx` reports failure or is dropped. |
-| `stop(client_id, streamer_id)` | Unsubscribes `client_id` from the specific streamer. If subscribers becomes empty, sends the shutdown signal and removes the streamer's registry entry. |
-| `remove_client(client_id)` | Removes the client, unsubscribes it from every streamer it was listening to, and shuts down any streamer whose subscriber set just became empty. |
-| `send<T: Send + 'static>(streamer_id, data) -> Result<(), String>` | Looks up the streamer, downcasts `data_in` to `mpsc::UnboundedSender<T>`, sends. Returns `Err` if the streamer is not running or the type does not match. |
-| `send_fn<T>(streamer_id, data_fn: impl FnOnce() -> T)` | Same as `send` but constructs the payload only after the streamer-running check. |
-| `is_active(streamer_id) -> bool` | Pure registry lookup. |
-
-Per-client receive channels are sized to a fixed buffer of 256 `Arc<Event>`
-entries (`mpsc::channel(256)`). When a slow client fills its buffer, the
-broadcaster's `try_send` returns `Err` and the event is dropped for that
-client only.
-
-The registry's `Default` impl is the only way to construct an instance; it
-is stored on `MmCtx`:
-
-```rust
-pub event_stream_manager: StreamingManager,
-```
-
-### 10.8 Native HTTP endpoint
-
-```rust
-#[cfg(not(target_arch = "wasm32"))]
-pub const SSE_ENDPOINT: &str = "/event-stream";
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn handle_sse(req: http::request::Parts, ctx_h: u32)
-    -> hyper::Response<hyper::Body>;
-```
-
-Wire shape:
-
-- Method: `GET /event-stream?id=<u64>`. Missing or unparseable `id` defaults
-  to `0`.
-- Response status: `200`.
-- Response headers:
-  - `Content-Type: text/event-stream`
-  - `Cache-Control: no-cache`
-  - `Connection: keep-alive`
-  - `Access-Control-Allow-Origin: <value of ctx.event_stream_access_control()>`
-    (defaults from `event_stream_access_control` in `mm2_ctx.conf`).
-- Response body: a chunked stream produced by `futures::stream::unfold` over
-  the per-client `mpsc::Receiver<Arc<Event>>` returned by
-  `StreamingManager::new_client`. Each chunk is the bytes of
-  ```
-  data: {"origin":"<StreamerId display>","payload":<event JSON>,"error":<bool>}\n\n
-  ```
-
-The endpoint is gated `#[cfg(not(target_arch = "wasm32"))]`; in WASM builds
-the streaming manager still exists and accepts subscriptions, but the HTTP
-endpoint is absent.
-
-### 10.9 `stream::*` RPC namespace
-
-In `mm2_main/src/rpc/dispatcher/dispatcher.rs`, the v2 dispatcher routes any
-method whose name begins with `stream::` to a dedicated
-`rpc_streaming_dispatcher`:
-
-```rust
-async fn rpc_streaming_dispatcher(
-    request: MmRpcRequest,
-    ctx: MmArc,
-    streaming_method: &str,
-) -> DispatcherResult<Response<Vec<u8>>> {
-    match streaming_method {
-        "balance::enable"       => handle_mmrpc(ctx, request, streaming_activations::balance::enable_balance).await,
-        "heartbeat::enable"     => handle_mmrpc(ctx, request, streaming_activations::heartbeat::enable_heartbeat).await,
-        "order_status::enable"  => handle_mmrpc(ctx, request, streaming_activations::orders::enable_order_status).await,
-        "orderbook::enable"     => handle_mmrpc(ctx, request, streaming_activations::orderbook::enable_orderbook).await,
-        "swap_status::enable"   => handle_mmrpc(ctx, request, streaming_activations::swaps::enable_swap_status).await,
-        _ => MmError::err(DispatcherError::NoSuchMethod),
-    }
-}
-```
-
-All `enable_*` handlers share the request/response envelope and error type
-in `streaming_activations/mod.rs`:
-
-```rust
-#[derive(Deserialize)]
-pub struct EnableStreamingRequest<T> {
-    pub client_id: u64,
-    #[serde(flatten)]
-    pub inner: T,
-}
-
-#[derive(Serialize)]
-pub struct EnableStreamingResponse { pub active: bool }
-
-#[derive(Display, Serialize, SerializeErrorType)]
-#[serde(tag = "error_type", content = "error_data")]
-pub enum StreamingError {
-    #[display(fmt = "Streamer initialization failed: {}", _0)]
-    InitFailed(String),
-}
-```
-
-`StreamingError::InitFailed` maps to HTTP 500 via `HttpStatusCode`.
-
-### 10.10 Concrete streamers in this tree
-
-`mm2_main/src/rpc/streaming_activations/` ships five streamers, each in its
-own module:
-
-| Module | RPC method | Streamer key |
-| --- | --- | --- |
-| `heartbeat.rs` | `stream::heartbeat::enable` | `StreamerId::Heartbeat` |
-| `balance.rs` | `stream::balance::enable` | `StreamerId::Balance(ticker)` |
-| `swaps.rs` | `stream::swap_status::enable` | `StreamerId::SwapStatus` |
-| `orders.rs` | `stream::order_status::enable` | `StreamerId::OrderStatus` |
-| `orderbook.rs` | `stream::orderbook::enable` | `StreamerId::OrderbookUpdate { topic }` |
-
-The balance streamer is illustrative of the pattern (the others follow the
-same shape). Its activation request is:
-
-```rust
-#[derive(Deserialize)]
-pub struct EnableBalanceRequest {
-    pub coin: String,
-    #[serde(default = "default_interval")]
-    pub interval_secs: u64, // default 30, floored to >= 10 at construction
-}
-```
-
-Its `handle` body:
-
-1. Look up the coin via `lp_coinfind`; report `Err` over `ready_tx` if not
-   activated, otherwise send `Ok(())`.
-2. Loop: race a `Timer::sleep(interval_secs)` against `shutdown_rx`.
-3. On the timer branch, call `coin.my_balance()` and broadcast a normal
-   `Event` only when the spendable or unspendable value differs from the
-   last emission; broadcast an error `Event` on failure.
+1. Resolve the coin via the central coin-registry accessor; report
+   failure on `ready_tx` if not activated, otherwise report ready.
+2. Loop, racing a timer against `shutdown_rx`.
+3. On the timer branch, call the coin's balance accessor and broadcast
+   a normal event only when the spendable or unspendable balance
+   differs from the previous emission; broadcast an error event on
+   failure.
 4. On the shutdown branch, return.
 
-Each event payload includes the coin ticker, both balance components as
-decimal strings, and `common::now_ms()` as a `timestamp` field. Errors are
-broadcast with `Event::err`.
+The bound emit-on-change semantics MUST be observed: an unchanged
+balance MUST NOT emit. Each emission's JSON message body MUST carry the
+ticker, both balance components as decimal strings, and a timestamp in
+milliseconds.
 
-### 10.11 Runtime invariants
+**R25.** The four non-balance streamers MUST follow the same activation
+shape (a per-streamer request struct, a streamer struct implementing
+the trait, an activation handler that constructs the streamer and
+forwards into `add`, mapping any error into the bound activation error
+variant). The substrate MUST NOT expose any streamer that is not on
+the R23 list.
 
-| Invariant | Where enforced |
-| --- | --- |
-| One streamer instance per `StreamerId`; first subscribe spawns it, last unsubscribe shuts it down. | `StreamingManager::add` / `remove_client` / `stop` |
-| Per-client buffers are bounded; slow clients only drop their own events. | `new_client` (`mpsc::channel(256)`) + `Broadcaster::broadcast` (`try_send`) |
-| `StreamerId::Display` strings are part of the SSE wire surface. | `streamer.rs` doc comments |
-| The HTTP endpoint is native-only. | `#[cfg(not(target_arch = "wasm32"))]` |
-| Streamer type-erased input must match `DataInType` exactly. | `StreamingManager::send` downcast |
-| A streamer that drops its `ready_tx` is treated as failed and removed. | `add()` ready-handling branch |
+## 10.11 Bound Central-Context Wiring
 
-### 10.12 Tests in the crate
+**R26.** The central context MUST carry exactly one new public field of
+type `StreamingManager`, initialised to the broker's default. Cloning
+the central context (which is itself a cheap shared handle) MUST
+observe the same broker instance.
 
-`manager.rs` ships three tokio unit tests that exercise the lifecycle:
+**R27.** The central context MUST expose one new accessor
+`event_stream_access_control()` returning the configured CORS origin
+string used in R16. The accessor MUST read a single named key
+(`event_stream_access_control`) from the central configuration and fall
+back to a substrate-defined default suitable for locally-hosted
+graphical consumers.
 
-- `should_deliver_event_when_client_subscribes`
-- `should_shut_down_streamer_when_last_client_removed`
-- `should_share_streamer_when_multiple_clients_subscribe`
+## 10.12 Tests
 
-These also serve as the minimum acceptance criteria for the crate.
+**T1.** *Single-client delivery.* A test client subscribes to a
+streamer that emits a single event; the test asserts the event is
+delivered to the client's receiver with the bound origin string.
 
-### 10.13 Reproduction recipe
+**T2.** *Last-unsubscribe shutdown.* Two clients subscribe to the same
+streamer (registry deduplication path); both unsubscribe in sequence;
+the test asserts the streamer task observed its `shutdown_rx` resolve
+exactly once, after the second unsubscribe.
 
-For an implementer holding only the baseline tree and this chapter:
+**T3.** *Multi-client fan-out.* Three clients subscribe; the streamer
+emits one event; the test asserts every client's receiver yields the
+same `Arc<Event>` (reference-count fan-out, not payload copy).
 
-1. Add a new workspace member `mm2src/mm2_event_stream/` with the four
-   source files listed in §10.2. Cargo dependencies: `async-trait`,
-   `parking_lot`, `serde`, `serde_json`, `tokio` (with `sync` feature),
-   `common` (for `executor::spawn`).
-2. Implement `Event` per §10.3 (Arc-returning constructors, `is_error`,
-   `origin`, `get`, manual `Debug`).
-3. Implement `StreamerId` per §10.4 with the six variants and the `Display`
-   wire strings exactly as listed.
-4. Implement `Broadcaster` per §10.6 (read-locked iteration over clients,
-   `try_send` per matching client).
-5. Implement `NoDataIn` as `pub enum NoDataIn {}`.
-6. Implement the `EventStreamer` trait per §10.5; document the
-   `ready_tx`/`shutdown_rx` contract in doc comments.
-7. Implement `StreamingManager` and `ClientHandle` per §10.7. Per-client
-   buffer size is `256`. Use `parking_lot::RwLock`. Spawn via
-   `common::executor::spawn`. Type-erase the per-streamer data sender via
-   `Box<dyn Any + Send + Sync>` storing an `mpsc::UnboundedSender<T>`;
-   downcast with `downcast_ref::<mpsc::UnboundedSender<T>>()` in `send`
-   and `send_fn`.
-8. Add the three lifecycle tests (§10.12) to `manager.rs`.
-9. In `mm2_core::mm_ctx::MmCtx`, add a public field
-   `event_stream_manager: StreamingManager` and initialise it to
-   `StreamingManager::default()`. Also add the JSON accessor
-   `event_stream_access_control()` that reads
-   `conf["event_stream_access_control"]` and falls back to a sensible CORS
-   default for local GUIs.
-10. Add `mm2_main/src/rpc/sse_handler.rs` with `SSE_ENDPOINT =
-    "/event-stream"` and `handle_sse(req, ctx_h)` per §10.8. Wire it into
-    the native HTTP router so `GET /event-stream` is routed to `handle_sse`.
-11. Add `mm2_main/src/rpc/streaming_activations/mod.rs` with
-    `EnableStreamingRequest<T>`, `EnableStreamingResponse`, and
-    `StreamingError` per §10.9, plus `pub mod` declarations for the five
-    streamer modules.
-12. Implement the five streamer modules per §10.10. Each module defines:
-    (a) a per-streamer request struct deserialised inside
-    `EnableStreamingRequest<…>::inner`; (b) a struct implementing
-    `EventStreamer` with the assigned `StreamerId`; (c) an async RPC handler
-    that constructs the streamer and calls
-    `ctx.event_stream_manager.add(client_id, streamer)`, mapping `Err` into
-    `StreamingError::InitFailed`.
-13. In the v2 dispatcher, before the per-method match, add the prefix-strip
-    branch that routes `stream::*` methods to `rpc_streaming_dispatcher`
-    (§10.9). Add the match arms for the five `enable` methods.
-14. Verify with the three crate tests and an end-to-end smoke: connect to
-    `GET /event-stream?id=1`, call `stream::heartbeat::enable` with
-    `{"client_id":1}`, observe `data: {…"origin":"HEARTBEAT"…}\n\n` lines
-    on the long-lived response.
+**T4.** *Slow-client back-pressure.* One client subscribes but does not
+drain its receiver; a second client subscribes and drains. The streamer
+emits more than 256 events. The test asserts that the slow client's
+receiver caps at 256 and that the fast client receives every event.
 
-## External References
+**T5.** *Wire-frame literalness.* An end-to-end test connects to
+`GET /event-stream?id=1`, activates the heartbeat streamer, and
+asserts the response body matches the regular expression
+`^data: \{"origin":"HEARTBEAT","payload":.*,"error":(true|false)\}\n\n`
+for at least one frame.
 
-- HTML Living Standard, "Server-sent events",
-  <https://html.spec.whatwg.org/multipage/server-sent-events.html>. Specifies
-  the `text/event-stream` wire format used in §10.8.
-- WHATWG Fetch — `Access-Control-Allow-Origin`,
-  <https://fetch.spec.whatwg.org/#http-access-control-allow-origin>.
-- IETF RFC 6585 — additional HTTP status codes (informational).
+**T6.** *Namespace routing.* A dispatcher unit test asserts that
+`stream::heartbeat::enable` is routed through the streamer-activation
+table and not through the v2 method table, and that a method
+`stream::nonsense::enable` returns the dispatcher's "no such method"
+error.
+
+## 10.13 Deferred Work
+
+**D1.** A WebAssembly-native delivery transport (the WebAssembly target
+currently has the broker but no transport adapter; a future substrate
+chapter is expected to bind an in-process callback adapter for
+embedded WebAssembly consumers).
+
+**D2.** Activation of the reserved `Network` origin tag (a streamer
+driven by the peer-discovery substrate; the tag is bound now to fix the
+wire string, but no activation handler is bound until the consumer
+exists).
+
+**D3.** Per-client authentication and per-client rate limits. The
+substrate currently relies on the bound CORS origin (R16) and the
+existing JSON-RPC password gate for the activation methods; per-stream
+gating is out of scope.
+
+**D4.** Streamer-specific event-history replay (a reconnecting client
+currently observes only events that occur after reconnect; replay would
+require a per-streamer bounded backlog and a "last-event-id" handshake,
+neither of which is bound).
+
+## 10.14 Baseline Verifications
+
+**V1.** The baseline tree MUST be confirmed to contain no
+`mm2_event_stream` crate, no `/event-stream` HTTP route, no
+`stream::` dispatcher prefix, and no broker field on the central
+context. All graphical synchronisation in the baseline tree is
+pull-mode through the existing JSON-RPC read surface.
+
+**V2.** The five activation method names bound in R20 MUST be confirmed
+absent from the baseline's v2 dispatcher method table. Adding them in
+the substrate is a pure surface addition; no baseline method is
+renamed or repurposed.
+
+**V3.** The six `StreamerId` wire strings bound in R6 MUST be confirmed
+absent from the baseline tree. They are introduced by the substrate
+and become part of the GUI-visible contract surface on first release.
+
+## 10.15 External References
+
+- HTML Living Standard, *Server-sent events*,
+  <https://html.spec.whatwg.org/multipage/server-sent-events.html> —
+  the `text/event-stream` wire format bound in R17.
+- WHATWG Fetch, *HTTP Access-Control-Allow-Origin*,
+  <https://fetch.spec.whatwg.org/#http-access-control-allow-origin> —
+  CORS header bound in R16.
 - `tokio::sync` channels (`mpsc`, `oneshot`),
-  <https://docs.rs/tokio/latest/tokio/sync/index.html>.
-- `parking_lot::RwLock`, <https://docs.rs/parking_lot/latest/parking_lot/>.
-- `async-trait`, <https://crates.io/crates/async-trait>.
-- `serde` and `serde_json`, <https://crates.io/crates/serde>.
+  <https://docs.rs/tokio/latest/tokio/sync/index.html> — the
+  asynchronous-channel primitives the trait surfaces in R8 and R10.
+- `parking_lot::RwLock`,
+  <https://docs.rs/parking_lot/latest/parking_lot/> — the
+  non-asynchronous lock bound in R14.
+- `async-trait`, <https://crates.io/crates/async-trait> — used by the
+  trait definition in R8.
 
-## Provenance Footer
+## 10.16 Provenance Footer
 
-- **Inputs:** `01-clean-room-rules.md`; the baseline workspace at commit
-  `c1d46c0…`; the post-baseline files
-  `mm2src/mm2_event_stream/src/{lib,event,streamer,manager}.rs`,
-  `mm2src/mm2_main/src/rpc/sse_handler.rs`,
-  `mm2src/mm2_main/src/rpc/dispatcher/dispatcher.rs` (stream-dispatcher
-  section), `mm2src/mm2_main/src/rpc/streaming_activations/{mod,balance,
-  heartbeat,swaps,orders,orderbook}.rs`, and the
-  `event_stream_manager`/`event_stream_access_control` additions in
-  `mm2_core/src/mm_ctx.rs`.
-- **Permitted-input classes used:** baseline source; first-party
-  post-baseline identifiers introduced with in-chapter justification; public
-  protocol documentation (WHATWG SSE, CORS); public Rust crates (tokio,
-  parking_lot, serde, async-trait).
-- **Not used:** any private repository, any internal-only document, any
-  upstream post-baseline source tree.
-- **Sibling-allowlist consultations:** none.
-- **Author of this chapter:** clean-room reimplementation working set,
-  reviewed under the two-reviewer protocol defined in
-  `local/clean-room-doc/IMPLEMENTER_RULES.md`.
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit; chapter 01 (clean-room rules); the chapter-bound
+  identifier set for the broker substrate, the HTTP endpoint, the
+  RPC namespace, and the five concrete streamers; public protocol
+  documentation (HTML Living Standard SSE, WHATWG CORS); public
+  documentation for the asynchronous-runtime and lock crates listed in
+  10.15.
+- *Permitted-input classes used:* baseline source; bound substrate
+  identifiers introduced with in-chapter justification; public
+  protocol documentation; public crate documentation.
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* not consulted.
