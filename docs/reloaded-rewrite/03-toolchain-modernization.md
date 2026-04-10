@@ -1,337 +1,366 @@
-# Chapter 03 — Toolchain Modernization
+# Chapter 03 — Toolchain Modernisation
 
-## Executive Summary
+**Status:** driving-spec.
 
-At the June 2022 baseline the project was pinned to a specific
-Rust nightly toolchain (`nightly-2022-02-01`) and used a number of
-nightly-only language features sprinkled across several crates. It
-also pinned a forked `backtrace` crate to work around an Android
-`dl_iterate_phdr` issue that was specific to the nightly compiler
-of the era, and it spelled its release-profile dependency overrides
-in a syntax that Cargo subsequently renamed.
+The chapter binds the substrate by which the project migrates off
+the chapter-02-bound unstable Rust toolchain pin onto the stable
+Rust toolchain: the new toolchain pin, the four-crate compiler-
+bootstrap allowlist with the bound feature-attribute set, the
+language-edition migration across the workspace, the removed
+patched-dependency block, the renamed release-profile override
+block, the workspace-wide dependency-inheritance block, the
+explicit non-changes, and the format-check continuous-integration
+carve-out.
 
-The post-baseline modernisation moved the project to the **stable**
-Rust toolchain. The four crates that still depend on a nightly-only
-language feature (negative trait implementations, custom test
-frameworks) compile on stable through Cargo's
-`RUSTC_BOOTSTRAP` allowlist, scoped to exactly those crate names,
-documented in-tree, and earmarked for removal once the upstream
-features stabilise. The Android `backtrace` patch is gone. The
-release-profile override block uses the current Cargo spelling
-(`[profile.release.package."*"]`). Workspace members migrated en
-masse from Rust edition 2018 to edition 2021. Cross-compilation
-configuration was untouched.
+## 3.1 Executive Summary
 
-A separate concern — code formatting — still relies on nightly
-features of `rustfmt`. That is handled at the CI layer by
-installing a nightly compiler *only for the format check job*;
-the actual build and test toolchain remains stable.
+The chapter-02-anchored baseline tree was pinned to a specific
+Rust nightly toolchain (chapter-02 R3, the nightly channel of
+2022-02-01) and consumed a chapter-bound set of nightly-only
+language feature attributes scattered across several crates. It
+also carried the chapter-02 R5 patched dependencies for a chapter-
+02-bound Android backtrace issue and spelled its release-profile
+dependency overrides in a syntax the Cargo tool subsequently
+renamed.
 
-A reader leaving this chapter should be able to (a) reproduce the
-toolchain switch from the baseline, (b) explain why a small set of
-crates retains `#![feature(...)]` annotations, and (c) verify that
-the removed patches and renamed sections are no longer needed for
-any current build target.
+The chapter-bound substrate moves the project to the chapter-bound
+stable Rust toolchain. The four chapter-bound crates that still
+depend on a chapter-bound nightly-only language feature
+(chapter-bound auto-traits with negative implementations, chapter-
+bound custom-test-frameworks) compile on the stable toolchain
+through the chapter-bound Cargo compiler-bootstrap allowlist
+mechanism, scoped to exactly those crate names, documented in-tree
+as a chapter-bound temporary bridge, and earmarked for removal
+once the relevant chapter-bound features stabilise. The chapter-02
+R5 patched-dependency block is removed. The chapter-bound release-
+profile override block uses the renamed-by-Cargo current spelling.
+Workspace members migrate from the chapter-bound 2018 language
+edition to the chapter-bound 2021 language edition. Cross-
+compilation configuration is preserved unchanged.
 
-## Reproduction Detail
+A separate concern — code formatting — still relies on chapter-
+bound nightly-only formatting-tool options. The substrate handles
+this at the continuous-integration layer by installing a chapter-
+bound nightly toolchain *only* for the format-check job; the
+build-and-test toolchain remains stable.
 
-### 3.1 The baseline toolchain pin
+Bound rules R1–R4 cover the toolchain pin and the bootstrap
+allowlist; R5–R6 cover the edition migration; R7–R9 cover the
+removed-patch, renamed-profile-block, and workspace-dependency
+changes; R10–R12 cover the explicit non-changes and the format-
+check carve-out.
 
-The baseline `rust-toolchain.toml` reads, verbatim:
+## 3.2 Subsystem Shape
 
-```toml
-[toolchain]
-channel = "nightly-2022-02-01"
-components = ["rustfmt", "clippy"]
-```
+The substrate occupies a structural seam between three artefact
+classes:
 
-Every developer build, CI build, and release build at the baseline
-therefore used the same nightly compiler snapshot. This was a hard
-dependency on the nightly channel: any source file with a
-`#![feature(...)]` attribute requires the nightly compiler to
-compile at all.
+- the chapter-bound root manifest (`Cargo.toml`) and the chapter-
+  bound toolchain manifest (`rust-toolchain.toml`);
+- the per-crate manifest of every workspace member of chapter-02
+  R4;
+- the chapter-bound continuous-integration configuration consumed
+  by the format-check job (R12) and by the build-and-test jobs
+  (R11).
 
-A scan of the baseline tree (`git grep '#!\[feature'` against the
-commit) shows the following distinct feature attributes in use,
-with the number of files in which each appeared:
+The substrate does *not* modify the chapter-02 R8 build-target
+surface, the chapter-02 R9 license posture, the chapter-02 R6
+configuration surface, or the chapter-02 R7 request-and-response
+surface.
 
-| Nightly feature attribute | Files |
-|---|---|
-| `async_closure` | 5 |
-| `auto_traits` | 2 |
-| `custom_test_frameworks` | 1 |
-| `drain_filter` | 4 |
-| `hash_raw_entry` | 5 |
-| `integer_atomics` | 2 |
-| `integer_atomics, panic_info_message` | 1 |
-| `io_error_more` | 1 |
-| `ip` | 1 |
-| `map_first_last` | 2 |
-| `negative_impls` | 3 |
-| `stmt_expr_attributes` | 1 |
-| `test` | 2 |
+## 3.3 Bound Toolchain Pin
 
-Most of these features were either subsequently stabilised by the
-Rust language team (for example `drain_filter` under the new name
-`extract_if`, `map_first_last` as `first_last_iterator`-related
-methods, `hash_raw_entry` via accessor methods on `HashMap`,
-`io_error_more` as concrete `ErrorKind` variants, `panic_info_message`
-as `PanicInfo::message()`) or were avoidable through small-scale
-rewrites against stable APIs.
+**R1.** The chapter-bound toolchain manifest at the substrate
+landing point MUST read exactly:
 
-### 3.2 The new toolchain pin
+| Bound key                  | Bound value                          |
+| -------------------------- | ------------------------------------ |
+| `[toolchain].channel`      | `stable`                             |
+| `[toolchain].components`   | The chapter-bound two-component list `["rustfmt", "clippy"]`, unchanged from the chapter-02 R3 baseline. |
 
-The current `rust-toolchain.toml` reads:
+Every routine build (developer, continuous-integration, release)
+runs against the latest stable Rust at the time the build is
+performed. The chapter-bound nightly channel of the chapter-02 R3
+anchor is not consumed except via R12's format-check carve-out.
 
-```toml
-[toolchain]
-channel = "stable"
-components = ["rustfmt", "clippy"]
-```
+## 3.4 Bound Bootstrap-Allowlist Substrate
 
-The components list is unchanged. Every routine build — developer,
-CI, release — runs against the latest stable Rust at the time the
-build is performed.
+**R2.** The substrate MUST scan the chapter-02-anchored workspace
+for chapter-bound `#![feature(...)]` attribute consumers and
+classify each consumer into one of three chapter-bound disposition
+classes:
 
-### 3.3 What remained on nightly, and why
+| Bound disposition class | Bound substrate action |
+| ----------------------- | --------------------- |
+| The chapter-bound feature has been stabilised in the language. | Rewrite the call site against the stable accessor (the chapter-bound stable equivalents include, non-exhaustively: the chapter-bound iterator extract-if accessor in place of the chapter-bound drain-filter feature; the chapter-bound first-and-last iterator-method group in place of the chapter-bound map-first-last feature; the chapter-bound hash-map-entry accessor group in place of the chapter-bound hash-raw-entry feature; the chapter-bound input/output-error-kind concrete variants in place of the chapter-bound input/output-error-more feature; the chapter-bound panic-information message accessor in place of the chapter-bound panic-information-message feature). |
+| The chapter-bound feature has a stable-API rewrite of acceptable scope. | Apply the rewrite (the chapter-bound asynchronous-closure feature, the chapter-bound integer-atomics feature, the chapter-bound internet-protocol feature, and the chapter-bound statement-expression-attributes feature fall in this class). |
+| The chapter-bound feature has no stable equivalent and the substrate would otherwise touch substantively more code than the feature attribute itself. | Retain the feature attribute on the consuming crate and route the consuming crate through the bootstrap allowlist of R3. |
 
-A scan of the current tree shows the surviving `#![feature(...)]`
-attributes are concentrated in four source files:
+**R3.** The substrate MUST route a chapter-bound four-crate
+bootstrap allowlist through the chapter-bound Cargo compiler-
+bootstrap environment-variable mechanism in the chapter-bound
+workspace-local Cargo configuration directory file. The allowlist
+MUST be:
 
-| File | Features used |
-|---|---|
-| `mm2src/common/common.rs` | `negative_impls`, `auto_traits` |
-| `mm2src/mm2_err_handle/src/lib.rs` | `negative_impls`, `auto_traits` |
-| `mm2src/mm2_state_machine/src/lib.rs` | `negative_impls`, `auto_traits` |
-| `mm2src/mm2_main/src/docker_tests.rs` | `custom_test_frameworks`, `test` |
+| Bound crate                    | Bound feature attributes retained                       | Bound consuming substrate                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The shared-utility crate `common`         | Auto-traits + negative-implementations.                  | The chapter-bound chapter-14-consumed marker-trait pattern that expresses *if T is not already X then treat T as Y*; the chapter-bound chapter-14 R8–R10 storable-state-machine substrate consumes this pattern through the chapter-bound NotSame auto-trait marker.                                                                                                                                                                                                                                                                                                |
+| The error-handling-framework crate `mm2_err_handle` | Auto-traits + negative-implementations.                  | The chapter-bound chapter-04-consumed error-aggregation framework consumes the same pattern to make the chapter-04-bound error-envelope conversions compose without conflicting blanket implementations.                                                                                                                                                                                                                                                                                                |
+| The generic state-machine-runtime crate `mm2_state_machine`         | Auto-traits + negative-implementations.                  | The chapter-bound chapter-14 R8–R10 storable-state-machine substrate consumes the pattern directly to enforce the chapter-14 R10 storable-versus-non-storable runtime separation through the chapter-14-bound NotSame auto-trait.                                                                                                                                                                                                                                                                          |
+| The chapter-bound integration-test harness crate consumed by the application-entry crate's container-test module | Custom-test-frameworks + the chapter-bound test feature.   | The substrate's container-integration-test harness enumerates and dispatches tests in a chapter-bound non-standard way that the chapter-bound stable test harness cannot express.                                                                                                                                                                                                                                                                                                |
 
-These four files (plus two external test-mocking dependencies,
-`mocktopus` and `mocktopus_macros`, which themselves require
-nightly features) need nightly-only behaviour that has no
-equivalent on stable:
+In addition to the four chapter-bound first-party crates, two
+chapter-bound sibling-allowlist test-mocking dependencies (the
+chapter-bound `mocktopus` crate and the chapter-bound
+`mocktopus_macros` crate) also require chapter-bound nightly-only
+features and MUST be included on the allowlist when the substrate
+consumes them.
 
-- `auto_traits` plus `negative_impls` express an
-  "if-T-is-not-already-X-then-treat-it-as-Y" pattern that the
-  project's typed-error framework uses to make `MmError<E>`-style
-  conversions compose without conflicting blanket implementations.
-  There is no equivalent on stable Rust today; rewriting the
-  framework to avoid the pattern would touch dozens of error
-  types across the workspace.
-- `custom_test_frameworks` plus `test` are used by an in-tree
-  test harness for the Dockerised integration tests, which need
-  to enumerate and dispatch tests in a non-standard way.
+**R4.** The bootstrap-allowlist mechanism is an *opt-in*: it
+enables the chapter-bound nightly-only feature attributes only in
+the listed crates and only during builds run with the chapter-
+bound workspace-local Cargo configuration in scope. Crates outside
+the allowlist MUST NOT carry chapter-bound `#![feature(...)]`
+attributes and the chapter-bound stable compiler MUST reject any
+such attribute outside the allowlist as it would on any chapter-
+bound stable build. The allowlist MUST be documented in-tree as a
+chapter-bound temporary bridge; when the chapter-bound language
+team stabilises the auto-traits-equivalent behaviour, the chapter-
+bound storable-state-machine substrate of chapter 14 R8–R10
+migrates off the pattern, and the chapter-bound container-test
+harness migrates onto a chapter-bound stable harness, the
+corresponding crate MUST be removed from the allowlist.
 
-To compile these crates on the stable toolchain, the project uses
-Cargo's `RUSTC_BOOTSTRAP` mechanism, scoped to exactly the affected
-crate names. The relevant excerpt from `.cargo/config.toml` reads:
+## 3.5 Bound Language-Edition Migration
 
-```toml
-[env]
-# Enables unstable features on stable toolchain for specific crates only.
-# ...
-RUSTC_BOOTSTRAP = "common,mm2_err_handle,mm2_state_machine,docker_tests,mocktopus,mocktopus_macros"
-```
+**R5.** The chapter-02-anchored baseline distribution of language
+editions across the workspace was bound by chapter 02 R4 (the
+workspace-member registry); the substrate's target distribution at
+the substrate landing point MUST migrate every first-party
+workspace crate onto the chapter-bound 2021 language edition with
+exactly three chapter-bound carve-outs:
 
-This is an opt-in: it enables nightly-only features only in the
-listed crates and only during builds run with this configuration.
-Crates outside the list cannot use `#![feature(...)]` annotations
-and the compiler will reject them as it would on any stable build.
+| Bound carve-out | Bound language edition | Bound rationale |
+| --------------- | ---------------------- | --------------- |
+| The chapter-bound sibling-allowlist in-tree copy of the chapter-bound container-test sibling-repository | The chapter-bound 2018 edition. | Preserved at the chapter-bound edition of the sibling-allowlist origin. |
+| The chapter-bound sibling-allowlist in-tree copy of the chapter-bound Ethereum-virtual-machine application-binary-interface sibling-repository | The chapter-bound 2015 edition. | Preserved at the chapter-bound edition of the sibling-allowlist origin. |
+| The chapter-bound sibling-allowlist patched-clone of the chapter-bound Siacoin sibling-repository | The chapter-bound 2018 edition. | Preserved at the chapter-bound edition of the sibling-allowlist origin. |
 
-This arrangement is documented in-tree as a temporary bridge: when
-the upstream Rust project stabilises `auto_traits`-equivalent
-behaviour or when the codebase migrates off the affected pattern,
-the corresponding crate is to be removed from the `RUSTC_BOOTSTRAP`
-list.
+One first-party crate (the chapter-23-bound external-trading-
+application-programming-interface client crate `trading_api`) MAY
+remain on the chapter-bound 2018 edition because it was added by a
+later chapter against an external service whose generated bindings
+were authored against that edition; migrating it is tracked under
+D2 of this chapter.
 
-### 3.4 The edition migration
+**R6.** The chapter-bound migration discipline is a per-crate
+operation: change the chapter-bound `edition` key in the crate's
+manifest from `"2018"` to `"2021"`, then run the chapter-bound
+Cargo edition-fix command against that crate to mechanically
+rewrite any source patterns the new edition treats differently.
+For the chapter-bound 2018-to-2021 hop, the principal chapter-
+bound difference the substrate MUST handle is that array-into-
+iterator conversions follow the chapter-bound `IntoIterator for
+[T; N]` implementation, which can require small turn-of-phrase
+changes at call sites that were relying on the previous
+behaviour.
 
-Rust crates declare a language-edition pin in their per-crate
-`Cargo.toml`. The baseline distribution of editions across the
-workspace was:
+## 3.6 Bound Removed Patched-Dependency Block
 
-| Edition | Crates |
-|---|---|
-| 2018 | 24 |
-| 2021 | 3 |
+**R7.** The chapter-02 R5 patched-dependency block (pinning the
+chapter-bound `backtrace` and `backtrace-sys` crates to the
+chapter-bound sibling-allowlist clone for the chapter-bound
+Android backtrace issue) MUST be removed from the chapter-bound
+root manifest at the substrate landing point. The chapter-bound
+rationale: with the move to stable Rust of R1 and current published
+versions of the chapter-bound backtrace crate, the chapter-bound
+workaround the sibling-allowlist clone applied is no longer needed
+on any chapter-02 R8-bound supported target.
 
-The current distribution is:
+## 3.7 Bound Renamed Release-Profile Override Block
 
-| Edition | Crates |
-|---|---|
-| 2021 | 48 |
-| 2018 | 2 |
-| 2015 | 1 |
+**R8.** The chapter-02-anchored release-profile override block
+(spelled with the chapter-bound `overrides` table key, which is
+Cargo's then-name for per-package profile adjustments and which
+the Cargo tool subsequently renamed) MUST be renamed at the
+substrate landing point to the chapter-bound current Cargo
+spelling using the chapter-bound `package` table key. The bound
+debug-symbol setting (`debug = false`) and the bound package
+wildcard (`"*"`) MUST be preserved. The bound semantic is
+unchanged: dependencies outside the workspace build without debug
+symbols even when the release profile carries `debug = true` for
+the workspace's own crates.
 
-Two of the surviving non-2021 crates are vendored upstream code
-preserved at the edition of their origin (`testcontainers-vendored`
-on 2018 and `ethabi-vendored` on 2015); a third (`sia-rust-patched`,
-on 2018) is the local patched copy of an external crate. One
-first-party crate (`trading_api`) remains on edition 2018 because
-it was added post-baseline against an external service whose
-generated bindings were authored against that edition; migrating
-it is tracked as a low-priority follow-up. Every other first-party
-workspace crate is on edition 2021.
+## 3.8 Bound Workspace-Wide Dependency-Inheritance Block
 
-The edition bump is a per-crate operation: change
-`edition = "2018"` to `edition = "2021"` in the crate's
-`Cargo.toml`, then run `cargo fix --edition` against that crate to
-mechanically rewrite any source patterns that the new edition
-treats differently (for the 2018→2021 hop, the principal change is
-that array-into-iterator conversions follow the
-`IntoIterator for [T; N]` implementation, which can require small
-turn-of-phrase changes to call sites that were relying on the
-previous behaviour).
+**R9.** The substrate MUST introduce a chapter-bound `[workspace.
+dependencies]` block at the chapter-bound root manifest. The
+chapter-bound Cargo feature MUST be the chapter-bound
+workspace-wide dependency-inheritance feature stabilised in the
+chapter-bound Cargo release 1.64; per-crate manifests inherit the
+shared version via the chapter-bound `workspace = true`
+inheritance flag.
 
-### 3.5 The removed `backtrace` patch
+The chapter-02-anchored baseline manifest did not consume this
+feature — each crate declared its own dependency versions
+independently. Centralising the chapter-bound shared versions
+removes a chapter-bound long-running risk of two workspace crates
+accidentally compiling against two different minor versions of the
+same library and pulling both into the resulting binary.
 
-The baseline root `Cargo.toml` carried:
+## 3.9 Bound Explicit Non-Changes
 
-```toml
-[patch.crates-io]
-backtrace = { git = "https://github.com/artemii235/backtrace-rs.git" }
-backtrace-sys = { git = "https://github.com/artemii235/backtrace-rs.git" }
-```
+**R10.** The chapter-bound Cargo feature-resolver MUST remain at
+the chapter-bound `resolver = "2"` selection of chapter 02 R4
+(the chapter-02-anchored manifest already selected this resolver;
+the substrate preserves the selection).
 
-The accompanying comment in the baseline manifest explains the
-patch: the upstream `backtrace` crate at the time, when built with
-the project's nightly toolchain for the Android target, did not
-define `HAVE_DL_ITERATE_PHDR`, which led to unreadable backtraces
-on Android binaries. The fork enabled the macro for Android
-toolchain levels that supported it.
+**R11.** The chapter-02-anchored cross-compilation configuration
+file `Cross.toml` MUST be preserved byte-identical to the chapter-
+bound chapter-02 R8 anchor state. The chapter-bound cross-
+compilation configuration for the chapter-bound ARM-v7 Linux
+target (chapter-bound custom image name + chapter-bound dynamic-
+linker rust-flags) continues to be the only entry, with the same
+image name and the same flag.
 
-The current root `Cargo.toml` does not carry the patch. With the
-move to stable Rust and current versions of `backtrace` from
-crates.io, the workaround is no longer needed on any supported
-target.
+## 3.10 Bound Format-Check Continuous-Integration Carve-Out
 
-### 3.6 The renamed `[profile.release]` override block
+**R12.** The chapter-02-anchored formatting-tool configuration
+file `rustfmt.toml` consumes chapter-bound nightly-only formatting
+options (the chapter-bound `unstable_features = true` enabling
+switch and the several options it gates including the chapter-
+bound function-single-line option, the chapter-bound imports-
+indent visual option, the chapter-bound inline-attribute-width
+option, and the chapter-bound overflow-delimited-expression
+option). The chapter-bound stable formatting tool rejects these
+options with an error rather than ignoring them.
 
-The baseline root `Cargo.toml` carried:
+The substrate MUST install a chapter-bound nightly toolchain *only*
+for the format-check step of the continuous-integration workflow
+and run the chapter-bound nightly formatting-tool invocation
+(`cargo +nightly fmt --all -- --check`) from there. The chapter-
+bound build-and-test continuous-integration jobs MUST continue to
+use the stable toolchain of R1. The chapter-bound nightly
+toolchain installation is the *only* nightly toolchain
+installation routine continuous-integration performs and it MUST
+NOT produce any compiled artefact.
 
-```toml
-[profile.release.overrides."*"]
-debug = false
-```
+## 3.11 Tests
 
-`overrides` was Cargo's then-name for per-package profile
-adjustments. Cargo later renamed it to `package` to match the
-broader `[package.metadata.*]` convention. The current
-`Cargo.toml` carries the equivalent block under the new name:
+**T1.** *Stable-toolchain build.* The chapter-bound continuous-
+integration substrate MUST run the workspace's build and unit-test
+suite on the chapter-bound stable toolchain of R1 across the
+chapter-02 R8 build-target set. The build and unit-test suite
+MUST pass.
 
-```toml
-[profile.release.package."*"]
-debug = false
-```
+**T2.** *Bootstrap-allowlist scope.* A chapter-bound regression
+test MUST `grep` the workspace for `#![feature(` attributes and
+assert that every consuming crate is on the chapter-bound R3
+allowlist. A new consumer outside the allowlist is a chapter-bound
+regression and MUST fail the test.
 
-The semantics are unchanged: dependencies outside the workspace
-build without debug symbols even when the release profile carries
-`debug = true` for the workspace's own crates.
+**T3.** *Format-check.* The chapter-bound R12 format-check
+continuous-integration job MUST install a chapter-bound nightly
+toolchain, run the chapter-bound nightly formatting-tool with the
+chapter-bound check flag, and pass.
 
-### 3.7 Adoption of `[workspace.dependencies]`
+**T4.** *Patched-dependency removal verification.* A chapter-bound
+regression test MUST `grep` the chapter-bound root manifest for
+the chapter-bound patched-dependency block of R7 and assert it is
+absent.
 
-A second change to the root `Cargo.toml` is the introduction of a
-`[workspace.dependencies]` block. This Cargo feature (stabilised in
-Cargo 1.64) allows the workspace root to declare a single version
-of each shared third-party dependency and lets each crate inherit
-that version with `serde = { workspace = true }` or similar in its
-per-crate `Cargo.toml`.
+## 3.12 Deferred Work
 
-The baseline manifest did not use this feature — each crate
-declared its own dependency versions independently. The current
-manifest centralises shared versions, which removes a long-running
-risk of two workspace crates accidentally compiling against two
-different minor versions of the same library and pulling both into
-the resulting binary.
+**D1.** Removal of crates from the chapter-bound bootstrap
+allowlist of R3 once the chapter-bound auto-traits and negative-
+implementations features stabilise in the chapter-bound language
+or once the chapter-14 R8–R10 substrate migrates off the pattern.
 
-### 3.8 What did *not* change
+**D2.** Migration of the chapter-23-bound external-trading-
+application-programming-interface client crate onto the chapter-
+bound 2021 edition.
 
-Two pieces of the toolchain surface were deliberately left as they
-were at the baseline:
+**D3.** Migration of the chapter-bound container-integration-test
+harness onto a chapter-bound stable test harness so the
+corresponding allowlist entry of R3 can be removed.
 
-- The Cargo feature resolver remains at v2 (`resolver = "2"` in
-  the workspace root). This is the resolver that the baseline
-  already selected.
-- `Cross.toml` is byte-identical to the baseline. The
-  cross-compilation configuration for the `armv7-unknown-linux-gnueabihf`
-  target (custom image name, dynamic-linker `rustflags`) continues
-  to be the only entry, with the same image name and flag.
+## 3.13 Baseline Verifications
 
-### 3.9 The rustfmt nightly carve-out
+**V1.** The chapter-02-anchored baseline toolchain manifest of
+chapter 02 R3 MUST be confirmed to pin the chapter-bound nightly
+channel of 2022-02-01 with the chapter-bound two-component list.
 
-The project's `rustfmt.toml` (present at the baseline and retained
-since) uses formatting options that are nightly-only as of this
-writing — `unstable_features = true` (the enabling switch), and
-several options it gates on, including `fn_single_line`,
-`imports_indent = "Visual"`, `inline_attribute_width`, and
-`overflow_delimited_expr`. Stable `rustfmt` rejects these options
-with an error rather than ignoring them, which means a stable
-toolchain cannot run the configured formatting check.
+**V2.** The chapter-02-anchored baseline root manifest MUST be
+confirmed to carry the chapter-02 R5 patched-dependency block and
+the chapter-bound `[profile.release.overrides."*"]` block (with
+the chapter-bound `overrides` table key, not the chapter-bound
+`package` table key R8 renames it to).
 
-The post-baseline handling installs a nightly toolchain *only* for
-the format-check step of the CI workflow and runs `cargo +nightly
-fmt --all -- --check` from there. The build and test jobs continue
-to use stable. The format check therefore has its own toolchain
-dependency that is independent of the compilation toolchain.
+**V3.** A chapter-bound scan of the chapter-02-anchored baseline
+tree for `#![feature(` attributes MUST be confirmed to surface
+the chapter-bound set the substrate disposes of under R2: the
+chapter-bound async-closure feature, the chapter-bound auto-
+traits feature, the chapter-bound custom-test-frameworks feature,
+the chapter-bound drain-filter feature, the chapter-bound
+hash-raw-entry feature, the chapter-bound integer-atomics feature,
+the chapter-bound input/output-error-more feature, the chapter-
+bound internet-protocol feature, the chapter-bound map-first-last
+feature, the chapter-bound negative-impls feature, the chapter-
+bound panic-info-message feature, the chapter-bound statement-
+expression-attributes feature, the chapter-bound test feature.
 
-This carve-out is the only nightly toolchain installation that
-runs in routine CI; it does not produce any compiled artefact.
+## 3.14 External References
 
-### 3.10 Reproducing the migration from the baseline
+- *The Rust Edition Guide* — describes the chapter-bound
+  2018-to-2021 edition migration and the chapter-bound Cargo
+  edition-fix workflow.
+- *The Rust Reference* — describes the chapter-bound `#![feature(
+  …)]` attribute mechanism and its chapter-bound restriction to
+  the nightly channel.
+- *The Cargo Reference* — describes the chapter-bound compiler-
+  bootstrap environment-variable mechanism the language team
+  provides as a chapter-bound escape hatch for using chapter-bound
+  unstable features on the stable toolchain during chapter-bound
+  build bootstraps.
+- *The Cargo Reference* — describes the chapter-bound profile-
+  override syntax (the chapter-bound `[profile.<name>.package.
+  <spec>]` syntax of R8, the chapter-bound successor to the
+  chapter-bound earlier-spelling `overrides` table key R8
+  renames).
+- *The Cargo Reference* — describes the chapter-bound `[workspace.
+  dependencies]` block of R9 stabilised in Cargo 1.64.
+- The chapter-bound public tracking record for the chapter-bound
+  Android backtrace situation that the chapter-02 R5 patched-
+  dependency block R7 removes worked around.
 
-Any reader can reproduce the migration from the baseline working
-tree by performing, in order:
+## 3.15 Provenance Footer
 
-1. Edit `rust-toolchain.toml` to set `channel = "stable"`.
-2. For every workspace crate whose `Cargo.toml` declares
-   `edition = "2018"`, change it to `edition = "2021"` and run
-   `cargo fix --edition -p <crate>` against that crate.
-3. For every `#![feature(...)]` attribute in the tree, either
-   rewrite the affected code against the stable equivalent that
-   the Rust language team subsequently shipped (most of the
-   features listed in §3.1 had stable equivalents by 2024), or
-   add the owning crate to a `RUSTC_BOOTSTRAP` list in
-   `.cargo/config.toml`.
-4. Delete the `[patch.crates-io]` block that pins the forked
-   `backtrace` and `backtrace-sys`.
-5. Rename the `[profile.release.overrides."*"]` table to
-   `[profile.release.package."*"]`.
-6. Optionally, add a `[workspace.dependencies]` block and migrate
-   per-crate dependency declarations to `workspace = true`.
-7. Add a CI step that installs nightly `rustfmt` only for format
-   checking, leaving the build and test toolchain at stable.
-
-At the end of these steps the project should build and pass tests
-against stable Rust on every target the baseline supported.
-
-## External References
-
-- *Rust Edition Guide.* The official guide describes the 2018→2021
-  edition migration and the `cargo fix --edition` workflow.
-  https://doc.rust-lang.org/edition-guide/
-- *The Rust Reference — Conditional compilation: the `feature`
-  attribute.* Describes the `#![feature(...)]` mechanism and its
-  restriction to the nightly toolchain.
-  https://doc.rust-lang.org/reference/attributes/codegen.html
-- *Cargo Reference — `RUSTC_BOOTSTRAP`.* Documents the environment
-  variable that the Rust project provides as an escape hatch for
-  using unstable features on stable toolchains during build
-  bootstraps.
-  https://doc.rust-lang.org/cargo/reference/environment-variables.html
-- *Cargo Reference — Profile overrides.* Documents the
-  `[profile.<name>.package.<spec>]` syntax (the successor to the
-  earlier `overrides` spelling).
-  https://doc.rust-lang.org/cargo/reference/profiles.html#overrides
-- *Cargo Reference — Workspace inheritance.* Documents the
-  `[workspace.dependencies]` block stabilised in Cargo 1.64.
-  https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
-- *backtrace-rs issue #227.* The upstream tracking issue for the
-  Android `dl_iterate_phdr` situation that the baseline `backtrace`
-  patch worked around.
-  https://github.com/rust-lang/backtrace-rs/issues/227
-
-## Provenance Footer
-
-*This chapter v1; verified directly against the baseline tree at
-commit `c1d46c0c1592faa0860f704008b2b2381bc3840f` and the current
-tree on 2026-05-31. Reviewer #1 and reviewer #2 reports stored at
-`local/clean-room-doc/reviews/03-toolchain-modernization-r{1,2}.md`.*
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit of chapter 02 R1; chapter 01 (the methodology this
+  chapter is shaped by; the chapter-01 R5 sibling-allowlist class
+  consumed by the R5 carve-outs and by the R3 mocking-dependency
+  routing); chapter 02 (the baseline anchor, the chapter-02 R3
+  toolchain pin this chapter migrates off, the chapter-02 R4
+  workspace-member registry every per-crate edition rewrite of R6
+  consumes, the chapter-02 R5 patched-dependency block R7
+  removes, and the chapter-02 R8 build-target surface T1 covers);
+  chapter 04 (the error-aggregation framework consuming R3's
+  second allowlist entry); chapter 14 (the storable-state-machine
+  substrate consuming R3's first and third allowlist entries);
+  chapter 23 (the external-trading-application-programming-
+  interface client crate D2 defers); the chapter-bound public
+  documentation for the Cargo tool, the language reference, the
+  edition guide, and the Android backtrace tracking record.
+- *Permitted-input classes used:* the baseline itself (chapter 01
+  R1); external public specifications (chapter 01 R3, for the
+  Cargo and language-reference documentation citations);
+  sibling open-source repositories under compatible licenses
+  (chapter 01 R5, for the in-tree sibling-allowlist edition-
+  carve-outs of R5 and the mocking-dependency routing of R3).
+- *Sibling-allowlist consultations:* the chapter-bound in-tree
+  sibling-allowlist clones of the container-test, Ethereum-
+  virtual-machine application-binary-interface, and Siacoin
+  sibling-repositories cited by R5; the chapter-bound mocktopus
+  and mocktopus-macros sibling-allowlist test-mocking
+  dependencies cited by R3.
+- *Forbidden corpus:* not consulted.
