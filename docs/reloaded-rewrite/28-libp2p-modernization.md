@@ -1,446 +1,394 @@
-# Chapter 28 -- libp2p Stack Consolidation
+# Chapter 28 — P2P Substrate Consolidation
 
-> **Chapter type:** document existing. No IMPL marker.
+**Status:** driving-spec.
 
-## 28.0 Executive summary
+This chapter binds the consolidated peer-to-peer substrate: the single
+crate boundary, the composed network behaviour and its deliberately
+constrained sub-behaviour set, the vendored relay-mesh-aware gossipsub
+extension, the bound topic-naming and application-payload-signing surface,
+the transport stack per build target, and the discovery / bootstrap /
+mesh-maintenance discipline.
 
-The baseline shipped four cooperating crates for its
-peer-to-peer mesh:
-[`mm2_libp2p/`](../../mm2src/mm2_libp2p/),
-[`gossipsub/`](../../mm2src/gossipsub/) (a vendored,
-relay-mesh-aware fork of the upstream libp2p gossipsub),
-[`floodsub/`](../../mm2src/floodsub/) (a vendored copy of
-the upstream libp2p floodsub), and a separate
-[`peers/`](../../mm2src/peers/) crate that wrapped peer
-discovery primitives. Together they composed the
-`AtomicDexBehaviour` network behaviour the application
-crate (`mm2_main`) drove.
+## 28.1 Executive Summary
 
-The reloaded tree consolidates this stack into a single
-crate, [`mm2src/mm2_p2p/`](../../mm2src/mm2_p2p/), with
-the two vendored protocol implementations moved to
-sub-modules under it (`mm2_p2p::gossipsub`,
-`mm2_p2p::floodsub`) and the peer-discovery primitives
-absorbed as `mm2_p2p::peers_exchange`. The legacy
-`mm2_libp2p/`, `gossipsub/`, and `floodsub/` directories
-have been deleted from the workspace; only
-[`mm2src/peers/`](../../mm2src/peers/) remains on disk,
-kept so that `git log -- mm2src/peers/` queries against
-the baseline-era code continue to work. Every post-baseline
-consumer (`mm2_main`, `mm2_event_stream`, `mm2_net`,
-[Chapter 22](22-walletconnect-v2.md), the V2 swap
-chapters) targets `mm2_p2p`.
+The baseline tree ships four cooperating P2P substrates: a glue crate
+holding the composed behaviour, a vendored relay-mesh-aware
+gossipsub crate, a vendored floodsub crate, and a separate peer-discovery
+crate. Each contributes a piece of the composed network behaviour that the
+application layer drives.
 
-The underlying libp2p version itself was *not* bumped: both
-baseline and reloaded pin to the same upstream
-`github.com/libp2p/rust-libp2p` Git revision (the `floodsub`
-+ `mplex` + `noise` + `ping` + `request-response` +
-`secp256k1` feature set on both sides; the native side adds
-`dns-tokio` + `tcp-tokio` + `websocket`; the WASM side adds
-`wasm-ext` + `wasm-ext-websocket`). The work in this chapter
-is the *crate-layout* modernization that lets the rest of
-the workspace see one P2P crate instead of four, plus the
-small post-baseline additions that hang off it:
+This chapter binds a single consolidated P2P substrate that exposes the
+same composed behaviour through one crate boundary. The vendored
+gossipsub and floodsub implementations and the peer-exchange primitives
+all become submodules of the consolidated substrate. The application
+layer and every other substrate that needs P2P facilities targets the
+single consolidated crate.
 
-- the [`proxy_signature`](../../mm2src/proxy_signature/)
-  crate ([Chapter 27 §27.10](27-infrastructure-crate-carve-outs.md#2710-libp2p-proxy-signing----proxy_signature))
-  for authenticating HTTP requests that the P2P mesh
-  forwards on behalf of a client;
-- the [`mm2_net_config`](../../mm2src/mm2_net_config/) crate
-  ([Chapter 6](06-network-id-seed-node.md)) for declaring
-  the bootstrap list and the network identifier the mesh
-  uses to scope its messages;
-- a small number of helpers (`relay_address`,
-  `peers_exchange`, `adex_ping`, `request_response`,
-  `runtime`, `ip_helpers`) that used to live in
-  `mm2_libp2p` and that are now part of the same crate as
-  the behaviour they support.
+The substrate is *not* a libp2p version bump: both before and after, the
+underlying libp2p revision is the same pinned external-dependency commit,
+with the same per-target feature flags. The change is a crate-layout consolidation
+plus the small set of post-substrate-introduction additions that hang off
+it: the proxy-signature substrate (Chapter 27), the network-id scoping
+substrate (Chapter 06), and the helpers that used to live in the glue
+crate (relay-address parser, peers-exchange wrapper, ping-with-disconnect
+wrapper, request-response wrapper, swarm runtime helpers, IP helpers).
 
-This chapter documents the consolidated layout, the
-composed behaviour, the topic and message-signing surface
-the application uses on top of it, the bootstrap-and-mesh
-maintenance loop, and the post-baseline additions
-(proxy signing, mesh-aware gossipsub relay extension,
-network-id scoping).
+## 28.2 Subsystem Shape
 
-## 28.1 Crate consolidation
+The consolidated substrate exposes a small public surface (R5 below) and
+keeps everything else internal. The composed network behaviour is a
+five-element `NetworkBehaviour` derive over the canonical libp2p protocol
+families plus the substrate-internal `PeersExchange` and `AdexPing`
+wrappers (R6).
 
-### 28.1.1 What moved into `mm2_p2p`
+The libp2p protocol families *not* present in the composed behaviour are
+themselves bound (R7): no Kademlia DHT, no mDNS, no Identify, no Relay
+(v1 or v2), no DCUtR, no AutoNAT. Peer discovery is bootstrap-list-plus-
+peers-exchange-only; NAT traversal is solved structurally (R18) by
+always having a small set of globally-routable relay nodes in the
+bootstrap list.
 
-The post-baseline
-[`mm2src/mm2_p2p/src/`](../../mm2src/mm2_p2p/src/) tree is
-flat at the top level and contains both the workspace's
-"glue" modules and the two vendored protocol
-sub-implementations:
+The vendored gossipsub carries a relay-mesh extension that the standard
+gossipsub specification does not have (R10–R13). This is the structural
+reason the substrate uses a vendored gossipsub rather than the standard
+libp2p implementation directly.
+
+## 28.3 Bound Crate Boundary
+
+**R1.** The substrate exposes exactly one crate boundary to all
+downstream consumers. The composed behaviour, the vendored gossipsub
+implementation, the vendored floodsub implementation, the peer-exchange
+protocol, the ping-with-disconnect wrapper, the request-response
+wrapper, the swarm runtime helpers, the relay-address parser, and the
+IP-detection helpers all live inside this single crate.
+
+**R2.** The substrate's submodule layout (one submodule per concern) is
+not part of the contract; downstream consumers MUST consume the
+re-exported public surface from the crate root (R5) and MUST NOT
+import from submodule paths.
+
+**R3.** Application crates that previously imported from any of the
+four baseline P2P substrates MUST be updated to import from the
+consolidated substrate. No application-side code path may retain a
+direct import of a deleted baseline P2P crate.
+
+**R4.** A single baseline P2P substrate (the peer-discovery substrate)
+MAY be retained on disk as a workspace member with no active consumer.
+Its retention is purely for repository-history continuity (`git log`
+and `git blame` against pre-substrate-introduction code). No
+post-substrate-introduction consumer MUST depend on it.
+
+## 28.4 Bound Public Surface
+
+**R5.** The consolidated substrate's crate root MUST re-export
+exactly the following named surface:
+
+- the swarm-spawning entry point, its associated error type, and its
+  configuration enums — including the relay-vs-client distinction
+  carried on a bound `NodeType` enum, and the optional TLS bundle type
+  for WSS transports;
+- the gossipsub event, message, and message-id types the consumer
+  matches on;
+- a small libp2p-identity re-export — `PeerId`, `Multiaddr`, and the
+  secp256k1 public-key wrappers;
+- the `PeerAddresses` type returned by the peer-exchange protocol;
+- the `RelayAddress` parser used to decode bootstrap entries from
+  configuration;
+- the bound application-payload signing pair `encode_and_sign` /
+  `decode_signed` defined in §28.7;
+- the `pub_sub_topic` helper and the `TOPIC_SEPARATOR` constant defined
+  in §28.7.
+
+Every other symbol in the substrate MUST be private to the crate.
+
+## 28.5 Bound Composed Behaviour
+
+**R6.** The composed network behaviour MUST be a `NetworkBehaviour`
+derive over exactly five sub-behaviours, with bound substrate role for
+each:
+
+| Sub-behaviour                  | Bound role                                                     |
+| ------------------------------ | -------------------------------------------------------------- |
+| `Gossipsub` (vendored)         | Mesh-based publish-subscribe for orderbook and swap traffic.   |
+| `Floodsub`                     | Flood-based publish-subscribe for the bound peers topic.       |
+| `RequestResponseBehaviour`     | Direct one-shot RPC over the mesh.                              |
+| `PeersExchange`                | Request-response over a bound protocol identifier (R8).         |
+| `AdexPing`                     | Ping wrapper that forces a disconnect on consecutive failures. |
+
+**R7.** The composed behaviour MUST NOT include any of the following
+libp2p protocol families: Kademlia DHT, mDNS, Identify, Relay (v1 or
+v2), DCUtR, AutoNAT. Their absence is a substrate contract.
+
+**R8.** The peer-exchange request-response protocol identifier is bound
+as the string `/peers-exchange/1`. The peer-exchange responder MUST cap
+each reply at no more than 100 addresses.
+
+**R9.** The ping wrapper MUST disconnect a peer after a bounded number
+of consecutive ping failures (the exact count is a substrate-internal
+tuning parameter, not bound here), as opposed to merely logging the
+failure.
+
+## 28.6 Bound Gossipsub Relay-Mesh Extension
+
+**R10.** The vendored gossipsub behaviour MUST carry, on top of the
+standard gossipsub state, five additional pieces of state:
+
+- a *connected-relays* set — peers that have advertised themselves
+  with the substrate's `IAmRelay` control message;
+- a *relay-mesh* map — the subset of connected relays the local node
+  treats as its mesh peers, with per-peer counters;
+- a *reverse-mesh* set — the relays that have included this node in
+  *their* mesh;
+- an *explicit-relay* list — relays pinned by configuration and never
+  evicted from the mesh;
+- a relay-mesh-maintenance timer running on a bound 10-second
+  interval.
+
+**R11.** The relay-mesh-maintenance tick MUST:
+
+1. fill the relay-mesh up to the substrate's configured low watermark
+   (`mesh_n_low`) by drawing from connected relays not currently in
+   the mesh;
+2. prune the relay-mesh back to the high watermark (`mesh_n_high`)
+   when it exceeds it;
+3. preserve every entry in the explicit-relay list against eviction.
+
+**R12.** The substrate's `IAmRelay` control message is bound: nodes
+that act as relays MUST emit it; nodes that act as clients MUST NOT.
+The configuration flag that selects which role applies is bound as a
+boolean `i_am_relay` field on the substrate's gossipsub configuration
+surface.
+
+**R13.** The substrate's gossipsub configuration surface MUST further
+expose:
+
+- a content-addressed message-id function that hashes payload-plus-
+  sequence-number, so duplicate payloads collapse to a single
+  message id;
+- the three mesh-size watermarks (`mesh_n_low`, `mesh_n`,
+  `mesh_n_high`), with substrate-level defaults differing between
+  client and relay roles;
+- a manual-propagation flag — when set, the consumer is responsible
+  for invoking the substrate's propagate-message method after
+  validating a message, which gives the application the ability to
+  drop invalid messages before forwarding;
+- a maximum transmit size bound at slightly under 1 MiB.
+
+**R14.** The substrate MUST NOT carry the peer-scoring / reputation
+extension present in later revisions of the standard gossipsub
+implementation. Abusive-peer handling falls to the consumer's manual-
+disconnect logic and to R9's force-disconnect.
+
+## 28.7 Bound Topic and Application-Payload Signing Surface
+
+**R15.** Pub/sub topic strings MUST be constructed by the bound
+`pub_sub_topic(prefix, topic)` helper. The topic separator MUST be
+bound as the single byte `/`, exposed as the `TOPIC_SEPARATOR` constant
+on the substrate's public surface. The resulting topic string is the
+verbatim concatenation `<prefix><TOPIC_SEPARATOR><topic>`.
+
+**R16.** Application payloads published on the mesh MUST be wrapped in
+a secp256k1-signed envelope before publication. The substrate exposes
+exactly two functions for this:
+
+- `encode_and_sign<T: Serialize>(message: &T, secret: &[u8; 32]) ->
+  Vec<u8>` — msgpack-encodes the payload, SHA-256 hashes the encoded
+  bytes, signs the hash with the supplied secp256k1 secret, and packs
+  `{ pubkey, signature, payload }` back into a msgpack envelope.
+- `decode_signed<'de, T: Deserialize<'de>>(encoded: &'de [u8]) ->
+  Result<(T, Signature, PublicKey), _>` — the inverse: parses the
+  envelope, verifies the signature against the embedded public key,
+  and returns the payload alongside the verified signature and public
+  key.
+
+**R17.** This application-payload signing surface is bound as *separate*
+from the proxy-signature substrate of Chapter 27. The two operate on
+different key spaces (raw secp256k1 here; libp2p-identity keypairs for
+proxy signing) and address different threat models (mesh-message
+authenticity here; HTTP-relay request-authentication for proxy signing).
+Unification of the two signing surfaces is recorded in §28.10 as
+deferred.
+
+## 28.8 Bound Transport and Upgrade Stack
+
+**R18.** The transport stack is target-dependent and is bound per
+target:
+
+| Target  | Bound transport                                                                                       |
+| ------- | ----------------------------------------------------------------------------------------------------- |
+| Native  | TCP plus DNS, optionally upgraded with WebSocket and WSS when the configuration supplies a TLS bundle. |
+| WASM    | Browser WebSocket via the libp2p WASM FFI substrate.                                                  |
+| Testing | An in-process memory transport for the substrate's own integration tests.                              |
+
+**R19.** The application-level upgrade pipeline is bound to be uniform
+across all targets: noise XX (`Xx25519Spec`) key agreement followed by
+mplex stream multiplexing, with a 20-second upgrade timeout.
+
+**R20.** The bootstrap-multiaddr formats the configuration accepts are
+bound to the standard libp2p forms: `/ip4/<addr>/tcp/<port>`,
+`/ip4/<addr>/tcp/<port>/wss`, `/dns/<host>/tcp/<port>`, and
+`/memory/<port>` for the testing transport.
+
+## 28.9 Bound Discovery, Mesh Maintenance, NAT
+
+**R21.** The substrate MUST NOT attempt open-internet peer discovery.
+The bootstrap list supplied via configuration is the bound source of
+truth for initial peer addresses.
+
+**R22.** At swarm-spawn time the substrate MUST:
+
+1. parse the configured bootstrap list (a vector of `RelayAddress`)
+   into multiaddrs;
+2. dial up to `mesh_n` random entries;
+3. start a 10-second maintenance timer running R11 plus a periodic
+   peers-exchange request to a random connected relay on a bound
+   300-second interval after a bound 20-second initial delay.
+
+**R23.** NAT traversal is bound to a *structural* solution: relay
+nodes MUST be deployed at globally-routable addresses, and client
+nodes that sit behind NAT reach the mesh exclusively via at least one
+relay. The substrate MUST NOT advertise non-routable listener
+addresses to peers; the bound `ip_helpers::is_global` predicate is
+applied to listener announcements.
+
+## 28.10 Tests (test invariants)
+
+**T1.** *Composed-behaviour shape.* A reflection-style test (or a
+documentation-extracting audit) MUST confirm that the composed
+`NetworkBehaviour` contains exactly the five sub-behaviours bound in
+R6, and none of the seven libp2p protocol families excluded by R7.
+
+**T2.** *Relay-mesh maintenance.* An in-process mesh test using the
+testing memory transport MUST:
+
+1. spawn one relay node and two client nodes;
+2. observe that each client's connected-relays set includes the
+   relay;
+3. observe that the relay-mesh of each client includes the relay
+   after one or two maintenance ticks (within roughly 30 seconds of
+   simulated time);
+4. force the relay to disconnect and observe that the maintenance
+   tick removes it from each client's relay-mesh.
+
+**T3.** *Pinned explicit relays.* A node configured with an explicit
+relay MUST retain that relay in its relay-mesh across a
+maintenance-tick cycle that would otherwise prune it when the mesh
+exceeds the high watermark (R11 step 3).
+
+**T4.** *Application-payload signing round-trip.* For arbitrary
+serializable values, `decode_signed(encode_and_sign(value, sk))` MUST
+return `Ok((value, signature, pubkey))` with `pubkey` matching the
+public key derived from `sk`. Any single-byte mutation of the encoded
+bytes MUST cause `decode_signed` to return an error and MUST NOT
+return a parseable but invalid payload.
+
+**T5.** *Topic construction.* `pub_sub_topic("orderbook",
+"KMD:BTC")` MUST return exactly `"orderbook/KMD:BTC"`; the substrate
+MUST NOT perform any URL-encoding or canonicalisation of the inputs.
+A test or audit MUST confirm the helper's implementation reads
+`TOPIC_SEPARATOR` (not a hard-coded `/`) so a future separator change
+remains a one-symbol substrate edit.
+
+**T6.** *Peer-exchange bound.* A peers-exchange request MUST receive
+no more than 100 addresses in its response, regardless of how many
+peers the responder is connected to.
+
+## 28.11 Deferred Work
+
+**D1.** A libp2p version bump (and the accompanying touch on every
+sub-behaviour and the swarm-builder code) is deferred. The substrate
+preserves the baseline libp2p revision pin and feature flags.
+
+**D2.** Removal of the retained pre-substrate peer-discovery crate
+(R4) from the workspace is deferred. Its retention costs build time
+but preserves repository-history continuity.
+
+**D3.** Unification of the two signing surfaces — application-payload
+signing in R16 and proxy-signature signing in Chapter 27 — is
+deferred. The two key spaces and threat models are currently kept
+separate by design.
+
+**D4.** Addition of peer-scoring / reputation extensions to the
+vendored gossipsub (or migration to a modern standard gossipsub
+implementation that carries them) is deferred. The current substrate
+handles abusive peers via manual-disconnect logic plus R9 force-
+disconnect.
+
+**D5.** Addition of libp2p relay-v2 plus DCUtR fallback for clients
+whose only path to a relay is blocked is deferred. The substrate
+currently degrades to "no connection" for such clients.
+
+## 28.12 External References
+
+- *libp2p* — the underlying networking substrate; the substrate pins
+  to the project's existing external-dependency revision (the pin
+  itself is workspace-side metadata, not bound here).
+- *libp2p gossipsub specification* — the basis the vendored gossipsub
+  extends with R10–R13.
+- *libp2p floodsub specification* — the basis of the substrate's
+  flood-based topic.
+- *libp2p noise handshake specification* — the bound key-agreement
+  protocol in R19.
+- *libp2p multiaddr format* — the bound bootstrap-address grammar in
+  R20.
+- *secp256k1* — the bound signing primitive in R16.
+- *msgpack serialization format* — the bound envelope serialization
+  in R16.
+- Chapter 06 (network-id and seed-node decoupling) — bound source of
+  the network-identifier scoping that all mesh traffic carries.
+- Chapter 27 (infrastructure substrate inventory), specifically the
+  proxy-signature substrate row — the *other* signing surface, kept
+  separate per R17.
+- Chapter 11 (order-match cancellation race) and Chapter 09
+  (watcher infrastructure) — primary consumers of the bound topic
+  surface of R15.
+
+## 28.13 Baseline Verifications
+
+**V1.** The baseline workspace MUST be confirmed to contain four
+distinct P2P-related substrate directories under the project's
+crate root, with the layout bound in §28.1 (one glue substrate,
+two vendored protocol substrates, one peer-discovery substrate). A
+`git ls-tree` over the project crate root at the baseline commit
+MUST list all four.
+
+**V2.** The baseline composed network behaviour MUST be confirmed to
+contain the five sub-behaviours of R6 (the bound substrate
+preserves the shape, only consolidates its location). A `git grep`
+for the bound sub-behaviour names against the baseline glue crate's
+behaviour module MUST confirm all five.
+
+**V3.** The baseline libp2p revision pin and per-target feature flags
+MUST be confirmed identical to the substrate's pin and flags. The
+bound substrate is a crate-layout consolidation, not a libp2p version
+bump:
 
 ```
-mm2_p2p/src/
-|-- lib.rs                  re-exports + message-signing API
-|-- atomicdex_behaviour.rs  composed NetworkBehaviour + swarm builder
-|-- atomicdex_behaviour/    test helpers
-|-- gossipsub/              vendored relay-mesh-aware gossipsub
-|   |-- behaviour.rs
-|   |-- config.rs
-|   |-- handler.rs
-|   |-- mcache.rs           message cache
-|   |-- protocol.rs
-|   `-- topic.rs
-|-- floodsub/               vendored floodsub
-|   |-- layer.rs
-|   |-- protocol.rs
-|   `-- topic.rs
-|-- peers_exchange.rs       request-response peer exchange
-|-- relay_address.rs        RelayAddress parsing
-|-- adex_ping.rs            ping wrapper that disconnects on failure
-|-- request_response.rs     request-response behaviour wrapper
-|-- runtime.rs              swarm runtime helpers
-`-- ip_helpers.rs           global IP detection
+git -C <baseline> show c1d46c0:<root>/<glue-crate>/Cargo.toml | grep -E 'libp2p|features'
 ```
 
-The cargo manifest declares the upstream libp2p Git pin on
-both targets, with the per-target feature lists noted in
-[§28.0](#280-executive-summary).
+## 28.14 Provenance Footer
 
-### 28.1.2 Legacy crates -- migration status
-
-The post-baseline consolidation removed three of the four
-original baseline crates from the active workspace. The
-`mm2src/mm2_libp2p/`, `mm2src/gossipsub/`, and
-`mm2src/floodsub/` directories have been deleted; they are
-no longer present on disk and no longer appear in the
-workspace `[workspace.members]` list. Their content was
-folded into [`mm2src/mm2_p2p/`](../../mm2src/mm2_p2p/) as
-described in [§28.1.1](#2811-what-moved-into-mm2_p2p).
-
-The fourth crate, [`mm2src/peers/`](../../mm2src/peers/),
-is still on disk and is still a workspace member. It is
-kept so that git-blame and `git log -- <path>` queries
-against the baseline-era code continue to work, and so
-that the provenance footers in this chapter and elsewhere
-can cite specific baseline files. No post-baseline
-consumer depends on it; the dependency graph from
-`mm2_main` and all the other post-baseline crates that
-need P2P routes entirely through `mm2_p2p`.
-
-### 28.1.3 Public surface
-
-[`mm2_p2p/src/lib.rs`](../../mm2src/mm2_p2p/src/lib.rs)
-re-exports a small public surface:
-
-- the swarm-spawning entry point (`spawn_gossipsub`) and
-  its associated error type and configuration enums
-  (`NodeType` distinguishing relay vs client, `WssCerts`
-  for the optional TLS bundle);
-- the gossipsub event, message, and message-id types the
-  consumer matches on;
-- a small libp2p-identity re-export (`PeerId`, `Multiaddr`,
-  the secp256k1 public-key wrappers);
-- the `PeerAddresses` type returned by the peer-exchange
-  protocol;
-- the `RelayAddress` parser used to decode bootstrap
-  entries from configuration;
-- the `encode_and_sign` / `decode_signed` pair that wraps
-  application payloads in a secp256k1-signed envelope; and
-- the `pub_sub_topic` helper plus the `TOPIC_SEPARATOR`
-  constant.
-
-Everything else is private to the crate.
-
-## 28.2 The composed behaviour
-
-The application network behaviour, declared in
-[`atomicdex_behaviour.rs`](../../mm2src/mm2_p2p/src/atomicdex_behaviour.rs),
-is a `#[derive(NetworkBehaviour)]` struct composed of five
-sub-behaviours:
-
-| Sub-behaviour          | Role                                          |
-|------------------------|-----------------------------------------------|
-| `Gossipsub` (vendored) | Mesh-based pub/sub for orderbook and swap     |
-| `Floodsub`             | Flood-based pub/sub for the peers topic       |
-| `RequestResponseBehaviour` | Direct one-shot RPCs over the mesh        |
-| `PeersExchange`        | Request-response protocol `/peers-exchange/1` |
-| `AdexPing`             | Ping with forced disconnect on failure        |
-
-The list of upstream behaviours that are *not* composed is
-itself meaningful: there is no Kademlia DHT, no libp2p
-mDNS, no libp2p Identify, no libp2p Relay protocol, no
-DCUtR direct-connection-upgrade, and no AutoNAT. Peer
-discovery happens entirely through the bootstrap list plus
-the peers-exchange protocol, and NAT traversal is solved
-by always having a small set of globally reachable relay
-nodes in the bootstrap list -- not by hole-punching at the
-libp2p layer.
-
-This is a deliberate choice: the workspace is shipping a
-production trading mesh on a curated set of known relay
-nodes, not a generic libp2p application, and the smaller
-behaviour surface is both simpler to reason about and
-smaller to ship to a browser.
-
-## 28.3 Relay-mesh-aware gossipsub
-
-The most substantial post-baseline-survivor in
-`mm2_p2p::gossipsub` is the relay-mesh extension that
-upstream libp2p-gossipsub does not have. The vendored
-behaviour
-([`gossipsub/behaviour.rs`](../../mm2src/mm2_p2p/src/gossipsub/behaviour.rs))
-adds, on top of the standard gossipsub state:
-
-- a set of *connected relays* (peers that have advertised
-  themselves with the protocol's `IAmRelay` control
-  message);
-- a *relay mesh* map (a subset of connected relays the
-  node treats as its mesh peers, with per-peer counters);
-- a *reverse* mesh set (the relays that have included
-  this node in *their* mesh);
-- an *explicit relay list* -- relays that are pinned and
-  never evicted from the mesh;
-- a 10-second *relay-mesh-maintenance* timer that fills
-  the mesh up to the configured low water mark and prunes
-  it back to the high water mark.
-
-This is the structural reason the workspace uses a
-vendored gossipsub: relay-aware mesh management is a
-project-specific extension to the spec, not something that
-upstream libp2p-gossipsub provides today.
-
-The accompanying configuration builder
-([`gossipsub/config.rs`](../../mm2src/mm2_p2p/src/gossipsub/config.rs))
-exposes a small set of knobs the application sets at
-swarm-spawn time:
-
-- a content-addressed `message_id_fn` (the message id is a
-  hash of payload + sequence number, so duplicate payloads
-  collapse);
-- the `i_am_relay` flag (controls whether the node
-  announces itself as a relay via the `IAmRelay` control
-  message);
-- the three mesh size watermarks (`mesh_n_low`, `mesh_n`,
-  `mesh_n_high`) which are tuned differently for clients
-  and relays;
-- `manual_propagation` (the consumer is responsible for
-  calling `propagate_message` after it has validated a
-  message, which gives the application the ability to drop
-  invalid messages before forwarding);
-- a maximum transmit size of just under 1 MiB.
-
-The implementation does *not* carry the peer-scoring /
-reputation system from later upstream gossipsub, and does
-not carry a separate message-validation filter (the
-manual-propagation hook is the equivalent).
-
-## 28.4 Transports and the upgrade stack
-
-The transport stack is target-dependent and the choices
-follow the per-target libp2p feature flags noted in
-[§28.0](#280-executive-summary):
-
-| Target  | Transport                                            |
-|---------|------------------------------------------------------|
-| Native  | TCP + DNS, optionally upgraded with WebSocket and    |
-|         | WSS (if the configuration supplies a `WssCerts`).    |
-| WASM    | Browser WebSocket via `libp2p::wasm_ext` FFI.        |
-| Testing | `MemoryTransport` for the in-process mesh used by    |
-|         | the integration tests in `mm2_p2p::atomicdex_behaviour/`.|
-
-The application-level upgrade pipeline is the same on all
-targets: noise XX key agreement
-(`Xx25519Spec`), then mplex multiplexing, with a 20-second
-upgrade timeout.
-
-Bootstrap-multiaddr formats the configuration accepts are
-the standard libp2p forms: `/ip4/<addr>/tcp/<port>`,
-`/ip4/<addr>/tcp/<port>/wss`, `/dns/<host>/tcp/<port>`,
-and `/memory/<port>` for tests.
-
-## 28.5 Topics and message signing
-
-The pub/sub topic surface is a flat namespace whose strings
-are part of the wire contract between mesh peers. Topic
-names are constructed via the `pub_sub_topic(prefix, topic)`
-helper in `mm2_p2p::lib.rs`, which formats them as
-`<prefix><TOPIC_SEPARATOR><topic>` (the separator is `/`).
-The conventional prefixes the `mm2_main` consumer uses are
-documented in
-[`mm2_main::lp_network`](../../mm2src/mm2_main/src/lp_network.rs)
-and split into three buckets:
-
-- the orderbook gossipsub topics
-  (`<orderbook-prefix>/<base>:<rel>`);
-- the swap gossipsub topics
-  (`<swap-prefix>/<uuid>`);
-- the floodsub peers topic (`PEERS`).
-
-Application payloads are wrapped in a secp256k1-signed
-envelope before publication. The signing surface is
-intentionally small:
-
-- `encode_and_sign<T: Serialize>(message: &T, secret: &[u8;
-  32]) -> Vec<u8>` -- msgpack-encodes the payload, hashes it
-  with SHA-256, signs the hash with the supplied secp256k1
-  secret, and packs `{ pubkey, signature, payload }` back
-  into a msgpack envelope.
-- `decode_signed<'de, T: Deserialize<'de>>(encoded: &'de
-  [u8]) -> Result<(T, Signature, PublicKey), ...>` --
-  reverse direction; verifies the signature and returns the
-  payload alongside the verified public key.
-
-Note that this signing surface is *separate* from the
-`proxy_signature` crate (Chapter
-[27 §27.10](27-infrastructure-crate-carve-outs.md#2710-libp2p-proxy-signing----proxy_signature)).
-`encode_and_sign`/`decode_signed` use raw `secp256k1` keys
-and serve the P2P mesh's *application payload*
-authenticity; `proxy_signature` uses libp2p-identity
-keypairs and serves the *HTTP* relay-proxy authentication
-flow described in [§28.7](#287-proxy-signing-for-http-relay).
-
-## 28.6 Discovery, mesh maintenance, NAT
-
-The application does not attempt to discover peers in the
-open-internet sense; the bootstrap list in the configuration
-is the source of truth. The workflow at swarm spawn time is:
-
-1. Parse the bootstrap list (a vector of
-   `RelayAddress`) into multiaddrs.
-2. Dial up to `mesh_n` random entries.
-3. Start a 10-second maintenance timer that:
-   - tops the connected-relays set back up if it falls
-     below `mesh_n_low` (by dialing additional bootstrap
-     entries and peers-exchange responses);
-   - prunes back to the high water mark if it grows past
-     it; and
-   - issues a peers-exchange request to a random connected
-     relay periodically (300-second interval, 20-second
-     initial delay) to pull in fresh peer addresses.
-
-The peers-exchange responder caps replies at 100 addresses
-per request to keep the protocol bounded.
-
-NAT traversal is solved structurally rather than
-dynamically: relay nodes are expected to be on globally
-routable addresses, and client nodes that sit behind NAT
-reach the mesh via at least one relay. The
-`ip_helpers::is_global` predicate filters out non-routable
-addresses from listener announcements so that other peers
-do not try to reach a client at its RFC1918 address.
-
-## 28.7 Proxy signing for HTTP relay
-
-The post-baseline addition of the
-[`proxy_signature`](../../mm2src/proxy_signature/) crate
-([Chapter 27 §27.10](27-infrastructure-crate-carve-outs.md#2710-libp2p-proxy-signing----proxy_signature))
-is what lets the trading mesh act as a relay for HTTP
-requests on behalf of light clients. The pattern is:
-
-1. The light client constructs a `RawMessage` envelope:
-   - a fixed magic prefix (`b"Proxy Auth Payload\n"`),
-   - the target URI,
-   - the request body size (hashed in to bind the body to
-     the signature),
-   - the libp2p-encoded public key of the client,
-   - an expiry timestamp.
-2. The client signs the envelope with its libp2p-identity
-   keypair (the same key that identifies the client on the
-   mesh) and attaches the signature as a request header.
-3. The proxy node receives the HTTP request, parses the
-   envelope from the request headers, re-derives the magic
-   prefix, and calls `verify` on the envelope-and-signature
-   pair against the embedded public key.
-4. If the signature verifies and the expiry has not
-   elapsed, the proxy forwards the HTTP request to the
-   real target; otherwise it returns Unauthorized.
-
-The point of this scheme is that the client does not
-need to share any secret with the proxy operator -- the
-client's libp2p-identity public key, which is already
-broadcast on the mesh, is the authentication material.
-
-## 28.8 Network identifier scoping
-
-The post-baseline `mm2_net_config` crate
-([Chapter 6](06-network-id-seed-node.md)) adds an explicit
-network-identifier mechanism that scopes the mesh:
-topics, peer-exchange responses, and signed payloads all
-carry the network id, so that two nodes configured for
-different networks do not see each other's traffic even if
-they happen to have overlapping bootstrap lists. This
-replaces a baseline-era practice of relying solely on the
-bootstrap list to keep networks apart, which was fragile
-when a node operator misconfigured an entry.
-
-## 28.9 Limitations and known gaps
-
-1. **libp2p upstream version is the same as at baseline.**
-   The reloaded tree still pins to the project's existing
-   Git revision of `rust-libp2p`. A version bump would
-   touch every behaviour and most of the swarm-builder code
-   and is held as a separate work item.
-2. **The legacy `peers/` crate is still in the workspace.**
-   It has no active consumer but appears in `cargo check`,
-   `cargo clippy`, and `cargo build` output. Removing it
-   is a follow-up; keeping it costs build time but
-   preserves git-blame against baseline.
-3. **No DHT, no mDNS, no AutoNAT.** Peer discovery is
-   bootstrap-list + peers-exchange-only; nodes that lose
-   contact with every bootstrap relay cannot recover
-   automatically.
-4. **The vendored gossipsub is not the modern peer-scoring
-   gossipsub.** Reputation, score thresholds, and
-   negative-score eviction are not implemented; abusive
-   peers are handled by manual disconnect logic plus the
-   ping-based force-disconnect in `AdexPing`.
-5. **Application-level message signing uses raw
-   `secp256k1`, not libp2p identity.** The two signing
-   surfaces (this chapter's `encode_and_sign` /
-   `decode_signed` and `proxy_signature`'s libp2p-identity
-   sign / verify) exist in parallel and a future unification
-   is plausible but not in scope here.
-6. **NAT traversal degrades to "no connection" for clients
-   whose only path to a relay is blocked.** There is no
-   libp2p relay-v2 + DCUtR fallback; the deployment
-   assumption is that relays are reachable from anywhere.
-
-## 28.10 External references
-
-- The `rust-libp2p` upstream project
-  ([github.com/libp2p/rust-libp2p](https://github.com/libp2p/rust-libp2p)).
-- The libp2p gossipsub specification
-  ([github.com/libp2p/specs/tree/master/pubsub/gossipsub](https://github.com/libp2p/specs/tree/master/pubsub/gossipsub)).
-- The libp2p floodsub specification
-  ([github.com/libp2p/specs/tree/master/pubsub](https://github.com/libp2p/specs/tree/master/pubsub)).
-- The libp2p noise handshake specification
-  ([github.com/libp2p/specs/tree/master/noise](https://github.com/libp2p/specs/tree/master/noise)).
-- The libp2p multiaddr format
-  ([github.com/multiformats/multiaddr](https://github.com/multiformats/multiaddr)).
-- secp256k1 (used for application-payload signing)
-  ([github.com/bitcoin-core/secp256k1](https://github.com/bitcoin-core/secp256k1)).
-- The msgpack serialization format used by
-  `encode_and_sign` / `decode_signed`
-  ([msgpack.org](https://msgpack.org/)).
-
-## 28.11 Provenance
-
-The four baseline crates (`mm2src/mm2_libp2p/`,
-`mm2src/gossipsub/`, `mm2src/floodsub/`, `mm2src/peers/`)
-were all present at `c1d46c0`; this was verified with
-`git ls-tree c1d46c0 -- mm2src/`. The first three have
-since been deleted; the fourth (`mm2src/peers/`) is
-retained as described in
-[§28.1.2](#2812-legacy-crates----migration-status). The
-vendored gossipsub and floodsub sub-modules now under
-[`mm2_p2p/src/gossipsub/`](../../mm2src/mm2_p2p/src/gossipsub/)
-and
-[`mm2_p2p/src/floodsub/`](../../mm2src/mm2_p2p/src/floodsub/)
-carry forward the baseline implementations as the starting
-point; their post-baseline changes include the relay-mesh
-state and timer extension, the message-id hashing function,
-and the manual-propagation hook.
-
-The peers-exchange, relay-address, adex-ping, and runtime
-modules are absorbed from the baseline `mm2_libp2p` crate
-into `mm2_p2p`. The proxy-signature and network-config
-crates ([§28.7](#287-proxy-signing-for-http-relay) and
-[§28.8](#288-network-identifier-scoping)) are entirely
-post-baseline and are documented in their own chapters
-(Chapter [27 §27.10](27-infrastructure-crate-carve-outs.md#2710-libp2p-proxy-signing----proxy_signature)
-and Chapter [6](06-network-id-seed-node.md)).
+- *Inputs consulted for this chapter:* the baseline tree at project
+  baseline commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`,
+  Chapter 06 (network-id substrate), Chapter 09 (watcher topic
+  conventions), Chapter 11 (order-match cancellation cache), Chapter
+  27 (infrastructure substrate inventory and proxy-signature
+  substrate row), and the external libp2p / cryptographic / wire-
+  format specifications listed in §28.12.
+- *Permitted-input classes used:* baseline source; chapter-bound
+  substrate identifiers introduced here as contract surface
+  (`AtomicDexBehaviour` composed-behaviour shape, `PeersExchange`,
+  `AdexPing`, `RelayAddress`, `PeerAddresses`, `encode_and_sign`,
+  `decode_signed`, `pub_sub_topic`, `TOPIC_SEPARATOR`, the bound
+  `/peers-exchange/1` protocol identifier, the `IAmRelay` control-
+  message name, the `i_am_relay` configuration field, the
+  `mesh_n_low`/`mesh_n`/`mesh_n_high` parameter names, the bound
+  numeric constants 10 s / 300 s / 20 s / 100 / ~1 MiB); standard
+  libp2p protocol names; standard cryptographic primitive names
+  (secp256k1, noise XX, SHA-256, msgpack).
+- *Sibling chapters cross-referenced:* Chapter 06, Chapter 09,
+  Chapter 11, Chapter 27.
+- *Author of this chapter:* clean-room round-2 driving-spec working
+  set.
+- *Forbidden corpus:* not consulted.
