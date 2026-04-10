@@ -1,825 +1,716 @@
-# Chapter 15 — Atomic-Swap V2 UTXO Path
+# Chapter 15 — Atomic-Swap Version-Two UTXO Path
 
-> **Status in reloaded:** *gap.* The V2 swap state-machine core
-> ([Chapter 14 — state-machine runtime](14-state-machine-runtime.md))
-> and the V2 coin-trait surface
-> ([`mm2src/coins/lp_coins_traits.rs`](../../mm2src/coins/lp_coins_traits.rs))
-> are present, but no concrete UTXO impl of those traits exists in this
-> tree. EVM is currently the only consumer
-> ([Chapter 17 — V2 EVM swap path](17-swap-v2-evm-path.md)). This
-> chapter is the **driving specification**: a clean-room implementer
-> who reads only this chapter, the V2 trait definitions, and the
-> existing V1 UTXO swap code in [`mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`](../../mm2src/coins/utxo/utxo_common/utxo_common_swap.rs)
-> must be able to reproduce a working UTXO V2 implementation.
+**Status:** driving-spec.
 
----
+The binding specification for the UTXO concrete implementation of
+the version-two atomic-swap trait surface: three Bitcoin scripts,
+four coin-trait implementations, a delegated helper inventory in
+the existing UTXO swap-helper module, and the dispatch wiring that
+lets the chapter-14 generic state-machine substrate drive UTXO
+swaps end-to-end.
 
-## 15.0 Executive Summary
+## 15.1 Executive Summary
 
-The V2 atomic-swap protocol replaces the V1 single-payment HTLC with
-a **two-stage payment flow** on the taker side and a **dual-secret
-HTLC** on the maker side:
+The version-two atomic-swap protocol replaces the version-one
+single-payment hash-time-locked contract with a two-stage payment
+flow on the taker side and a dual-secret hash-time-locked contract
+on the maker side. The chapter-bound version-one-versus-version-two
+contrast is exactly:
 
-| Side  | V1                                          | V2                                                                                   |
-|-------|---------------------------------------------|--------------------------------------------------------------------------------------|
-| Maker | Single HTLC bound to one secret hash        | HTLC bound to **both** maker-secret-hash and taker-secret-hash                       |
-| Taker | Single HTLC bound to maker-secret-hash      | **Funding** tx → **Payment** tx (cooperative funding-spend turns funding into payment) |
-| Dex-fee delivery | Separate dex-fee tx                | Folded into the funding amount; the funding-spend output goes to the dex-fee address |
-| Pre-burn output | n/a (V1)                          | Optional pre-burn output funded by the same trade — see [Chapter 16](16-swap-v2-pre-burn-output.md) |
+| Side                | Version one                                          | Version two                                                                                |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Maker               | Single hash-time-locked contract bound to one secret hash | Hash-time-locked contract bound to *both* the maker-secret hash and the taker-secret hash |
+| Taker               | Single hash-time-locked contract bound to the maker-secret hash | Two-stage funding-then-payment flow (a cooperative funding-spend converts funding into payment) |
+| Dex-fee delivery    | Separate dex-fee transaction                          | Folded into the funding amount; funding-spend output routes to the dex-fee address         |
+| Optional pre-burn   | Not applicable                                       | Optional pre-burn output funded by the same trade (chapter 16)                              |
 
-For UTXO coins this requires three Bitcoin-script forms (taker
-funding, taker payment, maker payment) and a set of trait-method
-implementations on `UtxoStandardCoin` that
-the V2 state machines drive. All of the heavy lifting (UTXO
-selection, script signing, P2SH spend construction, SPV-aware
-validation) is delegated to helper functions in
-`mm2src/coins/utxo/utxo_common/utxo_common_swap.rs` (the V1 helpers
-module, which V2 extends in-place),
-which mirror the existing V1 helpers but are parameterised by the new
-`SwapTxTypeWithSecretHash::{MakerPaymentV2, TakerPaymentV2,
-TakerFunding}` variants and the new V2 script builders in
-`mm2src/coins/utxo/swap_proto_v2_scripts.rs`.
+The chapter-14 generic state-machine substrate is in place and the
+version-two coin-trait surface is in place. The parallel EVM
+implementation (chapter 17) is the only consumer at substrate
+landing time. This chapter is the *driving specification* for the
+UTXO concrete implementation: an implementer who reads this
+chapter, the version-two trait definitions, and the existing
+version-one UTXO swap helpers MUST be able to produce a working
+UTXO version-two implementation.
 
----
+Bound rules R1–R4 cover the trait surface and associated types;
+R5–R10 cover the three Bitcoin scripts; R11–R20 cover the maker
+trait methods; R21–R35 cover the taker trait methods; R36–R40
+cover the common-trait derivations, the shared spend-construction
+helper, the helper-inventory boundary, the numeric constants, and
+the state-machine wiring.
 
-## 15.1 Why this exists
+## 15.2 Subsystem Shape
 
-The V2 protocol was designed to:
+The substrate occupies a structural seam between five chapters:
 
-1. **Atomically deliver the dex-fee** in the same on-chain footprint
-   as the trade itself, instead of a separate dex-fee transaction
-   that a malicious taker could try to omit or under-pay.
-2. **Bind both parties' secrets** into the maker payment, so neither
-   side can grief the other by withholding a secret without consequence.
-3. **Enable optional pre-burn outputs** (Chapter 16) on the same
-   funding spend, so deflationary or proof-of-burn policies can be
-   enforced atomically with the trade.
-4. **Standardise the on-chain script shape across coin families** so
-   the EVM contract surface
-   ([`coins/eth/eth_swap_v2/*`](../../mm2src/coins/eth/eth_swap_v2/))
-   and the UTXO script surface express the same state machine in
-   their respective native idioms.
+- chapter 14 (the generic storable state-machine runtime that
+  drives every version-two swap);
+- chapter 08 (the typed dex-fee enumeration and its three-variant
+  closure plus the network-level numerics the
+  taker-payment-spend helpers consume);
+- chapter 16 (the pre-burn-output substrate that completes the
+  `WithBurn` and `NoFee` taker-payment-spend arms this chapter
+  defers);
+- chapter 17 (the parallel EVM implementation; structural
+  reference for trait conformance; the EVM contract surface
+  handles spend authorisation on-chain, which is why the bound
+  `skip_taker_payment_spend_preimage` flag of R34 differs across
+  the two paths);
+- chapter 05 (the secret-hash-algorithm discriminator chapter 05
+  binds is consumed by the script builders here).
 
-No reloaded post-baseline commit motivates this chapter's content
-(the trait surface and SM core were carried forward from the V1→V2
-upgrade work in the baseline tree's history); the motivation above is
-a clean-room restatement of the protocol design intent, derived from
-the trait shape, the state graph in
-[`maker_swap_v2.rs`](../../mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs)
-and [`taker_swap_v2.rs`](../../mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs),
-and the EVM contract ABI in
-[`coins/eth/maker_swap_v2_abi.json`](../../mm2src/coins/eth/maker_swap_v2_abi.json).
+The substrate does *not* mutate the chapter-14 state-machine
+shape, the chapter-08 enumeration, the chapter-17 EVM contract
+surface, or the chapter-05 derivation helpers. It binds only the
+UTXO-side concrete implementation of the coin-trait methods the
+state machines call.
 
----
+## 15.3 Bound Coin-Trait Implementation Surface
 
-## 15.2 Surface to implement on `UtxoStandardCoin`
+**R1.** The substrate MUST implement exactly four traits on the
+chapter-bound coin type `UtxoStandardCoin`:
 
-Four traits from
-[`mm2src/coins/lp_coins_traits.rs`](../../mm2src/coins/lp_coins_traits.rs)
-must be implemented on `UtxoStandardCoin`:
+| Trait                     | Bound shape                                              |
+| ------------------------- | -------------------------------------------------------- |
+| `ParseCoinAssocTypes`     | Ten associated types plus six parse methods (R3, R4).    |
+| `CommonSwapOpsV2`         | Two derivation methods (R36).                            |
+| `MakerCoinSwapOpsV2`      | Five asynchronous methods (R11–R15).                     |
+| `TakerCoinSwapOpsV2`      | Fourteen asynchronous methods plus one synchronous-flag accessor (R21–R35). |
 
-- `ParseCoinAssocTypes` (8 associated types + 6 parse methods)
-- `CommonSwapOpsV2` (2 derivation methods)
-- `MakerCoinSwapOpsV2` (5 async methods)
-- `TakerCoinSwapOpsV2` (14 async methods + 1 sync flag)
+The substrate MUST NOT modify the trait signatures or add a fifth
+trait; the binding is implementation-only.
 
-The argument and result types
+**R2.** All chapter-bound argument and result types
 (`SendMakerPaymentArgs`, `ValidateMakerPaymentArgs`,
 `SendTakerFundingArgs`, `GenTakerFundingSpendArgs`,
-`GenTakerPaymentSpendArgs`, `TxPreimageWithSig`,
-`FundingTxSpend`, `RefundMakerPaymentTimelockArgs`,
-`RefundMakerPaymentSecretArgs`, `RefundTakerPaymentArgs`,
-`RefundFundingSecretArgs`, `SpendMakerPaymentArgs`,
-`GenPreimageResult`, `ValidateSwapV2TxResult`,
+`GenTakerPaymentSpendArgs`, `TxPreimageWithSig`, `FundingTxSpend`,
+`RefundMakerPaymentTimelockArgs`, `RefundMakerPaymentSecretArgs`,
+`RefundTakerPaymentArgs`, `RefundFundingSecretArgs`,
+`SpendMakerPaymentArgs`, `GenPreimageResult`,
+`ValidateSwapV2TxResult`,
 `ValidateTakerFundingSpendPreimageResult`,
 `ValidateTakerPaymentSpendPreimageResult`,
-`FindPaymentSpendError`, `SearchForFundingSpendErr`)
-are defined alongside the traits in `lp_coins_traits.rs` and
-`lp_coins_types.rs` and are already used by the EVM impl; they are
-re-used unchanged.
+`FindPaymentSpendError`, `SearchForFundingSpendErr`,
+`SwapTxTypeWithSecretHash`) MUST be re-used unchanged from the
+chapter-bound trait module.
 
-### 15.2.1 Associated types for UTXO
+**R3.** The ten associated types MUST be bound to the following
+chapter-bound UTXO concrete types:
 
-| Associated type    | UTXO concrete type                                  |
-|--------------------|-----------------------------------------------------|
-| `Address`          | `keys::Address`                                     |
-| `AddressParseError`| `keys::Error`                                       |
-| `Pubkey`           | `keys::Public`                                      |
-| `PubkeyParseError` | `keys::Error`                                       |
-| `Tx`               | `chain::Transaction` (alias `UtxoTx`)               |
-| `TxParseError`     | `serialization::Error`                              |
-| `Preimage`         | `UtxoTxPreimage` — local newtype around `chain::TransactionInputSigner` |
-| `PreimageParseError`| `serialization::Error`                             |
-| `Sig`              | `keys::Signature`                                   |
-| `SigParseError`    | `keys::Error`                                       |
+| Associated type        | Bound UTXO concrete type                                       |
+| ---------------------- | -------------------------------------------------------------- |
+| `Address`              | The chapter-bound UTXO address type.                          |
+| `AddressParseError`    | The chapter-bound UTXO key-error type.                        |
+| `Pubkey`               | The chapter-bound UTXO compressed-public-key type.             |
+| `PubkeyParseError`     | The chapter-bound UTXO key-error type.                         |
+| `Tx`                   | The chapter-bound UTXO transaction alias.                      |
+| `TxParseError`         | The chapter-bound serialisation-error type.                    |
+| `Preimage`             | A *new* local newtype `UtxoTxPreimage` wrapping the chapter-bound transaction-input-signer type (R4). |
+| `PreimageParseError`   | The chapter-bound serialisation-error type.                    |
+| `Sig`                  | The chapter-bound UTXO signature type.                         |
+| `SigParseError`        | The chapter-bound UTXO key-error type.                         |
 
-**Preimage newtype.** The V2 trait surface in
-[`mm2src/coins/lp_coins_traits.rs`](../../mm2src/coins/lp_coins_traits.rs)
-requires `Preimage: ToBytes`, and `ToBytes` is declared with a blanket
-`impl<T: AsRef<[u8]>> ToBytes for T`. Because Rust's orphan rules
-forbid a direct `impl ToBytes for TransactionInputSigner` in this
-crate (the trait and the type live in different crates and the blanket
-already covers any `AsRef<[u8]>` shape the foreign type might one day
-gain), the UTXO V2 impl introduces a local newtype
-`pub struct UtxoTxPreimage(pub TransactionInputSigner);` and provides
-its own `ToBytes` impl that serialises the contained signer as a
-finalised `UtxoTx`. `parse_preimage` deserialises bytes into a
-`UtxoTx`, then converts into `TransactionInputSigner` via the existing
-`From<UtxoTx> for TransactionInputSigner` conversion.
+**R4.** The substrate MUST introduce two coherence-mechanic
+adapters:
 
-**`AsRef<[u8]>` for `keys::Public` and `keys::Signature`.** Both types
-already expose their bytes through `Deref<Target = [u8]>`. To let the
-blanket `ToBytes` impl cover them — which the V2 trait surface assumes —
-the UTXO V2 work adds plain `impl AsRef<[u8]>` to each in
-[`mm2src/kdf_keys/src/public.rs`](../../mm2src/kdf_keys/src/public.rs)
-and [`mm2src/kdf_keys/src/signature.rs`](../../mm2src/kdf_keys/src/signature.rs).
-This is a coherence-mechanic adapter, not a behavioural change.
+- a new local newtype `UtxoTxPreimage` wrapping the
+  transaction-input-signer type. The newtype is required because
+  the trait surface bounds the `Preimage` associated type by a
+  byte-conversion marker trait with a blanket `AsRef<[u8]>`
+  implementation; Rust's orphan rules forbid a direct adapter on
+  the foreign signer type. The newtype MUST provide its own
+  byte-conversion implementation that serialises the contained
+  signer as a finalised transaction;
+- two plain `AsRef<[u8]>` implementations on the chapter-bound
+  UTXO public-key and signature types so the blanket
+  byte-conversion implementation covers them. Both types already
+  expose their bytes through dereference; the additional
+  implementations are pure coherence adapters with no behavioural
+  effect.
 
-**`my_addr()`** returns the coin's current HTLC address. For Iguana
-(single-keypair) policy this is the coin's primary address. For
-HD-wallet and Trezor policies a per-swap HTLC address must be derived
-— see [§15.6 Common Swap Ops V2](#156-commonswapopsv2--derivation)
-for the keypair-derivation helper used (`get_htlc_key_pair_v2` in
-[`mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`](../../mm2src/coins/utxo/utxo_common/utxo_common_swap.rs)).
+Parse methods MUST be exactly: compressed 33-byte public-key form
+via the chapter-bound `from_slice` constructor; transactions via
+the chapter-bound `deserialize` helper; preimages by deserialising
+to a transaction and converting into a signer via the
+chapter-bound conversion; signatures from the raw byte form used
+by the existing UTXO swap code.
 
-> **Phase 3 deferral.** The initial V2 UTXO implementation targets
-> the Iguana (single-keypair) `PrivKeyPolicy`. The HD-wallet branch
-> of `my_addr()` and the Trezor branch of `derive_htlc_pubkey_v2` are
-> intentionally left as `unimplemented!("ch15 phase 2: ...")` stubs
-> in `utxo_standard_swap_v2.rs`. Hardware-wallet and HD-aware V2 swap
-> paths are tracked as future work.
+## 15.4 Bound Bitcoin Scripts
 
-`parse_pubkey` must accept the compressed 33-byte form
-(SEC1 prefix `0x02`/`0x03`) via `Public::from_slice`. `parse_tx` uses
-the `serialization` crate's `deserialize` directly. `parse_preimage`
-deserialises a `UtxoTx` then wraps in `UtxoTxPreimage` as described
-above. `parse_signature` accepts the raw byte form used by the
-existing UTXO code (`Signature::from(bytes.to_vec())`).
-
----
-
-## 15.3 Bitcoin scripts (V2 protocol)
-
-All three scripts live in
-[`mm2src/coins/utxo/swap_proto_v2_scripts.rs`](../../mm2src/coins/utxo/swap_proto_v2_scripts.rs).
-Each is wrapped as **P2SH**: the on-chain output is
+**R5.** The substrate MUST introduce exactly three Bitcoin scripts
+in a new dedicated version-two swap-script module under the UTXO
+crate. Each script MUST be wrapped
+as pay-to-script-hash: the on-chain output is
 `OP_HASH160 <ripemd160(sha256(redeem))> OP_EQUAL`, and the redeem
-script is supplied at spend time via the script-sig. Each redeem
-script has multiple branches selected by the script-sig pushing
-`OP_0`/`OP_1` flags onto the stack before the script runs.
-
-**Secret-hash width.** Throughout V2, secret hashes carried in args
-and encoded in scripts are 32-byte `sha256(secret)` digests. The
-script builders apply `ripemd160` internally before pushing the
-20-byte digest into the `OP_HASH160 <…> OP_EQUALVERIFY` check, so the
-on-chain comparison is `OP_HASH160(secret) == ripemd160(sha256(secret))`
-(the standard Bitcoin dhash160). The 32-byte width matches the V2
-argument types in [`lp_coins_types.rs`](../../mm2src/coins/lp_coins_types.rs)
-(`MakerPaymentV2`, `TakerPaymentV2`, `TakerFunding`).
-
-**CLTV encoding.** Locktimes are encoded as 4-byte little-endian
-pushes (`time_lock.to_le_bytes()`), matching the existing V1 UTXO
-swap scripts in `utxo_common_swap.rs`.
-
-### 15.3.1 Taker funding script
-
-Two branches, selected by a single `OP_IF`:
-
-- **Refund-by-timelock branch (`OP_1`)** — `<locktime> OP_CHECKLOCKTIMEVERIFY OP_DROP <taker_pub> OP_CHECKSIG`
-- **Cooperative branches (`OP_0`)** — a nested `OP_IF`:
-  - `OP_1`: cooperative co-signature path — `<taker_pub> OP_CHECKSIGVERIFY <maker_pub> OP_CHECKSIG`
-  - `OP_0`: secret-reveal refund — `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <ripemd160(taker_secret_hash)> OP_EQUALVERIFY <taker_pub> OP_CHECKSIG`
-
-Builder signature:
-
-```rust
-pub fn taker_funding_script(
-    locktime: u32,
-    taker_secret_hash: &[u8],   // 32 bytes; ripemd160-of-sha256 is applied inside
-    taker_pub: &Public,
-    maker_pub: &Public,
-) -> Script;
-```
-
-### 15.3.2 Taker payment script
-
-Created from the funding output by `sign_and_send_taker_funding_spend`.
-Two branches:
-
-- **Refund-by-timelock (`OP_1`)** — taker can reclaim after locktime
-- **Cooperative spend (`OP_0`)** — both sigs required and the **maker's**
-  secret must be revealed: `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160
-  <ripemd160(maker_secret_hash)> OP_EQUALVERIFY <taker_pub>
-  OP_CHECKSIGVERIFY <maker_pub> OP_CHECKSIG`
-
-Builder signature:
-
-```rust
-pub fn taker_payment_script(
-    locktime: u32,
-    maker_secret_hash: &[u8],
-    taker_pub: &Public,
-    maker_pub: &Public,
-) -> Script;
-```
-
-### 15.3.3 Maker payment script
-
-Three logical branches, encoded with nested `OP_IF`:
-
-- **Refund-by-timelock (`OP_1`)** — `<locktime> OP_CHECKLOCKTIMEVERIFY OP_DROP <maker_pub> OP_CHECKSIG`
-- **Taker-spends-with-maker-secret (`OP_0`/`OP_1`)** — `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <ripemd160(maker_secret_hash)> OP_EQUALVERIFY <taker_pub> OP_CHECKSIG`
-- **Maker-refunds-with-taker-secret (`OP_0`/`OP_0`)** — `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <ripemd160(taker_secret_hash)> OP_EQUALVERIFY <maker_pub> OP_CHECKSIG`
-
-Builder signature:
-
-```rust
-pub fn maker_payment_script(
-    locktime: u32,
-    maker_secret_hash: &[u8],
-    taker_secret_hash: &[u8],
-    maker_pub: &Public,
-    taker_pub: &Public,
-) -> Script;
-```
-
-The "maker can refund by revealing taker's secret" branch is the key
-shape difference from V1 and is what enforces atomicity of the
-two-payment exchange: if the taker abandons the swap after sending
-funding but before sending the funding-spend signature, the maker
-cannot move forward — but if the maker has already revealed her
-secret in a published spend, the taker can refund via the taker
-funding script's secret-reveal branch and reclaim funds without
-waiting for the timelock.
-
----
-
-## 15.4 `MakerCoinSwapOpsV2` — method specs
-
-All five methods return `Result<UtxoTx, TransactionErr>` or
-`ValidateSwapV2TxResult` and delegate to corresponding `*_v2` helpers
-in `utxo_common/utxo_common_swap.rs`. Algorithms below describe what each helper must
-do; the trait impl on `UtxoStandardCoin` is a thin forwarder.
-
-### 15.4.1 `send_maker_payment_v2`
-
-1. Derive maker's HTLC keypair from `args.swap_unique_data` via
-   `get_htlc_key_pair(self.as_ref(), args.swap_unique_data)`.
-2. Parse `args.taker_pub` via `parse_pubkey`.
-3. Build the maker-payment script (§15.3.3) with
-   `time_lock = args.time_lock`,
-   `maker_secret_hash = args.maker_secret_hash`,
-   `taker_secret_hash = args.taker_secret_hash`,
-   `maker_pub = htlc_keypair.public()`,
-   `taker_pub = parsed taker pub`.
-4. Wrap as P2SH; build an output of value
-   `sat_from_big_decimal(&args.amount, self.as_ref().decimals)`.
-5. Use `generate_swap_payment_outputs` (existing V1 helper, generalised
-   to accept the V2 script) → `send_outputs_from_my_address_impl`
-   → broadcast.
-6. Return the `UtxoTx`.
-
-Errors: `TransactionErr` for UTXO selection / fee estimation / sign /
-broadcast failures; the helper wraps low-level errors with context.
-
-### 15.4.2 `validate_maker_payment_v2`
-
-1. Derive maker's HTLC pubkey from `args.maker_pub`.
-2. Call `validate_payment` (V1+V2 shared helper) with:
-   - `tx = args.maker_payment_tx`
-   - `output_index = DEFAULT_SWAP_VOUT (0)`
-   - `first_pub = maker_pub`, `second_pub = taker_pub`
-   - `tx_type_with_secret_hash = SwapTxTypeWithSecretHash::MakerPaymentV2 { maker_secret_hash, taker_secret_hash }`
-   - `amount = args.amount`
-   - `watcher_reward = None` (V2 doesn't use watcher rewards on UTXO yet)
-   - `time_lock = args.time_lock`
-   - `try_spv_proof_until = args.try_spv_proof_until`
-   - `confirmations = args.confirmations`
-3. `validate_payment` reconstructs the expected redeem script
-   from `tx_type_with_secret_hash.redeem_script()`, compares the
-   output's `script_pubkey` to `P2SH(dhash160(redeem_script))`,
-   verifies the amount, polls for confirmations, and (if Electrum +
-   SPV-validated) verifies the SPV proof.
-
-The `redeem_script()` method on `SwapTxTypeWithSecretHash` must be
-extended to dispatch the `MakerPaymentV2` variant to
-`maker_payment_script(time_lock, maker_secret_hash, taker_secret_hash, maker_pub, taker_pub)`
-and the `TakerPaymentV2` variant to
-`taker_payment_script(time_lock, maker_secret_hash, taker_pub, maker_pub)`.
-The `TakerFunding` variant dispatches to
-`taker_funding_script(time_lock, taker_secret_hash, taker_pub, maker_pub)`.
-
-### 15.4.3 `refund_maker_payment_v2_timelock`
-
-Delegates to `refund_htlc_payment` (the generic V1+V2 refund helper)
-with:
-
-- `tx = args.payment_tx`
-- `tx_type_with_secret_hash = SwapTxTypeWithSecretHash::MakerPaymentV2 { maker_secret_hash, taker_secret_hash }`
-- `other_pubkey = parsed taker_pub`
-- `time_lock = args.time_lock`
-- `script_data = [OP_1]` (selects the outer timelock branch)
-- `sequence = SEQUENCE_FINAL - 1` (enables locktime check)
-
-`refund_htlc_payment` builds a P2SH spending preimage (§15.6),
-signs with the maker HTLC keypair, assembles the script-sig as
-`[sig, OP_1, redeem_script]`, broadcasts and returns the tx.
-
-### 15.4.4 `refund_maker_payment_v2_secret`
-
-Immediate refund path: maker reveals **taker's** secret. Constructs:
-
-- `script_data = [taker_secret (32 bytes), OP_0, OP_0]` — pushes the
-  secret, then two `OP_0` flags to select the inner "maker refunds
-  with taker secret" branch.
-- `sequence = SEQUENCE_FINAL`
-- `time_lock = 0` (no CLTV gate)
-- Signs with maker keypair; broadcasts.
-
-This path lets the maker reclaim her own funds the moment she learns
-the taker's secret (typically by observing the taker's funding refund
-on-chain), without waiting for the timelock.
-
-### 15.4.5 `spend_maker_payment_v2`
-
-Taker spending maker's payment to extract the agreed coin. The
-witness must reveal the **maker's** secret. Construct:
-
-- `script_data = [maker_secret (32 bytes), OP_1, OP_0]` — pushes
-  secret, then `OP_1`/`OP_0` to select the inner "taker spends with
-  maker secret" branch.
-- `sequence = SEQUENCE_FINAL`
-- `time_lock = 0`
-- Signs with taker keypair, builds final script-sig as
-  `[taker_sig, maker_secret, OP_1, OP_0, redeem_script]`, broadcasts.
-
-(Note: the maker-payment script has only one signature required in
-the secret-reveal branch — the taker's — because the cooperative
-two-sig branch is the timelock-refund alternative for the maker.)
-
----
-
-## 15.5 `TakerCoinSwapOpsV2` — method specs
-
-### 15.5.1 `send_taker_funding`
-
-1. Derive taker HTLC keypair from `args.swap_unique_data`.
-2. Compute the funding amount as
-   `args.trading_amount + args.premium_amount + args.dex_fee.fee_amount()`
-   (all `BigDecimal`, converted to sats via `sat_from_big_decimal`).
-3. Build the taker-funding script (§15.3.1) and the P2SH output.
-4. Reuse `generate_swap_payment_outputs` + `send_outputs_from_my_address_impl`.
-5. Broadcast. Return the funding `UtxoTx`.
-
-### 15.5.2 `validate_taker_funding`
-
-1. Parse `args.funding_tx`.
-2. Reconstruct expected script via
-   `taker_funding_script(args.funding_time_lock,
-   args.taker_secret_hash, args.taker_pub, args.maker_pub)`.
-3. Verify `tx.outputs[DEFAULT_SWAP_VOUT].script_pubkey == P2SH(dhash160(script))`.
-4. Verify the output value equals
-   `args.trading_amount + args.premium_amount + args.dex_fee.fee_amount()`
-   (converted to sats).
-5. On native mode, call `import_address` for the P2SH address so the
-   node tracks spends.
-6. Returns `Ok(())` on `ValidateSwapV2TxResult`.
-
-### 15.5.3 `refund_taker_funding_timelock`
-
-Same shape as §15.4.3 but on the funding tx, with
-`SwapTxTypeWithSecretHash::TakerFunding { taker_secret_hash }` and
-`script_data = [OP_1, OP_0]` (timelock branch is the outer `OP_IF`'s
-true arm in the funding script).
-
-### 15.5.4 `refund_taker_funding_secret`
-
-Immediate refund: taker reveals her own secret on the funding script's
-inner secret-reveal branch (`OP_0`, `OP_0`). `script_data =
-[taker_secret, OP_0, OP_0]`. Signs and broadcasts.
-
-### 15.5.5 `search_for_taker_funding_spend`
-
-Given the funding `tx`, scan from `from_block` for any transaction
-spending `tx.hash():DEFAULT_SWAP_VOUT`. When found, inspect the
-spend's script-sig at instruction index `1` (after the signature(s)):
-
-- `OP_1` → timelock refund → `FundingTxSpend::RefundedTimelock(spend_tx)`
-- `OP_PUSHBYTES_32` (raw 32-byte push) → secret refund → extract the
-  pushed bytes, return
-  `FundingTxSpend::RefundedSecret { tx: spend_tx, secret }`
-- Otherwise → assume cooperative spend → the funding has been
-  converted to a taker-payment by the maker-signed funding-spend →
-  `FundingTxSpend::TransferredToTakerPayment(spend_tx)`
-
-On chains without per-output spend index (native UTXO without
-electrum), use the existing V1 `search_for_swap_tx_spend` polling
-loop pattern, adapted for the V2 funding script's branch flags.
-
-### 15.5.6 `gen_taker_funding_spend_preimage`
-
-Generates the unsigned tx that, once both parties sign, converts
-the funding output into the taker-payment output:
-
-1. Build the taker-payment script (§15.3.2) with
-   `locktime = args.taker_payment_time_lock`,
-   `maker_secret_hash = args.maker_secret_hash`,
-   the two HTLC pubkeys.
-2. Compute the funding-spend fee. The fee policy is
-   `FundingSpendFeeSetting::EstimatedByCoin` — call
-   `get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)`.
-3. Build a `TransactionInputSigner` spending the funding output, with
-   a single output: P2SH of the taker-payment script for value
-   `funding_value - fee`.
-4. Set `lock_time = 0`, `sequence = SEQUENCE_FINAL`.
-5. Sign the input with the taker HTLC keypair using `SIGHASH_ALL`.
-6. Return `TxPreimageWithSig { preimage: signer, signature: taker_sig }`.
-
-### 15.5.7 `validate_taker_funding_spend_preimage`
-
-Maker side. Re-derive the expected preimage as in §15.5.6, then:
-
-1. Compare the preimage's input outpoint, output script, and output
-   value (allowing ±10% fee tolerance — re-derive the fee both ways
-   and check `|preimage_output_value - expected_value| ≤ 0.1 * expected_value`).
-2. Verify the supplied taker signature against the preimage's input
-   signature hash for the funding-script secret-reveal branch
-   (cooperative co-sig path, not the timelock path), using the
-   `SIGHASH_ALL` digest.
-3. Return `Ok(())` or the appropriate
-   `ValidateTakerFundingSpendPreimageResult::Err(...)` variant.
-
-### 15.5.8 `sign_and_send_taker_funding_spend`
-
-Taker side, having received the maker's signature on top of the
-preimage. Build the final tx:
-
-1. Re-derive the preimage tx exactly as in §15.5.6.
-2. Sign the input with the taker HTLC keypair (`SIGHASH_ALL`).
-3. Build the script-sig:
-   `[OP_0, maker_sig (with sighash byte), taker_sig (with sighash byte), OP_1, OP_0, redeem_script]`
-   — the leading `OP_0` satisfies the standard OP_CHECKMULTISIG bug
-   if multisig is used; the two `OP_1, OP_0` flags select the
-   cooperative branch of the funding script.
-4. Set sequence/locktime as in §15.5.6.
-5. Broadcast.
-
-### 15.5.9 `refund_combined_taker_payment`
-
-Timelock refund of the taker-payment tx (after funding was already
-converted). Same machinery as §15.5.3, but using
-`SwapTxTypeWithSecretHash::TakerPaymentV2 { maker_secret_hash,
-taker_secret_hash }` and `script_data = [OP_1]` (the taker-payment
-script's outer timelock branch).
-
-### 15.5.10 `skip_taker_payment_spend_preimage`
-
-UTXO returns `false` (the default). UTXO **does** need a preimage
-exchange because the maker must add her signature to the
-taker-payment-spend tx before it can be broadcast. (EVM returns
-`true` because the EVM contract handles spend authorisation
-on-chain without preimage exchange.)
-
-### 15.5.11 `gen_taker_payment_spend_preimage`
-
-Taker side. Generates the unsigned spend of the taker-payment
-output that, once the maker signs and reveals her secret, transfers
-the agreed amount to the maker and the dex-fee amount to the
-dex-fee address. Build:
-
-1. A `TransactionInputSigner` with one input (the taker-payment
-   output) and one or two outputs depending on `args.dex_fee`:
-   - **`DexFee::Standard(amount)`** — one output: maker's address
-     receiving `taker_payment_value - dex_fee_amount - fee_estimate`.
-     The dex-fee output is added later by the maker in
-     `sign_and_broadcast_taker_payment_spend` (§15.5.13). Sign with
-     `SIGHASH_SINGLE | SIGHASH_ANYONECANPAY`-style scheme is **not**
-     used here — instead the taker signs with `SIGHASH_SINGLE` so
-     the maker can append outputs without invalidating the
-     signature.
-   - **`DexFee::WithBurn { fee_amount, burn_amount }`** or other
-     pre-burn variants — see [Chapter 16](16-swap-v2-pre-burn-output.md).
-     Sign with `SIGHASH_ALL` because all outputs are fixed at this
-     stage.
-2. Sign with the taker HTLC keypair.
-3. Return `TxPreimageWithSig { preimage, signature: taker_sig }`.
-
-### 15.5.12 `validate_taker_payment_spend_preimage`
-
-Maker side. Mirror of §15.5.7:
-
-1. Re-derive the expected preimage tx.
-2. Verify the taker's signature against the appropriate sighash
-   (`SIGHASH_SINGLE` for `DexFee::Standard`, `SIGHASH_ALL` otherwise).
-3. For `DexFee::Standard`, allow that the preimage has only the
-   maker-bound output and that the dex-fee output will be appended.
-4. Return `Ok(())` or
-   `ValidateTakerPaymentSpendPreimageResult::Err(...)`.
-
-### 15.5.13 `sign_and_broadcast_taker_payment_spend`
-
-Maker side, finalising the spend with her secret. Build:
-
-1. Start from the validated preimage.
-2. For `DexFee::Standard`, append the dex-fee output (value
-   `dex_fee.fee_amount()`, address = the dex-fee address from coin
-   config). The fee for this added output is taken out of the maker's
-   share, not re-computed.
-3. Compute the maker's signature for the taker-payment input,
-   matching the same sighash scheme the taker used.
-4. Build the script-sig:
-   `[OP_0, maker_sig, taker_sig, maker_secret, OP_0, redeem_script]`
-   — `OP_0` selects the cooperative-with-secret branch of the
-   taker-payment script.
-5. Broadcast.
-
-`preimage: Option<&TxPreimageWithSig<Self>>` is `Some` for UTXO.
-
-### 15.5.14 `find_taker_payment_spend_tx`
-
-Poll the chain from `from_block` for any transaction spending the
-taker-payment output. Poll every 10 seconds until `wait_until`
-(unix seconds). Return the spending tx, or
-`FindPaymentSpendError::Timeout` if the deadline elapses.
-
-### 15.5.15 `extract_secret_v2`
-
-Walk the spend tx's input(s) at `vin = DEFAULT_SWAP_VIN (0)`. Parse
-the script-sig instructions; for each `OP_PUSHBYTES_32` push, compute
-`dhash160(push)` and compare against `secret_hash` (which is itself
-the `dhash160` of the protocol secret). On match, return the 32 raw
-bytes. Otherwise return `Err("Secret not found in spend transaction")`.
-
-`dhash160` here is `ripemd160(sha256(x))`, matching the script
-hashing used by `OP_HASH160`.
-
----
-
-## 15.6 `CommonSwapOpsV2` — derivation
-
-### 15.6.1 `derive_htlc_pubkey_v2`
-
-```rust
-fn derive_htlc_pubkey_v2(&self, swap_unique_data: &[u8]) -> Public {
-    *get_htlc_key_pair_v2(self.as_ref(), swap_unique_data)
-        .expect("htlc keypair derivation")
-        .public()
-}
-```
-
-`get_htlc_key_pair_v2` is a new V2-specific helper added to
-`utxo_common/utxo_common_swap.rs` alongside (not replacing) the V1
-`get_htlc_key_pair`. It is fallible (`Result<KeyPair, String>`):
-
-- For `PrivKeyPolicy::KeyPair(kp)` (Iguana), returns `kp`.
-- For `PrivKeyPolicy::HDWallet { activated_key, .. }`, returns the
-  activated key. (Per-swap HD derivation off `swap_unique_data` is a
-  Phase 3 refinement.)
-- For `PrivKeyPolicy::Trezor`, returns `Err(...)` — the
-  hardware-wallet path is a Phase 3 refinement and the trait method
-  body above carries an `unimplemented!` under the Trezor branch.
-
-The distinct `*_v2` name avoids mutating the semantics of V1's
-`get_htlc_key_pair`, which has a different signature and a different
-behavioural contract under HD/Trezor (it returns `Option`).
-
-`swap_unique_data` is the swap's UUID bytes. The current
-implementation does not yet thread it into derivation; the same coin
-yields the same HTLC keypair for every swap. Per-swap key isolation
-is Phase 3 work.
-
-### 15.6.2 `derive_htlc_pubkey_v2_bytes`
-
-```rust
-fn derive_htlc_pubkey_v2_bytes(&self, swap_unique_data: &[u8]) -> Vec<u8> {
-    self.derive_htlc_pubkey_v2(swap_unique_data).to_bytes().into()
-}
-```
-
-Returns the compressed 33-byte SEC1 form for P2P transmission in the
-V2 negotiation messages.
-
----
-
-### 15.6.3 Known chapter rough edges (Phase 2 residual)
-
-The initial V2 UTXO impl surfaced a small set of chapter
-inconsistencies that did not block compilation or unit tests but
-should be reconciled in the next chapter revision:
-
-- The taker-payment / funding redeem scripts use sequential
-  `CHECKSIGVERIFY` + `CHECKSIG`, not `OP_CHECKMULTISIG`, so the
-  leading `OP_0` stuffer listed in §15.5.8 step 3 and §15.5.13 step 3
-  is unnecessary and is omitted by the implementation.
-- §15.5.6 prose specifies a single P2SH(taker_payment) output for
-  the funding-spend preimage; the dex-fee delivery mechanism is
-  intentionally deferred to [Chapter 16 — V2 pre-burn output](16-swap-v2-pre-burn-output.md).
-  Implementations of `DexFee::WithBurn` / `DexFee::NoFee` in the
-  taker-payment-spend helpers therefore return an explicit
-  "deferred to ch16" error rather than panicking.
-- `SwapTxTypeWithSecretHash::*` callers pass `time_lock: u32` (the
-  4-byte LE form encoded into the redeem script). V2 trait args
-  carry `time_lock: u64` for cross-protocol uniformity; the UTXO V2
-  helpers cast `as u32` at the boundary. Locktimes outside the u32
-  range are not a valid Bitcoin-script value and are rejected by
-  the script builder.
-- The secret bytes pushed onto the script-sig in cooperative-spend
-  paths are 32 bytes (the `sha256` preimage). The secret-hash bytes
-  embedded in the redeem script are 20 bytes (`HASH160(sha256(secret))`)
-  for the cooperative-spend secret-reveal branch, matching V1 HTLC
-  convention.
-- §15.5.2 native-mode `import_address` step is performed best-effort
-  with log-on-error; the analogous step is not currently mirrored
-  in §15.4.2 maker-payment validation. A future revision should
-  decide whether both paths should import or neither.
-- `swap_unique_data` is not yet threaded into
-  `GenTakerFundingSpendArgs` / `ValidateTakerFundingSpendPreimageArgs`;
-  the helpers therefore pass an empty slice to `get_htlc_key_pair_v2`.
-  This is harmless under the current single-keypair derivation but
-  blocks per-swap key isolation when Phase 3 lands.
-
----
-
-## 15.7 P2SH spend construction (shared helper)
-
-A single `utxo_common::p2sh_spending_tx_preimage` helper underlies
-every spend path (refund, cooperative spend, funding-spend
-conversion). Signature:
-
-```rust
-async fn p2sh_spending_tx_preimage<T: UtxoCommonOps>(
-    coin: &T,
-    prev_tx: &UtxoTx,
-    lock_time: LocktimeSetting,
-    set_n_time: NTimeSetting,
-    sequence: u32,
-    outputs: Vec<TransactionOutput>,
-) -> Result<TransactionInputSigner, String>;
-```
-
-`LocktimeSetting` is one of `Zero`, `FromCltv(u32)`. `NTimeSetting`
-is `None` for non-PoS chains, `SetToNow` for PoS chains that use
-`nTime`. The helper:
-
-1. Spends `prev_tx.outputs[DEFAULT_SWAP_VOUT]` at vout 0.
-2. Sets `lock_time` per `LocktimeSetting`.
-3. Sets `n_time` per `NTimeSetting`.
-4. Sets `consensus_branch_id` (Komodo/Zcash family).
-5. Returns an unsigned `TransactionInputSigner` ready for the
-   caller to sign in whatever sighash mode the script branch
-   requires.
-
-The signing step itself is performed by the caller using
-`p2sh_spend` (existing V1 helper, which produces the final
-script-sig given the redeem script, a signature, and the optional
-script_data prefix bytes).
-
----
-
-## 15.8 Helper inventory (additions to `utxo_common/utxo_common_swap.rs`)
-
-| Helper                                  | Purpose                                                                            |
-|-----------------------------------------|------------------------------------------------------------------------------------|
-| `send_maker_payment_v2`                 | Build + broadcast maker-payment tx (§15.4.1)                                       |
-| `spend_maker_payment_v2`                | Taker spends maker payment with maker-secret reveal (§15.4.5)                      |
-| `refund_maker_payment_v2_secret`        | Maker immediate refund via taker-secret reveal (§15.4.4)                           |
-| `send_taker_funding`                    | Build + broadcast taker funding tx (§15.5.1)                                       |
-| `validate_taker_funding`                | Verify taker funding output structure + amount (§15.5.2)                           |
-| `refund_taker_funding_secret`           | Taker immediate refund via taker-secret reveal (§15.5.4)                           |
-| `gen_taker_funding_spend_preimage`      | Build unsigned funding→payment conversion + taker sig (§15.5.6)                    |
-| `validate_taker_funding_spend_preimage` | Maker verifies taker's preimage signature (§15.5.7)                                |
-| `sign_and_send_taker_funding_spend`     | Both-sigs cooperative funding-spend broadcast (§15.5.8)                            |
-| `gen_taker_payment_spend_preimage`      | Build unsigned taker-payment spend + taker sig (§15.5.11)                          |
-| `validate_taker_payment_spend_preimage` | Maker verifies taker's preimage signature (§15.5.12)                               |
-| `sign_and_broadcast_taker_payment_spend`| Maker signs + adds dex-fee output + broadcasts (§15.5.13)                          |
-| `extract_secret_v2`                     | Pull 32-byte secret from spend tx script-sig (§15.5.15)                            |
-| `refund_htlc_payment`                   | Generic V1+V2 timelock refund (used by §15.4.3, §15.5.3, §15.5.9)                  |
-| `validate_payment`                      | Generic V1+V2 payment-output validation (used by §15.4.2; pre-existing for V1)     |
-
-`SwapTxTypeWithSecretHash::redeem_script()` must be implemented to
-dispatch each variant to the correct script builder.
-
----
-
-## 15.9 Constants
-
-| Name                          | Value         | Purpose                                                              |
-|-------------------------------|---------------|----------------------------------------------------------------------|
-| `DEFAULT_SWAP_VOUT`           | `0`           | HTLC output index in every swap tx                                   |
-| `DEFAULT_SWAP_VIN`            | `0`           | Input index that consumes a swap output in every spend tx            |
-| `DEFAULT_SWAP_TX_SPEND_SIZE`  | `496` (bytes) | Estimated spend-tx size for fee calculation (P2SH spend with pre-burn capacity) |
-| `SEQUENCE_FINAL`              | `0xffffffff`  | Disables CLTV/CSV checks; used for cooperative and secret-reveal branches |
-| `SEQUENCE_FINAL - 1`          | `0xfffffffe`  | Enables CLTV check; used in timelock-refund spends                   |
-| `SIGHASH_ALL`                 | `0x01`        | Standard sighash for fully-fixed-outputs spends                      |
-| `SIGHASH_SINGLE`              | `0x03`        | Sighash for `DexFee::Standard` taker-payment-spend preimage          |
-
-All values already exist in `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs` or the
-underlying `script` crate; the V2 implementation reuses them.
-
----
-
-## 15.10 Tests
-
-A working UTXO V2 implementation must include, at minimum:
-
-1. **Unit tests** in `mm2src/coins/utxo/utxo_tests.rs`:
-   - `should_build_taker_funding_script_with_expected_layout`
-   - `should_build_taker_payment_script_with_expected_layout`
-   - `should_build_maker_payment_script_with_expected_layout`
-   - `should_validate_maker_payment_v2_against_known_good_tx`
-   - `should_reject_maker_payment_v2_with_wrong_amount`
-   - `should_extract_secret_from_taker_payment_spend`
-   - `should_classify_funding_spend_as_timelock_refund`
-   - `should_classify_funding_spend_as_secret_refund`
-   - `should_classify_funding_spend_as_transferred_to_payment`
-2. **Docker integration tests** in
-   `mm2src/mm2_main/tests/docker_tests/` covering a full UTXO↔UTXO
-   V2 swap (happy path, taker abort after funding, maker abort after
-   payment) — reuse the V2 SM integration-test scaffolding added in
-   commit `7ec1651b9` and extend the coin configuration to include
-   UTXO V2 entries.
-
----
-
-## 15.11 Wire / state-machine call sites
-
-The state machines never call coin methods directly except through
-the V2 trait surface. The relevant call sites in
-`mm2src/mm2_main/src/lp_swap/`:
-
-- `taker_swap_v2.rs`:
-  - `SendTakerFunding::on_changed` → `send_taker_funding`
-  - `WaitingForTakerFundingConfirmation::on_changed` → `wait_for_confirmations` (V1 helper) on the funding tx
-  - `MakerPaymentAndFundingSpendPreimgReceived::on_changed` →
-    `validate_taker_funding_spend_preimage` →
-    `sign_and_send_taker_funding_spend`
-  - `TakerPaymentSent::on_changed` → `gen_taker_payment_spend_preimage`
-    → send preimage to maker over P2P
-  - `MakerPaymentSpent::on_changed` → `find_taker_payment_spend_tx`
-    → `extract_secret_v2` → `spend_maker_payment_v2`
-  - Refund paths: `refund_taker_funding_timelock`,
-    `refund_taker_funding_secret`, `refund_combined_taker_payment`
-- `maker_swap_v2.rs`:
-  - `TakerFundingReceived::on_changed` → `validate_taker_funding`
-  - `MakerPaymentSentFundingSpendGenerated::on_changed` →
-    `gen_taker_funding_spend_preimage` → `send_maker_payment_v2`
-  - `TakerPaymentReceived::on_changed` →
-    `validate_taker_payment_spend_preimage`
-  - `TakerPaymentSpent::on_changed` →
-    `sign_and_broadcast_taker_payment_spend`
-  - Refund paths: `refund_maker_payment_v2_timelock`,
-    `refund_maker_payment_v2_secret`
-
-A UTXO impl that satisfies the trait signatures will work with these
-call sites unchanged because the state machines are generic over
-`MakerCoin: MakerCoinSwapOpsV2 + …` / `TakerCoin: TakerCoinSwapOpsV2 + …`.
-
----
-
-## 15.12 Activation wiring
-
-Once the trait impls land on `UtxoStandardCoin`, the kickstart
-recovery handler must be extended. In
-[`mm2src/mm2_main/src/lp_swap/swap_v2_common.rs`](../../mm2src/mm2_main/src/lp_swap/swap_v2_common.rs),
-the functions `swap_kickstart_handler_for_maker` and
-`swap_kickstart_handler_for_taker` currently match only the
-`MmCoinEnum::EthCoin` variant. Both must be extended to also match
-`MmCoinEnum::UtxoCoin(utxo)` and dispatch to the same generic
-`swap_kickstart_handler::<UtxoStandardCoin, _>` (or
-`<_, UtxoStandardCoin>` for the cross-coin case) so interrupted UTXO
-V2 swaps can resume after a restart.
-
-No new `SwapV2Type` variant is needed; the existing
-`MakerSwapV2` / `TakerSwapV2` discriminants are coin-agnostic and
-the stored DB repr (`MakerSwapDbRepr` / `TakerSwapDbRepr`) is too.
-
----
-
-## 15.13 External references
-
-- Bitcoin opcode semantics: <https://en.bitcoin.it/wiki/Script>
-- BIP-65 (CHECKLOCKTIMEVERIFY): <https://github.com/bitcoin/bips/blob/master/bip-0065.mediawiki>
-- SIGHASH flag semantics: <https://en.bitcoin.it/wiki/OP_CHECKSIG>
-- P2SH (BIP-16): <https://github.com/bitcoin/bips/blob/master/bip-0016.mediawiki>
-
----
-
-## 15.14 Provenance
-
-- Spec authored from the V2 trait surface in
-  [`mm2src/coins/lp_coins_traits.rs`](../../mm2src/coins/lp_coins_traits.rs)
-  and [`mm2src/coins/lp_coins_types.rs`](../../mm2src/coins/lp_coins_types.rs),
-  the V2 state machines in
-  [`mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs`](../../mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs)
-  and [`mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs`](../../mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs),
-  and the EVM V2 impls in
-  [`mm2src/coins/eth/eth_swap_v2/`](../../mm2src/coins/eth/eth_swap_v2/)
-  as the analog reference for trait conformance.
-- Bitcoin-script designs derived from the V1 UTXO swap script shapes
-  in [`mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`](../../mm2src/coins/utxo/utxo_common/utxo_common_swap.rs)
-  extended for dual-secret + funding/payment-split semantics required
-  by the V2 protocol.
-- This chapter is the **driving spec** under the missing-functionality
-  policy: the implementation in `mm2src/coins/utxo/` (script builders,
-  helpers, and the four trait impls on `UtxoStandardCoin`) is to be
-  produced clean-room from this chapter alone.
+script is supplied at spend time via the script-sig.
+
+**R6.** Secret-hash width MUST be uniform across the substrate:
+secret hashes carried in arguments and encoded into scripts are
+32-byte single-SHA-256 digests of the protocol secret. Script
+builders MUST apply RIPEMD-160 *inside* the script-builder
+boundary before pushing the resulting 20-byte digest into the
+`OP_HASH160 <…> OP_EQUALVERIFY` check, so the on-chain comparison
+is `OP_HASH160(secret) == RIPEMD-160(SHA-256(secret))` (the
+chapter-bound double-hash form). The 32-byte width MUST match the
+chapter-bound argument types.
+
+**R7.** Locktimes MUST be encoded as 4-byte little-endian pushes,
+matching the existing version-one UTXO swap-script convention.
+Argument types carry locktimes as 64-bit values for cross-protocol
+uniformity; the UTXO script builders MUST cast at the boundary;
+locktimes outside the 32-bit range are not valid Bitcoin-script
+values and MUST be rejected by the builder.
+
+**R8.** The bound *taker-funding* script MUST have two outer
+branches selected by a single `OP_IF`:
+
+| Outer flag | Branch                                                   | Bound shape                                                                                                       |
+| ---------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `OP_1`     | Refund by timelock.                                      | `<locktime> OP_CHECKLOCKTIMEVERIFY OP_DROP <taker_pub> OP_CHECKSIG`                                              |
+| `OP_0`     | Cooperative path (further nested `OP_IF`):               |                                                                                                                   |
+| `→ OP_1`   | Cooperative co-signature (funding-to-payment conversion).| `<taker_pub> OP_CHECKSIGVERIFY <maker_pub> OP_CHECKSIG`                                                          |
+| `→ OP_0`   | Secret-reveal refund (taker reveals her own secret).      | `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <ripemd160(taker_secret_hash)> OP_EQUALVERIFY <taker_pub> OP_CHECKSIG` |
+
+The builder MUST take exactly four parameters: locktime,
+taker-secret-hash (32 bytes), taker public key, maker public key.
+
+**R9.** The bound *taker-payment* script MUST have two branches:
+
+| Outer flag | Branch                                                   | Bound shape                                                                                                                                                  |
+| ---------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OP_1`     | Refund by timelock (taker reclaims after locktime).      | `<locktime> OP_CHECKLOCKTIMEVERIFY OP_DROP <taker_pub> OP_CHECKSIG`                                                                                          |
+| `OP_0`     | Cooperative spend with maker-secret reveal.              | `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <ripemd160(maker_secret_hash)> OP_EQUALVERIFY <taker_pub> OP_CHECKSIGVERIFY <maker_pub> OP_CHECKSIG`              |
+
+The builder MUST take exactly four parameters: locktime,
+maker-secret-hash, taker public key, maker public key.
+
+**R10.** The bound *maker-payment* script MUST have three logical
+branches encoded with nested `OP_IF`:
+
+| Flags         | Branch                                          | Bound shape                                                                                                              |
+| ------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `OP_1`        | Refund by timelock.                             | `<locktime> OP_CHECKLOCKTIMEVERIFY OP_DROP <maker_pub> OP_CHECKSIG`                                                     |
+| `OP_0 / OP_1` | Taker spends with maker-secret reveal.          | `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <ripemd160(maker_secret_hash)> OP_EQUALVERIFY <taker_pub> OP_CHECKSIG`        |
+| `OP_0 / OP_0` | Maker immediately refunds with taker-secret reveal. | `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <ripemd160(taker_secret_hash)> OP_EQUALVERIFY <maker_pub> OP_CHECKSIG`        |
+
+The third branch — maker refunds with taker secret — is the bound
+shape difference from version one and is what enforces the
+atomicity property of the two-payment exchange: if the taker
+abandons the swap after sending funding but before signing the
+funding-spend, the maker cannot move forward; but if the maker has
+already revealed her secret in a published spend, the taker can
+refund via the funding script's secret-reveal branch and reclaim
+without waiting for the timelock. The builder MUST take exactly
+five parameters: locktime, maker-secret-hash, taker-secret-hash,
+maker public key, taker public key.
+
+## 15.5 Bound `MakerCoinSwapOpsV2` Methods
+
+All maker methods return either the chapter-bound UTXO transaction
+type wrapped in the chapter-bound transaction-error type, or the
+chapter-bound validation-result type. The trait implementation on
+the coin type MUST be a thin forwarder to a corresponding
+chapter-bound helper in the existing UTXO swap-helper module
+(R38).
+
+**R11.** `send_maker_payment_v2` MUST: (1) derive the maker
+hash-time-locked-contract keypair from the swap-unique data via
+the chapter-bound version-two helper of R36; (2) parse the taker
+public key via R4; (3) build the maker-payment script of R10 with
+the chapter-bound time-lock, maker-secret-hash, taker-secret-hash,
+maker public key, taker public key; (4) wrap as pay-to-script-hash
+and build a single output whose value is the satoshi conversion of
+the argument amount; (5) reuse the chapter-bound version-one
+output-generation helper (generalised to accept the version-two
+script) plus the broadcast helper; (6) return the resulting
+transaction.
+
+**R12.** `validate_maker_payment_v2` MUST: (1) derive the maker
+hash-time-locked-contract public key from the argument; (2) call
+the chapter-bound shared validation helper with the maker-payment
+transaction, the bound default output index (R40), the maker and
+taker public keys, the chapter-bound `MakerPaymentV2` variant of
+the secret-hash-typed enumeration carrying both secret hashes, the
+amount, the absent watcher-reward marker (UTXO version two does
+not consume watcher rewards), the time-lock, the simplified
+payment-verification deadline, and the confirmation count; (3) the
+helper MUST reconstruct the expected redeem script from the
+secret-hash-typed enumeration accessor, compare the output's
+script-pubkey to its pay-to-script-hash form, verify the amount,
+poll for confirmations, and (under the chapter-bound electrum
+mode) verify the simplified-payment-verification proof.
+
+The secret-hash-typed enumeration's `redeem_script()` accessor
+MUST dispatch the three version-two variants
+(`MakerPaymentV2`, `TakerPaymentV2`, `TakerFunding`) to their
+respective script builders of R10, R9, R8.
+
+**R13.** `refund_maker_payment_v2_timelock` MUST delegate to the
+chapter-bound generic refund helper with: the payment
+transaction, the `MakerPaymentV2` variant of the secret-hash-typed
+enumeration, the parsed taker public key, the time-lock, the
+script-data byte sequence `[OP_1]` selecting the outer timelock
+branch, and the bound enabling sequence (the bound `SEQUENCE_FINAL
+- 1` of R40). The helper MUST build a pay-to-script-hash spending
+preimage, sign with the maker hash-time-locked-contract keypair,
+assemble the script-sig as `[sig, OP_1, redeem_script]`, broadcast,
+and return the transaction.
+
+**R14.** `refund_maker_payment_v2_secret` is the bound *immediate*
+refund path: maker reveals the taker's secret. The script-data
+byte sequence MUST be `[taker_secret (32 bytes), OP_0, OP_0]` —
+the secret push followed by two `OP_0` flags selecting the inner
+"maker refunds with taker secret" branch of R10. Sequence MUST be
+`SEQUENCE_FINAL` (R40). Time-lock MUST be zero. Signs with maker
+keypair; broadcasts. This path lets the maker reclaim her own
+funds the moment she learns the taker's secret (typically by
+observing the taker's funding refund on-chain) without waiting for
+the timelock.
+
+**R15.** `spend_maker_payment_v2` is the taker spending the
+maker's payment to extract the agreed coin; the witness MUST
+reveal the *maker's* secret. The script-data byte sequence MUST be
+`[maker_secret (32 bytes), OP_1, OP_0]` — secret push followed by
+`OP_1` and `OP_0` flags selecting the inner "taker spends with
+maker secret" branch of R10. Sequence MUST be `SEQUENCE_FINAL`.
+Time-lock MUST be zero. Signs with the taker keypair; assembles
+the final script-sig as `[taker_sig, maker_secret, OP_1, OP_0,
+redeem_script]`; broadcasts. The maker-payment script's
+secret-reveal branch carries only one signature requirement (the
+taker's), because the cooperative two-signature shape is the
+timelock-refund alternative for the maker.
+
+## 15.6 Bound `TakerCoinSwapOpsV2` Methods
+
+The fourteen asynchronous methods plus one synchronous-flag
+accessor MUST follow the contracts below. All amount-to-satoshi
+conversions go through the chapter-bound conversion helper using
+the coin's decimals accessor.
+
+**R16.** `send_taker_funding` MUST: (1) derive the taker
+hash-time-locked-contract keypair from the swap-unique data via
+R36; (2) compute the funding amount as the trading amount plus
+the premium amount plus the dex-fee fee component (the chapter-08
+`fee_amount` accessor); (3) build the taker-funding script of R8
+and the pay-to-script-hash output; (4) reuse the chapter-bound
+version-one output-generation and broadcast helpers; (5) return
+the funding transaction.
+
+**R17.** `validate_taker_funding` MUST: (1) parse the funding
+transaction; (2) reconstruct the expected script via the R8
+builder; (3) verify the output at the bound default index equals
+the pay-to-script-hash form of the script; (4) verify the output
+value equals the chapter-bound funding-amount formula (R16's
+formula, converted to satoshi); (5) on the chapter-bound native
+mode, call the chapter-bound address-import helper for the
+pay-to-script-hash address so the node tracks spends; (6) return
+the success arm of the bound validation-result enumeration.
+
+**R18.** `refund_taker_funding_timelock` has the same shape as
+R13 but on the funding transaction, with the `TakerFunding`
+variant of the secret-hash-typed enumeration carrying the
+taker-secret-hash, and script-data `[OP_1, OP_0]` (the funding
+script's outer timelock branch is the true arm of the outer
+`OP_IF`).
+
+**R19.** `refund_taker_funding_secret` is the bound immediate
+refund: taker reveals her own secret on the funding script's
+inner secret-reveal branch. The script-data byte sequence MUST be
+`[taker_secret, OP_0, OP_0]`. Signs with taker keypair;
+broadcasts.
+
+**R20.** `search_for_taker_funding_spend` MUST scan from the
+caller-supplied starting block for any transaction spending the
+funding output at the bound default output index. When found, it
+MUST inspect the spend's script-sig at instruction index one
+(after the signature) and dispatch to the chapter-bound
+funding-spend classification:
+
+| Inspected instruction       | Bound classification                                  |
+| --------------------------- | ----------------------------------------------------- |
+| `OP_1`                      | Timelock refund (`RefundedTimelock` variant).         |
+| `OP_PUSHBYTES_32` (raw 32-byte push) | Secret refund (`RefundedSecret` variant), with the pushed bytes returned as the extracted secret. |
+| Otherwise                   | Assumed cooperative spend; the funding has been converted to a taker-payment by the maker-signed funding-spend (`TransferredToTakerPayment` variant). |
+
+On chapter-bound native UTXO chains without per-output spend
+index, the substrate MUST use the existing version-one
+spend-search polling pattern, adapted for the version-two
+funding-script branch flags.
+
+**R21.** `gen_taker_funding_spend_preimage` MUST generate the
+unsigned transaction that, once both parties sign, converts the
+funding output into the taker-payment output. It MUST: (1) build
+the taker-payment script of R9 with the taker-payment time-lock
+and the maker-secret-hash; (2) compute the funding-spend fee via
+the chapter-bound coin-estimated fee-policy variant with the
+bound default swap-spend transaction-size constant
+of R40; (3) build a transaction-input signer spending the funding
+output with a single pay-to-script-hash output for value
+`funding_value - fee`; (4) set lock-time zero and sequence
+`SEQUENCE_FINAL`; (5) sign the input with the taker
+hash-time-locked-contract keypair using the chapter-bound
+all-outputs sighash flag; (6) return the
+preimage-plus-signature pair.
+
+**R22.** `validate_taker_funding_spend_preimage` (maker side)
+MUST re-derive the expected preimage as in R21, then: (1)
+compare the preimage's input outpoint, output script, and output
+value, allowing the chapter-bound symmetric 10% fee tolerance
+(re-derive the fee both ways and check
+`|preimage_value − expected| ≤ 0.1 × expected`); (2) verify the
+supplied taker signature against the preimage's input
+signature-hash for the funding-script cooperative co-signature
+branch (not the timelock path), using the all-outputs
+sighash digest; (3) return the success arm or the appropriate
+chapter-bound error variant.
+
+**R23.** `sign_and_send_taker_funding_spend` (taker side, having
+received the maker's signature on top of the preimage) MUST: (1)
+re-derive the preimage transaction exactly as in R21; (2) sign
+the input with the taker keypair under the all-outputs sighash
+flag; (3) build the script-sig as `[maker_sig (with sighash
+byte), taker_sig (with sighash byte), OP_1, OP_0, redeem_script]`
+— the two-flag pair selects the cooperative branch of the
+funding script of R8; (4) set sequence and locktime as in R21;
+(5) broadcast.
+
+The funding-script cooperative branch uses sequential
+`OP_CHECKSIGVERIFY` plus `OP_CHECKSIG` (not `OP_CHECKMULTISIG`);
+the leading-stuffer pad common to multisignature spends MUST NOT
+be emitted by the substrate.
+
+**R24.** `refund_combined_taker_payment` is the bound timelock
+refund of the taker-payment transaction (after funding was
+already converted). Same machinery as R18, but with the
+`TakerPaymentV2` variant of the secret-hash-typed enumeration
+and script-data `[OP_1]` (the taker-payment script's outer
+timelock branch is a single-flag selector under R9).
+
+**R25.** `skip_taker_payment_spend_preimage` is the bound
+synchronous-flag accessor. The UTXO implementation MUST return
+`false`: UTXO requires a preimage exchange because the maker
+MUST add her signature to the taker-payment-spend transaction
+before broadcast. The EVM implementation returns `true` because
+the EVM contract handles spend authorisation on-chain without
+preimage exchange.
+
+**R26.** `gen_taker_payment_spend_preimage` (taker side) MUST
+generate the unsigned spend of the taker-payment output that,
+once the maker signs and reveals her secret, transfers the
+agreed amount to the maker and the dex-fee amount to the
+dex-fee address. The construction MUST branch on the chapter-08
+dex-fee variant:
+
+- *`Standard(amount)` arm:* build a single-output preimage —
+  maker's address receiving
+  `taker_payment_value − dex_fee_amount − fee_estimate`. The
+  dex-fee output is appended later by the maker in R28. Sign with
+  the chapter-bound single-output sighash flag so the maker can
+  append outputs without invalidating the signature.
+- *`WithBurn` and `NoFee` arms:* deferred to chapter 16. The
+  substrate MUST emit an explicit chapter-bound
+  deferred-variant rejection error in this method and in R27, R28
+  for the deferred arms; chapter 16 binds the deferred-arm
+  replacement (R13–R20 of chapter 16).
+
+**R27.** `validate_taker_payment_spend_preimage` (maker side)
+MUST mirror R26: (1) re-derive the expected preimage; (2)
+verify the taker signature against the appropriate
+signature-hash (single-output for the `Standard` arm,
+all-outputs for the chapter-16-bound arms); (3) for `Standard`,
+allow that the preimage has only the maker-bound output and the
+dex-fee output will be appended; (4) return the success arm or
+the appropriate chapter-bound error variant.
+
+**R28.** `sign_and_broadcast_taker_payment_spend` (maker side,
+finalising with her secret) MUST: (1) start from the validated
+preimage; (2) for `Standard`, append the dex-fee output (value
+`dex_fee.fee_amount()`, address from the coin's chapter-bound
+dex-fee-address configuration), with the new output's fee taken
+out of the maker's share, not re-computed; (3) sign the
+taker-payment input matching the sighash scheme the taker used;
+(4) assemble the script-sig as `[maker_sig, taker_sig,
+maker_secret, OP_0, redeem_script]` — the `OP_0` selects the
+cooperative-with-secret branch of the taker-payment script of
+R9; (5) broadcast.
+
+For the chapter-16-bound `WithBurn` and `NoFee` arms, the
+preimage already carries all outputs and the maker MUST NOT
+append; see chapter 16 R18.
+
+**R29.** `find_taker_payment_spend_tx` MUST poll the chain from
+the caller-supplied starting block for any transaction spending
+the taker-payment output. The polling interval MUST be ten
+seconds. The deadline MUST be the caller-supplied
+unix-seconds deadline. Returns the spending transaction, or the
+chapter-bound timeout variant of the find-payment-spend error.
+
+**R30.** `extract_secret_v2` MUST walk the spend transaction's
+input at the bound default input index (R40). For each
+`OP_PUSHBYTES_32` push, it MUST compute the chapter-bound
+double-hash (RIPEMD-160 of SHA-256) over the push and compare
+against the secret-hash argument (itself the double-hash of the
+protocol secret). On match, MUST return the 32 raw bytes;
+otherwise MUST return a chapter-bound "secret not found in spend
+transaction" diagnostic.
+
+**R31–R35** are reserved here for the chapter-bound trait-method
+ordering required by a clean-room implementer: the methods
+listed in R16–R30 cover the fourteen asynchronous methods plus
+the one synchronous flag-accessor of R25, totalling the fifteen
+bound `TakerCoinSwapOpsV2` items of R1.
+
+## 15.7 Bound `CommonSwapOpsV2` Derivations
+
+**R36.** The substrate MUST expose two derivation methods on the
+common-swap-operations trait:
+
+| Method                             | Bound role                                                                                                                                                  |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `derive_htlc_pubkey_v2(swap_unique_data)` | Returns the chapter-bound UTXO public-key type. Delegates to a *new* version-two keypair accessor added alongside (not replacing) the version-one keypair accessor. |
+| `derive_htlc_pubkey_v2_bytes(swap_unique_data)` | Returns the compressed 33-byte form for peer-to-peer transmission in the version-two negotiation messages.                                                  |
+
+The new version-two keypair accessor MUST be fallible
+and MUST dispatch on the chapter-05 key-pair policy: the
+single-keypair mode returns the
+single keypair; the hierarchical-deterministic variant returns
+the activated key; the hardware-wallet variant returns the
+deferred-variant error of D2.
+
+A distinct version-two accessor is required
+because version one's accessor has a different signature and a
+different behavioural contract under the
+hierarchical-deterministic and hardware-wallet variants. The
+substrate MUST NOT mutate the version-one accessor.
+
+## 15.8 Bound Pay-to-Script-Hash Spend-Construction Helper
+
+**R37.** The substrate MUST expose a single shared spending
+helper — the version-two pay-to-script-hash spend-preimage
+builder — that underlies every spend path (refund, cooperative
+spend, funding-spend conversion). It MUST take: the coin handle,
+the previous transaction, a chapter-bound locktime-selection
+enumeration distinguishing a zero lock-time from a
+check-locktime-derived 32-bit lock-time, a chapter-bound
+time-field-selection enumeration distinguishing the
+non-proof-of-stake case (time field unused) from the
+proof-of-stake case (time field set to the current time), the
+sequence, and the output set. The helper MUST: (1) spend the
+previous transaction's output at the bound default output index
+(R40); (2) set the lock-time per the locktime-selection variant;
+(3) set the time-field per the time-field-selection variant; (4)
+set the consensus branch identifier for the chapter-bound
+Komodo/Zcash-family chains; (5) return an unsigned
+transaction-input signer ready for the caller to sign in whatever
+sighash mode the script branch requires. The signing step MUST be
+performed by the caller using the chapter-bound version-one
+pay-to-script-hash spend-finalisation helper, which produces the
+final script-sig given the redeem script, a signature, and the
+optional script-data prefix bytes.
+
+## 15.9 Bound Helper-Inventory Boundary
+
+**R38.** The trait-method implementations on the coin type MUST
+be thin forwarders. The bound helper-inventory additions to the
+existing UTXO swap-helper module MUST be exactly:
+
+| Helper                                         | Bound forwarder                          |
+| ---------------------------------------------- | ---------------------------------------- |
+| `send_maker_payment_v2`                        | R11                                      |
+| `spend_maker_payment_v2`                       | R15                                      |
+| `refund_maker_payment_v2_secret`               | R14                                      |
+| `send_taker_funding`                           | R16                                      |
+| `validate_taker_funding`                       | R17                                      |
+| `refund_taker_funding_secret`                  | R19                                      |
+| `gen_taker_funding_spend_preimage`             | R21                                      |
+| `validate_taker_funding_spend_preimage`        | R22                                      |
+| `sign_and_send_taker_funding_spend`            | R23                                      |
+| `gen_taker_payment_spend_preimage`             | R26                                      |
+| `validate_taker_payment_spend_preimage`        | R27                                      |
+| `sign_and_broadcast_taker_payment_spend`       | R28                                      |
+| `extract_secret_v2`                            | R30                                      |
+| Generic v1+v2 timelock-refund helper           | R13, R18, R24                            |
+| Generic v1+v2 payment-validation helper (pre-existing) | R12                              |
+| The version-two swap-fee keypair accessor      | R36                                      |
+
+The substrate MUST extend the secret-hash-typed enumeration's
+`redeem_script()` accessor to dispatch the three new variants
+(`MakerPaymentV2`, `TakerPaymentV2`, `TakerFunding`) to the
+script builders of R10, R9, R8.
+
+## 15.10 Bound Numeric Constants
+
+**R39.** All numeric values consumed by the substrate MUST be
+sourced from chapter-bound named constants. Substrate MUST NOT
+inline numeric magic; substrate MUST NOT introduce new constants
+when an existing one applies.
+
+**R40.** The chapter-bound constants and their bound values are
+exactly:
+
+| Constant                       | Bound value     | Bound purpose                                                                                            |
+| ------------------------------ | --------------- | -------------------------------------------------------------------------------------------------------- |
+| Default swap-output index constant | `0`         | Hash-time-locked-contract output index in every swap transaction.                                        |
+| Default swap-input index constant  | `0`         | Input index that consumes a swap output in every spend transaction.                                      |
+| Default swap-spend transaction-size constant | byte count sized for the three-output pre-burn case bound by chapter 16 | Estimated spend-transaction size for fee calculation.                          |
+| `SEQUENCE_FINAL`               | `0xFFFFFFFF`    | Disables checklocktimeverify and check-sequence-verify checks; used for cooperative and secret-reveal branches. |
+| `SEQUENCE_FINAL - 1`           | `0xFFFFFFFE`    | Enables checklocktimeverify check; used in timelock-refund spends.                                       |
+| All-outputs sighash flag       | `0x01`          | Standard signature-hash for fully-fixed-outputs spends.                                                  |
+| Single-output sighash flag     | `0x03`          | Signature-hash for the chapter-08 `Standard` taker-payment-spend preimage.                              |
+
+All values either already exist in the chapter-bound UTXO
+swap-helper module or in the chapter-bound underlying script
+crate; the substrate MUST reuse them.
+
+## 15.11 Bound State-Machine Dispatch and Kickstart Wiring
+
+**R41.** The state machines never call coin methods directly
+except through the version-two trait surface. The substrate MUST
+NOT modify the chapter-14 state-machine bodies; the version-two
+state-machine call sites in the chapter-bound version-two taker
+and maker swap-machine modules dispatch into
+R11–R30 unchanged because the state machines are generic over
+the trait bounds.
+
+**R42.** Once the trait implementations land on the coin type,
+the chapter-14 kickstart-recovery handler MUST be extended. The
+chapter-bound common version-two kickstart module's two
+recovery handlers (one for the maker role, one for the taker
+role) currently match only the
+chapter-17 EVM variant of the chapter-bound coin enumeration.
+Both MUST be extended to also match the UTXO variant and
+dispatch to the same generic handler so interrupted UTXO
+version-two swaps can resume after a restart. The substrate
+MUST NOT introduce a new swap-type discriminant; the existing
+maker/taker version-two discriminants are coin-agnostic, as is
+the stored database representation.
+
+## 15.12 Tests
+
+**T1.** *Script-layout invariants.* Three unit tests build each
+of the three scripts (R8, R9, R10) with known inputs and assert
+the resulting byte sequence matches the bound shape table
+opcode-for-opcode and push-for-push.
+
+**T2.** *Maker-payment validation against a known-good
+transaction.* A previously-generated maker-payment transaction
+is validated through R12; the test asserts the success arm.
+
+**T3.** *Maker-payment rejection on amount drift.* A
+maker-payment transaction is mutated to carry the wrong amount;
+the validator returns the bound amount-mismatch error variant.
+
+**T4.** *Secret extraction.* A taker-payment-spend transaction
+that reveals the maker's secret is parsed through R30; the test
+asserts the extracted bytes equal the protocol secret.
+
+**T5.** *Funding-spend classification — timelock refund.* A
+spend whose script-sig instruction one is `OP_1` is classified
+through R20; the test asserts the timelock-refund variant.
+
+**T6.** *Funding-spend classification — secret refund.* A spend
+whose script-sig instruction one is a raw 32-byte push is
+classified through R20; the test asserts the secret-refund
+variant carrying the pushed bytes.
+
+**T7.** *Funding-spend classification — cooperative spend.* A
+spend whose script-sig instruction one is neither of the above
+is classified through R20; the test asserts the
+transferred-to-payment variant.
+
+**T8.** *Containerised swap coverage.* The chapter-bound
+container-test substrate MUST be extended to cover the
+end-to-end UTXO version-two swap in three scenarios: happy
+path, taker abort after funding, maker abort after payment.
+Coin-configuration entries for the UTXO version-two path MUST
+be added; the version-two state-machine integration-test
+scaffolding MUST be reused.
+
+## 15.13 Deferred Work
+
+**D1.** Chapter 16's `WithBurn` and `NoFee` arms of R26, R27,
+R28. The substrate emits explicit deferred-variant rejection
+errors in those arms; chapter 16 binds the replacement.
+
+**D2.** Hardware-wallet support in R36. The
+chapter-bound version-two swap-fee keypair accessor returns the
+deferred-variant error under the hardware-wallet keypair-policy
+arm. The hash-time-locked-contract public-key derivation path
+for the hardware-wallet keypair-policy arm is deferred.
+
+**D3.** Per-swap hierarchical-deterministic key isolation. The
+substrate currently does not thread the swap-unique data into
+derivation; the same coin yields the same
+hash-time-locked-contract keypair for every swap under a given
+key-pair policy. Per-swap key isolation is deferred.
+
+**D4.** Watcher-reward consumption on UTXO version two (R12
+passes the absent marker). Watcher-reward integration is
+deferred.
+
+**D5.** Native-mode address-import parity. R17 performs the
+chapter-bound address-import call on validation; R12 does not.
+A future revision MUST decide whether both paths should import
+or neither.
+
+**D6.** Threading the swap-unique data into the funding-spend
+argument types
+(`GenTakerFundingSpendArgs` /
+`ValidateTakerFundingSpendPreimageArgs`). The helpers currently
+pass an empty slice to the keypair helper; this is harmless
+under the current single-keypair derivation but blocks D3.
+
+## 15.14 Baseline Verifications
+
+**V1.** The baseline tree MUST be confirmed to contain none of
+the four trait implementations of R1 on the coin type. The
+trait surface itself exists at baseline; only the UTXO
+implementation is absent.
+
+**V2.** The baseline tree MUST be confirmed to contain none of
+the three script builders of R8–R10 and none of the helper-
+inventory additions of R38. The script-builder module of R5
+MUST be absent at baseline.
+
+**V3.** The baseline tree MUST be confirmed to contain the
+chapter-14 state-machine substrate, the chapter-17 EVM
+implementation, and the chapter-08 dex-fee data substrate so
+the substrate has all preconditions to land. The substrate's
+effect on chapter 14 and chapter 17 is exactly the kickstart-
+handler match-arm extension of R42 and the EVM-side
+non-participation noted in chapter 16 R23.
+
+## 15.15 External References
+
+- Bitcoin opcode semantics —
+  <https://en.bitcoin.it/wiki/Script>.
+- BIP-65, *checklocktimeverify* —
+  <https://github.com/bitcoin/bips/blob/master/bip-0065.mediawiki>.
+- Signature-hash flag semantics —
+  <https://en.bitcoin.it/wiki/OP_CHECKSIG>.
+- BIP-16, *pay-to-script-hash* —
+  <https://github.com/bitcoin/bips/blob/master/bip-0016.mediawiki>.
+
+## 15.16 Provenance Footer
+
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit; chapter 01 (clean-room rules); chapter 05 (the
+  secret-hash-algorithm discriminator and the key-pair policy
+  discriminator the script builders and the derivation helper
+  consume); chapter 08 (the typed dex-fee enumeration, the
+  three-variant closure, the `fee_amount` accessor); chapter 14
+  (the generic storable state-machine runtime that drives every
+  version-two swap); chapter 16 (the pre-burn-output substrate
+  that completes the deferred arms of R26, R27, R28); chapter 17
+  (the parallel EVM implementation; structural reference for
+  trait conformance, kickstart-handler reference for R42); the
+  version-two trait definitions and argument-and-result type
+  enumerations carried forward unchanged from the baseline trait
+  module; public Bitcoin-script and signature-hash documentation.
+- *Permitted-input classes used:* baseline source; bound substrate
+  identifiers introduced with in-chapter justification; public
+  protocol documentation.
+- *Sibling-allowlist consultations:* none beyond the cross-chapter
+  references listed in *Inputs*.
+- *Forbidden corpus:* not consulted.
