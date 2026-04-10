@@ -1,428 +1,452 @@
-# Chapter 02 — The Baseline State at the June 2022 Commit
-
-## Executive Summary
-
-This chapter describes the state of the inherited codebase at the
-baseline commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`
-(3 June 2022). Every later chapter in this document set describes a
-delta from this state; this chapter is the agreed vocabulary the
-later chapters refer to.
-
-The inherited project, hosted at the time as
-`github.com/KomodoPlatform/atomicdex-api`, was an open-source
-implementation of an atomic-swap exchange daemon. Its README at the
-baseline gave it the user-facing name *AtomicDEX API*, and the
-distributed binary was named `mm2`. The `LEGAL/LICENSE` file at the
-baseline distributed the project under the GNU General Public
-License version 2, with copyright attributed to "The SuperNET
-Developers" for the years 2013–2018.
-
-The daemon supported atomic swaps across multiple blockchain
-protocol families (UTXO chains, EVM chains, QRC20, Solana, the
-Lightning Network, and Z-coin–style shielded UTXO chains), exposed
-those capabilities over a JSON-RPC interface listening on TCP
-port 7783 by default, and participated in a peer-to-peer mesh for
-order discovery and swap negotiation. It ran on 64-bit Linux,
-macOS, and Windows, and could also be compiled to a WebAssembly
-target for in-browser deployment. Configuration was carried in two
-files: `MM2.json` (user secrets, network identifier, RPC password)
-and `coins` (a JSON list of supported assets, sourced from a sister
-repository `KomodoPlatform/coins`).
-
-The codebase was a single Rust Cargo workspace under `mm2src/`,
-containing 33 workspace members. The toolchain was pinned to Rust
-nightly `nightly-2022-02-01` via `rust-toolchain.toml`. A small
-amount of supporting material lived alongside the workspace:
-`iguana/tools` and `etomic_build/` shell helpers, a `js/` directory
-holding the WebAssembly build harness, a `docs/` directory with a
-handful of developer notes, Azure Pipelines and Docker
-infrastructure files, and the `LEGAL/` directory with the license,
-copying, third-party-license, and developer-agreement texts.
-
-The reader should leave this chapter knowing the names of the
-workspace members and the broad areas of functionality each one
-covers, because subsequent chapters refer to those names without
-re-establishing them.
-
-## Reproduction Detail
-
-### 2.1 Obtaining the baseline tree
-
-The baseline is a single Git commit. Anyone with a working clone of
-the repository can reproduce the working tree of this chapter by:
-
-```bash
-git checkout c1d46c0c1592faa0860f704008b2b2381bc3840f
-```
-
-All file names, paths, and listings in the rest of this chapter
-refer to that working tree. Readers verifying claims against later
-revisions of the project should consult the same commit, not the
-current branch tip.
-
-### 2.2 Top-level layout
-
-The repository root at the baseline contains:
-
-| Path | Role |
-|---|---|
-| `Cargo.toml`, `Cargo.lock` | Workspace manifest and lockfile |
-| `mm2src/` | The Rust workspace; all source code lives here |
-| `rust-toolchain.toml` | Pins Rust to `nightly-2022-02-01` |
-| `Cross.toml`, `deny.toml`, `rustfmt.toml` | Cross-compilation, dependency-policy, and formatting configuration |
-| `Dockerfile`, `Dockerfile.release`, `Dockerfile.dev-release`, `Dockerfile.parity.dev`, `Dockerfile.ubuntu.ci`, `Dockerfile.armv7-unknown-linux-gnueabihf`, `.dockerignore` | Container build definitions |
-| `azure-pipelines.yml` and four `azure-pipelines-*-stage-job.yml` files | CI pipeline definitions for build, lint, release, and WASM stages |
-| `etomic_build/` | Shell scripts wrapping common RPC calls (`buy`, `enable`, `orderbook`, `seed`, `setpassphrase`, `stop`, `userpass`, `autoprice`, `client`) |
-| `iguana/tools/` | Auxiliary tooling, retained from a predecessor project |
-| `js/` | WebAssembly build harness (`Dockerfile`, `package.json`, `wasm-build.sh`) |
-| `docs/` | Developer documentation: `DEV_ENVIRONMENT.md`, `GIT_FLOW_AND_WORKING_PROCESS.md`, `HEAPTRACK.md`, `PR_REVIEW_CHECKLIST.md`, `RASPBERRY_PI4_CROSS.md`, `WASM_BUILD.md` |
-| `LEGAL/` | License materials: `AUTHORS`, `COPYING` (GPLv2 text), `LICENSE` (project-specific GPLv2 statement), `THIRDPARTY-LICENSES`, `DEVELOPER-AGREEMENT` |
-| `wasm_build/` | WebAssembly build helpers complementary to `js/` |
-| `start_ONE_ANOTHER_trade.sh`, `travis_cmake_linux.sh`, `travis_cmake_mac.sh` | Legacy CI/test scripts |
-| `parity.dev.chain.json` | An Ethereum chain specification used by the Parity-backed development EVM node |
-| `README.md`, `CONTRIBUTING.md` | Project description and contribution guide |
-| `.github/`, `.vscode/`, `.cargo/`, `.editorconfig`, `.gitignore` | Tooling configuration |
-
-### 2.3 The Cargo workspace
-
-`Cargo.toml` at the root declares 33 workspace members under
-`mm2src/`. They group naturally into the functional areas listed
-below. Where a crate name in the manifest differs from a customary
-short name used in the rest of this document set, the short name
-is shown in parentheses.
-
-**Application core.**
-
-- `mm2src/mm2_main` — the binary's entry point and the home of the
-  long-running daemon orchestration; see §2.4.
-- `mm2src/mm2_core` — the central application context shared
-  between subsystems (the object that other crates receive and
-  consult to reach configuration, key material, the database, the
-  network, and so on).
-- `mm2src/mm2_rpc` — RPC data types and protocol-level definitions
-  shared between the dispatcher and the handlers.
-- `mm2src/mm2_err_handle` — the error-handling framework
-  (`MmError<T>`-style typed errors) the rest of the codebase uses.
-- `mm2src/mm2_io` — file-system input/output utilities, separated
-  for portability so that the WebAssembly target can substitute
-  its own implementation.
-- `mm2src/mm2_db` — IndexedDB-backed storage abstractions for the
-  WebAssembly target.
-- `mm2src/db_common` — SQLite-backed storage abstractions for the
-  native targets.
-- `mm2src/mm2_net` — HTTP, WebSocket, and related networking
-  primitives.
-- `mm2src/rpc_task` — a task framework for long-running, multi-step
-  RPC operations that report progress and accept cancellation.
-- `mm2src/mm2_test_helpers` — helpers reused by integration tests
-  across crates (declared in the workspace; not a published
-  crate).
-
-**Coin protocols.**
-
-- `mm2src/coins` — the multi-protocol coin layer; see §2.5.
-  Internal subdirectories at the baseline are `eth` (EVM),
-  `for_tests`, `hd_wallet_storage`, `lightning`,
-  `lightning_background_processor`, `lightning_persister`, `qrc20`,
-  `rpc_command`, `solana`, `utxo`, `utxo_signer`, and `z_coin`.
-- `mm2src/coins/utxo_signer` — UTXO transaction signing, factored
-  out of the main `coins` crate so it can be reused.
-- `mm2src/coins/lightning_persister` — persistent storage for
-  Lightning Network channel data.
-- `mm2src/coins/lightning_background_processor` — background-task
-  processor for Lightning Network maintenance.
-- `mm2src/coins_activation` — coin activation flows. A separate
-  crate so that adding a new coin protocol is a matter of
-  implementing the activation contract here, without touching the
-  core daemon.
-
-**Cryptography and key management.**
-
-- `mm2src/crypto` — key management, hierarchical-deterministic
-  derivation (in its baseline form; see chapter 05 for the
-  post-baseline rework), passphrase handling, and the global key
-  context.
-- `mm2src/mm2_bitcoin` — UTXO-protocol primitives, organised into
-  sub-crates (also workspace members):
-  - `mm2_bitcoin/chain` — block and transaction structures.
-  - `mm2_bitcoin/crypto` — hash functions used by Bitcoin-style
-    chains (`bitcrypto`).
-  - `mm2_bitcoin/keys` — Bitcoin-style address and key types.
-  - `mm2_bitcoin/primitives` — `H160`, `H256`, `U256`, and
-    arithmetic on them.
-  - `mm2_bitcoin/script` — Bitcoin scripting primitives.
-  - `mm2_bitcoin/serialization` — binary encoding for Bitcoin-style
-    types.
-  - `mm2_bitcoin/serialization_derive` — proc-macro support for
-    `serialization`.
-  - `mm2_bitcoin/rpc` — RPC response types for Bitcoin-style nodes.
-  - `mm2_bitcoin/test_helpers` — testing utilities for the family.
-- `mm2src/hw_common` — hardware-wallet abstractions shared between
-  device-specific implementations.
-- `mm2src/trezor` — Trezor-device protocol implementation.
-- `mm2src/ledger` — present as a directory at the baseline but not
-  a workspace member; scaffolding only.
-
-**Peer-to-peer networking.**
-
-- `mm2src/mm2_libp2p` (crate name `mm2-libp2p`) — the project's
-  libp2p-based peer-to-peer behaviour, including transport setup,
-  swarm wiring, and the project's gossip and request-response
-  protocols.
-- `mm2src/gossipsub` — a vendored copy of the gossipsub pub-sub
-  protocol, brought in-tree to allow project-specific
-  modifications.
-- `mm2src/floodsub` — a vendored copy of floodsub, similarly
-  in-tree.
-- `mm2src/peers` — present at the baseline as a directory under
-  `mm2src/`; not a workspace member at the baseline.
-
-**Procedural-macro support.**
-
-- `mm2src/derives/ser_error` — defines a trait used to mark error
-  types as safe-to-serialise on RPC responses.
-- `mm2src/derives/ser_error_derive` — proc-macro implementing the
-  trait above.
-
-**Shared utilities.**
-
-- `mm2src/common` (crate name `common`) — shared utility code; not
-  itself listed as a workspace member at the root manifest, but
-  present as a directory under `mm2src/`.
-- `mm2src/common/shared_ref_counter` — a debug-instrumented
-  reference-counter wrapper.
-
-The complete list of workspace members declared in the root
-`Cargo.toml` at the baseline is reproduced verbatim below. Readers
-verifying claims about later renamings, splits, or merges of these
-crates should refer to this list as the canonical baseline:
-
-```toml
-[workspace]
-members = [
-    "mm2src/coins",
-    "mm2src/common/shared_ref_counter",
-    "mm2src/coins/lightning_persister",
-    "mm2src/coins/lightning_background_processor",
-    "mm2src/coins/utxo_signer",
-    "mm2src/coins_activation",
-    "mm2src/crypto",
-    "mm2src/db_common",
-    "mm2src/derives/ser_error",
-    "mm2src/derives/ser_error_derive",
-    "mm2src/floodsub",
-    "mm2src/gossipsub",
-    "mm2src/hw_common",
-    "mm2src/mm2_bitcoin/crypto",
-    "mm2src/mm2_bitcoin/chain",
-    "mm2src/mm2_bitcoin/keys",
-    "mm2src/mm2_bitcoin/rpc",
-    "mm2src/mm2_bitcoin/primitives",
-    "mm2src/mm2_bitcoin/script",
-    "mm2src/mm2_bitcoin/serialization",
-    "mm2src/mm2_bitcoin/serialization_derive",
-    "mm2src/mm2_bitcoin/test_helpers",
-    "mm2src/mm2_core",
-    "mm2src/mm2_db",
-    "mm2src/mm2_err_handle",
-    "mm2src/mm2_test_helpers",
-    "mm2src/mm2_libp2p",
-    "mm2src/mm2_main",
-    "mm2src/mm2_net",
-    "mm2src/mm2_io",
-    "mm2src/mm2_rpc",
-    "mm2src/rpc_task",
-    "mm2src/trezor",
-]
-resolver = "2"
-```
-
-The manifest also pins two patched dependencies:
-
-```toml
-[patch.crates-io]
-backtrace = { git = "https://github.com/artemii235/backtrace-rs.git" }
-backtrace-sys = { git = "https://github.com/artemii235/backtrace-rs.git" }
-```
-
-These patches address an Android-target backtrace issue
-(`HAVE_DL_ITERATE_PHDR`) documented in the manifest comments and
-unrelated to the post-baseline work this document set describes.
-
-### 2.4 The application-core crate (`mm2_main`)
-
-`mm2_main` houses the binary entry point and the long-running
-orchestration that holds the project together. Top-level files
-under `mm2src/mm2_main/src/` at the baseline are:
-
-| File | Role |
-|---|---|
-| `mm2.rs`, `mm2_bin.rs`, `mm2_lib.rs` | The `mm2` binary entry point and the library shape used by the WebAssembly target |
-| `lp_native_dex.rs` | Native-target startup: parsing configuration, initialising key material, launching the network, the database, the order-matching loop, the swap loop, and the RPC server |
-| `lp_network.rs` | Wiring between the application core and the peer-to-peer behaviour in `mm2_libp2p` — message dispatch, peer reputation, network events |
-| `lp_ordermatch.rs` plus `lp_ordermatch/` | Order book, order placement, order matching, cancellation |
-| `lp_swap.rs` plus `lp_swap/` | Atomic-swap state machines (the v1 protocol at the baseline) |
-| `lp_dispatcher.rs` | Cross-subsystem event dispatch |
-| `lp_message_service.rs` | A small message-passing facility used by the order matcher and swap loop |
-| `lp_stats.rs` | Network-wide statistics gathering |
-| `database.rs` plus `database/` | Persistence schema and migrations |
-| `rpc.rs` plus `rpc/` | RPC dispatcher and handler routing |
-| `mm2_lib/` | Library-mode helpers for the WebAssembly target |
-| `notification/`, `for_tests/`, `docker_tests/`, `mm2_tests/` | Notification helpers and test scaffolding |
-
-The names of the `lp_*` modules — short for "long-poll", a naming
-convention inherited from the project's predecessor — are part of
-the baseline vocabulary that subsequent chapters refer to. When a
-later chapter says "the order-matching code", it means
-`lp_ordermatch.rs` and the directory of the same stem; when it
-says "the swap state machine", it means `lp_swap.rs` and its
-directory.
-
-### 2.5 The coin layer (`coins`)
-
-The `coins` crate is the project's plug-point for blockchain
-protocols. At the baseline its sub-modules are:
-
-| Sub-module | Protocol family |
-|---|---|
-| `utxo` | Bitcoin-derived UTXO chains |
-| `utxo_signer` | UTXO transaction signing, factored into a sibling crate |
-| `eth` | Ethereum and EVM-compatible chains |
-| `qrc20` | Qtum's QRC-20 token standard (UTXO chain with EVM-style contract calls) |
-| `solana` | Solana |
-| `z_coin` | Zcash-style shielded UTXO chains |
-| `lightning` | Bitcoin Lightning Network |
-| `hd_wallet_storage` | Hierarchical-deterministic wallet persistence used across coin types |
-| `rpc_command` | Coin-specific RPC handlers (withdraw, etc.) |
-| `for_tests` | Test utilities for coin developers |
-
-Tendermint, Cosmos, IBC, and TRON support are not present at the
-baseline. NFT support is not present at the baseline. Siacoin
-support is not present at the baseline. WalletConnect and MetaMask
-integration are not present at the baseline. These protocols and
-integrations are the subjects of later chapters (see chapters 18,
-19, 20, 21).
-
-### 2.6 The peer-to-peer layer (`mm2_libp2p`, `gossipsub`, `floodsub`)
-
-The peer-to-peer layer at the baseline is built on a vendored copy
-of `libp2p` extended with the project's own behaviour. The
-project-specific behaviour wires together a set of sub-protocols:
-
-- A pub-sub protocol for orderbook gossip, layered on `gossipsub`
-  (with `floodsub` retained as a compatibility option).
-- A request-response protocol for direct peer queries.
-- A peer-discovery and -reputation layer.
-
-Vendoring `gossipsub` and `floodsub` in-tree allowed protocol-level
-modifications that the project required and that an unmodified
-upstream `libp2p` did not offer at the baseline. Chapter 28
-describes the post-baseline modernisation of this layer.
-
-### 2.7 The configuration surface
-
-A daemon at the baseline is configured by two files:
-
-- `MM2.json` — user-facing runtime configuration. The example in
-  the baseline `README.md` documents at minimum the fields `gui`,
-  `netid`, `rpc_password`, and `passphrase`. The `netid` value
-  selects the peer-to-peer mesh; the baseline README states
-  `7777` as "the current main network".
-- `coins` — a JSON list of supported assets, with one record per
-  coin describing its protocol family, network parameters, and
-  default servers. The baseline README points readers to the
-  sister repository `github.com/KomodoPlatform/coins` as the
-  authoritative source.
-
-Both file formats are part of the externally-visible interface
-this project must inter-operate with: the configuration files are
-authored by users and by the GUIs that drive the daemon, and any
-post-baseline change to either format is a change to a public
-contract.
-
-### 2.8 The RPC surface
-
-The daemon exposes a JSON-RPC interface on a TCP port — `7783` by
-default per the baseline README. The README documents the `enable`
-method and a handful of related calls; the full RPC surface at the
-baseline lives in `mm2src/mm2_main/src/rpc.rs` and the directory of
-the same name. RPC method names, payload field names, and error
-codes are part of the project's external contract and are part of
-the vocabulary later chapters quote verbatim.
-
-### 2.9 The build surface
-
-The baseline supports five primary targets:
-
-- **Native Linux x86-64**, via direct `cargo build`.
-- **Native macOS** (Intel and Apple Silicon), via direct `cargo
-  build`.
-- **Native Windows x86-64**, via `cargo build` with MSVC.
-- **WebAssembly**, via the `js/` and `wasm_build/` build harness.
-- **Cross-compiled targets** (Android `aarch64`, ARM Linux), via
-  the `Cross.toml` configuration.
-
-The `azure-pipelines*.yml` files codify how each of these targets
-is built, linted, tested, and released in the project's then-active
-CI environment. The CI infrastructure itself was migrated to
-GitHub Actions later in the post-baseline work; chapter 03 covers
-that change.
-
-### 2.10 The license posture
-
-`LEGAL/COPYING` carries the verbatim text of the GNU General Public
-License version 2. `LEGAL/LICENSE` carries the project's
-project-specific GPLv2 statement: "Copyright © 2013-2018 The
-SuperNET Developers. This program is free software; you can
-redistribute it and/or modify it under the terms of the GNU
-General Public License version 2, as published by the Free Software
-Foundation." `LEGAL/AUTHORS` lists the contributors known to the
-project at the time. `LEGAL/THIRDPARTY-LICENSES` accumulates
-upstream license texts for vendored dependencies.
-`LEGAL/DEVELOPER-AGREEMENT` documents the contribution terms then
-in force.
-
-The baseline tree is therefore distributed under GPLv2 in its
-entirety, with the exception of in-tree third-party material whose
-own licenses are recorded in `THIRDPARTY-LICENSES`. This document
-set treats any artefact present at the baseline — code, comment,
-documentation, identifier name, schema field, configuration key —
-as available material in line with the inputs permitted by
-[`01-clean-room-rules.md`](01-clean-room-rules.md) §2.
-
-### 2.11 What this chapter explicitly does *not* establish
-
-This chapter is a snapshot. It does not:
-
-- describe any code, comment, or document produced upstream after
-  the baseline; that material is forbidden input under
-  [`01-clean-room-rules.md`](01-clean-room-rules.md) §3;
-- claim that the listed crates are still organised as at the
-  baseline in the present tree (they are not; chapters 03–30
-  describe the changes);
-- describe the protocols of the live peer-to-peer mesh
-  (`netid` 7777 or otherwise); the v1 swap protocol is
-  characterised by the baseline source itself, and where later
-  chapters describe a v2 protocol they do so on their own terms.
-
-## External References
-
-- *GNU General Public License, version 2, June 1991.* Free Software
-  Foundation, Inc. The full text is reproduced at the baseline as
-  `LEGAL/COPYING`.
-- *Komodo Platform coins repository.* Sister repository referenced
-  by the baseline README as the authoritative source for the
-  project's asset list. https://github.com/KomodoPlatform/coins
-- *Rust toolchain channel `nightly-2022-02-01`.* Pinned at the
-  baseline by `rust-toolchain.toml`.
-- *Cargo Feature Resolver, version 2.* Documented at
-  https://doc.rust-lang.org/beta/cargo/reference/features.html#feature-resolver-version-2
-  and selected at the baseline by `resolver = "2"` in the root
-  `Cargo.toml`.
-
-## Provenance Footer
-
-*This chapter v1; verified directly against the baseline tree at
-commit `c1d46c0c1592faa0860f704008b2b2381bc3840f` on 2026-05-31.
-Reviewer #1 and reviewer #2 reports stored at
-`local/clean-room-doc/reviews/02-baseline-state-r{1,2}.md`.*
+# Chapter 02 — Baseline State
+
+**Status:** driving-spec (anchor-chapter).
+
+The chapter binds the pinned baseline anchor every other chapter
+in the document set refers to: the commit identifier, the
+inherited workspace shape, the toolchain pin, the configuration
+surface, the request-and-response surface, the build-target set,
+the license posture, and the explicit non-claims that scope what
+this chapter is and is not authoritative on.
+
+## 2.1 Executive Summary
+
+This chapter is the *anchor*. Every later chapter describes a delta
+from the state bound here; this chapter is the agreed vocabulary
+those later chapters refer to. The anchor consists of a single
+chapter-bound commit, the workspace shape at that commit, the
+toolchain pin at that commit, the configuration-and-request-
+and-response surface at that commit, the build-target set at that
+commit, and the license posture at that commit.
+
+The inherited project at the bound anchor was an open-source
+implementation of an atomic-swap exchange daemon. Its read-me at
+the anchor gave it a public name; the distributed native binary
+carried the chapter-bound short name `mm2`. The chapter-bound
+license-directory file `LEGAL/LICENSE` at the anchor distributed
+the project under the GNU General Public License version 2 with
+copyright attributed to the chapter-02-bound copyright holder for
+the years 2013–2018.
+
+The anchor codebase supported atomic swaps across multiple
+chapter-02-bound blockchain protocol families
+(unspent-transaction-output chains, Ethereum-virtual-machine
+chains, the chapter-02-bound QRC20 surface, the chapter-02-bound
+Solana surface, the Lightning Network, and the chapter-02-bound
+Zcash-style shielded surface), exposed those capabilities over a
+request-and-response interface listening on the chapter-bound
+default port (R6), and participated in a peer-to-peer mesh for
+order discovery and swap negotiation. It ran on the chapter-02-
+bound native-target trio (Linux x86-64, macOS, Windows x86-64) and
+compiled to WebAssembly for in-browser deployment.
+
+Bound rules R1–R3 anchor the commit, the workspace shape, and the
+toolchain pin; R4–R5 anchor the workspace-member registry and the
+patched-dependency registry; R6–R8 anchor the configuration
+surface, the request-and-response surface, and the build-target
+surface; R9 anchors the license posture; R10–R12 bound the chapter's
+explicit non-claims. The chapter's substrate is the anchor itself,
+not a delta from it.
+
+## 2.2 Subsystem Shape
+
+The anchor is a single chapter-bound commit on the historical
+record the source tree descends from. The shape of the anchor is
+the shape of the tree at that commit. The chapter's substrate is
+the *anchor*, which is consumed by every later chapter via the
+chapter-bound *the baseline tree* / *the baseline workspace*
+referent (chapter 01 R15).
+
+## 2.3 Bound Anchor Commit
+
+**R1.** The bound anchor is a single chapter-bound commit on the
+historical record the project source tree descends from. The
+chapter-bound textual referent for the anchor is *the baseline
+commit* or *the baseline* in any later chapter that consumes it.
+The chapter-bound human-readable date is 3 June 2022. Anyone with
+a working clone of the historical record reproduces the anchor by
+checking out the chapter-bound commit identifier directly; later
+chapters that verify claims against the anchor MUST consult the
+chapter-bound commit, not a current branch tip.
+
+## 2.4 Bound Top-Level Layout
+
+**R2.** The chapter-bound top-level layout at the anchor is exactly:
+
+| Bound path                                                  | Bound role                                                                                                       |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `Cargo.toml`, `Cargo.lock`                                  | The Cargo workspace manifest and the lockfile.                                                                    |
+| The workspace source directory                              | The Rust workspace; all source code lives here. R4 binds the workspace-member registry.                            |
+| `rust-toolchain.toml`                                       | Pins the Rust toolchain (R3).                                                                                    |
+| `Cross.toml`, `deny.toml`, `rustfmt.toml`                   | Cross-compilation, dependency-policy, and formatting configuration.                                              |
+| `Dockerfile`, the variant Dockerfiles, `.dockerignore`      | Container build definitions.                                                                                     |
+| The Azure-Pipelines build-and-release configuration files   | Continuous-integration pipeline definitions for build, lint, release, and WebAssembly stages.                     |
+| The wrapped-request-and-response shell-script directory `etomic_build/` | Shell scripts wrapping common request-and-response calls (`buy`, `enable`, `orderbook`, `seed`, `setpassphrase`, `stop`, `userpass`, `autoprice`, `client`). |
+| The auxiliary-tooling directory `iguana/tools/`             | Auxiliary tooling, retained from a predecessor project.                                                          |
+| The WebAssembly build-harness directory `js/`               | WebAssembly build harness (`Dockerfile`, `package.json`, `wasm-build.sh`).                                       |
+| The chapter-bound developer-documentation directory `docs/` | Developer documentation: `DEV_ENVIRONMENT.md`, `GIT_FLOW_AND_WORKING_PROCESS.md`, `HEAPTRACK.md`, `PR_REVIEW_CHECKLIST.md`, `RASPBERRY_PI4_CROSS.md`, `WASM_BUILD.md`. |
+| The license-materials directory `LEGAL/`                    | `AUTHORS`, `COPYING` (GPLv2 text), `LICENSE` (project-specific GPLv2 statement), `THIRDPARTY-LICENSES`, `DEVELOPER-AGREEMENT`. |
+| The WebAssembly build-helpers directory `wasm_build/`       | WebAssembly build helpers complementary to `js/`.                                                                |
+| The chapter-bound continuous-integration shell-script files `start_ONE_ANOTHER_trade.sh`, `travis_cmake_linux.sh`, `travis_cmake_mac.sh` | Continuous-integration test-and-build scripts.                                                                   |
+| `parity.dev.chain.json`                                     | An Ethereum chain specification used by the development Ethereum-virtual-machine node implementation.            |
+| `README.md`, `CONTRIBUTING.md`                              | Project description and contribution guide.                                                                       |
+| `.github/`, `.vscode/`, `.cargo/`, `.editorconfig`, `.gitignore` | Tooling configuration.                                                                                       |
+
+## 2.5 Bound Toolchain Pin
+
+**R3.** The chapter-bound Rust toolchain at the anchor is pinned by
+the chapter-02-bound `rust-toolchain.toml` to the Rust *nightly*
+channel of the chapter-bound date 2022-02-01 (`nightly-2022-02-01`).
+The pin choice is part of the anchor; chapter 03 binds the
+methodology by which the project migrates off the chapter-bound
+unstable channel onto the chapter-03-bound stable channel.
+
+## 2.6 Bound Workspace-Member Registry
+
+**R4.** The chapter-bound workspace at the anchor consists of
+exactly the following 33 workspace members, grouped by functional
+area for legibility. Crate names below are the chapter-bound names
+the later chapters cite verbatim:
+
+*Application-core area:*
+
+- The application-entry crate `mm2_main` (binary entry point and
+  long-running daemon orchestration; §2.7 binds its top-level
+  module layout).
+- The central-application-context crate `mm2_core` (the chapter-
+  bound shared context the rest of the workspace consults to reach
+  configuration, key material, the database, and the network).
+- The request-and-response data-types crate `mm2_rpc` (data types
+  and protocol-level definitions shared between the dispatcher
+  and the handlers).
+- The error-handling-framework crate `mm2_err_handle` (the
+  chapter-bound `MmError<T>`-style typed-errors framework the rest
+  of the workspace consumes).
+- The file-system input/output crate `mm2_io` (separated for
+  portability so the WebAssembly target can substitute its own
+  implementation).
+- The IndexedDB-backed-storage crate `mm2_db` (storage abstraction
+  for the WebAssembly target).
+- The SQLite-backed-storage crate `db_common` (storage abstraction
+  for the native targets).
+- The HTTP-and-WebSocket networking crate `mm2_net`.
+- The long-running-task crate `rpc_task` (a task framework for
+  multi-step request-and-response operations that report progress
+  and accept cancellation).
+- The integration-test helpers crate `mm2_test_helpers` (declared
+  as a workspace member; not a published crate).
+
+*Coin-protocols area:*
+
+- The multi-protocol coin crate `coins`. The chapter-bound coin
+  sub-modules at the anchor are: the unspent-transaction-output
+  module, the chapter-02-bound transaction-signing sibling, the
+  Ethereum-virtual-machine module, the chapter-02-bound test-
+  utilities module, the hierarchical-deterministic-wallet storage
+  module, the Lightning Network module, the chapter-02-bound
+  Lightning-persister and Lightning-background-processor modules,
+  the chapter-02-bound QRC20 module, the coin-specific request-
+  handler module, the chapter-02-bound Solana module, the chapter-
+  02-bound Zcash-style shielded surface module.
+- The unspent-transaction-output transaction-signing crate
+  `utxo_signer` (factored out of the main coin crate for reuse).
+- The Lightning-persister crate `lightning_persister` (persistent
+  storage for Lightning Network channel data).
+- The Lightning-background-processor crate
+  `lightning_background_processor` (background-task processor for
+  Lightning Network maintenance).
+- The coin-activation crate `coins_activation` (so that adding a
+  new coin protocol is a matter of implementing the activation
+  contract here, without touching the core daemon).
+
+*Cryptography and key-management area:*
+
+- The key-management crate `crypto` (key management, hierarchical-
+  deterministic derivation in its chapter-bound anchor form,
+  passphrase handling, and the chapter-bound global key context;
+  chapter 05 binds the substrate redesign).
+- The Bitcoin-style primitives crate `mm2_bitcoin`, organised into
+  workspace-member sub-crates: the chain sub-crate (block and
+  transaction structures); the crypto sub-crate (hash functions
+  used by Bitcoin-style chains, also known as `bitcrypto`); the
+  keys sub-crate (Bitcoin-style address and key types); the
+  primitives sub-crate (the chapter-bound `H160` / `H256` / `U256`
+  types and arithmetic on them); the script sub-crate (Bitcoin
+  scripting primitives); the serialization sub-crate (binary
+  encoding for Bitcoin-style types); the serialization-derive
+  proc-macro support sub-crate; the request-and-response sub-crate
+  (request-and-response response types for Bitcoin-style node
+  implementations); the test-helpers sub-crate.
+- The hardware-wallet abstractions crate `hw_common` (shared
+  between device-specific implementations).
+- The Trezor device-protocol crate `trezor`.
+- The chapter-02-bound Ledger device directory (present at the
+  anchor as a directory under the workspace source directory; not
+  a workspace member at the anchor; scaffolding only).
+
+*Peer-to-peer-networking area:*
+
+- The chapter-02-bound peer-to-peer behaviour crate `mm2-libp2p`
+  (declared at workspace path `mm2_libp2p`; the project's
+  peer-to-peer behaviour including transport setup, swarm wiring,
+  and the project's gossip and request-response protocols).
+- The in-tree gossipsub crate `gossipsub` (a chapter-bound in-tree
+  copy of the gossipsub publish-and-subscribe protocol, brought
+  in-tree to allow project-specific modifications).
+- The in-tree floodsub crate `floodsub` (a chapter-bound in-tree
+  copy of floodsub, brought in-tree on the same rationale).
+- The chapter-02-bound `peers` directory (present at the anchor as
+  a directory under the workspace source directory; not a
+  workspace member at the anchor).
+
+*Procedural-macro support area:*
+
+- The serialise-error-marker trait crate `ser_error` (defines a
+  trait used to mark error types as safe to serialise on request-
+  and-response responses).
+- The serialise-error-marker proc-macro crate `ser_error_derive`
+  (proc-macro implementing the marker trait above).
+
+*Shared-utilities area:*
+
+- The shared-utility crate `common` (shared utility code; not
+  itself declared as a workspace member in the root manifest at the
+  anchor, but present as a directory under the workspace source
+  directory).
+- The debug-instrumented reference-counter sub-crate
+  `shared_ref_counter` under the shared-utility crate.
+
+## 2.7 Bound Patched-Dependency Registry
+
+**R5.** The chapter-bound root manifest at the anchor pins two
+sibling-allowlist patched dependencies (R5-allowlist consultation;
+sibling repository under a chapter-bound compatible license, cited
+per chapter 01 R14). The patch addresses a chapter-bound Android-
+target backtrace issue documented in the manifest comments and
+unrelated to the substantive work the document set binds. The
+patched dependencies and the patch source are:
+
+- The `backtrace` crate and the `backtrace-sys` crate, both patched
+  to a chapter-bound sibling-allowlist clone of the original public
+  repository, with the chapter-bound clone retained as part of the
+  baseline tree by the chapter-bound `[patch.crates-io]` table.
+
+## 2.8 Bound Application-Entry Crate Layout
+
+The bound application-entry crate `mm2_main` houses the binary
+entry point and the long-running orchestration that holds the
+workspace together. The chapter-bound top-level module layout at
+the anchor is:
+
+| Bound module                          | Bound role                                                                                                       |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `mm2`, `mm2_bin`, `mm2_lib`           | The `mm2` binary entry point and the library shape used by the WebAssembly target.                                |
+| `lp_native_dex`                       | Native-target startup: parsing configuration, initialising key material, launching the network, the database, the order-matching loop, the swap loop, and the request-and-response server. |
+| `lp_network`                          | Wiring between the application core and the peer-to-peer behaviour — message dispatch, peer reputation, network events. |
+| `lp_ordermatch` plus its sub-modules  | Order book, order placement, order matching, cancellation.                                                       |
+| `lp_swap` plus its sub-modules        | Atomic-swap state machines (the chapter-bound version-one protocol at the anchor).                                |
+| `lp_dispatcher`                       | Cross-subsystem event dispatch.                                                                                  |
+| `lp_message_service`                  | A small message-passing facility used by the order matcher and swap loop.                                         |
+| `lp_stats`                            | Network-wide statistics gathering.                                                                                |
+| `database` plus its sub-modules       | Persistence schema and migrations.                                                                                |
+| `rpc` plus its sub-modules            | Request-and-response dispatcher and handler routing.                                                              |
+| `mm2_lib` sub-directory               | Library-mode helpers for the WebAssembly target.                                                                  |
+| `notification`, `for_tests`, `docker_tests`, `mm2_tests` | Notification helpers and test scaffolding.                                                                 |
+
+The chapter-bound `lp_*` module-name prefix (short for the chapter-
+bound long-poll naming convention inherited from the predecessor
+project) is part of the anchor vocabulary later chapters refer to.
+A later chapter that refers to *the order-matching code* means the
+chapter-bound `lp_ordermatch` module and its sub-modules; a later
+chapter that refers to *the swap state machine* means the chapter-
+bound `lp_swap` module and its sub-modules.
+
+## 2.9 Bound Coin-Layer Layout
+
+The bound multi-protocol coin crate `coins` is the workspace's
+plug-point for blockchain protocols. The chapter-02-bound coin sub-
+module set is bound by R4 (coin-protocols area enumeration).
+Tendermint, Cosmos, the Inter-Blockchain Communication standard
+surface, the TRON surface, the non-fungible-token surface, the
+Siacoin surface, the WalletConnect surface, and the chapter-bound
+browser-extension wallet surface are *not* present at the anchor;
+later chapters (chapters 18, 19, 20, 21, 22) bind the substrate by
+which the project adds them.
+
+## 2.10 Bound Peer-to-Peer Layer
+
+The chapter-bound peer-to-peer layer at the anchor is built on a
+sibling-allowlist in-tree copy of the libp2p stack extended with
+the project's own behaviour. The chapter-bound substrate wires
+together:
+
+- a publish-and-subscribe protocol for orderbook gossip, layered
+  on the in-tree gossipsub copy of R4, with the in-tree floodsub
+  copy of R4 retained as a chapter-bound compatibility option;
+- a request-and-response protocol for direct peer queries;
+- a peer-discovery and peer-reputation layer.
+
+Bringing the in-tree gossipsub and floodsub copies in-tree allowed
+the chapter-bound protocol-level modifications the project required
+and that the chapter-bound off-the-shelf libp2p stack did not offer
+at the anchor. Chapter 28 binds the substrate by which the project
+modernises this layer onto the chapter-28-bound consolidated
+libp2p stack.
+
+## 2.11 Bound Configuration Surface
+
+**R6.** The chapter-bound configuration surface at the anchor is
+exactly two files:
+
+| Bound file | Bound role                                                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MM2.json` | User-facing runtime configuration. The chapter-bound documented-by-anchor-read-me minimum field set is `gui`, `netid`, `rpc_password`, `passphrase`. The chapter-bound `netid` value selects the peer-to-peer mesh; the chapter-bound anchor read-me states `7777` as the chapter-bound main-network identifier. |
+| `coins`    | A request-and-response-shaped list of supported assets, with one record per coin describing its protocol family, network parameters, and default servers. The chapter-bound anchor read-me points readers to a chapter-bound sister repository as the authoritative source for the asset list. |
+
+Both file formats are part of the chapter-bound externally-visible
+inter-operability surface (chapter 01 R4): the configuration files
+are authored by users and by the chapter-bound graphical-user-
+interface frontends that drive the daemon, and any substantive
+change to either format is a change to a public contract.
+
+## 2.12 Bound Request-and-Response Surface
+
+**R7.** The chapter-bound daemon at the anchor exposes a request-
+and-response interface on a chapter-bound TCP port — `7783` by
+default per the chapter-bound anchor read-me. The chapter-bound
+read-me documents the `enable` method and a handful of related
+calls; the full request-and-response surface at the anchor lives
+in the chapter-bound dispatcher module of the application-entry
+crate (R8 of §2.8). Request-and-response method names, payload
+field names, and error codes are part of the chapter-bound
+externally-visible inter-operability surface (chapter 01 R4) and
+are part of the vocabulary later chapters quote verbatim.
+
+## 2.13 Bound Build-Target Surface
+
+**R8.** The chapter-bound build-target surface at the anchor is
+exactly five primary targets:
+
+| Bound target | Bound build path |
+| ------------ | ---------------- |
+| Native Linux x86-64    | Direct `cargo build`.                                              |
+| Native macOS (Intel and the chapter-bound Apple-Silicon architecture) | Direct `cargo build`.                                              |
+| Native Windows x86-64  | `cargo build` with the chapter-bound Microsoft C-runtime toolchain. |
+| WebAssembly            | The chapter-bound WebAssembly build-harness directory `js/` and the chapter-bound complementary build-helpers directory `wasm_build/`. |
+| Cross-compiled targets (Android `aarch64`, ARM Linux)              | The chapter-bound `Cross.toml` configuration.                       |
+
+The chapter-bound Azure-Pipelines build-and-release configuration
+files codify how each of these targets is built, linted, tested,
+and released in the chapter-bound then-active continuous-
+integration environment. The continuous-integration infrastructure
+itself was migrated off Azure Pipelines onto a chapter-bound
+sibling-allowlist hosted-continuous-integration provider later;
+chapter 03 binds the substrate by which the project performs that
+migration.
+
+## 2.14 Bound License Posture
+
+**R9.** The chapter-bound license-materials directory `LEGAL/` at
+the anchor carries:
+
+| Bound file | Bound role |
+| ---------- | ---------- |
+| `COPYING`  | The verbatim text of the GNU General Public License version 2. |
+| `LICENSE`  | The chapter-bound project-specific GNU-General-Public-License-version-2 statement attributing copyright to the chapter-02-bound copyright holder for the years 2013–2018, with the chapter-bound permission-to-redistribute-and-modify clause. |
+| `AUTHORS`  | The contributor list known to the project at the anchor. |
+| `THIRDPARTY-LICENSES` | The chapter-bound accumulated license texts for in-tree third-party material. |
+| `DEVELOPER-AGREEMENT` | The chapter-bound contribution-terms statement then in force. |
+
+The chapter-bound anchor tree is therefore distributed under the
+GNU General Public License version 2 in its entirety, with the
+exception of in-tree third-party material whose own licenses are
+recorded in the chapter-bound `THIRDPARTY-LICENSES` file. The
+document set treats any artefact present at the anchor — code,
+comment, documentation, identifier name, schema field,
+configuration key — as a chapter-01 R1 permitted-input class
+(*the baseline itself*).
+
+## 2.15 Bound Non-Claims
+
+**R10.** This chapter is a *snapshot*; it MUST NOT describe any
+code, comment, or document produced under the chapter-01-bound
+relicensed terms of R8 of chapter 01. Any such material is a
+chapter-01 R8 forbidden-input class and MUST NOT be carried here.
+
+**R11.** This chapter MUST NOT claim that the bound workspace-
+member registry of R4 is still organised as at the anchor in the
+present source tree (it is not; chapters 03 through 28 bind the
+delta).
+
+**R12.** This chapter MUST NOT describe the chapter-bound live
+peer-to-peer-mesh protocol (the chapter-bound `netid 7777` shape
+or otherwise). The chapter-bound version-one swap protocol is
+characterised by the chapter-bound anchor source itself; later
+chapters that bind the substrate of a chapter-bound version-two
+swap protocol do so on their own terms (chapters 13 / 15 / 16 /
+17).
+
+## 2.16 Tests
+
+This chapter binds an anchor; it has no test surface of its own.
+The chapter-bound verification discipline that the anchor is
+correctly stated is carried by V1–V3 of §2.18.
+
+## 2.17 Deferred Work
+
+**D1.** A chapter-bound mechanical verification harness that
+re-derives the bound workspace-member registry of R4, the bound
+patched-dependency registry of R5, and the bound module layout of
+§2.8 from the anchor commit is deferred to chapter 30 D1 (the
+audit-tooling-gap binding).
+
+## 2.18 Baseline Verifications
+
+**V1.** The chapter-bound anchor commit identifier MUST be
+confirmed to exist on the historical record the source tree
+descends from, and MUST be confirmed to carry the chapter-bound
+anchor date.
+
+**V2.** The chapter-bound workspace-member registry of R4 MUST be
+confirmed against the chapter-bound root manifest of R2 at the
+anchor: the chapter-bound 33-member count, the chapter-bound
+member names, and the chapter-bound functional-area groupings of
+R4 MUST all match.
+
+**V3.** The chapter-bound license-materials directory `LEGAL/` of
+R9 MUST be confirmed to carry the chapter-bound files and the
+chapter-bound license-statement text at the anchor.
+
+## 2.19 External References
+
+- The GNU General Public License version 2 of June 1991 (Free
+  Software Foundation, Inc.). The full text is reproduced at the
+  anchor as the chapter-02-bound `LEGAL/COPYING` file.
+- The chapter-bound Komodo Platform sibling-repository for the
+  asset list referenced by the anchor read-me (chapter 01 R14
+  sibling-allowlist citation).
+- The Rust toolchain nightly channel of 2022-02-01
+  (`nightly-2022-02-01`), pinned at the anchor by the chapter-
+  bound `rust-toolchain.toml` of R3.
+- The chapter-bound Cargo feature-resolver version two
+  documentation page, and the chapter-bound `resolver = "2"`
+  selection in the root manifest of R2.
+
+## 2.20 Provenance Footer
+
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit of R1; chapter 01 (the methodology this chapter is shaped
+  by, the chapter-01 R15 baseline-citation rule, the chapter-01
+  R1–R5 permitted-input classes the chapter consumes); chapter 30
+  (the audit-tooling-gap this chapter's D1 hands off to); the
+  chapter-bound anchor read-me, the chapter-bound anchor root
+  manifest, the chapter-bound license-materials directory of R9 —
+  all consulted directly at the chapter-bound anchor commit per
+  R1.
+- *Permitted-input classes used:* the baseline itself
+  (chapter 01 R1).
+- *Sibling-allowlist consultations:* the chapter-bound Komodo
+  Platform sibling-repository asset-list citation of §2.19; the
+  chapter-bound sibling-allowlist clone of the public backtrace
+  repository cited by R5.
+- *Forbidden corpus:* not consulted.
