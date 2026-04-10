@@ -1,122 +1,174 @@
-# KDF-Reloaded — How This Project Came To Be
+# Chapter 00 — Overview and Purpose
 
-This document is the public, reader-facing record of how the present codebase
-was produced. It is the entry point to a multi-chapter narrative under this
-directory.
+**Status:** driving-spec (meta-chapter).
 
-## The question this document answers
+This chapter is the entry point to the document set. It binds what
+the document set *is*, who it is *for*, what it *is not*, the
+chapter-set composition discipline, and the reading order a first
+reader should follow.
 
-> *Given the upstream Komodo DeFi Framework codebase as it existed at commit
-> `c1d46c0c1592faa0860f704008b2b2381bc3840f` (3 June 2022, the last commit
-> made under the GNU General Public License version 2), and given only
-> publicly-available materials — protocol specifications, on-chain message
-> formats, the live behaviour of the public peer-to-peer mesh, and
-> sibling open-source projects under compatible licenses — could a
-> competent Rust developer have arrived at the present KDF-Reloaded
-> source tree?*
+## 0.1 Executive Summary
 
-Every chapter in this directory is a piece of the answer. Each chapter
-takes one area of functionality, names the publicly-available inputs that
-informed it, and walks through the design decisions that produced the
-current code. Read together, the chapters form an end-to-end derivation
-record.
+The document set is the project's *derivation record*: a
+chapter-by-chapter, publicly-reproducible record of how the project
+codebase arrives at its present shape starting from the pinned
+baseline tree of chapter 02, using only the permitted-input classes
+of chapter 01, and citing per substrate the external specifications
+the substrate's behaviour is dictated by.
 
-## The starting point
+Each substantive chapter is a *driving specification* of one
+substrate: it binds the substrate's contract surface, names its
+permitted inputs, lists its tests, deferred items, and baseline
+verifications, and closes with a provenance footer. The document
+set composes those substrate-by-substrate driving specifications
+into a single end-to-end record of the project's delta from the
+baseline tree.
 
-The starting point is a single Git commit: `c1d46c0c1592faa0860f704008b2b2381bc3840f`.
-Everything in that commit's tree is the inherited baseline. Throughout
-this document set, "the baseline" refers to that commit.
+This chapter does not bind any substrate of its own. It is a meta-
+chapter that binds the document set as a whole: how chapters are
+shaped, how the set composes, and the reading order. R1–R4 govern
+the document set; R5–R6 govern the per-chapter shape.
 
-A short time after that commit, the upstream project relicensed its
-codebase under GPL version 3. KDF-Reloaded does not incorporate any
-material produced upstream after that relicensing. The detailed rules
-under which post-baseline work was added to the project are set out in
-[01-clean-room-rules.md](01-clean-room-rules.md).
+## 0.2 Subsystem Shape
 
-## What this document *is*
+The document set is a sequence of standalone chapters under a
+single repository directory, maintained on the same branches as
+the source it describes. The set is composed of:
 
-- A **derivation record**. For every area of functionality that differs
-  from the baseline, it states what changed, what publicly-available
-  material informed the change, and how a reader could reach the same
-  outcome.
-- **Layered**. Every chapter begins with an Executive Summary readable
-  by a non-engineer, followed by Reproduction Detail readable by an
-  engineer who wants to verify or rebuild the work.
-- **Spec-first**. When a behaviour is dictated by an external
-  specification (a BIP, SLIP, EIP, IBC standard, gossipsub protocol
-  document, contract ABI, RPC payload shape, etc.), the chapter cites
-  that specification by name and version.
+| Class                        | Chapters                                                            |
+| ---------------------------- | ------------------------------------------------------------------- |
+| Meta-chapters                | Chapter 00 (this), chapter 01 (rules and methodology), chapter 30 (cross-cutting index). |
+| Anchor chapters              | Chapter 02 (baseline state), chapter 29 (license-condition treatment).               |
+| Substantive driving-spec chapters | Chapters 03 through 28.                                            |
 
-## What this document *is not*
+The substantive chapters are independent: each can be read on its
+own without prior chapters, provided the reader has read chapters 01
+and 02 first. Cross-chapter references between substantive chapters
+are by chapter number, not by source-tree path. Chapter 30 is the
+reverse index over the substantive chapters.
 
-- **Not a legal opinion.** Nothing here is intended as legal advice or
-  as a legal defence. It is a technical and procedural record of how
-  the code was produced.
-- **Not a substitute for the source.** The chapters describe behaviour
-  and design intent in plain language; they do not reproduce the source
-  code itself. To understand the code, read the code.
-- **Not an exhaustive feature catalog.** Areas that were not modified
-  relative to the baseline are out of scope. The chapters cover only
-  the post-baseline delta.
-- **Not a changelog.** A changelog answers *what* changed and *when*. A
-  derivation record answers *how* the change could have been produced
-  from public materials, regardless of when it was committed.
+## 0.3 Bound Document-Set Discipline
 
-## How to read this set
+**R1.** The document set MUST be a derivation record. For every
+area in which the project differs from the baseline tree of
+chapter 02, the set MUST contain a chapter that binds the
+substrate's contract surface, names the publicly-available input
+classes that informed it, and documents the discipline by which a
+clean-room implementer could arrive at the same outcome.
 
-1. Start with [01-clean-room-rules.md](01-clean-room-rules.md). It
-   defines the methodology this document set claims to follow.
-2. Read [02-baseline-state.md](02-baseline-state.md). It establishes the
-   shape of the inherited code at the baseline commit.
-3. Read subsequent chapters in numerical order. Each chapter is
-   self-contained and can also be read independently if you are only
-   interested in one area of functionality.
-4. Chapter [30-provenance-attribution.md](30-provenance-attribution.md)
-   is a cross-cutting index: it tabulates, for each major artefact in
-   the present tree, the specification, sibling project, or independent
-   contribution it descends from.
+**R2.** The document set MUST be *spec-first*. When a substrate's
+behaviour is dictated by an external specification (a Bitcoin
+Improvement Proposal, a Satoshi Labs Improvement Proposal, an
+Ethereum Improvement Proposal, an Inter-Blockchain Communication
+standard, a gossipsub protocol document, a contract Application
+Binary Interface, a request-and-response payload shape, etc.), the
+substrate's chapter MUST cite that specification by name and (where
+applicable) by version.
 
-## Table of contents
+**R3.** The document set MUST be maintained on the same branches as
+the source it describes. When a chapter is added or revised, the
+revision is recorded in the same commit history as any source
+change it accompanies. Where a chapter becomes inconsistent with
+the source it describes, the chapter is the defect and is to be
+reported as an issue against the document directory.
 
-- [00 — Overview & Purpose](00-overview.md) *(this document)*
-- [01 — Clean-Room Rules and Methodology](01-clean-room-rules.md)
-- [02 — The Baseline State at the June 2022 Commit](02-baseline-state.md)
-- [03 — Toolchain Modernization](03-toolchain-modernization.md)
-- [04 — Error-Aggregation Type Adaptation to the Modern Trait Solver](04-error-aggregation-type-adaptation.md)
-- [05 — Hierarchical-Deterministic Wallet Support](05-hd-wallet-support.md)
-- [06 — Network-Identifier & Seed-Node Decoupling](06-network-id-seed-node.md)
-- [07 — Wallet Lifecycle & Private-Key Export RPCs](07-wallet-lifecycle-and-key-export.md)
-- [08 — Atomic-Swap Fee-Routing Engine](08-fee-routing-engine.md)
-- [09 — Third-Party Watcher Reward Infrastructure](09-watcher-reward-infrastructure.md)
-- [10 — Server-Sent-Events Streaming Backbone](10-sse-streaming.md)
-- [11 — Order-Match Cancellation Race Mitigation](11-order-match-cancellation.md)
-- [12 — Order-Match State Store](12-order-match-state-store.md)
-- [13 — Atomic-Swap Version Negotiation Layer](13-swap-version-negotiation.md)
-- [14 — Generic State-Machine Runtime](14-state-machine-runtime.md)
-- [15 — Atomic-Swap V2 UTXO Path](15-swap-v2-utxo-path.md)
-- [16 — Atomic-Swap V2 Pre-Burn Output](16-swap-v2-pre-burn-output.md)
-- [17 — Atomic-Swap V2 EVM Path & Contract Interaction](17-swap-v2-evm-path.md)
-- [18 — Tendermint, IBC, and Cross-Chain HTLC Surfaces](18-tendermint-ibc-htlc.md)
-- [19 — Non-Fungible-Token Module Layout](19-nft-module-layout.md)
-- [20 — Siacoin Network Integration](20-siacoin-integration.md)
-- [21 — TRON Network Integration](21-tron-integration.md)
-- [22 — WalletConnect v2 Pairing & Session](22-walletconnect-v2.md)
-- [23 — External Trading-API Client](23-trading-api-client.md)
-- [24 — GUI-Facing Account-State Persistence](24-gui-account-state.md)
-- [25 — SQL Query-Builder Replacement](25-sql-query-builder.md)
-- [26 — Cross-Platform Build & WASM Adaptation](26-cross-platform-and-wasm.md)
-- [27 — Infrastructure-Crate Carve-Outs](27-infrastructure-crate-carve-outs.md)
-- [28 — libp2p Modernization](28-libp2p-modernization.md)
-- [29 — Treatment of License Conditions (e) and (f)](29-license-conditions-e-f.md)
-- [30 — Provenance & Attribution Index](30-provenance-attribution.md)
+**R4.** The document set MUST NOT make legal claims. It is a
+technical-and-procedural record only, not legal advice or legal
+defence; chapter 29 separately binds the project's legal position
+on the additional copyright-holder conditions chapter 02 anchors
+the baseline tree relative to.
 
-## Stability of this document
+## 0.4 Bound Per-Chapter Shape
 
-This document set is treated as part of the codebase. It is maintained
-on the same branch as the code it describes. When a chapter is added or
-revised, the revision is recorded in the commit history of this
-repository alongside any code change it accompanies.
+**R5.** Every substantive chapter (chapters 03 through 28) MUST
+follow the canonical chapter shape: a chapter-bound title line, a
+single `Status:` header on the third line carrying one of the two
+chapter-bound status values (`driving-spec` for substrate-binding
+chapters and the chapter-30-bound `legal-position` for chapter 29),
+a one-paragraph one-sentence chapter claim, sections covering the
+substrate's contract surface organised by sub-sub-claims and
+binding rules of the form `R<n>`, a `Tests` section of the form
+`T<n>`, a `Deferred Work` section of the form `D<n>`, a `Baseline
+Verifications` section of the form `V<n>`, an `External References`
+section, and a bulleted *Provenance Footer* closing with the
+chapter-bound *Forbidden corpus: not consulted.* trailer.
 
-If a chapter becomes inconsistent with the code it describes, that is a
-bug in the document set, not in the code. Such inconsistencies should be
-reported as issues against this directory.
+**R6.** Each chapter's contract surface MUST be carried by the
+rules-tests-deferred-verifications shape of R5 (the R/T/D/V
+discipline). Per-substrate prose between sections is permitted but
+MUST NOT carry binding contract that is not also carried in an
+`R<n>` rule. Where prose and an R-rule conflict, the R-rule is
+authoritative.
+
+## 0.5 Reading Order
+
+A first reader SHOULD read the document set in the following order:
+
+1. Chapter 01 — *Clean-Room Rules and Methodology.* The normative
+   rules the document set claims to follow (permitted-input classes,
+   forbidden inputs, identifier hygiene, citation discipline, the
+   canonical chapter shape).
+2. Chapter 02 — *Baseline State.* The exact pinned baseline commit
+   and the inherited tree shape at that commit.
+3. Chapters 03 through 28 in numerical order. Each chapter is
+   self-contained and can be read independently if the reader is
+   interested only in one substrate.
+4. Chapter 29 — *Treatment of License Conditions (e) and (f).* The
+   project's legal position on the additional copyright-holder
+   conditions appended after the baseline date.
+5. Chapter 30 — *Provenance and Attribution Index.* The cross-cutting
+   per-chapter capsule index, the aggregated input register, and the
+   per-substrate reverse map.
+
+## 0.6 What the Document Set Is Not
+
+The document set is *not*:
+
+- a *legal opinion or defence* — nothing in it is intended as legal
+  advice; chapter 29 binds the legal-position substrate separately;
+- a *substitute for the source* — the chapters describe behaviour
+  and design intent in plain language and do not reproduce the
+  source code itself; to understand the code, read the code;
+- an *exhaustive feature catalog* — areas the project did not modify
+  relative to the baseline tree of chapter 02 are out of scope; the
+  set covers only the delta relative to the baseline tree;
+- a *changelog* — a changelog answers *what* changed and *when*; a
+  derivation record answers *how* the change could be produced from
+  the permitted-input classes of chapter 01.
+
+## 0.7 Tests
+
+This is a meta-chapter; it has no test surface of its own. The
+testing discipline the document set binds is carried on the per-
+chapter `Tests` sections of the substantive chapters (R5).
+
+## 0.8 Deferred Work
+
+**D1.** Automated lint enforcement of R5 and R6 against the
+document set is deferred to chapter 30 D1; see chapter 30 for the
+audit-tooling-gap binding.
+
+## 0.9 Baseline Verifications
+
+**V1.** The document set MUST be confirmed to have no
+substantive-chapter gap relative to the chapter 30 capsule-index
+table: every chapter listed in chapter 30 §30.3 MUST exist under
+the document directory, and every file under the document
+directory MUST be listed in chapter 30 §30.3.
+
+## 0.10 External References
+
+This chapter has no external-specification citations of its own.
+External-specification citations are carried per substrate on the
+substantive chapters per R2, and aggregated by chapter 30 §30.4.
+
+## 0.11 Provenance Footer
+
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit of chapter 02; chapter 01 (the canonical chapter shape and
+  the permitted-input classes the rest of the document set follows);
+  chapter 30 (the cross-cutting index over the substantive chapters
+  and the audit-tooling-gap binding D1 of §0.8 refers to).
+- *Permitted-input classes used:* the document set as it stands.
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* not consulted.
