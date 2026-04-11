@@ -416,12 +416,14 @@ and become part of the GUI-visible contract surface on first release.
 ## 10.16 Provenance Footer
 
 - *Inputs:* the baseline workspace at the pinned baseline-revision
-  commit; chapter 01 (clean-room rules); the chapter-bound
-  identifier set for the broker substrate, the HTTP endpoint, the
-  RPC namespace, and the five concrete streamers; public protocol
-  documentation (HTML Living Standard SSE, WHATWG CORS); public
-  documentation for the asynchronous-runtime and lock crates listed in
-  10.15.
+  commit; chapter 01 (clean-room rules); chapter 31 (the central
+  application-context substrate the broker handle of R26 and the
+  `event_stream_access_control()` accessor are bound on); the
+  chapter-bound identifier set for the broker substrate, the HTTP
+  endpoint, the RPC namespace, and the five concrete streamers;
+  public protocol documentation (HTML Living Standard SSE, WHATWG
+  CORS); public documentation for the asynchronous-runtime and
+  lock crates listed in 10.15.
 - *Permitted-input classes used:* baseline source; bound substrate
   identifiers introduced with in-chapter justification; public
   protocol documentation; public crate documentation.

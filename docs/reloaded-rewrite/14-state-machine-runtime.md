@@ -452,10 +452,12 @@ compile on the bound stable toolchain.
   bootstrap allowlist that gates V3); chapter 13 (the swap
   version-negotiation predicate that routes into the storable
   substrate); chapters 15 and 17 (the consumers of the storable
-  variant); public Rust language documentation for the two
-  unstable language features the substrate consumes; public
-  documentation for the asynchronous-trait procedural-macro
-  crate.
+  variant); chapter 31 (the central application-context substrate
+  the storable-state-machine context back-reference is fetched
+  through, as `MmWeak` per chapter 31 R2); public Rust language
+  documentation for the two unstable language features the
+  substrate consumes; public documentation for the asynchronous-
+  trait procedural-macro crate.
 - *Permitted-input classes used:* baseline source; bound
   substrate identifiers introduced with in-chapter justification;
   public language documentation; public crate documentation.

@@ -374,8 +374,11 @@ git -C <baseline> show c1d46c0:<root>/<glue-crate>/Cargo.toml | grep -E 'libp2p|
   Chapter 06 (network-id substrate), Chapter 09 (watcher topic
   conventions), Chapter 11 (order-match cancellation cache), Chapter
   27 (infrastructure substrate inventory and proxy-signature
-  substrate row), and the external libp2p / cryptographic / wire-
-  format specifications listed in §28.12.
+  substrate row), Chapter 31 (the central application-context
+  substrate the `p2p_ctx` sub-context slot, the `peer_id` once-set
+  field, and the P2P command-channel sender are bound on per
+  chapter 31 R6 / R7), and the external libp2p / cryptographic /
+  wire-format specifications listed in §28.12.
 - *Permitted-input classes used:* baseline source; chapter-bound
   substrate identifiers introduced here as contract surface
   (`AtomicDexBehaviour` composed-behaviour shape, `PeersExchange`,
@@ -388,7 +391,7 @@ git -C <baseline> show c1d46c0:<root>/<glue-crate>/Cargo.toml | grep -E 'libp2p|
   libp2p protocol names; standard cryptographic primitive names
   (secp256k1, noise XX, SHA-256, msgpack).
 - *Sibling chapters cross-referenced:* Chapter 06, Chapter 09,
-  Chapter 11, Chapter 27.
+  Chapter 11, Chapter 27, Chapter 31.
 - *Author of this chapter:* clean-room round-2 driving-spec working
   set.
 - *Forbidden corpus:* not consulted.

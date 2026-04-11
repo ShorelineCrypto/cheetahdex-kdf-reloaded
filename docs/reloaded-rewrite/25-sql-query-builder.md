@@ -391,7 +391,12 @@ module of R10 MUST be confirmed absent.
   WalletConnect consumer of R16); chapter 24 (the graphical-user-
   interface account-state consumer of R16); chapter 26 (the
   parallel WebAssembly persistence substrate this chapter's
-  platform-gate R15 hands off to); chapter 04 (the error-handling
+  platform-gate R15 hands off to); chapter 31 (the central
+  application-context substrate the synchronous SQLite connection
+  handle is pinned on as the `sqlite_connection` once-set field of
+  chapter 31 R6, and the asynchronous SQLite connection handle is
+  pinned on as the `async_sqlite_connection` `OnceLock`-wrapped
+  field of chapter 31 R9); chapter 04 (the error-handling
   framework D5 routes the chapter-bound `StringError` substrate
   into); the chapter-bound public SQLite engine documentation,
   the chapter-bound third-party binding-crate documentation, the

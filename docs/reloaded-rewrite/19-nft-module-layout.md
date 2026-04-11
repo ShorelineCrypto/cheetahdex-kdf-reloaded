@@ -445,8 +445,8 @@ D3. **Live confirmation count.** The inventory stores the
 D4. **Signed-proxy provider operation.** Both bundled HTTP
     providers carry a reserved signed-proxy flag intended to
     sign outbound HTTP with the codebase's signed-proxy scheme
-    (see [Chapter 23](23-signed-proxy.md) for the scheme and
-    [Chapter 24](24-libp2p-handshake.md) for the keying);
+    (keyed off the P2P identity, see
+    [Chapter 28](28-libp2p-modernization.md) for the keying);
     wiring is deferred to that subsystem's integration step.
 
 D5. **End-to-end integration tests** against a deterministic
@@ -505,7 +505,9 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
   NFT subsystem at baseline verified via
   `git ls-tree -r c1d46c0c1592faa0860f704008b2b2381bc3840f`
   and tree-wide `git grep` for the storage-trait names against
-  the baseline; ERC-721 and ERC-1155 standards (the on-chain
+  the baseline; chapter 31 (the central application-context
+  substrate the `nft_ctx` sub-context slot is registered on per
+  chapter 31 R7 / R8); ERC-721 and ERC-1155 standards (the on-chain
   interface definitions used by the withdrawal path); the
   Ethereum JSON-RPC method `eth_call` (used for the ERC-1155
   balance query); EIP-1559 (one of the two signing policies);

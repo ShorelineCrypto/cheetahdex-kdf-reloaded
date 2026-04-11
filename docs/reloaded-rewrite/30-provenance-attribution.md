@@ -83,7 +83,8 @@ and a one-sentence capsule of what the chapter documents.
 | 27 | [Infrastructure Subsystem Inventory](27-infrastructure-crate-carve-outs.md)                          | (registry of cross-cutting infrastructure substrates)                                                    | The substrate inventory referenced by the rest of the document set: thirteen cross-cutting infrastructure substrates.                                                    |
 | 28 | [libp2p Stack Consolidation](28-libp2p-modernization.md)                                             | P2P-substrate consolidation, composed network behaviour, relay-mesh extension                            | The consolidation of the baseline P2P substrate, the composed network behaviour, and the relay-mesh extension.                                                           |
 | 29 | [Treatment of License Conditions (e) and (f)](29-license-conditions-e-f.md)                          | (legal position)                                                                                         | The project's legal position on the additional copyright-holder conditions appended after the baseline date.                                                              |
-| 30 | (this chapter)                                                                                       | (meta — index)                                                                                           | Cross-cutting index.                                                                                                                                                     |
+| 30 | [Provenance and Attribution Index](30-provenance-attribution.md)                                     | (meta — index)                                                                                           | Cross-cutting index.                                                                                                                                                     |
+| 31 | [Central Application-Context Substrate](31-central-application-context.md)                            | central-context substrate (`MmCtx` / `MmArc` / `MmWeak`, `Constructible<T>` once-set fields, sub-context slot pattern, `MmCtxBuilder`, FFI registry, stop signal) | The shared application-context substrate every consumer crate fetches its shared state through.                                                                          |
 
 ## 30.4 Aggregated Input Register
 
@@ -213,7 +214,7 @@ subject, the citation is marked *(ref)*.
 | WalletConnect-protocol substrate                                       | 22                                                  |
 | Ledger-protocol substrate (scaffolding only)                           | 27                                                  |
 | platform entry-point substrate                                         | 26                                                  |
-| central-context substrate                                              | 27 *(ref)*                                          |
+| central-context substrate                                              | 31, 27 *(ref)*, 10 *(ref)*, 14 *(ref)*, 18 *(ref)*, 19 *(ref)*, 22 *(ref)*, 24 *(ref)*, 25 *(ref)*, 28 *(ref)* |
 | IndexedDB / browser-storage substrate                                  | 26                                                  |
 | error-envelope substrate                                               | 04, 27                                              |
 | EVM-utility substrate                                                  | 26 *(ref)*                                          |

@@ -89,16 +89,16 @@ and claim-HTLC) but differ in:
   (`transfer`, `receiver_on_other_chain`, `sender_on_other_chain`)
   that record cross-chain provenance; Nucleus omits them.
 
-`mm2src/coins/tendermint/htlc/mod.rs` defines a thin abstraction
-layer with two union types:
+Within the Tendermint coin module, a thin dialect-abstraction
+layer reconciles the two dialects behind two sum types:
 
-- `CreateHtlcMsg` — sum type over `IrisCreateHtlcMsg` and
-  `NucleusCreateHtlcMsg`.
-- `ClaimHtlcMsg` — sum type over `IrisClaimHtlcMsg` and
-  `NucleusClaimHtlcMsg`.
+- a *create-HTLC message* that is a sum over the Iris and Nucleus
+  create-HTLC forms;
+- a *claim-HTLC message* that is a sum over the Iris and Nucleus
+  claim-HTLC forms.
 
-Higher-level swap code holds a `Box<dyn Htlc>` (or a trait-object
-equivalent) and dispatches without knowing the dialect.
+Higher-level swap code holds a trait object over the HTLC
+abstraction and dispatches without knowing the dialect.
 
 ---
 
@@ -260,17 +260,17 @@ configuration):
 
 | Method                                  | Behaviour                                                                            |
 |----------------------------------------|--------------------------------------------------------------------------------------|
-| `send_taker_fee`                       | Branches on `DexFee`: `Standard` → `MsgSend`; `WithBurn` → `MsgMultiSend` (split).   |
-| `send_maker_payment`                   | Delegates to `send_htlc_for_denom`.                                                  |
-| `send_taker_payment`                   | Delegates to `send_htlc_for_denom`.                                                  |
-| `send_maker_spends_taker_payment`      | Delegates to `spend_htlc`.                                                           |
-| `send_taker_spends_maker_payment`      | Delegates to `spend_htlc`.                                                           |
+| `send_taker_fee`                       | Branches on `DexFee`: `Standard` → single bank send; `WithBurn` → multi-output bank send (split). |
+| `send_maker_payment`                   | Builds and broadcasts a create-HTLC message for the payment denom.                  |
+| `send_taker_payment`                   | Builds and broadcasts a create-HTLC message for the payment denom.                  |
+| `send_maker_spends_taker_payment`      | Builds and broadcasts a claim-HTLC message revealing the secret.                    |
+| `send_taker_spends_maker_payment`      | Builds and broadcasts a claim-HTLC message revealing the secret.                    |
 | `validate_fee`                         | Decodes the fee tx, asserts denoms and recipients per `DexFee`.                      |
-| `validate_maker_payment`               | Delegates to `validate_payment_for_denom`.                                           |
-| `validate_taker_payment`               | Delegates to `validate_payment_for_denom`.                                           |
+| `validate_maker_payment`               | Validates the on-chain HTLC for the payment denom against negotiated parameters.    |
+| `validate_taker_payment`               | Validates the on-chain HTLC for the payment denom against negotiated parameters.    |
 | `check_if_my_payment_sent`             | ABCI-query HTLC state by id.                                                         |
-| `search_for_swap_tx_spend_my/other`    | Cosmos-tx-search for `MsgClaimHTLC` referencing the HTLC id.                         |
-| `extract_secret`                       | Decode `MsgClaimHTLC` from a spend tx and return the `secret` field.                 |
+| `search_for_swap_tx_spend_my/other`    | Cosmos-tx-search for a claim-HTLC referencing the HTLC id.                           |
+| `extract_secret`                       | Decode a claim-HTLC from a spend tx and return the `secret` field.                  |
 
 The two refund-method entries return a sentinel that the swap
 state machine recognises as "no refund tx is needed; the chain
@@ -418,7 +418,10 @@ The chapter relies on one baseline-state claim:
 - *Status:* driving-spec.
 - *Version:* v2.
 - *Verified against:* baseline commit
-  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; Cosmos SDK proto
+  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; chapter 31 (the
+  central application-context substrate the Tendermint coins
+  context is fetched through as a sub-context slot per chapter 31
+  R7); Cosmos SDK proto
   definitions for `Coin`, `MsgSend`, `MsgMultiSend`; ICS-20
   (`ibc.applications.transfer.v1.MsgTransfer`); the Iris-mod HTLC
   proto repository at `https://github.com/irismod/htlc`; BIP-173

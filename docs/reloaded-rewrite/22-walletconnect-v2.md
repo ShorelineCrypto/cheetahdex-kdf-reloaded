@@ -436,7 +436,9 @@ V3. The third-party Cargo dependencies that provide the relay
   subsystem at baseline verified via
   `git ls-tree -r c1d46c0c1592faa0860f704008b2b2381bc3840f`
   and tree-wide `git grep` for the integration-trait name
-  against the baseline; the public WalletConnect v2
+  against the baseline; chapter 31 (the central application-
+  context substrate the `wallet_connect` sub-context slot is
+  registered on per chapter 31 R7 / R8); the public WalletConnect v2
   specification; the CAIP-2 and CAIP-10 namespaces; the
   Ethereum JSON-RPC method definitions; the Cosmos SDK signing
   schemes (Amino and SignDirect); BIP-174 (PSBT); RFC 5869

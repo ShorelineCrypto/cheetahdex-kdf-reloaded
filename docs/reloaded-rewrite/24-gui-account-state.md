@@ -346,8 +346,10 @@ V3. The three-variant identity enum of §24.2 corresponds to
   namespace identifiers against the baseline; BIP-44 (the
   public derivation-path standard that backs the HD identity
   variant of §24.2); the codebase's standard error and HTTP-
-  status mapping conventions; the codebase's per-context
-  handle pattern and cross-platform persistence approach
-  (Chapters 8 and 26); the native SQL abstractions of
+  status mapping conventions; chapter 31 (the central
+  application-context substrate the `account_ctx` sub-context
+  slot is registered on per chapter 31 R7 / R8); the codebase's
+  per-context handle pattern and cross-platform persistence
+  approach (Chapters 8 and 26); the native SQL abstractions of
   Chapter 25.
 - *Forbidden corpus:* not consulted.
