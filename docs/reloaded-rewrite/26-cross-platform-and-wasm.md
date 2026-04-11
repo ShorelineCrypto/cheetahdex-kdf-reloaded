@@ -1,583 +1,608 @@
-# Chapter 26 -- Cross-Platform Build & WASM Adaptation
-
-> **Chapter type:** document existing. No IMPL marker.
-
-## 26.0 Executive summary
-
-The reloaded workspace targets seven first-class platforms
-out of one source tree:
-
-| Family    | Triple                          | Artefact                         |
-|-----------|---------------------------------|----------------------------------|
-| Linux     | `x86_64-unknown-linux-gnu`      | `mm2` binary                     |
-| macOS     | `x86_64-apple-darwin`           | `mm2` binary                     |
-| macOS     | `aarch64-apple-darwin`          | `mm2` binary                     |
-| macOS     | universal (`lipo`-merged)       | `mm2` binary                     |
-| Windows   | `x86_64-pc-windows-msvc`        | `mm2.exe` binary                 |
-| iOS       | `aarch64-apple-ios`             | `libmm2_bin_lib.a` static lib    |
-| Android   | `aarch64-linux-android`         | `libmm2_bin_lib.so` shared lib   |
-| Android   | `armv7-linux-androideabi`       | `libmm2_bin_lib.so` shared lib   |
-| Browser   | `wasm32-unknown-unknown`        | `wasm-pack` package              |
-
-This chapter documents the **structural pattern** the post-
-baseline tree uses to share one workspace across all of
-those targets without forking the code. The build-tooling
-changes themselves (toolchain pin, Cargo workspace member
-lists, CI matrix expansion) are covered in
-[Chapter 3](03-toolchain-modernization.md); this chapter
-describes what the source code does in response, namely:
-
-1. A pair of in-workspace macros (`cfg_native!` and
-   `cfg_wasm32!`) plus the standard
-   `#[cfg(target_arch = "wasm32")]` attribute used at
-   point-of-use for everything finer-grained than a whole
-   module.
-2. A one-crate platform shim
-   ([`mm2src/mm2_bin_lib/`](../../mm2src/mm2_bin_lib/))
-   that fans out into a native binary, a `cdylib`/`staticlib`
-   for mobile FFI, and a WASM JS shim.
-3. Per-crate target tables in `Cargo.toml`, so that
-   native-only and WASM-only dependency graphs never collide.
-4. Behaviour-equivalent storage backends
-   (SQLite on native, IndexedDB on WASM) and
-   behaviour-equivalent transports (hyper on native, browser
-   `fetch`/`WebSocket` on WASM) sitting behind common traits
-   so that consumer crates above the boundary stay
-   target-agnostic.
-5. A WASM-aware executor and time module in
-   [`mm2src/common/executor/`](../../mm2src/common/executor/)
-   that drops the `Send` bound on WASM (single-threaded JS
-   event loop) and forwards to
-   [`wasm_bindgen_futures`](https://crates.io/crates/wasm-bindgen-futures).
-
-The baseline carried a partial form of (1) and (3), an
-ancestor of (5), and an early IndexedDB layer. The reloaded
-tree extends the pattern to every new feature added in this
-document set: every async transport, every persistence
-component, every executor entry point exposes the same dual
-shape so that adding a target is a one-`cfg` change at the
-boundary, not a fork.
-
-## 26.1 Compilation guards
-
-### 26.1.1 Two macros for the common case
-
-The lowest layer is two declarative macros in
-[`mm2src/common/common.rs`](../../mm2src/common/common.rs):
-
-```rust
-#[macro_export]
-macro_rules! cfg_wasm32 {
-    ($($tokens:tt)*) => {
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "wasm32")] { $($tokens)* }
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! cfg_native {
-    ($($tokens:tt)*) => {
-        cfg_if::cfg_if! {
-            if #[cfg(not(target_arch = "wasm32"))] { $($tokens)* }
-        }
-    };
-}
-```
-
-Both macros expand to a `cfg_if::cfg_if!` block. Their
-purpose is purely ergonomic: in source files that need to
-gate a block of three to thirty `use` statements (or a
-helper function, or an `impl` block), wrapping the block
-in `cfg_native! { ... }` is more readable than peppering
-every line with `#[cfg(not(target_arch = "wasm32"))]`.
-
-A typical use, from
-[`mm2src/mm2_net/src/grpc_web.rs`](../../mm2src/mm2_net/src/grpc_web.rs):
-
-```rust
-use common::{cfg_native, cfg_wasm32};
-
-cfg_native! {
-    use crate::transport::slurp_req;
-    use http::header::{ACCEPT, CONTENT_TYPE};
-}
-
-cfg_wasm32! {
-    use crate::wasm_http::FetchRequest;
-}
-```
-
-Both branches are present in the source; one is selected by
-the compiler.
-
-### 26.1.2 Attribute guards everywhere else
-
-For finer granularity (one item, one function, one match
-arm, one enum variant, one struct field, one `impl`), the
-canonical pattern is the plain attribute form:
-
-```rust
-#[cfg(not(target_arch = "wasm32"))]   // native only
-#[cfg(target_arch = "wasm32")]        // WASM only
-```
-
-This is the form used inside
-[`mm2src/db_common/`](../../mm2src/db_common/) (whole
-modules native-gated, see
-[Chapter 25](25-sql-query-builder.md)),
-inside
-[`mm2src/mm2_gui_storage/`](../../mm2src/mm2_gui_storage/)
-(separate `sqlite_storage.rs` vs `wasm_storage.rs` modules,
-see [Chapter 24](24-gui-account-state.md)), and at
-function-level granularity inside
-[`mm2src/coins/`](../../mm2src/coins/).
-
-The convention is: macros for groups of imports and
-top-of-file branching, attributes for everything else.
-
-### 26.1.3 Target tables in `Cargo.toml`
-
-Where a dependency makes no sense on the other side of the
-fence, the gate moves out of the source and into
-`Cargo.toml` via Cargo's `[target.'cfg(...)']` tables. The
-pattern, from
-[`mm2src/trezor/Cargo.toml`](../../mm2src/trezor/Cargo.toml):
-
-```toml
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bip32 = { version = "0.2.2", default-features = false,
-          features = ["alloc", "secp256k1-ffi"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys      = { version = "0.3.27" }
-wasm-bindgen = { version = "0.2.50" }
-```
-
-This keeps `bip32`+`secp256k1-ffi` out of the WASM build
-(it pulls in a C library that does not cross-compile to
-`wasm32-unknown-unknown`) and keeps `js-sys`/`wasm-bindgen`
-out of the native build (they are no-ops there).
-
-`db_common`, `mm2_metamask`, `kdf_walletconnect`, and several
-others use the same shape.
-
-## 26.2 The platform shim crates
-
-There are two crates with binary-shaped surfaces, not one,
-and each owns a subset of the target matrix.
-
-### 26.2.1 mm2_main: desktop and WASM
-
-[`mm2src/mm2_main/`](../../mm2src/mm2_main/) carries the
-actual application logic. Its `Cargo.toml` declares both a
-binary target and a library target:
-
-```toml
-[[bin]]
-name = "mm2"
-path = "src/mm2_bin.rs"
-
-[lib]
-name = "mm2"
-path = "src/mm2_lib.rs"
-crate-type = ["lib", "cdylib", "staticlib"]
-```
-
-The desktop builds (Linux, macOS, Windows -- including the
-universal macOS artefact built by `lipo`-merging the two
-single-arch outputs) compile this `[[bin]]` directly with
-`cargo build --bin mm2`. The WASM build calls
-`wasm-pack build mm2src/mm2_main --target web`, which
-consumes the `cdylib` crate-type from the same `[lib]`.
-
-### 26.2.2 mm2_bin_lib: mobile bindings
-
-[`mm2src/mm2_bin_lib/`](../../mm2src/mm2_bin_lib/) is a
-thin wrapper used only by the mobile workflows:
-
-```
-mm2_bin_lib/
-|-- Cargo.toml      [[bin]] name = "mm2_reloaded"
-|                   [lib]   crate-type = ["cdylib", "rlib"]
-`-- src/
-    |-- lib.rs      Re-exports from mm2_main
-    `-- main.rs     Native pass-through to mm2::mm2_main()
-```
-
-`lib.rs` is essentially:
-
-```rust
-pub use mm2::lp_main;
-pub use mm2::mm2_status;
-pub use mm2::MainStatus;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use mm2::{mm2_main, run_lp_main};
-```
-
-The iOS workflow runs `cargo build -p mm2_bin_lib --target
-aarch64-apple-ios` and uploads the resulting
-`libmm2_bin_lib.a`. The Android workflow runs `cargo ndk
---target aarch64-linux-android -- build -p mm2_bin_lib`
-(once per ABI) and uploads `libmm2_bin_lib.so`.
-
-`main.rs` is two lines of body:
-
-```rust
-fn main() {
-    #[cfg(not(target_arch = "wasm32"))]
-    { mm2::mm2_main() }
-}
-```
-
-The binary is named `mm2_reloaded` (via
-`default-run = "mm2_reloaded"`) so that it does not collide
-with the desktop `mm2` binary built out of `mm2_main`.
-
-### 26.2.3 Why two shims
-
-The split exists because the desktop and mobile targets
-want different things from the same code:
-
-- The desktop binary is invoked by `cargo run` and by
-  packaging steps (Docker, Homebrew, MSI), and a clean
-  `[[bin]]` target is the easiest way to keep that
-  workflow unchanged.
-- Mobile builds need a library artefact (`.a` / `.so`) for
-  the host Swift/Kotlin app to link, not an executable. A
-  separate crate keeps the mobile dependency surface
-  (which has historically been the most fragile thing to
-  cross-compile) isolated from desktop dependency upgrades.
-- The browser build is consumed via `wasm-pack`, which
-  itself runs `cargo build --target wasm32-unknown-unknown`
-  with the appropriate crate-type and then post-processes
-  the result; the `mm2_main` library entry exposes
-  everything the JS shim needs, so a separate `mm2_bin_lib`
-  is unnecessary on this target.
-
-This is the only place in the workspace where
-target-specific binary surfaces exist; everything below
-`mm2_main` is library-shaped.
-
-## 26.3 Storage-backend duality
-
-The pattern used in every persistence consumer is:
-
-1. Define a behaviour-only trait in the consumer crate
-   (async, generic over `Result` types, no SQL or
-   IndexedDB types in the signature).
-2. Provide a native implementation backed by
-   [`db_common::AsyncConnection`](../../mm2src/db_common/src/async_sql_conn.rs)
-   (see [Chapter 25](25-sql-query-builder.md)) in a file
-   named `sqlite_storage.rs` (or under a `sqlite/`
-   submodule).
-3. Provide a WASM implementation backed by
-   [`mm2_db::indexed_db`](../../mm2src/mm2_db/src/indexed_db/)
-   in a file named `wasm_storage.rs`.
-4. Branch in the consumer's `mod.rs` on
-   `#[cfg(target_arch = "wasm32")]` so that only one of the
-   two compiles per target.
-
-A canonical worked example is
-[`mm2src/coins/hd_wallet_storage/`](../../mm2src/coins/hd_wallet_storage/):
-
-```
-hd_wallet_storage/
-|-- mod.rs               trait definition + cfg branching
-|-- mock_storage.rs      in-memory test double
-|-- sqlite_storage.rs    native, on db_common
-`-- wasm_storage.rs      WASM, on mm2_db::indexed_db
-```
-
-The same pattern is used by `mm2_gui_storage` (see
-[Chapter 24 §24.5](24-gui-account-state.md)), by the swap
-state stores (Chapters 12, 14, 15), by the NFT module
-(Chapter 19), and by the WalletConnect session store
-(Chapter 22).
-
-[`mm2_db`](../../mm2src/mm2_db/) is itself entirely WASM-
-oriented: its source tree is
-
-```
-mm2_db/src/
-|-- lib.rs
-`-- indexed_db/
-    |-- db_driver.rs
-    |-- db_lock.rs
-    |-- drivers/
-    |-- indexed_cursor.rs
-    `-- indexed_db.rs
-```
-
-and its dependency table consists almost entirely of the
-WASM target block (`web-sys`, `js-sys`,
-`wasm-bindgen-futures`, etc.). On native it compiles to
-nothing of substance and is brought in only so that
-downstream crates do not need their own `#[cfg]`-guarded
-import of it.
-
-## 26.4 The dual executor
-
-The `Send`-bound problem is the central reason WASM Rust
-code looks different from native Rust code: native futures
-spawned on a worker-stealing executor must be `Send`, but
-the browser event loop is single-threaded and the
-ecosystem's `wasm_bindgen_futures::spawn_local` does not
-require it. Forcing `Send` on every future just to satisfy
-the native path would prevent the WASM path from using any
-`!Send` future from the `wasm-bindgen` or `alloy` ecosystem.
-
-The reloaded tree solves this by exposing two parallel
-modules in
-[`mm2src/common/executor/`](../../mm2src/common/executor/),
-selected by `#[cfg]` in `executor/mod.rs`:
-
-```
-common/executor/
-|-- native_executor.rs    spawn() = tokio task; Send required
-`-- wasm_executor.rs      spawn() = spawn_local(); no Send
-```
-
-The WASM-side signature drops the `Send` bound on `spawn`,
-returns an `AbortOnDropHandle` wrapper around
-`futures::future::AbortHandle`, and bridges `setTimeout`
-/`clearTimeout` through `wasm_bindgen` for `spawn_after`.
-The relevant excerpt (paraphrased structurally):
-
-```rust
-pub fn spawn(future: impl Future<Output = ()> + 'static) {
-    spawn_local(future)
-}
-
-pub fn spawn_local(future: impl Future<Output = ()> + 'static) {
-    wasm_bindgen_futures::spawn_local(future)
-}
-
-pub fn spawn_local_abortable(
-    future: impl Future<Output = ()> + 'static,
-) -> AbortOnDropHandle {
-    let (abortable_fut, abort_handle) = abortable(future);
-    spawn_local(abortable_fut.then(|_| futures::future::ready(())));
-    AbortOnDropHandle::from(abort_handle)
-}
-```
-
-`AbortOnDropHandle` is a small `AbortHandle` newtype whose
-`Drop` impl calls `abort()`; it exists so that fire-and-
-forget spawn patterns clean up their continuations when the
-owning struct is dropped.
-
-The native side keeps the standard `Send`-bounded spawn
-surface and forwards to a tokio runtime; consumers depend
-on the unqualified `common::executor::*` re-exports and the
-correct binding is picked automatically.
-
-Closely related is the wall-clock module: on native,
-`gstuff::now_ms()` is re-exported (libc `gettimeofday`); on
-WASM the source replaces it with `js_sys::Date::now() as
-u64`. The seed for the small-RNG used in non-cryptographic
-contexts likewise uses `now_ms()` on both sides.
-
-## 26.5 The dual transport
-
-[`mm2src/mm2_net/`](../../mm2src/mm2_net/) is the workspace's
-network layer. Its `lib.rs` declares both worlds:
-
-```
-mm2_net/src/
-|-- lib.rs
-|-- native_http.rs       hyper 0.14 + rustls
-|-- wasm_http.rs         browser Fetch API
-|-- wasm_ws.rs           browser WebSocket
-|-- transport.rs         unified slurp_* surface
-|-- grpc_web.rs          gRPC-WEB (uses cfg_native!/cfg_wasm32!)
-`-- ...
-```
-
-The slurp surface (`slurp_url`, `slurp_url_with_headers`,
-`slurp_post_json`) is re-exported from `transport.rs` with
-identical signatures on both targets; the body picks the
-right module behind a `cfg`. Consumers above this layer
-write one code path.
-
-WebSockets follow the same shape: `wasm_ws.rs` uses the
-browser `WebSocket` interface (via `web-sys`), and the
-native equivalent uses `tungstenite`. `kdf_walletconnect`
-(see [Chapter 22](22-walletconnect-v2.md)) sits on top of
-this layer, so its relay code is also target-agnostic.
-
-gRPC-WEB is the third example, and it is the most explicit
-about the dual: the file shown in [§26.1.1](#2611-two-macros-for-the-common-case)
-uses both `cfg_native!` and `cfg_wasm32!` macros at the top
-of the file and a single shared `decode`/`encode` body
-below.
-
-## 26.6 Filesystem and OS interactions
-
-There is no browser filesystem. The reloaded tree handles
-this by collecting all native-only filesystem code into
-[`mm2src/mm2_io/`](../../mm2src/mm2_io/), which is itself
-declared with target tables in its `Cargo.toml` such that
-its real dependencies (the `gstuff` filesystem helpers,
-`tokio::fs`) appear only in the native target block. On
-WASM the crate compiles to an empty shell.
-
-Code that needs to "store a thing" therefore does not call
-`mm2_io` on WASM; it calls the relevant `*_storage` trait
-described in [§26.3](#263-storage-backend-duality), whose
-WASM implementation persists the thing to IndexedDB instead.
-
-## 26.7 Hardware wallets and other native-only stacks
-
-Several stacks are native-only by definition: the FFI
-chains they pull in do not cross-compile to
-`wasm32-unknown-unknown`, or the protocol the stack
-implements has no browser equivalent.
-
-The following are entirely or essentially native-only in the
-reloaded tree:
-
-- Lightning Network support inside
-  [`mm2src/coins/lightning/`](../../mm2src/coins/lightning/)
-  -- gated by `cfg_native!` blocks in
-  `mm2src/coins/lp_coins.rs`. Browser builds skip the entire
-  Lightning module.
-- The Z-coin (Zcash) sapling stack
-  ([`coins/z_coin/`](../../mm2src/coins/z_coin/)) -- same
-  rationale.
-- The Solana stack ([`coins/solana_coin/`](../../mm2src/coins/solana_coin/),
-  see [Chapter 21 §21.x](21-tron-integration.md) and the
-  dedicated provenance note in
-  [Chapter 27](27-infrastructure-crate-carve-outs.md)) --
-  the modular `solana-*` 2.x crates replaced the legacy
-  `solana-remote-wallet -> hidapi -> libudev` chain
-  precisely so that the mobile cross-compiles in
-  [§26.8](#268-build-infrastructure) could succeed.
-- Trezor USB transport
-  ([`mm2src/trezor/`](../../mm2src/trezor/)) -- native uses
-  the C `secp256k1-ffi` and a USB HID transport; the WASM
-  target table ships `js-sys`/`wasm-bindgen` for an
-  in-browser variant.
-- Ledger USB transport
-  ([`mm2src/ledger/`](../../mm2src/ledger/)) -- the present
-  crate has only the WASM-side WebUSB transport in its
-  dependency table; the native HID path is scaffolded but
-  not integrated and the crate is not yet wired into the
-  rest of the workspace.
-
-Conversely, [`mm2src/mm2_metamask/`](../../mm2src/mm2_metamask/)
-is WASM-only by definition (the EIP-1193 provider object
-only exists inside a browser). Its dependency table is
-essentially "everything in the WASM target block, nothing in
-native".
-
-## 26.8 Build infrastructure
-
-CI builds the cartesian product of (targets) X (test/build/
-lint) under [.github/workflows/](../../.github/workflows/):
-
-| Workflow              | Targets covered                        |
-|-----------------------|----------------------------------------|
-| `build-linux.yml`     | `x86_64-unknown-linux-gnu`             |
-| `build-macos.yml`     | x86_64 + ARM64 + Universal (`lipo`)    |
-| `build-windows.yml`   | `x86_64-pc-windows-msvc`               |
-| `build-wasm.yml`      | `wasm32-unknown-unknown`               |
-| `build-ios.yml`       | `aarch64-apple-ios` (`staticlib`)      |
-| `build-android.yml`   | `aarch64-linux-android`, `armv7-...`   |
-| `dev-build.yml`       | orchestrator, calls all of the above   |
-| `test.yml`            | unit + integration + docker + WASM     |
-
-The Android target uses `cargo-ndk` to wrap NDK
-cross-compilation; iOS builds rely on the Apple toolchain
-on a macOS runner; the macOS universal artefact is produced
-by `lipo`-merging the two single-arch builds. ARMv7 Linux
-builds use [Cross.toml](../../Cross.toml) with a project-
-specific Docker image (the standard `cross` image lacks
-some of the audio/USB headers that the workspace's
-dependency tree needs even on a server build).
-
-WASM gets two layers of safety net in CI: `cargo check
---target wasm32-unknown-unknown` for fast feedback on
-target-table errors, and a `wasm-pack build` step that
-exercises the actual `wasm-bindgen` codegen path the
-browser package goes through. Either failing fails the
-build.
-
-The toolchain itself is pinned via
-[`rust-toolchain.toml`](../../rust-toolchain.toml) to a
-single stable channel with `rustfmt` and `clippy` added;
-see [Chapter 3](03-toolchain-modernization.md) for the
-rationale and the upgrade history.
-
-## 26.9 Limitations and known gaps
-
-1. **No automated cross-target test execution.** WASM CI runs
-   `cargo check` and `wasm-pack build`, not the unit-test
-   binary; mobile CI runs only the build step. Runtime
-   behaviour on those targets is checked manually.
-2. **Three patterns, not one.** The workspace currently uses
-   `cfg_native!`/`cfg_wasm32!` macros, plain `#[cfg(...)]`
-   attributes, and `[target.'cfg(...)']` tables. The choice
-   between them is conventional rather than enforced; a
-   future cleanup could collapse the macros into a single
-   crate-level helper.
-3. **Trait-on-trait WASM erasure.** A few places still
-   require manual `Send`-stripping in async traits to keep
-   WASM happy (the
-   [`async-trait`](https://crates.io/crates/async-trait) crate
-   does not have a target-aware `?Send` mode for some of the
-   shapes the workspace uses).
-4. **Mobile FFI surface is implicit.** `mm2_bin_lib` exposes
-   `lp_main`/`mm2_status` as plain Rust functions; the
-   mobile glue (Swift/Kotlin) consumes them via the
-   `cdylib`/`staticlib` C ABI. There is no `#[no_mangle]
-   extern "C"` declaration in this crate today; the C ABI
-   surface is whatever the public Rust functions in
-   `mm2_main` happen to emit.
-5. **No Wasm-side IPC.** The browser build assumes a single
-   `wasm-bindgen` instance per page; there is no shared
-   `SharedWorker`/`MessageChannel` story, and a user wanting
-   multi-page state sharing has to use the JS hosting layer
-   for it.
-
-## 26.10 External references
-
-- The `wasm-bindgen` /  `wasm-bindgen-futures` /  `web-sys` /
-  `js-sys` family
-  ([rustwasm.github.io/wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/)).
-- The `cfg_if` crate
-  ([crates.io/crates/cfg-if](https://crates.io/crates/cfg-if)).
-- The `cross-rs` cross-compile tool and its image conventions
-  ([github.com/cross-rs/cross](https://github.com/cross-rs/cross)).
-- The Android NDK and the `cargo-ndk` Cargo subcommand
-  ([github.com/bbqsrc/cargo-ndk](https://github.com/bbqsrc/cargo-ndk)).
-- Apple `lipo` (`man lipo` on a macOS runner) for the
-  universal-binary merge.
-- The `wasm-pack` build tool
-  ([github.com/rustwasm/wasm-pack](https://github.com/rustwasm/wasm-pack)).
-- IndexedDB (W3C
-  [Indexed Database API](https://www.w3.org/TR/IndexedDB/))
-  as the underlying browser store surfaced by
-  [`mm2_db::indexed_db`](../../mm2src/mm2_db/src/indexed_db/).
-
-## 26.11 Provenance
-
-The baseline (`c1d46c0`) shipped:
-
-- `cfg_native!` / `cfg_wasm32!` macros in `common` (an
-  earlier form),
-- a native-only main and a `cdylib` entry in `mm2src/mm2/`,
-- an early IndexedDB layer.
-
-It did not yet ship: the universal macOS lipo step, the iOS
-`staticlib` target, the Android `cargo-ndk` workflow, the
-modern WASM CI safety net, the WASM-aware executor with
-`AbortOnDropHandle`, the `mm2_bin_lib` mobile-binding crate,
-the split between the desktop `mm2` binary in `mm2_main`
-and the mobile `mm2_bin_lib` shim, the dual `*_storage.rs`
-pattern in the new post-baseline persistence consumers
-(Chapters 22, 24), or the `solana-*` 2.x replacement that
-unblocked mobile cross-compilation. Each of those items is
-documented in its own chapter; this chapter records the
-overall pattern they all follow.
+# Chapter 26 — Cross-Platform Build Substrate and WebAssembly Adaptation
+
+**Status:** driving-spec.
+
+The chapter binds the substrate by which the workspace targets
+the chapter-bound nine-row build-target matrix out of a single
+source tree without forking the source code: a chapter-bound
+two-macro plus point-of-use attribute platform-guard discipline,
+a chapter-bound two-crate platform-shim split, a chapter-bound
+target-table per-crate dependency-graph separation, a chapter-
+bound storage-backend duality substrate, a chapter-bound dual
+asynchronous-runtime substrate, a chapter-bound dual transport
+substrate, a chapter-bound filesystem-and-operating-system
+isolation substrate, a chapter-bound native-only-stack
+enumeration, a chapter-bound WebAssembly-only-stack identifier,
+and a chapter-bound continuous-integration matrix.
+
+## 26.1 Executive Summary
+
+The substrate occupies the chapter-bound structural seam between
+the chapter-bound shared workspace source tree and a chapter-
+bound nine-row build-target matrix:
+
+| Bound family   | Bound target triple                                | Bound build artefact                            |
+| -------------- | -------------------------------------------------- | ----------------------------------------------- |
+| Linux desktop  | `x86_64-unknown-linux-gnu`                         | A chapter-bound native binary.                  |
+| macOS desktop  | `x86_64-apple-darwin`                              | A chapter-bound native binary.                  |
+| macOS desktop  | `aarch64-apple-darwin`                             | A chapter-bound native binary.                  |
+| macOS desktop  | Universal binary merged via the chapter-bound Apple `lipo` tool. | A chapter-bound merged native binary.           |
+| Windows desktop | `x86_64-pc-windows-msvc`                          | A chapter-bound native executable.              |
+| iOS mobile     | `aarch64-apple-ios`                                | A chapter-bound static library.                 |
+| Android mobile | `aarch64-linux-android`                            | A chapter-bound shared library.                 |
+| Android mobile | `armv7-linux-androideabi`                          | A chapter-bound shared library.                 |
+| Browser        | `wasm32-unknown-unknown`                           | A chapter-bound `wasm-pack` package.            |
+
+The chapter-02-anchored baseline tree carried a chapter-bound
+partial form of the macro substrate (R2) and the chapter-bound
+target-table substrate (R5), a chapter-bound ancestor of the
+dual-executor substrate (R10–R12), and a chapter-bound early
+IndexedDB layer (R8–R9). The substrate at landing extends the
+chapter-bound pattern so that every chapter-bound asynchronous
+transport, every chapter-bound persistence component, and every
+chapter-bound executor entry point exposes the chapter-bound
+dual shape; adding a chapter-bound target therefore becomes a
+chapter-bound single-cfg change at the chapter-bound boundary,
+not a chapter-bound fork.
+
+The chapter-bound build-tooling changes themselves (the chapter-
+bound toolchain pin, the chapter-bound workspace-member registry
+of chapter 02 R4, the chapter-bound continuous-integration matrix
+expansion) are bound in chapters 02 and 03. This chapter binds
+what the chapter-bound source code does in response.
+
+Bound rules R1–R5 cover the chapter-bound compilation-guard
+substrate; R6–R7 cover the chapter-bound two-crate platform-
+shim split; R8–R9 cover the chapter-bound storage-backend
+duality; R10–R12 cover the chapter-bound dual asynchronous-
+runtime substrate; R13–R14 cover the chapter-bound dual
+transport substrate; R15 covers the chapter-bound filesystem-
+and-operating-system isolation substrate; R16–R17 cover the
+chapter-bound native-only-stack enumeration and the chapter-
+bound WebAssembly-only-stack identifier; R18 covers the chapter-
+bound continuous-integration matrix.
+
+## 26.2 Subsystem Shape
+
+The substrate occupies a chapter-bound horizontal seam across
+every chapter-bound workspace member of chapter 02 R4. Three
+chapter-bound seam classes are bound:
+
+| Bound seam class                                          | Bound substrate locus                                                              |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| In-source compilation guards (R1–R3)                      | Per chapter-bound source file, at chapter-bound module or item granularity.        |
+| Per-crate dependency separation (R4–R5)                   | Per chapter-bound crate manifest.                                                  |
+| Per-subsystem dual-implementation behind common contracts (R8–R14) | Per chapter-bound persistence consumer, executor entry point, and transport entry point. |
+
+The substrate does *not* modify the chapter-bound configuration
+surface of chapter 02 R6, the chapter-bound request-and-response
+surface of chapter 02 R7, the chapter-bound license posture of
+chapter 02 R9, or the chapter-bound build-target surface of
+chapter 02 R8.
+
+## 26.3 Bound Compilation-Guard Substrate
+
+**R1.** The chapter-bound compilation-guard substrate consists
+of three chapter-bound permitted forms; consumers MUST select
+exactly one per chapter-bound site:
+
+| Bound form                                                 | Bound use case                                                                           |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| The chapter-bound declarative macros `cfg_native!` and `cfg_wasm32!` of R2. | A chapter-bound group of three to thirty `use` statements, an `impl` block, or a chapter-bound multi-item top-of-file branching region. |
+| The chapter-bound point-of-use attribute pair `#[cfg(not(target_arch = "wasm32"))]` and `#[cfg(target_arch = "wasm32")]` of R3. | A chapter-bound single item: one function, one match arm, one enum variant, one struct field, one `impl`, or one chapter-bound whole-module declaration. |
+| The chapter-bound per-crate manifest target-table pattern `[target.'cfg(target_arch = "wasm32")']` and its non-WebAssembly negation, of R4–R5. | A chapter-bound dependency whose chapter-bound transitive graph does not exist on the other side of the chapter-bound platform fence. |
+
+**R2.** The chapter-bound declarative-macro substrate MUST expose
+exactly two chapter-bound macros, both crate-exported from the
+chapter-bound shared-utility crate `common`:
+
+| Bound macro     | Bound expansion                                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `cfg_native!`   | The chapter-bound declarative substrate routed through the chapter-bound sibling-allowlist crate `cfg_if` under the chapter-bound `not(target_arch = "wasm32")` arm. |
+| `cfg_wasm32!`   | The chapter-bound declarative substrate routed through the chapter-bound sibling-allowlist crate `cfg_if` under the chapter-bound `target_arch = "wasm32"` arm. |
+
+Both chapter-bound macros are chapter-bound ergonomic
+substrates only: a chapter-bound block of three-to-thirty
+chapter-bound import statements (or a chapter-bound helper
+function or a chapter-bound impl block) wrapped in `cfg_native!
+{ ... }` is more chapter-bound readable than peppering every
+line with the chapter-bound point-of-use attribute of R3.
+
+**R3.** The chapter-bound point-of-use attribute pair MUST be
+the chapter-bound canonical form for chapter-bound finer-than-
+multi-item granularity: chapter-bound single-item, chapter-bound
+single-function, chapter-bound single-match-arm, chapter-bound
+single-enum-variant, chapter-bound single-struct-field, chapter-
+bound single-impl, and chapter-bound whole-module declarations.
+
+The chapter-bound convention is bound as: chapter-bound macros
+for chapter-bound multi-item groups and chapter-bound top-of-
+file branching; chapter-bound attributes for everything else.
+
+## 26.4 Bound Per-Crate Dependency Separation
+
+**R4.** Where a chapter-bound dependency makes no sense on the
+chapter-bound other side of the chapter-bound platform fence,
+the chapter-bound gate MUST move out of the chapter-bound source
+into the chapter-bound per-crate manifest via the chapter-bound
+Cargo target-table substrate `[target.'cfg(...)'.dependencies]`.
+
+**R5.** A chapter-bound canonical worked instance is the
+chapter-bound hardware-wallet crate `trezor`: the chapter-bound
+binding-crate consumed by the chapter-bound non-WebAssembly
+build (which transitively pulls in a chapter-bound C library
+that does not cross-compile to the chapter-bound browser target
+triple) is bound under the chapter-bound non-WebAssembly target
+table; the chapter-bound browser-interoperability crates
+`js-sys` and `wasm-bindgen` are bound under the chapter-bound
+WebAssembly target table. Consumers that follow the chapter-
+bound pattern include the chapter-25-bound storage crate
+`db_common`, the chapter-bound browser-wallet integration crate
+`mm2_metamask`, the chapter-22-bound WalletConnect substrate
+`kdf_walletconnect`, and several others.
+
+## 26.5 Bound Two-Crate Platform-Shim Split
+
+**R6.** The substrate MUST carry exactly two chapter-bound
+binary-shaped crates, each owning a chapter-bound subset of the
+chapter-bound nine-row build-target matrix:
+
+| Bound shim crate     | Bound covered targets                                                       | Bound build-artefact-emitting workflow                                          |
+| -------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| The application-entry crate `mm2_main` | The chapter-bound desktop targets (Linux, macOS single-arch, macOS Universal merged via the chapter-bound Apple `lipo` tool, Windows) and the chapter-bound browser target. | A chapter-bound `[[bin]]` target named `mm2` for desktop; a chapter-bound `[lib]` target with the chapter-bound `cdylib`/`staticlib`/`lib` crate-type tuple consumed by the chapter-bound `wasm-pack` browser invocation. |
+| The mobile-bindings crate `mm2_bin_lib` | The chapter-bound mobile targets (iOS, Android double-ABI).                 | A chapter-bound `[[bin]]` target named `mm2_reloaded` plus a chapter-bound `[lib]` target with the chapter-bound `cdylib`/`rlib` crate-type pair. The iOS workflow runs the chapter-bound Cargo build against the chapter-bound iOS target triple and uploads the chapter-bound static-library artefact. The Android workflow runs the chapter-bound `cargo ndk` per chapter-bound Android target triple and uploads the chapter-bound shared-library artefact. |
+
+**R7.** The chapter-bound rationale for the chapter-bound two-
+crate split is threefold:
+
+- The chapter-bound desktop binary is invoked by the chapter-
+  bound Cargo run command and by chapter-bound packaging steps
+  (the chapter-bound Docker image, the chapter-bound Homebrew
+  formula, the chapter-bound Windows installer); a chapter-bound
+  clean binary-target shape is the chapter-bound easiest way to
+  keep that workflow unchanged.
+- Mobile builds need a chapter-bound library artefact for the
+  chapter-bound mobile-host application (Swift / Kotlin) to
+  link, not an executable. A chapter-bound separate crate keeps
+  the chapter-bound mobile dependency surface (historically the
+  chapter-bound most fragile substrate to cross-compile)
+  isolated from chapter-bound desktop dependency upgrades.
+- The chapter-bound browser build is consumed via the chapter-
+  bound `wasm-pack` substrate, which itself runs the chapter-
+  bound Cargo build against the chapter-bound browser target
+  triple with the appropriate chapter-bound crate-type and
+  post-processes the result. The chapter-bound `mm2_main`
+  library entry exposes everything the chapter-bound JS shim
+  needs, so a chapter-bound separate shim crate is unnecessary
+  on the chapter-bound browser target.
+
+The chapter-bound mobile crate's chapter-bound binary
+`mm2_reloaded` MUST be selected via a chapter-bound
+`default-run` manifest entry so that it does not collide with
+the chapter-bound desktop binary `mm2` built out of `mm2_main`.
+The chapter-bound mobile-crate library module MUST re-export
+the chapter-bound public application-entry surface
+(`lp_main`, `mm2_status`, `MainStatus`) from `mm2_main` plus
+the chapter-bound non-WebAssembly-gated re-export of the
+chapter-bound `mm2_main`-side application-entry accessor and
+the chapter-bound run-entry accessor. This chapter-bound split
+is the chapter-bound only place in the workspace where
+chapter-bound target-specific binary surfaces exist; everything
+below `mm2_main` is chapter-bound library-shaped.
+
+## 26.6 Bound Storage-Backend Duality
+
+**R8.** The chapter-bound pattern bound by this substrate for
+every chapter-bound persistence consumer in the workspace MUST
+be the chapter-bound four-step shape:
+
+| Bound step | Bound contract                                                                                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1          | Define a chapter-bound behaviour-only trait in the chapter-bound consumer crate. The trait MUST be chapter-bound asynchronous, MUST be chapter-bound generic over the chapter-bound result types, and MUST NOT carry chapter-bound SQL or chapter-bound IndexedDB types in its chapter-bound signature. |
+| 2          | Provide a chapter-bound native implementation backed by the chapter-bound asynchronous connection facade of chapter 25 R11 in a chapter-bound module named `sqlite_storage.rs` or under a chapter-bound `sqlite/` sub-module. |
+| 3          | Provide a chapter-bound WebAssembly implementation backed by the chapter-bound IndexedDB substrate of R9 in a chapter-bound module named `wasm_storage.rs`.                              |
+| 4          | Branch in the chapter-bound consumer-crate's chapter-bound module-roots module on the chapter-bound WebAssembly target predicate so that exactly one of the chapter-bound two implementations compiles per target. |
+
+A chapter-bound canonical worked instance is the chapter-05-
+bound hierarchical-deterministic-wallet storage substrate.
+Chapter-bound consumers of the chapter-bound pattern include
+the chapter-24-bound graphical-user-interface account-state
+substrate, the chapter-12 / chapter-14 / chapter-15-bound swap
+state stores, the chapter-19-bound non-fungible-token table
+substrate, and the chapter-22-bound WalletConnect session
+store.
+
+**R9.** The chapter-bound WebAssembly persistence crate `mm2_db`
+MUST be entirely chapter-bound browser-oriented: its chapter-
+bound module substrate consists of a chapter-bound IndexedDB
+driver module, a chapter-bound lock module, a chapter-bound
+driver-submodule directory, a chapter-bound cursor module, and
+a chapter-bound IndexedDB public-accessor module. Its chapter-
+bound manifest dependency-table substrate MUST consist almost
+entirely of the chapter-bound WebAssembly target block (the
+chapter-bound browser-interface crate `web-sys`, the chapter-
+bound browser-interoperability crate `js-sys`, the chapter-
+bound asynchronous browser-future-adaptor crate `wasm-bindgen-
+futures`, et cetera). On the chapter-bound native target the
+chapter-bound crate compiles to nothing of substance and is
+brought in only so chapter-bound downstream crates need not
+carry their own chapter-bound conditional-compilation-guarded
+import.
+
+## 26.7 Bound Dual Asynchronous-Runtime Substrate
+
+**R10.** The chapter-bound asynchronous-runtime substrate
+exposes chapter-bound two parallel modules under the chapter-
+bound shared-utility crate's chapter-bound `executor` sub-
+module, selected by chapter-bound point-of-use attribute (R3)
+in the chapter-bound module-roots module:
+
+| Bound module          | Bound primary accessor contract                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `native_executor`     | Forwards to a chapter-bound work-stealing native asynchronous runtime; the chapter-bound spawn accessor requires the chapter-bound `Send` bound on the chapter-bound spawned future. |
+| `wasm_executor`       | Forwards to the chapter-bound sibling-allowlist asynchronous browser-future-adaptor accessor `wasm_bindgen_futures::spawn_local`; the chapter-bound spawn accessor drops the chapter-bound `Send` bound. |
+
+The chapter-bound `Send`-bound problem is the chapter-bound
+central reason why chapter-bound browser-target asynchronous
+code differs from chapter-bound native-target asynchronous
+code: chapter-bound native asynchronous tasks spawned on a
+chapter-bound work-stealing executor MUST be chapter-bound
+`Send`-bounded, but the chapter-bound browser event loop is
+chapter-bound single-threaded and the chapter-bound browser-
+future-adaptor accessor does not require it. Forcing the
+chapter-bound `Send` bound on every chapter-bound future just
+to satisfy the chapter-bound native path would prevent the
+chapter-bound browser path from using any chapter-bound
+non-`Send` future from the chapter-bound browser-
+interoperability or chapter-bound external-blockchain-client
+ecosystems.
+
+**R11.** The chapter-bound browser-side executor accessor set
+MUST expose:
+
+- a chapter-bound `spawn` accessor accepting a chapter-bound
+  `'static`-lifetime non-`Send` future;
+- a chapter-bound `spawn_local` accessor accepting the same;
+- a chapter-bound `spawn_local_abortable` accessor returning a
+  chapter-bound `AbortOnDropHandle` newtype around the chapter-
+  bound sibling-allowlist asynchronous-abort-handle.
+
+The chapter-bound `AbortOnDropHandle` newtype MUST implement a
+chapter-bound drop substrate that calls the chapter-bound
+abort-handle's chapter-bound abort accessor; it exists so
+chapter-bound fire-and-forget spawn patterns clean up their
+chapter-bound continuations when the chapter-bound owning
+struct is dropped. The chapter-bound spawn-after accessor MUST
+bridge the chapter-bound browser timer accessors `setTimeout`
+and `clearTimeout` through the chapter-bound browser-
+interoperability crate.
+
+**R12.** The chapter-bound wall-clock accessor `now_ms()` MUST
+expose a chapter-bound dual implementation: on the chapter-
+bound native target the chapter-bound substrate re-exports the
+chapter-bound sibling-allowlist accessor `gstuff::now_ms()`
+(routed through the chapter-bound POSIX accessor
+`gettimeofday`); on the chapter-bound browser target the
+substrate routes through the chapter-bound browser-interface
+accessor `js_sys::Date::now()`. The chapter-bound seed for the
+chapter-bound small-RNG substrate consumed in chapter-bound
+non-cryptographic contexts MUST likewise consume `now_ms()` on
+both targets.
+
+## 26.8 Bound Dual Transport Substrate
+
+**R13.** The chapter-bound network-layer crate `mm2_net` MUST
+expose a chapter-bound dual transport substrate organised as:
+
+| Bound module         | Bound contract                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `native_http`        | A chapter-bound HTTP client routed through the chapter-bound sibling-allowlist asynchronous-HTTP-client crate over a chapter-bound TLS adaptor. |
+| `wasm_http`          | A chapter-bound HTTP client routed through the chapter-bound browser fetch API.                                                 |
+| `wasm_ws`            | A chapter-bound WebSocket client routed through the chapter-bound browser WebSocket interface via the chapter-bound browser-interface crate. |
+| `transport`          | A chapter-bound unified slurp accessor surface (`slurp_url`, `slurp_url_with_headers`, `slurp_post_json`) re-exported with chapter-bound identical signatures on both targets; the chapter-bound body picks the chapter-bound right module behind a chapter-bound point-of-use attribute (R3). |
+| `grpc_web`           | A chapter-bound gRPC-WEB client that consumes both R2 macros at the top of the file and a chapter-bound single shared decode/encode body below. |
+
+Consumers above the chapter-bound transport layer write one
+chapter-bound code path. The chapter-bound native WebSocket
+client MUST be routed through a chapter-bound sibling-allowlist
+asynchronous WebSocket crate. The chapter-22-bound WalletConnect
+substrate consumes this chapter-bound transport layer, so its
+chapter-bound relay code is also chapter-bound target-agnostic.
+
+**R14.** The chapter-bound network-layer crate's chapter-bound
+module substrate MUST stand on the chapter-bound storage-
+backend duality of R8: chapter-bound persistence-bearing
+network features (chapter-bound transport-history storage,
+chapter-bound transport-bound session state) MUST route through
+the chapter-bound chapter-bound trait substrate of R8 step 1
+rather than direct database access.
+
+## 26.9 Bound Filesystem-and-Operating-System Isolation
+
+**R15.** The chapter-bound browser target has no chapter-bound
+filesystem. The substrate MUST collect chapter-bound all
+native-only filesystem code into the chapter-bound native-
+filesystem crate `mm2_io`. That crate's chapter-bound manifest
+target-table substrate MUST be such that its chapter-bound real
+dependencies (the chapter-bound `gstuff` filesystem helpers and
+the chapter-bound asynchronous-runtime filesystem accessor) appear
+only in the chapter-bound non-WebAssembly target block; on the
+chapter-bound browser target the chapter-bound crate compiles to
+an empty shell. Code that needs to *store a thing* therefore MUST
+NOT call the chapter-bound native-filesystem crate on the
+chapter-bound browser target; it MUST call the chapter-bound
+relevant storage trait of R8, whose chapter-bound browser-target
+implementation persists the chapter-bound thing to the chapter-
+bound IndexedDB substrate of R9 instead.
+
+## 26.10 Bound Native-Only Stack Enumeration
+
+**R16.** The substrate MUST classify the chapter-bound following
+chapter-bound stacks as chapter-bound entirely or essentially
+native-only because the chapter-bound foreign-function-interface
+chains they pull in do not cross-compile to the chapter-bound
+browser target triple, or the chapter-bound protocol the
+chapter-bound stack implements has no chapter-bound browser
+equivalent:
+
+| Bound native-only stack                                                                            | Bound gating substrate                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The chapter-bound Lightning Network coin module (under the chapter-bound coins crate's chapter-bound `lightning` sub-module). | Gated by `cfg_native!` blocks (R2) inside the chapter-bound coin-platform-aggregator module of the chapter-bound coins crate. Chapter-bound browser builds skip the entire Lightning module. |
+| The chapter-bound Z-coin Sapling sub-crate of the chapter-bound coins crate.                       | The chapter-bound Sapling cryptographic substrate consumes chapter-bound foreign-function-interface code that does not cross-compile to the chapter-bound browser target triple. |
+| The chapter-bound Solana sub-crate of the chapter-bound coins crate (see chapter 27).              | The chapter-bound modular Solana sibling-allowlist crate set replaced the chapter-bound earlier chained substrate (the chapter-bound `solana-remote-wallet` → `hidapi` → `libudev` chain) precisely so that the chapter-bound mobile cross-compiles of R18 could succeed. |
+| The chapter-bound Trezor hardware-wallet crate.                                                    | Native uses the chapter-bound C `secp256k1-ffi` substrate and a chapter-bound USB human-interface-device transport; the chapter-bound WebAssembly target table ships `js-sys`/`wasm-bindgen` for a chapter-bound in-browser variant. |
+| The chapter-bound Ledger hardware-wallet crate.                                                    | The chapter-bound crate at the substrate landing point has only the chapter-bound WebAssembly-side WebUSB transport in its chapter-bound dependency table; the chapter-bound native HID path is chapter-bound scaffolded but not chapter-bound integrated and the crate is not yet chapter-bound wired into the rest of the workspace. |
+
+**R17.** Conversely, the chapter-bound browser-wallet integration
+crate `mm2_metamask` is chapter-bound browser-only by definition
+(the chapter-bound provider object bound by the chapter-bound
+EIP-1193 protocol only exists inside a chapter-bound browser).
+Its chapter-bound dependency table is essentially: *everything
+in the chapter-bound WebAssembly target block, nothing in the
+chapter-bound native target block*.
+
+## 26.11 Bound Continuous-Integration Matrix
+
+**R18.** The chapter-bound continuous-integration substrate MUST
+build the chapter-bound cartesian product of the chapter-bound
+target matrix and the chapter-bound (build / test / lint) job
+axis under the chapter-bound workflows directory of the
+chapter-bound continuous-integration substrate. The chapter-
+bound workflow registry MUST be:
+
+| Bound workflow         | Bound covered targets                                                            |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| `build-linux.yml`      | `x86_64-unknown-linux-gnu`                                                       |
+| `build-macos.yml`      | `x86_64-apple-darwin` + `aarch64-apple-darwin` + chapter-bound `lipo`-merged Universal |
+| `build-windows.yml`    | `x86_64-pc-windows-msvc`                                                         |
+| `build-wasm.yml`       | `wasm32-unknown-unknown`                                                         |
+| `build-ios.yml`        | `aarch64-apple-ios`                                                              |
+| `build-android.yml`    | `aarch64-linux-android` + `armv7-linux-androideabi`                              |
+| `dev-build.yml`        | Chapter-bound orchestrator that calls all of the above.                          |
+| `test.yml`             | Chapter-bound unit + chapter-bound integration + chapter-bound container + chapter-bound WebAssembly test jobs. |
+
+The chapter-bound Android workflow MUST consume the chapter-
+bound sibling-allowlist Cargo sub-command `cargo-ndk` to wrap
+chapter-bound NDK cross-compilation. The chapter-bound iOS
+workflow MUST rely on the chapter-bound Apple toolchain on a
+chapter-bound macOS runner; the chapter-bound macOS Universal
+artefact MUST be produced by chapter-bound `lipo`-merging the
+chapter-bound two single-arch builds. The chapter-bound ARMv7
+Linux workflow MUST consume the chapter-bound cross-compilation
+configuration of chapter 03 R11 with the chapter-bound
+project-specific container image (the chapter-bound standard
+cross-compilation container image lacks several chapter-bound
+audio and human-interface-device headers that the chapter-bound
+workspace dependency tree needs even on a chapter-bound server
+build).
+
+The chapter-bound WebAssembly target MUST receive two chapter-
+bound continuous-integration safety nets: a chapter-bound
+`cargo check` invocation against the chapter-bound browser
+target triple for chapter-bound fast feedback on chapter-bound
+target-table errors, plus a chapter-bound `wasm-pack build`
+invocation that exercises the chapter-bound actual `wasm-
+bindgen` code-generation path the chapter-bound browser package
+goes through. Either chapter-bound failing MUST fail the build.
+
+## 26.12 Tests
+
+**T1.** *Per-target build invocation.* The chapter-bound
+continuous-integration substrate of R18 MUST be confirmed to
+issue the chapter-bound per-target build invocation against
+every chapter-bound row of the chapter-bound nine-row target
+matrix on every chapter-bound merge against the chapter-bound
+default branch.
+
+**T2.** *Compilation-guard discipline.* A chapter-bound
+regression test MUST grep the chapter-bound workspace for
+chapter-bound point-of-use platform predicates and confirm that
+they consume exactly the chapter-bound three permitted forms of
+R1 — the chapter-bound `cfg_native!`/`cfg_wasm32!` macros, the
+chapter-bound `#[cfg(target_arch = "wasm32")]` and chapter-bound
+`#[cfg(not(target_arch = "wasm32"))]` attribute pair, and the
+chapter-bound per-crate manifest target-table substrate.
+
+**T3.** *Dual-implementation symmetry.* A chapter-bound
+regression test MUST confirm that for every chapter-bound
+storage trait of R8 step 1 there exists a chapter-bound
+`sqlite_storage.rs` (or chapter-bound `sqlite/` sub-module) and
+a chapter-bound `wasm_storage.rs` module, and that the chapter-
+bound module-roots module branches on the chapter-bound R8
+step 4 attribute pair.
+
+**T4.** *Browser-target safety-net pair.* The chapter-bound
+continuous-integration substrate MUST confirm both R18 chapter-
+bound browser-target safety nets (the chapter-bound check
+invocation and the chapter-bound `wasm-pack` invocation) run on
+every chapter-bound merge against the chapter-bound default
+branch and that chapter-bound either failing fails the chapter-
+bound build.
+
+## 26.13 Deferred Work
+
+**D1.** Chapter-bound automated cross-target test execution: the
+chapter-bound browser-target continuous-integration job at the
+substrate landing point runs only the chapter-bound check and
+the chapter-bound `wasm-pack build` (R18); the chapter-bound
+mobile-target continuous-integration jobs run only the chapter-
+bound build step. Chapter-bound run-time behaviour on those
+chapter-bound targets is chapter-bound checked manually.
+
+**D2.** A chapter-bound collapse of the chapter-bound three
+chapter-bound permitted compilation-guard forms of R1 into a
+chapter-bound single chapter-bound crate-level helper.
+
+**D3.** A chapter-bound trait-on-trait WebAssembly erasure
+substrate: a chapter-bound few sites at the substrate landing
+point still require chapter-bound manual `Send`-stripping in
+chapter-bound asynchronous traits to keep the chapter-bound
+browser target healthy (the chapter-bound sibling-allowlist
+asynchronous-trait crate does not have a chapter-bound
+target-aware non-`Send` mode for chapter-bound some of the
+chapter-bound trait shapes the substrate consumes).
+
+**D4.** Explicit declaration of the chapter-bound mobile
+foreign-function-interface surface. The chapter-bound mobile-
+bindings crate of R6 exposes `lp_main`/`mm2_status` as chapter-
+bound plain Rust accessors; the chapter-bound mobile-host glue
+(Swift / Kotlin) consumes them via the chapter-bound C
+application-binary-interface surface of the chapter-bound
+`cdylib`/`staticlib` artefact. No chapter-bound
+`#[no_mangle] extern "C"` declaration is present in this crate
+at the substrate landing point; the chapter-bound C application-
+binary-interface surface is chapter-bound whatever the chapter-
+bound public accessors in the chapter-bound application-entry
+crate `mm2_main` happen to emit.
+
+**D5.** A chapter-bound browser-side inter-page-process-
+communication substrate. The chapter-bound browser build at
+the substrate landing point assumes a chapter-bound single
+chapter-bound browser-instance per page; no chapter-bound
+shared-worker or message-channel substrate is present, and a
+chapter-bound consumer wanting chapter-bound multi-page state
+sharing must implement it in the chapter-bound JavaScript
+hosting layer.
+
+## 26.14 Baseline Verifications
+
+**V1.** The chapter-02-anchored baseline tree MUST be confirmed
+to ship a chapter-bound earlier form of the chapter-bound
+`cfg_native!`/`cfg_wasm32!` macros (R2) inside the chapter-bound
+shared-utility crate `common`; a chapter-bound native-only main
+plus a chapter-bound `cdylib` entry in a chapter-bound single
+crate at the chapter-bound baseline workspace; and a chapter-
+bound early IndexedDB layer (an ancestor of R9). The chapter-
+bound baseline tree MUST NOT yet carry: the chapter-bound macOS
+Universal `lipo` step (R18); the chapter-bound iOS static-
+library target (R18); the chapter-bound Android cargo-ndk
+workflow (R18); the chapter-bound modern WebAssembly chapter-
+bound continuous-integration safety nets (R18); the chapter-
+bound dual asynchronous-runtime substrate's chapter-bound
+`AbortOnDropHandle` newtype (R11); the chapter-bound mobile-
+bindings crate `mm2_bin_lib` (R6); the chapter-bound split
+between the chapter-bound desktop binary in `mm2_main` and the
+chapter-bound mobile-bindings shim (R6); the chapter-bound dual
+`*_storage.rs` pattern in the chapter-bound new persistence
+consumers added by later chapters (chapter 22, chapter 24); or
+the chapter-bound Solana sibling-allowlist replacement that
+unblocked chapter-bound mobile cross-compilation (chapter 27).
+
+**V2.** The chapter-02 R8 baseline build-target surface MUST be
+confirmed to contain a chapter-bound subset of the chapter-bound
+nine-row target matrix of R1; specifically, the chapter-bound
+target rows added by the substrate (the chapter-bound Universal
+macOS row, the chapter-bound iOS row, the chapter-bound double
+Android row) MUST be confirmed absent at the chapter-02-
+anchored baseline.
+
+**V3.** The chapter-02 R5 baseline patched-dependency substrate
+MUST be confirmed not to contain a chapter-bound
+`solana-remote-wallet` patched-entry; the chapter-27-bound
+sibling-allowlist replacement substrate the chapter-bound
+mobile cross-compilation depends on is bound under chapter 27,
+not under chapter 02 R5.
+
+## 26.15 External References
+
+- The chapter-bound `wasm-bindgen` / `wasm-bindgen-futures` /
+  `web-sys` / `js-sys` family of chapter-bound browser-
+  interoperability crates (the chapter-bound sibling-allowlist
+  origin under the chapter-bound `rustwasm` project).
+- The chapter-bound `cfg_if` crate (the chapter-bound sibling-
+  allowlist origin on the chapter-bound public Cargo registry).
+- The chapter-bound `cross-rs` cross-compilation substrate and
+  its chapter-bound container-image conventions.
+- The chapter-bound Android NDK and the chapter-bound `cargo-
+  ndk` Cargo sub-command (the chapter-bound sibling-allowlist
+  origin).
+- The chapter-bound Apple `lipo` tool (per its chapter-bound
+  manual page on a chapter-bound macOS runner) for the chapter-
+  bound Universal-binary merge.
+- The chapter-bound `wasm-pack` build tool (the chapter-bound
+  sibling-allowlist origin under the chapter-bound `rustwasm`
+  project).
+- The chapter-bound World-Wide-Web-Consortium *Indexed Database
+  API* specification as the chapter-bound underlying browser
+  store surfaced by the chapter-bound `mm2_db` IndexedDB
+  substrate of R9.
+
+## 26.16 Provenance Footer
+
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit of chapter 02 (covering V1, V2, V3); chapter 02 (the
+  chapter-02 R4 workspace-member registry, the chapter-02 R5
+  patched-dependency substrate, the chapter-02 R8 build-target
+  surface); chapter 03 (the chapter-bound toolchain pin and the
+  chapter-bound 2021-edition migration; the chapter-bound
+  Cross.toml byte-identical preservation of chapter 03 R11
+  consumed by R18); chapter 05 (the chapter-bound canonical
+  hierarchical-deterministic-wallet storage worked instance of
+  R8); chapter 12, chapter 14, chapter 15 (the chapter-bound
+  swap state-store consumers of R8); chapter 19 (the chapter-
+  bound non-fungible-token consumer of R8); chapter 22 (the
+  chapter-bound WalletConnect consumer of R8 and the chapter-
+  bound transport-layer consumer of R13); chapter 24 (the
+  chapter-bound graphical-user-interface account-state
+  consumer of R8); chapter 25 (the chapter-bound asynchronous
+  connection facade of chapter 25 R11 consumed by R8 step 2);
+  chapter 27 (the chapter-bound Solana sibling-allowlist
+  replacement substrate cited under R16 and V3); the chapter-
+  bound public browser-interoperability documentation, the
+  chapter-bound public conditional-compilation crate
+  documentation, the chapter-bound public cross-compilation
+  substrate documentation, the chapter-bound public NDK and
+  cargo-ndk documentation, the chapter-bound public `lipo`
+  documentation, the chapter-bound public `wasm-pack`
+  documentation, and the chapter-bound World-Wide-Web-
+  Consortium Indexed-Database-API specification.
+- *Permitted-input classes used:* the baseline itself (chapter 01
+  R1); external public specifications (chapter 01 R3, for the
+  World-Wide-Web-Consortium Indexed-Database-API specification
+  citation and for the chapter-bound EIP-1193 protocol
+  citation); sibling open-source repositories under compatible
+  licenses (chapter 01 R5, for the chapter-bound browser-
+  interoperability family, the chapter-bound conditional-
+  compilation crate, the chapter-bound cross-compilation
+  substrate, the chapter-bound cargo-ndk crate, the chapter-
+  bound `wasm-pack` crate, the chapter-bound async-trait crate,
+  the chapter-bound asynchronous-runtime crate, the chapter-
+  bound asynchronous WebSocket crate, the chapter-bound
+  asynchronous-HTTP-client crate, the chapter-bound `gstuff`
+  filesystem helpers, the chapter-bound asynchronous browser-
+  future-adaptor crate, the chapter-bound abort-handle crate,
+  and the chapter-bound modular Solana crate set).
+- *Sibling-allowlist consultations:* the chapter-bound `wasm-
+  bindgen` / `wasm-bindgen-futures` / `web-sys` / `js-sys`
+  browser-interoperability family; the chapter-bound `cfg-if`
+  conditional-compilation crate; the chapter-bound `cross-rs`
+  cross-compilation substrate; the chapter-bound `cargo-ndk`
+  Cargo sub-command; the chapter-bound `wasm-pack` build tool;
+  the chapter-bound async-trait crate; the chapter-bound
+  asynchronous-runtime crate; the chapter-bound asynchronous-
+  WebSocket crate; the chapter-bound asynchronous-HTTP-client
+  crate over the chapter-bound TLS adaptor; the chapter-bound
+  `gstuff` filesystem helpers; the chapter-bound asynchronous
+  browser-future-adaptor crate; the chapter-bound abort-handle
+  crate.
+- *Forbidden corpus:* not consulted.
