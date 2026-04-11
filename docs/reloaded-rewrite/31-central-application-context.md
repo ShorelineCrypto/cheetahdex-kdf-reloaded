@@ -8,10 +8,11 @@ workspace process with a chapter-bound single shared central
 context: the chapter-bound reference-counted handle `MmArc`, the
 chapter-bound owned-state record `MmCtx`, the chapter-bound
 once-set lazy-initialisation field substrate, the chapter-bound
-asynchronous-mutex-guarded field substrate, the chapter-bound
-construction-and-lifecycle discipline (builder, registration,
-ready-signal, stop-signal), and the chapter-bound consumer-
-routing pattern by which every other workspace crate fetches its
+sub-context slot substrate populated through a chapter-bound
+`from_ctx` helper, the chapter-bound construction-and-lifecycle
+discipline (builder, registration, stop-signal, observable
+startup-progress flags), and the chapter-bound consumer-routing
+pattern by which every other workspace crate fetches its
 chapter-bound shared substrate handles.
 
 ## 31.1 Executive Summary
@@ -48,11 +49,12 @@ global state.
 Bound rules R1–R3 cover the chapter-bound owned-state record and
 its handle pair; R4–R6 cover the chapter-bound once-set lazy-
 initialisation field substrate; R7–R9 cover the chapter-bound
-asynchronous-mutex-guarded field substrate; R10–R13 cover the
-chapter-bound construction-and-lifecycle discipline; R14–R16
-cover the chapter-bound consumer-routing pattern; R17 covers the
-chapter-bound platform-gate discipline on chapter-bound platform-
-specific fields.
+sub-context slot substrate, the chapter-bound `from_ctx`
+constructor helper, and the chapter-bound asynchronous SQLite
+slot; R10–R13 cover the chapter-bound construction-and-
+lifecycle discipline; R14–R16 cover the chapter-bound consumer-
+routing pattern; R17 covers the chapter-bound platform-gate
+discipline on chapter-bound platform-specific fields.
 
 ## 31.2 Subsystem Shape
 
@@ -113,69 +115,130 @@ chapter-bound once-set lazy-initialisation substrate
 
 | Bound substrate accessor                    | Bound contract                                                                                                                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `Constructible<T>::pin(value)`              | Set the chapter-bound field exactly once; chapter-bound subsequent calls return a chapter-bound double-initialisation error.    |
-| `Constructible<T>::get_or_initialize(closure)` | Set-if-unset substrate; chapter-bound idempotent under chapter-bound concurrent callers.                                     |
-| `Constructible<T>::or_err(closure)`         | Read-only accessor returning the chapter-bound stored value or the chapter-bound closure's error if unset.                      |
-| `Constructible<T>::or_else(closure)`        | Read-only accessor returning the chapter-bound stored value or the chapter-bound closure's fallback if unset.                   |
+| `Constructible::<T>::default()`             | Allocate a chapter-bound uninitialised cell at the chapter-bound owned-state record construction site.                          |
+| `Constructible::<T>::pin(value)`            | Set the chapter-bound field; chapter-bound subsequent calls return a chapter-bound double-initialisation error.                 |
+| `Constructible::<T>::as_option()`           | Read-only accessor returning `Option<&T>`; chapter-bound `None` if unset.                                                       |
+| `Constructible::<T>::or(&closure)`          | Read-only accessor returning the chapter-bound stored value or the chapter-bound closure's reference fallback if unset.         |
+| `Constructible::<T>::ok_or(error)`          | Read-only accessor returning the chapter-bound stored value or the chapter-bound supplied error if unset.                       |
+| `Constructible::<T>::copy_or(default)`      | Read-only accessor on chapter-bound `Copy` payloads returning the chapter-bound stored value or the chapter-bound supplied default if unset. |
 
 **R5.** The chapter-bound once-set lazy-initialisation substrate
-MUST carry a chapter-bound thread-safe primitive (a chapter-
-bound asynchronous-once-cell pattern) so chapter-bound
-concurrent initialisation attempts converge on chapter-bound
-exactly one initialisation.
+MUST carry a chapter-bound interior-mutability primitive that
+rejects a chapter-bound second pin call so chapter-bound
+concurrent initialisation attempts cannot chapter-bound silently
+overwrite a chapter-bound previously pinned value.
 
 **R6.** Chapter-bound field categories carried as chapter-bound
-once-set lazy-initialisation fields MUST include:
+once-set lazy-initialisation fields `Constructible<T>` on the
+chapter-bound owned-state record MUST include:
 
-| Bound field category                                                                                                                                  | Bound substrate origin                                                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| The chapter-bound process-identifier accessor and the chapter-bound public-key registered at chapter 07 R-substrate startup.                          | Chapter 07 wallet-lifecycle substrate.                                            |
-| The chapter-bound synchronous SQLite connection handle `SqliteConnShared` (R4 of chapter 25).                                                          | Chapter 25 SQLite gateway substrate.                                              |
-| The chapter-bound peer-identifier registered at chapter 28 R-substrate startup.                                                                       | Chapter 28 P2P substrate.                                                         |
-| The chapter-bound P2P-substrate command-channel sender.                                                                                                | Chapter 28 P2P substrate.                                                         |
-| The chapter-bound event-stream-manager substrate handle.                                                                                              | Chapter 10 SSE streaming substrate.                                               |
-| The chapter-bound metrics-substrate handle.                                                                                                            | The chapter-bound metrics crate `mm2_metrics` of chapter 27.                      |
-| The chapter-bound configuration record loaded from the chapter-bound JSON configuration file of chapter 06.                                            | Chapter 06 net-config registry substrate.                                          |
-| The chapter-bound database root directory path on the chapter-bound native target.                                                                     | Chapter 26 R15 native-filesystem isolation substrate.                              |
-| The chapter-bound stop-signal sender (R12).                                                                                                            | This chapter R12.                                                                  |
+| Bound field                                                  | Bound payload type             | Bound substrate origin                                                            |
+| ------------------------------------------------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
+| `rmd160` (process-identifier RIPEMD160(SHA256(pubkey)))       | `H160`                         | Chapter 07 wallet-lifecycle substrate.                                            |
+| `secp256k1_key_pair`                                          | chapter-bound secp256k1 key-pair record | Chapter 07 wallet-lifecycle substrate.                                   |
+| `peer_id` (libp2p peer identifier)                            | `String`                       | Chapter 28 P2P substrate.                                                         |
+| `ffi_handle` (foreign-function-interface integer identifier)   | `u32`                          | This chapter R11 (process-context registry).                                       |
+| `initialized` (passphrase-init completion flag)                | `bool`                         | This chapter (chapter-bound observable startup-progress flag).                     |
+| `rpc_started` (RPC HTTP server startup flag)                   | `bool`                         | This chapter (chapter-bound observable startup-progress flag).                     |
+| `stop` (stop-signal flag of R12)                               | `bool`                         | This chapter R12.                                                                  |
+| `wallet_name` (active-wallet name, when wallet-persistence is on) | `Option<String>`            | Chapter 07 wallet-lifecycle substrate.                                             |
+| `sqlite_connection` (synchronous SQLite connection handle)      | `Arc<Mutex<Connection>>`       | Chapter 25 SQLite gateway substrate (chapter-bound non-WebAssembly target only).   |
+| `wasm_rpc` (WebAssembly RPC sender)                            | chapter-bound RPC-sender record | Chapter-bound WebAssembly RPC substrate (chapter-bound WebAssembly target only).  |
 
-## 31.5 Bound Asynchronous-Mutex-Guarded Field Substrate
+The chapter-bound `async_sqlite_connection` field — though
+chapter-bound also once-set — uses the chapter-bound standard-
+library `OnceLock` primitive rather than `Constructible<T>`,
+because its chapter-bound payload (an awaitable connection wrapper)
+wraps a chapter-bound `AsyncMutex` for R7 access discipline.
+
+Fields that are chapter-bound *not* once-set lazy-initialisation
+fields (and so are chapter-bound out of R6 scope) include the
+chapter-bound configuration record `conf: Json`, the chapter-
+bound logging handle `log: LogArc`, the chapter-bound metrics
+handle `metrics: MetricsArc`, and the chapter-bound event-
+stream-manager handle `event_stream_manager: StreamingManager`:
+these are chapter-bound owned plain fields set via the chapter-
+bound builder of R10 (chapter-bound `conf` only) or chapter-
+bound default-constructed in `MmCtx::with_log_state(...)`.
+
+## 31.5 Bound Sub-Context Slot Substrate
 
 **R7.** The chapter-bound owned-state record MUST carry chapter-
-bound shared fields that are chapter-bound mutated through the
-chapter-bound process lifetime — chapter-bound active swaps,
-chapter-bound order books, chapter-bound coin handles, chapter-
-bound WalletConnect session store, chapter-bound graphical-
-user-interface account state — behind a chapter-bound
-asynchronous-mutex primitive so chapter-bound concurrent
-consumers serialise their access without blocking the chapter-
-bound asynchronous runtime.
+bound sub-context handle slots for every chapter-bound feature
+crate that needs chapter-bound per-process shared substrate of
+its own (the chapter-bound order-match substrate, the chapter-
+bound swap substrate, the chapter-bound coins-activation
+substrate, the chapter-bound WalletConnect substrate, the
+chapter-bound graphical-user-interface account substrate, the
+chapter-bound non-fungible-token substrate, et cetera) shaped
+as a chapter-bound synchronous-mutex-guarded type-erased
+optional shared handle:
 
-| Bound field                                            | Bound owner chapter                          | Bound contract                                                                                                                                                              |
-| ------------------------------------------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The chapter-bound asynchronous SQLite connection handle `AsyncMutex<AsyncConnection>`. | Chapter 25.                                  | Awaitable wrapper around the chapter-25 R11 dedicated worker thread.                                                                                                       |
-| The chapter-bound coins-context registry handle.        | The chapter-bound coins-activation substrate. | The chapter-bound per-coin handle map keyed by chapter-bound ticker; consumers fetch through a chapter-bound asynchronous-mutex-guarded accessor.                          |
-| The chapter-bound order-book substrate handle.          | Chapter 11 / chapter 12 order-match substrate. | The chapter-bound my-order / chapter-bound peer-order book pair behind asynchronous mutexes.                                                                                |
-| The chapter-bound active-swap registry handle.          | Chapter 13 / chapter 15 swap substrate.       | The chapter-bound running-swap map keyed by chapter-bound swap-UUID.                                                                                                        |
-| The chapter-bound graphical-user-interface account-state handle. | Chapter 24.                                  | Routed through the chapter-24 storage trait of chapter 26 R8.                                                                                                              |
-| The chapter-bound WalletConnect session-store handle.   | Chapter 22.                                  | Routed through the chapter-22 storage trait of chapter 26 R8.                                                                                                              |
-| The chapter-bound non-fungible-token registry handle.   | Chapter 19.                                  | Routed through the chapter-19 storage trait of chapter 26 R8.                                                                                                              |
+```
+Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>
+```
 
-**R8.** Chapter-bound consumers MUST acquire the chapter-bound
-asynchronous-mutex guard via a chapter-bound `lock().await`-
-shaped accessor; chapter-bound consumers MUST NOT hold the
-chapter-bound guard across a chapter-bound await point on a
-chapter-bound long-running future (the chapter-bound
-asynchronous network round-trip, the chapter-bound asynchronous
-database round-trip) so they do not chapter-bound starve other
-chapter-bound consumers of the chapter-bound same field.
+Chapter-bound sub-context slots known at landing MUST include:
 
-**R9.** Chapter-bound consumers that need chapter-bound read-
-only access to a chapter-bound asynchronous-mutex-guarded field
-MAY take the chapter-bound guard, chapter-bound clone the
-chapter-bound relevant data out under the guard, chapter-bound
-release the guard, and chapter-bound operate on the chapter-
-bound cloned data.
+| Bound field slot                  | Bound owner chapter                              |
+| --------------------------------- | ------------------------------------------------ |
+| `ordermatch_ctx`                  | Chapter 11 / chapter 12 order-match substrate.   |
+| `rate_limit_ctx`                  | Chapter-bound rate-limit substrate.              |
+| `simple_market_maker_bot_ctx`     | Chapter-bound market-maker-bot substrate.        |
+| `dispatcher_ctx`                  | Chapter-bound RPC dispatcher substrate.          |
+| `message_service_ctx`             | Chapter-bound message-service substrate.         |
+| `p2p_ctx`                         | Chapter 28 P2P substrate.                        |
+| `coins_ctx`                       | Chapter-bound coins-activation substrate.        |
+| `coins_activation_ctx`            | Chapter-bound coins-activation substrate.        |
+| `crypto_ctx`                      | Chapter 04 / chapter 05 crypto substrate.        |
+| `swaps_ctx`                       | Chapter 13 / chapter 15 swap substrate.          |
+| `stats_ctx`                       | Chapter-bound stats substrate.                   |
+| `account_ctx`                     | Chapter 24 graphical-user-interface substrate.   |
+| `wallet_connect`                  | Chapter 22 WalletConnect substrate.              |
+| `mm_init_ctx`                     | Chapter-bound mm-init substrate.                 |
+| `nft_ctx`                         | Chapter 19 non-fungible-token substrate.         |
+
+**R8.** The chapter-bound application-context crate MUST expose
+a chapter-bound `from_ctx` constructor helper of the chapter-
+bound shape
+
+```
+fn from_ctx<T, C>(
+    ctx_field: &Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
+    constructor: C,
+) -> Result<Arc<T>, String>
+where C: FnOnce() -> Result<T, String>,
+      T: 'static + Send + Sync;
+```
+
+through which chapter-bound consumer crates lazily populate
+their chapter-bound sub-context slot of R7 the first time it is
+dereferenced and chapter-bound retrieve a chapter-bound
+`Arc<T>` clone on every subsequent dereference. Chapter-bound
+consumer crates MUST NOT chapter-bound lock the chapter-bound
+sub-context-slot mutex directly; they MUST route through the
+chapter-bound `from_ctx` helper.
+
+**R9.** The chapter-bound owned-state record MUST carry a
+chapter-bound asynchronous SQLite connection handle of the
+chapter-bound shape
+
+```
+#[cfg(not(target_arch = "wasm32"))]
+pub async_sqlite_connection: OnceLock<Arc<AsyncMutex<AsyncConnection>>>;
+```
+
+on chapter-bound non-WebAssembly targets. This is the chapter-
+bound only `AsyncMutex`-wrapped field on the chapter-bound owned-
+state record at landing; chapter-bound consumers MUST acquire
+its chapter-bound guard via `lock().await` and MUST NOT chapter-
+bound hold the chapter-bound guard across a chapter-bound long-
+running future on a chapter-bound separate substrate (a chapter-
+bound asynchronous network round-trip; a chapter-bound
+asynchronous database round-trip into a chapter-bound different
+substrate) so they do not chapter-bound starve other chapter-
+bound consumers of the chapter-bound asynchronous SQLite
+substrate.
 
 ## 31.6 Bound Construction-and-Lifecycle Discipline
 
@@ -186,12 +249,13 @@ chapter-bound consume-self call sequence:
 
 | Bound builder step              | Bound contract                                                                                                                                          |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MmCtxBuilder::new()`           | Allocate an empty chapter-bound owned-state record with chapter-bound once-set fields uninitialised.                                                    |
-| `with_conf(value)`              | Pin the chapter-bound configuration record (R6).                                                                                                        |
-| `with_log_level(level)`         | Pin the chapter-bound logging-substrate verbosity threshold.                                                                                            |
-| `with_version(...)`             | Pin the chapter-bound process-version substrate consumed by the chapter-bound version-handshake substrate of chapter 13.                                |
-| `with_datetime(...)`            | Pin the chapter-bound build-time datetime consumed by the chapter-bound version-handshake substrate of chapter 13.                                      |
-| `into_mm_arc()`                 | Consume self, register the chapter-bound resulting owned-state record on the chapter-bound process-wide context-registry of R11, and return the chapter-bound `MmArc` clone. |
+| `MmCtxBuilder::new()`           | Allocate an empty builder with chapter-bound defaulted slots; equivalent to `MmCtxBuilder::default()`.                                                  |
+| `with_conf(value)`              | Stash the chapter-bound configuration record to install on the chapter-bound owned-state record at `into_mm_arc()`.                                     |
+| `with_log_level(level)`         | Stash the chapter-bound logging-substrate verbosity threshold.                                                                                          |
+| `with_secp256k1_key_pair(pair)` | Stash the chapter-bound secp256k1 key-pair so `into_mm_arc()` pins the chapter-bound `secp256k1_key_pair` field of R6 and the chapter-bound `rmd160` field of R6 (derived from the chapter-bound key-pair's address hash). |
+| `with_version(version)`         | Stash the chapter-bound process-version string consumed by the chapter-bound version-handshake substrate.                                               |
+| `with_test_db_namespace()`      | Chapter-bound WebAssembly target only; stash a chapter-bound per-test database-namespace identifier so chapter-bound concurrent tests do not chapter-bound share IndexedDB stores. |
+| `into_mm_arc()`                 | Consume self, construct the chapter-bound owned-state record via `MmCtx::with_log_state(...)`, install the chapter-bound stashed values, and return the chapter-bound `MmArc` wrapping it. |
 
 The chapter-bound builder MUST be the chapter-bound *only*
 permitted construction substrate; chapter-bound consumers MUST
@@ -199,28 +263,41 @@ NOT construct chapter-bound owned-state records directly.
 
 **R11.** The chapter-bound application-context crate MUST
 maintain a chapter-bound process-wide registry of chapter-bound
-in-flight owned-state records keyed by chapter-bound process-
-context identifier so that:
+in-flight owned-state records keyed by chapter-bound `ffi_handle`
+integer identifier (R6), shaped as a chapter-bound
+`Mutex<HashMap<u32, MmWeak>>` global. Registry entries MUST hold
+chapter-bound `MmWeak` clones (R2) so the chapter-bound registry
+does not chapter-bound extend the chapter-bound owned record's
+lifetime. The chapter-bound `MmArc::ffi_handle()` accessor MUST
+be the chapter-bound only registration site: a chapter-bound
+first call pins the chapter-bound `ffi_handle` field of R6 to a
+chapter-bound freshly-rolled identifier and inserts the chapter-
+bound weak entry; chapter-bound subsequent calls return the
+chapter-bound already-pinned identifier. The chapter-bound
+registry MUST exist so that:
 
 - chapter-bound foreign-function-interface accessors (the
   chapter-bound mobile-bindings entry points of chapter 26 R6)
   may fetch a chapter-bound clone of the chapter-bound handle
-  by chapter-bound integer identifier without a chapter-bound
-  pass-the-pointer-across-the-FFI-boundary discipline;
-- chapter-bound stop-signal handling (R12) finds the chapter-
-  bound right owned-state record by chapter-bound identifier;
+  by chapter-bound integer identifier (via
+  `MmArc::from_ffi_handle(id)`) without a chapter-bound pass-
+  the-pointer-across-the-FFI-boundary discipline;
 - chapter-bound multi-context test substrates run several
   chapter-bound owned-state records side by side in chapter-
   bound the same process.
 
 **R12.** The chapter-bound owned-state record MUST carry a
-chapter-bound stop-signal substrate exposing exactly two
-chapter-bound accessors:
+chapter-bound stop-signal substrate composed of the chapter-
+bound `stop: Constructible<bool>` field of R6 plus a chapter-
+bound stop-listener registry `stop_listeners: Mutex<Vec<...>>`
+of chapter-bound callback boxes, and MUST expose the chapter-
+bound accessors:
 
-| Bound accessor       | Bound contract                                                                                                                                                              |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `is_stopping()`      | Synchronous predicate returning whether the chapter-bound stop signal has been raised; chapter-bound long-running loops poll this predicate at chapter-bound iteration boundaries. |
-| `stop()`             | Idempotent setter that raises the chapter-bound stop signal; chapter-bound subsequent calls are chapter-bound no-ops.                                                       |
+| Bound accessor       | Bound contract                                                                                                                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `is_stopping()`      | Synchronous predicate returning whether the chapter-bound `stop` field has been pinned to `true`; chapter-bound long-running loops poll this predicate at chapter-bound iteration boundaries.                                            |
+| `stop()` (on `MmArc`) | Pin the chapter-bound `stop` field to `true`, drain the chapter-bound abort-handler registry by chapter-bound calling abort on every chapter-bound registered handle, and drain the chapter-bound stop-listener registry by chapter-bound invoking every chapter-bound registered callback. Returns `Result<(), String>`; a chapter-bound second call returns the chapter-bound double-pin error of R5. |
+| `on_stop(callback)`  | Register a chapter-bound stop-listener callback box; if the chapter-bound stop signal is chapter-bound already raised, the chapter-bound callback is chapter-bound invoked synchronously at registration.                                |
 
 Chapter-bound consumers that hold chapter-bound long-running
 asynchronous tasks (the chapter-bound P2P substrate of chapter
@@ -228,16 +305,22 @@ asynchronous tasks (the chapter-bound P2P substrate of chapter
 chapter-bound order-match substrate of chapter 11 / chapter 12;
 the chapter-bound event-stream substrate of chapter 10) MUST
 consult `is_stopping()` at chapter-bound iteration boundaries
-and chapter-bound exit cleanly when set.
+and chapter-bound exit cleanly when set; chapter-bound consumers
+that hold chapter-bound abortable tasks MAY chapter-bound
+register their `AbortHandle` on the chapter-bound owned-state
+record's chapter-bound `abort_handlers: Mutex<Vec<AbortHandle>>`
+registry so `stop()` chapter-bound aborts them on chapter-bound
+shutdown.
 
-**R13.** The chapter-bound application-context crate MUST expose
-a chapter-bound *ready* helper that resolves to chapter-bound
-true once every chapter-bound once-set lazy-initialisation field
-of R6 enumerated as chapter-bound startup-mandatory has been
-chapter-bound pinned. Chapter-bound asynchronous consumers that
-need to wait for chapter-bound startup completion before
-beginning their chapter-bound work MUST await the chapter-bound
-ready helper.
+**R13.** The chapter-bound owned-state record MUST carry chapter-
+bound observable startup-progress flags `initialized:
+Constructible<bool>` and `rpc_started: Constructible<bool>` of
+R6 so chapter-bound consumers may chapter-bound poll the chapter-
+bound startup state without chapter-bound depending on a
+chapter-bound dedicated ready helper. Chapter-bound consumers
+that need to wait for chapter-bound startup completion MUST
+poll these flags via their chapter-bound `as_option()` accessor
+of R4 at chapter-bound iteration boundaries.
 
 ## 31.7 Bound Consumer-Routing Pattern
 
@@ -252,13 +335,16 @@ mutable variables, or chapter-bound thread-local storage.
 **R15.** A chapter-bound consumer that requires chapter-bound a
 sub-substrate carried in the chapter-bound owned-state record
 MUST fetch it through a chapter-bound dedicated accessor (the
-chapter-bound `MmArc::event_stream_manager()` accessor for
-chapter 10; the chapter-bound `MmArc::sqlite_connection()`
-accessor for chapter 25; the chapter-bound coins-context
-accessor for the chapter-bound coins-activation substrate; the
-chapter-bound peer-identifier accessor for chapter 28; et
-cetera) rather than chapter-bound reaching directly into the
-chapter-bound owned-state record's chapter-bound field.
+chapter-bound `MmArc::sqlite_connection()` accessor of chapter
+25 returning the chapter-bound mutex guard on the chapter-bound
+synchronous SQLite connection; the chapter-bound `from_ctx`
+helper of R8 for chapter-bound sub-context slots; the chapter-
+bound `MmCtx::rmd160()` accessor for chapter 07's chapter-bound
+process-identifier of R3; the chapter-bound
+`MmCtx::event_stream_manager` plain-field dereference for
+chapter 10; et cetera) rather than chapter-bound reaching
+directly into the chapter-bound owned-state record's chapter-
+bound private field.
 
 **R16.** Chapter-bound consumer chapters that bind their own
 chapter-bound substrate handle on the chapter-bound owned-
@@ -296,10 +382,13 @@ lazy-initialisation substrate `Constructible<T>::pin(value)` of
 R4 rejects a chapter-bound second call with the chapter-bound
 double-initialisation error.
 
-**T2.** *Concurrent-initialisation convergence.* A chapter-bound
+**T2.** *Sub-context slot single-population.* A chapter-bound
 regression test MUST confirm that two chapter-bound concurrent
-callers of `Constructible<T>::get_or_initialize(closure)` of R4
-converge on chapter-bound exactly one initialisation.
+callers of the chapter-bound `from_ctx` helper of R8 against
+the chapter-bound same sub-context slot of R7 converge on
+chapter-bound exactly one constructor invocation and chapter-
+bound receive `Arc<T>` clones pointing at chapter-bound the
+same allocation.
 
 **T3.** *Stop-signal propagation.* A chapter-bound regression
 test MUST confirm that after `stop()` of R12 is called, every
@@ -370,8 +459,8 @@ state record by adding chapter-bound those fields.
   substrate composes on.
 - *The Rust Asynchronous Book* — describes the chapter-bound
   asynchronous-mutex primitive consumed by the chapter-bound
-  asynchronous-mutex-guarded field substrate of R7 and the
-  chapter-bound await-point discipline of R8.
+  asynchronous SQLite slot of R9 and the chapter-bound await-
+  point discipline of R9.
 
 ## 31.13 Provenance Footer
 
