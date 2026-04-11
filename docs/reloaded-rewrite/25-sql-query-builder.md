@@ -1,354 +1,411 @@
-# Chapter 25 — SQL Query-Builder Replacement
+# Chapter 25 — Single SQLite Gateway Substrate
 
-> **Chapter type:** document existing. No IMPL marker.
+**Status:** driving-spec.
 
-## 25.0 Executive summary
+The chapter binds the substrate by which the chapter-bound
+storage crate `db_common` becomes the single SQLite gateway for
+every native-side persistence consumer in the workspace: a
+chapter-bound asynchronous connection facade, a chapter-bound
+typed query-builder substrate exposed under a chapter-bound
+single re-export module, a chapter-bound identifier-validation
+and pragma-helper toolbox, and a chapter-bound consumer-routing
+discipline.
 
-The reloaded tree carries a substantially extended
-[`mm2src/db_common/`](../../mm2src/db_common/) crate. Its role
-is to be the **single SQLite gateway** for every native-side
-persistence consumer in the workspace: an async wrapper around
-`rusqlite::Connection`, a typed query-builder DSL, and a small
-toolbox of identifier-validation and pragma helpers.
+## 25.1 Executive Summary
 
-Compared with the baseline (`c1d46c0`), the crate was three
-files (`Cargo.toml`, `lib.rs`, `sqlite.rs`). Everything else
-in the current tree is post-baseline:
+The chapter-bound storage crate `db_common` at the chapter-02-
+anchored baseline carried three chapter-bound source files only:
+the chapter-bound manifest, the chapter-bound crate-root module,
+and a chapter-bound low-level synchronous SQLite-helper module
+(R2). The chapter-bound substrate extends the crate to be the
+single SQLite gateway for every native-side persistence consumer
+in the workspace.
 
-- `async_sql_conn.rs` (about 300 LOC) -- an async `Connection`
-  facade backed by a dedicated worker thread + crossbeam
-  channels.
-- The DSL files `sql_condition.rs`, `sql_constraint.rs`,
-  `sql_create.rs`, `sql_delete.rs`, `sql_insert.rs`,
-  `sql_query.rs`, `sql_update.rs`, `sql_value.rs` (about 2.2
-  KLOC combined) -- the typed builder API, re-exported under a
-  virtual `db_common::sql_build` namespace.
-- `async_conn_tests.rs` (about 250 LOC) -- async unit tests.
-- A 330-line extension to `sqlite.rs` adding validation
-  helpers and a `SqliteConnShared` alias.
+The substrate consists of three chapter-bound stacking layers:
 
-The whole crate is native-only: every module other than the
-test module is gated on `#[cfg(not(target_arch =
-"wasm32"))]`. WASM persistence is the responsibility of
-`mm2_db::indexed_db`, documented in
-[Chapter 26](26-cross-platform-and-wasm.md).
+| Bound layer                                  | Bound contract                                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Validation-and-pragma layer (R3, R5)         | Identifier-validation accessors, parameter-newtype aliases, pragma-application helpers.                              |
+| Typed query-builder layer (R6–R10)           | Eight chapter-bound query-builder modules collected behind a single chapter-bound re-export module.                  |
+| Asynchronous-connection layer (R11–R14)      | An awaitable connection handle backed by a chapter-bound dedicated worker thread plus a chapter-bound message-channel substrate. |
 
-## 25.1 Crate layout
+The crate is native-only: every chapter-bound module other than
+the test module is gated on the chapter-bound non-WebAssembly
+target predicate (R15). Chapter 26 binds the parallel WebAssembly
+persistence substrate; this chapter binds the native side.
 
-```
-mm2src/db_common/
-|-- Cargo.toml
-`-- src/
-    |-- lib.rs                  Module roots + sql_build re-export
-    |-- sqlite.rs               Low-level helpers, validation, pragmas
-    |-- async_sql_conn.rs       AsyncConnection + worker thread
-    |-- async_conn_tests.rs     Async tests
-    |-- sql_condition.rs        WHERE-clause trait
-    |-- sql_constraint.rs       PrimaryKey / Unique / ForeignKey
-    |-- sql_create.rs           SqlCreateTable, SqlColumn, SqlType
-    |-- sql_delete.rs           SqlDelete
-    |-- sql_insert.rs           SqlInsert
-    |-- sql_query.rs            SqlQuery (SELECT), SqlSubquery
-    |-- sql_update.rs           SqlUpdate
-    `-- sql_value.rs            SqlValue, SqlValueOptional, FromQuoted
-```
+Bound rules R1–R5 cover the crate-layout and validation layer;
+R6–R10 cover the typed query-builder substrate; R11–R14 cover
+the asynchronous-connection facade; R15–R17 cover the platform
+gate, the consumer-routing discipline, and the chapter-bound
+deprecated-application-programming-interface allowance.
 
-The flat `sql_*.rs` modules are declared as `mod` in `lib.rs`
-and then collected behind a single re-export module:
+## 25.2 Subsystem Shape
 
-```rust
-#[cfg(not(target_arch = "wasm32"))]
-pub mod sql_build {
-    pub use crate::sql_condition::SqlCondition;
-    pub use crate::sql_constraint::{foreign_key, ForeignKey,
-                                    PrimaryKey, SqlConstraint, Unique};
-    pub use crate::sql_create::{SqlColumn, SqlCreateTable,
-                                SqlType, TableKey};
-    pub use crate::sql_delete::SqlDelete;
-    pub use crate::sql_insert::SqlInsert;
-    pub use crate::sql_query::{SqlQuery, SqlSubquery};
-    pub use crate::sql_update::SqlUpdate;
-    pub use crate::sql_value::{FromQuoted, SqlValue, SqlValueOptional};
-}
-```
+The substrate occupies a structural seam between the chapter-bound
+SQLite engine, the chapter-bound third-party synchronous SQLite
+binding crate, the chapter-bound third-party query-string-assembly
+crate the typed query-builder layer composes on top of, the
+chapter-bound asynchronous runtime, and every native-side chapter-
+bound persistence consumer in the workspace (R16). The substrate
+does *not* modify the chapter-bound SQLite engine, the chapter-
+bound binding crate, or the chapter-bound query-string-assembly
+crate; it composes them into the chapter-bound single-gateway
+shape.
 
-Consumers therefore import via `db_common::sql_build::{...}`
-even though there is no `sql_build/` directory on disk.
+## 25.3 Bound Crate Layout
 
-## 25.2 Three layers
+**R1.** The chapter-bound crate layout at the substrate landing
+point MUST extend the chapter-02-anchored three-file crate to
+exactly the following module set:
 
-The crate stacks cleanly into three layers:
+| Bound module                | Bound role                                                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Crate-root module           | Module roots plus the chapter-bound re-export module of R10.                                                                                                              |
+| Low-level helper module     | Low-level synchronous SQLite helpers, the chapter-bound validation accessors of R3, the chapter-bound parameter newtypes of R4, the chapter-bound pragma-application helper of R5, and the chapter-bound row-mapper helpers of R3. |
+| Asynchronous-connection module | The chapter-bound asynchronous connection facade of R11–R14.                                                                                                          |
+| Asynchronous-test module    | Asynchronous unit tests for the chapter-bound asynchronous facade (T1).                                                                                                  |
+| Query-builder condition module     | The chapter-bound WHERE-clause trait of R8.                                                                                                                       |
+| Query-builder constraint module    | The chapter-bound primary-key / unique / foreign-key constraint substrate (R7).                                                                                  |
+| Query-builder create-table module  | The chapter-bound CREATE-TABLE builder, the chapter-bound column descriptor, and the chapter-bound type enumeration (R7).                                          |
+| Query-builder delete module        | The chapter-bound DELETE builder (R6).                                                                                                                            |
+| Query-builder insert module        | The chapter-bound INSERT builder (R6).                                                                                                                            |
+| Query-builder select module        | The chapter-bound SELECT builder and the chapter-bound sub-query substrate (R6, R9).                                                                              |
+| Query-builder update module        | The chapter-bound UPDATE builder (R6).                                                                                                                            |
+| Query-builder value module         | The chapter-bound bound-value type and its optional-value variant plus the chapter-bound from-quoted accessor (R10).                                              |
 
-1. **Validation / helpers** ([`sqlite.rs`](../../mm2src/db_common/src/sqlite.rs))
-   -- identifier checks, parameter newtypes, pragma helpers.
-2. **DSL builders** (the eight `sql_*.rs` modules) -- typed,
-   fluent constructors for SELECT / INSERT / UPDATE / DELETE
-   / CREATE TABLE, all sitting on top of the third-party
-   `sql-builder` crate.
-3. **Async facade** ([`async_sql_conn.rs`](../../mm2src/db_common/src/async_sql_conn.rs))
-   -- an awaitable handle that dispatches closures onto a
-   dedicated worker thread holding the synchronous
-   `rusqlite::Connection`.
+**R2.** The chapter-02-anchored three-file baseline (the chapter-
+bound manifest, the chapter-bound crate-root module, and the
+chapter-bound low-level synchronous SQLite-helper module) MUST be
+preserved as the starting point: every substrate addition is a
+chapter-bound new module, not a chapter-bound rewrite of the
+chapter-02-anchored low-level helper module.
 
-A consumer typically composes a builder in async context,
-hands the closure to `AsyncConnection::call`, and lets the
-worker thread run `to_sql()` + `execute` / `query`.
+## 25.4 Bound Validation-and-Pragma Layer
 
-## 25.3 Validation layer (`sqlite.rs`)
+**R3.** The chapter-bound low-level helper module MUST expose the
+following chapter-bound validation, query-helper, and row-mapper
+accessor set:
 
-[`sqlite.rs`](../../mm2src/db_common/src/sqlite.rs) exposes
-about twenty public items. The ones most relevant to
-consumers:
+| Bound accessor                                   | Bound contract                                                                                                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_ident` and `validate_table_name`       | Reject anything outside the chapter-bound alphanumeric-and-underscore character class (with the period character additionally permitted by the identifier variant to admit chapter-bound dotted column references); reject empty strings; reject identifiers starting with a digit; reject a chapter-bound fixed list of SQL keywords. Every typed query-builder MUST run validation before SQL-string assembly. |
+| `ToValidSqlTable` and `ToValidSqlIdent` traits   | Implemented for `&str`, `String`, and chapter-bound newtypes; drive validation at the type level.                                                                |
+| `query_single_row<T>(conn, sql, params, mapper)` | A chapter-bound thin wrapper around the chapter-bound binding-crate single-row accessor that maps the chapter-bound no-rows arm to `Ok(None)` instead of an error. |
+| `offset_by_id`                                   | Chapter-bound helper for chapter-bound row-number-style cursor pagination.                                                                                       |
+| `h256_slice_from_row`, `h256_option_slice_from_row` | Chapter-bound hexadecimal-string-to-32-byte-array row mappers consumed by chapter-bound chain-data tables.                                                  |
+| `is_constraint_error(err)`                       | Inspect a chapter-bound binding-crate error to decide whether to map it to a domain *no-such-row* error.                                                         |
 
-- `type SqliteConnShared = Arc<Mutex<Connection>>` -- the
-  reference-counted, mutex-guarded connection handle used in
-  legacy synchronous paths.
-- `type OwnedSqlParams = Vec<rusqlite::types::Value>` and
-  `type OwnedSqlNamedParams = Vec<(&'static str, Value)>` --
-  owned param vectors so closures can move them across
-  threads.
-- `validate_ident(ident)` and `validate_table_name(table)` --
-  reject anything outside `[A-Za-z0-9_]` (and `.` for the
-  identifier variant, which has to accept dotted column
-  references), reject empty strings and identifiers starting
-  with a digit, and reject a fixed list of SQL keywords. Used
-  by every DSL builder before SQL string assembly.
-- `ToValidSqlTable` / `ToValidSqlIdent` -- traits implemented
-  for `&str` / `String` / newtypes that drive validation at
-  the type level.
-- `query_single_row<T>(conn, sql, params, mapper)` --
-  small wrapper around `conn.query_row()` that maps the
-  "no rows" case to `Ok(None)` instead of an error.
-- `offset_by_id` -- helper for `ROW_NUMBER`-style cursor
-  pagination.
-- `h256_slice_from_row`, `h256_option_slice_from_row` -- hex
-  string -> `[u8; 32]` row mappers used by chain-data tables.
-- `run_optimization_pragmas(conn)` -- sets `journal_mode =
-  WAL`, `synchronous = normal`, `temp_store = memory`, and
-  `foreign_keys = ON`.
-- `is_constraint_error(err)` -- inspect a `rusqlite::Error`
-  to decide whether to map it to a domain "no such row"
-  error.
+**R4.** The chapter-bound parameter-newtype aliases MUST be
+exactly two:
 
-The crate also provides two macros: `owned_named_params!` for
-ergonomic construction of `OwnedSqlNamedParams`, and
-`foreign_columns!` (re-exported by `sql_build`) for
-declaring foreign-key column pairs.
+| Bound alias                  | Bound shape                                                                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `SqliteConnShared`           | A chapter-bound reference-counted, mutex-guarded synchronous-connection handle used by chapter-bound legacy synchronous paths.    |
+| `OwnedSqlParams`             | An owned vector of chapter-bound binding-crate value cells so closures can move bound parameters across thread boundaries.        |
+| `OwnedSqlNamedParams`        | An owned vector of chapter-bound named-parameter pairs (a chapter-bound static-lifetime key paired with a chapter-bound value cell) for the same cross-thread move discipline. |
 
-## 25.4 DSL layer
+**R5.** The chapter-bound pragma-application helper
+`run_optimization_pragmas(conn)` MUST apply exactly the following
+chapter-bound four-pragma set: write-ahead-log journal mode;
+normal-level synchronous-mode; in-memory temporary-store mode;
+foreign-key enforcement on.
 
-Every builder is a stateful struct that records columns,
-parameters, constraints, conditions, and an output target,
-then emits an `(sql_string, owned_params)` pair to be run on a
-`Connection`.
+**R6.** The substrate MUST expose two chapter-bound supporting
+macros:
 
-### CREATE TABLE
+| Bound macro              | Bound role                                                                       |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `owned_named_params!`    | Ergonomic construction of the chapter-bound owned named-parameter vector of R4. |
+| `foreign_columns!`       | Declaration of chapter-bound foreign-key column pairs, re-exported through the chapter-bound re-export module of R10. |
 
-```rust
-use db_common::sql_build::{SqlColumn, SqlCreateTable, SqlType,
-                           PrimaryKey, foreign_key};
+## 25.5 Bound Typed Query-Builder Substrate
 
-let mut create = SqlCreateTable::new(conn, "gui_account");
-create
-    .if_not_exist()
-    .column(SqlColumn::new("account_type", SqlType::Integer).not_null())
-    .column(SqlColumn::new("account_idx",  SqlType::Integer).not_null())
-    .column(SqlColumn::new("device_pubkey", SqlType::Varchar(20)).not_null())
-    .column(SqlColumn::new("name",         SqlType::Varchar(255)))
-    .constraint(PrimaryKey::new(
-        "pk_gui_account",
-        ["account_type", "account_idx", "device_pubkey"],
-    )?)?;
-create.create()?;
-```
+**R7.** The chapter-bound typed query-builder substrate MUST
+expose exactly the following builder set, each as a chapter-bound
+stateful struct that records columns, parameters, constraints,
+conditions, and an output target, and then emits an
+`(sql_string, owned_params)` pair to be run on a chapter-bound
+connection handle:
 
-`SqlType` enumerates the column types that the DSL knows how
-to render (`Integer`, `Real`, `Text`, `Varchar(n)`, `Blob`,
-...); `TableKey` and the constraint types live in
-`sql_constraint.rs`.
+| Bound builder        | Bound operation               |
+| -------------------- | ----------------------------- |
+| `SqlCreateTable`     | CREATE TABLE                  |
+| `SqlInsert`          | INSERT (with chapter-bound `or_replace` variant) |
+| `SqlUpdate`          | UPDATE                        |
+| `SqlDelete`          | DELETE                        |
+| `SqlQuery`           | SELECT (with chapter-bound order, limit, and field accessors) |
+| `SqlSubquery`        | A chapter-bound select substrate embeddable inside another query where the chapter-bound dialect allows it (R9). |
 
-### INSERT / UPDATE / DELETE
+The chapter-bound CREATE-TABLE substrate MUST carry a chapter-
+bound column-type enumeration `SqlType` that enumerates the
+chapter-bound column types the substrate renders (the chapter-
+bound integer / real / text / varchar-of-bound-width / blob arm
+set), a chapter-bound table-key descriptor `TableKey`, and the
+chapter-bound constraint substrate of R8.
 
-```rust
-use db_common::sql_build::{SqlInsert, SqlCondition};
+**R8.** The chapter-bound constraint substrate MUST expose
+exactly three chapter-bound constraint kinds (the chapter-bound
+primary-key constraint `PrimaryKey`, the chapter-bound unique
+constraint `Unique`, and the chapter-bound foreign-key constraint
+`ForeignKey`), plus a chapter-bound `SqlConstraint` umbrella
+trait. The chapter-bound WHERE-clause trait `SqlCondition` MUST
+be implemented by every chapter-bound DELETE / UPDATE / SELECT
+builder of R7 and MUST expose:
 
-let mut insert = SqlInsert::new(conn, "gui_account");
-insert
-    .or_replace()
-    .column_param("account_type", account.kind_id())?
-    .column_param("account_idx",  account.idx())?
-    .column_param("device_pubkey", account.device_pubkey_hex())?
-    .column_param("name",          account.name())?;
-let _rows = insert.insert()?;
-```
+- the chapter-bound equality accessor pair `and_where_eq` and
+  `and_where_eq_param`;
+- the chapter-bound `IN`-clause accessor `and_where_in_params`;
+- a chapter-bound `or_*` variant set for every accessor above;
+- a chapter-bound `IS NULL` discriminator routed through the
+  chapter-bound optional bound-value type of R10.
 
-`SqlUpdate` and `SqlDelete` follow the same shape; both
-implement `SqlCondition`, the WHERE-clause trait, which gives
-them `.and_where_eq(col, val)`, `.and_where_eq_param(...)`,
-`.and_where_in_params(col, params)`, plus `or_*` variants and
-`IS NULL` handling via `Option`.
+**R9.** The chapter-bound select substrate MUST expose a chapter-
+bound `SqlSubquery` accessor that lets a chapter-bound select
+builder be embedded inside another query in places where the
+chapter-bound dialect allows it. Cross-table joins are out of
+scope under D3.
 
-### SELECT
+**R10.** The chapter-bound bound-value type set MUST be exactly:
 
-```rust
-use db_common::sql_build::{SqlQuery, SqlCondition};
+| Bound type            | Bound role                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `SqlValue`            | The chapter-bound single typed shape for *a bound value*.                                                  |
+| `SqlValueOptional`    | The chapter-bound optional-bound-value shape consumed by the chapter-bound `IS NULL` discriminator of R8. |
+| `FromQuoted`          | The chapter-bound trait by which statically-known literal values enter the chapter-bound `*_quoted` insert-builder accessor family. |
 
-let mut query = SqlQuery::select_from(conn, "gui_account")?;
-query
-    .field("account_idx")?
-    .and_where_eq_param("account_type", account_type)?
-    .order_desc("account_idx")?
-    .limit(10)?;
-let rows: Vec<u32> = query.query(|row| row.get(0))?;
-```
-
-`SqlSubquery` lets a `SqlQuery` be embedded inside another
-query in places where the dialect allows it.
-
-### Value handling
-
-`SqlValue` and `SqlValueOptional` give the DSL a single typed
-shape for "a bound value" so that constraint and condition
-helpers can take either an owned literal or a `None`. The
-DSL deliberately keeps user-supplied data parameterised --
-the only path where values enter the rendered SQL string is
-the `*_quoted` family on `SqlInsert`, which is reserved for
+User-supplied data MUST be carried as bound parameters; the only
+chapter-bound path by which a chapter-bound value enters the
+rendered SQL string is the chapter-bound `*_quoted` accessor
+family on the chapter-bound INSERT builder, which is reserved for
 literals known statically.
 
-## 25.5 Async facade
+The chapter-bound flat query-builder module set MUST be declared
+as crate-root modules and collected behind a chapter-bound single
+re-export module bound at the chapter-bound qualified path
+`db_common::sql_build`. Consumers MUST import the typed query-
+builder substrate via the chapter-bound re-export module
+notwithstanding the absence of a chapter-bound on-disk directory
+of that name.
 
-[`async_sql_conn.rs`](../../mm2src/db_common/src/async_sql_conn.rs)
-exposes `AsyncConnection`, an awaitable handle around a
-single dedicated worker thread:
+## 25.6 Bound Asynchronous-Connection Facade
 
-```rust
-pub struct AsyncConnection { sender: crossbeam_channel::Sender<Message> }
+**R11.** The chapter-bound asynchronous-connection module MUST
+expose a chapter-bound `AsyncConnection` handle: a chapter-bound
+awaitable wrapper around a chapter-bound dedicated worker thread
+that holds the chapter-bound synchronous binding-crate connection
+handle. The chapter-bound transport between the chapter-bound
+awaitable handle and the chapter-bound worker thread MUST be a
+chapter-bound message channel.
 
-type CallFn = Box<dyn FnOnce(&mut Connection) + Send + 'static>;
+**R12.** The chapter-bound message-channel substrate MUST carry
+exactly two chapter-bound message kinds:
 
-enum Message {
-    Execute(CallFn),
-    Close(oneshot::Sender<rusqlite::Result<()>>),
-}
-```
+| Bound kind          | Bound payload                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Execute             | A chapter-bound closure routed to a chapter-bound boxed function-once trait object accepting the chapter-bound synchronous connection handle by mutable reference. |
+| Close               | A chapter-bound one-shot reply channel carrying the chapter-bound binding-crate close-result.                                 |
 
-The constructor (`AsyncConnection::open(path)` or
-`AsyncConnection::open_in_memory()`) `thread::spawn`s the
-worker, hands it the synchronous `rusqlite::Connection`, and
-awaits a "ready" signal over a oneshot channel before
-returning. From then on every call is a one-shot
-request/response:
+**R13.** The chapter-bound constructor pair (the chapter-bound
+file-path constructor `AsyncConnection::open(path)` and the
+chapter-bound in-memory constructor
+`AsyncConnection::open_in_memory()`) MUST spawn the chapter-bound
+worker thread, hand it the chapter-bound synchronous binding-
+crate connection handle, and await a chapter-bound *ready* signal
+over a chapter-bound one-shot reply channel before returning.
 
-```rust
-pub async fn call<F, R>(&self, f: F) -> Result<R>
-where F: FnOnce(&mut Connection) -> Result<R> + Send + 'static,
-      R: Send + 'static;
-```
+The chapter-bound primary accessor `call` MUST package the caller-
+supplied closure into the chapter-bound Execute message kind of
+R12, allocate a chapter-bound one-shot reply channel, send the
+message over the chapter-bound message channel, and await the
+reply. The chapter-bound `call_unwrap` variant accessor is
+permitted for paths where the caller is willing to panic on
+chapter-bound internal failures.
 
-`call` packages the closure into a `Message::Execute`,
-allocates a `futures::channel::oneshot` for the reply, sends
-the message over the crossbeam channel, and awaits the reply.
-There is also a `call_unwrap` variant for paths where the
-caller is willing to panic on internal failures.
+**R14.** The chapter-bound `close` accessor MUST send the
+chapter-bound Close message kind of R12; the chapter-bound worker
+thread MUST perform the chapter-bound binding-crate close
+operation, reply over the chapter-bound one-shot reply channel,
+and exit its loop. Errors MUST be modelled by a chapter-bound
+`AsyncConnError` enumeration with chapter-bound transport,
+internal, and chapter-bound wrapped-binding-crate-error arms.
 
-`close` sends a `Message::Close`, the worker performs
-`conn.close()` and replies, then exits its loop. Errors are
-modeled by `AsyncConnError` (transport, internal, or
-wrapped `rusqlite::Error`).
+The substrate MUST NOT route the chapter-bound asynchronous-
+connection work through the chapter-bound runtime's chapter-bound
+blocking-pool accessor. The chapter-bound rationale is twofold:
+the chapter-bound SQLite engine is a single-writer engine, so
+serialising on a chapter-bound dedicated thread matches the
+chapter-bound engine model; and routing through the chapter-bound
+runtime's chapter-bound blocking pool would mix the chapter-bound
+database input/output with unrelated chapter-bound blocking work
+and complicate the chapter-bound shutdown discipline.
 
-This design intentionally avoids `tokio::task::spawn_blocking`
-for two reasons: SQLite is a single-writer engine, so
-serialising on a dedicated thread matches the engine model;
-and using the runtime's blocking pool would mix database I/O
-with other unrelated blocking work and complicate shutdown.
+## 25.7 Bound Platform Gate
 
-## 25.6 Cross-cutting use in the workspace
+**R15.** Every chapter-bound module other than the chapter-bound
+asynchronous-test module MUST carry the chapter-bound non-
+WebAssembly target predicate as a chapter-bound conditional-
+compilation gate. The chapter-bound re-export module of R10 MUST
+carry the same gate. The chapter-26-bound parallel WebAssembly
+persistence substrate is bound by chapter 26.
 
-The crate is consumed by every native-side persistence
-component:
+## 25.8 Bound Consumer-Routing Discipline
 
-- `mm2_core/src/mm_ctx.rs` -- `MmCtx` owns both
-  `Constructible<SqliteConnShared>` and an
-  `AsyncMutex<AsyncConnection>`, behind the codebase's
-  central-context substrate.
-- `mm2_gui_storage` ([Chapter 24](24-gui-account-state.md))
-  -- the three GUI-account tables go through the DSL.
-- `coins/sql_tx_history_storage.rs`, `coins/tx_history_db.rs`
-  and the various per-protocol history stores -- typed
-  builders for tx history.
-- `coins/lightning_persister/*` -- channel state and
-  payments persistence.
-- `kdf_walletconnect/src/storage/sqlite.rs`
-  ([Chapter 22](22-walletconnect-v2.md)) -- the WC session
-  store.
-- `coins/nft/store/sqlite/`
-  ([Chapter 19](19-nft-module-layout.md)) -- NFT tables.
+**R16.** Every chapter-bound native-side persistence consumer in
+the workspace MUST consume the chapter-bound SQLite engine
+through the chapter-bound crate `db_common`; bare chapter-bound
+binding-crate connection construction in chapter-bound feature
+code is the chapter-bound exception rather than the rule. The
+chapter-bound consumer set known at the substrate landing point
+includes:
 
-The intent is that everything in the workspace that touches
-SQLite touches it through `db_common`; bare `rusqlite::open`
-in feature code is the exception rather than the rule.
+- the chapter-bound central-context substrate of the chapter-
+  bound application-context crate `mm2_core`, which owns both a
+  chapter-bound constructible `SqliteConnShared` handle and a
+  chapter-bound asynchronous-mutex-guarded `AsyncConnection`
+  handle;
+- the chapter-24-bound graphical-user-interface account-state
+  substrate (chapter 24);
+- the chapter-bound transaction-history coin-module substrate and
+  the chapter-bound per-protocol history-store consumers;
+- the chapter-bound Lightning-persister sub-crate (chapter-bound
+  channel state and chapter-bound payments persistence);
+- the chapter-22-bound WalletConnect session-store substrate
+  (chapter 22);
+- the chapter-19-bound non-fungible-token table substrate
+  (chapter 19).
 
-## 25.7 Tests
+## 25.9 Bound Deprecated-Application-Programming-Interface Allowance
 
-[`async_conn_tests.rs`](../../mm2src/db_common/src/async_conn_tests.rs)
-covers the async facade end-to-end against in-memory
-databases:
+**R17.** The chapter-bound asynchronous-connection module MAY
+carry a chapter-bound crate-wide deprecated-API allowance
+attribute pinned to the chapter-bound binding-crate version
+consumed by the substrate; removal of the chapter-bound allowance
+attribute is deferred under D1 to the chapter-bound binding-
+crate-version upgrade.
 
-- `open_in_memory_test` -- basic construction and ready
-  signal.
-- `call_success_test`, `call_unwrap_success_test` -- closure
-  execution and result propagation.
-- `call_failure_test` -- error propagation across the
-  channel.
-- `close_success_test`, `double_close_test`, `close_call_test`
-  -- close semantics including double-close and post-close
-  calls.
+## 25.10 Tests
 
-Each DSL module also carries inline `#[test]` cases that
-exercise the rendered SQL string and the round-trip against
-an in-memory connection (NULL handling, `OR REPLACE`,
-single-column inserts, `DELETE ALL`, etc.). There is no
-integration test in `mm2_main` that exercises the crate as a
-whole; instead, each consumer crate covers its own usage.
+**T1.** *Asynchronous-facade end-to-end test set.* The chapter-
+bound asynchronous-test module MUST cover the chapter-bound
+asynchronous facade end-to-end against in-memory databases via
+exactly the following test set:
 
-## 25.8 Limitations and known gaps
+| Bound test                                                              | Bound covered behaviour                                          |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `open_in_memory_test`                                                   | Basic construction and the chapter-bound *ready* signal of R13. |
+| `call_success_test`, `call_unwrap_success_test`                         | Closure execution and result propagation across the chapter-bound message channel. |
+| `call_failure_test`                                                     | Error propagation across the chapter-bound message channel.     |
+| `close_success_test`, `double_close_test`, `close_call_test`            | Close semantics including double-close and post-close calls.    |
 
-1. **rusqlite is pinned at `0.24.2`.** Upgrading would touch
-   every `lib.rs` and the deprecated-API allowance in
-   `async_sql_conn.rs`; an explicit TODO in the source notes
-   the wish to remove `#![allow(deprecated)]` once the
-   workspace MSRV permits a newer rusqlite.
-2. **No streaming `fetch`.** `SqlQuery::query` materialises
-   the entire result set; queries that need to iterate
-   row-by-row over a large table must drop down to raw
-   `rusqlite` inside the closure.
-3. **JOIN support is intentionally minimal.** Non-trivial
-   multi-table queries today are written as raw SQL inside a
-   `call` closure; the DSL covers single-table CRUD and the
-   common SELECT shapes only.
-4. **All operations serialise on a single worker thread.**
-   This is a feature for write-heavy paths (matches SQLite's
-   single-writer model), but it does mean read concurrency on
-   a single `AsyncConnection` is zero. Multi-handle pools are
-   not provided.
-5. **`StringError` lives in this crate.** A TODO comment in
-   `sqlite.rs` flags moving it to
-   [`mm2_err_handle::common_errors`](../../mm2src/mm2_err_handle/)
-   so it can be shared more broadly.
-6. **Constraint-error mapping is by-string-prefix.**
-   `is_constraint_error` works against the `rusqlite::Error`
-   variants, but the higher-level "translate FK violation to
-   NoSuchRow" pattern is reimplemented in every consumer; a
-   shared helper would be a small follow-on.
+**T2.** *Per-builder inline test discipline.* Every chapter-bound
+query-builder module of R7 MUST carry chapter-bound inline test
+cases that exercise the rendered SQL string and the round-trip
+against an in-memory connection (the chapter-bound null-handling
+case, the chapter-bound `or-replace` case, the chapter-bound
+single-column-insert case, the chapter-bound delete-all case, et
+cetera).
 
-## 25.9 Provenance
+**T3.** *Per-consumer self-coverage discipline.* No chapter-bound
+integration test in the chapter-bound application-entry crate
+exercises the substrate as a whole; instead, every chapter-bound
+consumer of R16 MUST cover its own usage of the substrate.
 
-In the baseline (`c1d46c0`), `mm2src/db_common/` contained
-only `Cargo.toml`, `lib.rs`, and the original `sqlite.rs`
-(verified via `git ls-tree c1d46c0 -- mm2src/db_common/src`).
-The async facade, every `sql_*.rs` DSL module, the async
-tests, and the validation extensions to `sqlite.rs` are all
-post-baseline. The DSL builders sit on top of the
-third-party `sql-builder` crate (registered under the legal
-classification register in
-[`local/legal/AUDIT_FILE_CLASSIFICATION.md`](../../local/legal/AUDIT_FILE_CLASSIFICATION.md)).
+## 25.11 Deferred Work
+
+**D1.** Upgrade of the chapter-bound third-party SQLite binding
+crate to a chapter-bound newer version once the chapter-bound
+minimum-supported-Rust-version permits it, with removal of the
+chapter-bound deprecated-API allowance of R17.
+
+**D2.** A chapter-bound streaming-fetch accessor on the chapter-
+bound select builder of R7. The chapter-bound substrate at
+landing materialises the entire result set; chapter-bound large-
+result-set consumers that need to iterate row-by-row currently
+drop down to raw binding-crate calls inside the chapter-bound
+closure routed through R11.
+
+**D3.** Non-trivial chapter-bound multi-table join support on the
+chapter-bound select builder of R7. The chapter-bound substrate
+at landing covers single-table operations and the chapter-bound
+common select shapes only; chapter-bound multi-table queries
+today are written as raw SQL inside the chapter-bound closure
+routed through R11.
+
+**D4.** A chapter-bound multi-handle pool substrate. All chapter-
+bound operations serialise on a chapter-bound single worker thread
+per R11; this matches the chapter-bound SQLite single-writer
+engine model on write-heavy paths, but it means read concurrency
+on a chapter-bound single asynchronous-connection handle is zero.
+Multi-handle pools are deferred.
+
+**D5.** Move of the chapter-bound `StringError` substrate out of
+this crate and into the chapter-bound error-handling-framework
+crate `mm2_err_handle` (chapter 04's common-errors module) so it
+can be shared more broadly.
+
+**D6.** A chapter-bound shared *translate foreign-key violation
+to no-such-row* helper. The chapter-bound substrate at landing
+exposes the chapter-bound constraint-error inspector
+`is_constraint_error` of R3 against the chapter-bound binding-
+crate error variants, but the higher-level *no-such-row* mapping
+is reimplemented by every chapter-bound consumer of R16.
+
+## 25.12 Baseline Verifications
+
+**V1.** The chapter-02-anchored baseline `db_common` crate MUST
+be confirmed to contain exactly the three chapter-bound source
+files (the manifest, the crate-root module, the chapter-bound
+low-level synchronous SQLite-helper module) of R2; every
+chapter-bound module added by R1 beyond those three MUST be
+confirmed absent at the chapter-02-anchored baseline.
+
+**V2.** No chapter-bound asynchronous-connection facade is
+present at the chapter-02-anchored baseline.
+
+**V3.** No chapter-bound typed query-builder substrate is present
+at the chapter-02-anchored baseline; the chapter-bound re-export
+module of R10 MUST be confirmed absent.
+
+## 25.13 External References
+
+- The chapter-bound SQLite engine documentation, in particular
+  the chapter-bound write-ahead-log journal-mode page and the
+  chapter-bound pragmas page covering the chapter-bound four-
+  pragma set of R5.
+- The chapter-bound documentation pages of the chapter-bound
+  third-party synchronous SQLite binding crate the substrate
+  composes on top of, the chapter-bound third-party query-string-
+  assembly crate the chapter-bound typed query-builder layer
+  composes on top of, and the chapter-bound third-party
+  asynchronous-message-channel crate the chapter-bound
+  message-channel substrate of R12 consumes.
+
+## 25.14 Provenance Footer
+
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit of chapter 02; chapter 02 (the chapter-02 R4 workspace-
+  member registry containing the chapter-bound `db_common` crate
+  at the chapter-02-anchored three-file shape of R2); chapter 19
+  (the non-fungible-token consumer of R16); chapter 22 (the
+  WalletConnect consumer of R16); chapter 24 (the graphical-user-
+  interface account-state consumer of R16); chapter 26 (the
+  parallel WebAssembly persistence substrate this chapter's
+  platform-gate R15 hands off to); chapter 04 (the error-handling
+  framework D5 routes the chapter-bound `StringError` substrate
+  into); the chapter-bound public SQLite engine documentation,
+  the chapter-bound third-party binding-crate documentation, the
+  chapter-bound third-party query-string-assembly crate
+  documentation, the chapter-bound third-party asynchronous-
+  message-channel crate documentation.
+- *Permitted-input classes used:* the baseline itself (chapter 01
+  R1); external public specifications (chapter 01 R3, for the
+  SQLite engine documentation citation); sibling open-source
+  repositories under compatible licenses (chapter 01 R5, for the
+  third-party binding-crate, query-string-assembly crate, and
+  asynchronous-message-channel crate citations).
+- *Sibling-allowlist consultations:* the chapter-bound third-party
+  synchronous SQLite binding crate; the chapter-bound third-party
+  query-string-assembly crate; the chapter-bound third-party
+  asynchronous-message-channel crate.
+- *Forbidden corpus:* not consulted.
