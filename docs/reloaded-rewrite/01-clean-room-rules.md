@@ -12,11 +12,13 @@ and source-of-truth discipline.
 ## 1.1 Executive Summary
 
 This chapter is the *authoritative methodology* for the document set
-and for every source change recorded in the commit history that
-postdates the chapter-02-anchored baseline tree. A chapter or a
-source change that contradicts the rules below is a bug to be
-tracked and remediated against the offending artefact, not against
-this chapter.
+and for source changes explicitly developed as clean-room-derived
+work after the chapter-02-anchored baseline tree. Components
+intentionally imported or adapted from publicly available,
+license-compatible sources are governed by provenance recording and
+must not be represented as clean-room-derived. A chapter or a source
+change that contradicts the rules below is a bug to be tracked and
+remediated against the offending artefact, not against this chapter.
 
 The methodology is structured as four normative groups: an *input*
 group (permitted-input classes R1–R7; forbidden-input classes R8–R10);
@@ -37,7 +39,7 @@ The methodology applies to two artefact classes:
 | Artefact class                    | Binding scope                                                          |
 | --------------------------------- | ---------------------------------------------------------------------- |
 | Documentation chapters (this directory) | Every chapter under the document directory beyond chapter 02.       |
-| Source-tree commits               | Every commit in the project history that postdates the baseline anchor of chapter 02. |
+| Source-tree commits               | Commits explicitly developed and documented as clean-room-derived post-baseline work. |
 
 The baseline anchor itself, the inherited tree at the baseline
 commit, and any artefact that predates the baseline date under a
@@ -110,12 +112,12 @@ The three forbidden-input classes below are exhaustive: every
 chapter and every commit MUST be free of derivation from these
 classes.
 
-**R8.** *Source produced under the relicensing of the historical
-record the baseline tree descends from, after the chapter-02-anchored
-baseline date.* Any code,
-comment, documentation, commit message, or request-discussion thread
-produced after the chapter-02-anchored baseline date under the
-relicensed terms is a forbidden input.
+**R8.** *Forbidden input for clean-room-derived work:* source
+produced under the relicensing of the historical record the baseline
+tree descends from, after the chapter-02-anchored baseline date. Any
+code, comment, documentation, commit message, or request-discussion
+thread from that corpus is a forbidden input when claiming
+clean-room derivation.
 
 **R9.** *Derived analyses of R8 material.* Summaries, paraphrases,
 ports, transliterations, or reconstructions of R8 material are
@@ -139,6 +141,8 @@ one of the following chapter-bound carve-out classes:
 | Baseline-existing identifier             | The identifier existed in the baseline tree on or before the chapter-02-anchored baseline commit.     |
 | Sibling-allowlist identifier             | The identifier appears in a sibling open-source repository under a compatible license per R5, and that appearance predates the baseline. |
 | Chapter-bound substrate identifier       | The identifier is bound by the chapter itself as substrate contract surface (the substrate's chapter is the bounding authority for the identifier's expression). |
+| Legal-position evidentiary citation      | The chapter is a legal-position chapter and the identifier (a baseline file path, a baseline-existing constant name, a present-tree symbol cited as evidence of a position the chapter binds) is quoted as evidence rather than as substrate. The chapter MUST name itself as the legal-position chapter on which the citation depends. |
+| Project-internal source-comment marker   | The identifier is a project-internal mnemonic notation that appears verbatim in the source tree as a comment marker (a deferral-tracking tag, a TODO-style identifier, a workplan-cross-reference token). The chapter MUST cite the source-tree location at which the marker appears and MUST NOT treat the marker itself as substrate. |
 
 Identifiers that do not satisfy any carve-out class — internal module
 names, internal struct names, internal field names, internal function
@@ -288,7 +292,148 @@ chapter that violated it under the pre-revision rules. A rule MAY
 be tightened retroactively to require revision of chapters that the
 older rule would have permitted.
 
-## 1.11 Stylistic Commitments
+**R27.** Components intentionally imported or adapted from public,
+license-compatible sources MUST be recorded in a repository-level
+provenance ledger. Each record MUST identify destination path,
+introducing commit in this repository, source repository/commit (when
+known), and license basis. Such components MUST NOT be described as
+clean-room-derived in user-facing documentation.
+
+## 1.11 Bound Component Provenance Categories
+
+Most components in this repository are produced by clean-room derivation
+under Sections 1.3–1.5. This section names the additional, narrowly-bound
+categories under which verbatim reuse of upstream or third-party content is
+permitted, and the rules that govern each. The five categories are mutually
+exhaustive: a file (and each fragment of a file) belongs to exactly one of
+them. **Clean-room** is the default category and is the only one that does
+not require an explicit category marker in CRD chapters; the four reuse
+categories defined below MUST be explicitly marked at the point of reuse.
+
+### Category: Generated artifact
+
+**R28.** A file or fragment classified as *Generated artifact* is the
+deterministic output of a code generator (a `build.rs` step, a protobuf
+compiler, a `bindgen` run, or equivalent) executed over project-controlled
+input. The generator and its input MUST be checked into this repository or
+pinned to a specific external version recorded in the CRD chapter. A
+Generated-artifact file is reproduced byte-identically by re-running the
+generator over the recorded input; any divergence from the generator's
+output is a defect.
+
+### Category: Interop / wire-format reuse
+
+**R29.** A file or fragment classified as *Interop / wire-format reuse*
+exists because functional identity with an external counterparty is
+required — a deployed smart contract, a protobuf wire format consumed by
+third-party peers, an on-disk schema read by another version of the
+application, or the public payload shape of an external service. For such
+content, expression and function are merged: differing bytes break
+interoperability.
+
+**R30.** When the authoritative source for an Interop / wire-format
+artifact is a third-party project, the CRD chapter MUST cite that source
+by URL, version (or commit), and license. The blind implementer MAY fetch
+the verbatim content from the cited source.
+
+**R31.** When the only available source for an Interop / wire-format
+artifact is the relicensed historical record (the corpus forbidden under
+R8), the CRD chapter MUST embed the verbatim bytes required for
+interoperability into the chapter itself. Short inclusions (approximately
+twenty lines or fewer) appear inline in the relevant chapter; longer
+inclusions appear in an appendix chapter referenced from the relevant
+chapter. The embedding MUST observe the following sanitization discipline:
+
+- Upstream comments MUST NOT be copied. If commentary is needed in the
+  embedded content, it is authored fresh in the CRD.
+- Only the bytes strictly necessary for interoperability are embedded.
+  Unrelated declarations, dead branches, and non-load-bearing formatting
+  are dropped.
+- Internal identifiers that do not affect external identity (private
+  variable names, private constant names, struct field order where the
+  serialized form is order-insensitive) MAY be renamed; identifiers that
+  ARE part of the external interface (protobuf field numbers, JSON key
+  names, ABI signatures, exported symbol names) MUST be preserved exactly.
+
+This procedure permits the blind implementer to operate from the CRD alone
+without consulting the forbidden corpus.
+
+### Category: Convergent idiomatic shape
+
+**R32.** A file or fragment classified as *Convergent idiomatic shape* is
+short, follows a canonical pattern (either a project-wide pattern
+documented in `AGENTS.md` or the standard Rust idiom for a specific
+construct), and any competent implementer would arrive at substantially the
+same expression. The CRD chapter MUST cite the canonical pattern source.
+Convergent idiomatic content does not require behavioural specification
+beyond naming the pattern.
+
+### Category: Third-party-API-bound shape
+
+**R33.** A file or fragment classified as *Third-party-API-bound shape*
+exists as a thin wrapper whose shape is dictated by an external crate's
+API surface or by a public protocol specification not maintained by this
+project. The CRD chapter MUST cite the external crate or specification by
+name and version. Variants, methods, and field names that mirror the
+cited API are preserved as named by the cited API.
+
+### File-level classification
+
+**R34.** A file's overall category is the least-permissive category of any
+fragment it contains. A file containing even a single clean-room fragment
+is itself classified as clean-room; the file passes through the clean-room
+procedure, while fragments individually classified as Generated artifact,
+Interop / wire-format reuse, Convergent idiomatic shape, or
+Third-party-API-bound shape are marked in the CRD chapter at the point of
+their reuse, with the source citation required by the relevant rule above,
+and the blind implementer treats those fragments as direct CRD input.
+
+### Residual-similarity gate
+
+**R35.** When a file's textual similarity to the relicensed historical
+record is measured to assess clean-room sufficiency, the measurement MUST be
+taken over *discretionary expression only*. Lines belonging to fragments
+classified under R28–R33 (Generated artifact, Interop / wire-format reuse,
+Convergent idiomatic shape, Third-party-API-bound shape), and lines of
+interface surface the chapter pins by necessity — public type, enum, struct,
+trait, and function signatures; serde wire renames; on-disk schema and table
+or column names; `#[repr]` discriminant values; pinned constant values; and
+import lists — are EXCLUDED from the measured set. Those lines are required to
+match, so their matching carries no inference of copying. Consequently a
+whole-file similarity figure is NOT a valid clean-room gate for
+interface-dense files and MUST NOT be used as one. The gate is the
+*discretionary-body* similarity: function bodies, private helper
+decomposition, control flow, local naming, and comment / diagnostic wording,
+compared after stripping comments and normalizing whitespace. A file passes
+when its discretionary-body similarity is materially below its whole-file
+similarity AND each residual identical body line is individually attributable
+to an R28–R33 fragment or a pinned-interface line. Mechanical thresholds and
+the automated tool that applies this gate are deferred to chapter 30 (D1).
+
+### Binding force of chapter code blocks
+
+**R36.** A code block in a substantive chapter is binding only as to the
+content that carries function or external identity: public type, enum,
+struct, trait, and function signatures; serde wire renames; on-disk schema
+and SQL text; protocol path tokens, header names, and constant values;
+`#[repr]` discriminants; control-flow branches whose outcome is observable;
+and the set (not the wording) of diagnostics. Everything else a code block
+happens to show -- private field and local-variable names, private helper
+decomposition, statement ordering that does not change observable output,
+and comment or log-message wording -- is INFORMATIVE: it records one in-tree
+realization, not a mandate. A blind implementer MAY satisfy the binding
+contract with different private names, decomposition, or wording, and such
+divergence is conformant, not a defect. Where a chapter's prose says a
+structure "MUST have exactly" certain fields or bodies, that phrasing binds
+the functional and interface content enumerated above; it does not extend
+this project's clean-room obligation to the discretionary expression shown
+alongside it, and a chapter author MUST NOT rely on such phrasing to import
+verbatim authorial expression from the forbidden corpus (R8) into a chapter.
+This rule is the interpretive companion to R35, which governs measurement:
+R36 fixes what a chapter's code blocks oblige, R35 fixes how residual
+similarity to that obligation is scored.
+
+## 1.12 Stylistic Commitments
 
 The principles in this section are not procedural rules but
 stylistic commitments. They exist so that future chapter authors can
@@ -309,31 +454,33 @@ extend the document set in a consistent voice.
   about a specific substrate. Chapters whose purpose cannot be
   stated in one sentence are not yet ready to be written.
 
-## 1.12 Tests
+## 1.13 Tests
 
 This chapter binds methodology; it has no test surface of its own.
 The testing discipline the rules bind is carried per chapter on the
 substantive chapters' *Tests* sections (R19).
 
-## 1.13 Deferred Work
+## 1.14 Deferred Work
 
 **D1.** Automated linting of R11 (identifier hygiene), R13–R15
-(citation discipline), and R16 / R19 / R20 (per-chapter shape) is
-deferred to chapter 30 D1; chapter 30 binds the audit-tooling-gap.
+(citation discipline), R16 / R19 / R20 (per-chapter shape), and the
+R35 residual-similarity gate (mechanical thresholds and the tool that
+applies it) is deferred to chapter 30 D1; chapter 30 binds the
+audit-tooling-gap.
 
 **D2.** A bound machine-readable manifest of the seven permitted-input
 classes (R1–R7) and the three forbidden-input classes (R8–R10)
 suitable for cross-checking commit-message and chapter-citation
 metadata against is deferred.
 
-## 1.14 Baseline Verifications
+## 1.15 Baseline Verifications
 
 This chapter makes no claims of the form *X already existed in the
 baseline*. The baseline anchor itself is bound by chapter 02; every
 chapter that consumes the baseline cites it per R15. The section is
 present per R19 with no V-numbered entries.
 
-## 1.15 External References
+## 1.16 External References
 
 This chapter cites no external-specification, wire-format, or
 sibling-allowlist material directly. The chapter's substrate is the
@@ -343,7 +490,7 @@ specification families), R4 (counterparty-defined inter-operability
 shapes), and R5 (sibling-allowlist repositories under compatible
 licenses).
 
-## 1.16 Provenance Footer
+## 1.17 Provenance Footer
 
 - *Inputs:* the baseline workspace at the pinned baseline-revision
   commit of chapter 02; chapter 00 (the document-set framing and the
