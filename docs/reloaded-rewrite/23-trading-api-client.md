@@ -13,7 +13,7 @@
 
 A dedicated workspace crate carries bindings to external
 trading-API providers (price oracles, swap aggregators, route
-indexers). At the time of writing the crate contains exactly
+indexers). The chapter-bound crate contains exactly
 one provider binding: a typed client for the publicly-
 documented **1inch Swap API v6.0** plus the matching portfolio
 price-history endpoint. The crate is structured so that a
@@ -67,7 +67,7 @@ The crate **does not** define a provider-agnostic trait. A
 second provider added later would live as a sibling submodule
 (`<provider>`) with its own client, its own error type, and
 its own URL builder. A provider-agnostic abstraction is an open
-question (§23.9 D1), not a binding rule at the time of writing.
+question (§23.9 D1), not a binding rule of the chapter-bound substrate.
 
 ## 23.2 1inch Provider -- Endpoints
 
@@ -215,7 +215,7 @@ R6. **Allowance shortfall carries machine-actionable data.**
     below) reads the amounts it needs.
 
 R7. **No HTTP-status mapping in the crate.** The crate shall
-    not implement the codebase's
+    not implement the project's
     `HttpStatusCode` mapping trait. Mapping provider errors
     to RPC-layer HTTP status codes is the responsibility of
     the future RPC handlers (D2).
@@ -244,7 +244,204 @@ The URL builder for each provider is responsible for:
   bounds; out-of-bound values surface as the out-of-bounds
   error variant of §23.5 before any network call is made.
 
-## 23.7 Binding Requirements
+## 23.7 Error Parsing and the Allowance-Shortfall Wire Envelope
+
+The error model of §23.5 is produced by parsing the provider's
+HTTP error bodies. The provider dictates the wire shapes below;
+the field spellings are the provider's documented camelCase JSON
+and are reproduced here as externally-dictated interop (R29 wire-
+format / R33 third-party-api-bound), not as project expression.
+
+**R10-A — Error wire envelope (R29/R33, externally dictated).**
+A 1inch error response on an HTTP 400 carries a JSON object with
+these fields:
+
+| Wire field    | JSON type        | Meaning                       |
+|---------------|------------------|-------------------------------|
+| `error`       | string           | short error token             |
+| `description` | string, optional | human-readable description    |
+| `statusCode`  | integer          | echoed HTTP status            |
+| `meta`        | array, optional  | typed metadata entries        |
+| `requestId`   | string, optional | provider request id (ignored) |
+
+Each `meta` entry is an object with a `type` string and a
+`value` string. The binding consumes `requestId` only so that
+decode does not reject the field; it is never surfaced to
+callers.
+
+**R10-B — Recognised `meta.type` tokens (R33).** The two
+`meta.type` tokens the binding acts on are the provider's
+documented values `allowance` and `amount`. Any other token is
+treated as unknown, and the body falls through to the general-
+API-error path.
+
+**R10-C — Allowance-shortfall promotion.** When a 400 body's
+`meta` array contains an entry of type `allowance`, the binding
+MUST:
+
+- read the `value` of that entry as the current allowance;
+- read the `value` of a sibling entry of type `amount` as the
+  required allowance;
+- decode both decimal strings into the workspace's 256-bit
+  unsigned integer type;
+- produce the allowance-not-enough variant of §23.5 carrying the
+  provider `error`, `description`, echoed status code, and the
+  two decoded 256-bit values.
+
+A 400 body with no `allowance` meta entry MUST instead produce
+the general-API-error variant.
+
+**R10-D — Other error bodies.** A non-400 error response MUST be
+reported as the general-API-error variant, reading the top-level
+`error` string from the body (empty when absent) together with
+the echoed status code. A 400 body that fails to decode against
+the envelope of R10-A MUST be reported as the body-parse-error
+variant of §23.5.
+
+**R10-E — Lenient amount decode.** An `allowance`/`amount` value
+that does not parse as a decimal 256-bit integer MUST decode to
+zero rather than aborting the parse. This is a deliberate
+functional choice: the downstream allowance-approval consumer
+(deferred D5) treats a zero current allowance as "no approval on
+record" and is not broken by the substitution, whereas surfacing
+a parse error here would mask the actionable allowance shortfall.
+
+**Binding scope of §23.7 (R36).** The wire field spellings and
+`meta.type` tokens above are dictated by the public 1inch API and
+bind as interop (R29/R33). The error-variant *shapes* are the
+§23.5 contract. Any Rust type names, private helper or
+deserialisation structs, helper decomposition, field
+identifiers, and the Display/diagnostic wording used to realise
+this parsing are informative under R36: a re-derivation that
+decodes the same wire envelope and produces the same §23.5
+variants with different internal naming or decomposition is
+conformant.
+
+## 23.8 HTTP Client and URL Composition
+
+The networking contract of §23.6 is realised by a stateless
+client namespace plus a URL composer. This section states the URL
+grammar, request behaviour, and dictated interop the client MUST
+produce. The grammar, path tokens, provider constants, supported-
+chain set, and header set are dictated by the public 1inch v6.0
+API and bind as interop (R29/R33); the internal Rust shape used to
+realise them is informative (R36).
+
+### 23.8.1 Provider constants (R33, externally dictated)
+
+R11-A. The binding carries the following 1inch v6.0 protocol
+values — published provider constants, not project choices — and
+MUST expose them to callers:
+
+- **Aggregation router (v6.0) contract address:**
+  `0x111111125421ca6dc452d289314280a0f8842a65`.
+- **Native-asset sentinel address**, used by the provider to
+  denote the chain's native coin in token positions:
+  `0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee`.
+- **Supported chain set:** the twelve `(ecosystem, chain id)`
+  pairs enumerated in §23.2.
+
+The binding MUST additionally expose a predicate that answers
+whether a given chain id is in the supported set above (used to
+reject unsupported chains per R1 of §23.2).
+
+### 23.8.2 URL grammar (R33, externally dictated)
+
+R11-B. The composed request URL MUST follow the 1inch path
+grammar:
+
+```
+<base-url>/<endpoint-prefix>/<chain-id>/<method-token>?<query>
+```
+
+where, for the four swap routes, `<endpoint-prefix>` is
+`swap/v6.0` and `<method-token>` is one of `quote`, `swap`,
+`liquidity-sources`, or `tokens`; and for the portfolio route the
+prefix is `portfolio/integrations/prices/v1`, the chain-id path
+segment is omitted (the chain id travels as a query parameter per
+§23.2), and the method token is `time_range/cross_prices`. The
+path segments MUST be joined in the order prefix → chain id (swap
+routes only) → method token, so the chain id is interpolated
+between the version-pinned endpoint prefix and the method token;
+query parameters are appended last. These prefixes and method
+tokens are 1inch URL grammar, not project expression.
+
+### 23.8.3 Base URL and headers
+
+R11-C. **Base URL resolution.** On production builds the client
+MUST resolve the base URL from the daemon configuration field
+`1inch_api` (per R1); absence MUST surface as the invalid-
+parameter error variant of §23.5 before any network call is
+made. A test build path MAY substitute a fixed provider test
+host. A base URL that fails to parse MUST surface as the invalid-
+parameter variant.
+
+R11-D. **Header set (R33 / standard content negotiation).** Every
+request MUST carry `accept: application/json` and
+`content-type: application/json`. On the `test-ext-api` build
+path only, an `Authorization` header sourced from the
+`ONE_INCH_API_TEST_AUTH` environment variable (per R3) MUST be
+added. These are the standard JSON content-negotiation headers
+and, for the authorization header, the provider's documented
+test-tier authentication scheme; none shall be present in
+release builds beyond the two content-negotiation headers.
+
+### 23.8.4 Request execution
+
+R11-E. **Call sequence.** A typed request call MUST:
+
+1. on the `test-ext-api` build path only, acquire the test-tier
+   rate-limit guard (R11-G) for the duration of the call;
+2. issue a `GET` for the composed URL through the chapter-26
+   cross-platform HTTP transport with the header set of R11-D,
+   mapping any transport failure to the transport error variant
+   of §23.5;
+3. decode the response body once into a generic JSON value,
+   mapping a decode failure to the body-parse-error variant;
+4. on a non-`200` status, route the generic value through the
+   error-parsing contract of §23.7 and return the resulting
+   error variant;
+5. on a `200` status, decode the same generic value into the
+   caller's requested typed response shape, mapping a decode
+   failure to the body-parse-error variant.
+
+The decode-once-to-value-then-branch-on-status shape is a
+functional requirement: success and error bodies share the
+provider's JSON envelope at the transport layer but deserialise
+to different typed shapes, so the status code selects which shape
+the already-decoded value is interpreted as.
+
+R11-F. **Diagnostics.** The binding MAY emit debug-level
+diagnostics around the outbound URL and the response body.
+Diagnostic wording is not part of the contract.
+
+### 23.8.5 Test-tier rate limiting
+
+R11-G. **One-request-per-second guard (test builds only).** On
+the `test-ext-api` build path the client MUST serialise outbound
+requests so that no two requests issue within one second of each
+other, keeping test runs inside the provider's test-tier rate
+limit (R3). The guard MUST NOT be present in release builds. The
+mechanism used to realise it (a process-wide async lock plus a
+one-second delay held across the request) is informative under
+R36.
+
+**Binding scope of §23.8 (R36).** The URL grammar, path tokens,
+provider constants, supported-chain set, and header set above are
+dictated by the public 1inch v6.0 API and bind as interop
+(R29/R33). The error-routing and decode-branch behaviour are the
+functional contract. All Rust type names, private struct and
+field names, helper/marker types, local variables, control-flow
+decomposition, and diagnostic wording used to realise this
+section are informative: a re-derivation that emits the same
+URLs, headers, and decode/error behaviour with different internal
+naming or structure is conformant. Residual similarity of the
+realisation to the historical lineage is governed by the R35
+gate, under which a thin REST-path composer of this kind retains
+little discretionary expression once the dictated grammar and
+interface are excluded.
+
+## 23.9 Binding Requirements
 
 R1-R9 above are binding. In addition:
 
@@ -262,19 +459,19 @@ R12. **No vendored provider source.** The crate shall consume
      each provider's public HTTP API only. No provider's
      source code shall be vendored into the crate.
 
-## 23.8 Tests
+## 23.10 Tests
 
 The crate ships unit tests colocated with each region. The
-unit-test set at the time of writing covers:
+chapter-bound unit-test set covers:
 
 - Anti-phishing URL validation on the provider client.
 
 End-to-end tests against the live provider API are not in the
-test set at the time of writing; they require both the
+chapter-bound test set; they require both the
 deferred RPC handlers (D2) and the test-only authentication
 build path (R3) configured with a valid test-tier token.
 
-## 23.9 Deferred Work
+## 23.11 Deferred Work
 
 D1. **Provider-agnostic abstraction.** A trait covering the
     common client surface across providers is an open
@@ -290,18 +487,18 @@ D2. **JSON-RPC handler registration.** The intended public
     entry for this provider.
 
 D3. **1inch Fusion mode.** Only the classic-swap surface is
-    bound at the time of writing. The intent-based, resolver-
+    bound in the chapter-bound substrate. The intent-based, resolver-
     filled Fusion variant of the provider's API is not
     bound.
 
 D4. **Portfolio endpoint integration.** The portfolio cross-
     prices request and response types are defined but no
-    consumer in the codebase calls them.
+    consumer in the project calls them.
 
 D5. **Allowance-approval flow.** The `AllowanceNotEnough`
     error variant carries enough information (R6) for a
     consumer to issue an ERC-20 `approve` call before
-    retrying. No such flow is wired at the time of writing;
+    retrying. No such flow is wired in the chapter-bound substrate;
     the variant is a parse target without a handler.
 
 D6. **Production rate-limit policy.** Only the test-only
@@ -316,7 +513,7 @@ D7. **Transaction signing and broadcast.** The transaction-
     sign or broadcast; that wiring belongs in the integrating
     RPC handler and the EVM coin support module.
 
-## 23.10 External References
+## 23.12 External References
 
 - The 1inch Swap API v6.0 specification (the public HTTP API
   bound by the first provider).
@@ -331,7 +528,7 @@ D7. **Transaction signing and broadcast.** The transaction-
   (the workspace's standard numeric substrates for on-chain
   amounts and allowance values).
 
-## 23.11 Baseline Verifications
+## 23.13 Baseline Verifications
 
 The following are verifiable from the baseline state defined
 in [Chapter 02](02-baseline-state.md), commit
@@ -361,12 +558,10 @@ V4. The provider's HTTP API is a public specification.
     workspace; the binding is via the public HTTP surface
     only (R12).
 
-## 23.12 Provenance Footer
+## 23.14 Provenance Footer
 
-- *Status:* driving-spec.
-- *Version:* v2.
-- *Verified against:* baseline commit
-  `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of the
+- *Inputs:* the baseline workspace at the pinned baseline-revision
+  commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of the
   trading-API binding crate at baseline verified via
   `git ls-tree c1d46c0c1592faa0860f704008b2b2381bc3840f`
   and tree-wide `git grep` for the provider keywords against
@@ -375,4 +570,26 @@ V4. The provider's HTTP API is a public specification.
   the publicly-documented EVM chain ids of the twelve chains
   enumerated in §23.2; the ERC-20 `approve`/`allowance`
   standard.
-- *Forbidden corpus:* not consulted.
+- *Permitted-input classes used:* baseline source; external public
+  specifications (1inch Swap API v6.0; 1inch Portfolio Cross-Prices
+  API; ERC-20 `approve`/`allowance`); behavioural observation of
+  public networks (the publicly-documented EVM chain ids);
+  Interop / third-party-API-bound reuse (R29 wire-format / R33
+  third-party-api-bound) for the dictated 1inch interop embedded in
+  §23.7 and §23.8 — the error wire-envelope field spellings
+  (`error`/`description`/`statusCode`/`meta`/`requestId` and the
+  `meta` `type`/`value` keys), the `allowance`/`amount` `meta.type`
+  tokens, the URL grammar and path tokens, the aggregation-router
+  and native-asset-sentinel contract addresses, the supported-chain
+  set, and the content-negotiation header names — whose authoritative
+  source is the public 1inch v6.0 API, not the historical lineage.
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* not consulted for clean-room derivation. The
+  dictated 1inch interop fragments enumerated above (R29/R33) are
+  sourced from the public 1inch v6.0 API documentation; no
+  discretionary expression — no function bodies, private
+  identifiers, helper decomposition, control-flow transcription, or
+  diagnostic/Display string literals — from the historical lineage
+  crosses into this chapter. The realisation's residual similarity
+  to that lineage for the thin REST-path composer is governed by the
+  R35 gate (see §23.8 binding-scope note).
