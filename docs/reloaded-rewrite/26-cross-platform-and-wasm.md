@@ -2,607 +2,738 @@
 
 **Status:** driving-spec.
 
+> **One-sentence claim:** the project shall target a nine-row
+> build-target matrix out of a single source tree without
+> forking the source code, via a two-macro plus point-of-use
+> attribute platform-guard discipline, a two-crate platform-
+> shim split, per-crate target-table dependency-graph
+> separation, dual storage and asynchronous-runtime and
+> transport substrates, and a filesystem-and-operating-system
+> isolation substrate.
+
 The chapter binds the substrate by which the workspace targets
-the chapter-bound nine-row build-target matrix out of a single
-source tree without forking the source code: a chapter-bound
-two-macro plus point-of-use attribute platform-guard discipline,
-a chapter-bound two-crate platform-shim split, a chapter-bound
-target-table per-crate dependency-graph separation, a chapter-
-bound storage-backend duality substrate, a chapter-bound dual
-asynchronous-runtime substrate, a chapter-bound dual transport
-substrate, a chapter-bound filesystem-and-operating-system
-isolation substrate, a chapter-bound native-only-stack
-enumeration, a chapter-bound WebAssembly-only-stack identifier,
-and a chapter-bound continuous-integration matrix.
+the nine-row build-target matrix out of a single
+source tree without forking the source code: a two-macro plus point-of-use attribute platform-guard discipline,
+a two-crate platform-shim split, a target-table per-crate dependency-graph separation, a
+storage-backend duality substrate, a dual
+asynchronous-runtime substrate, a dual transport
+substrate, a filesystem-and-operating-system
+isolation substrate, a native-only-stack
+enumeration, a WebAssembly-only-stack identifier,
+and a continuous-integration matrix.
 
 ## 26.1 Executive Summary
 
-The substrate occupies the chapter-bound structural seam between
-the chapter-bound shared workspace source tree and a chapter-
-bound nine-row build-target matrix:
+The substrate occupies the structural seam between
+the shared workspace source tree and a
+nine-row build-target matrix:
 
-| Bound family   | Bound target triple                                | Bound build artefact                            |
+| Bound family | Bound target triple | Bound build artefact |
 | -------------- | -------------------------------------------------- | ----------------------------------------------- |
-| Linux desktop  | `x86_64-unknown-linux-gnu`                         | A chapter-bound native binary.                  |
-| macOS desktop  | `x86_64-apple-darwin`                              | A chapter-bound native binary.                  |
-| macOS desktop  | `aarch64-apple-darwin`                             | A chapter-bound native binary.                  |
-| macOS desktop  | Universal binary merged via the chapter-bound Apple `lipo` tool. | A chapter-bound merged native binary.           |
-| Windows desktop | `x86_64-pc-windows-msvc`                          | A chapter-bound native executable.              |
-| iOS mobile     | `aarch64-apple-ios`                                | A chapter-bound static library.                 |
-| Android mobile | `aarch64-linux-android`                            | A chapter-bound shared library.                 |
-| Android mobile | `armv7-linux-androideabi`                          | A chapter-bound shared library.                 |
-| Browser        | `wasm32-unknown-unknown`                           | A chapter-bound `wasm-pack` package.            |
+| Linux desktop | `x86_64-unknown-linux-gnu` | A native binary. |
+| macOS desktop | `x86_64-apple-darwin` | A native binary. |
+| macOS desktop | `aarch64-apple-darwin` | A native binary. |
+| macOS desktop | Universal binary merged via the Apple `lipo` tool. | A merged native binary. |
+| Windows desktop | `x86_64-pc-windows-msvc` | A native executable. |
+| iOS mobile | `aarch64-apple-ios` | A static library. |
+| Android mobile | `aarch64-linux-android` | A shared library. |
+| Android mobile | `armv7-linux-androideabi` | A shared library. |
+| Browser | `wasm32-unknown-unknown` | A `wasm-pack` package. |
 
-The chapter-02-anchored baseline tree carried a chapter-bound
-partial form of the macro substrate (R2) and the chapter-bound
-target-table substrate (R5), a chapter-bound ancestor of the
-dual-executor substrate (R10–R12), and a chapter-bound early
+The chapter-02-anchored baseline tree carried a partial form of the macro substrate (R2) and the target-table substrate (R5), a ancestor of the
+dual-executor substrate (R10–R12), and a early
 IndexedDB layer (R8–R9). The substrate at landing extends the
-chapter-bound pattern so that every chapter-bound asynchronous
-transport, every chapter-bound persistence component, and every
-chapter-bound executor entry point exposes the chapter-bound
-dual shape; adding a chapter-bound target therefore becomes a
-chapter-bound single-cfg change at the chapter-bound boundary,
-not a chapter-bound fork.
+pattern so that every asynchronous
+transport, every persistence component, and every
+executor entry point exposes the dual shape; adding a target therefore becomes a
+single-cfg change at the boundary,
+not a fork.
 
-The chapter-bound build-tooling changes themselves (the chapter-
-bound toolchain pin, the chapter-bound workspace-member registry
-of chapter 02 R4, the chapter-bound continuous-integration matrix
+The build-tooling changes themselves (the
+toolchain pin, the workspace-member registry
+of chapter 02 R4, the continuous-integration matrix
 expansion) are bound in chapters 02 and 03. This chapter binds
-what the chapter-bound source code does in response.
+what the source code does in response.
 
-Bound rules R1–R5 cover the chapter-bound compilation-guard
-substrate; R6–R7 cover the chapter-bound two-crate platform-
-shim split; R8–R9 cover the chapter-bound storage-backend
-duality; R10–R12 cover the chapter-bound dual asynchronous-
-runtime substrate; R13–R14 cover the chapter-bound dual
-transport substrate; R15 covers the chapter-bound filesystem-
+Bound rules R1–R5 cover the compilation-guard
+substrate; R6–R7 cover the two-crate platform-
+shim split; R8–R9 cover the storage-backend
+duality; R10–R12 cover the dual asynchronous-
+runtime substrate; R13–R14 cover the dual
+transport substrate; R15 covers the filesystem-
 and-operating-system isolation substrate; R16–R17 cover the
-chapter-bound native-only-stack enumeration and the chapter-
-bound WebAssembly-only-stack identifier; R18 covers the chapter-
-bound continuous-integration matrix.
+native-only-stack enumeration and the
+WebAssembly-only-stack identifier; R18 covers the
+continuous-integration matrix.
 
 ## 26.2 Subsystem Shape
 
-The substrate occupies a chapter-bound horizontal seam across
-every chapter-bound workspace member of chapter 02 R4. Three
-chapter-bound seam classes are bound:
+The substrate occupies a horizontal seam across
+every workspace member of chapter 02 R4. Three
+seam classes are bound:
 
-| Bound seam class                                          | Bound substrate locus                                                              |
+| Bound seam class | Bound substrate locus |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| In-source compilation guards (R1–R3)                      | Per chapter-bound source file, at chapter-bound module or item granularity.        |
-| Per-crate dependency separation (R4–R5)                   | Per chapter-bound crate manifest.                                                  |
-| Per-subsystem dual-implementation behind common contracts (R8–R14) | Per chapter-bound persistence consumer, executor entry point, and transport entry point. |
+| In-source compilation guards (R1–R3) | Per source file, at module or item granularity. |
+| Per-crate dependency separation (R4–R5) | Per crate manifest. |
+| Per-subsystem dual-implementation behind common contracts (R8–R14) | Per persistence consumer, executor entry point, and transport entry point. |
 
-The substrate does *not* modify the chapter-bound configuration
-surface of chapter 02 R6, the chapter-bound request-and-response
-surface of chapter 02 R7, the chapter-bound license posture of
-chapter 02 R9, or the chapter-bound build-target surface of
+The substrate does *not* modify the configuration
+surface of chapter 02 R6, the request-and-response
+surface of chapter 02 R7, the license posture of
+chapter 02 R9, or the build-target surface of
 chapter 02 R8.
 
 ## 26.3 Bound Compilation-Guard Substrate
 
-**R1.** The chapter-bound compilation-guard substrate consists
-of three chapter-bound permitted forms; consumers MUST select
-exactly one per chapter-bound site:
+**R1.** The compilation-guard substrate consists
+of three permitted forms; consumers MUST select
+exactly one per site:
 
-| Bound form                                                 | Bound use case                                                                           |
+| Bound form | Bound use case |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| The chapter-bound declarative macros `cfg_native!` and `cfg_wasm32!` of R2. | A chapter-bound group of three to thirty `use` statements, an `impl` block, or a chapter-bound multi-item top-of-file branching region. |
-| The chapter-bound point-of-use attribute pair `#[cfg(not(target_arch = "wasm32"))]` and `#[cfg(target_arch = "wasm32")]` of R3. | A chapter-bound single item: one function, one match arm, one enum variant, one struct field, one `impl`, or one chapter-bound whole-module declaration. |
-| The chapter-bound per-crate manifest target-table pattern `[target.'cfg(target_arch = "wasm32")']` and its non-WebAssembly negation, of R4–R5. | A chapter-bound dependency whose chapter-bound transitive graph does not exist on the other side of the chapter-bound platform fence. |
+| The declarative macros `cfg_native!` and `cfg_wasm32!` of R2. | A group of three to thirty `use` statements, an `impl` block, or a multi-item top-of-file branching region. |
+| The point-of-use attribute pair `#[cfg(not(target_arch = "wasm32"))]` and `#[cfg(target_arch = "wasm32")]` of R3. | A single item: one function, one match arm, one enum variant, one struct field, one `impl`, or one whole-module declaration. |
+| The per-crate manifest target-table pattern `[target.'cfg(target_arch = "wasm32")']` and its non-WebAssembly negation, of R4–R5. | A dependency whose transitive graph does not exist on the other side of the platform fence. |
 
-**R2.** The chapter-bound declarative-macro substrate MUST expose
-exactly two chapter-bound macros, both crate-exported from the
-chapter-bound shared-utility crate `common`:
+**R2.** The declarative-macro substrate MUST expose
+exactly two macros, both crate-exported from the
+shared-utility crate `common`:
 
-| Bound macro     | Bound expansion                                                                                                  |
+| Bound macro | Bound expansion |
 | --------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `cfg_native!`   | The chapter-bound declarative substrate routed through the chapter-bound sibling-allowlist crate `cfg_if` under the chapter-bound `not(target_arch = "wasm32")` arm. |
-| `cfg_wasm32!`   | The chapter-bound declarative substrate routed through the chapter-bound sibling-allowlist crate `cfg_if` under the chapter-bound `target_arch = "wasm32"` arm. |
+| `cfg_native!` | The declarative substrate routed through the sibling-allowlist crate `cfg_if` under the `not(target_arch = "wasm32")` arm. |
+| `cfg_wasm32!` | The declarative substrate routed through the sibling-allowlist crate `cfg_if` under the `target_arch = "wasm32"` arm. |
 
-Both chapter-bound macros are chapter-bound ergonomic
-substrates only: a chapter-bound block of three-to-thirty
-chapter-bound import statements (or a chapter-bound helper
-function or a chapter-bound impl block) wrapped in `cfg_native!
-{ ... }` is more chapter-bound readable than peppering every
-line with the chapter-bound point-of-use attribute of R3.
+Both macros are ergonomic
+substrates only: a block of three-to-thirty
+import statements (or a helper
+function or a impl block) wrapped in `cfg_native!
+{ ... }` is more readable than peppering every
+line with the point-of-use attribute of R3.
 
-**R3.** The chapter-bound point-of-use attribute pair MUST be
-the chapter-bound canonical form for chapter-bound finer-than-
-multi-item granularity: chapter-bound single-item, chapter-bound
-single-function, chapter-bound single-match-arm, chapter-bound
-single-enum-variant, chapter-bound single-struct-field, chapter-
-bound single-impl, and chapter-bound whole-module declarations.
+**R3.** The point-of-use attribute pair MUST be
+the canonical form for finer-than-
+multi-item granularity: single-item, single-function, single-match-arm, single-enum-variant, single-struct-field, 
+single-impl, and whole-module declarations.
 
-The chapter-bound convention is bound as: chapter-bound macros
-for chapter-bound multi-item groups and chapter-bound top-of-
-file branching; chapter-bound attributes for everything else.
+The convention is bound as: macros
+for multi-item groups and top-of-
+file branching; attributes for everything else.
 
 ## 26.4 Bound Per-Crate Dependency Separation
 
-**R4.** Where a chapter-bound dependency makes no sense on the
-chapter-bound other side of the chapter-bound platform fence,
-the chapter-bound gate MUST move out of the chapter-bound source
-into the chapter-bound per-crate manifest via the chapter-bound
-Cargo target-table substrate `[target.'cfg(...)'.dependencies]`.
+**R4.** Where a dependency makes no sense on the
+other side of the platform fence,
+the gate MUST move out of the source
+into the per-crate manifest via the Cargo target-table substrate `[target.'cfg(...)'.dependencies]`.
 
-**R5.** A chapter-bound canonical worked instance is the
-chapter-bound hardware-wallet crate `trezor`: the chapter-bound
-binding-crate consumed by the chapter-bound non-WebAssembly
-build (which transitively pulls in a chapter-bound C library
-that does not cross-compile to the chapter-bound browser target
-triple) is bound under the chapter-bound non-WebAssembly target
-table; the chapter-bound browser-interoperability crates
-`js-sys` and `wasm-bindgen` are bound under the chapter-bound
-WebAssembly target table. Consumers that follow the chapter-
-bound pattern include the chapter-25-bound storage crate
-`db_common`, the chapter-bound browser-wallet integration crate
+**R5.** A canonical worked instance is the
+hardware-wallet crate `trezor`: the binding-crate consumed by the non-WebAssembly
+build (which transitively pulls in a C library
+that does not cross-compile to the browser target
+triple) is bound under the non-WebAssembly target
+table; the browser-interoperability crates
+`js-sys` and `wasm-bindgen` are bound under the WebAssembly target table. Consumers that follow the
+pattern include the chapter-25-bound storage crate
+`db_common`, the browser-wallet integration crate
 `mm2_metamask`, the chapter-22-bound WalletConnect substrate
 `kdf_walletconnect`, and several others.
 
 ## 26.5 Bound Two-Crate Platform-Shim Split
 
-**R6.** The substrate MUST carry exactly two chapter-bound
-binary-shaped crates, each owning a chapter-bound subset of the
-chapter-bound nine-row build-target matrix:
+**R6.** The substrate MUST carry exactly two binary-shaped crates, each owning a subset of the
+nine-row build-target matrix:
 
-| Bound shim crate     | Bound covered targets                                                       | Bound build-artefact-emitting workflow                                          |
+| Bound shim crate | Bound covered targets | Bound build-artefact-emitting workflow |
 | -------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| The application-entry crate `mm2_main` | The chapter-bound desktop targets (Linux, macOS single-arch, macOS Universal merged via the chapter-bound Apple `lipo` tool, Windows) and the chapter-bound browser target. | A chapter-bound `[[bin]]` target named `mm2` for desktop; a chapter-bound `[lib]` target with the chapter-bound `cdylib`/`staticlib`/`lib` crate-type tuple consumed by the chapter-bound `wasm-pack` browser invocation. |
-| The mobile-bindings crate `mm2_bin_lib` | The chapter-bound mobile targets (iOS, Android double-ABI).                 | A chapter-bound `[[bin]]` target named `mm2_reloaded` plus a chapter-bound `[lib]` target with the chapter-bound `cdylib`/`rlib` crate-type pair. The iOS workflow runs the chapter-bound Cargo build against the chapter-bound iOS target triple and uploads the chapter-bound static-library artefact. The Android workflow runs the chapter-bound `cargo ndk` per chapter-bound Android target triple and uploads the chapter-bound shared-library artefact. |
+| The application-entry crate `mm2_main` | The desktop targets (Linux, macOS single-arch, macOS Universal merged via the Apple `lipo` tool, Windows) and the browser target. | A `[[bin]]` target named `mm2` for desktop; a `[lib]` target with the `cdylib`/`staticlib`/`lib` crate-type tuple consumed by the `wasm-pack` browser invocation. |
+| The mobile-bindings crate `mm2_bin_lib` | The mobile targets (iOS, Android double-ABI). | A `[[bin]]` target named `mm2_reloaded` plus a `[lib]` target with the `cdylib`/`rlib` crate-type pair. The iOS workflow runs the Cargo build against the iOS target triple and uploads the static-library artefact. The Android workflow runs the `cargo ndk` per Android target triple and uploads the shared-library artefact. |
 
-**R7.** The chapter-bound rationale for the chapter-bound two-
+**R7.** The rationale for the two-
 crate split is threefold:
 
-- The chapter-bound desktop binary is invoked by the chapter-
-  bound Cargo run command and by chapter-bound packaging steps
-  (the chapter-bound Docker image, the chapter-bound Homebrew
-  formula, the chapter-bound Windows installer); a chapter-bound
-  clean binary-target shape is the chapter-bound easiest way to
+- The desktop binary is invoked by the
+  Cargo run command and by packaging steps
+  (the Docker image, the Homebrew
+  formula, the Windows installer); a clean binary-target shape is the easiest way to
   keep that workflow unchanged.
-- Mobile builds need a chapter-bound library artefact for the
-  chapter-bound mobile-host application (Swift / Kotlin) to
-  link, not an executable. A chapter-bound separate crate keeps
-  the chapter-bound mobile dependency surface (historically the
-  chapter-bound most fragile substrate to cross-compile)
-  isolated from chapter-bound desktop dependency upgrades.
-- The chapter-bound browser build is consumed via the chapter-
-  bound `wasm-pack` substrate, which itself runs the chapter-
-  bound Cargo build against the chapter-bound browser target
-  triple with the appropriate chapter-bound crate-type and
-  post-processes the result. The chapter-bound `mm2_main`
-  library entry exposes everything the chapter-bound JS shim
-  needs, so a chapter-bound separate shim crate is unnecessary
-  on the chapter-bound browser target.
+- Mobile builds need a library artefact for the
+  mobile-host application (Swift / Kotlin) to
+  link, not an executable. A separate crate keeps
+  the mobile dependency surface (historically the
+  most fragile substrate to cross-compile)
+  isolated from desktop dependency upgrades.
+- The browser build is consumed via the
+  `wasm-pack` substrate, which itself runs the
+  Cargo build against the browser target
+  triple with the appropriate crate-type and
+  post-processes the result. The `mm2_main`
+  library entry exposes everything the JS shim
+  needs, so a separate shim crate is unnecessary
+  on the browser target.
 
-The chapter-bound mobile crate's chapter-bound binary
-`mm2_reloaded` MUST be selected via a chapter-bound
-`default-run` manifest entry so that it does not collide with
-the chapter-bound desktop binary `mm2` built out of `mm2_main`.
-The chapter-bound mobile-crate library module MUST re-export
-the chapter-bound public application-entry surface
+The mobile crate's binary
+`mm2_reloaded` MUST be selected via a `default-run` manifest entry so that it does not collide with
+the desktop binary `mm2` built out of `mm2_main`.
+The mobile-crate library module MUST re-export
+the public application-entry surface
 (`lp_main`, `mm2_status`, `MainStatus`) from `mm2_main` plus
-the chapter-bound non-WebAssembly-gated re-export of the
-chapter-bound `mm2_main`-side application-entry accessor and
-the chapter-bound run-entry accessor. This chapter-bound split
-is the chapter-bound only place in the workspace where
-chapter-bound target-specific binary surfaces exist; everything
-below `mm2_main` is chapter-bound library-shaped.
+the non-WebAssembly-gated re-export of the
+`mm2_main`-side application-entry accessor and
+the run-entry accessor. This split
+is the only place in the workspace where
+target-specific binary surfaces exist; everything
+below `mm2_main` is library-shaped.
 
 ## 26.6 Bound Storage-Backend Duality
 
-**R8.** The chapter-bound pattern bound by this substrate for
-every chapter-bound persistence consumer in the workspace MUST
-be the chapter-bound four-step shape:
+**R8.** The pattern bound by this substrate for
+every persistence consumer in the workspace MUST
+be the four-step shape:
 
-| Bound step | Bound contract                                                                                                                                                          |
+| Bound step | Bound contract |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1          | Define a chapter-bound behaviour-only trait in the chapter-bound consumer crate. The trait MUST be chapter-bound asynchronous, MUST be chapter-bound generic over the chapter-bound result types, and MUST NOT carry chapter-bound SQL or chapter-bound IndexedDB types in its chapter-bound signature. |
-| 2          | Provide a chapter-bound native implementation backed by the chapter-bound asynchronous connection facade of chapter 25 R11 in a chapter-bound module named `sqlite_storage.rs` or under a chapter-bound `sqlite/` sub-module. |
-| 3          | Provide a chapter-bound WebAssembly implementation backed by the chapter-bound IndexedDB substrate of R9 in a chapter-bound module named `wasm_storage.rs`.                              |
-| 4          | Branch in the chapter-bound consumer-crate's chapter-bound module-roots module on the chapter-bound WebAssembly target predicate so that exactly one of the chapter-bound two implementations compiles per target. |
+| 1 | Define a behaviour-only trait in the consumer crate. The trait MUST be asynchronous, MUST be generic over the result types, and MUST NOT carry SQL or IndexedDB types in its signature. |
+| 2 | Provide a native implementation backed by the asynchronous connection facade of chapter 25 R11 in a module named `sqlite_storage.rs` or under a `sqlite/` sub-module. |
+| 3 | Provide a WebAssembly implementation backed by the IndexedDB substrate of R9 in a module named `wasm_storage.rs`. |
+| 4 | Branch in the consumer-crate's module-roots module on the WebAssembly target predicate so that exactly one of the two implementations compiles per target. |
 
-A chapter-bound canonical worked instance is the chapter-05-
+A canonical worked instance is the chapter-05-
 bound hierarchical-deterministic-wallet storage substrate.
-Chapter-bound consumers of the chapter-bound pattern include
+Chapter-bound consumers of the pattern include
 the chapter-24-bound graphical-user-interface account-state
 substrate, the chapter-12 / chapter-14 / chapter-15-bound swap
 state stores, the chapter-19-bound non-fungible-token table
 substrate, and the chapter-22-bound WalletConnect session
 store.
 
-**R9.** The chapter-bound WebAssembly persistence crate `mm2_db`
-MUST be entirely chapter-bound browser-oriented: its chapter-
-bound module substrate consists of a chapter-bound IndexedDB
-driver module, a chapter-bound lock module, a chapter-bound
-driver-submodule directory, a chapter-bound cursor module, and
-a chapter-bound IndexedDB public-accessor module. Its chapter-
-bound manifest dependency-table substrate MUST consist almost
-entirely of the chapter-bound WebAssembly target block (the
-chapter-bound browser-interface crate `web-sys`, the chapter-
-bound browser-interoperability crate `js-sys`, the chapter-
-bound asynchronous browser-future-adaptor crate `wasm-bindgen-
-futures`, et cetera). On the chapter-bound native target the
-chapter-bound crate compiles to nothing of substance and is
-brought in only so chapter-bound downstream crates need not
-carry their own chapter-bound conditional-compilation-guarded
+**R9.** The WebAssembly persistence crate `mm2_db`
+MUST be entirely browser-oriented: its 
+module substrate consists of a IndexedDB
+driver module, a lock module, a driver-submodule directory, a cursor module, and
+a IndexedDB public-accessor module. Its 
+manifest dependency-table substrate MUST consist almost
+entirely of the WebAssembly target block (the
+browser-interface crate `web-sys`, the
+browser-interoperability crate `js-sys`, the
+asynchronous browser-future-adaptor crate `wasm-bindgen-
+futures`, et cetera). On the native target the
+crate compiles to nothing of substance and is
+brought in only so downstream crates need not
+carry their own conditional-compilation-guarded
 import.
 
 ## 26.7 Bound Dual Asynchronous-Runtime Substrate
 
-**R10.** The chapter-bound asynchronous-runtime substrate
-exposes chapter-bound two parallel modules under the chapter-
-bound shared-utility crate's chapter-bound `executor` sub-
-module, selected by chapter-bound point-of-use attribute (R3)
-in the chapter-bound module-roots module:
+**R10.** The asynchronous-runtime substrate
+exposes two parallel modules under the
+shared-utility crate's `executor` sub-
+module, selected by point-of-use attribute (R3)
+in the module-roots module:
 
-| Bound module          | Bound primary accessor contract                                                                          |
+| Bound module | Bound primary accessor contract |
 | --------------------- | -------------------------------------------------------------------------------------------------------- |
-| `native_executor`     | Forwards to a chapter-bound work-stealing native asynchronous runtime; the chapter-bound spawn accessor requires the chapter-bound `Send` bound on the chapter-bound spawned future. |
-| `wasm_executor`       | Forwards to the chapter-bound sibling-allowlist asynchronous browser-future-adaptor accessor `wasm_bindgen_futures::spawn_local`; the chapter-bound spawn accessor drops the chapter-bound `Send` bound. |
+| `native_executor` | Forwards to a work-stealing native asynchronous runtime; the spawn accessor requires the `Send` bound on the spawned future. |
+| `wasm_executor` | Forwards to the sibling-allowlist asynchronous browser-future-adaptor accessor `wasm_bindgen_futures::spawn_local`; the spawn accessor drops the `Send` bound. |
 
-The chapter-bound `Send`-bound problem is the chapter-bound
-central reason why chapter-bound browser-target asynchronous
-code differs from chapter-bound native-target asynchronous
-code: chapter-bound native asynchronous tasks spawned on a
-chapter-bound work-stealing executor MUST be chapter-bound
-`Send`-bounded, but the chapter-bound browser event loop is
-chapter-bound single-threaded and the chapter-bound browser-
+The `Send`-bound problem is the central reason why browser-target asynchronous
+code differs from native-target asynchronous
+code: native asynchronous tasks spawned on a
+work-stealing executor MUST be `Send`-bounded, but the browser event loop is
+single-threaded and the browser-
 future-adaptor accessor does not require it. Forcing the
-chapter-bound `Send` bound on every chapter-bound future just
-to satisfy the chapter-bound native path would prevent the
-chapter-bound browser path from using any chapter-bound
-non-`Send` future from the chapter-bound browser-
-interoperability or chapter-bound external-blockchain-client
+`Send` bound on every future just
+to satisfy the native path would prevent the
+browser path from using any non-`Send` future from the browser-
+interoperability or external-blockchain-client
 ecosystems.
 
-**R11.** The chapter-bound browser-side executor accessor set
+**R11.** The browser-side executor accessor set
 MUST expose:
 
-- a chapter-bound `spawn` accessor accepting a chapter-bound
-  `'static`-lifetime non-`Send` future;
-- a chapter-bound `spawn_local` accessor accepting the same;
-- a chapter-bound `spawn_local_abortable` accessor returning a
-  chapter-bound `AbortOnDropHandle` newtype around the chapter-
-  bound sibling-allowlist asynchronous-abort-handle.
+- a `spawn` accessor accepting a `'static`-lifetime non-`Send` future;
+- a `spawn_local` accessor accepting the same;
+- a `spawn_local_abortable` accessor returning a
+  `AbortOnDropHandle` newtype around the
+  sibling-allowlist asynchronous-abort-handle.
 
-The chapter-bound `AbortOnDropHandle` newtype MUST implement a
-chapter-bound drop substrate that calls the chapter-bound
-abort-handle's chapter-bound abort accessor; it exists so
-chapter-bound fire-and-forget spawn patterns clean up their
-chapter-bound continuations when the chapter-bound owning
-struct is dropped. The chapter-bound spawn-after accessor MUST
-bridge the chapter-bound browser timer accessors `setTimeout`
-and `clearTimeout` through the chapter-bound browser-
+The `AbortOnDropHandle` newtype MUST implement a
+drop substrate that calls the abort-handle's abort accessor; it exists so
+fire-and-forget spawn patterns clean up their
+continuations when the owning
+struct is dropped. The spawn-after accessor MUST
+bridge the browser timer accessors `setTimeout`
+and `clearTimeout` through the browser-
 interoperability crate.
 
-**R12.** The chapter-bound wall-clock accessor `now_ms()` MUST
-expose a chapter-bound dual implementation: on the chapter-
-bound native target the chapter-bound substrate re-exports the
-chapter-bound sibling-allowlist accessor `gstuff::now_ms()`
-(routed through the chapter-bound POSIX accessor
-`gettimeofday`); on the chapter-bound browser target the
-substrate routes through the chapter-bound browser-interface
-accessor `js_sys::Date::now()`. The chapter-bound seed for the
-chapter-bound small-RNG substrate consumed in chapter-bound
-non-cryptographic contexts MUST likewise consume `now_ms()` on
+**R12.** The wall-clock accessor `now_ms()` MUST
+expose a dual implementation: on the
+native target the substrate re-exports the
+sibling-allowlist accessor `gstuff::now_ms()`
+(routed through the POSIX accessor
+`gettimeofday`); on the browser target the
+substrate routes through the browser-interface
+accessor `js_sys::Date::now()`. The seed for the
+small-RNG substrate consumed in non-cryptographic contexts MUST likewise consume `now_ms()` on
 both targets.
 
 ## 26.8 Bound Dual Transport Substrate
 
-**R13.** The chapter-bound network-layer crate `mm2_net` MUST
-expose a chapter-bound dual transport substrate organised as:
+**R13.** The network-layer crate `mm2_net` MUST
+expose a dual transport substrate organised as:
 
-| Bound module         | Bound contract                                                                                                                 |
+| Bound module | Bound contract |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `native_http`        | A chapter-bound HTTP client routed through the chapter-bound sibling-allowlist asynchronous-HTTP-client crate over a chapter-bound TLS adaptor. |
-| `wasm_http`          | A chapter-bound HTTP client routed through the chapter-bound browser fetch API.                                                 |
-| `wasm_ws`            | A chapter-bound WebSocket client routed through the chapter-bound browser WebSocket interface via the chapter-bound browser-interface crate. |
-| `transport`          | A chapter-bound unified slurp accessor surface (`slurp_url`, `slurp_url_with_headers`, `slurp_post_json`) re-exported with chapter-bound identical signatures on both targets; the chapter-bound body picks the chapter-bound right module behind a chapter-bound point-of-use attribute (R3). |
-| `grpc_web`           | A chapter-bound gRPC-WEB client that consumes both R2 macros at the top of the file and a chapter-bound single shared decode/encode body below. |
+| `native_http` | A HTTP client routed through the sibling-allowlist asynchronous-HTTP-client crate over a TLS adaptor. |
+| `wasm_http` | A HTTP client routed through the browser fetch API. |
+| `wasm_ws` | A WebSocket client routed through the browser WebSocket interface via the browser-interface crate. |
+| `transport` | A unified slurp accessor surface (`slurp_url`, `slurp_url_with_headers`, `slurp_post_json`) re-exported with identical signatures on both targets; the body picks the right module behind a point-of-use attribute (R3). |
+| `grpc_web` | A gRPC-WEB client that consumes both R2 macros at the top of the file and a single shared decode/encode body below. |
 
-Consumers above the chapter-bound transport layer write one
-chapter-bound code path. The chapter-bound native WebSocket
-client MUST be routed through a chapter-bound sibling-allowlist
+Consumers above the transport layer write one
+code path. The native WebSocket
+client MUST be routed through a sibling-allowlist
 asynchronous WebSocket crate. The chapter-22-bound WalletConnect
-substrate consumes this chapter-bound transport layer, so its
-chapter-bound relay code is also chapter-bound target-agnostic.
+substrate consumes this transport layer, so its
+relay code is also target-agnostic.
 
-**R14.** The chapter-bound network-layer crate's chapter-bound
-module substrate MUST stand on the chapter-bound storage-
-backend duality of R8: chapter-bound persistence-bearing
+**R14.** The network-layer crate's module substrate MUST stand on the storage-
+backend duality of R8: persistence-bearing
 network features (chapter-bound transport-history storage,
-chapter-bound transport-bound session state) MUST route through
-the chapter-bound chapter-bound trait substrate of R8 step 1
+transport-bound session state) MUST route through
+the trait substrate of R8 step 1
 rather than direct database access.
 
-## 26.9 Bound Filesystem-and-Operating-System Isolation
+## 26.9 Bound Browser-Local RPC Channel Substrate
 
-**R15.** The chapter-bound browser target has no chapter-bound
-filesystem. The substrate MUST collect chapter-bound all
-native-only filesystem code into the chapter-bound native-
-filesystem crate `mm2_io`. That crate's chapter-bound manifest
-target-table substrate MUST be such that its chapter-bound real
-dependencies (the chapter-bound `gstuff` filesystem helpers and
-the chapter-bound asynchronous-runtime filesystem accessor) appear
-only in the chapter-bound non-WebAssembly target block; on the
-chapter-bound browser target the chapter-bound crate compiles to
+The browser-hosted variant of the framework cannot
+expose its RPC dispatcher over a sibling-network
+listener, because the browser sandbox forbids in-page
+listeners. The substrate MUST instead supply a
+single in-process request-response channel that
+crosses the JavaScript-boundary in one direction
+and is dispatched by the asynchronous-runtime
+substrate of R10 in the other. This channel is the
+sole means by which a browser host invokes RPC
+methods on the embedded framework.
+
+**R15.** The RPC-types crate `mm2_rpc` MUST expose,
+under a `target_arch = "wasm32"` point-of-use
+attribute pair, a `wasm_rpc` module containing
+exactly the following surface:
+
+| Bound public item | Bound contract |
+| --- | --- |
+| `WasmRpcResponse` type alias | `Result<serde_json::Value, String>`. The error arm carries a human-readable message; the success arm carries the dispatcher's JSON reply verbatim. |
+| `WasmRpcRequest` type alias | A pair `(serde_json::Value, oneshot::Sender<WasmRpcResponse>)` from the futures crate. The first element is the incoming request body; the second is the per-request reply channel. |
+| `channel()` free function | Returns a `(WasmRpcSender, WasmRpcReceiver)` pair backed by a futures `mpsc` channel of bounded capacity (R15-A). The sender is wrapped in a `futures::lock::Mutex` so it is callable from concurrent JavaScript-boundary entrants without a `&mut self`. |
+| `WasmRpcSender` struct | Public, opaque field set, single field: an async mutex over the `mpsc::Sender<WasmRpcRequest>`. Carries one method, `pub async fn request(&self, request_json: serde_json::Value) -> WasmRpcResponse`, whose contract is R15-B. |
+| `WasmRpcReceiver` struct | Public, opaque field set, single field: the `mpsc::Receiver<WasmRpcRequest>`. Implements `futures::Stream<Item = WasmRpcRequest>` by delegation; the dispatcher loop of the application crate consumes it. |
+
+**R15-A.** The `mpsc` channel capacity MUST be a
+single named module-level constant. The chosen
+value MUST balance two pressures: large enough that
+ordinary front-end traffic does not back-pressure
+the JavaScript caller, and bounded so a runaway
+caller cannot exhaust browser memory. The baseline
+value is one thousand and twenty-four.
+
+**R15-B.** `WasmRpcSender::request` MUST execute
+the following sequence in order:
+
+1. Construct a oneshot reply channel.
+2. Lock the inner async mutex over the
+   `mpsc::Sender`.
+3. `try_send` the pair `(request_json, oneshot_tx)`
+   over the mpsc channel; on send error, return the
+   error arm carrying the formatted send error.
+4. Drop the mutex guard before awaiting the reply
+   so a second concurrent caller may proceed.
+5. Await the oneshot receiver. On receive success,
+   return the inner `WasmRpcResponse` verbatim. On
+   receiver-cancelled error, return the error arm
+   carrying a formatted cancellation message.
+
+The method MUST NOT panic on either send or receive
+failure; both are reported through the error arm of
+the return type.
+
+**R15-C.** `WasmRpcReceiver` MUST implement
+`futures::Stream<Item = WasmRpcRequest>` by
+forwarding `poll_next` to the wrapped
+`mpsc::Receiver`. No buffering, filtering, or
+re-ordering is permitted; the dispatcher loop sees
+requests in arrival order.
+
+**R15-D.** The `wasm_rpc` module MUST be the only
+crate-level entry point for the browser-local RPC
+channel; the application-binary crate's WASM entry
+point (chapter 27 R-bound `mm2_wasm_lib`) MUST
+acquire the `WasmRpcSender` from the central
+context and call `request` on it; the framework's
+RPC dispatcher (chapter-bound RPC top-level loop)
+MUST consume the matching `WasmRpcReceiver` as a
+stream and reply on the per-request oneshot.
+
+## 26.10 Bound Filesystem-and-Operating-System Isolation
+
+**R16.** The browser target has no filesystem. The substrate MUST collect all
+native-only filesystem code into the native-
+filesystem crate `mm2_io`. That crate's manifest
+target-table substrate MUST be such that its real
+dependencies (the `gstuff` filesystem helpers and
+the asynchronous-runtime filesystem accessor) appear
+only in the non-WebAssembly target block; on the
+browser target the crate compiles to
 an empty shell. Code that needs to *store a thing* therefore MUST
-NOT call the chapter-bound native-filesystem crate on the
-chapter-bound browser target; it MUST call the chapter-bound
-relevant storage trait of R8, whose chapter-bound browser-target
-implementation persists the chapter-bound thing to the chapter-
-bound IndexedDB substrate of R9 instead.
+NOT call the native-filesystem crate on the
+browser target; it MUST call the relevant storage trait of R8, whose browser-target
+implementation persists the thing to the
+IndexedDB substrate of R9 instead.
 
-## 26.10 Bound Native-Only Stack Enumeration
+## 26.11 Bound Native-Only Stack Enumeration
 
-**R16.** The substrate MUST classify the chapter-bound following
-chapter-bound stacks as chapter-bound entirely or essentially
-native-only because the chapter-bound foreign-function-interface
-chains they pull in do not cross-compile to the chapter-bound
-browser target triple, or the chapter-bound protocol the
-chapter-bound stack implements has no chapter-bound browser
+**R17.** The substrate MUST classify the following
+stacks as entirely or essentially
+native-only because the foreign-function-interface
+chains they pull in do not cross-compile to the browser target triple, or the protocol the
+stack implements has no browser
 equivalent:
 
-| Bound native-only stack                                                                            | Bound gating substrate                                                                                                                                                              |
+| Bound native-only stack | Bound gating substrate |
 | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The chapter-bound Lightning Network coin module (under the chapter-bound coins crate's chapter-bound `lightning` sub-module). | Gated by `cfg_native!` blocks (R2) inside the chapter-bound coin-platform-aggregator module of the chapter-bound coins crate. Chapter-bound browser builds skip the entire Lightning module. |
-| The chapter-bound Z-coin Sapling sub-crate of the chapter-bound coins crate.                       | The chapter-bound Sapling cryptographic substrate consumes chapter-bound foreign-function-interface code that does not cross-compile to the chapter-bound browser target triple. |
-| The chapter-bound Solana sub-crate of the chapter-bound coins crate (see chapter 27).              | The chapter-bound modular Solana sibling-allowlist crate set replaced the chapter-bound earlier chained substrate (the chapter-bound `solana-remote-wallet` → `hidapi` → `libudev` chain) precisely so that the chapter-bound mobile cross-compiles of R18 could succeed. |
-| The chapter-bound Trezor hardware-wallet crate.                                                    | Native uses the chapter-bound C `secp256k1-ffi` substrate and a chapter-bound USB human-interface-device transport; the chapter-bound WebAssembly target table ships `js-sys`/`wasm-bindgen` for a chapter-bound in-browser variant. |
-| The chapter-bound Ledger hardware-wallet crate.                                                    | The chapter-bound crate at the substrate landing point has only the chapter-bound WebAssembly-side WebUSB transport in its chapter-bound dependency table; the chapter-bound native HID path is chapter-bound scaffolded but not chapter-bound integrated and the crate is not yet chapter-bound wired into the rest of the workspace. |
+| The Lightning Network coin module (under the coins crate's `lightning` sub-module). | Gated by `cfg_native!` blocks (R2) inside the coin-platform-aggregator module of the coins crate. Chapter-bound browser builds skip the entire Lightning module. |
+| The Z-coin Sapling sub-crate of the coins crate. | The Sapling cryptographic substrate consumes foreign-function-interface code that does not cross-compile to the browser target triple. |
+| The Solana sub-crate of the coins crate (see chapter 27). | The modular Solana sibling-allowlist crate set replaced the earlier chained substrate (the `solana-remote-wallet` → `hidapi` → `libudev` chain) precisely so that the mobile cross-compiles of R18 could succeed. |
+| The Trezor hardware-wallet crate. | Native uses the C `secp256k1-ffi` substrate and a USB human-interface-device transport; the WebAssembly target table ships `js-sys`/`wasm-bindgen` for a in-browser variant. |
+| The Ledger hardware-wallet crate. | The crate at the substrate landing point has only the WebAssembly-side WebUSB transport in its dependency table; the native HID path is scaffolded but not integrated and the crate is not yet wired into the rest of the workspace. |
 
-**R17.** Conversely, the chapter-bound browser-wallet integration
-crate `mm2_metamask` is chapter-bound browser-only by definition
-(the chapter-bound provider object bound by the chapter-bound
-EIP-1193 protocol only exists inside a chapter-bound browser).
-Its chapter-bound dependency table is essentially: *everything
-in the chapter-bound WebAssembly target block, nothing in the
-chapter-bound native target block*.
+**R18.** Conversely, the browser-wallet integration
+crate `mm2_metamask` is browser-only by definition
+(the provider object bound by the EIP-1193 protocol only exists inside a browser).
+Its dependency table is essentially: *everything
+in the WebAssembly target block, nothing in the
+native target block*.
 
-## 26.11 Bound Continuous-Integration Matrix
+### 26.11.1 Bound HID-Driver Substrate
 
-**R18.** The chapter-bound continuous-integration substrate MUST
-build the chapter-bound cartesian product of the chapter-bound
-target matrix and the chapter-bound (build / test / lint) job
-axis under the chapter-bound workflows directory of the
-chapter-bound continuous-integration substrate. The chapter-
-bound workflow registry MUST be:
+The Trezor hardware-wallet stack of R17 reaches the
+device through a native-only human-interface-device
+(HID) transport. The transport substrate sits in the
+`hw_common` infrastructure crate (chapter 27 §27.11)
+as a single module gated `#[cfg(not(target_arch = "wasm32"))]`.
+This sub-section binds its shape.
 
-| Bound workflow         | Bound covered targets                                                            |
+**R17-A.** The substrate MUST wrap exactly one
+`hidapi::HidApi` instance per process. A
+process-global atomic boolean MUST track whether the
+wrapper is initialised; the constructor MUST fail
+with a typed "initialised already" error if the flag
+is set, and the wrapper's `Drop` MUST clear the flag
+(warning at log-level if it was not set, i.e. the
+wrapper was already released by another path).
+
+**R17-B.** The transport MUST expose three logical roles plus a
+typed error set, described here by behaviour only (concrete type
+names, method names, and signatures are an implementation choice):
+
+- a *singleton handle* obtained by asynchronous initialisation that
+  owns the shared library context and offers exactly one operation:
+  enumerate the currently attached devices;
+- a *device handle* representing one enumerated device, carrying a
+  clone of the shared context and the device's identity record, and
+  offering: connect, an open-state query, write-one-chunk, and
+  read-one-chunk;
+- an *identity record* carrying vendor id, product id, interface
+  number, the operating-system device path, and optional
+  serial/manufacturer/product text. It MUST be cheaply cloneable and
+  usable as a map key (it MUST support equality and hashing) and MUST
+  be constructible from the underlying library's device-info value.
+
+Internally, the shared context holds the underlying library handle
+plus a map of currently-open devices keyed by identity record, and is
+shared (reference-counted) across all handles behind a single
+asynchronous mutex. The mutex MUST be a futures-aware async mutex,
+because the lock is held across awaited I/O; a synchronous
+standard-library mutex MUST NOT be used.
+
+**R17-C.** Every device open MUST place the underlying library
+device in non-blocking mode. Reads MUST therefore use the library's
+plain non-blocking read and MUST NOT use its timeout-bearing read
+(the two have undefined interaction when combined with non-blocking
+mode in the underlying library; this is the chapter-21-bound
+rationale). A read MUST return whatever the non-blocking read
+produced, which MAY be **shorter than the requested length**,
+including length zero. Retry and poll semantics are the caller's
+responsibility (the Trezor session layer of chapter 28).
+
+**R17-D.** Connecting to an enumerated device MUST select its open
+strategy from the device's identity record: when the record carries a
+usable operating-system path, the device MUST be opened by that path;
+otherwise the transport MUST fall back to opening by the (vendor id,
+product id, serial number) triple. If neither a usable path nor a
+serial number is available, connection MUST fail with a typed
+insufficient-identifying-information error.
+
+**R17-E.** The transport MUST define a single typed error set,
+surfaced only inside the process boundary (a display-only error; it
+is never serialised across the RPC boundary) and returned through the
+project's standard error wrapper. The set MUST distinguish at least
+the following conditions:
+
+- access to a device that is not present in the open-devices map;
+- an attempt to open a device that is already open;
+- a second initialisation of the process singleton;
+- failures reported by the underlying library during initialisation,
+  enumeration, open, write, and read;
+- a partial-write interruption that reports both the requested chunk
+  length and the number of bytes actually sent;
+- an over-long read that reports both the actual and the expected
+  length;
+- insufficient information to connect;
+- an internal catch-all carrying a message.
+
+The not-present-device condition MUST be raised by both the write and
+read operations when the device-info key is absent from the
+open-devices map. The partial-write condition MUST be raised when the
+underlying write reports fewer bytes than requested. The
+over-long-read condition MUST be raised when the underlying read
+reports more bytes than requested (which indicates a defective device
+or a bug in the underlying library).
+
+**R17-F.** The open-state query MUST be defined as: the device is
+present in the open-devices map **and** still appears in a fresh
+enumeration of system devices. The transport MUST document that the
+second half of this predicate is expensive on some operating systems
+(it triggers a USB enumeration) and that callers needing a hot-path
+readiness check must cache it. The rationale is that the underlying
+library exposes no disconnect notification, so a fresh enumeration is
+the only available liveness signal.
+
+**R17-G.** Enumerating devices MUST refresh the underlying library's
+device list before reading it, and MUST map both a refresh failure and
+a wrapper-construction failure to the enumeration-failure error of
+R17-E. Each returned device handle MUST receive a clone of the shared
+context.
+
+**R17-H.** The transport MUST record (in module documentation) the
+rationale for its shape: the underlying library context is neither
+thread-safe nor asynchronous, so a wrapper must either dedicate a
+thread to it or guard it with a mutex and use non-blocking I/O. This
+substrate takes the second route (see R17-A–R17-C). The documentation
+MUST also note the absence of a device-disconnect signal in the
+underlying library, which motivates the enumeration-based liveness
+check of R17-F.
+
+## 26.12 Bound Continuous-Integration Matrix
+
+**R19.** The continuous-integration substrate MUST
+build the cartesian product of the target matrix and the (build / test / lint) job
+axis under the workflows directory of the
+continuous-integration substrate. The
+workflow registry MUST be:
+
+| Bound workflow | Bound covered targets |
 | ---------------------- | -------------------------------------------------------------------------------- |
-| `build-linux.yml`      | `x86_64-unknown-linux-gnu`                                                       |
-| `build-macos.yml`      | `x86_64-apple-darwin` + `aarch64-apple-darwin` + chapter-bound `lipo`-merged Universal |
-| `build-windows.yml`    | `x86_64-pc-windows-msvc`                                                         |
-| `build-wasm.yml`       | `wasm32-unknown-unknown`                                                         |
-| `build-ios.yml`        | `aarch64-apple-ios`                                                              |
-| `build-android.yml`    | `aarch64-linux-android` + `armv7-linux-androideabi`                              |
-| `dev-build.yml`        | Chapter-bound orchestrator that calls all of the above.                          |
-| `test.yml`             | Chapter-bound unit + chapter-bound integration + chapter-bound container + chapter-bound WebAssembly test jobs. |
+| `build-linux.yml` | `x86_64-unknown-linux-gnu` |
+| `build-macos.yml` | `x86_64-apple-darwin` + `aarch64-apple-darwin` + `lipo`-merged Universal |
+| `build-windows.yml` | `x86_64-pc-windows-msvc` |
+| `build-wasm.yml` | `wasm32-unknown-unknown` |
+| `build-ios.yml` | `aarch64-apple-ios` |
+| `build-android.yml` | `aarch64-linux-android` + `armv7-linux-androideabi` |
+| `dev-build.yml` | Chapter-bound orchestrator that calls all of the above. |
+| `test.yml` | Chapter-bound unit + integration + container + WebAssembly test jobs. |
 
-The chapter-bound Android workflow MUST consume the chapter-
-bound sibling-allowlist Cargo sub-command `cargo-ndk` to wrap
-chapter-bound NDK cross-compilation. The chapter-bound iOS
-workflow MUST rely on the chapter-bound Apple toolchain on a
-chapter-bound macOS runner; the chapter-bound macOS Universal
-artefact MUST be produced by chapter-bound `lipo`-merging the
-chapter-bound two single-arch builds. The chapter-bound ARMv7
-Linux workflow MUST consume the chapter-bound cross-compilation
-configuration of chapter 03 R11 with the chapter-bound
-project-specific container image (the chapter-bound standard
-cross-compilation container image lacks several chapter-bound
-audio and human-interface-device headers that the chapter-bound
-workspace dependency tree needs even on a chapter-bound server
+The Android workflow MUST consume the
+sibling-allowlist Cargo sub-command `cargo-ndk` to wrap
+NDK cross-compilation. The iOS
+workflow MUST rely on the Apple toolchain on a
+macOS runner; the macOS Universal
+artefact MUST be produced by `lipo`-merging the
+two single-arch builds. The ARMv7
+Linux workflow MUST consume the cross-compilation
+configuration of chapter 03 R11 with the project-specific container image (the standard
+cross-compilation container image lacks several audio and human-interface-device headers that the workspace dependency tree needs even on a server
 build).
 
-The chapter-bound WebAssembly target MUST receive two chapter-
-bound continuous-integration safety nets: a chapter-bound
-`cargo check` invocation against the chapter-bound browser
-target triple for chapter-bound fast feedback on chapter-bound
-target-table errors, plus a chapter-bound `wasm-pack build`
-invocation that exercises the chapter-bound actual `wasm-
-bindgen` code-generation path the chapter-bound browser package
-goes through. Either chapter-bound failing MUST fail the build.
+The WebAssembly target MUST receive two 
+continuous-integration safety nets: a `cargo check` invocation against the browser
+target triple for fast feedback on target-table errors, plus a `wasm-pack build`
+invocation that exercises the actual `wasm-
+bindgen` code-generation path the browser package
+goes through. Either failing MUST fail the build.
 
-## 26.12 Tests
+## 26.13 Tests
 
-**T1.** *Per-target build invocation.* The chapter-bound
-continuous-integration substrate of R18 MUST be confirmed to
-issue the chapter-bound per-target build invocation against
-every chapter-bound row of the chapter-bound nine-row target
-matrix on every chapter-bound merge against the chapter-bound
-default branch.
+**T1.** *Per-target build invocation.* The continuous-integration substrate of R18 MUST be confirmed to
+issue the per-target build invocation against
+every row of the nine-row target
+matrix on every merge against the default branch.
 
-**T2.** *Compilation-guard discipline.* A chapter-bound
-regression test MUST grep the chapter-bound workspace for
-chapter-bound point-of-use platform predicates and confirm that
-they consume exactly the chapter-bound three permitted forms of
-R1 — the chapter-bound `cfg_native!`/`cfg_wasm32!` macros, the
-chapter-bound `#[cfg(target_arch = "wasm32")]` and chapter-bound
-`#[cfg(not(target_arch = "wasm32"))]` attribute pair, and the
-chapter-bound per-crate manifest target-table substrate.
+**T2.** *Compilation-guard discipline.* A regression test MUST grep the workspace for
+point-of-use platform predicates and confirm that
+they consume exactly the three permitted forms of
+R1 — the `cfg_native!`/`cfg_wasm32!` macros, the
+`#[cfg(target_arch = "wasm32")]` and `#[cfg(not(target_arch = "wasm32"))]` attribute pair, and the
+per-crate manifest target-table substrate.
 
-**T3.** *Dual-implementation symmetry.* A chapter-bound
-regression test MUST confirm that for every chapter-bound
-storage trait of R8 step 1 there exists a chapter-bound
-`sqlite_storage.rs` (or chapter-bound `sqlite/` sub-module) and
-a chapter-bound `wasm_storage.rs` module, and that the chapter-
-bound module-roots module branches on the chapter-bound R8
+**T3.** *Dual-implementation symmetry.* A regression test MUST confirm that for every storage trait of R8 step 1 there exists a `sqlite_storage.rs` (or `sqlite/` sub-module) and
+a `wasm_storage.rs` module, and that the
+module-roots module branches on the R8
 step 4 attribute pair.
 
-**T4.** *Browser-target safety-net pair.* The chapter-bound
-continuous-integration substrate MUST confirm both R18 chapter-
-bound browser-target safety nets (the chapter-bound check
-invocation and the chapter-bound `wasm-pack` invocation) run on
-every chapter-bound merge against the chapter-bound default
-branch and that chapter-bound either failing fails the chapter-
-bound build.
+**T4.** *Browser-target safety-net pair.* The continuous-integration substrate MUST confirm both R18 
+browser-target safety nets (the check
+invocation and the `wasm-pack` invocation) run on
+every merge against the default
+branch and that either failing fails the
+build.
 
-## 26.13 Deferred Work
+## 26.14 Deferred Work
 
 **D1.** Chapter-bound automated cross-target test execution: the
-chapter-bound browser-target continuous-integration job at the
-substrate landing point runs only the chapter-bound check and
-the chapter-bound `wasm-pack build` (R18); the chapter-bound
-mobile-target continuous-integration jobs run only the chapter-
-bound build step. Chapter-bound run-time behaviour on those
-chapter-bound targets is chapter-bound checked manually.
+browser-target continuous-integration job at the
+substrate landing point runs only the check and
+the `wasm-pack build` (R18); the mobile-target continuous-integration jobs run only the
+build step. Chapter-bound run-time behaviour on those
+targets is checked manually.
 
-**D2.** A chapter-bound collapse of the chapter-bound three
-chapter-bound permitted compilation-guard forms of R1 into a
-chapter-bound single chapter-bound crate-level helper.
+**D2.** A collapse of the three
+permitted compilation-guard forms of R1 into a
+single crate-level helper.
 
-**D3.** A chapter-bound trait-on-trait WebAssembly erasure
-substrate: a chapter-bound few sites at the substrate landing
-point still require chapter-bound manual `Send`-stripping in
-chapter-bound asynchronous traits to keep the chapter-bound
-browser target healthy (the chapter-bound sibling-allowlist
-asynchronous-trait crate does not have a chapter-bound
-target-aware non-`Send` mode for chapter-bound some of the
-chapter-bound trait shapes the substrate consumes).
+**D3.** A trait-on-trait WebAssembly erasure
+substrate: a few sites at the substrate landing
+point still require manual `Send`-stripping in
+asynchronous traits to keep the browser target healthy (the sibling-allowlist
+asynchronous-trait crate does not have a target-aware non-`Send` mode for some of the
+trait shapes the substrate consumes).
 
-**D4.** Explicit declaration of the chapter-bound mobile
-foreign-function-interface surface. The chapter-bound mobile-
-bindings crate of R6 exposes `lp_main`/`mm2_status` as chapter-
-bound plain Rust accessors; the chapter-bound mobile-host glue
-(Swift / Kotlin) consumes them via the chapter-bound C
-application-binary-interface surface of the chapter-bound
-`cdylib`/`staticlib` artefact. No chapter-bound
-`#[no_mangle] extern "C"` declaration is present in this crate
-at the substrate landing point; the chapter-bound C application-
-binary-interface surface is chapter-bound whatever the chapter-
-bound public accessors in the chapter-bound application-entry
+**D4.** Explicit declaration of the mobile
+foreign-function-interface surface. The mobile-
+bindings crate of R6 exposes `lp_main`/`mm2_status` as 
+plain Rust accessors; the mobile-host glue
+(Swift / Kotlin) consumes them via the C
+application-binary-interface surface of the `cdylib`/`staticlib` artefact. No `#[no_mangle] extern "C"` declaration is present in this crate
+at the substrate landing point; the C application-
+binary-interface surface is whatever the
+public accessors in the application-entry
 crate `mm2_main` happen to emit.
 
-**D5.** A chapter-bound browser-side inter-page-process-
-communication substrate. The chapter-bound browser build at
-the substrate landing point assumes a chapter-bound single
-chapter-bound browser-instance per page; no chapter-bound
-shared-worker or message-channel substrate is present, and a
-chapter-bound consumer wanting chapter-bound multi-page state
-sharing must implement it in the chapter-bound JavaScript
+**D5.** A browser-side inter-page-process-
+communication substrate. The browser build at
+the substrate landing point assumes a single
+browser-instance per page; no shared-worker or message-channel substrate is present, and a
+consumer wanting multi-page state
+sharing must implement it in the JavaScript
 hosting layer.
 
-## 26.14 Baseline Verifications
+## 26.15 Baseline Verifications
 
 **V1.** The chapter-02-anchored baseline tree MUST be confirmed
-to ship a chapter-bound earlier form of the chapter-bound
-`cfg_native!`/`cfg_wasm32!` macros (R2) inside the chapter-bound
-shared-utility crate `common`; a chapter-bound native-only main
-plus a chapter-bound `cdylib` entry in a chapter-bound single
-crate at the chapter-bound baseline workspace; and a chapter-
-bound early IndexedDB layer (an ancestor of R9). The chapter-
-bound baseline tree MUST NOT yet carry: the chapter-bound macOS
-Universal `lipo` step (R18); the chapter-bound iOS static-
-library target (R18); the chapter-bound Android cargo-ndk
-workflow (R18); the chapter-bound modern WebAssembly chapter-
-bound continuous-integration safety nets (R18); the chapter-
-bound dual asynchronous-runtime substrate's chapter-bound
-`AbortOnDropHandle` newtype (R11); the chapter-bound mobile-
-bindings crate `mm2_bin_lib` (R6); the chapter-bound split
-between the chapter-bound desktop binary in `mm2_main` and the
-chapter-bound mobile-bindings shim (R6); the chapter-bound dual
-`*_storage.rs` pattern in the chapter-bound new persistence
+to ship a earlier form of the `cfg_native!`/`cfg_wasm32!` macros (R2) inside the shared-utility crate `common`; a native-only main
+plus a `cdylib` entry in a single
+crate at the baseline workspace; and a
+early IndexedDB layer (an ancestor of R9). The
+baseline tree MUST NOT yet carry: the macOS
+Universal `lipo` step (R18); the iOS static-
+library target (R18); the Android cargo-ndk
+workflow (R18); the modern WebAssembly 
+continuous-integration safety nets (R18); the
+dual asynchronous-runtime substrate's `AbortOnDropHandle` newtype (R11); the mobile-
+bindings crate `mm2_bin_lib` (R6); the split
+between the desktop binary in `mm2_main` and the
+mobile-bindings shim (R6); the dual
+`*_storage.rs` pattern in the new persistence
 consumers added by later chapters (chapter 22, chapter 24); or
-the chapter-bound Solana sibling-allowlist replacement that
-unblocked chapter-bound mobile cross-compilation (chapter 27).
+the Solana sibling-allowlist replacement that
+unblocked mobile cross-compilation (chapter 27).
 
 **V2.** The chapter-02 R8 baseline build-target surface MUST be
-confirmed to contain a chapter-bound subset of the chapter-bound
-nine-row target matrix of R1; specifically, the chapter-bound
-target rows added by the substrate (the chapter-bound Universal
-macOS row, the chapter-bound iOS row, the chapter-bound double
+confirmed to contain a subset of the nine-row target matrix of R1; specifically, the target rows added by the substrate (the Universal
+macOS row, the iOS row, the double
 Android row) MUST be confirmed absent at the chapter-02-
 anchored baseline.
 
 **V3.** The chapter-02 R5 baseline patched-dependency substrate
-MUST be confirmed not to contain a chapter-bound
-`solana-remote-wallet` patched-entry; the chapter-27-bound
-sibling-allowlist replacement substrate the chapter-bound
-mobile cross-compilation depends on is bound under chapter 27,
+MUST be confirmed not to contain a `solana-remote-wallet` patched-entry; the chapter-27-bound
+sibling-allowlist replacement substrate the mobile cross-compilation depends on is bound under chapter 27,
 not under chapter 02 R5.
 
-## 26.15 External References
+## 26.16 External References
 
-- The chapter-bound `wasm-bindgen` / `wasm-bindgen-futures` /
-  `web-sys` / `js-sys` family of chapter-bound browser-
-  interoperability crates (the chapter-bound sibling-allowlist
-  origin under the chapter-bound `rustwasm` project).
-- The chapter-bound `cfg_if` crate (the chapter-bound sibling-
-  allowlist origin on the chapter-bound public Cargo registry).
-- The chapter-bound `cross-rs` cross-compilation substrate and
-  its chapter-bound container-image conventions.
-- The chapter-bound Android NDK and the chapter-bound `cargo-
-  ndk` Cargo sub-command (the chapter-bound sibling-allowlist
+- The `wasm-bindgen` / `wasm-bindgen-futures` /
+  `web-sys` / `js-sys` family of browser-
+  interoperability crates (the sibling-allowlist
+  origin under the `rustwasm` project).
+- The `cfg_if` crate (the sibling-
+  allowlist origin on the public Cargo registry).
+- The `cross-rs` cross-compilation substrate and
+  its container-image conventions.
+- The Android NDK and the `cargo-
+  ndk` Cargo sub-command (the sibling-allowlist
   origin).
-- The chapter-bound Apple `lipo` tool (per its chapter-bound
-  manual page on a chapter-bound macOS runner) for the chapter-
-  bound Universal-binary merge.
-- The chapter-bound `wasm-pack` build tool (the chapter-bound
-  sibling-allowlist origin under the chapter-bound `rustwasm`
+- The Apple `lipo` tool (per its manual page on a macOS runner) for the
+  Universal-binary merge.
+- The `wasm-pack` build tool (the sibling-allowlist origin under the `rustwasm`
   project).
-- The chapter-bound World-Wide-Web-Consortium *Indexed Database
-  API* specification as the chapter-bound underlying browser
-  store surfaced by the chapter-bound `mm2_db` IndexedDB
+- The World-Wide-Web-Consortium *Indexed Database
+  API* specification as the underlying browser
+  store surfaced by the `mm2_db` IndexedDB
   substrate of R9.
 
-## 26.16 Provenance Footer
+## 26.17 Provenance Footer
 
 - *Inputs:* the baseline workspace at the pinned baseline-revision
   commit of chapter 02 (covering V1, V2, V3); chapter 02 (the
   chapter-02 R4 workspace-member registry, the chapter-02 R5
   patched-dependency substrate, the chapter-02 R8 build-target
-  surface); chapter 03 (the chapter-bound toolchain pin and the
-  chapter-bound 2021-edition migration; the chapter-bound
-  Cross.toml byte-identical preservation of chapter 03 R11
-  consumed by R18); chapter 05 (the chapter-bound canonical
+  surface); chapter 03 (the toolchain pin and the
+  2021-edition migration; the Cross.toml byte-identical preservation of chapter 03 R11
+  consumed by R18); chapter 05 (the canonical
   hierarchical-deterministic-wallet storage worked instance of
-  R8); chapter 12, chapter 14, chapter 15 (the chapter-bound
-  swap state-store consumers of R8); chapter 19 (the chapter-
-  bound non-fungible-token consumer of R8); chapter 22 (the
-  chapter-bound WalletConnect consumer of R8 and the chapter-
-  bound transport-layer consumer of R13); chapter 24 (the
-  chapter-bound graphical-user-interface account-state
-  consumer of R8); chapter 25 (the chapter-bound asynchronous
+  R8); chapter 12, chapter 14, chapter 15 (the swap state-store consumers of R8); chapter 19 (the
+  non-fungible-token consumer of R8); chapter 22 (the
+  WalletConnect consumer of R8 and the
+  transport-layer consumer of R13); chapter 24 (the
+  graphical-user-interface account-state
+  consumer of R8); chapter 25 (the asynchronous
   connection facade of chapter 25 R11 consumed by R8 step 2);
-  chapter 27 (the chapter-bound Solana sibling-allowlist
-  replacement substrate cited under R16 and V3); the chapter-
-  bound public browser-interoperability documentation, the
-  chapter-bound public conditional-compilation crate
-  documentation, the chapter-bound public cross-compilation
-  substrate documentation, the chapter-bound public NDK and
-  cargo-ndk documentation, the chapter-bound public `lipo`
-  documentation, the chapter-bound public `wasm-pack`
-  documentation, and the chapter-bound World-Wide-Web-
+  chapter 27 (the Solana sibling-allowlist
+  replacement substrate cited under R16 and V3); the
+  public browser-interoperability documentation, the
+  public conditional-compilation crate
+  documentation, the public cross-compilation
+  substrate documentation, the public NDK and
+  cargo-ndk documentation, the public `lipo`
+  documentation, the public `wasm-pack`
+  documentation, and the World-Wide-Web-
   Consortium Indexed-Database-API specification.
 - *Permitted-input classes used:* the baseline itself (chapter 01
   R1); external public specifications (chapter 01 R3, for the
   World-Wide-Web-Consortium Indexed-Database-API specification
-  citation and for the chapter-bound EIP-1193 protocol
+  citation and for the EIP-1193 protocol
   citation); sibling open-source repositories under compatible
-  licenses (chapter 01 R5, for the chapter-bound browser-
-  interoperability family, the chapter-bound conditional-
-  compilation crate, the chapter-bound cross-compilation
-  substrate, the chapter-bound cargo-ndk crate, the chapter-
-  bound `wasm-pack` crate, the chapter-bound async-trait crate,
-  the chapter-bound asynchronous-runtime crate, the chapter-
-  bound asynchronous WebSocket crate, the chapter-bound
-  asynchronous-HTTP-client crate, the chapter-bound `gstuff`
-  filesystem helpers, the chapter-bound asynchronous browser-
-  future-adaptor crate, the chapter-bound abort-handle crate,
-  and the chapter-bound modular Solana crate set).
-- *Sibling-allowlist consultations:* the chapter-bound `wasm-
+  licenses (chapter 01 R5, for the browser-
+  interoperability family, the conditional-
+  compilation crate, the cross-compilation
+  substrate, the cargo-ndk crate, the
+  `wasm-pack` crate, the async-trait crate,
+  the asynchronous-runtime crate, the
+  asynchronous WebSocket crate, the asynchronous-HTTP-client crate, the `gstuff`
+  filesystem helpers, the asynchronous browser-
+  future-adaptor crate, the abort-handle crate,
+  and the modular Solana crate set).
+- *Sibling-allowlist consultations:* the `wasm-
   bindgen` / `wasm-bindgen-futures` / `web-sys` / `js-sys`
-  browser-interoperability family; the chapter-bound `cfg-if`
-  conditional-compilation crate; the chapter-bound `cross-rs`
-  cross-compilation substrate; the chapter-bound `cargo-ndk`
-  Cargo sub-command; the chapter-bound `wasm-pack` build tool;
-  the chapter-bound async-trait crate; the chapter-bound
-  asynchronous-runtime crate; the chapter-bound asynchronous-
-  WebSocket crate; the chapter-bound asynchronous-HTTP-client
-  crate over the chapter-bound TLS adaptor; the chapter-bound
-  `gstuff` filesystem helpers; the chapter-bound asynchronous
-  browser-future-adaptor crate; the chapter-bound abort-handle
+  browser-interoperability family; the `cfg-if`
+  conditional-compilation crate; the `cross-rs`
+  cross-compilation substrate; the `cargo-ndk`
+  Cargo sub-command; the `wasm-pack` build tool;
+  the async-trait crate; the asynchronous-runtime crate; the asynchronous-
+  WebSocket crate; the asynchronous-HTTP-client
+  crate over the TLS adaptor; the `gstuff` filesystem helpers; the asynchronous
+  browser-future-adaptor crate; the abort-handle
   crate.
 - *Forbidden corpus:* not consulted.
