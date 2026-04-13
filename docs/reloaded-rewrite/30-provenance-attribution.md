@@ -85,6 +85,9 @@ and a one-sentence capsule of what the chapter documents.
 | 29 | [Treatment of License Conditions (e) and (f)](29-license-conditions-e-f.md)                          | (legal position)                                                                                         | The project's legal position on the additional copyright-holder conditions appended after the baseline date.                                                              |
 | 30 | [Provenance and Attribution Index](30-provenance-attribution.md)                                     | (meta — index)                                                                                           | Cross-cutting index.                                                                                                                                                     |
 | 31 | [Central Application-Context Substrate](31-central-application-context.md)                            | central-context substrate (`MmCtx` / `MmArc` / `MmWeak`, `Constructible<T>` once-set fields, sub-context slot pattern, `MmCtxBuilder`, FFI registry, stop signal) | The shared application-context substrate every consumer crate fetches its shared state through.                                                                          |
+| 32 | [Orderbook Patricia-Trie and P2P Surface](32-orderbook-p2p-and-trie.md)                              | orderbook Patricia-trie substrate, keep-alive root advertisement, sync-delta request surface             | The per-pubkey/per-pair Patricia-trie orderbook substrate and its P2P root-advertisement plus delta-synchronisation surface.                                          |
+| 33 | [Bound Swap V2 P2P Wire Schema (B-gleec Embedding)](33-swap-v2-wire-schema-embedding.md)            | swap-v2 protobuf wire schema (`swap_v2.proto`)                                                           | Verbatim embedded wire descriptor for swap-v2 P2P messages, with fresh CRD commentary binding interoperability constraints.                                            |
+| 34 | [Provenance Ledger](34-provenance-ledger.md)                                                          | (meta — companion ledger)                                                                                | Per-file classification and source/constraint ledger companion referenced by the chapter set.                                                                           |
 
 ## 30.4 Aggregated Input Register
 
@@ -182,6 +185,12 @@ explicitly:
 - Chapter 13 cites the observed presence of mixed-version peers as the
   motivation for the swap-version tag.
 
+### 30.4.11 Ledger companion artifact
+
+- Chapter 34 carries the per-file provenance ledger companion used by
+  the chapter set; it references and operationalises the rule framework
+  bound in Chapter 01.
+
 ## 30.5 Per-Substrate Reverse Map
 
 The reverse map answers "which chapter(s) bind the substrate that owns this
@@ -225,7 +234,8 @@ subject, the citation is marked *(ref)*.
 | application-root substrate                                             | 07, 08, 09, 10, 11, 12, 13, 14, 17, 29              |
 | node-init substrate                                                    | 06, 29                                              |
 | order-matching substrate                                               | 11, 12                                              |
-| atomic-swap substrate                                                  | 08, 09, 13, 15, 16, 17, 29                          |
+| orderbook Patricia-trie + orderbook sync substrate                     | 32                                                  |
+| atomic-swap substrate                                                  | 08, 09, 13, 15, 16, 17, 29, 33                      |
 | wallet-lifecycle substrate                                             | 07                                                  |
 | RPC-dispatcher substrate                                               | 10 *(ref)*, 27 *(ref)*                              |
 | browser-wallet-bridge substrate                                        | 05 *(ref)*, 26                                      |
@@ -256,7 +266,8 @@ preserved-for-history substrate retained for git-archaeology continuity
 
 ## 30.6 Document-Set Composition (binding rules)
 
-**R1.** *Per-chapter self-containment.* Each substantive chapter MUST
+**R1.** *Per-chapter self-containment.* Each substantive chapter (03
+through 28, and 31 through 33) MUST
 satisfy the project's chapter-shape rules (Chapter 01 §6): executive
 summary, subsystem shape, the binding-rule sections appropriate to the
 chapter's substrate, tests / deferred work / external references /
@@ -348,8 +359,8 @@ file MUST agree with the row title here.
 
 ## 30.11 Provenance Footer
 
-- *Inputs consulted for this chapter:* every other chapter of this
-  document set in the working tree at the time of writing, at project
+- *Inputs:* every other chapter of this
+  document set in the working tree at project
   baseline commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`. The
   per-chapter capsule summaries paraphrase the executive summaries of
   the chapters they point to; the input register groups citations by
@@ -357,7 +368,5 @@ file MUST agree with the row title here.
   per-substrate reverse map was assembled by scanning the same chapters
   for the substrate names they bind.
 - *Permitted-input classes used:* the document set itself.
-- *Sibling chapters cross-referenced:* every other chapter (this is an
-  index).
-- *Author of this chapter:* clean-room round-2 driving-spec working set.
+- *Sibling-allowlist consultations:* none.
 - *Forbidden corpus:* not consulted.
