@@ -5,8 +5,10 @@
 # Remove once these features are formally stabilized.
 #
 # - common:          `auto trait NotSame` + `impl !NotSame`
-# - mm2_err_handle:  `auto trait NotMmError` / `NotEqual` + negative impls
-# - docker_tests_main: `custom_test_frameworks` + `test` (test harness)
+# - mm2_err_handle:  `auto trait NotMmError` + negative impls
+#                    (NotEqual was removed in P0 — Rust 1.93 trait solver regression)
+# - docker_tests:    `custom_test_frameworks` + `test` (test harness)
+#                    (RUSTC_BOOTSTRAP matches binary target name, not package name)
 # - mocktopus, mocktopus_macros: test mocking framework (nightly only)
 RUSTC_BOOTSTRAP = "common,mm2_err_handle,docker_tests,mocktopus,mocktopus_macros"
 
