@@ -5,6 +5,7 @@ use crate::TrezorResult;
 use async_trait::async_trait;
 use hw_common::transport::libusb::{GetDevicesFilters, UsbAvailableDevice as UsbAvailableDeviceImpl, UsbContext,
                                    UsbDevice};
+use mm2_err_handle::prelude::*;
 use std::time::Duration;
 
 pub use hw_common::transport::libusb::UsbDeviceInfo;
@@ -43,17 +44,17 @@ struct UsbLink {
 impl Link for UsbLink {
     async fn write_chunk(&mut self, chunk: Vec<u8>) -> TrezorResult<()> {
         // don't try to reconnect since libusb requires to enumerate all devices, ope and, claim interface again
-        Ok(self.device.write_chunk(chunk, WRITE_TIMEOUT).await?)
+        self.device.write_chunk(chunk, WRITE_TIMEOUT).await.mm_err(Into::into)
     }
 
     async fn read_chunk(&mut self, chunk_len: u32) -> TrezorResult<Vec<u8>> {
         // don't try to reconnect since libusb requires to enumerate all devices, ope and, claim interface again
-        Ok(self.device.read_chunk(chunk_len as usize, READ_TIMEOUT).await?)
+        self.device.read_chunk(chunk_len as usize, READ_TIMEOUT).await.mm_err(Into::into)
     }
 }
 
 pub fn find_devices() -> TrezorResult<Vec<UsbAvailableDevice>> {
-    let context = UsbContext::new()?;
+    let context = UsbContext::new().mm_err(Into::into)?;
     let filters = GetDevicesFilters {
         config_id: CONFIG_ID,
         interface_id: INTERFACE,
@@ -61,7 +62,7 @@ pub fn find_devices() -> TrezorResult<Vec<UsbAvailableDevice>> {
         interface_class_code: LIBUSB_CLASS_VENDOR_SPEC,
     };
     Ok(context
-        .get_devices(filters)?
+        .get_devices(filters).mm_err(Into::into)?
         .into_iter()
         .filter(is_trezor)
         .map(UsbAvailableDevice)
@@ -74,7 +75,7 @@ impl UsbAvailableDevice {
     /// Please note [`hw_common::transport::libusb::UsbAvailableDevice::connect`] spawns a thread.
     pub fn connect(self) -> TrezorResult<UsbTransport> {
         let link = UsbLink {
-            device: self.0.connect()?,
+            device: self.0.connect().mm_err(Into::into)?,
         };
         Ok(UsbTransport {
             protocol: ProtocolV1 { link },

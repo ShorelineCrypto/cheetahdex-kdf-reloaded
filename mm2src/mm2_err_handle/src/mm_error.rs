@@ -118,21 +118,6 @@ pub struct MmError<E: NotMmError> {
     pub(crate) trace: Vec<TraceLocation>,
 }
 
-pub auto trait NotEqual {}
-impl<X> !NotEqual for (X, X) {}
-impl<T: ?Sized> NotEqual for Box<T> {}
-
-/// Track the location whenever `MmError<E2>::from(MmError<E1>)` is called.
-impl<E1, E2> From<MmError<E1>> for MmError<E2>
-where
-    E1: NotMmError,
-    E2: From<E1> + NotMmError,
-    (E1, E2): NotEqual,
-{
-    #[track_caller]
-    fn from(orig: MmError<E1>) -> Self { orig.map(E2::from) }
-}
-
 /// Track the location whenever `MmError<E2>::from(E1)` is called.
 impl<E1, E2> From<E1> for MmError<E2>
 where
@@ -340,7 +325,7 @@ mod tests {
 
         const FORWARDED_LINE: u32 = line!() + 2;
         fn forward_error(actual: u64, required: u64) -> Result<(), MmError<ForwardedError>> {
-            let _ = generate_error(actual, required)?;
+            let _ = generate_error(actual, required).mm_err(Into::into)?;
             unreachable!("'generate_error' must return an error")
         }
 
@@ -437,7 +422,7 @@ mod tests {
 
         const FORWARDED_LINE: u32 = line!() + 2;
         fn forward_error_for_box(actual: u64, required: u64) -> Result<(), MmError<ForwardedErrorWithBox>> {
-            let _ = generate_error_for_box(actual, required)?;
+            let _ = generate_error_for_box(actual, required).mm_err(Into::into)?;
             unreachable!("'generate_error' must return an error")
         }
 

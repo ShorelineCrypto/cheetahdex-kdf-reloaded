@@ -234,7 +234,7 @@ impl From<Bip32Error> for HDWalletStorageError {
 #[async_trait]
 impl TxProvider for UtxoRpcClientEnum {
     async fn get_rpc_transaction(&self, tx_hash: &H256Json) -> Result<RpcTransaction, MmError<TxProviderError>> {
-        Ok(self.get_verbose_transaction(tx_hash).compat().await?)
+        Ok(self.get_verbose_transaction(tx_hash).compat().await.mm_err(Into::into)?)
     }
 }
 
@@ -1366,7 +1366,7 @@ impl UtxoHDAccount {
         let account_child = ChildNumber::new(account_info.account_id, ACCOUNT_CHILD_HARDENED)?;
         let account_derivation_path = wallet_der_path
             .derive(account_child)
-            .map_to_mm(Bip44DerPathError::from)?;
+            .map_to_mm(Bip44DerPathError::from).mm_err(Into::into)?;
         let extended_pubkey = Secp256k1ExtendedPublicKey::from_str(&account_info.account_xpub)?;
         Ok(UtxoHDAccount {
             account_id: account_info.account_id,

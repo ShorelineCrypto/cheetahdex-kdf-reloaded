@@ -126,7 +126,7 @@ pub trait UtxoCoinWithIguanaPrivKeyBuilder: UtxoFieldsWithIguanaPrivKeyBuilder {
 #[async_trait]
 pub trait UtxoFieldsWithIguanaPrivKeyBuilder: UtxoCoinBuilderCommonOps {
     async fn build_utxo_fields_with_iguana_priv_key(&self, priv_key: &[u8]) -> UtxoCoinBuildResult<UtxoCoinFields> {
-        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), self.ticker()).build()?;
+        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), self.ticker()).build().mm_err(Into::into)?;
 
         if self.is_hw_coin(&conf) {
             return MmError::err(UtxoCoinBuildError::CoinShouldBeActivatedWithHw);
@@ -187,7 +187,7 @@ pub trait UtxoFieldsWithIguanaPrivKeyBuilder: UtxoCoinBuilderCommonOps {
 pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
     async fn build_utxo_fields_with_trezor(&self) -> UtxoCoinBuildResult<UtxoCoinFields> {
         let ticker = self.ticker().to_owned();
-        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), &ticker).build()?;
+        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), &ticker).build().mm_err(Into::into)?;
 
         if !self.supports_trezor(&conf) {
             return MmError::err(UtxoCoinBuildError::CoinDoesntSupportTrezor);
@@ -200,9 +200,9 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
         let recently_spent_outpoints = AsyncMutex::new(RecentlySpentOutPoints::new(my_script_pubkey));
 
         let address_format = self.address_format()?;
-        let derivation_path = self.derivation_path()?;
+        let derivation_path = self.derivation_path().mm_err(Into::into)?;
 
-        let hd_wallet_storage = HDWalletCoinStorage::init(self.ctx(), ticker).await?;
+        let hd_wallet_storage = HDWalletCoinStorage::init(self.ctx(), ticker).await.mm_err(Into::into)?;
 
         let accounts = self
             .load_hd_wallet_accounts(&hd_wallet_storage, &derivation_path)
@@ -272,7 +272,7 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
 
     #[inline]
     fn check_if_trezor_is_initialized(&self) -> UtxoCoinBuildResult<()> {
-        let crypto_ctx = CryptoCtx::from_ctx(self.ctx())?;
+        let crypto_ctx = CryptoCtx::from_ctx(self.ctx()).mm_err(Into::into)?;
         let hw_ctx = crypto_ctx
             .hw_ctx()
             .or_mm_err(|| UtxoCoinBuildError::HwContextNotInitialized)?;
@@ -295,7 +295,7 @@ pub trait UtxoCoinBuilderCommonOps {
     #[inline]
     fn block_headers_storage(&self) -> UtxoCoinBuildResult<Option<BlockHeaderStorage>> {
         let params: Option<_> = json::from_value(self.conf()["block_header_params"].clone())
-            .map_to_mm(|e| UtxoConfError::InvalidBlockHeaderParams(e.to_string()))?;
+            .map_to_mm(|e| UtxoConfError::InvalidBlockHeaderParams(e.to_string())).mm_err(Into::into)?;
         match params {
             None => Ok(None),
             Some(params) => Ok(BlockHeaderStorage::new_from_ctx(self.ctx().clone(), params)),
@@ -305,7 +305,7 @@ pub trait UtxoCoinBuilderCommonOps {
     fn address_format(&self) -> UtxoCoinBuildResult<UtxoAddressFormat> {
         let format_from_req = self.activation_params().address_format.clone();
         let format_from_conf = json::from_value::<Option<UtxoAddressFormat>>(self.conf()["address_format"].clone())
-            .map_to_mm(|e| UtxoConfError::InvalidAddressFormat(e.to_string()))?
+            .map_to_mm(|e| UtxoConfError::InvalidAddressFormat(e.to_string())).mm_err(Into::into)?
             .unwrap_or(UtxoAddressFormat::Standard);
 
         let mut address_format = match format_from_req {
@@ -533,7 +533,7 @@ pub trait UtxoCoinBuilderCommonOps {
                         None => {
                             let name = conf["name"]
                                 .as_str()
-                                .or_mm_err(|| UtxoConfError::CurrencyNameIsNotSet)?;
+                                .or_mm_err(|| UtxoConfError::CurrencyNameIsNotSet).mm_err(Into::into)?;
                             (name, false)
                         },
                     }

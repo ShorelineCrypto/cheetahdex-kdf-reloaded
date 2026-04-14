@@ -234,14 +234,14 @@ impl ZCoin {
         while !self.is_sapling_state_synced() {
             Timer::sleep(0.5).await
         }
-        let tx_fee = self.get_one_kbyte_tx_fee().await?;
+        let tx_fee = self.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
         let t_output_sat: u64 = t_outputs.iter().fold(0, |cur, out| cur + u64::from(out.value));
         let z_output_sat: u64 = z_outputs.iter().fold(0, |cur, out| cur + u64::from(out.amount));
         let total_output_sat = t_output_sat + z_output_sat;
         let total_output = big_decimal_from_sat_unsigned(total_output_sat, self.utxo_arc.decimals);
         let total_required = &total_output + &tx_fee;
 
-        let z_unspents = self.my_spendable_z_unspents_ordered().await?;
+        let z_unspents = self.my_spendable_z_unspents_ordered().await.mm_err(Into::into)?;
         let mut selected_unspents = Vec::new();
         let mut total_input_amount = BigDecimal::from(0u8);
         let mut change = BigDecimal::from(0u8);
@@ -266,7 +266,7 @@ impl ZCoin {
             });
         }
 
-        let current_block = self.utxo_arc.rpc_client.get_block_count().compat().await? as u32;
+        let current_block = self.utxo_arc.rpc_client.get_block_count().compat().await.mm_err(Into::into)? as u32;
         let mut tx_builder = ZTxBuilder::new(ARRRConsensusParams {}, current_block.into());
 
         let mut ext = HashMap::new();
@@ -281,7 +281,7 @@ impl ZCoin {
                 .rpc_client()
                 .get_verbose_transaction(&unspent.txid)
                 .compat()
-                .await?;
+                .await.mm_err(Into::into)?;
 
             let height = prev_tx.height.or_mm_err(|| GenTxError::PrevTxNotConfirmed)?;
 
@@ -298,7 +298,7 @@ impl ZCoin {
                 .iter()
                 .find(|out| out.index as u32 == unspent.out_index)
                 .or_mm_err(|| GenTxError::DecryptedOutputNotFound)?;
-            let witness = self.get_unspent_witness(&decrypted_output.note, height as u32).await?;
+            let witness = self.get_unspent_witness(&decrypted_output.note, height as u32).await.mm_err(Into::into)?;
             selected_notes_with_witness.push((decrypted_output.note.clone(), witness));
         }
 
@@ -320,7 +320,7 @@ impl ZCoin {
         }
 
         if change > BigDecimal::from(0u8) {
-            let change_sat = sat_from_big_decimal(&change, self.utxo_arc.decimals)?;
+            let change_sat = sat_from_big_decimal(&change, self.utxo_arc.decimals).mm_err(Into::into)?;
             received_by_me += change_sat;
 
             tx_builder.add_sapling_output(
@@ -345,8 +345,8 @@ impl ZCoin {
 
         let additional_data = AdditionalTxData {
             received_by_me,
-            spent_by_me: sat_from_big_decimal(&total_input_amount, self.decimals())?,
-            fee_amount: sat_from_big_decimal(&tx_fee, self.decimals())?,
+            spent_by_me: sat_from_big_decimal(&total_input_amount, self.decimals()).mm_err(Into::into)?,
+            fee_amount: sat_from_big_decimal(&tx_fee, self.decimals()).mm_err(Into::into)?,
             unused_change: None,
             kmd_rewards: None,
         };
@@ -358,11 +358,11 @@ impl ZCoin {
         t_outputs: Vec<TxOut>,
         z_outputs: Vec<ZOutput>,
     ) -> Result<ZTransaction, MmError<SendOutputsErr>> {
-        let (tx, _) = self.gen_tx(t_outputs, z_outputs).await?;
+        let (tx, _) = self.gen_tx(t_outputs, z_outputs).await.mm_err(Into::into)?;
         let mut tx_bytes = Vec::with_capacity(1024);
         tx.write(&mut tx_bytes).expect("Write should not fail");
 
-        self.rpc_client().send_raw_transaction(tx_bytes.into()).compat().await?;
+        self.rpc_client().send_raw_transaction(tx_bytes.into()).compat().await.mm_err(Into::into)?;
 
         self.rpc_client()
             .wait_for_confirmations(
@@ -647,7 +647,7 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
     fn priv_key(&self) -> &[u8] { self.secp_priv_key }
 
     async fn build(self) -> MmResult<Self::ResultCoin, Self::Error> {
-        let utxo = self.build_utxo_fields_with_iguana_priv_key(self.priv_key()).await?;
+        let utxo = self.build_utxo_fields_with_iguana_priv_key(self.priv_key()).await.mm_err(Into::into)?;
         let utxo_arc = UtxoArc::new(utxo);
         let db_name = format!("{}_CACHE.db", self.ticker);
         let mut db_dir_path = self.db_dir_path;
@@ -703,7 +703,7 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             z_fields: Arc::new(z_fields),
         };
 
-        z_coin.z_rpc().z_import_key(&my_z_key_encoded).compat().await?;
+        z_coin.z_rpc().z_import_key(&my_z_key_encoded).compat().await.mm_err(Into::into)?;
         spawn(sapling_state_cache_loop(z_coin.clone()));
         Ok(z_coin)
     }
@@ -768,7 +768,7 @@ impl MarketCoinOps for ZCoin {
     fn my_balance(&self) -> BalanceFut<CoinBalance> {
         let coin = self.clone();
         let fut = async move {
-            let unspents = coin.my_z_unspents_ordered().await?;
+            let unspents = coin.my_z_unspents_ordered().await.mm_err(Into::into)?;
             let (spendable, unspendable) = unspents.iter().fold(
                 (BigDecimal::from(0), BigDecimal::from(0)),
                 |(cur_spendable, cur_unspendable), unspent| {
@@ -1223,23 +1223,23 @@ impl MmCoin for ZCoin {
                 .map_to_mm(|e| WithdrawError::InvalidAddress(format!("{}", e)))?
                 .or_mm_err(|| WithdrawError::InvalidAddress(format!("Address {} decoded to None", req.to)))?;
             let amount = if req.max {
-                let fee = coin.get_one_kbyte_tx_fee().await?;
-                let balance = coin.my_balance().compat().await?;
+                let fee = coin.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
+                let balance = coin.my_balance().compat().await.mm_err(Into::into)?;
                 balance.spendable - fee
             } else {
                 req.amount
             };
-            let satoshi = sat_from_big_decimal(&amount, coin.decimals())?;
+            let satoshi = sat_from_big_decimal(&amount, coin.decimals()).mm_err(Into::into)?;
             let z_output = ZOutput {
                 to_addr,
                 amount: Amount::from_u64(satoshi)
-                    .map_to_mm(|_| NumConversError(format!("Failed to get ZCash amount from {}", amount)))?,
+                    .map_to_mm(|_| NumConversError(format!("Failed to get ZCash amount from {}", amount))).mm_err(Into::into)?,
                 // TODO add optional viewing_key and memo fields to the WithdrawRequest
                 viewing_key: None,
                 memo: None,
             };
 
-            let (tx, data) = coin.gen_tx(vec![], vec![z_output]).await?;
+            let (tx, data) = coin.gen_tx(vec![], vec![z_output]).await.mm_err(Into::into)?;
             let mut tx_bytes = Vec::with_capacity(1024);
             tx.write(&mut tx_bytes)
                 .map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
@@ -1317,7 +1317,7 @@ impl MmCoin for ZCoin {
     ) -> TradePreimageResult<TradeFee> {
         Ok(TradeFee {
             coin: self.ticker().to_owned(),
-            amount: self.get_one_kbyte_tx_fee().await?.into(),
+            amount: self.get_one_kbyte_tx_fee().await.mm_err(Into::into)?.into(),
             paid_from_trading_vol: false,
         })
     }
@@ -1333,7 +1333,7 @@ impl MmCoin for ZCoin {
     ) -> TradePreimageResult<TradeFee> {
         Ok(TradeFee {
             coin: self.ticker().to_owned(),
-            amount: self.get_one_kbyte_tx_fee().await?.into(),
+            amount: self.get_one_kbyte_tx_fee().await.mm_err(Into::into)?.into(),
             paid_from_trading_vol: false,
         })
     }

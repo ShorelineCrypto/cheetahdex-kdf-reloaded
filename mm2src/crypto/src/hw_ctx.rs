@@ -51,7 +51,7 @@ impl HardwareWalletCtx {
     {
         let trezor = HwClient::trezor(processor).await?;
         let hw_internal_pubkey = {
-            let mut session = trezor.session().await?;
+            let mut session = trezor.session().await.mm_err(Into::into)?;
             HardwareWalletCtx::trezor_mm_internal_pubkey(&mut session, processor).await?
         };
         let hw_client = HwClient::Trezor(trezor);
@@ -107,10 +107,14 @@ impl HardwareWalletCtx {
             .expect("'MM2_INTERNAL_DERIVATION_PATH' is expected to be valid derivation path");
         let mm2_internal_xpub = trezor
             .get_public_key(path, MM2_TREZOR_INTERNAL_COIN, MM2_INTERNAL_ECDSA_CURVE)
-            .await?
+            .await
+            .mm_err(Into::into)?
             .process(processor)
-            .await?;
-        let extended_pubkey = Secp256k1ExtendedPublicKey::from_str(&mm2_internal_xpub).map_to_mm(HwError::from)?;
+            .await
+            .mm_err(Into::into)?;
+        let extended_pubkey = Secp256k1ExtendedPublicKey::from_str(&mm2_internal_xpub)
+            .map_to_mm(HwError::from)
+            .mm_err(Into::into)?;
         Ok(H264::from(extended_pubkey.public_key().serialize()))
     }
 
@@ -122,7 +126,7 @@ impl HardwareWalletCtx {
     where
         Processor: TrezorRequestProcessor + Sync,
     {
-        let mut session = trezor.session().await.mm_err(HwError::from)?;
+        let mut session = trezor.session().await.mm_err(HwError::from).mm_err(Into::into)?;
         let actual_pubkey = Self::trezor_mm_internal_pubkey(&mut session, processor).await?;
         if actual_pubkey != self.hw_internal_pubkey {
             return MmError::err(HwProcessingError::HwError(HwError::FoundUnexpectedDevice {

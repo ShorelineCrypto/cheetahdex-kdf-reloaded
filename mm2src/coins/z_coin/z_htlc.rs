@@ -48,7 +48,7 @@ pub async fn z_send_htlc(
         hrp: None,
     };
 
-    let amount_sat = sat_from_big_decimal(&amount, coin.utxo_arc.decimals)?;
+    let amount_sat = sat_from_big_decimal(&amount, coin.utxo_arc.decimals).mm_err(Into::into)?;
     let address = htlc_address.to_string();
     if let UtxoRpcClientEnum::Native(native) = coin.rpc_client() {
         native.import_address(&address, &address, false).compat().await.unwrap();
@@ -80,7 +80,7 @@ pub async fn z_send_dex_fee(
     amount: BigDecimal,
     uuid: &[u8],
 ) -> Result<ZTransaction, MmError<SendOutputsErr>> {
-    let dex_fee_amount = sat_from_big_decimal(&amount, coin.utxo_arc.decimals)?;
+    let dex_fee_amount = sat_from_big_decimal(&amount, coin.utxo_arc.decimals).mm_err(Into::into)?;
     let dex_fee_out = ZOutput {
         to_addr: coin.z_fields.dex_fee_addr.clone(),
         amount: Amount::from_u64(dex_fee_amount).map_err(|_| NumConversError::new("Invalid ZCash amount".into()))?,
@@ -135,7 +135,7 @@ pub async fn z_p2sh_spend(
     script_data: Script,
     htlc_privkey: &[u8],
 ) -> Result<UtxoTx, MmError<ZP2SHSpendError>> {
-    let current_block = coin.utxo_arc.rpc_client.get_block_count().compat().await? as u32;
+    let current_block = coin.utxo_arc.rpc_client.get_block_count().compat().await.mm_err(Into::into)? as u32;
     let mut tx_builder = ZTxBuilder::new(ARRRConsensusParams {}, current_block.into());
     tx_builder.set_lock_time(tx_locktime);
 

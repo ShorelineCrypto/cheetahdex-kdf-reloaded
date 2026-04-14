@@ -92,10 +92,10 @@ pub async fn init_scan_for_new_addresses(
     ctx: MmArc,
     req: ScanAddressesRequest,
 ) -> MmResult<InitRpcTaskResponse, HDAccountBalanceRpcError> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let coins_ctx = CoinsContext::from_ctx(&ctx).map_to_mm(HDAccountBalanceRpcError::Internal)?;
     let task = InitScanAddressesTask { req, coin };
-    let task_id = ScanAddressesTaskManager::spawn_rpc_task(&coins_ctx.scan_addresses_manager, task)?;
+    let task_id = ScanAddressesTaskManager::spawn_rpc_task(&coins_ctx.scan_addresses_manager, task).mm_err(Into::into)?;
     Ok(InitRpcTaskResponse { task_id })
 }
 
@@ -129,7 +129,7 @@ pub mod common_impl {
         Coin: CoinWithDerivationMethod<HDWallet = <Coin as HDWalletCoinOps>::HDWallet> + HDWalletBalanceOps + Sync,
         <Coin as HDWalletCoinOps>::Address: fmt::Display,
     {
-        let hd_wallet = coin.derivation_method().hd_wallet_or_err()?;
+        let hd_wallet = coin.derivation_method().hd_wallet_or_err().mm_err(Into::into)?;
 
         let account_id = params.account_index;
         let mut hd_account = hd_wallet
@@ -137,12 +137,12 @@ pub mod common_impl {
             .await
             .or_mm_err(|| HDAccountBalanceRpcError::CoinIsActivatedNotWithHDWallet)?;
         let account_derivation_path = hd_account.account_derivation_path();
-        let address_scanner = coin.produce_hd_address_scanner().await?;
+        let address_scanner = coin.produce_hd_address_scanner().await.mm_err(Into::into)?;
         let gap_limit = params.gap_limit.unwrap_or_else(|| hd_wallet.gap_limit());
 
         let new_addresses = coin
             .scan_for_new_addresses(hd_wallet, hd_account.deref_mut(), &address_scanner, gap_limit)
-            .await?;
+            .await.mm_err(Into::into)?;
 
         Ok(ScanAddressesResponse {
             account_index: account_id,

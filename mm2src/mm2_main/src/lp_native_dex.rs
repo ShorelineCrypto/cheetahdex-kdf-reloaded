@@ -359,9 +359,9 @@ pub async fn lp_init_continue(ctx: MmArc) -> MmInitResult<()> {
         migrate_db(&ctx)?;
     }
 
-    init_ordermatch_context(&ctx)?;
-    init_message_service(&ctx).await?;
-    init_p2p(ctx.clone()).await?;
+    init_ordermatch_context(&ctx).mm_err(Into::into)?;
+    init_message_service(&ctx).await.mm_err(Into::into)?;
+    init_p2p(ctx.clone()).await.mm_err(Into::into)?;
 
     let balance_update_ordermatch_handler = BalanceUpdateOrdermatchHandler::new(ctx.clone());
     register_balance_update_handler(ctx.clone(), Box::new(balance_update_ordermatch_handler)).await;
@@ -396,7 +396,7 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
             field: "passphrase".to_owned(),
             error: e.to_string(),
         })?;
-    CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase)?;
+    CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase).mm_err(Into::into)?;
     lp_init_continue(ctx.clone()).await?;
 
     let ctx_id = ctx.ffi_handle().map_to_mm(MmInitError::Internal)?;
@@ -542,7 +542,7 @@ async fn relay_node_type(ctx: &MmArc) -> P2PResult<NodeType> {
     let ip = myipaddr(ctx.clone())
         .await
         .map_to_mm(P2PInitError::ErrorGettingMyIpAddr)?;
-    let network_ports = lp_network_ports(netid)?;
+    let network_ports = lp_network_ports(netid).mm_err(Into::into)?;
     let wss_certs = wss_certs(ctx)?;
     if wss_certs.is_none() {
         const WARN_MSG: &str = r#"Please note TLS private key and certificate are not specified.
@@ -573,7 +573,7 @@ fn light_node_type(ctx: &MmArc) -> P2PResult<NodeType> {
     }
 
     let netid = ctx.netid();
-    let network_ports = lp_network_ports(netid)?;
+    let network_ports = lp_network_ports(netid).mm_err(Into::into)?;
     Ok(NodeType::Light { network_ports })
 }
 

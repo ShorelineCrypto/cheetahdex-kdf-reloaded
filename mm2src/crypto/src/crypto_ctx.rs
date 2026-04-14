@@ -56,8 +56,7 @@ impl<ProcessorError> From<HwProcessingError<ProcessorError>> for HwCtxInitError<
     }
 }
 
-/// This is required for converting `MmError<HwProcessingError<E>>` into `MmError<InitHwCtxError<E>>`.
-impl<E> NotEqual for HwCtxInitError<E> {}
+
 
 pub struct CryptoCtx {
     iguana_ctx: IguanaArc,
@@ -104,9 +103,9 @@ impl CryptoCtx {
             return MmError::err(CryptoInitError::NullStringPassphrase);
         }
 
-        let secp256k1_key_pair = key_pair_from_seed(passphrase)?;
+        let secp256k1_key_pair = key_pair_from_seed(passphrase).mm_err(Into::into)?;
         // We can't clone `secp256k1_key_pair`, but it's used later to initialize legacy `MmCtx` fields.
-        let secp256k1_key_pair_for_legacy = key_pair_from_seed(passphrase)?;
+        let secp256k1_key_pair_for_legacy = key_pair_from_seed(passphrase).mm_err(Into::into)?;
 
         let rmd160 = secp256k1_key_pair.public().address_hash();
         let crypto_ctx = CryptoCtx {

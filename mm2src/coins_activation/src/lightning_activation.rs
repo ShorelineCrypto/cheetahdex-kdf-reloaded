@@ -168,7 +168,7 @@ impl L2ActivationOps for LightningCoin {
             activation_params.color.unwrap_or_else(|| "000000".into()),
             &mut node_color as &mut [u8],
         )
-        .map_to_mm(|_| LightningValidationErr::InvalidRequest("Invalid Hex Color".into()))?;
+        .map_to_mm(|_| LightningValidationErr::InvalidRequest("Invalid Hex Color".into())).mm_err(Into::into)?;
 
         let listening_port = activation_params.listening_port.unwrap_or(DEFAULT_LISTENING_PORT);
 
@@ -189,7 +189,7 @@ impl L2ActivationOps for LightningCoin {
         coin_conf: Self::CoinConf,
     ) -> Result<(Self, Self::ActivationResult), MmError<Self::ActivationError>> {
         let lightning_coin =
-            start_lightning(ctx, platform_coin.clone(), protocol_conf, coin_conf, validated_params).await?;
+            start_lightning(ctx, platform_coin.clone(), protocol_conf, coin_conf, validated_params).await.mm_err(Into::into)?;
         let address = lightning_coin
             .my_address()
             .map_to_mm(LightningInitError::MyAddressError)?;

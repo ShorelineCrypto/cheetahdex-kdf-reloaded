@@ -28,12 +28,12 @@ impl<TxP: TxProvider + Send + Sync> TrezorTxSigner<TxP> {
         }
 
         let trezor_unsigned_tx = self.get_trezor_unsigned_tx().await?;
-        let mut session = self.trezor.session().await?;
+        let mut session = self.trezor.session().await.mm_err(Into::into)?;
 
         let TxSignResult {
             signatures,
             serialized_tx,
-        } = session.sign_utxo_tx(trezor_unsigned_tx).await?;
+        } = session.sign_utxo_tx(trezor_unsigned_tx).await.mm_err(Into::into)?;
         debug!("Transaction signed by Trezor: {}", hex::encode(serialized_tx));
         if signatures.len() != self.params.inputs_count() {
             return MmError::err(UtxoSignTxError::InvalidSignaturesNumber {
@@ -117,7 +117,7 @@ impl<TxP: TxProvider + Send + Sync> TrezorTxSigner<TxP> {
     }
 
     async fn get_trezor_prev_tx(&self, prev_tx_hash: &H256Json) -> UtxoSignTxResult<PrevTx> {
-        let prev_verbose = self.tx_provider.get_rpc_transaction(prev_tx_hash).await?;
+        let prev_verbose = self.tx_provider.get_rpc_transaction(prev_tx_hash).await.mm_err(Into::into)?;
         let prev_utxo: UtxoTx =
             deserialize(prev_verbose.hex.as_slice()).map_to_mm(|e| UtxoSignTxError::Transport(e.to_string()))?;
 

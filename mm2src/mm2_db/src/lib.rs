@@ -1,4 +1,3 @@
-#![feature(negative_impls)]
 
 #[cfg(target_arch = "wasm32")]
 #[path = "indexed_db/indexed_db.rs"]

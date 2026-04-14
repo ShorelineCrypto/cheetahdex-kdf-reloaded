@@ -57,14 +57,14 @@ mod native_lock {
     impl SwapLockOps for SwapLock {
         async fn lock(ctx: &MmArc, swap_uuid: Uuid, ttl_sec: f64) -> SwapLockResult<Option<SwapLock>> {
             let lock_path = my_swaps_dir(ctx).join(format!("{}.lock", swap_uuid));
-            let file_lock = match FileLock::lock(lock_path, ttl_sec)? {
+            let file_lock = match FileLock::lock(lock_path, ttl_sec).mm_err(Into::into)? {
                 Some(lock) => lock,
                 None => return Ok(None),
             };
             Ok(Some(SwapLock { file_lock }))
         }
 
-        async fn touch(&self) -> SwapLockResult<()> { Ok(self.file_lock.touch()?) }
+        async fn touch(&self) -> SwapLockResult<()> { Ok(self.file_lock.touch().mm_err(Into::into)?) }
     }
 }
 

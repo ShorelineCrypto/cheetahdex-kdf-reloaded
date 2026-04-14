@@ -231,7 +231,7 @@ impl PeersExchange {
         let mut components = address.iter();
         match components.next() {
             Some(Protocol::Ip4(addr)) => {
-                if !addr.is_global() {
+                if !crate::ip_helpers::ipv4_is_global(&addr) {
                     return false;
                 }
             },

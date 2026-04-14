@@ -143,7 +143,7 @@ where
         task_handle: &'task RpcTaskHandle<Task>,
         statuses: HwConnectStatuses<Task::InProgressStatus, Task::AwaitingStatus>,
     ) -> MmResult<RpcTaskXPubExtractor<'task, Task>, HDExtractPubkeyError> {
-        let crypto_ctx = CryptoCtx::from_ctx(ctx)?;
+        let crypto_ctx = CryptoCtx::from_ctx(ctx).mm_err(Into::into)?;
         let hw_ctx = crypto_ctx
             .hw_ctx()
             .or_mm_err(|| HDExtractPubkeyError::HwContextNotInitialized)?;
@@ -171,13 +171,13 @@ where
         derivation_path: DerivationPath,
     ) -> MmResult<XPub, HDExtractPubkeyError> {
         let connect_processor = TrezorRpcTaskConnectProcessor::new(task_handle, statuses.clone());
-        let trezor = hw_ctx.trezor(&connect_processor).await?;
-        let mut trezor_session = trezor.session().await?;
+        let trezor = hw_ctx.trezor(&connect_processor).await.mm_err(Into::into)?;
+        let mut trezor_session = trezor.session().await.mm_err(Into::into)?;
 
         let pubkey_processor = TrezorRpcTaskProcessor::new(task_handle, statuses.to_trezor_request_statuses());
         trezor_session
             .get_public_key(derivation_path, trezor_coin, EcdsaCurve::Secp256k1)
-            .await?
+            .await.mm_err(Into::into)?
             .process(&pubkey_processor)
             .await
             .mm_err(HDExtractPubkeyError::from)

@@ -88,14 +88,14 @@ impl SplToken {
 }
 
 async fn withdraw_spl_token_impl(coin: SplToken, req: WithdrawRequest) -> WithdrawResult {
-    let (hash, fees) = coin.platform_coin.estimate_withdraw_fees().await?;
+    let (hash, fees) = coin.platform_coin.estimate_withdraw_fees().await.mm_err(Into::into)?;
     let res = coin
         .check_balance_and_prepare_transfer(req.max, req.amount.clone(), fees)
-        .await?;
+        .await.mm_err(Into::into)?;
     let system_destination_pubkey = solana_sdk::pubkey::Pubkey::try_from(&*req.to)?;
     let contract_key = coin.get_underlying_contract_pubkey();
     let auth_key = coin.platform_coin.key_pair.pubkey();
-    let funding_address = coin.get_pubkey().await?;
+    let funding_address = coin.get_pubkey().await.mm_err(Into::into)?;
     let dest_token_address = get_associated_token_address(&system_destination_pubkey, &contract_key);
     let mut instructions = Vec::with_capacity(1);
     let account_info = async_blocking({
@@ -107,7 +107,7 @@ async fn withdraw_spl_token_impl(coin: SplToken, req: WithdrawRequest) -> Withdr
         let instruction_creation = create_associated_token_account(&auth_key, &dest_token_address, &contract_key);
         instructions.push(instruction_creation);
     }
-    let amount = ui_amount_to_amount(req.amount, coin.conf.decimals)?;
+    let amount = ui_amount_to_amount(req.amount, coin.conf.decimals).mm_err(Into::into)?;
     let instruction_transfer_checked = spl_token::instruction::transfer_checked(
         &spl_token::id(),
         &funding_address,

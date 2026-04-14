@@ -153,14 +153,14 @@ where
         let script_pubkey = output_script(&to, script_type).to_bytes();
 
         let _utxo_lock = UTXO_LOCK.lock().await;
-        let (unspents, _) = coin.get_unspent_ordered_list(&self.sender_address()).await?;
+        let (unspents, _) = coin.get_unspent_ordered_list(&self.sender_address()).await.mm_err(Into::into)?;
         let (value, fee_policy) = if req.max {
             (
                 unspents.iter().fold(0, |sum, unspent| sum + unspent.value),
                 FeePolicy::DeductFromOutput(0),
             )
         } else {
-            let value = sat_from_big_decimal(&req.amount, decimals)?;
+            let value = sat_from_big_decimal(&req.amount, decimals).mm_err(Into::into)?;
             (value, FeePolicy::SendExact)
         };
         let outputs = vec![TransactionOutput { value, script_pubkey }];
@@ -173,11 +173,11 @@ where
 
         match req.fee {
             Some(WithdrawFee::UtxoFixed { ref amount }) => {
-                let fixed = sat_from_big_decimal(amount, decimals)?;
+                let fixed = sat_from_big_decimal(amount, decimals).mm_err(Into::into)?;
                 tx_builder = tx_builder.with_fee(ActualTxFee::FixedPerKb(fixed));
             },
             Some(WithdrawFee::UtxoPerKbyte { ref amount }) => {
-                let dynamic = sat_from_big_decimal(amount, decimals)?;
+                let dynamic = sat_from_big_decimal(amount, decimals).mm_err(Into::into)?;
                 tx_builder = tx_builder.with_fee(ActualTxFee::Dynamic(dynamic));
             },
             Some(ref fee_policy) => {
@@ -271,18 +271,18 @@ where
 
         Ok(self
             .task_handle
-            .update_in_progress_status(WithdrawInProgressStatus::GeneratingTransaction)?)
+            .update_in_progress_status(WithdrawInProgressStatus::GeneratingTransaction).mm_err(Into::into)?)
     }
 
     fn on_finishing(&self) -> Result<(), MmError<WithdrawError>> {
         Ok(self
             .task_handle
-            .update_in_progress_status(WithdrawInProgressStatus::Finishing)?)
+            .update_in_progress_status(WithdrawInProgressStatus::Finishing).mm_err(Into::into)?)
     }
 
     async fn sign_tx(&self, unsigned_tx: TransactionInputSigner) -> Result<UtxoTx, MmError<WithdrawError>> {
         self.task_handle
-            .update_in_progress_status(WithdrawInProgressStatus::SigningTransaction)?;
+            .update_in_progress_status(WithdrawInProgressStatus::SigningTransaction).mm_err(Into::into)?;
 
         let mut sign_params = UtxoSignTxParamsBuilder::new();
 
@@ -313,7 +313,7 @@ where
             .with_signature_version(self.signature_version())
             .with_unsigned_tx(unsigned_tx)
             .with_prev_script(Builder::build_p2pkh(&self.from_address.hash));
-        let sign_params = sign_params.build()?;
+        let sign_params = sign_params.build().mm_err(Into::into)?;
 
         let sign_policy = match self.coin.as_ref().priv_key_policy {
             PrivKeyPolicy::KeyPair(ref key_pair) => SignPolicy::WithKeyPair(key_pair),
@@ -324,8 +324,8 @@ where
         };
 
         self.task_handle
-            .update_in_progress_status(WithdrawInProgressStatus::WaitingForUserToConfirmSigning)?;
-        let signed = self.coin.sign_tx(sign_params, sign_policy).await?;
+            .update_in_progress_status(WithdrawInProgressStatus::WaitingForUserToConfirmSigning).mm_err(Into::into)?;
+        let signed = self.coin.sign_tx(sign_params, sign_policy).await.mm_err(Into::into)?;
 
         Ok(signed)
     }
@@ -371,7 +371,7 @@ impl<'a, Coin> InitUtxoWithdraw<'a, Coin> {
     ///
     /// The method fails if [`CryptoCtx::hw_ctx`] is not initialized yet.
     async fn trezor_client(&self) -> MmResult<TrezorClient, WithdrawError> {
-        let crypto_ctx = CryptoCtx::from_ctx(&self.ctx)?;
+        let crypto_ctx = CryptoCtx::from_ctx(&self.ctx).mm_err(Into::into)?;
         let hw_ctx = crypto_ctx
             .hw_ctx()
             .or_mm_err(|| WithdrawError::NoTrezorDeviceAvailable)?;
@@ -419,14 +419,14 @@ where
     fn on_finishing(&self) -> Result<(), MmError<WithdrawError>> { Ok(()) }
 
     async fn sign_tx(&self, unsigned_tx: TransactionInputSigner) -> Result<UtxoTx, MmError<WithdrawError>> {
-        let key_pair = self.coin.as_ref().priv_key_policy.key_pair_or_err()?;
+        let key_pair = self.coin.as_ref().priv_key_policy.key_pair_or_err().mm_err(Into::into)?;
         Ok(with_key_pair::sign_tx(
             unsigned_tx,
             key_pair,
             self.prev_script(),
             self.signature_version(),
             self.coin.as_ref().conf.fork_id,
-        )?)
+        ).mm_err(Into::into)?)
     }
 }
 
@@ -435,7 +435,7 @@ where
     Coin: AsRef<UtxoCoinFields> + MarketCoinOps,
 {
     pub fn new(coin: Coin, req: WithdrawRequest) -> Result<Self, MmError<WithdrawError>> {
-        let my_address = coin.as_ref().derivation_method.iguana_or_err()?.clone();
+        let my_address = coin.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?.clone();
         let my_address_string = coin.my_address().map_to_mm(WithdrawError::InternalError)?;
         Ok(StandardUtxoWithdraw {
             coin,

@@ -287,10 +287,16 @@ impl Deserializable for BlockHeader {
 }
 
 impl BlockHeader {
-    pub fn hash(&self) -> H256 { dhash256(&serialize(self)) }
+    pub fn hash(&self) -> H256 {
+        dhash256(&serialize(self))
+    }
 
-    pub fn is_prog_pow(&self) -> bool { self.version == MTP_POW_VERSION && self.time >= PROG_POW_SWITCH_TIME }
-    pub fn raw(&self) -> Bytes { serialize(self) }
+    pub fn is_prog_pow(&self) -> bool {
+        self.version == MTP_POW_VERSION && self.time >= PROG_POW_SWITCH_TIME
+    }
+    pub fn raw(&self) -> Bytes {
+        serialize(self)
+    }
     pub fn target(&self) -> Result<U256, U256> {
         match self.bits {
             BlockHeaderBits::Compact(compact) => compact.to_u256(),
@@ -300,13 +306,17 @@ impl BlockHeader {
 }
 
 impl From<&'static str> for BlockHeader {
-    fn from(s: &'static str) -> Self { deserialize(&s.from_hex::<Vec<u8>>().unwrap() as &[u8]).unwrap() }
+    fn from(s: &'static str) -> Self {
+        deserialize(&s.from_hex::<Vec<u8>>().unwrap() as &[u8]).unwrap()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use block_header::{BlockHeader, BlockHeaderBits, BlockHeaderNonce, AUX_POW_VERSION_DOGE, AUX_POW_VERSION_SYS,
-                       KAWPOW_VERSION, MTP_POW_VERSION, PROG_POW_SWITCH_TIME, QTUM_BLOCK_HEADER_VERSION};
+    use block_header::{
+        BlockHeader, BlockHeaderBits, BlockHeaderNonce, AUX_POW_VERSION_DOGE, AUX_POW_VERSION_SYS, KAWPOW_VERSION,
+        MTP_POW_VERSION, PROG_POW_SWITCH_TIME, QTUM_BLOCK_HEADER_VERSION,
+    };
     use hex::FromHex;
     use ser::{deserialize, serialize, serialize_list, CoinVariant, Error as ReaderError, Reader, Stream};
 

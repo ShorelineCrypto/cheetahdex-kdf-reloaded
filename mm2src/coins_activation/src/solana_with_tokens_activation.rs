@@ -198,7 +198,7 @@ impl PlatformWithTokensActivationOps for SolanaCoin {
         let mut token_balances = HashMap::new();
         let token_infos = self.get_spl_tokens_infos();
         for (token_ticker, info) in token_infos.into_iter() {
-            let balance = self.my_balance_spl(&info.clone()).await?;
+            let balance = self.my_balance_spl(&info.clone()).await.mm_err(Into::into)?;
             token_balances.insert(token_ticker.to_owned(), balance);
         }
         let mut result = SolanaWithTokensActivationResult {

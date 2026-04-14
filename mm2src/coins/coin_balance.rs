@@ -175,7 +175,7 @@ pub trait HDWalletBalanceOps: HDWalletCoinOps {
                     address,
                     derivation_path,
                     ..
-                } = self.derive_address(hd_account, chain, address_id)?;
+                } = self.derive_address(hd_account, chain, address_id).mm_err(Into::into)?;
                 Ok((address, derivation_path))
             })
             // Try to unzip `Result<(Address, DerivationPath)>` elements into `Result<(Vec<Address>, Vec<DerivationPath>)>`.
@@ -254,11 +254,11 @@ pub mod common_impl {
         Coin: HDWalletBalanceOps + Sync,
     {
         let gap_limit = hd_wallet.gap_limit();
-        let mut addresses = coin.all_known_addresses_balances(hd_account).await?;
+        let mut addresses = coin.all_known_addresses_balances(hd_account).await.mm_err(Into::into)?;
         if scan_new_addresses {
             addresses.extend(
                 coin.scan_for_new_addresses(hd_wallet, hd_account, address_scanner, gap_limit)
-                    .await?,
+                    .await.mm_err(Into::into)?,
             );
         }
 
@@ -286,7 +286,7 @@ pub mod common_impl {
         XPubExtractor: HDXPubExtractor + Sync,
     {
         let mut accounts = hd_wallet.get_accounts_mut().await;
-        let address_scanner = coin.produce_hd_address_scanner().await?;
+        let address_scanner = coin.produce_hd_address_scanner().await.mm_err(Into::into)?;
 
         let mut result = HDWalletBalance {
             accounts: Vec::with_capacity(accounts.len() + 1),
@@ -301,7 +301,7 @@ pub mod common_impl {
             );
 
             // Create new HD account.
-            let mut new_account = coin.create_new_account(hd_wallet, xpub_extractor).await?;
+            let mut new_account = coin.create_new_account(hd_wallet, xpub_extractor).await.mm_err(Into::into)?;
             let scan_new_addresses = matches!(
                 scan_policy,
                 EnableCoinScanPolicy::ScanIfNewWallet | EnableCoinScanPolicy::Scan

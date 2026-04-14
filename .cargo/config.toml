@@ -1,0 +1,15 @@
+[env]
+# Enables unstable features on stable toolchain for specific crates only.
+# These crates depend on `auto_traits` and `negative_impls` which have no
+# practical stable alternative without rewriting ~70 error types.
+# Remove once these features are formally stabilized.
+#
+# - common:          `auto trait NotSame` + `impl !NotSame`
+# - mm2_err_handle:  `auto trait NotMmError` / `NotEqual` + negative impls
+# - docker_tests_main: `custom_test_frameworks` + `test` (test harness)
+# - mocktopus, mocktopus_macros: test mocking framework (nightly only)
+RUSTC_BOOTSTRAP = "common,mm2_err_handle,docker_tests,mocktopus,mocktopus_macros"
+
+[target.wasm32-unknown-unknown]
+runner = 'wasm-bindgen-test-runner-0.2.78'
+rustflags = ["--cfg=web_sys_unstable_apis"]

@@ -30,7 +30,7 @@ pub struct GetHistoryResult {
     pub total: usize,
 }
 
-pub trait TxHistoryStorageError: std::fmt::Debug + NotMmError + NotEqual + Send {}
+pub trait TxHistoryStorageError: std::fmt::Debug + NotMmError + Send {}
 
 #[async_trait]
 pub trait TxHistoryStorage: Send + Sync + 'static {
@@ -323,7 +323,7 @@ pub async fn my_tx_history_v2_rpc(
     ctx: MmArc,
     request: MyTxHistoryRequestV2,
 ) -> Result<MyTxHistoryResponseV2, MmError<MyTxHistoryErrorV2>> {
-    let coin = lp_coinfind_or_err(&ctx, &request.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &request.coin).await.mm_err(Into::into)?;
     let tx_history_storage = SqliteTxHistoryStorage(
         ctx.sqlite_connection
             .ok_or(MmError::new(MyTxHistoryErrorV2::StorageIsNotInitialized(
@@ -337,7 +337,8 @@ pub async fn my_tx_history_v2_rpc(
     };
     let is_storage_init = tx_history_storage
         .is_initialized_for(history_coin_type.storage_ticker())
-        .await?;
+        .await
+        .mm_err(Into::into)?;
     if !is_storage_init {
         let msg = format!("Storage is not initialized for {}", history_coin_type.storage_ticker());
         return MmError::err(MyTxHistoryErrorV2::StorageIsNotInitialized(msg));
@@ -350,7 +351,8 @@ pub async fn my_tx_history_v2_rpc(
 
     let history = tx_history_storage
         .get_history(history_coin_type, request.paging_options.clone(), request.limit)
-        .await?;
+        .await
+        .mm_err(Into::into)?;
 
     let transactions = history
         .transactions

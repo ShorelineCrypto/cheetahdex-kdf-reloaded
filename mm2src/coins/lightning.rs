@@ -753,7 +753,7 @@ pub struct ConnectToNodeRequest {
 
 /// Connect to a certain node on the lightning network.
 pub async fn connect_to_lightning_node(ctx: MmArc, req: ConnectToNodeRequest) -> ConnectToNodeResult<String> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(ConnectToNodeError::UnsupportedCoin(coin.ticker().to_string())),
@@ -808,7 +808,7 @@ pub struct OpenChannelResponse {
 
 /// Opens a channel on the lightning network.
 pub async fn open_channel(ctx: MmArc, req: OpenChannelRequest) -> OpenChannelResult<OpenChannelResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(OpenChannelError::UnsupportedCoin(coin.ticker().to_string())),
@@ -817,19 +817,19 @@ pub async fn open_channel(ctx: MmArc, req: OpenChannelRequest) -> OpenChannelRes
     // Making sure that the node data is correct and that we can connect to it before doing more operations
     let node_pubkey = req.node_address.pubkey;
     let node_addr = req.node_address.addr;
-    connect_to_node(node_pubkey, node_addr, ln_coin.peer_manager.clone()).await?;
+    connect_to_node(node_pubkey, node_addr, ln_coin.peer_manager.clone()).await.mm_err(Into::into)?;
 
     let platform_coin = ln_coin.platform_coin().clone();
     let decimals = platform_coin.as_ref().decimals;
-    let my_address = platform_coin.as_ref().derivation_method.iguana_or_err()?;
-    let (unspents, _) = platform_coin.get_unspent_ordered_list(my_address).await?;
+    let my_address = platform_coin.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
+    let (unspents, _) = platform_coin.get_unspent_ordered_list(my_address).await.mm_err(Into::into)?;
     let (value, fee_policy) = match req.amount.clone() {
         ChannelOpenAmount::Max => (
             unspents.iter().fold(0, |sum, unspent| sum + unspent.value),
             FeePolicy::DeductFromOutput(0),
         ),
         ChannelOpenAmount::Exact(v) => {
-            let value = sat_from_big_decimal(&v, decimals)?;
+            let value = sat_from_big_decimal(&v, decimals).mm_err(Into::into)?;
             (value, FeePolicy::SendExact)
         },
     };
@@ -851,7 +851,7 @@ pub async fn open_channel(ctx: MmArc, req: OpenChannelRequest) -> OpenChannelRes
         .map_err(|e| OpenChannelError::RpcError(e.to_string()))?;
     tx_builder = tx_builder.with_fee(fee);
 
-    let (unsigned, _) = tx_builder.build().await?;
+    let (unsigned, _) = tx_builder.build().await.mm_err(Into::into)?;
 
     let amount_in_sat = unsigned.outputs[0].value;
     let push_msat = req.push_msat;
@@ -1058,7 +1058,7 @@ pub async fn list_open_channels_by_filter(
     ctx: MmArc,
     req: ListOpenChannelsRequest,
 ) -> ListChannelsResult<ListOpenChannelsResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(ListChannelsError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1102,7 +1102,7 @@ pub async fn list_closed_channels_by_filter(
     ctx: MmArc,
     req: ListClosedChannelsRequest,
 ) -> ListChannelsResult<ListClosedChannelsResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(ListChannelsError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1139,7 +1139,7 @@ pub async fn get_channel_details(
     ctx: MmArc,
     req: GetChannelDetailsRequest,
 ) -> GetChannelDetailsResult<GetChannelDetailsResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(GetChannelDetailsError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1181,7 +1181,7 @@ pub async fn generate_invoice(
     ctx: MmArc,
     req: GenerateInvoiceRequest,
 ) -> GenerateInvoiceResult<GenerateInvoiceResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(GenerateInvoiceError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1253,7 +1253,7 @@ pub struct SendPaymentResponse {
 }
 
 pub async fn send_payment(ctx: MmArc, req: SendPaymentReq) -> SendPaymentResult<SendPaymentResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(SendPaymentError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1394,7 +1394,7 @@ pub struct ListPaymentsResponse {
 }
 
 pub async fn list_payments_by_filter(ctx: MmArc, req: ListPaymentsReq) -> ListPaymentsResult<ListPaymentsResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(ListPaymentsError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1433,7 +1433,7 @@ pub async fn get_payment_details(
     ctx: MmArc,
     req: GetPaymentDetailsRequest,
 ) -> GetPaymentDetailsResult<GetPaymentDetailsResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(GetPaymentDetailsError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1461,7 +1461,7 @@ pub struct CloseChannelReq {
 }
 
 pub async fn close_channel(ctx: MmArc, req: CloseChannelReq) -> CloseChannelResult<String> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(CloseChannelError::UnsupportedCoin(coin.ticker().to_string())),
@@ -1574,7 +1574,7 @@ pub async fn get_claimable_balances(
     ctx: MmArc,
     req: ClaimableBalancesReq,
 ) -> ClaimableBalancesResult<Vec<ClaimableBalance>> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let ln_coin = match coin {
         MmCoinEnum::LightningCoin(c) => c,
         _ => return MmError::err(ClaimableBalancesError::UnsupportedCoin(coin.ticker().to_string())),

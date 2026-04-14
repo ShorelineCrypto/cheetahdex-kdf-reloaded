@@ -1,6 +1,5 @@
 //! Utilities that handle persisting Rust-Lightning data to disk via standard filesystem APIs.
 
-#![feature(io_error_more)]
 
 pub mod storage;
 mod util;

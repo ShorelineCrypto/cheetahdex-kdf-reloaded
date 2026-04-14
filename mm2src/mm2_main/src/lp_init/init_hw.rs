@@ -116,7 +116,7 @@ impl RpcTask for InitHwTask {
     fn initial_status(&self) -> Self::InProgressStatus { InitHwInProgressStatus::Initializing }
 
     async fn run(self, task_handle: &InitHwTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
-        let crypto_ctx = CryptoCtx::from_ctx(&self.ctx)?;
+        let crypto_ctx = CryptoCtx::from_ctx(&self.ctx).mm_err(Into::into)?;
 
         match self.hw_wallet_type {
             HwWalletType::Trezor => {
@@ -131,7 +131,7 @@ impl RpcTask for InitHwTask {
                 .with_connect_timeout(TREZOR_CONNECT_TIMEOUT)
                 .with_pin_timeout(TREZOR_PIN_TIMEOUT);
 
-                crypto_ctx.init_hw_ctx_with_trezor(&trezor_connect_processor).await?;
+                crypto_ctx.init_hw_ctx_with_trezor(&trezor_connect_processor).await.mm_err(Into::into)?;
             },
         }
         Ok(SuccessResponse::new())
@@ -147,7 +147,7 @@ pub async fn init_trezor(ctx: MmArc, _req: InitTrezorRequest) -> MmResult<InitRp
         ctx,
         hw_wallet_type: HwWalletType::Trezor,
     };
-    let task_id = RpcTaskManager::spawn_rpc_task(&init_ctx.init_hw_task_manager, task)?;
+    let task_id = RpcTaskManager::spawn_rpc_task(&init_ctx.init_hw_task_manager, task).mm_err(Into::into)?;
     Ok(InitRpcTaskResponse { task_id })
 }
 
@@ -171,6 +171,6 @@ pub async fn init_trezor_user_action(
         .init_hw_task_manager
         .lock()
         .map_to_mm(|e| RpcTaskUserActionError::Internal(e.to_string()))?;
-    task_manager.on_user_action(req.task_id, req.user_action)?;
+    task_manager.on_user_action(req.task_id, req.user_action).mm_err(Into::into)?;
     Ok(SuccessResponse::new())
 }

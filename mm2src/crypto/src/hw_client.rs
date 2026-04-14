@@ -89,8 +89,7 @@ impl<E> From<TrezorProcessingError<E>> for HwProcessingError<E> {
     }
 }
 
-/// This is required for converting `MmError<HwError>` into `MmError<HwProcessingError<E>>`.
-impl<E> NotEqual for HwProcessingError<E> {}
+
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum HwWalletType {
@@ -163,7 +162,7 @@ impl HwClient {
         use common::executor::Timer;
 
         async fn try_to_connect() -> HwResult<Option<TrezorClient>> {
-            let mut devices = trezor::transport::usb::find_devices()?;
+            let mut devices = trezor::transport::usb::find_devices().mm_err(Into::into)?;
             if devices.is_empty() {
                 return Ok(None);
             }
@@ -171,7 +170,7 @@ impl HwClient {
                 return MmError::err(HwError::CannotChooseDevice { count: devices.len() });
             }
             let device = devices.remove(0);
-            let transport = device.connect()?;
+            let transport = device.connect().mm_err(Into::into)?;
             let trezor = TrezorClient::from_transport(transport);
             Ok(Some(trezor))
         }

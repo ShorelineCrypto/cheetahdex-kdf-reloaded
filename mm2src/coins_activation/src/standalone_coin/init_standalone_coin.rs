@@ -34,7 +34,6 @@ pub trait InitStandaloneCoinActivationOps: Into<MmCoinEnum> + Send + Sync + 'sta
     type ActivationError: From<RegisterCoinError>
         + Into<InitStandaloneCoinError>
         + SerMmErrorType
-        + NotEqual
         + Clone
         + Send
         + Sync
@@ -71,13 +70,12 @@ where
     Standalone: InitStandaloneCoinActivationOps + Send + Sync + 'static,
     Standalone::InProgressStatus: InitStandaloneCoinInitialStatus,
     InitStandaloneCoinError: From<Standalone::ActivationError>,
-    (Standalone::ActivationError, InitStandaloneCoinError): NotEqual,
 {
     if let Ok(Some(_)) = lp_coinfind(&ctx, &request.ticker).await {
         return MmError::err(InitStandaloneCoinError::CoinIsAlreadyActivated { ticker: request.ticker });
     }
 
-    let (coin_conf, protocol_info) = coin_conf_with_protocol(&ctx, &request.ticker)?;
+    let (coin_conf, protocol_info) = coin_conf_with_protocol(&ctx, &request.ticker).mm_err(Into::into)?;
 
     let coins_act_ctx = CoinsActivationContext::from_ctx(&ctx).map_to_mm(InitStandaloneCoinError::Internal)?;
     let task = InitStandaloneCoinTask::<Standalone> {
@@ -128,7 +126,7 @@ pub async fn init_standalone_coin_user_action<Standalone: InitStandaloneCoinActi
     let mut task_manager = Standalone::rpc_task_manager(&coins_act_ctx)
         .lock()
         .map_to_mm(|poison| InitStandaloneCoinUserActionError::Internal(poison.to_string()))?;
-    task_manager.on_user_action(req.task_id, req.user_action)?;
+    task_manager.on_user_action(req.task_id, req.user_action).mm_err(Into::into)?;
     Ok(SuccessResponse::new())
 }
 
@@ -175,7 +173,7 @@ where
 
         let tx_history = self.request.activation_params.tx_history();
 
-        lp_register_coin(&self.ctx, coin.into(), RegisterCoinParams { ticker, tx_history }).await?;
+        lp_register_coin(&self.ctx, coin.into(), RegisterCoinParams { ticker, tx_history }).await.mm_err(Into::into)?;
 
         Ok(result)
     }

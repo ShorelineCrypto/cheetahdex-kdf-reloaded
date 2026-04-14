@@ -151,8 +151,8 @@ fn sign_funding_transaction(
     };
     unsigned.outputs[0].script_pubkey = output_script.to_bytes().into();
 
-    let my_address = coin.as_ref().derivation_method.iguana_or_err()?;
-    let key_pair = coin.as_ref().priv_key_policy.key_pair_or_err()?;
+    let my_address = coin.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
+    let key_pair = coin.as_ref().priv_key_policy.key_pair_or_err().mm_err(Into::into)?;
 
     let prev_script = Builder::build_p2pkh(&my_address.hash);
     let signed = sign_tx(
@@ -161,7 +161,7 @@ fn sign_funding_transaction(
         prev_script,
         SignatureVersion::WitnessV0,
         coin.as_ref().conf.fork_id,
-    )?;
+    ).mm_err(Into::into)?;
 
     Transaction::try_from(signed).map_to_mm(|e| OpenChannelError::ConvertTxErr(e.to_string()))
 }

@@ -27,8 +27,8 @@ pub async fn trade_preimage_rpc(
         return MmError::err(TradePreimageRpcError::CoinIsWalletOnly { coin: req.rel });
     }
 
-    let base_coin = lp_coinfind_or_err(&ctx, &req.base).await?;
-    let rel_coin = lp_coinfind_or_err(&ctx, &req.rel).await?;
+    let base_coin = lp_coinfind_or_err(&ctx, &req.base).await.mm_err(Into::into)?;
+    let rel_coin = lp_coinfind_or_err(&ctx, &req.rel).await.mm_err(Into::into)?;
 
     match req.swap_method {
         TradePreimageMethod::SetPrice => maker_swap_trade_preimage(&ctx, req, base_coin, rel_coin)

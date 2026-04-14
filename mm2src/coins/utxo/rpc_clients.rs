@@ -669,7 +669,7 @@ impl UtxoRpcClientOps for NativeClient {
                                 hash: unspent.txid.reversed().into(),
                                 index: unspent.vout,
                             },
-                            value: sat_from_big_decimal(&unspent.amount.to_decimal(), decimals)?,
+                            value: sat_from_big_decimal(&unspent.amount.to_decimal(), decimals).mm_err(Into::into)?,
                             height: None,
                         })
                     })
@@ -707,7 +707,7 @@ impl UtxoRpcClientOps for NativeClient {
                                 hash: unspent.txid.reversed().into(),
                                 index: unspent.vout,
                             },
-                            value: sat_from_big_decimal(&unspent.amount.to_decimal(), decimals)?,
+                            value: sat_from_big_decimal(&unspent.amount.to_decimal(), decimals).mm_err(Into::into)?,
                             height: None,
                         };
                         Ok((orig_address, unspent_info))

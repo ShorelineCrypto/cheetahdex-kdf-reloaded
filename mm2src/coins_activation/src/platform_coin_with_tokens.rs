@@ -101,7 +101,6 @@ impl<T> TokenAsMmCoinInitializer for T
 where
     T: TokenInitializer + Send + Sync,
     InitTokensAsMmCoinsError: From<T::InitTokensError>,
-    (T::InitTokensError, InitTokensAsMmCoinsError): NotEqual,
 {
     type PlatformCoin = <T::Token as TokenOf>::PlatformCoin;
     type ActivationRequest = <Self::PlatformCoin as PlatformWithTokensActivationOps>::ActivationRequest;
@@ -122,9 +121,9 @@ where
                     protocol,
                 })
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>().mm_err(Into::into)?;
 
-        let tokens = self.enable_tokens(token_params).await?;
+        let tokens = self.enable_tokens(token_params).await.mm_err(Into::into)?;
         for token in tokens.iter() {
             self.platform_coin().register_token_info(token);
         }
@@ -277,7 +276,6 @@ pub async fn enable_platform_coin_with_tokens<Platform>(
 where
     Platform: PlatformWithTokensActivationOps,
     EnablePlatformCoinWithTokensError: From<Platform::ActivationError>,
-    (Platform::ActivationError, EnablePlatformCoinWithTokensError): NotEqual,
 {
     if let Ok(Some(_)) = lp_coinfind(&ctx, &req.ticker).await {
         return MmError::err(EnablePlatformCoinWithTokensError::PlatformIsAlreadyActivated(
@@ -285,7 +283,7 @@ where
         ));
     }
 
-    let (platform_conf, platform_protocol) = coin_conf_with_protocol(&ctx, &req.ticker)?;
+    let (platform_conf, platform_protocol) = coin_conf_with_protocol(&ctx, &req.ticker).mm_err(Into::into)?;
 
     let priv_key = &*ctx.secp256k1_key_pair().private().secret;
 
@@ -297,14 +295,14 @@ where
         platform_protocol,
         priv_key,
     )
-    .await?;
+    .await.mm_err(Into::into)?;
     let mut mm_tokens = Vec::new();
     for initializer in platform_coin.token_initializers() {
-        let tokens = initializer.enable_tokens_as_mm_coins(ctx.clone(), &req.request).await?;
+        let tokens = initializer.enable_tokens_as_mm_coins(ctx.clone(), &req.request).await.mm_err(Into::into)?;
         mm_tokens.extend(tokens);
     }
 
-    let activation_result = platform_coin.get_activation_result().await?;
+    let activation_result = platform_coin.get_activation_result().await.mm_err(Into::into)?;
     log::info!("{} current block {}", req.ticker, activation_result.current_block());
 
     #[cfg(not(target_arch = "wasm32"))]

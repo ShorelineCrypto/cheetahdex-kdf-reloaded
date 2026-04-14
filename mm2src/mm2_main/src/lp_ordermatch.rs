@@ -46,7 +46,7 @@ use parking_lot::Mutex as PaMutex;
 use rpc::v1::types::H256 as H256Json;
 use serde_json::{self as json, Value as Json};
 use sp_trie::{delta_trie_root, MemoryDB, Trie, TrieConfiguration, TrieDB, TrieDBMut, TrieHash, TrieMut};
-use std::collections::hash_map::{Entry, HashMap, RawEntryMut};
+use std::collections::hash_map::{Entry, HashMap};
 use std::collections::{BTreeSet, HashSet};
 use std::convert::TryInto;
 use std::fmt;
@@ -2316,20 +2316,13 @@ fn pubkey_state_mut<'a>(
     state: &'a mut HashMap<String, OrderbookPubkeyState>,
     from_pubkey: &str,
 ) -> &'a mut OrderbookPubkeyState {
-    match state.raw_entry_mut().from_key(from_pubkey) {
-        RawEntryMut::Occupied(e) => e.into_mut(),
-        RawEntryMut::Vacant(e) => {
-            let state = OrderbookPubkeyState::with_history_timeout(Duration::new(TRIE_STATE_HISTORY_TIMEOUT, 0));
-            e.insert(from_pubkey.to_string(), state).1
-        },
-    }
+    state
+        .entry(from_pubkey.to_string())
+        .or_insert_with(|| OrderbookPubkeyState::with_history_timeout(Duration::new(TRIE_STATE_HISTORY_TIMEOUT, 0)))
 }
 
 fn order_pair_root_mut<'a>(state: &'a mut HashMap<AlbOrderedOrderbookPair, H64>, pair: &str) -> &'a mut H64 {
-    match state.raw_entry_mut().from_key(pair) {
-        RawEntryMut::Occupied(e) => e.into_mut(),
-        RawEntryMut::Vacant(e) => e.insert(pair.to_string(), Default::default()).1,
-    }
+    state.entry(pair.to_string()).or_default()
 }
 
 fn pair_history_mut<'a>(

@@ -47,7 +47,7 @@ impl BchActivationRequest {
     pub fn from_legacy_req(req: &Json) -> Result<Self, MmError<BchFromLegacyReqErr>> {
         let bchd_urls = json::from_value(req["bchd_urls"].clone()).map_to_mm(BchFromLegacyReqErr::InvalidBchdUrls)?;
         let allow_slp_unsafe_conf = req["allow_slp_unsafe_conf"].as_bool().unwrap_or_default();
-        let utxo_params = UtxoActivationParams::from_legacy_req(req)?;
+        let utxo_params = UtxoActivationParams::from_legacy_req(req).mm_err(Into::into)?;
 
         Ok(BchActivationRequest {
             allow_slp_unsafe_conf,
@@ -383,13 +383,13 @@ impl BchCoin {
         storage: &T,
     ) -> Result<UtxoTx, MmError<GetTxDetailsError<T::Error>>> {
         let tx_hash_as_bytes = BytesJson::new(tx_hash.0.to_vec());
-        let tx_bytes = match storage.tx_bytes_from_cache(self.ticker(), &tx_hash_as_bytes).await? {
+        let tx_bytes = match storage.tx_bytes_from_cache(self.ticker(), &tx_hash_as_bytes).await.mm_err(Into::into)? {
             Some(tx_bytes) => tx_bytes,
             None => {
-                let tx_bytes = self.as_ref().rpc_client.get_transaction_bytes(tx_hash).compat().await?;
+                let tx_bytes = self.as_ref().rpc_client.get_transaction_bytes(tx_hash).compat().await.mm_err(Into::into)?;
                 storage
                     .add_tx_to_cache(self.ticker(), &tx_hash_as_bytes, &tx_bytes)
-                    .await?;
+                    .await.mm_err(Into::into)?;
                 tx_bytes
             },
         };
@@ -438,7 +438,7 @@ impl BchCoin {
         height_and_time: Option<BlockHeightAndTime>,
         storage: &T,
     ) -> Result<TransactionDetails, MmError<GetTxDetailsError<T::Error>>> {
-        let my_address = self.as_ref().derivation_method.iguana_or_err()?;
+        let my_address = self.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
         let my_addresses = [my_address.clone()];
         let mut tx_builder = TxDetailsBuilder::new(self.ticker().to_owned(), tx, height_and_time, my_addresses);
         for output in &tx.outputs {
@@ -509,7 +509,7 @@ impl BchCoin {
     ) -> Result<SlpGenesisParams, MmError<GetTxDetailsError<T::Error>>> {
         let token_genesis_tx = self.tx_from_storage_or_rpc(&token_id.into(), storage).await?;
         let maybe_genesis_script: Script = token_genesis_tx.outputs[0].script_pubkey.clone().into();
-        let slp_details = parse_slp_script(&maybe_genesis_script)?;
+        let slp_details = parse_slp_script(&maybe_genesis_script).mm_err(Into::into)?;
         match slp_details.transaction {
             SlpTransaction::Genesis(params) => Ok(params),
             _ => MmError::err(GetTxDetailsError::SlpTokenIdIsNotGenesisTx(token_id)),
@@ -588,7 +588,7 @@ impl BchCoin {
             None => tx.hash().reversed(),
         };
 
-        let my_address = self.as_ref().derivation_method.iguana_or_err()?;
+        let my_address = self.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
         let slp_address = self
             .slp_address(my_address)
             .map_to_mm(GetTxDetailsError::ToSlpAddressError)?;
@@ -1082,8 +1082,8 @@ impl MarketCoinOps for BchCoin {
     fn my_balance(&self) -> BalanceFut<CoinBalance> {
         let coin = self.clone();
         let fut = async move {
-            let my_address = coin.as_ref().derivation_method.iguana_or_err()?;
-            let bch_unspents = coin.bch_unspents_for_display(my_address).await?;
+            let my_address = coin.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
+            let bch_unspents = coin.bch_unspents_for_display(my_address).await.mm_err(Into::into)?;
             Ok(bch_unspents.platform_balance(coin.as_ref().decimals))
         };
         Box::new(fut.boxed().compat())

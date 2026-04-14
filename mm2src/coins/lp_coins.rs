@@ -18,10 +18,6 @@
 //
 
 #![allow(uncommon_codepoints)]
-#![feature(integer_atomics)]
-#![feature(async_closure)]
-#![feature(hash_raw_entry)]
-#![feature(stmt_expr_attributes)]
 
 #[macro_use] extern crate common;
 #[macro_use] extern crate fomat_macros;
@@ -51,7 +47,7 @@ use mm2_err_handle::prelude::*;
 use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{self as json, Value as Json};
-use std::collections::hash_map::{HashMap, RawEntryMut};
+use std::collections::hash_map::HashMap;
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::ops::{Add, Deref};
@@ -607,7 +603,11 @@ pub trait MarketCoinOps {
             }
             Ok(MmNumber::from(spendable))
         };
-        Box::new(self.my_spendable_balance().map_err(From::from).and_then(closure))
+        Box::new(
+            self.my_spendable_balance()
+                .map_err(|e| e.map(GetNonZeroBalance::from))
+                .and_then(closure),
+        )
     }
 
     fn my_balance(&self) -> BalanceFut<CoinBalance>;
@@ -2394,12 +2394,10 @@ pub async fn lp_register_coin(
     // So I'm leaving the possibility of race condition intentionally in favor of faster concurrent activation.
     // Should consider refactoring: maybe extract the RPC client initialization part from coin init functions.
     let mut coins = cctx.coins.lock().await;
-    match coins.raw_entry_mut().from_key(&ticker) {
-        RawEntryMut::Occupied(_oe) => {
-            return MmError::err(RegisterCoinError::CoinIsInitializedAlready { coin: ticker.clone() })
-        },
-        RawEntryMut::Vacant(ve) => ve.insert(ticker.clone(), coin.clone()),
-    };
+    if coins.contains_key(&ticker) {
+        return MmError::err(RegisterCoinError::CoinIsInitializedAlready { coin: ticker.clone() });
+    }
+    coins.insert(ticker.clone(), coin.clone());
     if tx_history {
         lp_spawn_tx_history(ctx.clone(), coin).map_to_mm(RegisterCoinError::Internal)?;
     }
@@ -2524,23 +2522,23 @@ pub async fn validate_address(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>
 }
 
 pub async fn withdraw(ctx: MmArc, req: WithdrawRequest) -> WithdrawResult {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     coin.withdraw(req).compat().await
 }
 
 pub async fn get_raw_transaction(ctx: MmArc, req: RawTransactionRequest) -> RawTransactionResult {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     coin.get_raw_transaction(req).compat().await
 }
 
 pub async fn sign_message(ctx: MmArc, req: SignatureRequest) -> SignatureResult<SignatureResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let signature = coin.sign_message(&req.message)?;
     Ok(SignatureResponse { signature })
 }
 
 pub async fn verify_message(ctx: MmArc, req: VerificationRequest) -> VerificationResult<VerificationResponse> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
 
     let validate_address_result = coin.validate_address(&req.address);
     if !validate_address_result.is_valid {
@@ -2555,7 +2553,7 @@ pub async fn verify_message(ctx: MmArc, req: VerificationRequest) -> Verificatio
 }
 
 pub async fn remove_delegation(ctx: MmArc, req: RemoveDelegateRequest) -> DelegationResult {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     match coin {
         MmCoinEnum::QtumCoin(qtum) => qtum.remove_delegation().compat().await,
         _ => {
@@ -2567,7 +2565,7 @@ pub async fn remove_delegation(ctx: MmArc, req: RemoveDelegateRequest) -> Delega
 }
 
 pub async fn get_staking_infos(ctx: MmArc, req: GetStakingInfosRequest) -> StakingInfosResult {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     match coin {
         MmCoinEnum::QtumCoin(qtum) => qtum.get_delegation_infos().compat().await,
         _ => {
@@ -2579,7 +2577,7 @@ pub async fn get_staking_infos(ctx: MmArc, req: GetStakingInfosRequest) -> Staki
 }
 
 pub async fn add_delegation(ctx: MmArc, req: AddDelegateRequest) -> DelegationResult {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     // Need to find a way to do a proper dispatch
     let coin_concrete = match coin {
         MmCoinEnum::QtumCoin(qtum) => qtum,

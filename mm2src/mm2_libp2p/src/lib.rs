@@ -1,8 +1,8 @@
-#![feature(ip)]
 
 #[macro_use] extern crate lazy_static;
 
 mod adex_ping;
+mod ip_helpers;
 pub mod atomicdex_behaviour;
 mod network;
 pub mod peers_exchange;

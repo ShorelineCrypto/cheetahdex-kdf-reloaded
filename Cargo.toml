@@ -39,21 +39,10 @@ members = [
 resolver = "2"
 
 [profile.release]
-# Due to the "overrides" only affects our workspace crates, as intended.
+# Due to the "package" section only affects out-of-workspace crates, as intended.
 debug = true
 debug-assertions = false
-# For better or worse, might affect the stack traces in our portion of the code.
-#opt-level = 1
 
-[profile.release.overrides."*"]
+[profile.release.package."*"]
 # Turns debugging symbols off for the out-of-workspace dependencies.
 debug = false
-
-# The backtrace disables build.define("HAVE_DL_ITERATE_PHDR", "1"); for android which results in "unknown" function
-# names being printed, but dl_iterate_phdr is present since API version 21 https://github.com/rust-lang/rust/issues/17520#issuecomment-344885468
-# We're using 21 version for Android build so we're fine to use the patch.
-# Consider removing once this issue is solved and fix applied to upstream repository
-# https://github.com/rust-lang/backtrace-rs/issues/227
-[patch.crates-io]
-backtrace = { git = "https://github.com/artemii235/backtrace-rs.git" }
-backtrace-sys = { git = "https://github.com/artemii235/backtrace-rs.git" }

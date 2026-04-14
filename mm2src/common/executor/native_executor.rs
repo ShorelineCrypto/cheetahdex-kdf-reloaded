@@ -13,19 +13,18 @@ pub fn spawn_boxed(future: Box<dyn Future03<Output = ()> + Send + Unpin + 'stati
 /// Schedule the given `future` to be executed shortly after the given `utc` time is reached.
 pub fn spawn_after(utc: f64, future: impl Future03<Output = ()> + Send + 'static) {
     use crossbeam::channel;
-    use gstuff::Constructible;
     use std::collections::BTreeMap;
-    use std::sync::Once;
+    use std::sync::{Once, OnceLock};
 
     type SheduleChannelItem = (f64, Pin<Box<dyn Future03<Output = ()> + Send + 'static>>);
     static START: Once = Once::new();
-    static SCHEDULE: Constructible<channel::Sender<SheduleChannelItem>> = Constructible::new();
+    static SCHEDULE: OnceLock<channel::Sender<SheduleChannelItem>> = OnceLock::new();
     START.call_once(|| {
         thread::Builder::new()
             .name("spawn_after".into())
             .spawn(move || {
                 let (tx, rx) = channel::bounded(0);
-                SCHEDULE.pin(tx).expect("spawn_after] Can't pin the channel");
+                SCHEDULE.set(tx).expect("spawn_after] Can't pin the channel");
                 type Task = Pin<Box<dyn Future03<Output = ()> + Send + 'static>>;
                 let mut tasks: BTreeMap<Duration, Vec<Task>> = BTreeMap::new();
                 let mut ready = Vec::with_capacity(4);
@@ -64,7 +63,7 @@ pub fn spawn_after(utc: f64, future: impl Future03<Output = ()> + Send + 'static
             .expect("Can't spawn a spawn_after thread");
     });
     loop {
-        match SCHEDULE.as_option() {
+        match SCHEDULE.get() {
             None => {
                 thread::yield_now();
                 continue;

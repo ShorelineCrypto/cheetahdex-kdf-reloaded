@@ -191,13 +191,13 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
             check_utxo_maturity: None,
         };
-        let crypto_ctx = CryptoCtx::from_ctx(&ctx)?;
+        let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?;
         let priv_key = crypto_ctx.iguana_ctx().secp256k1_privkey().secret;
         let coin = z_coin_from_conf_and_params(&ctx, &ticker, &coin_conf, &utxo_params, priv_key.as_slice())
             .await
             .mm_err(|e| ZcoinInitError::from_build_err(e, ticker))?;
 
-        task_handle.update_in_progress_status(ZcoinInProgressStatus::Scanning)?;
+        task_handle.update_in_progress_status(ZcoinInProgressStatus::Scanning).mm_err(Into::into)?;
         while !coin.is_sapling_state_synced() {
             Timer::sleep(1.).await;
         }
@@ -210,14 +210,14 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         task_handle: &ZcoinRpcTaskHandle,
         _activation_request: &Self::ActivationRequest,
     ) -> MmResult<Self::ActivationResult, ZcoinInitError> {
-        task_handle.update_in_progress_status(ZcoinInProgressStatus::RequestingWalletBalance)?;
+        task_handle.update_in_progress_status(ZcoinInProgressStatus::RequestingWalletBalance).mm_err(Into::into)?;
         let current_block = self
             .current_block()
             .compat()
             .await
             .map_to_mm(ZcoinInitError::CouldNotGetBlockCount)?;
 
-        let balance = self.my_balance().compat().await?;
+        let balance = self.my_balance().compat().await.mm_err(Into::into)?;
         Ok(ZcoinActivationResult {
             current_block,
             wallet_balance: EnableCoinBalance::Iguana(IguanaWalletBalance {

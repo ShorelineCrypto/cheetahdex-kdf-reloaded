@@ -228,16 +228,16 @@ impl PlatformWithTokensActivationOps for BchCoin {
     async fn get_activation_result(
         &self,
     ) -> Result<BchWithTokensActivationResult, MmError<BchWithTokensActivationError>> {
-        let my_address = self.as_ref().derivation_method.iguana_or_err()?;
+        let my_address = self.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
         let my_slp_address = self
             .get_my_slp_address()
             .map_to_mm(BchWithTokensActivationError::Internal)?
             .encode()
             .map_to_mm(BchWithTokensActivationError::Internal)?;
 
-        let current_block = self.as_ref().rpc_client.get_block_count().compat().await?;
+        let current_block = self.as_ref().rpc_client.get_block_count().compat().await.mm_err(Into::into)?;
 
-        let bch_unspents = self.bch_unspents_for_display(my_address).await?;
+        let bch_unspents = self.bch_unspents_for_display(my_address).await.mm_err(Into::into)?;
         let bch_balance = bch_unspents.platform_balance(self.decimals());
 
         let mut token_balances = HashMap::new();
@@ -256,13 +256,13 @@ impl PlatformWithTokensActivationOps for BchCoin {
             .bch_addresses_infos
             .insert(my_address.to_string(), CoinAddressInfo {
                 derivation_method: DerivationMethod::Iguana,
-                pubkey: self.my_public_key()?.to_string(),
+                pubkey: self.my_public_key().mm_err(Into::into)?.to_string(),
                 balances: bch_balance,
             });
 
         result.slp_addresses_infos.insert(my_slp_address, CoinAddressInfo {
             derivation_method: DerivationMethod::Iguana,
-            pubkey: self.my_public_key()?.to_string(),
+            pubkey: self.my_public_key().mm_err(Into::into)?.to_string(),
             balances: token_balances,
         });
         Ok(result)

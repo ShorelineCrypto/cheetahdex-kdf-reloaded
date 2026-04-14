@@ -1,10 +1,6 @@
-#![feature(async_closure)]
 #![feature(custom_test_frameworks)]
 #![feature(test)]
 #![test_runner(docker_tests_runner)]
-#![feature(drain_filter)]
-#![feature(hash_raw_entry)]
-#![feature(map_first_last)]
 #![recursion_limit = "512"]
 
 #[cfg(test)] use docker_tests::docker_tests_runner;

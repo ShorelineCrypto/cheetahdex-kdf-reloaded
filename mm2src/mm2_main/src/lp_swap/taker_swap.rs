@@ -1881,7 +1881,7 @@ pub async fn taker_swap_trade_preimage(
         Some(prepared_params),
         stage,
     )
-    .await?;
+    .await.mm_err(Into::into)?;
 
     let conf_settings = OrderConfirmationsSettings {
         base_confs: base_coin.required_confirmations(),
@@ -1975,7 +1975,7 @@ pub async fn calc_max_taker_vol(
     stage: FeeApproxStage,
 ) -> CheckBalanceResult<MmNumber> {
     let my_coin = coin.ticker();
-    let balance: MmNumber = coin.my_spendable_balance().compat().await?.into();
+    let balance: MmNumber = coin.my_spendable_balance().compat().await.mm_err(Into::into)?.into();
     let locked = get_locked_amount(ctx, my_coin);
     let min_tx_amount = MmNumber::from(coin.min_tx_amount());
 

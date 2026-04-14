@@ -35,7 +35,9 @@ impl OutPoint {
         }
     }
 
-    pub fn is_null(&self) -> bool { self.hash.is_zero() && self.index == u32::MAX }
+    pub fn is_null(&self) -> bool {
+        self.hash.is_zero() && self.index == u32::MAX
+    }
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]
@@ -56,9 +58,13 @@ impl TransactionInput {
         }
     }
 
-    pub fn is_final(&self) -> bool { self.sequence == SEQUENCE_FINAL }
+    pub fn is_final(&self) -> bool {
+        self.sequence == SEQUENCE_FINAL
+    }
 
-    pub fn has_witness(&self) -> bool { !self.script_witness.is_empty() }
+    pub fn has_witness(&self) -> bool {
+        !self.script_witness.is_empty()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serializable, Deserializable)]
@@ -195,7 +201,9 @@ pub struct Transaction {
 }
 
 impl From<&'static str> for Transaction {
-    fn from(s: &'static str) -> Self { deserialize(&s.from_hex::<Vec<u8>>().unwrap() as &[u8]).unwrap() }
+    fn from(s: &'static str) -> Self {
+        deserialize(&s.from_hex::<Vec<u8>>().unwrap() as &[u8]).unwrap()
+    }
 }
 
 impl TryFrom<Transaction> for ExtTransaction {
@@ -219,7 +227,9 @@ pub enum TxHashAlgo {
 }
 
 impl Default for TxHashAlgo {
-    fn default() -> Self { TxHashAlgo::DSHA256 }
+    fn default() -> Self {
+        TxHashAlgo::DSHA256
+    }
 }
 
 impl Transaction {
@@ -231,17 +241,29 @@ impl Transaction {
         }
     }
 
-    pub fn witness_hash(&self) -> H256 { dhash256(&serialize_with_flags(self, SERIALIZE_TRANSACTION_WITNESS)) }
+    pub fn witness_hash(&self) -> H256 {
+        dhash256(&serialize_with_flags(self, SERIALIZE_TRANSACTION_WITNESS))
+    }
 
-    pub fn inputs(&self) -> &[TransactionInput] { &self.inputs }
+    pub fn inputs(&self) -> &[TransactionInput] {
+        &self.inputs
+    }
 
-    pub fn outputs(&self) -> &[TransactionOutput] { &self.outputs }
+    pub fn outputs(&self) -> &[TransactionOutput] {
+        &self.outputs
+    }
 
-    pub fn is_empty(&self) -> bool { self.inputs.is_empty() || self.outputs.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.inputs.is_empty() || self.outputs.is_empty()
+    }
 
-    pub fn is_null(&self) -> bool { self.inputs.iter().any(|input| input.previous_output.is_null()) }
+    pub fn is_null(&self) -> bool {
+        self.inputs.iter().any(|input| input.previous_output.is_null())
+    }
 
-    pub fn is_coinbase(&self) -> bool { self.inputs.len() == 1 && self.inputs[0].previous_output.is_null() }
+    pub fn is_coinbase(&self) -> bool {
+        self.inputs.len() == 1 && self.inputs[0].previous_output.is_null()
+    }
 
     pub fn is_final(&self) -> bool {
         // if lock_time is 0, transaction is final
@@ -271,7 +293,9 @@ impl Transaction {
         self.inputs.iter().all(TransactionInput::is_final)
     }
 
-    pub fn has_witness(&self) -> bool { self.inputs.iter().any(TransactionInput::has_witness) }
+    pub fn has_witness(&self) -> bool {
+        self.inputs.iter().any(TransactionInput::has_witness)
+    }
 
     pub fn total_spends(&self) -> u64 {
         let mut result = 0u64;

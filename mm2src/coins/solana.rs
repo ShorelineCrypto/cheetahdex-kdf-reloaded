@@ -230,10 +230,10 @@ pub struct SolanaFeeDetails {
 }
 
 async fn withdraw_base_coin_impl(coin: SolanaCoin, req: WithdrawRequest) -> WithdrawResult {
-    let (hash, fees) = coin.estimate_withdraw_fees().await?;
+    let (hash, fees) = coin.estimate_withdraw_fees().await.mm_err(Into::into)?;
     let res = coin
         .check_balance_and_prepare_transfer(req.max, req.amount.clone(), fees)
-        .await?;
+        .await.mm_err(Into::into)?;
     let to = solana_sdk::pubkey::Pubkey::try_from(&*req.to)?;
     let tx = solana_sdk::system_transaction::transfer(&coin.key_pair, &to, res.lamports_to_send, hash);
     let serialized_tx = serialize(&tx).map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;

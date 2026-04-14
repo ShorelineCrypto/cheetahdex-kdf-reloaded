@@ -42,8 +42,8 @@ log = "0.4.8"
 num-bigint = { version = "0.4", features = ["serde", "std"] }
 num-rational = { version = "0.4", features = ["serde"] }
 num-traits = "0.2"
-parking_lot = { version = "0.12.0", features = ["nightly"] }
-parking_lot_core = { version = "0.6", features = ["nightly"] }
+parking_lot = { version = "0.12.0" }
+parking_lot_core = { version = "0.6" }
 paste = "1.0"
 primitives = { path = "../mm2_bitcoin/primitives" }
 prost = "0.8"
@@ -65,10 +65,10 @@ winapi = "0.3"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 chrono = { version = "0.4", features = ["wasmbind"] }
 getrandom = { version = "0.2", features = ["js"] } # see https://docs.rs/getrandom/0.2.0/getrandom/#webassembly-support
-gstuff = { version = "0.7", features = ["nightly"] }
+gstuff = { version = "0.7" }
 js-sys = "0.3.27"
 serde-wasm-bindgen = "0.4.3"
-wasm-bindgen = { version = "0.2.50", features = ["nightly"] }
+wasm-bindgen = { version = "0.2.50" }
 wasm-bindgen-futures = "0.4.21"
 wasm-bindgen-test = { version = "0.3.2" }
 web-sys = { version = "0.3.55", features = ["console", "CloseEvent", "DomException", "ErrorEvent", "IdbDatabase", "IdbCursor", "IdbCursorWithValue", "IdbFactory", "IdbIndex", "IdbIndexParameters", "IdbObjectStore", "IdbObjectStoreParameters", "IdbOpenDbRequest", "IdbKeyRange", "IdbTransaction", "IdbTransactionMode", "IdbVersionChangeEvent", "MessageEvent", "WebSocket"] }
@@ -77,7 +77,7 @@ web-sys = { version = "0.3.55", features = ["console", "CloseEvent", "DomExcepti
 anyhow = "1.0"
 chrono = "0.4"
 crossterm = "0.20"
-gstuff = { version = "0.7", features = ["crossterm", "nightly"] }
+gstuff = { version = "0.7", features = ["crossterm"] }
 hdrhistogram = { version = "7.0", default-features = false, features = ["sync"] }
 hyper = { version = "0.14.11", features = ["client", "http2", "server", "tcp"] }
 # using webpki-tokio to avoid rejecting valid certificates
@@ -94,4 +94,4 @@ tokio = { version = "1.7", features = ["io-util", "rt-multi-thread", "net"] }
 [build-dependencies]
 cc = "1.0"
 fomat-macros = "0.3"
-gstuff = { version = "0.7", features = ["nightly"] }
+gstuff = { version = "0.7" }

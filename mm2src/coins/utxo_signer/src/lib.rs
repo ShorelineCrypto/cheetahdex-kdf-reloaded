@@ -148,7 +148,7 @@ pub trait UtxoSignerOps {
                     params.prev_script,
                     params.signature_version,
                     self.fork_id(),
-                )?;
+                ).mm_err(Into::into)?;
                 Ok(signed)
             },
         }

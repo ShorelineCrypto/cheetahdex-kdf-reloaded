@@ -138,11 +138,11 @@ where
         .uri(url)
         .header(CONTENT_TYPE, "application/grpc-web")
         .header(ACCEPT, "application/grpc-web")
-        .body(encode_body(req)?)?;
+        .body(encode_body(req).mm_err(Into::into)?)?;
 
-    let response = slurp_req(request).await?;
+    let response = slurp_req(request).await.mm_err(Into::into)?;
 
-    let reply = decode_body(response.2.into())?;
+    let reply = decode_body(response.2.into()).mm_err(Into::into)?;
 
     Ok(reply)
 }
@@ -153,7 +153,7 @@ where
     Req: prost::Message + Send + 'static,
     Res: prost::Message + Default + Send + 'static,
 {
-    let body = encode_body(req)?;
+    let body = encode_body(req).mm_err(Into::into)?;
     let request = FetchRequest::post(url)
         .body_bytes(body)
         .header("content-type", "application/grpc-web+proto")
@@ -163,7 +163,7 @@ where
 
     let response = request.request_array().await?;
 
-    let reply = decode_body(response.1.into())?;
+    let reply = decode_body(response.1.into()).mm_err(Into::into)?;
 
     Ok(reply)
 }

@@ -371,7 +371,7 @@ pub trait HDWalletCoinOps {
         hd_account: &mut Self::HDAccount,
         chain: Bip44Chain,
     ) -> MmResult<HDAddress<Self::Address, Self::Pubkey>, NewAddressDerivingError> {
-        let known_addresses_number = hd_account.known_addresses_number(chain)?;
+        let known_addresses_number = hd_account.known_addresses_number(chain).mm_err(Into::into)?;
         // Address IDs start from 0, so the `known_addresses_number = last_known_address_id + 1`.
         let new_address_id = known_addresses_number;
         if new_address_id >= ChildNumber::HARDENED_FLAG {
@@ -383,7 +383,7 @@ pub trait HDWalletCoinOps {
             .derive_address(hd_account, chain, new_address_id)
             .mm_err(NewAddressDerivingError::from)?;
         self.set_known_addresses_number(hd_wallet, hd_account, chain, known_addresses_number + 1)
-            .await?;
+            .await.mm_err(Into::into)?;
         Ok(new_address)
     }
 
@@ -491,7 +491,7 @@ pub async fn get_new_address(
     ctx: MmArc,
     req: GetNewHDAddressRequest,
 ) -> MmResult<GetNewHDAddressResponse, HDWalletRpcError> {
-    let coin = lp_coinfind_or_err(&ctx, &req.coin).await?;
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     match coin {
         MmCoinEnum::UtxoCoin(utxo) => utxo.get_new_address_rpc(req.params).await,
         MmCoinEnum::QtumCoin(qtum) => qtum.get_new_address_rpc(req.params).await,
@@ -522,7 +522,7 @@ pub mod common_impl {
         let account_id = params.account_id;
         let chain = params.chain;
 
-        let hd_wallet = coin.derivation_method().hd_wallet_or_err()?;
+        let hd_wallet = coin.derivation_method().hd_wallet_or_err().mm_err(Into::into)?;
         let mut hd_account = hd_wallet
             .get_account_mut(params.account_id)
             .await
@@ -534,8 +534,8 @@ pub mod common_impl {
             ..
         } = coin
             .generate_new_address(hd_wallet, hd_account.deref_mut(), chain)
-            .await?;
-        let balance = coin.known_address_balance(&address).await?;
+            .await.mm_err(Into::into)?;
+        let balance = coin.known_address_balance(&address).await.mm_err(Into::into)?;
 
         Ok(GetNewHDAddressResponse {
             new_address: HDAddressBalance {

@@ -325,7 +325,7 @@ pub enum EthAddressFormat {
 
 #[cfg_attr(test, mockable)]
 async fn make_gas_station_request(url: &str) -> GasStationResult {
-    let resp = slurp_url(url).await?;
+    let resp = slurp_url(url).await.mm_err(Into::into)?;
     if resp.0 != StatusCode::OK {
         let error = format!("Gas price request failed with status code {}", resp.0);
         return MmError::err(GasStationReqErr::Transport {
@@ -549,13 +549,13 @@ async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> Withd
     let to_addr = coin
         .address_from_str(&req.to)
         .map_to_mm(WithdrawError::InvalidAddress)?;
-    let my_balance = coin.my_balance().compat().await?;
-    let my_balance_dec = u256_to_big_decimal(my_balance, coin.decimals)?;
+    let my_balance = coin.my_balance().compat().await.mm_err(Into::into)?;
+    let my_balance_dec = u256_to_big_decimal(my_balance, coin.decimals).mm_err(Into::into)?;
 
     let (mut wei_amount, dec_amount) = if req.max {
         (my_balance, my_balance_dec.clone())
     } else {
-        let wei_amount = wei_from_big_decimal(&req.amount, coin.decimals)?;
+        let wei_amount = wei_from_big_decimal(&req.amount, coin.decimals).mm_err(Into::into)?;
         (wei_amount, req.amount.clone())
     };
     if wei_amount > my_balance {
@@ -573,11 +573,11 @@ async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> Withd
             (0.into(), data, *token_addr, platform.as_str())
         },
     };
-    let eth_value_dec = u256_to_big_decimal(eth_value, coin.decimals)?;
+    let eth_value_dec = u256_to_big_decimal(eth_value, coin.decimals).mm_err(Into::into)?;
 
     let (gas, gas_price) = match req.fee {
         Some(WithdrawFee::EthGas { gas_price, gas }) => {
-            let gas_price = wei_from_big_decimal(&gas_price, 9)?;
+            let gas_price = wei_from_big_decimal(&gas_price, 9).mm_err(Into::into)?;
             (gas.into(), gas_price)
         },
         Some(fee_policy) => {
@@ -585,7 +585,7 @@ async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> Withd
             return MmError::err(WithdrawError::InvalidFeePolicy(error));
         },
         None => {
-            let gas_price = coin.get_gas_price().compat().await?;
+            let gas_price = coin.get_gas_price().compat().await.mm_err(Into::into)?;
             // covering edge case by deducting the standard transfer fee when we want to max withdraw ETH
             let eth_value_for_estimate = if req.max && coin.coin_type == EthCoinType::Eth {
                 eth_value - gas_price * U256::from(21000)
@@ -609,7 +609,7 @@ async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> Withd
         },
     };
     let total_fee = gas * gas_price;
-    let total_fee_dec = u256_to_big_decimal(total_fee, coin.decimals)?;
+    let total_fee_dec = u256_to_big_decimal(total_fee, coin.decimals).mm_err(Into::into)?;
 
     if req.max && coin.coin_type == EthCoinType::Eth {
         if eth_value < total_fee || wei_amount < total_fee {
@@ -646,14 +646,14 @@ async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> Withd
 
     let signed = tx.sign(coin.key_pair.secret(), coin.chain_id);
     let bytes = rlp::encode(&signed);
-    let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals)?;
+    let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
     let mut spent_by_me = amount_decimal.clone();
     let received_by_me = if to_addr == coin.my_address {
         amount_decimal.clone()
     } else {
         0.into()
     };
-    let fee_details = EthTxFeeDetails::new(gas, gas_price, fee_coin)?;
+    let fee_details = EthTxFeeDetails::new(gas, gas_price, fee_coin).mm_err(Into::into)?;
     if coin.coin_type == EthCoinType::Eth {
         spent_by_me += &fee_details.total_fee;
     }
@@ -1136,7 +1136,7 @@ impl MarketCoinOps for EthCoin {
         let decimals = self.decimals;
         let fut = self
             .my_balance()
-            .and_then(move |result| Ok(u256_to_big_decimal(result, decimals)?))
+            .and_then(move |result| Ok(u256_to_big_decimal(result, decimals).mm_err(Into::into)?))
             .map(|spendable| CoinBalance {
                 spendable,
                 unspendable: BigDecimal::from(0),
@@ -1147,7 +1147,7 @@ impl MarketCoinOps for EthCoin {
     fn base_coin_balance(&self) -> BalanceFut<BigDecimal> {
         Box::new(
             self.eth_balance()
-                .and_then(move |result| Ok(u256_to_big_decimal(result, 18)?)),
+                .and_then(move |result| Ok(u256_to_big_decimal(result, 18).mm_err(Into::into)?)),
         )
     }
 
@@ -3052,7 +3052,7 @@ impl MmCoin for EthCoin {
         value: TradePreimageValue,
         stage: FeeApproxStage,
     ) -> TradePreimageResult<TradeFee> {
-        let gas_price = self.get_gas_price().compat().await?;
+        let gas_price = self.get_gas_price().compat().await.mm_err(Into::into)?;
         let gas_price = increase_gas_price_by_stage(gas_price, &stage);
         let gas_limit = match self.coin_type {
             EthCoinType::Eth => {
@@ -3062,10 +3062,10 @@ impl MmCoin for EthCoin {
             EthCoinType::Erc20 { token_addr, .. } => {
                 let value = match value {
                     TradePreimageValue::Exact(value) | TradePreimageValue::UpperBound(value) => {
-                        wei_from_big_decimal(&value, self.decimals)?
+                        wei_from_big_decimal(&value, self.decimals).mm_err(Into::into)?
                     },
                 };
-                let allowed = self.allowance(self.swap_contract_address).compat().await?;
+                let allowed = self.allowance(self.swap_contract_address).compat().await.mm_err(Into::into)?;
                 if allowed < value {
                     // estimate gas for the `approve` contract call
 
@@ -3076,7 +3076,7 @@ impl MmCoin for EthCoin {
                     let approve_gas_limit = self
                         .estimate_gas_for_contract_call(token_addr, Bytes::from(approve_data))
                         .compat()
-                        .await?;
+                        .await.mm_err(Into::into)?;
 
                     // this gas_limit includes gas for `approve`, `erc20Payment` and `senderRefund` contract calls
                     U256::from(300_000) + approve_gas_limit
@@ -3088,7 +3088,7 @@ impl MmCoin for EthCoin {
         };
 
         let total_fee = gas_limit * gas_price;
-        let amount = u256_to_big_decimal(total_fee, 18)?;
+        let amount = u256_to_big_decimal(total_fee, 18).mm_err(Into::into)?;
         let fee_coin = match &self.coin_type {
             EthCoinType::Eth => &self.ticker,
             EthCoinType::Erc20 { platform, .. } => platform,
@@ -3103,10 +3103,10 @@ impl MmCoin for EthCoin {
     fn get_receiver_trade_fee(&self, stage: FeeApproxStage) -> TradePreimageFut<TradeFee> {
         let coin = self.clone();
         let fut = async move {
-            let gas_price = coin.get_gas_price().compat().await?;
+            let gas_price = coin.get_gas_price().compat().await.mm_err(Into::into)?;
             let gas_price = increase_gas_price_by_stage(gas_price, &stage);
             let total_fee = gas_price * U256::from(150_000);
-            let amount = u256_to_big_decimal(total_fee, 18)?;
+            let amount = u256_to_big_decimal(total_fee, 18).mm_err(Into::into)?;
             let fee_coin = match &coin.coin_type {
                 EthCoinType::Eth => &coin.ticker,
                 EthCoinType::Erc20 { platform, .. } => platform,
@@ -3125,7 +3125,7 @@ impl MmCoin for EthCoin {
         dex_fee_amount: BigDecimal,
         stage: FeeApproxStage,
     ) -> TradePreimageResult<TradeFee> {
-        let dex_fee_amount = wei_from_big_decimal(&dex_fee_amount, self.decimals)?;
+        let dex_fee_amount = wei_from_big_decimal(&dex_fee_amount, self.decimals).mm_err(Into::into)?;
 
         // pass the dummy params
         let to_addr = addr_from_raw_pubkey(&DEX_FEE_ADDR_RAW_PUBKEY)
@@ -3139,7 +3139,7 @@ impl MmCoin for EthCoin {
             },
         };
 
-        let gas_price = self.get_gas_price().compat().await?;
+        let gas_price = self.get_gas_price().compat().await.mm_err(Into::into)?;
         let gas_price = increase_gas_price_by_stage(gas_price, &stage);
         let estimate_gas_req = CallRequest {
             value: Some(eth_value),
@@ -3156,7 +3156,7 @@ impl MmCoin for EthCoin {
         // Ideally we should determine the case when we have the insufficient balance and return `TradePreimageError::NotSufficientBalance` error.
         let gas_limit = self.estimate_gas(estimate_gas_req).compat().await?;
         let total_fee = gas_limit * gas_price;
-        let amount = u256_to_big_decimal(total_fee, 18)?;
+        let amount = u256_to_big_decimal(total_fee, 18).mm_err(Into::into)?;
         Ok(TradeFee {
             coin: fee_coin.into(),
             amount: amount.into(),
@@ -3318,7 +3318,7 @@ impl GasStationData {
         let uri = uri.to_owned();
         let fut = async move {
             make_gas_station_request(&uri)
-                .await?
+                .await.mm_err(Into::into)?
                 .average_gwei(decimals, gas_price_policy)
                 .mm_err(|e| Web3RpcError::Internal(e.0))
         };

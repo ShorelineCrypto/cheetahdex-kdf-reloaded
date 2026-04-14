@@ -95,7 +95,7 @@ impl TokenActivationOps for SplToken {
             ticker,
             protocol_conf.token_contract_address,
             platform_coin,
-        )?;
+        ).mm_err(Into::into)?;
         let balance = token
             .my_balance()
             .compat()

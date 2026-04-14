@@ -138,7 +138,7 @@ pub async fn check_balance_and_prepare_transfer<T>(
 where
     T: SolanaCommonOps + MarketCoinOps,
 {
-    let base_balance = coin.base_coin_balance().compat().await?;
+    let base_balance = coin.base_coin_balance().compat().await.mm_err(Into::into)?;
     let sol_required = lamports_to_sol(fees);
     if base_balance < sol_required {
         return MmError::err(SufficientBalanceError::NotSufficientBalance {
@@ -148,7 +148,7 @@ where
         });
     }
 
-    let my_balance = coin.my_balance().compat().await?.spendable;
+    let my_balance = coin.my_balance().compat().await.mm_err(Into::into)?.spendable;
     let to_send = if max { my_balance.clone() } else { amount.clone() };
     let to_check = if max || coin.is_token() {
         to_send.clone()
@@ -165,9 +165,9 @@ where
 
     let lamports_to_send = if !coin.is_token() {
         if max {
-            sol_to_lamports(&my_balance)? - sol_to_lamports(&sol_required)?
+            sol_to_lamports(&my_balance).mm_err(Into::into)? - sol_to_lamports(&sol_required).mm_err(Into::into)?
         } else {
-            sol_to_lamports(&amount)?
+            sol_to_lamports(&amount).mm_err(Into::into)?
         }
     } else {
         0_u64

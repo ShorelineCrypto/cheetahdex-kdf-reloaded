@@ -108,11 +108,11 @@ where
                     TrezorResponse::Ready(result) => return Ok(result),
                     TrezorResponse::ButtonRequest(button_req) => {
                         processor.on_button_request().await?;
-                        button_req.ack().await?
+                        button_req.ack().await.mm_err(Into::into)?
                     },
                     TrezorResponse::PinMatrixRequest(pin_req) => {
                         let pin_response = processor.on_pin_request().await?;
-                        pin_req.ack_pin(pin_response.pin).await?
+                        pin_req.ack_pin(pin_response.pin).await.mm_err(Into::into)?
                     },
                 };
             }

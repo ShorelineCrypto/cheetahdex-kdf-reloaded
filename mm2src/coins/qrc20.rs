@@ -138,7 +138,7 @@ impl Qrc20ActivationParams {
             .map_to_mm(Qrc20FromLegacyReqErr::InvalidSwapContractAddr)?;
         let fallback_swap_contract = json::from_value(req["fallback_swap_contract"].clone())
             .map_to_mm(Qrc20FromLegacyReqErr::InvalidFallbackSwapContract)?;
-        let utxo_params = UtxoActivationParams::from_legacy_req(req)?;
+        let utxo_params = UtxoActivationParams::from_legacy_req(req).mm_err(Into::into)?;
         Ok(Qrc20ActivationParams {
             swap_contract_address,
             fallback_swap_contract,
@@ -477,8 +477,8 @@ impl Qrc20Coin {
         &self,
         contract_outputs: Vec<ContractCallOutput>,
     ) -> Result<GenerateQrc20TxResult, MmError<Qrc20GenTxError>> {
-        let my_address = self.utxo.derivation_method.iguana_or_err()?;
-        let (unspents, _) = self.get_unspent_ordered_list(my_address).await?;
+        let my_address = self.utxo.derivation_method.iguana_or_err().mm_err(Into::into)?;
+        let (unspents, _) = self.get_unspent_ordered_list(my_address).await.mm_err(Into::into)?;
 
         let mut gas_fee = 0;
         let mut outputs = Vec::with_capacity(contract_outputs.len());
@@ -492,10 +492,10 @@ impl Qrc20Coin {
             .add_outputs(outputs)
             .with_gas_fee(gas_fee)
             .build()
-            .await?;
+            .await.mm_err(Into::into)?;
 
-        let my_address = self.utxo.derivation_method.iguana_or_err()?;
-        let key_pair = self.utxo.priv_key_policy.key_pair_or_err()?;
+        let my_address = self.utxo.derivation_method.iguana_or_err().mm_err(Into::into)?;
+        let key_pair = self.utxo.priv_key_policy.key_pair_or_err().mm_err(Into::into)?;
 
         let prev_script = ScriptBuilder::build_p2pkh(&my_address.hash);
         let signed = sign_tx(
@@ -504,7 +504,7 @@ impl Qrc20Coin {
             prev_script,
             self.utxo.conf.signature_version,
             self.utxo.conf.fork_id,
-        )?;
+        ).mm_err(Into::into)?;
 
         let miner_fee = data.fee_amount + data.unused_change.unwrap_or_default();
         Ok(GenerateQrc20TxResult {
@@ -1059,9 +1059,9 @@ impl MarketCoinOps for Qrc20Coin {
                 .rpc_client
                 .rpc_contract_call(ViewContractCallType::BalanceOf, &contract_address, &params)
                 .compat()
-                .await?;
+                .await.mm_err(Into::into)?;
             let spendable = match tokens.first() {
-                Some(Token::Uint(bal)) => u256_to_big_decimal(*bal, decimals)?,
+                Some(Token::Uint(bal)) => u256_to_big_decimal(*bal, decimals).mm_err(Into::into)?,
                 _ => {
                     let error = format!("Expected U256 as balanceOf result but got {:?}", tokens);
                     return MmError::err(BalanceError::InvalidResponse(error));
@@ -1205,7 +1205,7 @@ impl MmCoin for Qrc20Coin {
         let my_balance = U256::max_value();
         let value = match value {
             TradePreimageValue::Exact(value) | TradePreimageValue::UpperBound(value) => {
-                wei_from_big_decimal(&value, decimals)?
+                wei_from_big_decimal(&value, decimals).mm_err(Into::into)?
             },
         };
 
@@ -1220,14 +1220,14 @@ impl MmCoin for Qrc20Coin {
                     receiver_addr,
                     self.swap_contract_address,
                 )
-                .await?;
+                .await.mm_err(Into::into)?;
             self.preimage_trade_fee_required_to_send_outputs(erc20_payment_outputs, &stage)
                 .await?
         };
 
         let sender_refund_fee = {
             let sender_refund_output =
-                self.sender_refund_output(&self.swap_contract_address, swap_id, value, secret_hash, receiver_addr)?;
+                self.sender_refund_output(&self.swap_contract_address, swap_id, value, secret_hash, receiver_addr).mm_err(Into::into)?;
             self.preimage_trade_fee_required_to_send_outputs(vec![sender_refund_output], &stage)
                 .await?
         };
@@ -1252,7 +1252,7 @@ impl MmCoin for Qrc20Coin {
             // see `generate_contract_call_script_pubkey`
             let value = u64::MAX.into();
             let output =
-                selfi.receiver_spend_output(&selfi.swap_contract_address, swap_id, value, secret, sender_addr)?;
+                selfi.receiver_spend_output(&selfi.swap_contract_address, swap_id, value, secret, sender_addr).mm_err(Into::into)?;
 
             let total_fee = selfi
                 .preimage_trade_fee_required_to_send_outputs(vec![output], &stage)
@@ -1271,12 +1271,12 @@ impl MmCoin for Qrc20Coin {
         dex_fee_amount: BigDecimal,
         stage: FeeApproxStage,
     ) -> TradePreimageResult<TradeFee> {
-        let amount = wei_from_big_decimal(&dex_fee_amount, self.utxo.decimals)?;
+        let amount = wei_from_big_decimal(&dex_fee_amount, self.utxo.decimals).mm_err(Into::into)?;
 
         // pass the dummy params
         let to_addr = H160::default();
         let transfer_output =
-            self.transfer_output(to_addr, amount, QRC20_GAS_LIMIT_DEFAULT, QRC20_GAS_PRICE_DEFAULT)?;
+            self.transfer_output(to_addr, amount, QRC20_GAS_LIMIT_DEFAULT, QRC20_GAS_PRICE_DEFAULT).mm_err(Into::into)?;
 
         let total_fee = self
             .preimage_trade_fee_required_to_send_outputs(vec![transfer_output], &stage)
@@ -1352,17 +1352,17 @@ async fn qrc20_withdraw(coin: Qrc20Coin, req: WithdrawRequest) -> WithdrawResult
 
     let _utxo_lock = UTXO_LOCK.lock().await;
 
-    let qrc20_balance = coin.my_spendable_balance().compat().await?;
+    let qrc20_balance = coin.my_spendable_balance().compat().await.mm_err(Into::into)?;
 
     // the qrc20_amount_sat is used only within smart contract calls
     let (qrc20_amount_sat, qrc20_amount) = if req.max {
-        let amount = wei_from_big_decimal(&qrc20_balance, coin.utxo.decimals)?;
+        let amount = wei_from_big_decimal(&qrc20_balance, coin.utxo.decimals).mm_err(Into::into)?;
         if amount.is_zero() {
             return MmError::err(WithdrawError::ZeroBalanceToWithdrawMax);
         }
         (amount, qrc20_balance.clone())
     } else {
-        let amount_sat = wei_from_big_decimal(&req.amount, coin.utxo.decimals)?;
+        let amount_sat = wei_from_big_decimal(&req.amount, coin.utxo.decimals).mm_err(Into::into)?;
         if req.amount > qrc20_balance {
             return MmError::err(WithdrawError::NotSufficientBalance {
                 coin: coin.ticker().to_owned(),
@@ -1383,8 +1383,8 @@ async fn qrc20_withdraw(coin: Qrc20Coin, req: WithdrawRequest) -> WithdrawResult
     };
 
     // [`Qrc20Coin::transfer_output`] shouldn't fail if the arguments are correct
-    let contract_addr = qtum::contract_addr_from_utxo_addr(to_addr.clone())?;
-    let transfer_output = coin.transfer_output(contract_addr, qrc20_amount_sat, gas_limit, gas_price)?;
+    let contract_addr = qtum::contract_addr_from_utxo_addr(to_addr.clone()).mm_err(Into::into)?;
+    let transfer_output = coin.transfer_output(contract_addr, qrc20_amount_sat, gas_limit, gas_price).mm_err(Into::into)?;
     let outputs = vec![transfer_output];
 
     let GenerateQrc20TxResult {
@@ -1396,7 +1396,7 @@ async fn qrc20_withdraw(coin: Qrc20Coin, req: WithdrawRequest) -> WithdrawResult
         .await
         .mm_err(|gen_tx_error| gen_tx_error.into_withdraw_error(coin.platform.clone(), coin.utxo.decimals))?;
 
-    let my_address = coin.utxo.derivation_method.iguana_or_err()?;
+    let my_address = coin.utxo.derivation_method.iguana_or_err().mm_err(Into::into)?;
     let received_by_me = if to_addr == *my_address {
         qrc20_amount.clone()
     } else {

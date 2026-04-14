@@ -398,12 +398,12 @@ async fn vwap_calculator(
         ctx.clone(),
         my_recent_swaps_req(cfg.base.clone(), cfg.rel.clone()).await,
     )
-    .await?;
+    .await.mm_err(Into::into)?;
     let rel_swaps = my_recent_swaps(
         ctx.clone(),
         my_recent_swaps_req(cfg.rel.clone(), cfg.base.clone()).await,
     )
-    .await?;
+    .await.mm_err(Into::into)?;
     Ok(vwap(base_swaps, rel_swaps, calculated_price, cfg).await)
 }
 
@@ -512,7 +512,7 @@ async fn prepare_order(
     let base_coin = lp_coinfind(ctx, cfg.base.as_str())
         .await?
         .ok_or_else(|| MmError::new(OrderProcessingError::AssetNotEnabled))?;
-    let base_balance = base_coin.get_non_zero_balance().compat().await?;
+    let base_balance = base_coin.get_non_zero_balance().compat().await.mm_err(Into::into)?;
     lp_coinfind(ctx, cfg.rel.as_str())
         .await?
         .ok_or_else(|| MmError::new(OrderProcessingError::AssetNotEnabled))?;
@@ -771,7 +771,7 @@ pub async fn lp_bot_loop(ctx: MmArc) {
 
 pub async fn process_price_request(price_url: &str) -> Result<TickerInfosRegistry, MmError<PriceServiceRequestError>> {
     debug!("Fetching price from: {}", price_url);
-    let (status, headers, body) = slurp_url(price_url).await?;
+    let (status, headers, body) = slurp_url(price_url).await.mm_err(Into::into)?;
     let (status_code, body, _) = (status, std::str::from_utf8(&body)?.trim().into(), headers);
     if status_code != StatusCode::OK {
         return MmError::err(PriceServiceRequestError::HttpProcessError(body));

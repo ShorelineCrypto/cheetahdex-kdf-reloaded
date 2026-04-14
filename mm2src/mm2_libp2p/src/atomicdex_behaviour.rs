@@ -538,7 +538,7 @@ fn announce_my_addresses(swarm: &mut AtomicDexSwarm) {
         .filter(|listener| {
             for protocol in listener.iter() {
                 if let Protocol::Ip4(ip) = protocol {
-                    return ip.is_global();
+                    return crate::ip_helpers::ipv4_is_global(&ip);
                 }
             }
             false

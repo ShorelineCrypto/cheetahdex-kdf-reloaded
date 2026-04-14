@@ -414,10 +414,10 @@ impl Qrc20Coin {
         if allowance < value {
             if allowance > U256::zero() {
                 // first reset the allowance to the 0
-                outputs.push(self.approve_output(swap_contract_address, 0.into())?);
+                outputs.push(self.approve_output(swap_contract_address, 0.into()).mm_err(Into::into)?);
             }
             // set the allowance from 0 to `my_balance` after the previous output is executed
-            outputs.push(self.approve_output(swap_contract_address, my_balance)?);
+            outputs.push(self.approve_output(swap_contract_address, my_balance).mm_err(Into::into)?);
         }
 
         // when this output is executed, the allowance will be sufficient already
@@ -428,7 +428,7 @@ impl Qrc20Coin {
             &secret_hash,
             receiver_addr,
             &swap_contract_address,
-        )?);
+        ).mm_err(Into::into)?);
         Ok(outputs)
     }
 
