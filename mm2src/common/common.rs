@@ -60,6 +60,15 @@ macro_rules! cfg_native {
     };
 }
 
+/// Drops mutability of a given variable by re-binding it as immutable.
+/// Useful after building up a value through mutation, to prevent further changes.
+#[macro_export]
+macro_rules! drop_mutability {
+    ($t:ident) => {
+        let $t = $t;
+    };
+}
+
 /// Returns a JSON error HyRes on a failure.
 #[macro_export]
 macro_rules! try_h {
@@ -112,6 +121,7 @@ use gstuff::binprint;
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::Response;
 use parking_lot::{Mutex as PaMutex, MutexGuard as PaMutexGuard};
+use rand::RngCore;
 use rand::{rngs::SmallRng, SeedableRng};
 use serde::{de, ser};
 use serde_bytes::ByteBuf;
@@ -1230,4 +1240,10 @@ impl<Id> PagingOptionsEnum<Id> {
 
 impl<Id> Default for PagingOptionsEnum<Id> {
     fn default() -> Self { PagingOptionsEnum::PageNumber(NonZeroUsize::new(1).expect("1 > 0")) }
+}
+
+/// Fills `dest` with cryptographically secure random bytes from the OS entropy source.
+#[inline(always)]
+pub fn os_rng(dest: &mut [u8]) -> Result<(), rand::Error> {
+    rand::rngs::OsRng.try_fill_bytes(dest)
 }

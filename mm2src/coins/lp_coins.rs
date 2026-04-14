@@ -2014,7 +2014,7 @@ pub enum PrivKeyBuildPolicy<'a> {
 
 impl<'a> PrivKeyBuildPolicy<'a> {
     pub fn iguana_priv_key(crypto_ctx: &'a CryptoCtx) -> Self {
-        PrivKeyBuildPolicy::IguanaPrivKey(crypto_ctx.iguana_ctx().secp256k1_privkey_bytes())
+        PrivKeyBuildPolicy::IguanaPrivKey(crypto_ctx.mm2_internal_privkey_slice())
     }
 }
 
@@ -2285,8 +2285,7 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
         ));
     }
     let secret = try_s!(CryptoCtx::from_ctx(ctx))
-        .iguana_ctx()
-        .secp256k1_privkey_bytes()
+        .mm2_internal_privkey_slice()
         .to_vec();
 
     if coins_en["protocol"].is_null() {

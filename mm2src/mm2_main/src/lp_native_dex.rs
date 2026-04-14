@@ -192,7 +192,7 @@ impl From<CryptoInitError> for MmInitError {
             e @ CryptoInitError::InitializedAlready | e @ CryptoInitError::NotInitialized => {
                 MmInitError::Internal(e.to_string())
             },
-            CryptoInitError::NullStringPassphrase => MmInitError::NullStringPassphrase,
+            CryptoInitError::EmptyPassphrase => MmInitError::NullStringPassphrase,
             CryptoInitError::InvalidPassphrase(pass) => MmInitError::InvalidPassphrase(pass.to_string()),
             CryptoInitError::Internal(internal) => MmInitError::Internal(internal),
         }

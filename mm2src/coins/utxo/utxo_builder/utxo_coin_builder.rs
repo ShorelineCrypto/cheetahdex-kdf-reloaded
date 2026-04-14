@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use chain::TxHashAlgo;
 use common::executor::{spawn, Timer};
 use common::small_rng;
-use crypto::{Bip32DerPathError, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoInitError, HwWalletType};
+use crypto::{Bip32DerPathError, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoCtxError, CryptoInitError, HwWalletType};
 use derive_more::Display;
 use futures::channel::mpsc;
 use futures::compat::Future01CompatExt;
@@ -86,6 +86,10 @@ impl From<UtxoConfError> for UtxoCoinBuildError {
 impl From<CryptoInitError> for UtxoCoinBuildError {
     /// `CryptoCtx` is expected to be initialized already.
     fn from(crypto_err: CryptoInitError) -> Self { UtxoCoinBuildError::Internal(crypto_err.to_string()) }
+}
+
+impl From<CryptoCtxError> for UtxoCoinBuildError {
+    fn from(e: CryptoCtxError) -> Self { UtxoCoinBuildError::Internal(e.to_string()) }
 }
 
 impl From<Bip32DerPathError> for UtxoCoinBuildError {

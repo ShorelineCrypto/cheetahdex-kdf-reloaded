@@ -1,5 +1,5 @@
 use common::HttpStatusCode;
-use crypto::{CryptoCtx, CryptoInitError};
+use crypto::{CryptoCtx, CryptoCtxError, CryptoInitError};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -19,6 +19,10 @@ impl From<CryptoInitError> for GetPublicKeyError {
     fn from(_: CryptoInitError) -> Self { GetPublicKeyError::Internal("public_key not available".to_string()) }
 }
 
+impl From<CryptoCtxError> for GetPublicKeyError {
+    fn from(_: CryptoCtxError) -> Self { GetPublicKeyError::Internal("public_key not available".to_string()) }
+}
+
 #[derive(Serialize)]
 pub struct GetPublicKeyResponse {
     public_key: String,
@@ -33,7 +37,7 @@ impl HttpStatusCode for GetPublicKeyError {
 }
 
 pub async fn get_public_key(ctx: MmArc, _req: Json) -> GetPublicKeyRpcResult<GetPublicKeyResponse> {
-    let public_key = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?.secp256k1_pubkey().to_string();
+    let public_key = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?.mm2_internal_pubkey().to_string();
     Ok(GetPublicKeyResponse { public_key })
 }
 

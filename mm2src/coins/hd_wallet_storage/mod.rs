@@ -1,6 +1,6 @@
 use crate::hd_wallet::HDWalletCoinOps;
 use async_trait::async_trait;
-use crypto::{CryptoCtx, CryptoInitError, XPub};
+use crypto::{CryptoCtx, CryptoCtxError, CryptoInitError, XPub};
 use derive_more::Display;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -50,6 +50,10 @@ pub enum HDWalletStorageError {
 
 impl From<CryptoInitError> for HDWalletStorageError {
     fn from(e: CryptoInitError) -> Self { HDWalletStorageError::Internal(e.to_string()) }
+}
+
+impl From<CryptoCtxError> for HDWalletStorageError {
+    fn from(e: CryptoCtxError) -> Self { HDWalletStorageError::Internal(e.to_string()) }
 }
 
 impl HDWalletStorageError {
@@ -225,7 +229,7 @@ impl HDWalletCoinStorage {
         let inner = Box::new(HDWalletStorageInstance::init(ctx).await?);
         let crypto_ctx = CryptoCtx::from_ctx(ctx).mm_err(Into::into)?;
         let hd_wallet_rmd160 = crypto_ctx
-            .hd_wallet_rmd160()
+            .hw_wallet_rmd160()
             .or_mm_err(|| HDWalletStorageError::HDWalletUnavailable)?;
         Ok(HDWalletCoinStorage {
             coin,

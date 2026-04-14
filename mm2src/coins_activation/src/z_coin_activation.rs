@@ -11,7 +11,7 @@ use coins::z_coin::{z_coin_from_conf_and_params, ZCoin, ZCoinBuildError};
 use coins::{BalanceError, CoinProtocol, MarketCoinOps, PrivKeyActivationPolicy, RegisterCoinError};
 use common::executor::Timer;
 use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
-use crypto::{CryptoCtx, CryptoInitError};
+use crypto::{CryptoCtx, CryptoCtxError, CryptoInitError};
 use derive_more::Display;
 use futures::compat::Future01CompatExt;
 use mm2_core::mm_ctx::MmArc;
@@ -133,6 +133,10 @@ impl From<CryptoInitError> for ZcoinInitError {
     fn from(err: CryptoInitError) -> Self { ZcoinInitError::Internal(err.to_string()) }
 }
 
+impl From<CryptoCtxError> for ZcoinInitError {
+    fn from(err: CryptoCtxError) -> Self { ZcoinInitError::Internal(err.to_string()) }
+}
+
 impl From<ZcoinInitError> for InitStandaloneCoinError {
     fn from(_: ZcoinInitError) -> Self { todo!() }
 }
@@ -192,7 +196,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             check_utxo_maturity: None,
         };
         let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?;
-        let priv_key = crypto_ctx.iguana_ctx().secp256k1_privkey().secret;
+        let priv_key = crypto_ctx.mm2_internal_privkey_secret();
         let coin = z_coin_from_conf_and_params(&ctx, &ticker, &coin_conf, &utxo_params, priv_key.as_slice())
             .await
             .mm_err(|e| ZcoinInitError::from_build_err(e, ticker))?;
