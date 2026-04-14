@@ -1,6 +1,6 @@
 [package]
 name = "atomicdex-gossipsub"
-edition = "2018"
+edition = "2021"
 description = "Gossipsub protocol for AtomicDEX, based on libp2p gossipsub"
 version = "0.20.0"
 authors = ["Age Manning <Age@AgeManning.com>"]

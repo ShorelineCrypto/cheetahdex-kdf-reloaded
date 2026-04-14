@@ -1,12 +1,12 @@
 //! Bitcoin transaction.
 //! https://en.bitcoin.it/wiki/Protocol_documentation#tx
 
-use bytes::Bytes;
-use constants::{LOCKTIME_THRESHOLD, SEQUENCE_FINAL};
+use crate::bytes::Bytes;
+use crate::constants::{LOCKTIME_THRESHOLD, SEQUENCE_FINAL};
 use crypto::{dhash256, sha256};
 use ext_bitcoin::blockdata::transaction::Transaction as ExtTransaction;
 use ext_bitcoin::consensus::encode::{deserialize as deserialize_ext, Error as EncodeError};
-use hash::{CipherText, EncCipherText, OutCipherText, ZkProof, ZkProofSapling, H256, H512, H64};
+use crate::hash::{CipherText, EncCipherText, OutCipherText, ZkProof, ZkProofSapling, H256, H512, H64};
 use hex::FromHex;
 use ser::{deserialize, serialize, serialize_with_flags, SERIALIZE_TRANSACTION_WITNESS};
 use ser::{CompactInteger, Deserializable, Error, Reader, Serializable, Stream};
@@ -548,11 +548,11 @@ impl Deserializable for Transaction {
 #[cfg(test)]
 mod tests {
     use super::{Bytes, ExtTransaction, OutPoint, Transaction, TransactionInput, TransactionOutput};
-    use hash::{H256, H512};
+    use crate::hash::{H256, H512};
     use hex::ToHex;
     use ser::{deserialize, serialize, serialize_with_flags, Serializable, SERIALIZE_TRANSACTION_WITNESS};
     use std::convert::TryFrom;
-    use TxHashAlgo;
+    use crate::TxHashAlgo;
 
     // real transaction from block 80000
     // https://blockchain.info/rawtx/5a4ebf66822b0b2d56bd9dc64ece0bc38ee7844a23ff1d7320a88c5fdb2ad3e2

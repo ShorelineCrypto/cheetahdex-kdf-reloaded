@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
-use {AddressHashEnum, CashAddrType, CashAddress, DisplayLayout, Error, SegwitAddress};
+use crate::{AddressHashEnum, CashAddrType, CashAddress, DisplayLayout, Error, SegwitAddress};
 
 /// There are two address formats currently in use.
 /// https://bitcoin.org/en/developer-reference#address-conversion

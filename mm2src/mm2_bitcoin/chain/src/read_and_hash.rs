@@ -1,5 +1,5 @@
 use crypto::dhash256;
-use hash::H256;
+use crate::hash::H256;
 use ser::{Deserializable, Error as ReaderError, Reader};
 use std::io;
 

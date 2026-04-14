@@ -1,11 +1,11 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use bytes::Bytes;
-use compact::Compact;
-use compact_integer::CompactInteger;
-use hash::{CipherText, EncCipherText, EquihashSolution, OutCipherText, ZkProof, ZkProofSapling, H128, H160, H256,
+use crate::bytes::Bytes;
+use crate::compact::Compact;
+use crate::compact_integer::CompactInteger;
+use crate::hash::{CipherText, EncCipherText, EquihashSolution, OutCipherText, ZkProof, ZkProofSapling, H128, H160, H256,
            H264, H32, H48, H512, H520, H64, H96};
 use std::io;
-use {Deserializable, Error, Reader, Serializable, Stream};
+use crate::{Deserializable, Error, Reader, Serializable, Stream};
 
 impl Serializable for bool {
     #[inline]
@@ -252,8 +252,8 @@ impl Deserializable for Compact {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use {deserialize, deserialize_iterator, serialize, Error, Reader, Stream};
+    use crate::bytes::Bytes;
+    use crate::{deserialize, deserialize_iterator, serialize, Error, Reader, Stream};
 
     #[test]
     fn test_reader_read() {

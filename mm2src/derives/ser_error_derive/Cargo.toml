@@ -2,7 +2,7 @@
 name = "ser_error_derive"
 version = "0.1.0"
 authors = ["Sergey O. Boyko <sergey.boyko0791@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 proc-macro = true

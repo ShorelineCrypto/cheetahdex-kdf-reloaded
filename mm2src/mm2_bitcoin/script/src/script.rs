@@ -1,9 +1,9 @@
 //! Serialized script, used inside transaction inputs and outputs.
 
-use bytes::Bytes;
+use crate::bytes::Bytes;
 use keys::{self, AddressHashEnum, Public};
 use std::{fmt, ops};
-use {Error, Opcode};
+use crate::{Error, Opcode};
 
 /// Maximum number of public keys per multisig
 pub const MAX_PUBKEYS_PER_MULTISIG: usize = 20;
@@ -604,7 +604,7 @@ mod tests {
     use super::{Script, ScriptAddress, ScriptType};
     use crypto::ChecksumType;
     use keys::{Address, Public};
-    use {Builder, Error, Opcode};
+    use crate::{Builder, Error, Opcode};
 
     /// Maximum number of bytes pushable to the stack
     const MAX_SCRIPT_ELEMENT_SIZE: usize = 52;

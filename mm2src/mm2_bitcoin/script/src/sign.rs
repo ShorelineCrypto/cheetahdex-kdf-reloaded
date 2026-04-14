@@ -1,15 +1,15 @@
 //! Transaction signer
 
 use blake2b_simd::Params as Blake2b;
-use bytes::Bytes;
+use crate::bytes::Bytes;
 use chain::{JoinSplit, OutPoint, ShieldedOutput, ShieldedSpend, Transaction, TransactionInput, TransactionOutput,
             TxHashAlgo};
 use crypto::{dhash256, sha256};
-use hash::{H256, H512};
+use crate::hash::{H256, H512};
 use keys::KeyPair;
 use ser::Stream;
 use serde::Deserialize;
-use {Builder, Script};
+use crate::{Builder, Script};
 
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8] = b"ZcashPrevoutHash";
 const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8] = b"ZcashSequencHash";
@@ -598,12 +598,12 @@ fn blake_2b_256_personal(input: &[u8], personal: &[u8]) -> H256 {
 mod tests {
     use super::{blake_2b_256_personal, Sighash, SighashBase, SignatureVersion, TransactionInputSigner,
                 UnsignedTransactionInput};
-    use bytes::Bytes;
+    use crate::bytes::Bytes;
     use chain::{OutPoint, Transaction, TransactionOutput};
-    use hash::{H160, H256};
+    use crate::hash::{H160, H256};
     use keys::{Address, AddressHashEnum, Private};
-    use script::Script;
-    use sign::SignerHashAlgo;
+    use crate::script::Script;
+    use crate::sign::SignerHashAlgo;
 
     // http://www.righto.com/2014/02/bitcoins-hard-way-using-raw-bitcoin.html
     // https://blockchain.info/rawtx/81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48

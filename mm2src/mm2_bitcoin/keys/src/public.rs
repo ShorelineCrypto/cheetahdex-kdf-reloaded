@@ -1,11 +1,11 @@
 use crate::SECP_VERIFY;
 use crypto::dhash160;
-use hash::{H160, H264, H520};
+use crate::hash::{H160, H264, H520};
 use hex::ToHex;
 use secp256k1::{recovery::{RecoverableSignature, RecoveryId},
                 Message as SecpMessage, PublicKey, Signature as SecpSignature};
 use std::{fmt, ops};
-use {CompactSignature, Error, Message, Signature};
+use crate::{CompactSignature, Error, Message, Signature};
 
 /// Secret public key
 #[derive(Copy, Clone)]

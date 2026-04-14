@@ -1,4 +1,4 @@
-use {quote, syn};
+// `quote` and `syn` are external crate deps — available without explicit import in edition 2021
 
 pub fn impl_deserializable(ast: &syn::DeriveInput) -> quote::Tokens {
     let body = match ast.body {

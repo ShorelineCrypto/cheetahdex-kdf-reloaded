@@ -1,9 +1,9 @@
 use super::RepresentH256;
-use hash::H256;
+use crate::hash::H256;
 use hex::FromHex;
-use merkle_root::merkle_root;
+use crate::merkle_root::merkle_root;
 use ser::deserialize;
-use {BlockHeader, Transaction};
+use crate::{BlockHeader, Transaction};
 
 #[derive(Debug, PartialEq, Clone, Serializable, Deserializable)]
 pub struct Block {
@@ -66,7 +66,7 @@ impl Block {
 #[cfg(test)]
 mod tests {
     use super::Block;
-    use hash::H256;
+    use crate::hash::H256;
     use hex::FromHex;
     use ser::deserialize;
 

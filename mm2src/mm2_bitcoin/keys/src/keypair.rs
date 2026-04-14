@@ -2,10 +2,10 @@
 
 use crate::SECP_SIGN;
 use crypto::ChecksumType;
-use hash::{H264, H520};
+use crate::hash::{H264, H520};
 use secp256k1::{PublicKey, SecretKey};
 use std::fmt;
-use {Error, Private, Public, Secret};
+use crate::{Error, Private, Public, Secret};
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct KeyPair {

@@ -1,4 +1,4 @@
-use compact_integer::CompactInteger;
+use crate::compact_integer::CompactInteger;
 use derive_more::Display;
 use std::{io, marker};
 

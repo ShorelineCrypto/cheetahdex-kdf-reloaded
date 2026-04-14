@@ -1,6 +1,6 @@
 use chain::BlockHeader;
 use chain::RawBlockHeader;
-use helpers_validation::{merkle_prove, validate_vin, validate_vout, SPVError};
+use crate::helpers_validation::{merkle_prove, validate_vin, validate_vout, SPVError};
 use primitives::hash::H256;
 
 pub const TRY_SPV_PROOF_INTERVAL: u64 = 10;
@@ -72,7 +72,7 @@ mod spv_proof_tests {
     use chain::RawBlockHeader;
     use hex::FromHex;
     use serialization::deserialize;
-    use spv_proof::SPVProof;
+    use crate::spv_proof::SPVProof;
 
     #[test]
     fn test_block_header() {

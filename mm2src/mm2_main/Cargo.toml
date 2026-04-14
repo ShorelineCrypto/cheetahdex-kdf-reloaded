@@ -6,7 +6,7 @@
 [package]
 name = "mm2_main"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 default-run = "mm2"
 
 # wasm-opt reduces the size from 17 Mb to 14. But it runs for few minutes, which is not good for CI.

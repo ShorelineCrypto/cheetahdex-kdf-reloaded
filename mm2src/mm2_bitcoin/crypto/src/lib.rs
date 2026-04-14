@@ -113,7 +113,7 @@ mod tests {
     use super::{checksum, dhash160, dhash256, ripemd160, sha1, sha256, siphash24};
     use primitives::bytes::Bytes;
     use primitives::hash::{H160, H256, H32};
-    use ChecksumType;
+    use crate::ChecksumType;
 
     #[test]
     fn test_ripemd160() {

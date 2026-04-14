@@ -5,7 +5,7 @@ use keys::Address;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use v1::types;
+use crate::v1::types;
 
 /// Hex-encoded transaction
 pub type RawTransaction = Bytes;
