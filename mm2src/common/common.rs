@@ -160,8 +160,14 @@ cfg_native! {
 
 pub const SATOSHIS: u64 = 100_000_000;
 
+/// DEPRECATED: Use `mm2_net_config::NetConfig::dex_fee_addr_pubkey()` for the
+/// correct netid. This constant uses the netid 8762 (AtomicDEX) value and
+/// exists only for backward compatibility in coin crate internals (e.g. gas
+/// estimation) and test code.
 pub const DEX_FEE_ADDR_PUBKEY: &str = "03bc2c7ba671bae4a6fc835244c9762b41647b9827d4780a89a949b984a8ddcc06";
 lazy_static! {
+    /// DEPRECATED: Use `mm2_net_config::NetConfig::dex_fee_addr_raw_pubkey()`.
+    /// Kept for coin crate backward compatibility.
     pub static ref DEX_FEE_ADDR_RAW_PUBKEY: Vec<u8> =
         hex::decode(DEX_FEE_ADDR_PUBKEY).expect("DEX_FEE_ADDR_PUBKEY is expected to be a hexadecimal string");
 }

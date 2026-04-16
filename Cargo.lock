@@ -497,7 +497,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90dbd31c98227229239363921e60fcf5e558e43ec69094d46fc4996f08d1d5bc"
 dependencies = [
  "bitcoin_hashes 0.14.1",
- "rand_core 0.5.1",
+ "rand_core 0.6.4",
  "serde",
  "unicode-normalization",
  "zeroize",
@@ -4407,6 +4407,7 @@ dependencies = [
  "mm2_err_handle",
  "mm2_io",
  "mm2_net",
+ "mm2_net_config",
  "mm2_rpc",
  "mm2_test_helpers",
  "mocktopus",
@@ -4471,6 +4472,15 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
+]
+
+[[package]]
+name = "mm2_net_config"
+version = "0.1.0"
+dependencies = [
+ "hex 0.4.2",
+ "lazy_static",
+ "num-rational",
 ]
 
 [[package]]

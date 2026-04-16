@@ -118,6 +118,10 @@ impl consensus::Parameters for ARRRConsensusParams {
 }
 
 const DEX_FEE_OVK: OutgoingViewingKey = OutgoingViewingKey([7; 32]);
+/// DEPRECATED: Use `mm2_net_config::NetConfig::dex_fee_z_addr()` for the correct netid.
+/// This constant uses the netid 8762 (AtomicDEX) value and exists only for
+/// backward compatibility until the ZCoin trait is refactored to receive
+/// the fee address from the caller.
 const DEX_FEE_Z_ADDR: &str = "zs1rp6426e9r6jkq2nsanl66tkd34enewrmr0uvj0zelhkcwmsy0uvxz2fhm9eu9rl3ukxvgzy2v9f";
 
 pub struct ZCoinFields {

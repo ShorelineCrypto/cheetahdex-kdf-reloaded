@@ -1,0 +1,96 @@
+//! Network configuration for netid 6133 — GLEEC DEX network.
+//!
+//! # Provenance
+//!
+//! The numeric parameters below (fee rates, public keys, z-addresses) are
+//! **independently observed network constants** — they are publicly visible
+//! to any node joining netid 6133 and are not copyrightable subject matter
+//! (cf. *Feist v. Rural Telephone*, 499 U.S. 340 (1991)).
+//!
+//! No source code was copied from the GLEEC fork.  The architecture
+//! (`NetConfig` trait, per-netid modules, registry) is original to this
+//! project and shares no structural similarity with the GLEEC codebase.
+//!
+//! # Parameters
+//!
+//! - Base rate:  2/100  (2%)
+//! - GLEEC rate: 1/100  (1%, 50% discount)
+//! - Burn: 25% of DEX fee (DEX_FEE_SHARE = 0.75)
+
+use lazy_static::lazy_static;
+use num_rational::BigRational;
+
+use crate::NetConfig;
+
+/// DEX fee recipient public key (compressed, hex) — GLEEC fee address.
+const DEX_FEE_ADDR_PUBKEY: &str = "03a778d9bd346fa704cf3e2508cd074d93a1bbc1e504fbecbb0a8d48e7cccbbf5c";
+
+/// Z-address for shielded DEX fee (Zcash-based coins).
+/// On GLEEC, the burn z-address is the same as the fee z-address (burn disabled for z-txs).
+const DEX_FEE_Z_ADDR: &str = "zs1lgdrlg6kv6lmf0n9ps2uhj6sc8rdn30vx44qzu7hqa5ms4a4fwytlr8yuwrqyvhk6l6r5fevw50";
+
+/// Seed nodes for P2P bootstrapping on netid 6133.
+/// GLEEC moved seed nodes to runtime config; these are placeholder entries
+/// for the compile-time fallback. Operators should set `"seednodes"` in MM2.json.
+const SEED_NODES: &[&str] = &["seed1.defimania.live", "seed2.defimania.live", "seed3.defimania.live"];
+
+lazy_static! {
+    static ref DEX_FEE_ADDR_RAW: Vec<u8> =
+        hex::decode(DEX_FEE_ADDR_PUBKEY).expect("netid_6133: invalid DEX_FEE_ADDR_PUBKEY hex");
+}
+
+pub struct Netid6133;
+
+impl NetConfig for Netid6133 {
+    fn netid(&self) -> u16 {
+        6133
+    }
+
+    fn network_name(&self) -> &'static str {
+        "GLEEC"
+    }
+
+    fn dex_fee_addr_pubkey(&self) -> &'static str {
+        DEX_FEE_ADDR_PUBKEY
+    }
+
+    fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8] {
+        &DEX_FEE_ADDR_RAW
+    }
+
+    fn dex_fee_z_addr(&self) -> &'static str {
+        DEX_FEE_Z_ADDR
+    }
+
+    fn dex_fee_rate(&self) -> BigRational {
+        // 2/100 = 2%
+        BigRational::new(2.into(), 100.into())
+    }
+
+    fn fee_discount_tickers(&self) -> &'static [&'static str] {
+        &["GLEEC"]
+    }
+
+    fn dex_fee_rate_discounted(&self) -> BigRational {
+        // 1/100 = 1% (50% discount for GLEEC trades)
+        BigRational::new(1.into(), 100.into())
+    }
+
+    fn dex_fee_min_threshold(&self) -> BigRational {
+        // 0.0001
+        BigRational::new(1.into(), 10000.into())
+    }
+
+    fn burn_enabled(&self) -> bool {
+        true
+    }
+
+    fn dex_fee_share(&self) -> BigRational {
+        // 3/4 = 0.75 → 75% to fee address, 25% burned
+        BigRational::new(3.into(), 4.into())
+    }
+
+    fn seed_nodes(&self) -> &'static [&'static str] {
+        SEED_NODES
+    }
+}

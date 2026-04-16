@@ -6,15 +6,18 @@ use coins::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin};
 use coins::utxo::rpc_clients::UtxoRpcClientEnum;
 use coins::utxo::utxo_common::big_decimal_from_sat;
 use coins::utxo::{UtxoActivationParams, UtxoCommonOps};
-use coins::{FeeApproxStage, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, TradePreimageValue, TransactionEnum,
-            ValidatePaymentInput};
+use coins::{
+    FeeApproxStage, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, TradePreimageValue, TransactionEnum,
+    ValidatePaymentInput,
+};
 use common::log::debug;
 use common::mm_number::BigDecimal;
-use common::{temp_dir, DEX_FEE_ADDR_RAW_PUBKEY};
+use common::temp_dir;
 use ethereum_types::H160;
 use futures01::Future;
 use http::StatusCode;
 use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
+use mm2_net_config::net_config_or_panic;
 use rand6::Rng;
 use serde_json::{self as json, Value as Json};
 use std::convert::TryFrom;
@@ -37,7 +40,9 @@ pub struct QtumDockerOps {
 }
 
 impl CoinDockerOps for QtumDockerOps {
-    fn rpc_client(&self) -> &UtxoRpcClientEnum { &self.coin.as_ref().rpc_client }
+    fn rpc_client(&self) -> &UtxoRpcClientEnum {
+        &self.coin.as_ref().rpc_client
+    }
 }
 
 impl QtumDockerOps {
@@ -952,7 +957,9 @@ fn test_get_max_taker_vol_and_trade_with_dynamic_trade_fee(coin: QtumCoin, priv_
     // - `max_possible_2 = balance - locked_amount - max_trade_fee`, where `locked_amount = 0`
     let max_possible_2 = &qtum_balance - &max_trade_fee;
     // - `max_dex_fee = dex_fee(max_possible_2)`
+    let net_cfg = net_config_or_panic(8762);
     let max_dex_fee = dex_fee_amount(
+        net_cfg,
         "QTUM",
         "MYCOIN",
         &MmNumber::from(max_possible_2),
@@ -974,9 +981,15 @@ fn test_get_max_taker_vol_and_trade_with_dynamic_trade_fee(coin: QtumCoin, priv_
     debug!("total_available: {}", available);
     let min_tx_amount = qtum_dex_fee_threshold.clone();
     let expected_max_taker_vol =
-        max_taker_vol_from_available(MmNumber::from(available), "QTUM", "MYCOIN", &min_tx_amount)
+        max_taker_vol_from_available(net_cfg, MmNumber::from(available), "QTUM", "MYCOIN", &min_tx_amount)
             .expect("max_taker_vol_from_available");
-    let real_dex_fee = dex_fee_amount("QTUM", "MYCOIN", &expected_max_taker_vol, &qtum_dex_fee_threshold);
+    let real_dex_fee = dex_fee_amount(
+        net_cfg,
+        "QTUM",
+        "MYCOIN",
+        &expected_max_taker_vol,
+        &qtum_dex_fee_threshold,
+    );
     debug!("real_max_dex_fee: {:?}", real_dex_fee.to_fraction());
 
     // check if the actual max_taker_vol equals to the expected
@@ -1009,9 +1022,15 @@ fn test_get_max_taker_vol_and_trade_with_dynamic_trade_fee(coin: QtumCoin, priv_
     let timelock = (now_ms() / 1000) as u32 - 200;
     let secret_hash = &[0; 20];
 
-    let dex_fee_amount = dex_fee_amount("QTUM", "MYCOIN", &expected_max_taker_vol, &qtum_dex_fee_threshold);
+    let dex_fee_amount = dex_fee_amount(
+        net_cfg,
+        "QTUM",
+        "MYCOIN",
+        &expected_max_taker_vol,
+        &qtum_dex_fee_threshold,
+    );
     let _taker_fee_tx = coin
-        .send_taker_fee(&DEX_FEE_ADDR_RAW_PUBKEY, dex_fee_amount.to_decimal(), &[])
+        .send_taker_fee(net_cfg.dex_fee_addr_raw_pubkey(), dex_fee_amount.to_decimal(), &[])
         .wait()
         .expect("!send_taker_fee");
 
@@ -1019,7 +1038,7 @@ fn test_get_max_taker_vol_and_trade_with_dynamic_trade_fee(coin: QtumCoin, priv_
         .send_taker_payment(
             timelock,
             coin.my_public_key().unwrap().as_ref(),
-            &DEX_FEE_ADDR_RAW_PUBKEY,
+            net_cfg.dex_fee_addr_raw_pubkey(),
             secret_hash,
             expected_max_taker_vol.to_decimal(),
             &None,
@@ -1501,18 +1520,28 @@ fn segwit_address_in_the_orderbook() {
 }
 
 #[test]
-fn test_trade_qrc20() { trade_base_rel(("QICK", "QORTY")); }
+fn test_trade_qrc20() {
+    trade_base_rel(("QICK", "QORTY"));
+}
 
 #[test]
-fn trade_test_with_maker_segwit() { trade_base_rel(("QTUM", "MYCOIN")); }
+fn trade_test_with_maker_segwit() {
+    trade_base_rel(("QTUM", "MYCOIN"));
+}
 
 #[test]
-fn trade_test_with_taker_segwit() { trade_base_rel(("MYCOIN", "QTUM")); }
+fn trade_test_with_taker_segwit() {
+    trade_base_rel(("MYCOIN", "QTUM"));
+}
 
 #[test]
 #[ignore]
-fn test_trade_qrc20_utxo() { trade_base_rel(("QICK", "MYCOIN")); }
+fn test_trade_qrc20_utxo() {
+    trade_base_rel(("QICK", "MYCOIN"));
+}
 
 #[test]
 #[ignore]
-fn test_trade_utxo_qrc20() { trade_base_rel(("MYCOIN", "QICK")); }
+fn test_trade_utxo_qrc20() {
+    trade_base_rel(("MYCOIN", "QICK"));
+}

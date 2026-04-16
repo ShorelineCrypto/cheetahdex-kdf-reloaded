@@ -59,17 +59,20 @@ use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
 use coins::{lp_coinfind, MmCoinEnum, TradeFee, TransactionEnum};
 use common::log::{debug, warn};
-use common::{bits256, calc_total_pages,
-             executor::{spawn, Timer},
-             log::{error, info},
-             mm_number::{BigDecimal, BigRational, MmNumber},
-             now_ms, var, PagingOptions};
+use common::{
+    bits256, calc_total_pages,
+    executor::{spawn, Timer},
+    log::{error, info},
+    mm_number::{BigDecimal, BigRational, MmNumber},
+    now_ms, var, PagingOptions,
+};
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
 use http::Response;
 use mm2_core::mm_ctx::{from_ctx, MmArc};
 use mm2_err_handle::prelude::*;
 use mm2_libp2p::{decode_signed, encode_and_sign, pub_sub_topic, TopicPrefix};
+use mm2_net_config::NetConfig;
 use primitives::hash::{H160, H264};
 use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json};
 use serde_json::{self as json, Value as Json};
@@ -82,15 +85,24 @@ use uuid::Uuid;
 #[cfg(feature = "custom-swap-locktime")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[path = "lp_swap/check_balance.rs"] mod check_balance;
-#[path = "lp_swap/maker_swap.rs"] mod maker_swap;
-#[path = "lp_swap/my_swaps_storage.rs"] mod my_swaps_storage;
-#[path = "lp_swap/pubkey_banning.rs"] mod pubkey_banning;
-#[path = "lp_swap/recreate_swap_data.rs"] mod recreate_swap_data;
-#[path = "lp_swap/saved_swap.rs"] mod saved_swap;
-#[path = "lp_swap/swap_lock.rs"] mod swap_lock;
-#[path = "lp_swap/taker_swap.rs"] mod taker_swap;
-#[path = "lp_swap/trade_preimage.rs"] mod trade_preimage;
+#[path = "lp_swap/check_balance.rs"]
+mod check_balance;
+#[path = "lp_swap/maker_swap.rs"]
+mod maker_swap;
+#[path = "lp_swap/my_swaps_storage.rs"]
+mod my_swaps_storage;
+#[path = "lp_swap/pubkey_banning.rs"]
+mod pubkey_banning;
+#[path = "lp_swap/recreate_swap_data.rs"]
+mod recreate_swap_data;
+#[path = "lp_swap/saved_swap.rs"]
+mod saved_swap;
+#[path = "lp_swap/swap_lock.rs"]
+mod swap_lock;
+#[path = "lp_swap/taker_swap.rs"]
+mod taker_swap;
+#[path = "lp_swap/trade_preimage.rs"]
+mod trade_preimage;
 
 #[cfg(target_arch = "wasm32")]
 #[path = "lp_swap/swap_wasm_db.rs"]
@@ -99,9 +111,10 @@ mod swap_wasm_db;
 pub use check_balance::{check_other_coin_balance_for_swap, CheckBalanceError};
 use keys::KeyPair;
 use maker_swap::MakerSwapEvent;
-pub use maker_swap::{calc_max_maker_vol, check_balance_for_maker_swap, maker_swap_trade_preimage, run_maker_swap,
-                     MakerSavedEvent, MakerSavedSwap, MakerSwap, MakerSwapStatusChanged, MakerTradePreimage,
-                     RunMakerSwapInput};
+pub use maker_swap::{
+    calc_max_maker_vol, check_balance_for_maker_swap, maker_swap_trade_preimage, run_maker_swap, MakerSavedEvent,
+    MakerSavedSwap, MakerSwap, MakerSwapStatusChanged, MakerTradePreimage, RunMakerSwapInput,
+};
 use my_swaps_storage::{MySwapsOps, MySwapsStorage};
 use pubkey_banning::BanReason;
 pub use pubkey_banning::{ban_pubkey_rpc, is_pubkey_banned, list_banned_pubkeys_rpc, unban_pubkeys_rpc};
@@ -109,9 +122,11 @@ pub use recreate_swap_data::recreate_swap_data;
 pub use saved_swap::{SavedSwap, SavedSwapError, SavedSwapIo, SavedSwapResult};
 use std::num::NonZeroUsize;
 use taker_swap::TakerSwapEvent;
-pub use taker_swap::{calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available,
-                     run_taker_swap, taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap,
-                     TakerSwapPreparedParams, TakerTradePreimage};
+pub use taker_swap::{
+    calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available, run_taker_swap,
+    taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap, TakerSwapPreparedParams,
+    TakerTradePreimage,
+};
 pub use trade_preimage::trade_preimage_rpc;
 
 pub const SWAP_PREFIX: TopicPrefix = "swap";
@@ -159,7 +174,9 @@ impl SwapMsgStore {
 pub struct AbortOnDropHandle(AbortHandle);
 
 impl Drop for AbortOnDropHandle {
-    fn drop(&mut self) { self.0.abort(); }
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Spawns the loop that broadcasts message every `interval` seconds returning the AbortOnDropHandle
@@ -248,7 +265,9 @@ pub async fn process_msg(ctx: MmArc, topic: &str, msg: &[u8]) {
     }
 }
 
-pub fn swap_topic(uuid: &Uuid) -> String { pub_sub_topic(SWAP_PREFIX, &uuid.to_string()) }
+pub fn swap_topic(uuid: &Uuid) -> String {
+    pub_sub_topic(SWAP_PREFIX, &uuid.to_string())
+}
 
 /// Formats and returns a topic format for `txhlp`.
 ///
@@ -258,7 +277,9 @@ pub fn swap_topic(uuid: &Uuid) -> String { pub_sub_topic(SWAP_PREFIX, &uuid.to_s
 /// // Returns topic format `txhlp/BTC` as String type.
 /// ```
 #[inline(always)]
-pub fn tx_helper_topic(coin: &str) -> String { pub_sub_topic(TX_HELPER_PREFIX, coin) }
+pub fn tx_helper_topic(coin: &str) -> String {
+    pub_sub_topic(TX_HELPER_PREFIX, coin)
+}
 
 async fn recv_swap_msg<T>(
     ctx: MmArc,
@@ -354,11 +375,15 @@ pub enum SwapEvent {
 }
 
 impl From<MakerSwapEvent> for SwapEvent {
-    fn from(maker_event: MakerSwapEvent) -> Self { SwapEvent::Maker(maker_event) }
+    fn from(maker_event: MakerSwapEvent) -> Self {
+        SwapEvent::Maker(maker_event)
+    }
 }
 
 impl From<TakerSwapEvent> for SwapEvent {
-    fn from(taker_event: TakerSwapEvent) -> Self { SwapEvent::Taker(taker_event) }
+    fn from(taker_event: TakerSwapEvent) -> Self {
+        SwapEvent::Taker(taker_event)
+    }
 }
 
 struct SwapsContext {
@@ -410,7 +435,9 @@ impl SwapsContext {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub async fn swap_db(&self) -> InitDbResult<SwapDbLocked<'_>> { Ok(self.swap_db.get_or_initialize().await?) }
+    pub async fn swap_db(&self) -> InitDbResult<SwapDbLocked<'_>> {
+        Ok(self.swap_db.get_or_initialize().await?)
+    }
 }
 
 /// Get total amount of selected coin locked by all currently ongoing swaps
@@ -503,10 +530,14 @@ pub struct SwapConfirmationsSettings {
 }
 
 impl SwapConfirmationsSettings {
-    pub fn requires_notarization(&self) -> bool { self.maker_coin_nota || self.taker_coin_nota }
+    pub fn requires_notarization(&self) -> bool {
+        self.maker_coin_nota || self.taker_coin_nota
+    }
 }
 
-fn coin_with_4x_locktime(ticker: &str) -> bool { matches!(ticker, "BCH" | "BTG" | "SBTC") }
+fn coin_with_4x_locktime(ticker: &str) -> bool {
+    matches!(ticker, "BCH" | "BTG" | "SBTC")
+}
 
 #[derive(Debug)]
 pub enum AtomicLocktimeVersion {
@@ -559,9 +590,8 @@ pub fn lp_atomic_locktime(maker_coin: &str, taker_coin: &str, version: AtomicLoc
     }
 }
 
-fn dex_fee_threshold(min_tx_amount: MmNumber) -> MmNumber {
-    // 0.0001
-    let min_fee = MmNumber::from((1, 10000));
+fn dex_fee_threshold(net_cfg: &dyn NetConfig, min_tx_amount: MmNumber) -> MmNumber {
+    let min_fee: MmNumber = net_cfg.dex_fee_min_threshold().into();
     if min_fee < min_tx_amount {
         min_tx_amount
     } else {
@@ -569,22 +599,39 @@ fn dex_fee_threshold(min_tx_amount: MmNumber) -> MmNumber {
     }
 }
 
-fn dex_fee_rate(base: &str, rel: &str) -> MmNumber {
-    let fee_discount_tickers: &[&str] = if cfg!(test) && var("MYCOIN_FEE_DISCOUNT").is_ok() {
-        &["KMD", "MYCOIN"]
+fn dex_fee_rate(net_cfg: &dyn NetConfig, base: &str, rel: &str) -> MmNumber {
+    let discount_tickers: &[&str] = if cfg!(test) && var("MYCOIN_FEE_DISCOUNT").is_ok() {
+        // In tests, also give discount to MYCOIN (alongside the netid-configured tickers)
+        // This is a test-only workaround; the NetConfig discount tickers are authoritative.
+        let configured = net_cfg.fee_discount_tickers();
+        if configured.contains(&"MYCOIN") {
+            configured
+        } else {
+            // Fall back to checking both configured tickers and MYCOIN
+            if configured.contains(&base) || configured.contains(&rel) || base == "MYCOIN" || rel == "MYCOIN" {
+                return net_cfg.dex_fee_rate_discounted().into();
+            } else {
+                return net_cfg.dex_fee_rate().into();
+            }
+        }
     } else {
-        &["KMD"]
+        net_cfg.fee_discount_tickers()
     };
-    if fee_discount_tickers.contains(&base) || fee_discount_tickers.contains(&rel) {
-        // 1/777 - 10%
-        BigRational::new(9.into(), 7770.into()).into()
+    if discount_tickers.contains(&base) || discount_tickers.contains(&rel) {
+        net_cfg.dex_fee_rate_discounted().into()
     } else {
-        BigRational::new(1.into(), 777.into()).into()
+        net_cfg.dex_fee_rate().into()
     }
 }
 
-pub fn dex_fee_amount(base: &str, rel: &str, trade_amount: &MmNumber, dex_fee_threshold: &MmNumber) -> MmNumber {
-    let rate = dex_fee_rate(base, rel);
+pub fn dex_fee_amount(
+    net_cfg: &dyn NetConfig,
+    base: &str,
+    rel: &str,
+    trade_amount: &MmNumber,
+    dex_fee_threshold: &MmNumber,
+) -> MmNumber {
+    let rate = dex_fee_rate(net_cfg, base, rel);
     let fee_amount = trade_amount * &rate;
     if &fee_amount < dex_fee_threshold {
         dex_fee_threshold.clone()
@@ -593,10 +640,15 @@ pub fn dex_fee_amount(base: &str, rel: &str, trade_amount: &MmNumber, dex_fee_th
     }
 }
 
-pub fn dex_fee_amount_from_taker_coin(taker_coin: &MmCoinEnum, maker_coin: &str, trade_amount: &MmNumber) -> MmNumber {
+pub fn dex_fee_amount_from_taker_coin(
+    net_cfg: &dyn NetConfig,
+    taker_coin: &MmCoinEnum,
+    maker_coin: &str,
+    trade_amount: &MmNumber,
+) -> MmNumber {
     let min_tx_amount = MmNumber::from(taker_coin.min_tx_amount());
-    let dex_fee_threshold = dex_fee_threshold(min_tx_amount);
-    dex_fee_amount(taker_coin.ticker(), maker_coin, trade_amount, &dex_fee_threshold)
+    let threshold = dex_fee_threshold(net_cfg, min_tx_amount);
+    dex_fee_amount(net_cfg, taker_coin.ticker(), maker_coin, trade_amount, &threshold)
 }
 
 #[derive(Clone, Debug, Eq, Deserialize, PartialEq, Serialize)]
@@ -711,9 +763,13 @@ pub struct TransactionIdentifier {
     tx_hash: BytesJson,
 }
 
-pub fn my_swaps_dir(ctx: &MmArc) -> PathBuf { ctx.dbdir().join("SWAPS").join("MY") }
+pub fn my_swaps_dir(ctx: &MmArc) -> PathBuf {
+    ctx.dbdir().join("SWAPS").join("MY")
+}
 
-pub fn my_swap_file_path(ctx: &MmArc, uuid: &Uuid) -> PathBuf { my_swaps_dir(ctx).join(format!("{}.json", uuid)) }
+pub fn my_swap_file_path(ctx: &MmArc, uuid: &Uuid) -> PathBuf {
+    my_swaps_dir(ctx).join(format!("{}.json", uuid))
+}
 
 pub async fn insert_new_swap_to_db(
     ctx: MmArc,
@@ -786,11 +842,15 @@ pub struct SwapError {
 }
 
 impl From<String> for SwapError {
-    fn from(error: String) -> Self { SwapError { error } }
+    fn from(error: String) -> Self {
+        SwapError { error }
+    }
 }
 
 impl From<&str> for SwapError {
-    fn from(e: &str) -> Self { SwapError { error: e.to_owned() } }
+    fn from(e: &str) -> Self {
+        SwapError { error: e.to_owned() }
+    }
 }
 
 #[derive(Serialize)]
@@ -1246,35 +1306,41 @@ mod lp_swap_tests {
 
     use super::*;
 
+    /// Tests use netid 8762 (AtomicDEX) parameters.
+    fn test_net_cfg() -> &'static dyn NetConfig {
+        mm2_net_config::net_config_or_panic(8762)
+    }
+
     #[test]
     fn test_dex_fee_amount() {
+        let net_cfg = test_net_cfg();
         let dex_fee_threshold = MmNumber::from("0.0001");
 
         let base = "BTC";
         let rel = "ETH";
         let amount = 1.into();
-        let actual_fee = dex_fee_amount(base, rel, &amount, &dex_fee_threshold);
+        let actual_fee = dex_fee_amount(net_cfg, base, rel, &amount, &dex_fee_threshold);
         let expected_fee = amount / 777u64.into();
         assert_eq!(expected_fee, actual_fee);
 
         let base = "KMD";
         let rel = "ETH";
         let amount = 1.into();
-        let actual_fee = dex_fee_amount(base, rel, &amount, &dex_fee_threshold);
+        let actual_fee = dex_fee_amount(net_cfg, base, rel, &amount, &dex_fee_threshold);
         let expected_fee = amount * (9, 7770).into();
         assert_eq!(expected_fee, actual_fee);
 
         let base = "BTC";
         let rel = "KMD";
         let amount = 1.into();
-        let actual_fee = dex_fee_amount(base, rel, &amount, &dex_fee_threshold);
+        let actual_fee = dex_fee_amount(net_cfg, base, rel, &amount, &dex_fee_threshold);
         let expected_fee = amount * (9, 7770).into();
         assert_eq!(expected_fee, actual_fee);
 
         let base = "BTC";
         let rel = "KMD";
         let amount: MmNumber = "0.001".parse::<BigDecimal>().unwrap().into();
-        let actual_fee = dex_fee_amount(base, rel, &amount, &dex_fee_threshold);
+        let actual_fee = dex_fee_amount(net_cfg, base, rel, &amount, &dex_fee_threshold);
         assert_eq!(dex_fee_threshold, actual_fee);
     }
 

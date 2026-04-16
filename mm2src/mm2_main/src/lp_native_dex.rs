@@ -26,6 +26,7 @@ use derive_more::Display;
 use mm2_core::mm_ctx::{MmArc, MmCtx};
 use mm2_err_handle::prelude::*;
 use mm2_libp2p::{spawn_gossipsub, AdexBehaviourError, NodeType, RelayAddress, RelayAddressError, WssCerts};
+use mm2_net_config::{net_config_for, net_config_or_panic, SUPPORTED_NETIDS};
 use rpc_task::RpcTaskError;
 use serde_json::{self as json};
 use std::fs;
@@ -38,9 +39,10 @@ use std::time::Duration;
 use crate::mm2::database::init_and_migrate_db;
 use crate::mm2::lp_message_service::{init_message_service, InitMessageServiceError};
 use crate::mm2::lp_network::{lp_network_ports, p2p_event_process_loop, NetIdError, P2PContext};
-use crate::mm2::lp_ordermatch::{broadcast_maker_orders_keep_alive_loop, clean_memory_loop, init_ordermatch_context,
-                                lp_ordermatch_loop, orders_kick_start, BalanceUpdateOrdermatchHandler,
-                                OrdermatchInitError};
+use crate::mm2::lp_ordermatch::{
+    broadcast_maker_orders_keep_alive_loop, clean_memory_loop, init_ordermatch_context, lp_ordermatch_loop,
+    orders_kick_start, BalanceUpdateOrdermatchHandler, OrdermatchInitError,
+};
 use crate::mm2::lp_swap::{running_swaps_num, swap_kick_starts};
 use crate::mm2::rpc::spawn_rpc;
 use crate::mm2::{MM_DATETIME, MM_VERSION};
@@ -51,10 +53,10 @@ cfg_native! {
     use db_common::sqlite::rusqlite::Error as SqlError;
 }
 
-#[path = "lp_init/init_context.rs"] mod init_context;
-#[path = "lp_init/init_hw.rs"] pub mod init_hw;
-
-const NETID_7777_SEEDNODES: [&str; 3] = ["seed1.defimania.live", "seed2.defimania.live", "seed3.defimania.live"];
+#[path = "lp_init/init_context.rs"]
+mod init_context;
+#[path = "lp_init/init_hw.rs"]
+pub mod init_hw;
 
 pub type P2PResult<T> = Result<T, MmError<P2PInitError>>;
 pub type MmInitResult<T> = Result<T, MmError<MmInitError>>;
@@ -87,7 +89,9 @@ pub enum P2PInitError {
 }
 
 impl From<NetIdError> for P2PInitError {
-    fn from(e: NetIdError) -> Self { P2PInitError::InvalidNetId(e) }
+    fn from(e: NetIdError) -> Self {
+        P2PInitError::InvalidNetId(e)
+    }
 }
 
 impl From<AdexBehaviourError> for P2PInitError {
@@ -145,6 +149,15 @@ pub enum MmInitError {
     HardwareWalletError(String),
     #[display(fmt = "Internal error: {}", _0)]
     Internal(String),
+    #[display(
+        fmt = "Unsupported netid {}: no compiled configuration. Supported: {:?}",
+        netid,
+        supported
+    )]
+    UnsupportedNetId {
+        netid: u16,
+        supported: &'static [u16],
+    },
 }
 
 impl From<P2PInitError> for MmInitError {
@@ -162,7 +175,9 @@ impl From<P2PInitError> for MmInitError {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SqlError> for MmInitError {
-    fn from(e: SqlError) -> Self { MmInitError::ErrorSqliteInitializing(e.to_string()) }
+    fn from(e: SqlError) -> Self {
+        MmInitError::ErrorSqliteInitializing(e.to_string())
+    }
 }
 
 impl From<OrdermatchInitError> for MmInitError {
@@ -236,29 +251,34 @@ impl MmInitError {
     }
 }
 
+/// Returns compile-time seed nodes from NetConfig for the given netid.
+/// Falls back to an empty list for unknown netids (which shouldn't happen
+/// because startup validation rejects unknown netids).
 #[cfg(target_arch = "wasm32")]
 fn default_seednodes(netid: u16) -> Vec<RelayAddress> {
-    if netid == 7777 {
-        NETID_7777_SEEDNODES
+    match net_config_for(netid) {
+        Some(cfg) => cfg
+            .seed_nodes()
             .iter()
             .map(|seed| RelayAddress::Dns(seed.to_string()))
-            .collect()
-    } else {
-        Vec::new()
+            .collect(),
+        None => Vec::new(),
     }
 }
 
+/// Returns compile-time seed nodes from NetConfig for the given netid,
+/// resolving DNS hostnames to IPv4 addresses.
 #[cfg(not(target_arch = "wasm32"))]
 fn default_seednodes(netid: u16) -> Vec<RelayAddress> {
     use crate::mm2::lp_network::addr_to_ipv4_string;
-    if netid == 7777 {
-        NETID_7777_SEEDNODES
+    match net_config_for(netid) {
+        Some(cfg) => cfg
+            .seed_nodes()
             .iter()
             .filter_map(|seed| addr_to_ipv4_string(*seed).ok())
             .map(RelayAddress::IPv4)
-            .collect()
-    } else {
-        Vec::new()
+            .collect(),
+        None => Vec::new(),
     }
 }
 
@@ -384,6 +404,17 @@ pub async fn lp_init_continue(ctx: MmArc) -> MmInitResult<()> {
 /// * `ctx_cb` - callback used to share the `MmCtx` ID with the call site.
 pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
     info!("Version: {} DT {}", MM_VERSION, MM_DATETIME);
+
+    // Validate netid against compiled network configurations ("deny except config exists").
+    let netid = ctx.netid();
+    if net_config_for(netid).is_none() {
+        return MmError::err(MmInitError::UnsupportedNetId {
+            netid,
+            supported: SUPPORTED_NETIDS,
+        });
+    }
+    let net_cfg = net_config_or_panic(netid);
+    info!("Network: {} (netid {})", net_cfg.network_name(), netid);
 
     if ctx.conf["passphrase"].is_null() && ctx.conf["hw_wallet"].is_null() {
         return MmError::err(MmInitError::FieldNotFoundInConfig {
