@@ -15,6 +15,7 @@ use crate::{
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
 use coins::rpc_command::account_balance::account_balance;
+use coins::rpc_command::get_private_keys::get_private_keys;
 use coins::rpc_command::init_create_account::{
     init_create_new_account, init_create_new_account_status, init_create_new_account_user_action,
 };
@@ -137,6 +138,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "enable_bch_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<BchCoin>).await,
         "enable_slp" => handle_mmrpc(ctx, request, enable_token::<SlpToken>).await,
         "get_new_address" => handle_mmrpc(ctx, request, get_new_address).await,
+        "get_private_keys" => handle_mmrpc(ctx, request, get_private_keys).await,
         "get_public_key" => handle_mmrpc(ctx, request, get_public_key).await,
         "get_public_key_hash" => handle_mmrpc(ctx, request, get_public_key_hash).await,
         "get_raw_transaction" => handle_mmrpc(ctx, request, get_raw_transaction).await,
