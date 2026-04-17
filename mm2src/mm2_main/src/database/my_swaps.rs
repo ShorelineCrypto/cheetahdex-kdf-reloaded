@@ -61,15 +61,21 @@ pub enum SelectRecentSwapsUuidsErr {
 }
 
 impl std::fmt::Display for SelectRecentSwapsUuidsErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{:?}", self) }
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl From<SqlError> for SelectRecentSwapsUuidsErr {
-    fn from(err: SqlError) -> Self { SelectRecentSwapsUuidsErr::Sql(err) }
+    fn from(err: SqlError) -> Self {
+        SelectRecentSwapsUuidsErr::Sql(err)
+    }
 }
 
 impl From<uuid::parser::ParseError> for SelectRecentSwapsUuidsErr {
-    fn from(err: uuid::parser::ParseError) -> Self { SelectRecentSwapsUuidsErr::Parse(err) }
+    fn from(err: uuid::parser::ParseError) -> Self {
+        SelectRecentSwapsUuidsErr::Parse(err)
+    }
 }
 
 /// Adds where clauses determined by MySwapsFilter

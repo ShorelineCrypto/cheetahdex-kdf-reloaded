@@ -1,15 +1,19 @@
 use crate::mm2::lp_native_dex::init_context::MmInitContext;
 use async_trait::async_trait;
 use common::{HttpStatusCode, SuccessResponse};
-use crypto::hw_rpc_task::{HwConnectStatuses, HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTaskUserActionRequest,
-                          TrezorRpcTaskConnectProcessor};
+use crypto::hw_rpc_task::{
+    HwConnectStatuses, HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTaskUserActionRequest,
+    TrezorRpcTaskConnectProcessor,
+};
 use crypto::{CryptoCtx, CryptoCtxError, CryptoInitError, HwCtxInitError, HwError, HwWalletType};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use rpc_task::rpc_common::{InitRpcTaskResponse, RpcTaskStatusError, RpcTaskStatusRequest, RpcTaskUserActionError};
-use rpc_task::{RpcTask, RpcTaskError, RpcTaskHandle, RpcTaskManager, RpcTaskManagerShared, RpcTaskStatus, RpcTaskTypes};
+use rpc_task::{
+    RpcTask, RpcTaskError, RpcTaskHandle, RpcTaskManager, RpcTaskManagerShared, RpcTaskStatus, RpcTaskTypes,
+};
 use std::time::Duration;
 
 const TREZOR_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -42,11 +46,15 @@ pub enum InitHwError {
 }
 
 impl From<CryptoInitError> for InitHwError {
-    fn from(e: CryptoInitError) -> Self { InitHwError::Internal(e.to_string()) }
+    fn from(e: CryptoInitError) -> Self {
+        InitHwError::Internal(e.to_string())
+    }
 }
 
 impl From<CryptoCtxError> for InitHwError {
-    fn from(e: CryptoCtxError) -> Self { InitHwError::Internal(e.to_string()) }
+    fn from(e: CryptoCtxError) -> Self {
+        InitHwError::Internal(e.to_string())
+    }
 }
 
 impl From<HwCtxInitError<RpcTaskError>> for InitHwError {
@@ -116,25 +124,33 @@ impl RpcTaskTypes for InitHwTask {
 
 #[async_trait]
 impl RpcTask for InitHwTask {
-    fn initial_status(&self) -> Self::InProgressStatus { InitHwInProgressStatus::Initializing }
+    fn initial_status(&self) -> Self::InProgressStatus {
+        InitHwInProgressStatus::Initializing
+    }
 
     async fn run(self, task_handle: &InitHwTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         let crypto_ctx = CryptoCtx::from_ctx(&self.ctx).mm_err(Into::into)?;
 
         match self.hw_wallet_type {
             HwWalletType::Trezor => {
-                let trezor_connect_processor = TrezorRpcTaskConnectProcessor::new(task_handle, HwConnectStatuses {
-                    on_connect: InitHwInProgressStatus::WaitingForTrezorToConnect,
-                    on_connected: InitHwInProgressStatus::Initializing,
-                    on_connection_failed: InitHwInProgressStatus::Initializing,
-                    on_button_request: InitHwInProgressStatus::ReadPublicKeyFromTrezor,
-                    on_pin_request: InitHwAwaitingStatus::WaitForTrezorPin,
-                    on_ready: InitHwInProgressStatus::Initializing,
-                })
+                let trezor_connect_processor = TrezorRpcTaskConnectProcessor::new(
+                    task_handle,
+                    HwConnectStatuses {
+                        on_connect: InitHwInProgressStatus::WaitingForTrezorToConnect,
+                        on_connected: InitHwInProgressStatus::Initializing,
+                        on_connection_failed: InitHwInProgressStatus::Initializing,
+                        on_button_request: InitHwInProgressStatus::ReadPublicKeyFromTrezor,
+                        on_pin_request: InitHwAwaitingStatus::WaitForTrezorPin,
+                        on_ready: InitHwInProgressStatus::Initializing,
+                    },
+                )
                 .with_connect_timeout(TREZOR_CONNECT_TIMEOUT)
                 .with_pin_timeout(TREZOR_PIN_TIMEOUT);
 
-                crypto_ctx.init_hw_ctx_with_trezor(&trezor_connect_processor).await.mm_err(Into::into)?;
+                crypto_ctx
+                    .init_hw_ctx_with_trezor(&trezor_connect_processor)
+                    .await
+                    .mm_err(Into::into)?;
             },
         }
         Ok(SuccessResponse::new())
@@ -174,6 +190,8 @@ pub async fn init_trezor_user_action(
         .init_hw_task_manager
         .lock()
         .map_to_mm(|e| RpcTaskUserActionError::Internal(e.to_string()))?;
-    task_manager.on_user_action(req.task_id, req.user_action).mm_err(Into::into)?;
+    task_manager
+        .on_user_action(req.task_id, req.user_action)
+        .mm_err(Into::into)?;
     Ok(SuccessResponse::new())
 }

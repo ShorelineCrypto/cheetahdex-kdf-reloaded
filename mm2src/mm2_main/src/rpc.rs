@@ -18,7 +18,8 @@
 //
 
 use crate::mm2::rpc::rate_limiter::RateLimitError;
-#[cfg(not(target_arch = "wasm32"))] use common::log::warn;
+#[cfg(not(target_arch = "wasm32"))]
+use common::log::warn;
 use common::log::{error, info};
 use common::{err_to_rpc_json_string, err_tp_rpc_json, HttpStatusCode};
 use derive_more::Display;
@@ -38,13 +39,16 @@ use serde_json::{self as json, Value as Json};
 use std::borrow::Cow;
 use std::net::SocketAddr;
 
-#[path = "rpc/dispatcher/dispatcher.rs"] mod dispatcher;
+#[path = "rpc/dispatcher/dispatcher.rs"]
+mod dispatcher;
 #[path = "rpc/dispatcher/dispatcher_legacy.rs"]
 mod dispatcher_legacy;
-#[path = "rpc/lp_commands/lp_commands.rs"] pub mod lp_commands;
+#[path = "rpc/lp_commands/lp_commands.rs"]
+pub mod lp_commands;
 #[path = "rpc/lp_commands/lp_commands_legacy.rs"]
 pub mod lp_commands_legacy;
-#[path = "rpc/rate_limiter.rs"] mod rate_limiter;
+#[path = "rpc/rate_limiter.rs"]
+mod rate_limiter;
 
 /// Lists the RPC method not requiring the "userpass" authentication.  
 /// None is also public to skip auth and display proper error in case of method is missing
@@ -104,7 +108,9 @@ impl HttpStatusCode for DispatcherError {
 }
 
 impl From<serde_json::Error> for DispatcherError {
-    fn from(e: serde_json::Error) -> Self { DispatcherError::InvalidRequest(e.to_string()) }
+    fn from(e: serde_json::Error) -> Self {
+        DispatcherError::InvalidRequest(e.to_string())
+    }
 }
 
 #[allow(unused_macros)]

@@ -16,11 +16,15 @@ pub enum GetPublicKeyError {
 }
 
 impl From<CryptoInitError> for GetPublicKeyError {
-    fn from(_: CryptoInitError) -> Self { GetPublicKeyError::Internal("public_key not available".to_string()) }
+    fn from(_: CryptoInitError) -> Self {
+        GetPublicKeyError::Internal("public_key not available".to_string())
+    }
 }
 
 impl From<CryptoCtxError> for GetPublicKeyError {
-    fn from(_: CryptoCtxError) -> Self { GetPublicKeyError::Internal("public_key not available".to_string()) }
+    fn from(_: CryptoCtxError) -> Self {
+        GetPublicKeyError::Internal("public_key not available".to_string())
+    }
 }
 
 #[derive(Serialize)]
@@ -37,7 +41,10 @@ impl HttpStatusCode for GetPublicKeyError {
 }
 
 pub async fn get_public_key(ctx: MmArc, _req: Json) -> GetPublicKeyRpcResult<GetPublicKeyResponse> {
-    let public_key = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?.mm2_internal_pubkey().to_string();
+    let public_key = CryptoCtx::from_ctx(&ctx)
+        .mm_err(Into::into)?
+        .mm2_internal_pubkey()
+        .to_string();
     Ok(GetPublicKeyResponse { public_key })
 }
 

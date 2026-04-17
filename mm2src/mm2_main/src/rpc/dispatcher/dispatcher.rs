@@ -1,27 +1,38 @@
 use super::{DispatcherError, DispatcherResult, PUBLIC_METHODS};
 use crate::mm2::lp_native_dex::init_hw::{init_trezor, init_trezor_status, init_trezor_user_action};
-use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simple_market_maker_bot,
-                                stop_simple_market_maker_bot};
+use crate::mm2::lp_ordermatch::{
+    best_orders_rpc_v2, orderbook_rpc_v2, start_simple_market_maker_bot, stop_simple_market_maker_bot,
+};
 use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
-use crate::{mm2::lp_stats::{add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,
-                            stop_version_stat_collection, update_version_stat_collection},
-            mm2::lp_swap::{recreate_swap_data, trade_preimage_rpc},
-            mm2::rpc::lp_commands::{get_public_key, get_public_key_hash}};
+use crate::{
+    mm2::lp_stats::{
+        add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,
+        stop_version_stat_collection, update_version_stat_collection,
+    },
+    mm2::lp_swap::{recreate_swap_data, trade_preimage_rpc},
+    mm2::rpc::lp_commands::{get_public_key, get_public_key_hash},
+};
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
 use coins::rpc_command::account_balance::account_balance;
-use coins::rpc_command::init_create_account::{init_create_new_account, init_create_new_account_status,
-                                              init_create_new_account_user_action};
-use coins::rpc_command::init_scan_for_new_addresses::{init_scan_for_new_addresses, init_scan_for_new_addresses_status};
+use coins::rpc_command::init_create_account::{
+    init_create_new_account, init_create_new_account_status, init_create_new_account_user_action,
+};
+use coins::rpc_command::init_scan_for_new_addresses::{
+    init_scan_for_new_addresses, init_scan_for_new_addresses_status,
+};
 use coins::rpc_command::init_withdraw::{init_withdraw, withdraw_status, withdraw_user_action};
 use coins::utxo::bch::BchCoin;
 use coins::utxo::qtum::QtumCoin;
 use coins::utxo::slp::SlpToken;
 use coins::utxo::utxo_standard::UtxoStandardCoin;
-use coins::{add_delegation, get_raw_transaction, get_staking_infos, remove_delegation, sign_message, verify_message,
-            withdraw};
-use coins_activation::{enable_l2, enable_platform_coin_with_tokens, enable_token, init_standalone_coin,
-                       init_standalone_coin_status, init_standalone_coin_user_action};
+use coins::{
+    add_delegation, get_raw_transaction, get_staking_infos, remove_delegation, sign_message, verify_message, withdraw,
+};
+use coins_activation::{
+    enable_l2, enable_platform_coin_with_tokens, enable_token, init_standalone_coin, init_standalone_coin_status,
+    init_standalone_coin_user_action,
+};
 use common::log::{error, warn};
 use common::HttpStatusCode;
 use futures::Future as Future03;

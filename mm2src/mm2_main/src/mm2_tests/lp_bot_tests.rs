@@ -1,5 +1,7 @@
-use crate::{mm2::lp_ordermatch::process_price_request, mm2::lp_ordermatch::start_simple_market_maker_bot,
-            mm2::lp_ordermatch::stop_simple_market_maker_bot, mm2::lp_ordermatch::StartSimpleMakerBotRequest};
+use crate::{
+    mm2::lp_ordermatch::process_price_request, mm2::lp_ordermatch::start_simple_market_maker_bot,
+    mm2::lp_ordermatch::stop_simple_market_maker_bot, mm2::lp_ordermatch::StartSimpleMakerBotRequest,
+};
 use common::block_on;
 use crypto::privkey::key_pair_from_seed;
 use http::StatusCode;
@@ -14,7 +16,9 @@ mod tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
-    fn test_process_price_request() { let _resp = block_on(process_price_request(KMD_PRICE_ENDPOINT)).unwrap(); }
+    fn test_process_price_request() {
+        let _resp = block_on(process_price_request(KMD_PRICE_ENDPOINT)).unwrap();
+    }
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
