@@ -3,20 +3,23 @@ use crate::coin_balance::HDAddressBalance;
 use crate::hd_wallet::HDAccountsMap;
 use crate::hd_wallet_storage::{HDWalletMockStorage, HDWalletStorageInternalOps};
 use crate::rpc_command::account_balance::{AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
-use crate::rpc_command::init_scan_for_new_addresses::{InitScanAddressesRpcOps, ScanAddressesParams,
-                                                      ScanAddressesResponse};
+use crate::rpc_command::init_scan_for_new_addresses::{
+    InitScanAddressesRpcOps, ScanAddressesParams, ScanAddressesResponse,
+};
 use crate::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin, QtumDelegationOps, QtumDelegationRequest};
-use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl,
-                               GetAddressInfoRes, ListSinceBlockRes, ListTransactionsItem, NativeClient,
-                               NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps, ValidateAddressRes,
-                               VerboseBlock};
+use crate::utxo::rpc_clients::{
+    BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl, GetAddressInfoRes, ListSinceBlockRes,
+    ListTransactionsItem, NativeClient, NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps,
+    ValidateAddressRes, VerboseBlock,
+};
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
 use crate::utxo::utxo_common::UtxoTxBuilder;
 use crate::utxo::utxo_common_tests;
 use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
-#[cfg(not(target_arch = "wasm32"))] use crate::WithdrawFee;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::WithdrawFee;
 use crate::{CoinBalance, PrivKeyBuildPolicy, StakingInfosDetails, SwapOps, TradePreimageValue, TxFeeDetails};
 use bigdecimal::{BigDecimal, Signed};
 use chain::OutPoint;
@@ -73,7 +76,9 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
 
 /// Returned client won't work by default, requires some mocks to be usable
 #[cfg(not(target_arch = "wasm32"))]
-fn native_client_for_test() -> NativeClient { NativeClient(Arc::new(NativeClientImpl::default())) }
+fn native_client_for_test() -> NativeClient {
+    NativeClient(Arc::new(NativeClientImpl::default()))
+}
 
 fn utxo_coin_fields_for_test(
     rpc_client: UtxoRpcClientEnum,
@@ -3335,12 +3340,15 @@ fn test_account_balance_rpc() {
     macro_rules! known_address {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:literal) => {
             addresses_map.insert($address.to_string(), $balance);
-            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
-                address: $address.to_string(),
-                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                chain: $chain,
-                balance: CoinBalance::new(BigDecimal::from($balance)),
-            })
+            balances_by_der_path.insert(
+                $der_path.to_string(),
+                HDAddressBalance {
+                    address: $address.to_string(),
+                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                    chain: $chain,
+                    balance: CoinBalance::new(BigDecimal::from($balance)),
+                },
+            )
         };
     }
 
@@ -3353,21 +3361,76 @@ fn test_account_balance_rpc() {
     // rustfmt::skip - formatting intentional
     {
         // Account#0, external addresses.
-        known_address!("m/44'/141'/0'/0/0", "RRqF4cYniMwYs66S4QDUUZ4GJQFQF69rBE", Bip44Chain::External, balance = 0);
-        known_address!("m/44'/141'/0'/0/1", "RSVLsjXc9LJ8fm9Jq7gXjeubfja3bbgSDf", Bip44Chain::External, balance = 0);
-        known_address!("m/44'/141'/0'/0/2", "RSSZjtgfnLzvqF4cZQJJEpN5gvK3pWmd3h", Bip44Chain::External, balance = 0);
-        known_address!("m/44'/141'/0'/0/3", "RU1gRFXWXNx7uPRAEJ7wdZAW1RZ4TE6Vv1", Bip44Chain::External, balance = 98);
-        known_address!("m/44'/141'/0'/0/4", "RUkEvRzb7mtwfVeKiSFEbYupLkcvU5KJBw", Bip44Chain::External, balance = 1);
-        known_address!("m/44'/141'/0'/0/5", "RP8deqVfjBbkvxbGbsQ2EGdamMaP1wxizR", Bip44Chain::External, balance = 0);
-        known_address!("m/44'/141'/0'/0/6", "RSvKMMegKGP5e2EanH7fnD4yNsxdJvLAmL", Bip44Chain::External, balance = 32);
+        known_address!(
+            "m/44'/141'/0'/0/0",
+            "RRqF4cYniMwYs66S4QDUUZ4GJQFQF69rBE",
+            Bip44Chain::External,
+            balance = 0
+        );
+        known_address!(
+            "m/44'/141'/0'/0/1",
+            "RSVLsjXc9LJ8fm9Jq7gXjeubfja3bbgSDf",
+            Bip44Chain::External,
+            balance = 0
+        );
+        known_address!(
+            "m/44'/141'/0'/0/2",
+            "RSSZjtgfnLzvqF4cZQJJEpN5gvK3pWmd3h",
+            Bip44Chain::External,
+            balance = 0
+        );
+        known_address!(
+            "m/44'/141'/0'/0/3",
+            "RU1gRFXWXNx7uPRAEJ7wdZAW1RZ4TE6Vv1",
+            Bip44Chain::External,
+            balance = 98
+        );
+        known_address!(
+            "m/44'/141'/0'/0/4",
+            "RUkEvRzb7mtwfVeKiSFEbYupLkcvU5KJBw",
+            Bip44Chain::External,
+            balance = 1
+        );
+        known_address!(
+            "m/44'/141'/0'/0/5",
+            "RP8deqVfjBbkvxbGbsQ2EGdamMaP1wxizR",
+            Bip44Chain::External,
+            balance = 0
+        );
+        known_address!(
+            "m/44'/141'/0'/0/6",
+            "RSvKMMegKGP5e2EanH7fnD4yNsxdJvLAmL",
+            Bip44Chain::External,
+            balance = 32
+        );
 
         // Account#0, internal addresses.
-        known_address!("m/44'/141'/0'/1/0", "RLZxcZSYtKe74JZd1hBAmmD9PNHZqb72oL", Bip44Chain::Internal, balance = 13);
-        known_address!("m/44'/141'/0'/1/1", "RPj9JXUVnewWwVpxZDeqGB25qVqz5qJzwP", Bip44Chain::Internal, balance = 44);
-        known_address!("m/44'/141'/0'/1/2", "RSYdSLRYWuzBson2GDbWBa632q2PmFnCaH", Bip44Chain::Internal, balance = 10);
+        known_address!(
+            "m/44'/141'/0'/1/0",
+            "RLZxcZSYtKe74JZd1hBAmmD9PNHZqb72oL",
+            Bip44Chain::Internal,
+            balance = 13
+        );
+        known_address!(
+            "m/44'/141'/0'/1/1",
+            "RPj9JXUVnewWwVpxZDeqGB25qVqz5qJzwP",
+            Bip44Chain::Internal,
+            balance = 44
+        );
+        known_address!(
+            "m/44'/141'/0'/1/2",
+            "RSYdSLRYWuzBson2GDbWBa632q2PmFnCaH",
+            Bip44Chain::Internal,
+            balance = 10
+        );
 
         // Account#1, internal addresses.
-        known_address!("m/44'/141'/1'/1/0", "RGo7sYzivPtzv8aRQ4A6vRJDxoqkRRBRhZ", Bip44Chain::Internal, balance = 0);
+        known_address!(
+            "m/44'/141'/1'/1/0",
+            "RGo7sYzivPtzv8aRQ4A6vRJDxoqkRRBRhZ",
+            Bip44Chain::Internal,
+            balance = 0
+        );
     }
 
     NativeClient::display_balances.mock_safe(move |_, addresses: Vec<Address>, _| {
@@ -3617,12 +3680,15 @@ fn test_scan_for_new_addresses() {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:expr) => {{
             let balance = $balance;
             checking_addresses.insert($address.to_string(), balance);
-            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
-                address: $address.to_string(),
-                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                chain: $chain,
-                balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
-            });
+            balances_by_der_path.insert(
+                $der_path.to_string(),
+                HDAddressBalance {
+                    address: $address.to_string(),
+                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                    chain: $chain,
+                    balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
+                },
+            );
             if balance.is_some() {
                 non_empty_addresses.push($address.to_string());
             }
@@ -3644,25 +3710,70 @@ fn test_scan_for_new_addresses() {
     // rustfmt::skip - formatting intentional
     {
         // Account#0, external addresses.
-        new_address!("m/44'/141'/0'/0/3", "RU1gRFXWXNx7uPRAEJ7wdZAW1RZ4TE6Vv1", Bip44Chain::External, balance = Some(98));
+        new_address!(
+            "m/44'/141'/0'/0/3",
+            "RU1gRFXWXNx7uPRAEJ7wdZAW1RZ4TE6Vv1",
+            Bip44Chain::External,
+            balance = Some(98)
+        );
         unused_address!("m/44'/141'/0'/0/4", "RUkEvRzb7mtwfVeKiSFEbYupLkcvU5KJBw");
         unused_address!("m/44'/141'/0'/0/5", "RP8deqVfjBbkvxbGbsQ2EGdamMaP1wxizR");
         unused_address!("m/44'/141'/0'/0/6", "RSvKMMegKGP5e2EanH7fnD4yNsxdJvLAmL"); // Stop searching for a non-empty address (gap_limit = 3).
 
         // Account#0, internal addresses.
-        new_address!("m/44'/141'/0'/1/1", "RPj9JXUVnewWwVpxZDeqGB25qVqz5qJzwP", Bip44Chain::Internal, balance = Some(98));
-        new_address!("m/44'/141'/0'/1/2", "RSYdSLRYWuzBson2GDbWBa632q2PmFnCaH", Bip44Chain::Internal, balance = None);
-        new_address!("m/44'/141'/0'/1/3", "RQstQeTUEZLh6c3YWJDkeVTTQoZUsfvNCr", Bip44Chain::Internal, balance = Some(14));
+        new_address!(
+            "m/44'/141'/0'/1/1",
+            "RPj9JXUVnewWwVpxZDeqGB25qVqz5qJzwP",
+            Bip44Chain::Internal,
+            balance = Some(98)
+        );
+        new_address!(
+            "m/44'/141'/0'/1/2",
+            "RSYdSLRYWuzBson2GDbWBa632q2PmFnCaH",
+            Bip44Chain::Internal,
+            balance = None
+        );
+        new_address!(
+            "m/44'/141'/0'/1/3",
+            "RQstQeTUEZLh6c3YWJDkeVTTQoZUsfvNCr",
+            Bip44Chain::Internal,
+            balance = Some(14)
+        );
         unused_address!("m/44'/141'/0'/1/4", "RT54m6pfj9scqwSLmYdfbmPcrpxnWGAe9J");
         unused_address!("m/44'/141'/0'/1/5", "RYWfEFxqA6zya9c891Dj7vxiDojCmuWR9T");
         unused_address!("m/44'/141'/0'/1/6", "RSkY6twW8knTcn6wGACUAG9crJHcuQ2kEH"); // Stop searching for a non-empty address (gap_limit = 3).
 
         // Account#1, external addresses.
-        new_address!("m/44'/141'/1'/0/0", "RBQFLwJ88gVcnfkYvJETeTAB6AAYLow12K", Bip44Chain::External, balance = Some(9));
-        new_address!("m/44'/141'/1'/0/1", "RCyy77sRWFa2oiFPpyimeTQfenM1aRoiZs", Bip44Chain::External, balance = Some(7));
-        new_address!("m/44'/141'/1'/0/2", "RDnNa3pQmisfi42KiTZrfYfuxkLC91PoTJ", Bip44Chain::External, balance = None);
-        new_address!("m/44'/141'/1'/0/3", "RQRGgXcGJz93CoAfQJoLgBz2r9HtJYMX3Z", Bip44Chain::External, balance = None);
-        new_address!("m/44'/141'/1'/0/4", "RM6cqSFCFZ4J1LngLzqKkwo2ouipbDZUbm", Bip44Chain::External, balance = Some(11));
+        new_address!(
+            "m/44'/141'/1'/0/0",
+            "RBQFLwJ88gVcnfkYvJETeTAB6AAYLow12K",
+            Bip44Chain::External,
+            balance = Some(9)
+        );
+        new_address!(
+            "m/44'/141'/1'/0/1",
+            "RCyy77sRWFa2oiFPpyimeTQfenM1aRoiZs",
+            Bip44Chain::External,
+            balance = Some(7)
+        );
+        new_address!(
+            "m/44'/141'/1'/0/2",
+            "RDnNa3pQmisfi42KiTZrfYfuxkLC91PoTJ",
+            Bip44Chain::External,
+            balance = None
+        );
+        new_address!(
+            "m/44'/141'/1'/0/3",
+            "RQRGgXcGJz93CoAfQJoLgBz2r9HtJYMX3Z",
+            Bip44Chain::External,
+            balance = None
+        );
+        new_address!(
+            "m/44'/141'/1'/0/4",
+            "RM6cqSFCFZ4J1LngLzqKkwo2ouipbDZUbm",
+            Bip44Chain::External,
+            balance = Some(11)
+        );
         unused_address!("m/44'/141'/1'/0/5", "RX2fGBZjNZMNdNcnc5QBRXvmsXTvadvTPN");
         unused_address!("m/44'/141'/1'/0/6", "RJJ7muUETyp59vxVXna9KAZ9uQ1QSqmcjE");
         unused_address!("m/44'/141'/1'/0/7", "RYJ6vbhxFre5yChCMiJJFNTTBhAQbKM9AY"); // Stop searching for a non-empty address (gap_limit = 3).
@@ -3670,7 +3781,8 @@ fn test_scan_for_new_addresses() {
         // Account#1, internal addresses.
         unused_address!("m/44'/141'/1'/0/2", "RCjRDibDAXKYpVYSUeJXrbTzZ1UEKYAwJa");
         unused_address!("m/44'/141'/1'/0/3", "REs1NRzg8XjwN3v8Jp1wQUAyQb3TzeT8EB");
-        unused_address!("m/44'/141'/1'/0/4", "RS4UZtkwZ8eYaTL1xodXgFNryJoTbPJYE5"); // Stop searching for a non-empty address (gap_limit = 3).
+        unused_address!("m/44'/141'/1'/0/4", "RS4UZtkwZ8eYaTL1xodXgFNryJoTbPJYE5");
+        // Stop searching for a non-empty address (gap_limit = 3).
     }
 
     NativeClient::display_balance.mock_safe(move |_, address: Address, _| {

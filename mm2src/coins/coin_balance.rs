@@ -1,7 +1,8 @@
 use crate::hd_pubkey::HDXPubExtractor;
 use crate::hd_wallet::{HDWalletCoinOps, NewAccountCreatingError};
-use crate::{BalanceError, BalanceResult, CoinBalance, CoinWithDerivationMethod, DerivationMethod, HDAddress,
-            MarketCoinOps};
+use crate::{
+    BalanceError, BalanceResult, CoinBalance, CoinWithDerivationMethod, DerivationMethod, HDAddress, MarketCoinOps,
+};
 use async_trait::async_trait;
 use common::custom_iter::TryUnzip;
 use common::log::{debug, info};
@@ -21,11 +22,15 @@ pub enum EnableCoinBalanceError {
 }
 
 impl From<NewAccountCreatingError> for EnableCoinBalanceError {
-    fn from(e: NewAccountCreatingError) -> Self { EnableCoinBalanceError::NewAccountCreatingError(e) }
+    fn from(e: NewAccountCreatingError) -> Self {
+        EnableCoinBalanceError::NewAccountCreatingError(e)
+    }
 }
 
 impl From<BalanceError> for EnableCoinBalanceError {
-    fn from(e: BalanceError) -> Self { EnableCoinBalanceError::BalanceError(e) }
+    fn from(e: BalanceError) -> Self {
+        EnableCoinBalanceError::BalanceError(e)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -75,7 +80,9 @@ pub enum EnableCoinScanPolicy {
 }
 
 impl Default for EnableCoinScanPolicy {
-    fn default() -> Self { EnableCoinScanPolicy::ScanIfNewWallet }
+    fn default() -> Self {
+        EnableCoinScanPolicy::ScanIfNewWallet
+    }
 }
 
 #[async_trait]
@@ -258,7 +265,8 @@ pub mod common_impl {
         if scan_new_addresses {
             addresses.extend(
                 coin.scan_for_new_addresses(hd_wallet, hd_account, address_scanner, gap_limit)
-                    .await.mm_err(Into::into)?,
+                    .await
+                    .mm_err(Into::into)?,
             );
         }
 
@@ -301,7 +309,10 @@ pub mod common_impl {
             );
 
             // Create new HD account.
-            let mut new_account = coin.create_new_account(hd_wallet, xpub_extractor).await.mm_err(Into::into)?;
+            let mut new_account = coin
+                .create_new_account(hd_wallet, xpub_extractor)
+                .await
+                .mm_err(Into::into)?;
             let scan_new_addresses = matches!(
                 scan_policy,
                 EnableCoinScanPolicy::ScanIfNewWallet | EnableCoinScanPolicy::Scan

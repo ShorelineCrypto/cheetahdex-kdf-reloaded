@@ -19,13 +19,20 @@
 
 #![allow(uncommon_codepoints)]
 
-#[macro_use] extern crate common;
-#[macro_use] extern crate fomat_macros;
-#[macro_use] extern crate gstuff;
-#[macro_use] extern crate lazy_static;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate serde_json;
-#[macro_use] extern crate ser_error_derive;
+#[macro_use]
+extern crate common;
+#[macro_use]
+extern crate fomat_macros;
+#[macro_use]
+extern crate gstuff;
+#[macro_use]
+extern crate lazy_static;
+#[macro_use]
+extern crate serde_derive;
+#[macro_use]
+extern crate serde_json;
+#[macro_use]
+extern crate ser_error_derive;
 
 use async_trait::async_trait;
 use base58::FromBase58Error;
@@ -212,7 +219,8 @@ pub mod eth;
 pub mod hd_pubkey;
 pub mod hd_wallet;
 pub mod hd_wallet_storage;
-#[cfg(not(target_arch = "wasm32"))] pub mod lightning;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod lightning;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
 pub mod my_tx_history_v2;
 pub mod qrc20;
@@ -233,9 +241,11 @@ pub use solana::spl::SplToken;
 #[cfg(not(target_arch = "wasm32"))]
 pub use solana::{solana_coin_from_conf_and_params, SolanaActivationParams, SolanaCoin, SolanaFeeDetails};
 
-#[cfg(target_arch = "wasm32")] pub mod tx_history_db;
+#[cfg(target_arch = "wasm32")]
+pub mod tx_history_db;
 pub mod utxo;
-#[cfg(not(target_arch = "wasm32"))] pub mod z_coin;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod z_coin;
 
 use eth::{eth_coin_from_conf_and_request, EthCoin, EthTxFeeDetails, SignedEthTx};
 use hd_wallet::{HDAddress, HDAddressId};
@@ -255,7 +265,8 @@ use utxo::utxo_common::big_decimal_from_sat_unsigned;
 use utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
 use utxo::UtxoActivationParams;
 use utxo::{BlockchainNetwork, GenerateTxError, UtxoFeeDetails, UtxoTx};
-#[cfg(not(target_arch = "wasm32"))] use z_coin::ZCoin;
+#[cfg(not(target_arch = "wasm32"))]
+use z_coin::ZCoin;
 
 pub type BalanceResult<T> = Result<T, MmError<BalanceError>>;
 pub type BalanceFut<T> = Box<dyn Future<Item = T, Error = MmError<BalanceError>> + Send>;
@@ -655,7 +666,9 @@ pub trait MarketCoinOps {
     /// Get the minimum amount to trade.
     fn min_trading_vol(&self) -> MmNumber;
 
-    fn is_privacy(&self) -> bool { false }
+    fn is_privacy(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -808,7 +821,9 @@ pub enum StakingInfosDetails {
 }
 
 impl From<QtumStakingInfosDetails> for StakingInfosDetails {
-    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self { StakingInfosDetails::Qtum(qtum_staking_infos) }
+    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self {
+        StakingInfosDetails::Qtum(qtum_staking_infos)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -866,20 +881,28 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
 }
 
 impl From<EthTxFeeDetails> for TxFeeDetails {
-    fn from(eth_details: EthTxFeeDetails) -> Self { TxFeeDetails::Eth(eth_details) }
+    fn from(eth_details: EthTxFeeDetails) -> Self {
+        TxFeeDetails::Eth(eth_details)
+    }
 }
 
 impl From<UtxoFeeDetails> for TxFeeDetails {
-    fn from(utxo_details: UtxoFeeDetails) -> Self { TxFeeDetails::Utxo(utxo_details) }
+    fn from(utxo_details: UtxoFeeDetails) -> Self {
+        TxFeeDetails::Utxo(utxo_details)
+    }
 }
 
 impl From<Qrc20FeeDetails> for TxFeeDetails {
-    fn from(qrc20_details: Qrc20FeeDetails) -> Self { TxFeeDetails::Qrc20(qrc20_details) }
+    fn from(qrc20_details: Qrc20FeeDetails) -> Self {
+        TxFeeDetails::Qrc20(qrc20_details)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaFeeDetails> for TxFeeDetails {
-    fn from(solana_details: SolanaFeeDetails) -> Self { TxFeeDetails::Solana(solana_details) }
+    fn from(solana_details: SolanaFeeDetails) -> Self {
+        TxFeeDetails::Solana(solana_details)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -906,7 +929,9 @@ pub enum TransactionType {
 }
 
 impl Default for TransactionType {
-    fn default() -> Self { TransactionType::StandardTransfer }
+    fn default() -> Self {
+        TransactionType::StandardTransfer
+    }
 }
 
 /// Transaction details
@@ -969,7 +994,9 @@ impl TransactionDetails {
         self.timestamp == 0
     }
 
-    pub fn should_update_kmd_rewards(&self) -> bool { self.coin == "KMD" && self.kmd_rewards.is_none() }
+    pub fn should_update_kmd_rewards(&self) -> bool {
+        self.coin == "KMD" && self.kmd_rewards.is_none()
+    }
 
     pub fn firo_negative_fee(&self) -> bool {
         match &self.fee_details {
@@ -1007,9 +1034,13 @@ impl CoinBalance {
         }
     }
 
-    pub fn into_total(self) -> BigDecimal { self.spendable + self.unspendable }
+    pub fn into_total(self) -> BigDecimal {
+        self.spendable + self.unspendable
+    }
 
-    pub fn get_total(&self) -> BigDecimal { &self.spendable + &self.unspendable }
+    pub fn get_total(&self) -> BigDecimal {
+        &self.spendable + &self.unspendable
+    }
 }
 
 impl Add for CoinBalance {
@@ -1064,11 +1095,15 @@ pub enum TradePreimageError {
 }
 
 impl From<NumConversError> for TradePreimageError {
-    fn from(e: NumConversError) -> Self { TradePreimageError::InternalError(e.to_string()) }
+    fn from(e: NumConversError) -> Self {
+        TradePreimageError::InternalError(e.to_string())
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for TradePreimageError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { TradePreimageError::InternalError(e.to_string()) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        TradePreimageError::InternalError(e.to_string())
+    }
 }
 
 impl TradePreimageError {
@@ -1143,13 +1178,19 @@ impl TradePreimageError {
 pub struct NumConversError(String);
 
 impl From<ParseBigDecimalError> for NumConversError {
-    fn from(e: ParseBigDecimalError) -> Self { NumConversError::new(e.to_string()) }
+    fn from(e: ParseBigDecimalError) -> Self {
+        NumConversError::new(e.to_string())
+    }
 }
 
 impl NumConversError {
-    pub fn new(description: String) -> NumConversError { NumConversError(description) }
+    pub fn new(description: String) -> NumConversError {
+        NumConversError(description)
+    }
 
-    pub fn description(&self) -> &str { &self.0 }
+    pub fn description(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Debug, Display, PartialEq)]
@@ -1174,19 +1215,27 @@ pub enum GetNonZeroBalance {
 }
 
 impl From<BalanceError> for GetNonZeroBalance {
-    fn from(e: BalanceError) -> Self { GetNonZeroBalance::MyBalanceError(e) }
+    fn from(e: BalanceError) -> Self {
+        GetNonZeroBalance::MyBalanceError(e)
+    }
 }
 
 impl From<NumConversError> for BalanceError {
-    fn from(e: NumConversError) -> Self { BalanceError::Internal(e.to_string()) }
+    fn from(e: NumConversError) -> Self {
+        BalanceError::Internal(e.to_string())
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for BalanceError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { BalanceError::UnexpectedDerivationMethod(e) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        BalanceError::UnexpectedDerivationMethod(e)
+    }
 }
 
 impl From<Bip32Error> for BalanceError {
-    fn from(e: Bip32Error) -> Self { BalanceError::Internal(e.to_string()) }
+    fn from(e: Bip32Error) -> Self {
+        BalanceError::Internal(e.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -1217,7 +1266,9 @@ impl From<UtxoRpcError> for StakingInfosError {
 }
 
 impl From<UnexpectedDerivationMethod> for StakingInfosError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { StakingInfosError::UnexpectedDerivationMethod(e.to_string()) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        StakingInfosError::UnexpectedDerivationMethod(e.to_string())
+    }
 }
 
 impl From<Qrc20AddressError> for StakingInfosError {
@@ -1341,7 +1392,9 @@ impl From<UtxoSignWithKeyPairError> for DelegationError {
 }
 
 impl From<PrivKeyNotAllowed> for DelegationError {
-    fn from(e: PrivKeyNotAllowed) -> Self { DelegationError::DelegationOpsNotSupported { reason: e.to_string() } }
+    fn from(e: PrivKeyNotAllowed) -> Self {
+        DelegationError::DelegationOpsNotSupported { reason: e.to_string() }
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for DelegationError {
@@ -1351,7 +1404,9 @@ impl From<UnexpectedDerivationMethod> for DelegationError {
 }
 
 impl From<ScriptHashTypeNotSupported> for DelegationError {
-    fn from(e: ScriptHashTypeNotSupported) -> Self { DelegationError::AddressError(e.to_string()) }
+    fn from(e: ScriptHashTypeNotSupported) -> Self {
+        DelegationError::AddressError(e.to_string())
+    }
 }
 
 impl HttpStatusCode for DelegationError {
@@ -1491,7 +1546,9 @@ impl HttpStatusCode for WithdrawError {
 }
 
 impl From<NumConversError> for WithdrawError {
-    fn from(e: NumConversError) -> Self { WithdrawError::InternalError(e.to_string()) }
+    fn from(e: NumConversError) -> Self {
+        WithdrawError::InternalError(e.to_string())
+    }
 }
 
 impl From<BalanceError> for WithdrawError {
@@ -1521,11 +1578,15 @@ impl From<UtxoSignWithKeyPairError> for WithdrawError {
 }
 
 impl From<UnexpectedDerivationMethod> for WithdrawError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { WithdrawError::InternalError(e.to_string()) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        WithdrawError::InternalError(e.to_string())
+    }
 }
 
 impl From<PrivKeyNotAllowed> for WithdrawError {
-    fn from(e: PrivKeyNotAllowed) -> Self { WithdrawError::InternalError(e.to_string()) }
+    fn from(e: PrivKeyNotAllowed) -> Self {
+        WithdrawError::InternalError(e.to_string())
+    }
 }
 
 impl WithdrawError {
@@ -1597,19 +1658,27 @@ impl HttpStatusCode for SignatureError {
 }
 
 impl From<keys::Error> for SignatureError {
-    fn from(e: keys::Error) -> Self { SignatureError::InternalError(e.to_string()) }
+    fn from(e: keys::Error) -> Self {
+        SignatureError::InternalError(e.to_string())
+    }
 }
 
 impl From<ethkey::Error> for SignatureError {
-    fn from(e: ethkey::Error) -> Self { SignatureError::InternalError(e.to_string()) }
+    fn from(e: ethkey::Error) -> Self {
+        SignatureError::InternalError(e.to_string())
+    }
 }
 
 impl From<PrivKeyNotAllowed> for SignatureError {
-    fn from(e: PrivKeyNotAllowed) -> Self { SignatureError::InternalError(e.to_string()) }
+    fn from(e: PrivKeyNotAllowed) -> Self {
+        SignatureError::InternalError(e.to_string())
+    }
 }
 
 impl From<CoinFindError> for SignatureError {
-    fn from(e: CoinFindError) -> Self { SignatureError::CoinIsNotFound(e.to_string()) }
+    fn from(e: CoinFindError) -> Self {
+        SignatureError::CoinIsNotFound(e.to_string())
+    }
 }
 
 #[derive(Serialize, Display, Debug, SerializeErrorType)]
@@ -1643,11 +1712,15 @@ impl HttpStatusCode for VerificationError {
 }
 
 impl From<base64::DecodeError> for VerificationError {
-    fn from(e: base64::DecodeError) -> Self { VerificationError::SignatureDecodingError(e.to_string()) }
+    fn from(e: base64::DecodeError) -> Self {
+        VerificationError::SignatureDecodingError(e.to_string())
+    }
 }
 
 impl From<hex::FromHexError> for VerificationError {
-    fn from(e: hex::FromHexError) -> Self { VerificationError::AddressDecodingError(e.to_string()) }
+    fn from(e: hex::FromHexError) -> Self {
+        VerificationError::AddressDecodingError(e.to_string())
+    }
 }
 
 impl From<FromBase58Error> for VerificationError {
@@ -1664,15 +1737,21 @@ impl From<FromBase58Error> for VerificationError {
 }
 
 impl From<keys::Error> for VerificationError {
-    fn from(e: keys::Error) -> Self { VerificationError::InternalError(e.to_string()) }
+    fn from(e: keys::Error) -> Self {
+        VerificationError::InternalError(e.to_string())
+    }
 }
 
 impl From<ethkey::Error> for VerificationError {
-    fn from(e: ethkey::Error) -> Self { VerificationError::InternalError(e.to_string()) }
+    fn from(e: ethkey::Error) -> Self {
+        VerificationError::InternalError(e.to_string())
+    }
 }
 
 impl From<CoinFindError> for VerificationError {
-    fn from(e: CoinFindError) -> Self { VerificationError::CoinIsNotFound(e.to_string()) }
+    fn from(e: CoinFindError) -> Self {
+        VerificationError::CoinIsNotFound(e.to_string())
+    }
 }
 
 /// NB: Implementations are expected to follow the pImpl idiom, providing cheap reference-counted cloning and garbage collection.
@@ -1797,51 +1876,73 @@ pub enum MmCoinEnum {
 }
 
 impl From<UtxoStandardCoin> for MmCoinEnum {
-    fn from(c: UtxoStandardCoin) -> MmCoinEnum { MmCoinEnum::UtxoCoin(c) }
+    fn from(c: UtxoStandardCoin) -> MmCoinEnum {
+        MmCoinEnum::UtxoCoin(c)
+    }
 }
 
 impl From<EthCoin> for MmCoinEnum {
-    fn from(c: EthCoin) -> MmCoinEnum { MmCoinEnum::EthCoin(c) }
+    fn from(c: EthCoin) -> MmCoinEnum {
+        MmCoinEnum::EthCoin(c)
+    }
 }
 
 impl From<TestCoin> for MmCoinEnum {
-    fn from(c: TestCoin) -> MmCoinEnum { MmCoinEnum::Test(c) }
+    fn from(c: TestCoin) -> MmCoinEnum {
+        MmCoinEnum::Test(c)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaCoin> for MmCoinEnum {
-    fn from(c: SolanaCoin) -> MmCoinEnum { MmCoinEnum::SolanaCoin(c) }
+    fn from(c: SolanaCoin) -> MmCoinEnum {
+        MmCoinEnum::SolanaCoin(c)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SplToken> for MmCoinEnum {
-    fn from(c: SplToken) -> MmCoinEnum { MmCoinEnum::SplToken(c) }
+    fn from(c: SplToken) -> MmCoinEnum {
+        MmCoinEnum::SplToken(c)
+    }
 }
 
 impl From<QtumCoin> for MmCoinEnum {
-    fn from(coin: QtumCoin) -> Self { MmCoinEnum::QtumCoin(coin) }
+    fn from(coin: QtumCoin) -> Self {
+        MmCoinEnum::QtumCoin(coin)
+    }
 }
 
 impl From<Qrc20Coin> for MmCoinEnum {
-    fn from(c: Qrc20Coin) -> MmCoinEnum { MmCoinEnum::Qrc20Coin(c) }
+    fn from(c: Qrc20Coin) -> MmCoinEnum {
+        MmCoinEnum::Qrc20Coin(c)
+    }
 }
 
 impl From<BchCoin> for MmCoinEnum {
-    fn from(c: BchCoin) -> MmCoinEnum { MmCoinEnum::Bch(c) }
+    fn from(c: BchCoin) -> MmCoinEnum {
+        MmCoinEnum::Bch(c)
+    }
 }
 
 impl From<SlpToken> for MmCoinEnum {
-    fn from(c: SlpToken) -> MmCoinEnum { MmCoinEnum::SlpToken(c) }
+    fn from(c: SlpToken) -> MmCoinEnum {
+        MmCoinEnum::SlpToken(c)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<LightningCoin> for MmCoinEnum {
-    fn from(c: LightningCoin) -> MmCoinEnum { MmCoinEnum::LightningCoin(c) }
+    fn from(c: LightningCoin) -> MmCoinEnum {
+        MmCoinEnum::LightningCoin(c)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<ZCoin> for MmCoinEnum {
-    fn from(c: ZCoin) -> MmCoinEnum { MmCoinEnum::ZCoin(c) }
+    fn from(c: ZCoin) -> MmCoinEnum {
+        MmCoinEnum::ZCoin(c)
+    }
 }
 
 // NB: When stable and groked by IDEs, `enum_dispatch` can be used instead of `Deref` to speed things up.
@@ -1979,11 +2080,15 @@ pub enum PrivKeyActivationPolicy {
 impl PrivKeyActivationPolicy {
     /// The function can be used as a default deserialization constructor:
     /// `#[serde(default = "PrivKeyActivationPolicy::iguana_priv_key")]`
-    pub fn iguana_priv_key() -> PrivKeyActivationPolicy { PrivKeyActivationPolicy::IguanaPrivKey }
+    pub fn iguana_priv_key() -> PrivKeyActivationPolicy {
+        PrivKeyActivationPolicy::IguanaPrivKey
+    }
 
     /// The function can be used as a default deserialization constructor:
     /// `#[serde(default = "PrivKeyActivationPolicy::trezor")]`
-    pub fn trezor() -> PrivKeyActivationPolicy { PrivKeyActivationPolicy::Trezor }
+    pub fn trezor() -> PrivKeyActivationPolicy {
+        PrivKeyActivationPolicy::Trezor
+    }
 }
 
 #[derive(Debug)]
@@ -2052,7 +2157,9 @@ impl<Address, HDWallet> DerivationMethod<Address, HDWallet> {
     /// # Panic
     ///
     /// Panic if the address mode is [`DerivationMethod::HDWallet`].
-    pub fn unwrap_iguana(&self) -> &Address { self.iguana_or_err().unwrap() }
+    pub fn unwrap_iguana(&self) -> &Address {
+        self.iguana_or_err().unwrap()
+    }
 }
 
 #[async_trait]
@@ -2123,17 +2230,27 @@ pub trait RpcTransportEventHandler {
 }
 
 impl fmt::Debug for dyn RpcTransportEventHandler + Send + Sync {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.debug_info()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.debug_info())
+    }
 }
 
 impl RpcTransportEventHandler for RpcTransportEventHandlerShared {
-    fn debug_info(&self) -> String { self.deref().debug_info() }
+    fn debug_info(&self) -> String {
+        self.deref().debug_info()
+    }
 
-    fn on_outgoing_request(&self, data: &[u8]) { self.as_ref().on_outgoing_request(data) }
+    fn on_outgoing_request(&self, data: &[u8]) {
+        self.as_ref().on_outgoing_request(data)
+    }
 
-    fn on_incoming_response(&self, data: &[u8]) { self.as_ref().on_incoming_response(data) }
+    fn on_incoming_response(&self, data: &[u8]) {
+        self.as_ref().on_incoming_response(data)
+    }
 
-    fn on_connected(&self, address: String) -> Result<(), String> { self.as_ref().on_connected(address) }
+    fn on_connected(&self, address: String) -> Result<(), String> {
+        self.as_ref().on_connected(address)
+    }
 }
 
 impl<T: RpcTransportEventHandler> RpcTransportEventHandler for Vec<T> {
@@ -2197,11 +2314,15 @@ impl CoinTransportMetrics {
         }
     }
 
-    fn into_shared(self) -> RpcTransportEventHandlerShared { Arc::new(self) }
+    fn into_shared(self) -> RpcTransportEventHandlerShared {
+        Arc::new(self)
+    }
 }
 
 impl RpcTransportEventHandler for CoinTransportMetrics {
-    fn debug_info(&self) -> String { "CoinTransportMetrics".into() }
+    fn debug_info(&self) -> String {
+        "CoinTransportMetrics".into()
+    }
 
     fn on_outgoing_request(&self, data: &[u8]) {
         mm_counter!(self.metrics, "rpc_client.traffic.out", data.len() as u64,
@@ -2244,7 +2365,9 @@ pub fn coin_conf(ctx: &MmArc, ticker: &str) -> Json {
     }
 }
 
-pub fn is_wallet_only_conf(conf: &Json) -> bool { conf["wallet_only"].as_bool().unwrap_or(false) }
+pub fn is_wallet_only_conf(conf: &Json) -> bool {
+    conf["wallet_only"].as_bool().unwrap_or(false)
+}
 
 pub fn is_wallet_only_ticker(ctx: &MmArc, ticker: &str) -> bool {
     let coin_conf = coin_conf(ctx, ticker);
@@ -2284,9 +2407,7 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
             "assuming that coin is not supported"
         ));
     }
-    let secret = try_s!(CryptoCtx::from_ctx(ctx))
-        .mm2_internal_privkey_slice()
-        .to_vec();
+    let secret = try_s!(CryptoCtx::from_ctx(ctx)).mm2_internal_privkey_slice().to_vec();
 
     if coins_en["protocol"].is_null() {
         return ERR!(

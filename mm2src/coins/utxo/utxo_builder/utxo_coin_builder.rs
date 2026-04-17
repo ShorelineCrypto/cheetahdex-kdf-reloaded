@@ -1,28 +1,35 @@
 use crate::hd_wallet::{HDAccountsMap, HDAccountsMutex};
 use crate::hd_wallet_storage::{HDWalletCoinStorage, HDWalletStorageError};
-use crate::utxo::rpc_clients::{ElectrumClient, ElectrumClientImpl, ElectrumRpcRequest, EstimateFeeMethod,
-                               UtxoRpcClientEnum};
+use crate::utxo::rpc_clients::{
+    ElectrumClient, ElectrumClientImpl, ElectrumRpcRequest, EstimateFeeMethod, UtxoRpcClientEnum,
+};
 use crate::utxo::tx_cache::{UtxoVerboseCacheOps, UtxoVerboseCacheShared};
 use crate::utxo::utxo_block_header_storage::{BlockHeaderStorage, InitBlockHeaderStorageOps};
 use crate::utxo::utxo_builder::utxo_conf_builder::{UtxoConfBuilder, UtxoConfError, UtxoConfResult};
-use crate::utxo::{output_script, utxo_common, ElectrumBuilderArgs, ElectrumProtoVerifier, RecentlySpentOutPoints,
-                  TxFee, UtxoCoinConf, UtxoCoinFields, UtxoHDAccount, UtxoHDWallet, UtxoRpcMode, DEFAULT_GAP_LIMIT,
-                  UTXO_DUST_AMOUNT};
-use crate::{BlockchainNetwork, CoinTransportMetrics, DerivationMethod, HistorySyncState, PrivKeyBuildPolicy,
-            PrivKeyPolicy, RpcClientType, UtxoActivationParams};
+use crate::utxo::{
+    output_script, utxo_common, ElectrumBuilderArgs, ElectrumProtoVerifier, RecentlySpentOutPoints, TxFee,
+    UtxoCoinConf, UtxoCoinFields, UtxoHDAccount, UtxoHDWallet, UtxoRpcMode, DEFAULT_GAP_LIMIT, UTXO_DUST_AMOUNT,
+};
+use crate::{
+    BlockchainNetwork, CoinTransportMetrics, DerivationMethod, HistorySyncState, PrivKeyBuildPolicy, PrivKeyPolicy,
+    RpcClientType, UtxoActivationParams,
+};
 use async_trait::async_trait;
 use chain::TxHashAlgo;
 use common::executor::{spawn, Timer};
 use common::small_rng;
-use crypto::{Bip32DerPathError, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoCtxError, CryptoInitError, HwWalletType};
+use crypto::{
+    Bip32DerPathError, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoCtxError, CryptoInitError, HwWalletType,
+};
 use derive_more::Display;
 use futures::channel::mpsc;
 use futures::compat::Future01CompatExt;
 use futures::lock::Mutex as AsyncMutex;
 use futures::StreamExt;
 use keys::bytes::Bytes;
-pub use keys::{Address, AddressFormat as UtxoAddressFormat, AddressHashEnum, KeyPair, Private, Public, Secret,
-               Type as ScriptType};
+pub use keys::{
+    Address, AddressFormat as UtxoAddressFormat, AddressHashEnum, KeyPair, Private, Public, Secret, Type as ScriptType,
+};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use primitives::hash::H256;
@@ -80,24 +87,34 @@ pub enum UtxoCoinBuildError {
 }
 
 impl From<UtxoConfError> for UtxoCoinBuildError {
-    fn from(e: UtxoConfError) -> Self { UtxoCoinBuildError::ConfError(e) }
+    fn from(e: UtxoConfError) -> Self {
+        UtxoCoinBuildError::ConfError(e)
+    }
 }
 
 impl From<CryptoInitError> for UtxoCoinBuildError {
     /// `CryptoCtx` is expected to be initialized already.
-    fn from(crypto_err: CryptoInitError) -> Self { UtxoCoinBuildError::Internal(crypto_err.to_string()) }
+    fn from(crypto_err: CryptoInitError) -> Self {
+        UtxoCoinBuildError::Internal(crypto_err.to_string())
+    }
 }
 
 impl From<CryptoCtxError> for UtxoCoinBuildError {
-    fn from(e: CryptoCtxError) -> Self { UtxoCoinBuildError::Internal(e.to_string()) }
+    fn from(e: CryptoCtxError) -> Self {
+        UtxoCoinBuildError::Internal(e.to_string())
+    }
 }
 
 impl From<Bip32DerPathError> for UtxoCoinBuildError {
-    fn from(e: Bip32DerPathError) -> Self { UtxoCoinBuildError::Internal(Bip44DerPathError::from(e).to_string()) }
+    fn from(e: Bip32DerPathError) -> Self {
+        UtxoCoinBuildError::Internal(Bip44DerPathError::from(e).to_string())
+    }
 }
 
 impl From<HDWalletStorageError> for UtxoCoinBuildError {
-    fn from(e: HDWalletStorageError) -> Self { UtxoCoinBuildError::HDWalletStorageError(e) }
+    fn from(e: HDWalletStorageError) -> Self {
+        UtxoCoinBuildError::HDWalletStorageError(e)
+    }
 }
 
 #[async_trait]
@@ -130,7 +147,9 @@ pub trait UtxoCoinWithIguanaPrivKeyBuilder: UtxoFieldsWithIguanaPrivKeyBuilder {
 #[async_trait]
 pub trait UtxoFieldsWithIguanaPrivKeyBuilder: UtxoCoinBuilderCommonOps {
     async fn build_utxo_fields_with_iguana_priv_key(&self, priv_key: &[u8]) -> UtxoCoinBuildResult<UtxoCoinFields> {
-        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), self.ticker()).build().mm_err(Into::into)?;
+        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), self.ticker())
+            .build()
+            .mm_err(Into::into)?;
 
         if self.is_hw_coin(&conf) {
             return MmError::err(UtxoCoinBuildError::CoinShouldBeActivatedWithHw);
@@ -191,7 +210,9 @@ pub trait UtxoFieldsWithIguanaPrivKeyBuilder: UtxoCoinBuilderCommonOps {
 pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
     async fn build_utxo_fields_with_trezor(&self) -> UtxoCoinBuildResult<UtxoCoinFields> {
         let ticker = self.ticker().to_owned();
-        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), &ticker).build().mm_err(Into::into)?;
+        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), &ticker)
+            .build()
+            .mm_err(Into::into)?;
 
         if !self.supports_trezor(&conf) {
             return MmError::err(UtxoCoinBuildError::CoinDoesntSupportTrezor);
@@ -269,10 +290,14 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
     }
 
     #[inline]
-    fn gap_limit(&self) -> u32 { self.activation_params().gap_limit.unwrap_or(DEFAULT_GAP_LIMIT) }
+    fn gap_limit(&self) -> u32 {
+        self.activation_params().gap_limit.unwrap_or(DEFAULT_GAP_LIMIT)
+    }
 
     #[inline]
-    fn supports_trezor(&self, conf: &UtxoCoinConf) -> bool { conf.trezor_coin.is_some() }
+    fn supports_trezor(&self, conf: &UtxoCoinConf) -> bool {
+        conf.trezor_coin.is_some()
+    }
 
     #[inline]
     fn check_if_trezor_is_initialized(&self) -> UtxoCoinBuildResult<()> {
@@ -299,7 +324,8 @@ pub trait UtxoCoinBuilderCommonOps {
     #[inline]
     fn block_headers_storage(&self) -> UtxoCoinBuildResult<Option<BlockHeaderStorage>> {
         let params: Option<_> = json::from_value(self.conf()["block_header_params"].clone())
-            .map_to_mm(|e| UtxoConfError::InvalidBlockHeaderParams(e.to_string())).mm_err(Into::into)?;
+            .map_to_mm(|e| UtxoConfError::InvalidBlockHeaderParams(e.to_string()))
+            .mm_err(Into::into)?;
         match params {
             None => Ok(None),
             Some(params) => Ok(BlockHeaderStorage::new_from_ctx(self.ctx().clone(), params)),
@@ -309,7 +335,8 @@ pub trait UtxoCoinBuilderCommonOps {
     fn address_format(&self) -> UtxoCoinBuildResult<UtxoAddressFormat> {
         let format_from_req = self.activation_params().address_format.clone();
         let format_from_conf = json::from_value::<Option<UtxoAddressFormat>>(self.conf()["address_format"].clone())
-            .map_to_mm(|e| UtxoConfError::InvalidAddressFormat(e.to_string())).mm_err(Into::into)?
+            .map_to_mm(|e| UtxoConfError::InvalidAddressFormat(e.to_string()))
+            .mm_err(Into::into)?
             .unwrap_or(UtxoAddressFormat::Standard);
 
         let mut address_format = match format_from_req {
@@ -362,7 +389,9 @@ pub trait UtxoCoinBuilderCommonOps {
     }
 
     #[inline]
-    fn dust_amount(&self) -> u64 { json::from_value(self.conf()["dust"].clone()).unwrap_or(UTXO_DUST_AMOUNT) }
+    fn dust_amount(&self) -> u64 {
+        json::from_value(self.conf()["dust"].clone()).unwrap_or(UTXO_DUST_AMOUNT)
+    }
 
     #[inline]
     fn network(&self) -> UtxoCoinBuildResult<BlockchainNetwork> {
@@ -537,7 +566,8 @@ pub trait UtxoCoinBuilderCommonOps {
                         None => {
                             let name = conf["name"]
                                 .as_str()
-                                .or_mm_err(|| UtxoConfError::CurrencyNameIsNotSet).mm_err(Into::into)?;
+                                .or_mm_err(|| UtxoConfError::CurrencyNameIsNotSet)
+                                .mm_err(Into::into)?;
                             (name, false)
                         },
                     }
@@ -575,10 +605,14 @@ pub trait UtxoCoinBuilderCommonOps {
     }
 
     #[inline]
-    fn check_utxo_maturity(&self) -> bool { self.activation_params().check_utxo_maturity.unwrap_or_default() }
+    fn check_utxo_maturity(&self) -> bool {
+        self.activation_params().check_utxo_maturity.unwrap_or_default()
+    }
 
     #[inline]
-    fn is_hw_coin(&self, conf: &UtxoCoinConf) -> bool { conf.trezor_coin.is_some() }
+    fn is_hw_coin(&self, conf: &UtxoCoinConf) -> bool {
+        conf.trezor_coin.is_some()
+    }
 
     #[inline]
     #[cfg(target_arch = "wasm32")]
@@ -595,7 +629,9 @@ pub trait UtxoCoinBuilderCommonOps {
 
     #[inline]
     #[cfg(not(target_arch = "wasm32"))]
-    fn tx_cache_path(&self) -> PathBuf { self.ctx().dbdir().join("TX_CACHE") }
+    fn tx_cache_path(&self) -> PathBuf {
+        self.ctx().dbdir().join("TX_CACHE")
+    }
 }
 
 /// Attempts to parse native daemon conf file and return rpcport, rpcuser and rpcpassword

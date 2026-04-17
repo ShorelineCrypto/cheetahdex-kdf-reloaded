@@ -72,9 +72,12 @@ pub fn spl_coin_for_test(
 
 pub fn solana_coin_for_test(seed: String, net_type: SolanaNet) -> (MmArc, SolanaCoin) {
     let url = solana_net_to_url(net_type);
-    let client = RpcClient::new_with_commitment(url, CommitmentConfig {
-        commitment: CommitmentLevel::Finalized,
-    });
+    let client = RpcClient::new_with_commitment(
+        url,
+        CommitmentConfig {
+            commitment: CommitmentLevel::Finalized,
+        },
+    );
     let conf = json!({
         "coins":[
            {"coin":"SOL","name":"solana","protocol":{"type":"SOL"},"rpcport":80,"mm2":1}

@@ -7,15 +7,19 @@ use crate::utxo::bch::BchCoin;
 use crate::utxo::bchd_grpc::{check_slp_transaction, validate_slp_utxos, ValidateSlpUtxosErr};
 use crate::utxo::rpc_clients::{UnspentInfo, UtxoRpcClientEnum, UtxoRpcError, UtxoRpcResult};
 use crate::utxo::utxo_common::{self, big_decimal_from_sat_unsigned, payment_script, UtxoTxBuilder};
-use crate::utxo::{generate_and_send_tx, sat_from_big_decimal, ActualTxFee, AdditionalTxData, BroadcastTxErr,
-                  FeePolicy, GenerateTxError, RecentlySpentOutPointsGuard, UtxoCoinConf, UtxoCoinFields,
-                  UtxoCommonOps, UtxoTx, UtxoTxBroadcastOps, UtxoTxGenerationOps};
-use crate::{BalanceFut, CoinBalance, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
-            NegotiateSwapContractAddrErr, NumConversError, PrivKeyNotAllowed, RawTransactionFut,
-            RawTransactionRequest, SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut,
-            TradePreimageResult, TradePreimageValue, TransactionDetails, TransactionEnum, TransactionErr,
-            TransactionFut, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidatePaymentInput,
-            VerificationError, VerificationResult, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest};
+use crate::utxo::{
+    generate_and_send_tx, sat_from_big_decimal, ActualTxFee, AdditionalTxData, BroadcastTxErr, FeePolicy,
+    GenerateTxError, RecentlySpentOutPointsGuard, UtxoCoinConf, UtxoCoinFields, UtxoCommonOps, UtxoTx,
+    UtxoTxBroadcastOps, UtxoTxGenerationOps,
+};
+use crate::{
+    BalanceFut, CoinBalance, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
+    NegotiateSwapContractAddrErr, NumConversError, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest,
+    SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
+    TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod,
+    ValidateAddressResult, ValidatePaymentInput, VerificationError, VerificationResult, WithdrawError, WithdrawFee,
+    WithdrawFut, WithdrawRequest,
+};
 use async_trait::async_trait;
 use bitcrypto::dhash160;
 use chain::constants::SEQUENCE_FINAL;
@@ -30,8 +34,9 @@ use futures::{FutureExt, TryFutureExt};
 use futures01::Future;
 use hex::FromHexError;
 use keys::hash::H160;
-use keys::{AddressHashEnum, CashAddrType, CashAddress, CompactSignature, KeyPair, NetworkPrefix as CashAddrPrefix,
-           Public};
+use keys::{
+    AddressHashEnum, CashAddrType, CashAddress, CompactSignature, KeyPair, NetworkPrefix as CashAddrPrefix, Public,
+};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use primitives::hash::H256;
@@ -111,19 +116,27 @@ enum ValidateHtlcError {
 }
 
 impl From<NumConversError> for ValidateHtlcError {
-    fn from(err: NumConversError) -> ValidateHtlcError { ValidateHtlcError::NumConversionErr(err) }
+    fn from(err: NumConversError) -> ValidateHtlcError {
+        ValidateHtlcError::NumConversionErr(err)
+    }
 }
 
 impl From<ParseSlpScriptError> for ValidateHtlcError {
-    fn from(err: ParseSlpScriptError) -> Self { ValidateHtlcError::OpReturnParseError(err) }
+    fn from(err: ParseSlpScriptError) -> Self {
+        ValidateHtlcError::OpReturnParseError(err)
+    }
 }
 
 impl From<ValidateSlpUtxosErr> for ValidateHtlcError {
-    fn from(err: ValidateSlpUtxosErr) -> Self { ValidateHtlcError::InvalidSlpUtxo(err) }
+    fn from(err: ValidateSlpUtxosErr) -> Self {
+        ValidateHtlcError::InvalidSlpUtxo(err)
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for ValidateHtlcError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { ValidateHtlcError::UnexpectedDerivationMethod(e) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        ValidateHtlcError::UnexpectedDerivationMethod(e)
+    }
 }
 
 #[derive(Debug, Display)]
@@ -137,11 +150,15 @@ enum ValidateDexFeeError {
 }
 
 impl From<NumConversError> for ValidateDexFeeError {
-    fn from(err: NumConversError) -> ValidateDexFeeError { ValidateDexFeeError::NumConversionErr(err) }
+    fn from(err: NumConversError) -> ValidateDexFeeError {
+        ValidateDexFeeError::NumConversionErr(err)
+    }
 }
 
 impl From<ParseSlpScriptError> for ValidateDexFeeError {
-    fn from(err: ParseSlpScriptError) -> Self { ValidateDexFeeError::OpReturnParseError(err) }
+    fn from(err: ParseSlpScriptError) -> Self {
+        ValidateDexFeeError::OpReturnParseError(err)
+    }
 }
 
 #[allow(clippy::upper_case_acronyms, clippy::large_enum_variant)]
@@ -156,27 +173,39 @@ pub enum SpendP2SHError {
 }
 
 impl From<GenerateTxError> for SpendP2SHError {
-    fn from(err: GenerateTxError) -> SpendP2SHError { SpendP2SHError::GenerateTxErr(err) }
+    fn from(err: GenerateTxError) -> SpendP2SHError {
+        SpendP2SHError::GenerateTxErr(err)
+    }
 }
 
 impl From<UtxoRpcError> for SpendP2SHError {
-    fn from(err: UtxoRpcError) -> SpendP2SHError { SpendP2SHError::Rpc(err) }
+    fn from(err: UtxoRpcError) -> SpendP2SHError {
+        SpendP2SHError::Rpc(err)
+    }
 }
 
 impl From<UtxoSignWithKeyPairError> for SpendP2SHError {
-    fn from(sign: UtxoSignWithKeyPairError) -> SpendP2SHError { SpendP2SHError::SignTxErr(sign) }
+    fn from(sign: UtxoSignWithKeyPairError) -> SpendP2SHError {
+        SpendP2SHError::SignTxErr(sign)
+    }
 }
 
 impl From<PrivKeyNotAllowed> for SpendP2SHError {
-    fn from(e: PrivKeyNotAllowed) -> Self { SpendP2SHError::PrivKeyNotAllowed(e) }
+    fn from(e: PrivKeyNotAllowed) -> Self {
+        SpendP2SHError::PrivKeyNotAllowed(e)
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for SpendP2SHError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { SpendP2SHError::UnexpectedDerivationMethod(e) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        SpendP2SHError::UnexpectedDerivationMethod(e)
+    }
 }
 
 impl From<String> for SpendP2SHError {
-    fn from(err: String) -> SpendP2SHError { SpendP2SHError::String(err) }
+    fn from(err: String) -> SpendP2SHError {
+        SpendP2SHError::String(err)
+    }
 }
 
 #[derive(Debug, Display)]
@@ -196,31 +225,45 @@ pub enum SpendHtlcError {
 }
 
 impl From<UnexpectedDerivationMethod> for SpendHtlcError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { SpendHtlcError::UnexpectedDerivationMethod(e) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        SpendHtlcError::UnexpectedDerivationMethod(e)
+    }
 }
 
 impl From<NumConversError> for SpendHtlcError {
-    fn from(err: NumConversError) -> SpendHtlcError { SpendHtlcError::NumConversionErr(err) }
+    fn from(err: NumConversError) -> SpendHtlcError {
+        SpendHtlcError::NumConversionErr(err)
+    }
 }
 
 impl From<Error> for SpendHtlcError {
-    fn from(err: Error) -> SpendHtlcError { SpendHtlcError::DeserializationErr(err) }
+    fn from(err: Error) -> SpendHtlcError {
+        SpendHtlcError::DeserializationErr(err)
+    }
 }
 
 impl From<keys::Error> for SpendHtlcError {
-    fn from(err: keys::Error) -> SpendHtlcError { SpendHtlcError::PubkeyParseErr(err) }
+    fn from(err: keys::Error) -> SpendHtlcError {
+        SpendHtlcError::PubkeyParseErr(err)
+    }
 }
 
 impl From<SpendP2SHError> for SpendHtlcError {
-    fn from(err: SpendP2SHError) -> SpendHtlcError { SpendHtlcError::SpendP2SHErr(err) }
+    fn from(err: SpendP2SHError) -> SpendHtlcError {
+        SpendHtlcError::SpendP2SHErr(err)
+    }
 }
 
 impl From<UtxoRpcError> for SpendHtlcError {
-    fn from(err: UtxoRpcError) -> SpendHtlcError { SpendHtlcError::RpcErr(err) }
+    fn from(err: UtxoRpcError) -> SpendHtlcError {
+        SpendHtlcError::RpcErr(err)
+    }
 }
 
 impl From<ParseSlpScriptError> for SpendHtlcError {
-    fn from(err: ParseSlpScriptError) -> Self { SpendHtlcError::OpReturnParseError(err) }
+    fn from(err: ParseSlpScriptError) -> Self {
+        SpendHtlcError::OpReturnParseError(err)
+    }
 }
 
 fn slp_send_output(token_id: &H256, amounts: &[u64]) -> TransactionOutput {
@@ -326,7 +369,9 @@ impl SlpToken {
         slp_send_output(&self.conf.token_id, amounts)
     }
 
-    fn rpc(&self) -> &UtxoRpcClientEnum { &self.platform_coin.as_ref().rpc_client }
+    fn rpc(&self) -> &UtxoRpcClientEnum {
+        &self.platform_coin.as_ref().rpc_client
+    }
 
     /// Returns unspents of the SLP token plus plain BCH UTXOs plus RecentlySpentOutPoints mutex guard
     async fn slp_unspents_for_spend(
@@ -395,7 +440,9 @@ impl SlpToken {
             outputs.push(slp_change_out);
         }
 
-        validate_slp_utxos(self.platform_coin.bchd_urls(), &inputs, self.token_id()).await.mm_err(Into::into)?;
+        validate_slp_utxos(self.platform_coin.bchd_urls(), &inputs, self.token_id())
+            .await
+            .mm_err(Into::into)?;
         let preimage = SlpTxPreimage {
             slp_inputs: inputs,
             available_bch_inputs: bch_unspents,
@@ -460,7 +507,9 @@ impl SlpToken {
             },
             slp_amount: slp_satoshis,
         };
-        validate_slp_utxos(self.platform_coin.bchd_urls(), &[slp_unspent], self.token_id()).await.mm_err(Into::into)?;
+        validate_slp_utxos(self.platform_coin.bchd_urls(), &[slp_unspent], self.token_id())
+            .await
+            .mm_err(Into::into)?;
 
         let slp_tx: SlpTxDetails = parse_slp_script(tx.outputs[0].script_pubkey.as_slice()).mm_err(Into::into)?;
 
@@ -542,7 +591,11 @@ impl SlpToken {
             slp_amount,
         };
 
-        let tx_locktime = self.platform_coin.p2sh_tx_locktime(time_lock).await.mm_err(Into::into)?;
+        let tx_locktime = self
+            .platform_coin
+            .p2sh_tx_locktime(time_lock)
+            .await
+            .mm_err(Into::into)?;
         let script_data = ScriptBuilder::default().push_opcode(Opcode::OP_1).into_script();
         let tx = self
             .spend_p2sh(
@@ -553,7 +606,8 @@ impl SlpToken {
                 redeem_script,
                 htlc_keypair,
             )
-            .await.mm_err(Into::into)?;
+            .await
+            .mm_err(Into::into)?;
         Ok(tx)
     }
 
@@ -592,14 +646,19 @@ impl SlpToken {
             slp_amount,
         };
 
-        let tx_locktime = self.platform_coin.p2sh_tx_locktime(time_lock).await.mm_err(Into::into)?;
+        let tx_locktime = self
+            .platform_coin
+            .p2sh_tx_locktime(time_lock)
+            .await
+            .mm_err(Into::into)?;
         let script_data = ScriptBuilder::default()
             .push_data(secret)
             .push_opcode(Opcode::OP_0)
             .into_script();
         let tx = self
             .spend_p2sh(slp_utxo, tx_locktime, SEQUENCE_FINAL, script_data, redeem, keypair)
-            .await.mm_err(Into::into)?;
+            .await
+            .mm_err(Into::into)?;
         Ok(tx)
     }
 
@@ -630,12 +689,18 @@ impl SlpToken {
             .add_available_inputs(bch_inputs)
             .add_outputs(outputs)
             .build()
-            .await.mm_err(Into::into)?;
+            .await
+            .mm_err(Into::into)?;
 
         unsigned.lock_time = tx_locktime;
         unsigned.inputs[0].sequence = input_sequence;
 
-        let my_key_pair = self.platform_coin.as_ref().priv_key_policy.key_pair_or_err().mm_err(Into::into)?;
+        let my_key_pair = self
+            .platform_coin
+            .as_ref()
+            .priv_key_policy
+            .key_pair_or_err()
+            .mm_err(Into::into)?;
         let signed_p2sh_input = p2sh_spend(
             &unsigned,
             0,
@@ -644,7 +709,8 @@ impl SlpToken {
             redeem_script,
             self.platform_coin.as_ref().conf.signature_version,
             self.platform_coin.as_ref().conf.fork_id,
-        ).mm_err(Into::into)?;
+        )
+        .mm_err(Into::into)?;
 
         let signed_inputs: Result<Vec<_>, _> = unsigned
             .inputs
@@ -692,7 +758,8 @@ impl SlpToken {
             .rpc()
             .send_raw_transaction(serialize(&signed).into())
             .compat()
-            .await.mm_err(Into::into)?;
+            .await
+            .mm_err(Into::into)?;
         Ok(signed)
     }
 
@@ -747,19 +814,29 @@ impl SlpToken {
         Ok(())
     }
 
-    pub fn platform_dust(&self) -> u64 { self.platform_coin.as_ref().dust_amount }
+    pub fn platform_dust(&self) -> u64 {
+        self.platform_coin.as_ref().dust_amount
+    }
 
-    pub fn platform_decimals(&self) -> u8 { self.platform_coin.as_ref().decimals }
+    pub fn platform_decimals(&self) -> u8 {
+        self.platform_coin.as_ref().decimals
+    }
 
     pub fn platform_dust_dec(&self) -> BigDecimal {
         big_decimal_from_sat_unsigned(self.platform_dust(), self.platform_decimals())
     }
 
-    pub fn decimals(&self) -> u8 { self.conf.decimals }
+    pub fn decimals(&self) -> u8 {
+        self.conf.decimals
+    }
 
-    pub fn token_id(&self) -> &H256 { &self.conf.token_id }
+    pub fn token_id(&self) -> &H256 {
+        &self.conf.token_id
+    }
 
-    fn platform_conf(&self) -> &UtxoCoinConf { &self.platform_coin.as_ref().conf }
+    fn platform_conf(&self) -> &UtxoCoinConf {
+        &self.platform_coin.as_ref().conf
+    }
 
     async fn my_balance_sat(&self) -> UtxoRpcResult<u64> {
         let (slp_unspents, _) = self.slp_unspents_for_display().await?;
@@ -776,7 +853,9 @@ impl SlpToken {
         })
     }
 
-    fn slp_prefix(&self) -> &CashAddrPrefix { self.platform_coin.slp_prefix() }
+    fn slp_prefix(&self) -> &CashAddrPrefix {
+        self.platform_coin.slp_prefix()
+    }
 
     pub fn get_info(&self) -> SlpTokenInfo {
         SlpTokenInfo {
@@ -951,7 +1030,9 @@ pub enum ParseSlpScriptError {
 }
 
 impl From<Error> for ParseSlpScriptError {
-    fn from(err: Error) -> ParseSlpScriptError { ParseSlpScriptError::DeserializeFailed(err) }
+    fn from(err: Error) -> ParseSlpScriptError {
+        ParseSlpScriptError::DeserializeFailed(err)
+    }
 }
 
 pub fn parse_slp_script(script: &[u8]) -> Result<SlpTxDetails, MmError<ParseSlpScriptError>> {
@@ -991,15 +1072,21 @@ enum GenSlpSpendErr {
 }
 
 impl From<UtxoRpcError> for GenSlpSpendErr {
-    fn from(err: UtxoRpcError) -> GenSlpSpendErr { GenSlpSpendErr::RpcError(err) }
+    fn from(err: UtxoRpcError) -> GenSlpSpendErr {
+        GenSlpSpendErr::RpcError(err)
+    }
 }
 
 impl From<ValidateSlpUtxosErr> for GenSlpSpendErr {
-    fn from(err: ValidateSlpUtxosErr) -> GenSlpSpendErr { GenSlpSpendErr::InvalidSlpUtxos(err) }
+    fn from(err: ValidateSlpUtxosErr) -> GenSlpSpendErr {
+        GenSlpSpendErr::InvalidSlpUtxos(err)
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for GenSlpSpendErr {
-    fn from(e: UnexpectedDerivationMethod) -> Self { GenSlpSpendErr::Internal(e.to_string()) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        GenSlpSpendErr::Internal(e.to_string())
+    }
 }
 
 impl From<GenSlpSpendErr> for WithdrawError {
@@ -1024,7 +1111,9 @@ impl From<GenSlpSpendErr> for WithdrawError {
 }
 
 impl AsRef<UtxoCoinFields> for SlpToken {
-    fn as_ref(&self) -> &UtxoCoinFields { self.platform_coin.as_ref() }
+    fn as_ref(&self) -> &UtxoCoinFields {
+        self.platform_coin.as_ref()
+    }
 }
 
 #[async_trait]
@@ -1035,7 +1124,12 @@ impl UtxoTxBroadcastOps for SlpToken {
             .await
             .mm_err(|e| BroadcastTxErr::Other(e.to_string()))?;
 
-        let hash = self.rpc().send_raw_transaction(tx_bytes.into()).compat().await.mm_err(Into::into)?;
+        let hash = self
+            .rpc()
+            .send_raw_transaction(tx_bytes.into())
+            .compat()
+            .await
+            .mm_err(Into::into)?;
 
         Ok(hash)
     }
@@ -1043,7 +1137,9 @@ impl UtxoTxBroadcastOps for SlpToken {
 
 #[async_trait]
 impl UtxoTxGenerationOps for SlpToken {
-    async fn get_tx_fee(&self) -> UtxoRpcResult<ActualTxFee> { self.platform_coin.get_tx_fee().await }
+    async fn get_tx_fee(&self) -> UtxoRpcResult<ActualTxFee> {
+        self.platform_coin.get_tx_fee().await
+    }
 
     async fn calc_interest_if_required(
         &self,
@@ -1058,7 +1154,9 @@ impl UtxoTxGenerationOps for SlpToken {
 }
 
 impl MarketCoinOps for SlpToken {
-    fn ticker(&self) -> &str { &self.conf.ticker }
+    fn ticker(&self) -> &str {
+        &self.conf.ticker
+    }
 
     fn my_address(&self) -> Result<String, String> {
         let my_address = try_s!(self.as_ref().derivation_method.iguana_or_err());
@@ -1066,7 +1164,9 @@ impl MarketCoinOps for SlpToken {
         slp_address.encode()
     }
 
-    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> { unimplemented!() }
+    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
+        unimplemented!()
+    }
 
     fn sign_message_hash(&self, message: &str) -> Option<[u8; 32]> {
         utxo_common::sign_message_hash(self.as_ref(), message)
@@ -1102,7 +1202,9 @@ impl MarketCoinOps for SlpToken {
         Box::new(self.platform_coin.my_balance().map(|res| res.spendable))
     }
 
-    fn platform_ticker(&self) -> &str { self.platform_coin.ticker() }
+    fn platform_ticker(&self) -> &str {
+        self.platform_coin.ticker()
+    }
 
     /// Receives raw transaction bytes in hexadecimal format as input and returns tx hash in hexadecimal format
     fn send_raw_tx(&self, tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
@@ -1162,13 +1264,21 @@ impl MarketCoinOps for SlpToken {
         self.platform_coin.tx_enum_from_bytes(bytes)
     }
 
-    fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> { self.platform_coin.current_block() }
+    fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> {
+        self.platform_coin.current_block()
+    }
 
-    fn display_priv_key(&self) -> Result<String, String> { self.platform_coin.display_priv_key() }
+    fn display_priv_key(&self) -> Result<String, String> {
+        self.platform_coin.display_priv_key()
+    }
 
-    fn min_tx_amount(&self) -> BigDecimal { big_decimal_from_sat_unsigned(1, self.decimals()) }
+    fn min_tx_amount(&self) -> BigDecimal {
+        big_decimal_from_sat_unsigned(1, self.decimals())
+    }
 
-    fn min_trading_vol(&self) -> MmNumber { big_decimal_from_sat_unsigned(1, self.decimals()).into() }
+    fn min_trading_vol(&self) -> MmNumber {
+        big_decimal_from_sat_unsigned(1, self.decimals()).into()
+    }
 }
 
 #[async_trait]
@@ -1486,7 +1596,9 @@ impl SwapOps for SlpToken {
         Ok(None)
     }
 
-    fn get_htlc_key_pair(&self) -> Option<KeyPair> { utxo_common::get_htlc_key_pair(&self.platform_coin) }
+    fn get_htlc_key_pair(&self) -> Option<KeyPair> {
+        utxo_common::get_htlc_key_pair(&self.platform_coin)
+    }
 }
 
 impl From<GenSlpSpendErr> for TradePreimageError {
@@ -1517,12 +1629,16 @@ pub struct SlpFeeDetails {
 }
 
 impl From<SlpFeeDetails> for TxFeeDetails {
-    fn from(slp: SlpFeeDetails) -> TxFeeDetails { TxFeeDetails::Slp(slp) }
+    fn from(slp: SlpFeeDetails) -> TxFeeDetails {
+        TxFeeDetails::Slp(slp)
+    }
 }
 
 #[async_trait]
 impl MmCoin for SlpToken {
-    fn is_asset_chain(&self) -> bool { false }
+    fn is_asset_chain(&self) -> bool {
+        false
+    }
 
     fn get_raw_transaction(&self, req: RawTransactionRequest) -> RawTransactionFut {
         Box::new(
@@ -1535,8 +1651,18 @@ impl MmCoin for SlpToken {
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         let coin = self.clone();
         let fut = async move {
-            let my_address = coin.platform_coin.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
-            let key_pair = coin.platform_coin.as_ref().priv_key_policy.key_pair_or_err().mm_err(Into::into)?;
+            let my_address = coin
+                .platform_coin
+                .as_ref()
+                .derivation_method
+                .iguana_or_err()
+                .mm_err(Into::into)?;
+            let key_pair = coin
+                .platform_coin
+                .as_ref()
+                .priv_key_policy
+                .key_pair_or_err()
+                .mm_err(Into::into)?;
 
             let address = CashAddress::decode(&req.to).map_to_mm(WithdrawError::InvalidAddress)?;
             if address.prefix != *coin.slp_prefix() {
@@ -1571,7 +1697,10 @@ impl MmCoin for SlpToken {
                 },
             };
             let slp_output = SlpOutput { amount, script_pubkey };
-            let (slp_preimage, _) = coin.generate_slp_tx_preimage(vec![slp_output]).await.mm_err(Into::into)?;
+            let (slp_preimage, _) = coin
+                .generate_slp_tx_preimage(vec![slp_output])
+                .await
+                .mm_err(Into::into)?;
             let mut tx_builder = UtxoTxBuilder::new(&coin.platform_coin)
                 .add_required_inputs(slp_preimage.slp_inputs.into_iter().map(|slp| slp.bch_unspent))
                 .add_available_inputs(slp_preimage.available_bch_inputs)
@@ -1608,7 +1737,8 @@ impl MmCoin for SlpToken {
                 prev_script,
                 coin.platform_conf().signature_version,
                 coin.platform_conf().fork_id,
-            ).mm_err(Into::into)?;
+            )
+            .mm_err(Into::into)?;
             let fee_details = SlpFeeDetails {
                 amount: big_decimal_from_sat_unsigned(tx_data.fee_amount, coin.platform_decimals()),
                 coin: coin.platform_coin.ticker().into(),
@@ -1647,7 +1777,9 @@ impl MmCoin for SlpToken {
         Box::new(fut.boxed().compat())
     }
 
-    fn decimals(&self) -> u8 { self.decimals() }
+    fn decimals(&self) -> u8 {
+        self.decimals()
+    }
 
     fn convert_to_address(&self, from: &str, to_address_format: Json) -> Result<String, String> {
         utxo_common::convert_to_address(&self.platform_coin, from, to_address_format)
@@ -1687,7 +1819,9 @@ impl MmCoin for SlpToken {
         Box::new(futures01::future::err(()))
     }
 
-    fn history_sync_status(&self) -> HistorySyncState { self.platform_coin.history_sync_status() }
+    fn history_sync_status(&self) -> HistorySyncState {
+        self.platform_coin.history_sync_status()
+    }
 
     /// Get fee to be paid per 1 swap transaction
     fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
@@ -1730,7 +1864,11 @@ impl MmCoin for SlpToken {
         let coin = self.clone();
 
         let fut = async move {
-            let htlc_fee = coin.platform_coin.get_htlc_spend_fee(SLP_HTLC_SPEND_SIZE).await.mm_err(Into::into)?;
+            let htlc_fee = coin
+                .platform_coin
+                .get_htlc_spend_fee(SLP_HTLC_SPEND_SIZE)
+                .await
+                .mm_err(Into::into)?;
             let amount =
                 (big_decimal_from_sat_unsigned(htlc_fee, coin.platform_decimals()) + coin.platform_dust_dec()).into();
             Ok(TradeFee {
@@ -1771,9 +1909,13 @@ impl MmCoin for SlpToken {
         })
     }
 
-    fn required_confirmations(&self) -> u64 { self.conf.required_confirmations.load(AtomicOrdering::Relaxed) }
+    fn required_confirmations(&self) -> u64 {
+        self.conf.required_confirmations.load(AtomicOrdering::Relaxed)
+    }
 
-    fn requires_notarization(&self) -> bool { false }
+    fn requires_notarization(&self) -> bool {
+        false
+    }
 
     fn set_required_confirmations(&self, confirmations: u64) {
         self.conf
@@ -1785,13 +1927,21 @@ impl MmCoin for SlpToken {
         warn!("set_requires_notarization has no effect on SLPTOKEN!")
     }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> { None }
+    fn swap_contract_address(&self) -> Option<BytesJson> {
+        None
+    }
 
-    fn mature_confirmations(&self) -> Option<u32> { self.platform_coin.mature_confirmations() }
+    fn mature_confirmations(&self) -> Option<u32> {
+        self.platform_coin.mature_confirmations()
+    }
 
-    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
+    fn coin_protocol_info(&self) -> Vec<u8> {
+        Vec::new()
+    }
 
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool { true }
+    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Display)]
@@ -1802,7 +1952,9 @@ pub enum SlpAddrFromPubkeyErr {
 }
 
 impl From<hex::FromHexError> for SlpAddrFromPubkeyErr {
-    fn from(err: FromHexError) -> SlpAddrFromPubkeyErr { SlpAddrFromPubkeyErr::InvalidHex(err) }
+    fn from(err: FromHexError) -> SlpAddrFromPubkeyErr {
+        SlpAddrFromPubkeyErr::InvalidHex(err)
+    }
 }
 
 pub fn slp_addr_from_pubkey_str(pubkey: &str, prefix: &str) -> Result<String, MmError<SlpAddrFromPubkeyErr>> {

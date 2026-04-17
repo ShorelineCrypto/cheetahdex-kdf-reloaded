@@ -4,7 +4,9 @@ use crate::hd_wallet::HDWalletRpcError;
 use crate::{lp_coinfind_or_err, CoinBalance, CoinWithDerivationMethod, CoinsContext, MmCoinEnum};
 use async_trait::async_trait;
 use common::{true_f, SuccessResponse};
-use crypto::hw_rpc_task::{HwConnectStatuses, HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTaskUserActionRequest};
+use crypto::hw_rpc_task::{
+    HwConnectStatuses, HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTaskUserActionRequest,
+};
 use crypto::RpcDerivationPath;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -73,7 +75,9 @@ impl RpcTaskTypes for InitCreateAccountTask {
 
 #[async_trait]
 impl RpcTask for InitCreateAccountTask {
-    fn initial_status(&self) -> Self::InProgressStatus { CreateAccountInProgressStatus::Preparing }
+    fn initial_status(&self) -> Self::InProgressStatus {
+        CreateAccountInProgressStatus::Preparing
+    }
 
     async fn run(self, task_handle: &CreateAccountTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         async fn create_new_account_helper<Coin>(
@@ -116,7 +120,8 @@ pub async fn init_create_new_account(
     let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     let coins_ctx = CoinsContext::from_ctx(&ctx).map_to_mm(HDWalletRpcError::Internal)?;
     let task = InitCreateAccountTask { ctx, coin, req };
-    let task_id = CreateAccountTaskManager::spawn_rpc_task(&coins_ctx.create_account_manager, task).mm_err(Into::into)?;
+    let task_id =
+        CreateAccountTaskManager::spawn_rpc_task(&coins_ctx.create_account_manager, task).mm_err(Into::into)?;
     Ok(InitRpcTaskResponse { task_id })
 }
 
@@ -143,7 +148,9 @@ pub async fn init_create_new_account_user_action(
         .create_account_manager
         .lock()
         .map_to_mm(|e| RpcTaskUserActionError::Internal(e.to_string()))?;
-    task_manager.on_user_action(req.task_id, req.user_action).mm_err(Into::into)?;
+    task_manager
+        .on_user_action(req.task_id, req.user_action)
+        .mm_err(Into::into)?;
     Ok(SuccessResponse::new())
 }
 
@@ -168,7 +175,10 @@ pub(crate) mod common_impl {
     {
         let hd_wallet = coin.derivation_method().hd_wallet_or_err().mm_err(Into::into)?;
 
-        let mut new_account = coin.create_new_account(hd_wallet, xpub_extractor).await.mm_err(Into::into)?;
+        let mut new_account = coin
+            .create_new_account(hd_wallet, xpub_extractor)
+            .await
+            .mm_err(Into::into)?;
         let address_scanner = coin.produce_hd_address_scanner().await.mm_err(Into::into)?;
         let account_index = new_account.account_id();
         let account_derivation_path = new_account.account_derivation_path();
@@ -176,7 +186,8 @@ pub(crate) mod common_impl {
         let addresses = if params.scan {
             let gap_limit = params.gap_limit.unwrap_or_else(|| hd_wallet.gap_limit());
             coin.scan_for_new_addresses(hd_wallet, &mut new_account, &address_scanner, gap_limit)
-                .await.mm_err(Into::into)?
+                .await
+                .mm_err(Into::into)?
         } else {
             Vec::new()
         };

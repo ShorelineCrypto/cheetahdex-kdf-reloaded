@@ -1,12 +1,16 @@
 use crate::coin_balance::HDAddressBalance;
 use crate::hd_pubkey::HDXPubExtractor;
 use crate::hd_wallet_storage::HDWalletStorageError;
-use crate::{lp_coinfind_or_err, BalanceError, CoinFindError, CoinWithDerivationMethod, MmCoinEnum,
-            UnexpectedDerivationMethod, WithdrawError};
+use crate::{
+    lp_coinfind_or_err, BalanceError, CoinFindError, CoinWithDerivationMethod, MmCoinEnum, UnexpectedDerivationMethod,
+    WithdrawError,
+};
 use async_trait::async_trait;
 use common::HttpStatusCode;
-use crypto::{Bip32DerPathError, Bip32Error, Bip44Chain, Bip44DerPathError, Bip44DerivationPath, ChildNumber,
-             DerivationPath, HwError};
+use crypto::{
+    Bip32DerPathError, Bip32Error, Bip44Chain, Bip44DerPathError, Bip44DerivationPath, ChildNumber, DerivationPath,
+    HwError,
+};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -16,7 +20,9 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-pub use futures::lock::{MappedMutexGuard as AsyncMappedMutexGuard, Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
+pub use futures::lock::{
+    MappedMutexGuard as AsyncMappedMutexGuard, Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard,
+};
 
 pub type HDAccountsMap<HDAccount> = BTreeMap<u32, HDAccount>;
 pub type HDAccountsMutex<HDAccount> = AsyncMutex<HDAccountsMap<HDAccount>>;
@@ -30,7 +36,9 @@ pub enum AddressDerivingError {
 }
 
 impl From<Bip32Error> for AddressDerivingError {
-    fn from(e: Bip32Error) -> Self { AddressDerivingError::Bip32Error(e) }
+    fn from(e: Bip32Error) -> Self {
+        AddressDerivingError::Bip32Error(e)
+    }
 }
 
 impl From<AddressDerivingError> for BalanceError {
@@ -42,7 +50,9 @@ impl From<AddressDerivingError> for BalanceError {
 }
 
 impl From<AddressDerivingError> for WithdrawError {
-    fn from(e: AddressDerivingError) -> Self { WithdrawError::UnexpectedFromAddress(e.to_string()) }
+    fn from(e: AddressDerivingError) -> Self {
+        WithdrawError::UnexpectedFromAddress(e.to_string())
+    }
 }
 
 pub enum NewAddressDerivingError {
@@ -53,7 +63,9 @@ pub enum NewAddressDerivingError {
 }
 
 impl From<Bip32Error> for NewAddressDerivingError {
-    fn from(e: Bip32Error) -> Self { NewAddressDerivingError::Bip32Error(e) }
+    fn from(e: Bip32Error) -> Self {
+        NewAddressDerivingError::Bip32Error(e)
+    }
 }
 
 impl From<AddressDerivingError> for NewAddressDerivingError {
@@ -65,7 +77,9 @@ impl From<AddressDerivingError> for NewAddressDerivingError {
 }
 
 impl From<InvalidBip44ChainError> for NewAddressDerivingError {
-    fn from(e: InvalidBip44ChainError) -> Self { NewAddressDerivingError::InvalidBip44Chain { chain: e.chain } }
+    fn from(e: InvalidBip44ChainError) -> Self {
+        NewAddressDerivingError::InvalidBip44Chain { chain: e.chain }
+    }
 }
 
 impl From<AccountUpdatingError> for NewAddressDerivingError {
@@ -103,7 +117,9 @@ pub enum NewAccountCreatingError {
 }
 
 impl From<Bip32DerPathError> for NewAccountCreatingError {
-    fn from(e: Bip32DerPathError) -> Self { NewAccountCreatingError::Internal(Bip44DerPathError::from(e).to_string()) }
+    fn from(e: Bip32DerPathError) -> Self {
+        NewAccountCreatingError::Internal(Bip44DerPathError::from(e).to_string())
+    }
 }
 
 impl From<HDWalletStorageError> for NewAccountCreatingError {
@@ -154,11 +170,15 @@ pub enum AccountUpdatingError {
 }
 
 impl From<InvalidBip44ChainError> for AccountUpdatingError {
-    fn from(e: InvalidBip44ChainError) -> Self { AccountUpdatingError::InvalidBip44Chain(e) }
+    fn from(e: InvalidBip44ChainError) -> Self {
+        AccountUpdatingError::InvalidBip44Chain(e)
+    }
 }
 
 impl From<HDWalletStorageError> for AccountUpdatingError {
-    fn from(e: HDWalletStorageError) -> Self { AccountUpdatingError::WalletStorageError(e) }
+    fn from(e: HDWalletStorageError) -> Self {
+        AccountUpdatingError::WalletStorageError(e)
+    }
 }
 
 impl From<AccountUpdatingError> for BalanceError {
@@ -250,7 +270,9 @@ impl From<BalanceError> for HDWalletRpcError {
 }
 
 impl From<InvalidBip44ChainError> for HDWalletRpcError {
-    fn from(e: InvalidBip44ChainError) -> Self { HDWalletRpcError::InvalidBip44Chain { chain: e.chain } }
+    fn from(e: InvalidBip44ChainError) -> Self {
+        HDWalletRpcError::InvalidBip44Chain { chain: e.chain }
+    }
 }
 
 impl From<AddressDerivingError> for HDWalletRpcError {
@@ -383,7 +405,8 @@ pub trait HDWalletCoinOps {
             .derive_address(hd_account, chain, new_address_id)
             .mm_err(NewAddressDerivingError::from)?;
         self.set_known_addresses_number(hd_wallet, hd_account, chain, known_addresses_number + 1)
-            .await.mm_err(Into::into)?;
+            .await
+            .mm_err(Into::into)?;
         Ok(new_address)
     }
 
@@ -437,10 +460,14 @@ pub trait HDWalletOps: Send + Sync {
     }
 
     /// Returns copies of all activated accounts.
-    async fn get_accounts(&self) -> HDAccountsMap<Self::HDAccount> { self.get_accounts_mutex().lock().await.clone() }
+    async fn get_accounts(&self) -> HDAccountsMap<Self::HDAccount> {
+        self.get_accounts_mutex().lock().await.clone()
+    }
 
     /// Returns a mutable reference to all activated accounts.
-    async fn get_accounts_mut(&self) -> HDAccountsMut<'_, Self::HDAccount> { self.get_accounts_mutex().lock().await }
+    async fn get_accounts_mut(&self) -> HDAccountsMut<'_, Self::HDAccount> {
+        self.get_accounts_mutex().lock().await
+    }
 }
 
 pub trait HDAccountOps: Send + Sync {
@@ -534,7 +561,8 @@ pub mod common_impl {
             ..
         } = coin
             .generate_new_address(hd_wallet, hd_account.deref_mut(), chain)
-            .await.mm_err(Into::into)?;
+            .await
+            .mm_err(Into::into)?;
         let balance = coin.known_address_balance(&address).await.mm_err(Into::into)?;
 
         Ok(GetNewHDAddressResponse {

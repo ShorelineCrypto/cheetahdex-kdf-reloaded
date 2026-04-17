@@ -161,7 +161,8 @@ fn sign_funding_transaction(
         prev_script,
         SignatureVersion::WitnessV0,
         coin.as_ref().conf.fork_id,
-    ).mm_err(Into::into)?;
+    )
+    .mm_err(Into::into)?;
 
     Transaction::try_from(signed).map_to_mm(|e| OpenChannelError::ConvertTxErr(e.to_string()))
 }

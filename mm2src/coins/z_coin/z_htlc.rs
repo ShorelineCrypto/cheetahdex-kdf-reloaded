@@ -104,15 +104,21 @@ pub enum ZP2SHSpendError {
 }
 
 impl From<ZTxBuilderError> for ZP2SHSpendError {
-    fn from(tx_builder: ZTxBuilderError) -> ZP2SHSpendError { ZP2SHSpendError::ZTxBuilderError(tx_builder) }
+    fn from(tx_builder: ZTxBuilderError) -> ZP2SHSpendError {
+        ZP2SHSpendError::ZTxBuilderError(tx_builder)
+    }
 }
 
 impl From<PrivKeyNotAllowed> for ZP2SHSpendError {
-    fn from(err: PrivKeyNotAllowed) -> Self { ZP2SHSpendError::PrivKeyNotAllowed(err) }
+    fn from(err: PrivKeyNotAllowed) -> Self {
+        ZP2SHSpendError::PrivKeyNotAllowed(err)
+    }
 }
 
 impl From<UtxoRpcError> for ZP2SHSpendError {
-    fn from(rpc: UtxoRpcError) -> ZP2SHSpendError { ZP2SHSpendError::Rpc(rpc) }
+    fn from(rpc: UtxoRpcError) -> ZP2SHSpendError {
+        ZP2SHSpendError::Rpc(rpc)
+    }
 }
 
 impl ZP2SHSpendError {
@@ -135,7 +141,13 @@ pub async fn z_p2sh_spend(
     script_data: Script,
     htlc_privkey: &[u8],
 ) -> Result<UtxoTx, MmError<ZP2SHSpendError>> {
-    let current_block = coin.utxo_arc.rpc_client.get_block_count().compat().await.mm_err(Into::into)? as u32;
+    let current_block = coin
+        .utxo_arc
+        .rpc_client
+        .get_block_count()
+        .compat()
+        .await
+        .mm_err(Into::into)? as u32;
     let mut tx_builder = ZTxBuilder::new(ARRRConsensusParams {}, current_block.into());
     tx_builder.set_lock_time(tx_locktime);
 

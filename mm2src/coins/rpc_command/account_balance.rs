@@ -75,7 +75,8 @@ pub mod common_impl {
         let account_id = params.account_index;
         let hd_account = coin
             .derivation_method()
-            .hd_wallet_or_err().mm_err(Into::into)?
+            .hd_wallet_or_err()
+            .mm_err(Into::into)?
             .get_account(account_id)
             .await
             .or_mm_err(|| HDAccountBalanceRpcError::UnknownAccount { account_id })?;
@@ -89,7 +90,8 @@ pub mod common_impl {
 
         let addresses = coin
             .known_addresses_balances_with_ids(&hd_account, params.chain, from_address_id..to_address_id)
-            .await.mm_err(Into::into)?;
+            .await
+            .mm_err(Into::into)?;
         let page_balance = addresses.iter().fold(CoinBalance::default(), |total, addr_balance| {
             total + addr_balance.balance.clone()
         });

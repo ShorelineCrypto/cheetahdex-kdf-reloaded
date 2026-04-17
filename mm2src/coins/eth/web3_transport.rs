@@ -1,10 +1,12 @@
 use super::{RpcTransportEventHandler, RpcTransportEventHandlerShared};
-#[cfg(not(target_arch = "wasm32"))] use futures::FutureExt;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::FutureExt;
 use futures::TryFutureExt;
 use futures01::{Future, Poll};
 use jsonrpc_core::{Call, Response};
 use serde_json::Value as Json;
-#[cfg(not(target_arch = "wasm32"))] use std::ops::Deref;
+#[cfg(not(target_arch = "wasm32"))]
+use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use web3::api::Namespace;
@@ -28,7 +30,9 @@ impl<T: Transport> Namespace<T> for EthFeeHistoryNamespace<T> {
         Self { transport }
     }
 
-    fn transport(&self) -> &T { &self.transport }
+    fn transport(&self) -> &T {
+        &self.transport
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,7 +115,9 @@ impl<T: Future> Future for SendFuture<T> {
 
     type Error = T::Error;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> { self.0.poll() }
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.0.poll()
+    }
 }
 
 unsafe impl<T> Send for SendFuture<T> where T: Send {}

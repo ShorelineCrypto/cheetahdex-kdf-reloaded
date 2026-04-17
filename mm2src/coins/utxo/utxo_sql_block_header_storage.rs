@@ -3,17 +3,21 @@ use crate::utxo::utxo_block_header_storage::{BlockHeaderStorageError, BlockHeade
 use async_trait::async_trait;
 use chain::BlockHeader;
 use common::async_blocking;
-use db_common::{sqlite::rusqlite::Error as SqlError,
-                sqlite::rusqlite::{Connection, Row, ToSql, NO_PARAMS},
-                sqlite::string_from_row,
-                sqlite::validate_table_name,
-                sqlite::CHECK_TABLE_EXISTS_SQL};
+use db_common::{
+    sqlite::rusqlite::Error as SqlError,
+    sqlite::rusqlite::{Connection, Row, ToSql, NO_PARAMS},
+    sqlite::string_from_row,
+    sqlite::validate_table_name,
+    sqlite::CHECK_TABLE_EXISTS_SQL,
+};
 use mm2_err_handle::prelude::*;
 use serialization::deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-fn block_headers_cache_table(ticker: &str) -> String { ticker.to_owned() + "_block_headers_cache" }
+fn block_headers_cache_table(ticker: &str) -> String {
+    ticker.to_owned() + "_block_headers_cache"
+}
 
 fn get_table_name_and_validate(for_coin: &str) -> Result<String, MmError<BlockHeaderStorageError>> {
     let table_name = block_headers_cache_table(for_coin);

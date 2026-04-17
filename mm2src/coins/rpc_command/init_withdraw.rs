@@ -78,7 +78,9 @@ pub async fn withdraw_user_action(
         .withdraw_task_manager
         .lock()
         .map_to_mm(|e| WithdrawUserActionError::Internal(e.to_string()))?;
-    task_manager.on_user_action(req.task_id, req.user_action).mm_err(Into::into)?;
+    task_manager
+        .on_user_action(req.task_id, req.user_action)
+        .mm_err(Into::into)?;
     Ok(SuccessResponse::new())
 }
 
@@ -108,7 +110,9 @@ impl RpcTaskTypes for WithdrawTask {
 
 #[async_trait]
 impl RpcTask for WithdrawTask {
-    fn initial_status(&self) -> Self::InProgressStatus { WithdrawInProgressStatus::Preparing }
+    fn initial_status(&self) -> Self::InProgressStatus {
+        WithdrawInProgressStatus::Preparing
+    }
 
     async fn run(self, task_handle: &WithdrawTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         match self.coin {

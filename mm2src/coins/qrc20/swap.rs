@@ -414,21 +414,30 @@ impl Qrc20Coin {
         if allowance < value {
             if allowance > U256::zero() {
                 // first reset the allowance to the 0
-                outputs.push(self.approve_output(swap_contract_address, 0.into()).mm_err(Into::into)?);
+                outputs.push(
+                    self.approve_output(swap_contract_address, 0.into())
+                        .mm_err(Into::into)?,
+                );
             }
             // set the allowance from 0 to `my_balance` after the previous output is executed
-            outputs.push(self.approve_output(swap_contract_address, my_balance).mm_err(Into::into)?);
+            outputs.push(
+                self.approve_output(swap_contract_address, my_balance)
+                    .mm_err(Into::into)?,
+            );
         }
 
         // when this output is executed, the allowance will be sufficient already
-        outputs.push(self.erc20_payment_output(
-            id,
-            value,
-            time_lock,
-            &secret_hash,
-            receiver_addr,
-            &swap_contract_address,
-        ).mm_err(Into::into)?);
+        outputs.push(
+            self.erc20_payment_output(
+                id,
+                value,
+                time_lock,
+                &secret_hash,
+                receiver_addr,
+                &swap_contract_address,
+            )
+            .mm_err(Into::into)?,
+        );
         Ok(outputs)
     }
 
@@ -441,13 +450,17 @@ impl Qrc20Coin {
         let tokens = self
             .utxo
             .rpc_client
-            .rpc_contract_call(ViewContractCallType::Allowance, &self.contract_address, &[
-                Token::Address(
-                    qtum::contract_addr_from_utxo_addr(my_address.clone())
-                        .mm_err(|e| UtxoRpcError::Internal(e.to_string()))?,
-                ),
-                Token::Address(spender),
-            ])
+            .rpc_contract_call(
+                ViewContractCallType::Allowance,
+                &self.contract_address,
+                &[
+                    Token::Address(
+                        qtum::contract_addr_from_utxo_addr(my_address.clone())
+                            .mm_err(|e| UtxoRpcError::Internal(e.to_string()))?,
+                    ),
+                    Token::Address(spender),
+                ],
+            )
             .compat()
             .await?;
 
@@ -470,9 +483,11 @@ impl Qrc20Coin {
         let decoded = try_s!(
             self.utxo
                 .rpc_client
-                .rpc_contract_call(ViewContractCallType::Payments, swap_contract_address, &[
-                    Token::FixedBytes(swap_id)
-                ])
+                .rpc_contract_call(
+                    ViewContractCallType::Payments,
+                    swap_contract_address,
+                    &[Token::FixedBytes(swap_id)]
+                )
                 .compat()
                 .await
         );

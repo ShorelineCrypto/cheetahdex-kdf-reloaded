@@ -4,8 +4,10 @@ use crypto::hw_rpc_task::{HwConnectStatuses, TrezorRpcTaskConnectProcessor};
 use crypto::trezor::trezor_rpc_task::TrezorRpcTaskProcessor;
 use crypto::trezor::utxo::TrezorUtxoCoin;
 use crypto::trezor::{ProcessTrezorResponse, TrezorError, TrezorPinMatrix3x3Response, TrezorProcessingError};
-use crypto::{Bip32Error, CryptoCtx, CryptoCtxError, CryptoInitError, DerivationPath, EcdsaCurve, HardwareWalletArc, HwError,
-             HwProcessingError, XPub};
+use crypto::{
+    Bip32Error, CryptoCtx, CryptoCtxError, CryptoInitError, DerivationPath, EcdsaCurve, HardwareWalletArc, HwError,
+    HwProcessingError, XPub,
+};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use rpc_task::{RpcTask, RpcTaskError, RpcTaskHandle};
@@ -22,19 +24,27 @@ pub enum HDExtractPubkeyError {
 }
 
 impl From<CryptoInitError> for HDExtractPubkeyError {
-    fn from(e: CryptoInitError) -> Self { HDExtractPubkeyError::Internal(e.to_string()) }
+    fn from(e: CryptoInitError) -> Self {
+        HDExtractPubkeyError::Internal(e.to_string())
+    }
 }
 
 impl From<CryptoCtxError> for HDExtractPubkeyError {
-    fn from(e: CryptoCtxError) -> Self { HDExtractPubkeyError::Internal(e.to_string()) }
+    fn from(e: CryptoCtxError) -> Self {
+        HDExtractPubkeyError::Internal(e.to_string())
+    }
 }
 
 impl From<TrezorError> for HDExtractPubkeyError {
-    fn from(e: TrezorError) -> Self { HDExtractPubkeyError::HardwareWalletError(HwError::from(e)) }
+    fn from(e: TrezorError) -> Self {
+        HDExtractPubkeyError::HardwareWalletError(HwError::from(e))
+    }
 }
 
 impl From<HwError> for HDExtractPubkeyError {
-    fn from(e: HwError) -> Self { HDExtractPubkeyError::HardwareWalletError(e) }
+    fn from(e: HwError) -> Self {
+        HDExtractPubkeyError::HardwareWalletError(e)
+    }
 }
 
 impl From<TrezorProcessingError<RpcTaskError>> for HDExtractPubkeyError {
@@ -181,7 +191,8 @@ where
         let pubkey_processor = TrezorRpcTaskProcessor::new(task_handle, statuses.to_trezor_request_statuses());
         trezor_session
             .get_public_key(derivation_path, trezor_coin, EcdsaCurve::Secp256k1)
-            .await.mm_err(Into::into)?
+            .await
+            .mm_err(Into::into)?
             .process(&pubkey_processor)
             .await
             .mm_err(HDExtractPubkeyError::from)

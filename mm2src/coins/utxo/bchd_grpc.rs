@@ -110,7 +110,8 @@ pub async fn validate_slp_utxos(
         .iter()
         .map(|url| url.as_ref().to_owned() + "/pb.bchrpc/GetSlpTrustedValidation")
         .collect();
-    let responses: Vec<(_, GetSlpTrustedValidationResponse)> = grpc_web_multi_url_request(&urls, &request).await.mm_err(Into::into)?;
+    let responses: Vec<(_, GetSlpTrustedValidationResponse)> =
+        grpc_web_multi_url_request(&urls, &request).await.mm_err(Into::into)?;
     for (url, response) in responses {
         for validation_result in response.results {
             let actual_token_id = validation_result.token_id.as_slice().into();
@@ -205,7 +206,8 @@ pub async fn check_slp_transaction(
         .map(|url| url.as_ref().to_owned() + "/pb.bchrpc/CheckSlpTransaction")
         .collect();
 
-    let responses: Vec<(_, CheckSlpTransactionResponse)> = grpc_web_multi_url_request(&urls, &request).await.mm_err(Into::into)?;
+    let responses: Vec<(_, CheckSlpTransactionResponse)> =
+        grpc_web_multi_url_request(&urls, &request).await.mm_err(Into::into)?;
     for (url, response) in responses {
         if !response.is_valid {
             return MmError::err(CheckSlpTransactionErr {
@@ -324,17 +326,20 @@ mod bchd_grpc_tests {
             slp_amount: 999,
         };
 
-        let slp_utxos = [invalid_utxo.clone(), SlpUnspent {
-            bch_unspent: UnspentInfo {
-                outpoint: OutPoint {
-                    hash: tx_hash,
-                    index: 2,
+        let slp_utxos = [
+            invalid_utxo.clone(),
+            SlpUnspent {
+                bch_unspent: UnspentInfo {
+                    outpoint: OutPoint {
+                        hash: tx_hash,
+                        index: 2,
+                    },
+                    value: 0,
+                    height: None,
                 },
-                value: 0,
-                height: None,
+                slp_amount: 8999,
             },
-            slp_amount: 8999,
-        }];
+        ];
 
         let url = "https://bchd-testnet.electroncash.de:18335";
         let token_id = H256::from("bb309e48930671582bea508f9a1d9b491e49b69be3d6f372dc08da2ac6e90eb7");

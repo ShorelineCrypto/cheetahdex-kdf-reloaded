@@ -1,9 +1,11 @@
 use super::*;
-use crate::lightning::ln_errors::{FindWatchedOutputSpendError, GetHeaderError, GetTxError, SaveChannelClosingError,
-                                  SaveChannelClosingResult};
-use crate::utxo::rpc_clients::{electrum_script_hash, BestBlock as RpcBestBlock, BlockHashOrHeight,
-                               ElectrumBlockHeader, ElectrumClient, ElectrumNonce, EstimateFeeMethod,
-                               UtxoRpcClientEnum, UtxoRpcError};
+use crate::lightning::ln_errors::{
+    FindWatchedOutputSpendError, GetHeaderError, GetTxError, SaveChannelClosingError, SaveChannelClosingResult,
+};
+use crate::utxo::rpc_clients::{
+    electrum_script_hash, BestBlock as RpcBestBlock, BlockHashOrHeight, ElectrumBlockHeader, ElectrumClient,
+    ElectrumNonce, EstimateFeeMethod, UtxoRpcClientEnum, UtxoRpcError,
+};
 use crate::utxo::utxo_standard::UtxoStandardCoin;
 use crate::{MarketCoinOps, MmCoin};
 use bitcoin::blockdata::block::BlockHeader;
@@ -17,8 +19,10 @@ use common::jsonrpc_client::JsonRpcErrorType;
 use common::log::{debug, error, info};
 use futures::compat::Future01CompatExt;
 use keys::hash::H256;
-use lightning::chain::{chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator},
-                       Confirm, Filter, WatchedOutput};
+use lightning::chain::{
+    chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator},
+    Confirm, Filter, WatchedOutput,
+};
 use rpc::v1::types::H256 as H256Json;
 use std::cmp;
 use std::convert::TryFrom;
@@ -29,7 +33,9 @@ const MIN_ALLOWED_FEE_PER_1000_WEIGHT: u32 = 253;
 const TRY_LOOP_INTERVAL: f64 = 60.;
 
 #[inline]
-pub fn h256_json_from_txid(txid: Txid) -> H256Json { H256Json::from(txid.as_hash().into_inner()).reversed() }
+pub fn h256_json_from_txid(txid: Txid) -> H256Json {
+    H256Json::from(txid.as_hash().into_inner()).reversed()
+}
 
 struct TxWithBlockInfo {
     tx: Transaction,
@@ -227,7 +233,9 @@ impl Platform {
     }
 
     #[inline]
-    fn rpc_client(&self) -> &UtxoRpcClientEnum { &self.coin.as_ref().rpc_client }
+    fn rpc_client(&self) -> &UtxoRpcClientEnum {
+        &self.coin.as_ref().rpc_client
+    }
 
     #[inline]
     pub fn update_best_block_height(&self, new_height: u64) {
@@ -235,7 +243,9 @@ impl Platform {
     }
 
     #[inline]
-    pub fn best_block_height(&self) -> u64 { self.best_block_height.load(AtomicOrdering::Relaxed) }
+    pub fn best_block_height(&self) -> u64 {
+        self.best_block_height.load(AtomicOrdering::Relaxed)
+    }
 
     pub fn add_tx(&self, txid: Txid, script_pubkey: Script) {
         let mut registered_txs = self.registered_txs.lock();
@@ -529,7 +539,9 @@ impl BroadcasterInterface for Platform {
 impl Filter for Platform {
     // Watches for this transaction on-chain
     #[inline]
-    fn register_tx(&self, txid: &Txid, script_pubkey: &Script) { self.add_tx(*txid, script_pubkey.clone()); }
+    fn register_tx(&self, txid: &Txid, script_pubkey: &Script) {
+        self.add_tx(*txid, script_pubkey.clone());
+    }
 
     // Watches for any transactions that spend this output on-chain
     fn register_output(&self, output: WatchedOutput) -> Option<(usize, Transaction)> {
