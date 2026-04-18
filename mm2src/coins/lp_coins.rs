@@ -447,6 +447,98 @@ pub enum NegotiateSwapContractAddrErr {
     NoOtherAddrAndNoFallback,
 }
 
+// ── DEX Fee Types ────────────────────────────────────────────────────
+
+/// Where the burn portion of a DEX fee is sent.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DexFeeBurnDestination {
+    /// KMD-specific: value is attached to an OP_RETURN output (provably unspendable).
+    KmdOpReturn,
+    /// Non-KMD coins: value is sent to a designated burn address (P2PKH).
+    PreBurnAccount,
+}
+
+/// Represents the DEX fee for a taker swap, optionally split between a
+/// fee-collection address and a burn output.
+///
+/// The `WithBurn` variant encodes a split (e.g. 75% to fee address, 25%
+/// burned) configured per-network via `NetConfig::dex_fee_share()`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DexFee {
+    /// No fee required (taker is the fee pubkey itself — rare edge case).
+    NoFee,
+    /// Standard single-output fee: the entire amount goes to the DEX fee address.
+    Standard(MmNumber),
+    /// Split fee: `fee_amount` to the DEX fee address, `burn_amount` destroyed.
+    WithBurn {
+        fee_amount: MmNumber,
+        burn_amount: MmNumber,
+        burn_destination: DexFeeBurnDestination,
+    },
+}
+
+impl DexFee {
+    /// Total amount the taker must spend on the fee transaction.
+    pub fn total_spend_amount(&self) -> MmNumber {
+        match self {
+            DexFee::NoFee => MmNumber::from(0),
+            DexFee::Standard(amount) => amount.clone(),
+            DexFee::WithBurn {
+                fee_amount,
+                burn_amount,
+                ..
+            } => fee_amount + burn_amount,
+        }
+    }
+
+    /// The portion that goes to the fee-collection address.
+    pub fn fee_amount(&self) -> MmNumber {
+        match self {
+            DexFee::NoFee => MmNumber::from(0),
+            DexFee::Standard(amount) => amount.clone(),
+            DexFee::WithBurn { fee_amount, .. } => fee_amount.clone(),
+        }
+    }
+
+    /// The portion that is burned (zero for Standard / NoFee).
+    pub fn burn_amount(&self) -> MmNumber {
+        match self {
+            DexFee::NoFee | DexFee::Standard(_) => MmNumber::from(0),
+            DexFee::WithBurn { burn_amount, .. } => burn_amount.clone(),
+        }
+    }
+}
+
+impl fmt::Display for DexFee {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DexFee::NoFee => write!(f, "NoFee"),
+            DexFee::Standard(amount) => write!(f, "Standard({})", amount),
+            DexFee::WithBurn {
+                fee_amount,
+                burn_amount,
+                ..
+            } => write!(f, "WithBurn(fee={}, burn={})", fee_amount, burn_amount),
+        }
+    }
+}
+
+/// Structured arguments for fee validation (replaces positional parameter lists).
+pub struct ValidateFeeArgs<'a> {
+    /// The fee transaction to validate.
+    pub fee_tx: &'a TransactionEnum,
+    /// Public key of the expected sender (taker).
+    pub expected_sender: &'a [u8],
+    /// Raw public key of the DEX fee recipient address.
+    pub fee_addr: &'a [u8],
+    /// The DEX fee specification (includes burn details if applicable).
+    pub dex_fee: &'a DexFee,
+    /// Earliest block number the fee tx should appear in.
+    pub min_block_number: u64,
+    /// Swap UUID (for logging / memo validation).
+    pub uuid: &'a [u8],
+}
+
 #[derive(Clone, Debug)]
 pub struct ValidatePaymentInput {
     pub payment_tx: Vec<u8>,
@@ -463,7 +555,7 @@ pub struct ValidatePaymentInput {
 /// Swap operations (mostly based on the Hash/Time locked transactions implemented by coin wallets).
 #[async_trait]
 pub trait SwapOps {
-    fn send_taker_fee(&self, fee_addr: &[u8], amount: BigDecimal, uuid: &[u8]) -> TransactionFut;
+    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], uuid: &[u8]) -> TransactionFut;
 
     fn send_maker_payment(
         &self,
@@ -525,15 +617,7 @@ pub trait SwapOps {
         swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut;
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        expected_sender: &[u8],
-        fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send>;
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send>;
 
     fn validate_maker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send>;
 

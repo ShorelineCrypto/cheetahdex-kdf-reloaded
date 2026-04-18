@@ -20,9 +20,9 @@ use crate::utxo::utxo_builder::{
     UtxoFieldsWithHardwareWalletBuilder, UtxoFieldsWithIguanaPrivKeyBuilder,
 };
 use crate::{
-    eth, CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DelegationError, DelegationFut,
+    eth, CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DelegationError, DelegationFut, DexFee,
     GetWithdrawSenderAddress, NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, SignatureResult, StakingInfosFut,
-    SwapOps, TradePreimageValue, TransactionFut, UnexpectedDerivationMethod, ValidateAddressResult,
+    SwapOps, TradePreimageValue, TransactionFut, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
     ValidatePaymentInput, VerificationResult, WithdrawFut, WithdrawSenderAddress,
 };
 use common::mm_metrics::MetricsArc;
@@ -551,8 +551,8 @@ impl UtxoStandardOps for QtumCoin {
 
 #[async_trait]
 impl SwapOps for QtumCoin {
-    fn send_taker_fee(&self, fee_addr: &[u8], amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
-        utxo_common::send_taker_fee(self.clone(), fee_addr, amount)
+    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
+        utxo_common::send_taker_fee(self.clone(), dex_fee, fee_addr)
     }
 
     fn send_maker_payment(
@@ -627,16 +627,8 @@ impl SwapOps for QtumCoin {
         utxo_common::send_maker_refunds_payment(self.clone(), maker_tx, time_lock, taker_pub, secret_hash, htlc_privkey)
     }
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        expected_sender: &[u8],
-        fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let tx = match fee_tx {
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let tx = match args.fee_tx {
             TransactionEnum::UtxoTx(tx) => tx.clone(),
             _ => panic!(),
         };
@@ -644,10 +636,10 @@ impl SwapOps for QtumCoin {
             self.clone(),
             tx,
             utxo_common::DEFAULT_FEE_VOUT,
-            expected_sender,
-            amount,
-            min_block_number,
-            fee_addr,
+            args.expected_sender,
+            args.dex_fee,
+            args.min_block_number,
+            args.fee_addr,
         )
     }
 

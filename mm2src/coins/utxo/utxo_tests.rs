@@ -21,6 +21,7 @@ use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardC
 #[cfg(not(target_arch = "wasm32"))]
 use crate::WithdrawFee;
 use crate::{CoinBalance, PrivKeyBuildPolicy, StakingInfosDetails, SwapOps, TradePreimageValue, TxFeeDetails};
+use crate::{DexFee, ValidateFeeArgs};
 use bigdecimal::{BigDecimal, Signed};
 use chain::OutPoint;
 use common::executor::Timer;
@@ -2521,14 +2522,14 @@ fn test_validate_fee_wrong_sender() {
     let taker_fee_tx = coin.tx_enum_from_bytes(&tx_bytes).unwrap();
     let amount: BigDecimal = "0.0014157".parse().unwrap();
     let validate_err = coin
-        .validate_fee(
-            &taker_fee_tx,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &amount,
-            0,
-            &[],
-        )
+        .validate_fee(ValidateFeeArgs {
+            fee_tx: &taker_fee_tx,
+            expected_sender: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            dex_fee: &DexFee::Standard(amount.into()),
+            min_block_number: 0,
+            uuid: &[],
+        })
         .wait()
         .unwrap_err();
     assert!(validate_err.contains("was sent from wrong address"));
@@ -2548,14 +2549,14 @@ fn test_validate_fee_min_block() {
     let amount: BigDecimal = "0.0014157".parse().unwrap();
     let sender_pub = hex::decode("03ad6f89abc2e5beaa8a3ac28e22170659b3209fe2ddf439681b4b8f31508c36fa").unwrap();
     let validate_err = coin
-        .validate_fee(
-            &taker_fee_tx,
-            &sender_pub,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &amount,
-            810329,
-            &[],
-        )
+        .validate_fee(ValidateFeeArgs {
+            fee_tx: &taker_fee_tx,
+            expected_sender: &sender_pub,
+            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            dex_fee: &DexFee::Standard(amount.into()),
+            min_block_number: 810329,
+            uuid: &[],
+        })
         .wait()
         .unwrap_err();
     assert!(validate_err.contains("confirmed before min_block"));
@@ -2575,9 +2576,16 @@ fn test_validate_fee_bch_70_bytes_signature() {
     let taker_fee_tx = coin.tx_enum_from_bytes(&tx_bytes).unwrap();
     let amount: BigDecimal = "0.0001".parse().unwrap();
     let sender_pub = hex::decode("02ae7dc4ef1b49aadeff79cfad56664105f4d114e1716bc4f930cb27dbd309e521").unwrap();
-    coin.validate_fee(&taker_fee_tx, &sender_pub, &*DEX_FEE_ADDR_RAW_PUBKEY, &amount, 0, &[])
-        .wait()
-        .unwrap();
+    coin.validate_fee(ValidateFeeArgs {
+        fee_tx: &taker_fee_tx,
+        expected_sender: &sender_pub,
+        fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+        dex_fee: &DexFee::Standard(amount.into()),
+        min_block_number: 0,
+        uuid: &[],
+    })
+    .wait()
+    .unwrap();
 }
 
 #[test]

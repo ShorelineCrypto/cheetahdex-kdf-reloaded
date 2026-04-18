@@ -2,10 +2,11 @@ use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, Trade
 use crate::solana::solana_common::{ui_amount_to_amount, PrepareTransferData, SufficientBalanceError};
 use crate::solana::{solana_common, AccountError, SolanaCommonOps, SolanaFeeDetails};
 use crate::{
-    BalanceFut, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, RawTransactionFut,
+    BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, RawTransactionFut,
     RawTransactionRequest, SignatureResult, SolanaCoin, TradePreimageFut, TradePreimageResult, TradePreimageValue,
     TransactionDetails, TransactionFut, TransactionType, UnexpectedDerivationMethod, ValidateAddressResult,
-    ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFut, WithdrawRequest, WithdrawResult,
+    ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFut, WithdrawRequest,
+    WithdrawResult,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -315,7 +316,7 @@ impl MarketCoinOps for SplToken {
 #[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
 #[async_trait]
 impl SwapOps for SplToken {
-    fn send_taker_fee(&self, _fee_addr: &[u8], amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         unimplemented!()
     }
 
@@ -391,15 +392,7 @@ impl SwapOps for SplToken {
         todo!()
     }
 
-    fn validate_fee(
-        &self,
-        _fee_tx: &TransactionEnum,
-        _expected_sender: &[u8],
-        _fee_addr: &[u8],
-        _amount: &BigDecimal,
-        _min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+    fn validate_fee(&self, _args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
         unimplemented!()
     }
 

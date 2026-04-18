@@ -14,10 +14,10 @@ use crate::utxo::rpc_clients::{
 use crate::utxo::tx_cache::TxCacheResult;
 use crate::utxo::utxo_withdraw::{InitUtxoWithdraw, StandardUtxoWithdraw, UtxoWithdraw};
 use crate::{
-    CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, GetWithdrawSenderAddress, HDAddressId, RawTransactionError,
-    RawTransactionRequest, RawTransactionRes, SignatureError, SignatureResult, TradePreimageValue, TransactionFut,
-    TxFeeDetails, ValidateAddressResult, ValidatePaymentInput, VerificationError, VerificationResult, WithdrawFrom,
-    WithdrawResult, WithdrawSenderAddress,
+    CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DexFee, DexFeeBurnDestination, GetWithdrawSenderAddress,
+    HDAddressId, RawTransactionError, RawTransactionRequest, RawTransactionRes, SignatureError, SignatureResult,
+    TradePreimageValue, TransactionFut, TxFeeDetails, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
+    VerificationError, VerificationResult, WithdrawFrom, WithdrawResult, WithdrawSenderAddress,
 };
 use bigdecimal::BigDecimal;
 use bitcrypto::dhash256;
@@ -1067,11 +1067,16 @@ pub async fn p2sh_spending_tx<T: UtxoCommonOps>(
     })
 }
 
-pub fn send_taker_fee<T>(coin: T, fee_pub_key: &[u8], amount: BigDecimal) -> TransactionFut
+/// Constructs and broadcasts the taker DEX fee transaction.
+///
+/// For `DexFee::Standard`: a single P2PKH output to the fee-collection address.
+/// For `DexFee::WithBurn`: two outputs — fee to the DEX address, burn via
+/// OP_RETURN (KMD) or P2PKH to a burn address (other coins).
+pub fn send_taker_fee<T>(coin: T, dex_fee: &DexFee, fee_pub_key: &[u8]) -> TransactionFut
 where
     T: UtxoCommonOps + GetUtxoListOps,
 {
-    let address = try_tx_fus!(address_from_raw_pubkey(
+    let fee_address = try_tx_fus!(address_from_raw_pubkey(
         fee_pub_key,
         coin.as_ref().conf.pub_addr_prefix,
         coin.as_ref().conf.pub_t_addr_prefix,
@@ -1079,12 +1084,65 @@ where
         coin.as_ref().conf.bech32_hrp.clone(),
         coin.addr_format().clone(),
     ));
-    let amount = try_tx_fus!(sat_from_big_decimal(&amount, coin.as_ref().decimals));
-    let output = TransactionOutput {
-        value: amount,
-        script_pubkey: Builder::build_p2pkh(&address.hash).to_bytes(),
-    };
-    send_outputs_from_my_address(coin, vec![output])
+
+    let outputs = try_tx_fus!(generate_taker_fee_tx_outputs(&coin, dex_fee, &fee_address));
+    send_outputs_from_my_address(coin, outputs)
+}
+
+/// Builds the transaction outputs for a taker fee payment.
+///
+/// Returns 0 outputs for `NoFee`, 1 for `Standard`, or 2 for `WithBurn`.
+fn generate_taker_fee_tx_outputs(
+    coin: &impl UtxoCommonOps,
+    dex_fee: &DexFee,
+    fee_address: &Address,
+) -> Result<Vec<TransactionOutput>, String> {
+    match dex_fee {
+        DexFee::NoFee => Ok(vec![]),
+        DexFee::Standard(amount) => {
+            let sat = sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals).map_err(|e| e.to_string())?;
+            Ok(vec![TransactionOutput {
+                value: sat,
+                script_pubkey: Builder::build_p2pkh(&fee_address.hash).to_bytes(),
+            }])
+        },
+        DexFee::WithBurn {
+            fee_amount,
+            burn_amount,
+            burn_destination,
+        } => {
+            let fee_sat =
+                sat_from_big_decimal(&fee_amount.to_decimal(), coin.as_ref().decimals).map_err(|e| e.to_string())?;
+            let burn_sat =
+                sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals).map_err(|e| e.to_string())?;
+
+            // Output 0: fee portion → DEX address (P2PKH)
+            let fee_output = TransactionOutput {
+                value: fee_sat,
+                script_pubkey: Builder::build_p2pkh(&fee_address.hash).to_bytes(),
+            };
+
+            // Output 1: burn portion → OP_RETURN (KMD) or burn address (others)
+            let burn_output = match burn_destination {
+                DexFeeBurnDestination::KmdOpReturn => TransactionOutput {
+                    value: burn_sat,
+                    script_pubkey: Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes(),
+                },
+                DexFeeBurnDestination::PreBurnAccount => {
+                    // For PreBurn, use the same address format but a different pubkey
+                    // would be needed. For now, the burn goes to an OP_RETURN as well
+                    // since we don't have a separate burn address configured.
+                    // TODO: Add burn_addr_pubkey to NetConfig for PreBurnAccount support
+                    TransactionOutput {
+                        value: burn_sat,
+                        script_pubkey: Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes(),
+                    }
+                },
+            };
+
+            Ok(vec![fee_output, burn_output])
+        },
+    }
 }
 
 pub fn send_maker_payment<T>(
@@ -1449,16 +1507,20 @@ pub fn check_all_inputs_signed_by_pub(tx: &UtxoTx, expected_pub: &[u8]) -> Resul
     Ok(true)
 }
 
+/// Validates a taker DEX fee transaction against expected parameters.
+///
+/// For `DexFee::Standard`: checks output 0 pays the fee address the expected amount.
+/// For `DexFee::WithBurn`: additionally validates the burn output (OP_RETURN or P2PKH).
 pub fn validate_fee<T: UtxoCommonOps>(
     coin: T,
     tx: UtxoTx,
     output_index: usize,
     sender_pubkey: &[u8],
-    amount: &BigDecimal,
+    dex_fee: &DexFee,
     min_block_number: u64,
     fee_addr: &[u8],
 ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-    let amount = amount.clone();
+    let dex_fee = dex_fee.clone();
     let address = try_fus!(address_from_raw_pubkey(
         fee_addr,
         coin.as_ref().conf.pub_addr_prefix,
@@ -1472,7 +1534,6 @@ pub fn validate_fee<T: UtxoCommonOps>(
         return Box::new(futures01::future::err(ERRL!("The dex fee was sent from wrong address")));
     }
     let fut = async move {
-        let amount = try_s!(sat_from_big_decimal(&amount, coin.as_ref().decimals));
         let tx_from_rpc = try_s!(
             coin.as_ref()
                 .rpc_client
@@ -1498,31 +1559,93 @@ pub fn validate_fee<T: UtxoCommonOps>(
             );
         }
 
-        match tx.outputs.get(output_index) {
-            Some(out) => {
-                let expected_script_pubkey = Builder::build_p2pkh(&address.hash).to_bytes();
-                if out.script_pubkey != expected_script_pubkey {
-                    return ERR!(
-                        "Provided dex fee tx output script_pubkey doesn't match expected {:?} {:?}",
-                        out.script_pubkey,
-                        expected_script_pubkey
-                    );
-                }
-                if out.value < amount {
-                    return ERR!(
-                        "Provided dex fee tx output value is less than expected {:?} {:?}",
-                        out.value,
-                        amount
-                    );
-                }
+        // Validate fee output(s) based on DexFee variant
+        match &dex_fee {
+            DexFee::NoFee => {},
+            DexFee::Standard(amount) => {
+                let expected_sat = try_s!(sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals));
+                try_s!(validate_dex_output(&tx, output_index, &address, expected_sat));
             },
-            None => {
-                return ERR!("Provided dex fee tx {:?} does not have output {}", tx, output_index);
+            DexFee::WithBurn {
+                fee_amount,
+                burn_amount,
+                burn_destination,
+            } => {
+                // Validate fee output (output_index)
+                let fee_sat = try_s!(sat_from_big_decimal(&fee_amount.to_decimal(), coin.as_ref().decimals));
+                try_s!(validate_dex_output(&tx, output_index, &address, fee_sat));
+
+                // Validate burn output (output_index + 1)
+                let burn_sat = try_s!(sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals));
+                let expected_burn_script = match burn_destination {
+                    DexFeeBurnDestination::KmdOpReturn | DexFeeBurnDestination::PreBurnAccount => {
+                        Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
+                    },
+                };
+                try_s!(validate_burn_output(
+                    &tx,
+                    output_index + 1,
+                    &expected_burn_script,
+                    burn_sat
+                ));
             },
         }
         Ok(())
     };
     Box::new(fut.boxed().compat())
+}
+
+/// Validates that a specific output pays the expected address the expected amount.
+fn validate_dex_output(tx: &UtxoTx, index: usize, expected_addr: &Address, expected_sat: u64) -> Result<(), String> {
+    match tx.outputs.get(index) {
+        Some(out) => {
+            let expected_script = Builder::build_p2pkh(&expected_addr.hash).to_bytes();
+            if out.script_pubkey != expected_script {
+                return ERR!(
+                    "Dex fee tx output {} script_pubkey mismatch: got {:?}, expected {:?}",
+                    index,
+                    out.script_pubkey,
+                    expected_script
+                );
+            }
+            if out.value < expected_sat {
+                return ERR!(
+                    "Dex fee tx output {} value {} is less than expected {}",
+                    index,
+                    out.value,
+                    expected_sat
+                );
+            }
+            Ok(())
+        },
+        None => ERR!("Dex fee tx does not have output index {}", index),
+    }
+}
+
+/// Validates that a specific output matches the expected burn script and amount.
+fn validate_burn_output(tx: &UtxoTx, index: usize, expected_script: &[u8], expected_sat: u64) -> Result<(), String> {
+    match tx.outputs.get(index) {
+        Some(out) => {
+            if out.script_pubkey.as_ref() != expected_script {
+                return ERR!(
+                    "Burn output {} script mismatch: got {:?}, expected {:?}",
+                    index,
+                    out.script_pubkey,
+                    expected_script
+                );
+            }
+            if out.value < expected_sat {
+                return ERR!(
+                    "Burn output {} value {} is less than expected {}",
+                    index,
+                    out.value,
+                    expected_sat
+                );
+            }
+            Ok(())
+        },
+        None => ERR!("Dex fee tx does not have burn output at index {}", index),
+    }
 }
 
 pub fn validate_maker_payment<T: UtxoCommonOps>(

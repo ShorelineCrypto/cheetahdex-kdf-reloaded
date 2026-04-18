@@ -13,12 +13,12 @@ use crate::utxo::{
     UtxoTxBroadcastOps, UtxoTxGenerationOps,
 };
 use crate::{
-    BalanceFut, CoinBalance, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
+    BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
     NegotiateSwapContractAddrErr, NumConversError, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest,
     SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
     TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod,
-    ValidateAddressResult, ValidatePaymentInput, VerificationError, VerificationResult, WithdrawError, WithdrawFee,
-    WithdrawFut, WithdrawRequest,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationError, VerificationResult, WithdrawError,
+    WithdrawFee, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
 use bitcrypto::dhash160;
@@ -796,12 +796,13 @@ impl SlpToken {
             _ => return MmError::err(ValidateDexFeeError::InvalidSlpDetails),
         }
 
+        let platform_dust_fee = DexFee::Standard(self.platform_dust_dec().into());
         let validate_fut = utxo_common::validate_fee(
             self.platform_coin.clone(),
             tx,
             SLP_FEE_VOUT,
             expected_sender,
-            &self.platform_dust_dec(),
+            &platform_dust_fee,
             min_block_number,
             fee_addr,
         );
@@ -1283,11 +1284,14 @@ impl MarketCoinOps for SlpToken {
 
 #[async_trait]
 impl SwapOps for SlpToken {
-    fn send_taker_fee(&self, fee_addr: &[u8], amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         let coin = self.clone();
         let fee_pubkey = try_tx_fus!(Public::from_slice(fee_addr));
         let script_pubkey = ScriptBuilder::build_p2pkh(&fee_pubkey.address_hash().into()).into();
-        let amount = try_tx_fus!(sat_from_big_decimal(&amount, self.decimals()));
+        let amount = try_tx_fus!(sat_from_big_decimal(
+            &dex_fee.total_spend_amount().to_decimal(),
+            self.decimals()
+        ));
 
         let fut = async move {
             let slp_out = SlpOutput { amount, script_pubkey };
@@ -1455,23 +1459,16 @@ impl SwapOps for SlpToken {
         Box::new(fut.boxed().compat())
     }
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        expected_sender: &[u8],
-        fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let tx = match fee_tx {
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let tx = match args.fee_tx {
             TransactionEnum::UtxoTx(tx) => tx.clone(),
             _ => panic!(),
         };
         let coin = self.clone();
-        let expected_sender = expected_sender.to_owned();
-        let fee_addr = fee_addr.to_owned();
-        let amount = amount.to_owned();
+        let expected_sender = args.expected_sender.to_owned();
+        let fee_addr = args.fee_addr.to_owned();
+        let amount = args.dex_fee.total_spend_amount().to_decimal();
+        let min_block_number = args.min_block_number;
 
         let fut = async move {
             try_s!(

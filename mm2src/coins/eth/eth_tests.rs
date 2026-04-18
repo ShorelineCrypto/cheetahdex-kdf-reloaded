@@ -997,14 +997,14 @@ fn validate_dex_fee_invalid_sender_eth() {
     let tx = signed_tx_from_web3_tx(tx).unwrap().into();
     let amount: BigDecimal = "0.000526435076465".parse().unwrap();
     let validate_err = coin
-        .validate_fee(
-            &tx,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &amount,
-            0,
-            &[],
-        )
+        .validate_fee(ValidateFeeArgs {
+            fee_tx: &tx,
+            expected_sender: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            dex_fee: &DexFee::Standard(amount.into()),
+            min_block_number: 0,
+            uuid: &[],
+        })
         .wait()
         .unwrap_err();
     assert!(validate_err.contains("was sent from wrong address"));
@@ -1034,14 +1034,14 @@ fn validate_dex_fee_invalid_sender_erc() {
     let tx = signed_tx_from_web3_tx(tx).unwrap().into();
     let amount: BigDecimal = "5.548262548262548262".parse().unwrap();
     let validate_err = coin
-        .validate_fee(
-            &tx,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &amount,
-            0,
-            &[],
-        )
+        .validate_fee(ValidateFeeArgs {
+            fee_tx: &tx,
+            expected_sender: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            dex_fee: &DexFee::Standard(amount.into()),
+            min_block_number: 0,
+            uuid: &[],
+        })
         .wait()
         .unwrap_err();
     assert!(validate_err.contains("was sent from wrong address"));
@@ -1079,14 +1079,14 @@ fn validate_dex_fee_eth_confirmed_before_min_block() {
     let tx = tx.into();
     let amount: BigDecimal = "0.000526435076465".parse().unwrap();
     let validate_err = coin
-        .validate_fee(
-            &tx,
-            &compressed_public,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &amount,
-            11784793,
-            &[],
-        )
+        .validate_fee(ValidateFeeArgs {
+            fee_tx: &tx,
+            expected_sender: &compressed_public,
+            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            dex_fee: &DexFee::Standard(amount.into()),
+            min_block_number: 11784793,
+            uuid: &[],
+        })
         .wait()
         .unwrap_err();
     assert!(validate_err.contains("confirmed before min_block"));
@@ -1119,14 +1119,14 @@ fn validate_dex_fee_erc_confirmed_before_min_block() {
     let tx = tx.into();
     let amount: BigDecimal = "5.548262548262548262".parse().unwrap();
     let validate_err = coin
-        .validate_fee(
-            &tx,
-            &compressed_public,
-            &*DEX_FEE_ADDR_RAW_PUBKEY,
-            &amount,
-            11823975,
-            &[],
-        )
+        .validate_fee(ValidateFeeArgs {
+            fee_tx: &tx,
+            expected_sender: &compressed_public,
+            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            dex_fee: &DexFee::Standard(amount.into()),
+            min_block_number: 11823975,
+            uuid: &[],
+        })
         .wait()
         .unwrap_err();
     assert!(validate_err.contains("confirmed before min_block"));

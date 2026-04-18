@@ -3,9 +3,9 @@ use super::{
     TransactionEnum, TransactionFut,
 };
 use crate::{
-    BalanceFut, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, SignatureResult, TradePreimageFut,
-    TradePreimageResult, TradePreimageValue, UnexpectedDerivationMethod, ValidateAddressResult, ValidatePaymentInput,
-    VerificationResult, WithdrawFut, WithdrawRequest,
+    BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, SignatureResult,
+    TradePreimageFut, TradePreimageResult, TradePreimageValue, UnexpectedDerivationMethod, ValidateAddressResult,
+    ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -131,7 +131,7 @@ impl MarketCoinOps for TestCoin {
 #[mockable]
 #[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
 impl SwapOps for TestCoin {
-    fn send_taker_fee(&self, fee_addr: &[u8], amount: BigDecimal, uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         unimplemented!()
     }
 
@@ -207,15 +207,7 @@ impl SwapOps for TestCoin {
         unimplemented!()
     }
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        expected_sender: &[u8],
-        fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+    fn validate_fee(&self, _args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
         unimplemented!()
     }
 

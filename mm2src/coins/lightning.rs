@@ -11,11 +11,11 @@ use crate::utxo::rpc_clients::UtxoRpcClientEnum;
 use crate::utxo::utxo_common::{big_decimal_from_sat_unsigned, UtxoTxBuilder};
 use crate::utxo::{sat_from_big_decimal, BlockchainNetwork, FeePolicy, GetUtxoListOps, UtxoTxGenerationOps};
 use crate::{
-    BalanceFut, CoinBalance, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
+    BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
     NegotiateSwapContractAddrErr, RawTransactionFut, RawTransactionRequest, SignatureError, SignatureResult, SwapOps,
     TradeFee, TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionEnum, TransactionFut,
-    UnexpectedDerivationMethod, UtxoStandardCoin, ValidateAddressResult, ValidatePaymentInput, VerificationError,
-    VerificationResult, WithdrawError, WithdrawFut, WithdrawRequest,
+    UnexpectedDerivationMethod, UtxoStandardCoin, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
+    VerificationError, VerificationResult, WithdrawError, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -247,7 +247,7 @@ impl LightningCoin {
 #[async_trait]
 // Todo: Implement this when implementing swaps for lightning as it's is used only for swaps
 impl SwapOps for LightningCoin {
-    fn send_taker_fee(&self, _fee_addr: &[u8], _amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         unimplemented!()
     }
 
@@ -323,15 +323,7 @@ impl SwapOps for LightningCoin {
         unimplemented!()
     }
 
-    fn validate_fee(
-        &self,
-        _fee_tx: &TransactionEnum,
-        _expected_sender: &[u8],
-        _fee_addr: &[u8],
-        _amount: &BigDecimal,
-        _min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+    fn validate_fee(&self, _args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
         unimplemented!()
     }
 

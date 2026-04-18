@@ -21,12 +21,12 @@ use crate::utxo::{
     VerboseTransactionFrom, UTXO_LOCK,
 };
 use crate::{
-    BalanceError, BalanceFut, CoinBalance, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
-    NegotiateSwapContractAddrErr, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest, SignatureResult,
+    BalanceError, BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps,
+    MmCoin, NegotiateSwapContractAddrErr, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest, SignatureResult,
     SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
     TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TransactionType, UnexpectedDerivationMethod,
-    ValidateAddressResult, ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFee, WithdrawFut,
-    WithdrawRequest, WithdrawResult,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFee,
+    WithdrawFut, WithdrawRequest, WithdrawResult,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -779,9 +779,12 @@ impl UtxoCommonOps for Qrc20Coin {
 
 #[async_trait]
 impl SwapOps for Qrc20Coin {
-    fn send_taker_fee(&self, fee_addr: &[u8], amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         let to_address = try_tx_fus!(self.contract_address_from_raw_pubkey(fee_addr));
-        let amount = try_tx_fus!(wei_from_big_decimal(&amount, self.utxo.decimals));
+        let amount = try_tx_fus!(wei_from_big_decimal(
+            &dex_fee.total_spend_amount().to_decimal(),
+            self.utxo.decimals
+        ));
         let transfer_output =
             try_tx_fus!(self.transfer_output(to_address, amount, QRC20_GAS_LIMIT_DEFAULT, QRC20_GAS_PRICE_DEFAULT));
         let outputs = vec![transfer_output];
@@ -926,27 +929,23 @@ impl SwapOps for Qrc20Coin {
         Box::new(fut.boxed().compat())
     }
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        expected_sender: &[u8],
-        fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let fee_tx = match fee_tx {
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let fee_tx = match args.fee_tx {
             TransactionEnum::UtxoTx(tx) => tx,
             _ => panic!("Unexpected TransactionEnum"),
         };
         let fee_tx_hash = fee_tx.hash().reversed().into();
-        if !try_fus!(check_all_inputs_signed_by_pub(fee_tx, expected_sender)) {
+        if !try_fus!(check_all_inputs_signed_by_pub(&fee_tx, args.expected_sender)) {
             return Box::new(futures01::future::err(ERRL!("The dex fee was sent from wrong address")));
         }
-        let fee_addr = try_fus!(self.contract_address_from_raw_pubkey(fee_addr));
-        let expected_value = try_fus!(wei_from_big_decimal(amount, self.utxo.decimals));
+        let fee_addr = try_fus!(self.contract_address_from_raw_pubkey(args.fee_addr));
+        let expected_value = try_fus!(wei_from_big_decimal(
+            &args.dex_fee.total_spend_amount().to_decimal(),
+            self.utxo.decimals
+        ));
 
         let selfi = self.clone();
+        let min_block_number = args.min_block_number;
         let fut = async move {
             selfi
                 .validate_fee_impl(fee_tx_hash, fee_addr, expected_value, min_block_number)

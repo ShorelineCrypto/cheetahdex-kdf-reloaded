@@ -70,7 +70,7 @@ pub use ethcore_transaction::SignedTransaction as SignedEthTx;
 pub use rlp;
 
 mod web3_transport;
-use crate::{TransactionErr, TransactionFut, ValidatePaymentInput};
+use crate::{DexFee, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput};
 use common::mm_number::MmNumber;
 use ethkey::{sign, verify_address};
 use serialization::{CompactInteger, Serializable, Stream};
@@ -706,12 +706,16 @@ impl Deref for EthCoin {
 
 #[async_trait]
 impl SwapOps for EthCoin {
-    fn send_taker_fee(&self, fee_addr: &[u8], amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         let address = try_tx_fus!(addr_from_raw_pubkey(fee_addr));
+        let amount = dex_fee.total_spend_amount();
 
         Box::new(
-            self.send_to_address(address, try_tx_fus!(wei_from_big_decimal(&amount, self.decimals)))
-                .map(TransactionEnum::from),
+            self.send_to_address(
+                address,
+                try_tx_fus!(wei_from_big_decimal(&amount.to_decimal(), self.decimals)),
+            )
+            .map(TransactionEnum::from),
         )
     }
 
@@ -840,23 +844,17 @@ impl SwapOps for EthCoin {
         )
     }
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        expected_sender: &[u8],
-        fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
         let selfi = self.clone();
-        let tx = match fee_tx {
+        let tx = match args.fee_tx {
             TransactionEnum::SignedEthTx(t) => t.clone(),
             _ => panic!(),
         };
-        let sender_addr = try_fus!(addr_from_raw_pubkey(expected_sender));
-        let fee_addr = try_fus!(addr_from_raw_pubkey(fee_addr));
-        let amount = amount.clone();
+        let sender_addr = try_fus!(addr_from_raw_pubkey(args.expected_sender));
+        let fee_addr = try_fus!(addr_from_raw_pubkey(args.fee_addr));
+        // For EVM, burn is not supported — use total spend amount for validation
+        let amount = args.dex_fee.total_spend_amount().to_decimal();
+        let min_block_number = args.min_block_number;
 
         let fut = async move {
             let expected_value = try_s!(wei_from_big_decimal(&amount, selfi.decimals));

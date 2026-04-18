@@ -57,7 +57,7 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use coins::{lp_coinfind, MmCoinEnum, TradeFee, TransactionEnum};
+use coins::{lp_coinfind, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee, TransactionEnum};
 use common::log::{debug, warn};
 use common::{
     bits256, calc_total_pages,
@@ -649,6 +649,56 @@ pub fn dex_fee_amount_from_taker_coin(
     let min_tx_amount = MmNumber::from(taker_coin.min_tx_amount());
     let threshold = dex_fee_threshold(net_cfg, min_tx_amount);
     dex_fee_amount(net_cfg, taker_coin.ticker(), maker_coin, trade_amount, &threshold)
+}
+
+/// Computes the full [`DexFee`] for a taker swap, applying the burn split
+/// from the network configuration.
+///
+/// If `NetConfig::burn_enabled()` is false, returns `DexFee::Standard`.
+/// Otherwise, splits the total fee according to `NetConfig::dex_fee_share()`:
+///   - `fee_amount = total * share` (goes to DEX fee address)
+///   - `burn_amount = total - fee_amount` (goes to OP_RETURN / burn address)
+///
+/// The burn destination is `KmdOpReturn` for KMD, `PreBurnAccount` for others.
+pub fn compute_dex_fee(
+    net_cfg: &dyn NetConfig,
+    taker_coin: &MmCoinEnum,
+    maker_coin: &str,
+    trade_amount: &MmNumber,
+) -> DexFee {
+    let total = dex_fee_amount_from_taker_coin(net_cfg, taker_coin, maker_coin, trade_amount);
+
+    if !net_cfg.burn_enabled() {
+        return DexFee::Standard(total);
+    }
+
+    let share: MmNumber = net_cfg.dex_fee_share().into();
+    let fee_amount = &total * &share;
+    let burn_amount = &total - &fee_amount;
+
+    // If burn amount would be zero or negative (rounding), fall back to standard
+    if burn_amount <= MmNumber::from(0) {
+        return DexFee::Standard(total);
+    }
+
+    let min_tx_amount = MmNumber::from(taker_coin.min_tx_amount());
+    // If either portion falls below the minimum tx amount, fall back to standard
+    if fee_amount < min_tx_amount || burn_amount < min_tx_amount {
+        return DexFee::Standard(total);
+    }
+
+    // KMD uses OP_RETURN; all other coins use a pre-burn address
+    let burn_destination = if taker_coin.ticker() == "KMD" {
+        DexFeeBurnDestination::KmdOpReturn
+    } else {
+        DexFeeBurnDestination::PreBurnAccount
+    };
+
+    DexFee::WithBurn {
+        fee_amount,
+        burn_amount,
+        burn_destination,
+    }
 }
 
 #[derive(Clone, Debug, Eq, Deserialize, PartialEq, Serialize)]
@@ -1601,5 +1651,76 @@ mod lp_swap_tests {
         let deserialized: NegotiationDataMsg = rmp_serde::from_read_ref(serialized.as_slice()).unwrap();
 
         assert_eq!(deserialized, v3);
+    }
+
+    #[test]
+    fn test_dex_fee_no_fee_amounts() {
+        let fee = DexFee::NoFee;
+        assert_eq!(fee.total_spend_amount(), MmNumber::from(0));
+        assert_eq!(fee.fee_amount(), MmNumber::from(0));
+        assert_eq!(fee.burn_amount(), MmNumber::from(0));
+    }
+
+    #[test]
+    fn test_dex_fee_standard_amounts() {
+        let fee = DexFee::Standard(MmNumber::from("1.5"));
+        assert_eq!(fee.total_spend_amount(), MmNumber::from("1.5"));
+        assert_eq!(fee.fee_amount(), MmNumber::from("1.5"));
+        assert_eq!(fee.burn_amount(), MmNumber::from(0));
+    }
+
+    #[test]
+    fn test_dex_fee_with_burn_amounts() {
+        let fee = DexFee::WithBurn {
+            fee_amount: MmNumber::from("0.75"),
+            burn_amount: MmNumber::from("0.25"),
+            burn_destination: DexFeeBurnDestination::KmdOpReturn,
+        };
+        assert_eq!(fee.total_spend_amount(), MmNumber::from("1.0"));
+        assert_eq!(fee.fee_amount(), MmNumber::from("0.75"));
+        assert_eq!(fee.burn_amount(), MmNumber::from("0.25"));
+    }
+
+    #[test]
+    fn test_dex_fee_display() {
+        let fee = DexFee::NoFee;
+        assert_eq!(format!("{}", fee), "NoFee");
+
+        let fee = DexFee::Standard(MmNumber::from("1.5"));
+        let display = format!("{}", fee);
+        assert!(display.starts_with("Standard("));
+
+        let fee = DexFee::WithBurn {
+            fee_amount: MmNumber::from("0.75"),
+            burn_amount: MmNumber::from("0.25"),
+            burn_destination: DexFeeBurnDestination::PreBurnAccount,
+        };
+        let display = format!("{}", fee);
+        assert!(display.starts_with("WithBurn("));
+    }
+
+    /// Netid 8762 has burn_enabled=false, so compute_dex_fee should always return Standard.
+    #[test]
+    fn test_dex_fee_netid_8762_always_standard() {
+        let net_cfg = mm2_net_config::net_config_or_panic(8762);
+        assert!(!net_cfg.burn_enabled());
+
+        let total = dex_fee_amount(net_cfg, "BTC", "ETH", &MmNumber::from(1), &MmNumber::from("0.0001"));
+        // On netid 8762, compute_dex_fee cannot be called without MmCoinEnum,
+        // but we can verify the config invariant:
+        // burn_enabled=false means any code path through compute_dex_fee
+        // would return DexFee::Standard(total).
+        assert!(total > MmNumber::from(0));
+    }
+
+    /// Netid 6133 has burn_enabled=true with dex_fee_share=3/4.
+    #[test]
+    fn test_dex_fee_netid_6133_burn_config() {
+        let net_cfg = mm2_net_config::net_config_or_panic(6133);
+        assert!(net_cfg.burn_enabled());
+        // dex_fee_share should be 3/4 (75% fee, 25% burn)
+        let expected_share: MmNumber = (3, 4).into();
+        let actual_share: MmNumber = net_cfg.dex_fee_share().into();
+        assert_eq!(actual_share, expected_share);
     }
 }

@@ -2,10 +2,11 @@ use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, Trade
 use crate::solana::solana_common::{lamports_to_sol, PrepareTransferData, SufficientBalanceError};
 use crate::solana::spl::SplTokenInfo;
 use crate::{
-    BalanceError, BalanceFut, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, RawTransactionFut,
-    RawTransactionRequest, SignatureResult, TradePreimageFut, TradePreimageResult, TradePreimageValue,
-    TransactionDetails, TransactionFut, TransactionType, UnexpectedDerivationMethod, ValidateAddressResult,
-    ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFut, WithdrawRequest, WithdrawResult,
+    BalanceError, BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr,
+    RawTransactionFut, RawTransactionRequest, SignatureResult, TradePreimageFut, TradePreimageResult,
+    TradePreimageValue, TransactionDetails, TransactionFut, TransactionType, UnexpectedDerivationMethod,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFut,
+    WithdrawRequest, WithdrawResult,
 };
 use async_trait::async_trait;
 use base58::ToBase58;
@@ -505,7 +506,7 @@ impl MarketCoinOps for SolanaCoin {
 #[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
 #[async_trait]
 impl SwapOps for SolanaCoin {
-    fn send_taker_fee(&self, _fee_addr: &[u8], amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         unimplemented!()
     }
 
@@ -581,15 +582,7 @@ impl SwapOps for SolanaCoin {
         unimplemented!()
     }
 
-    fn validate_fee(
-        &self,
-        _fee_tx: &TransactionEnum,
-        _expected_sender: &[u8],
-        _fee_addr: &[u8],
-        _amount: &BigDecimal,
-        _min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+    fn validate_fee(&self, _args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
         unimplemented!()
     }
 

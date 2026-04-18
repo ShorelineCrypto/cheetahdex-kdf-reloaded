@@ -12,10 +12,10 @@ use crate::utxo::{
     UtxoTxBroadcastOps, UtxoTxGenerationOps, UtxoWeak, VerboseTransactionFrom,
 };
 use crate::{
-    BalanceFut, CoinBalance, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
+    BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
     NegotiateSwapContractAddrErr, NumConversError, RawTransactionFut, RawTransactionRequest, SignatureError,
     SignatureResult, SwapOps, TradeFee, TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionDetails,
-    TransactionEnum, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult,
+    TransactionEnum, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
     ValidatePaymentInput, VerificationError, VerificationResult, WithdrawFut, WithdrawRequest,
 };
 use crate::{Transaction, WithdrawError};
@@ -932,9 +932,10 @@ impl MarketCoinOps for ZCoin {
 
 #[async_trait]
 impl SwapOps for ZCoin {
-    fn send_taker_fee(&self, _fee_addr: &[u8], amount: BigDecimal, uuid: &[u8]) -> TransactionFut {
+    fn send_taker_fee(&self, dex_fee: &DexFee, _fee_addr: &[u8], uuid: &[u8]) -> TransactionFut {
         let selfi = self.clone();
         let uuid = uuid.to_owned();
+        let amount = dex_fee.total_spend_amount().to_decimal();
         let fut = async move {
             let tx = try_tx_s!(z_send_dex_fee(&selfi, amount, &uuid).await);
             Ok(tx.into())
@@ -1128,21 +1129,15 @@ impl SwapOps for ZCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        _expected_sender: &[u8],
-        _fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let z_tx = match fee_tx {
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let z_tx = match args.fee_tx {
             TransactionEnum::ZTransaction(t) => t.clone(),
-            _ => panic!("Unexpected tx {:?}", fee_tx),
+            _ => panic!("Unexpected tx {:?}", args.fee_tx),
         };
-        let amount_sat = try_fus!(sat_from_big_decimal(amount, self.utxo_arc.decimals));
-        let expected_memo = MemoBytes::from_bytes(uuid).expect("Uuid length < 512");
+        let amount = args.dex_fee.total_spend_amount().to_decimal();
+        let amount_sat = try_fus!(sat_from_big_decimal(&amount, self.utxo_arc.decimals));
+        let expected_memo = MemoBytes::from_bytes(args.uuid).expect("Uuid length < 512");
+        let min_block_number = args.min_block_number;
 
         let coin = self.clone();
         let fut = async move {

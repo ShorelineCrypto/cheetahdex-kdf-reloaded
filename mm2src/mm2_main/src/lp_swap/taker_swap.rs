@@ -5,11 +5,11 @@ use super::pubkey_banning::ban_pubkey_on_failed_swap;
 use super::swap_lock::{SwapLock, SwapLockOps};
 use super::trade_preimage::{TradePreimageRequest, TradePreimageRpcError, TradePreimageRpcResult};
 use super::{
-    broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap, dex_fee_amount,
-    dex_fee_amount_from_taker_coin, dex_fee_rate, dex_fee_threshold, get_locked_amount, recv_swap_msg, swap_topic,
-    AtomicSwap, LockedAmount, MySwapInfo, NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap,
-    RecoveredSwapAction, SavedSwap, SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg,
-    SwapsContext, TransactionIdentifier, WAIT_CONFIRM_INTERVAL,
+    broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap, compute_dex_fee,
+    dex_fee_amount, dex_fee_amount_from_taker_coin, dex_fee_rate, dex_fee_threshold, get_locked_amount, recv_swap_msg,
+    swap_topic, AtomicSwap, LockedAmount, MySwapInfo, NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3,
+    RecoveredSwap, RecoveredSwapAction, SavedSwap, SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError,
+    SwapMsg, SwapsContext, TransactionIdentifier, WAIT_CONFIRM_INTERVAL,
 };
 use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MatchBy, OrderConfirmationsSettings, TakerAction, TakerOrderBuilder};
@@ -796,7 +796,7 @@ impl TakerSwap {
     async fn start(&self) -> Result<(Option<TakerSwapCommand>, Vec<TakerSwapEvent>), String> {
         // do not use self.r().data here as it is not initialized at this step yet
         let stage = FeeApproxStage::StartSwap;
-        let dex_fee = dex_fee_amount_from_taker_coin(
+        let dex_fee = compute_dex_fee(
             self.net_cfg(),
             &self.taker_coin,
             self.maker_coin.ticker(),
@@ -806,7 +806,7 @@ impl TakerSwap {
 
         let fee_to_send_dex_fee_fut = self
             .taker_coin
-            .get_fee_to_send_taker_fee(dex_fee.to_decimal(), stage.clone());
+            .get_fee_to_send_taker_fee(dex_fee.total_spend_amount().to_decimal(), stage.clone());
         let fee_to_send_dex_fee = match fee_to_send_dex_fee_fut.await {
             Ok(fee) => fee,
             Err(e) => {
@@ -844,7 +844,7 @@ impl TakerSwap {
         };
 
         let params = TakerSwapPreparedParams {
-            dex_fee: dex_fee.clone(),
+            dex_fee: dex_fee.total_spend_amount(),
             fee_to_send_dex_fee: fee_to_send_dex_fee.clone(),
             taker_payment_trade_fee: taker_payment_trade_fee.clone(),
             maker_payment_spend_trade_fee: maker_payment_spend_trade_fee.clone(),
@@ -1092,7 +1092,7 @@ impl TakerSwap {
             ));
         }
 
-        let fee_amount = dex_fee_amount_from_taker_coin(
+        let dex_fee = compute_dex_fee(
             self.net_cfg(),
             &self.taker_coin,
             &self.r().data.maker_coin,
@@ -1100,11 +1100,7 @@ impl TakerSwap {
         );
         let fee_tx = self
             .taker_coin
-            .send_taker_fee(
-                self.net_cfg().dex_fee_addr_raw_pubkey(),
-                fee_amount.into(),
-                self.uuid.as_bytes(),
-            )
+            .send_taker_fee(&dex_fee, self.net_cfg().dex_fee_addr_raw_pubkey(), self.uuid.as_bytes())
             .compat()
             .await;
         let transaction = match fee_tx {

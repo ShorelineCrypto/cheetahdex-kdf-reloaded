@@ -17,9 +17,10 @@ use crate::rpc_command::init_scan_for_new_addresses::{
 use crate::rpc_command::init_withdraw::{InitWithdrawCoin, WithdrawTaskHandle};
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilder};
 use crate::{
-    CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, GetWithdrawSenderAddress, NegotiateSwapContractAddrErr,
-    PrivKeyBuildPolicy, SignatureResult, SwapOps, TradePreimageValue, TransactionFut, ValidateAddressResult,
-    ValidatePaymentInput, VerificationResult, WithdrawFut, WithdrawSenderAddress,
+    CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DexFee, GetWithdrawSenderAddress,
+    NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, SignatureResult, SwapOps, TradePreimageValue, TransactionFut,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawFut,
+    WithdrawSenderAddress,
 };
 use common::mm_metrics::MetricsArc;
 use common::mm_number::MmNumber;
@@ -293,8 +294,8 @@ impl UtxoStandardOps for UtxoStandardCoin {
 
 #[async_trait]
 impl SwapOps for UtxoStandardCoin {
-    fn send_taker_fee(&self, fee_addr: &[u8], amount: BigDecimal, _uuid: &[u8]) -> TransactionFut {
-        utxo_common::send_taker_fee(self.clone(), fee_addr, amount)
+    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
+        utxo_common::send_taker_fee(self.clone(), dex_fee, fee_addr)
     }
 
     fn send_maker_payment(
@@ -376,16 +377,8 @@ impl SwapOps for UtxoStandardCoin {
         utxo_common::send_maker_refunds_payment(self.clone(), maker_tx, time_lock, taker_pub, secret_hash, htlc_privkey)
     }
 
-    fn validate_fee(
-        &self,
-        fee_tx: &TransactionEnum,
-        expected_sender: &[u8],
-        fee_addr: &[u8],
-        amount: &BigDecimal,
-        min_block_number: u64,
-        _uuid: &[u8],
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let tx = match fee_tx {
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let tx = match args.fee_tx {
             TransactionEnum::UtxoTx(tx) => tx.clone(),
             _ => panic!(),
         };
@@ -393,10 +386,10 @@ impl SwapOps for UtxoStandardCoin {
             self.clone(),
             tx,
             utxo_common::DEFAULT_FEE_VOUT,
-            expected_sender,
-            amount,
-            min_block_number,
-            fee_addr,
+            args.expected_sender,
+            args.dex_fee,
+            args.min_block_number,
+            args.fee_addr,
         )
     }
 

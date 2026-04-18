@@ -5,7 +5,7 @@ use super::pubkey_banning::ban_pubkey_on_failed_swap;
 use super::swap_lock::{SwapLock, SwapLockOps};
 use super::trade_preimage::{TradePreimageRequest, TradePreimageRpcError, TradePreimageRpcResult};
 use super::{
-    broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap,
+    broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap, compute_dex_fee,
     dex_fee_amount_from_taker_coin, get_locked_amount, recv_swap_msg, swap_topic, AtomicSwap, LockedAmount, MySwapInfo,
     NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap,
     SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext, TransactionIdentifier,
@@ -19,7 +19,7 @@ use crate::mm2::MM_VERSION;
 use bitcrypto::dhash160;
 use coins::{
     CanRefundHtlc, FeeApproxStage, FoundSwapTxSpend, MmCoinEnum, TradeFee, TradePreimageValue, TransactionEnum,
-    ValidatePaymentInput,
+    ValidateFeeArgs, ValidatePaymentInput,
 };
 use common::log::{debug, error, warn};
 use common::mm_number::{BigDecimal, MmNumber};
@@ -652,7 +652,7 @@ impl MakerSwap {
         log!({ "Taker fee tx {:02x}", hash });
 
         let taker_amount = MmNumber::from(self.taker_amount.clone());
-        let fee_amount = dex_fee_amount_from_taker_coin(
+        let dex_fee = compute_dex_fee(
             self.net_cfg(),
             &self.taker_coin,
             &self.r().data.maker_coin,
@@ -665,14 +665,14 @@ impl MakerSwap {
         loop {
             match self
                 .taker_coin
-                .validate_fee(
-                    &taker_fee,
-                    &*other_taker_coin_htlc_pub,
-                    self.net_cfg().dex_fee_addr_raw_pubkey(),
-                    &fee_amount.clone().into(),
-                    taker_coin_start_block,
-                    self.uuid.as_bytes(),
-                )
+                .validate_fee(ValidateFeeArgs {
+                    fee_tx: &taker_fee,
+                    expected_sender: &*other_taker_coin_htlc_pub,
+                    fee_addr: self.net_cfg().dex_fee_addr_raw_pubkey(),
+                    dex_fee: &dex_fee,
+                    min_block_number: taker_coin_start_block,
+                    uuid: self.uuid.as_bytes(),
+                })
                 .compat()
                 .await
             {
