@@ -19,7 +19,7 @@ use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilder};
 use crate::{
     CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DexFee, GetWithdrawSenderAddress,
     NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, SignatureResult, SwapOps, TradePreimageValue, TransactionFut,
-    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawFut,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut,
     WithdrawSenderAddress,
 };
 use common::mm_metrics::MetricsArc;
@@ -477,6 +477,13 @@ impl SwapOps for UtxoStandardCoin {
 
     fn get_htlc_key_pair(&self) -> Option<KeyPair> {
         utxo_common::get_htlc_key_pair(self)
+    }
+}
+
+#[async_trait]
+impl WatcherOps for UtxoStandardCoin {
+    fn is_supported_by_watchers(&self) -> bool {
+        true
     }
 }
 

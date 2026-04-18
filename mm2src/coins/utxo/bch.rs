@@ -10,7 +10,7 @@ use crate::{
     BlockHeightAndTime, CanRefundHtlc, CoinBalance, CoinProtocol, DexFee, NegotiateSwapContractAddrErr,
     PrivKeyBuildPolicy, RawTransactionFut, RawTransactionRequest, SignatureResult, SwapOps, TradePreimageValue,
     TransactionFut, TransactionType, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
-    ValidatePaymentInput, VerificationResult, WithdrawFut,
+    ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut,
 };
 use common::log::warn;
 use common::mm_metrics::MetricsArc;
@@ -1097,6 +1097,13 @@ impl SwapOps for BchCoin {
 
     fn get_htlc_key_pair(&self) -> Option<KeyPair> {
         utxo_common::get_htlc_key_pair(self)
+    }
+}
+
+#[async_trait]
+impl WatcherOps for BchCoin {
+    fn is_supported_by_watchers(&self) -> bool {
+        true
     }
 }
 

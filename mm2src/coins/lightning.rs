@@ -15,7 +15,7 @@ use crate::{
     NegotiateSwapContractAddrErr, RawTransactionFut, RawTransactionRequest, SignatureError, SignatureResult, SwapOps,
     TradeFee, TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionEnum, TransactionFut,
     UnexpectedDerivationMethod, UtxoStandardCoin, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
-    VerificationError, VerificationResult, WithdrawError, WithdrawFut, WithdrawRequest,
+    VerificationError, VerificationResult, WatcherOps, WithdrawError, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -392,6 +392,9 @@ impl SwapOps for LightningCoin {
         unimplemented!()
     }
 }
+
+#[async_trait]
+impl WatcherOps for LightningCoin {}
 
 impl MarketCoinOps for LightningCoin {
     fn ticker(&self) -> &str {

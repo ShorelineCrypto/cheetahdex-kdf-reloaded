@@ -7,9 +7,9 @@ use super::trade_preimage::{TradePreimageRequest, TradePreimageRpcError, TradePr
 use super::{
     broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap, compute_dex_fee,
     dex_fee_amount, dex_fee_amount_from_taker_coin, dex_fee_rate, dex_fee_threshold, get_locked_amount, recv_swap_msg,
-    swap_topic, AtomicSwap, LockedAmount, MySwapInfo, NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3,
-    RecoveredSwap, RecoveredSwapAction, SavedSwap, SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError,
-    SwapMsg, SwapsContext, TransactionIdentifier, WAIT_CONFIRM_INTERVAL,
+    swap_topic, AbortOnDropHandle, AtomicSwap, LockedAmount, MySwapInfo, NegotiationDataMsg, NegotiationDataV2,
+    NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap, SavedSwapIo, SavedTradeFee,
+    SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext, TransactionIdentifier, WAIT_CONFIRM_INTERVAL,
 };
 use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MatchBy, OrderConfirmationsSettings, TakerAction, TakerOrderBuilder};
@@ -1301,11 +1301,143 @@ impl TakerSwap {
         ))
     }
 
+    /// If both coins support watchers, compute spend/refund preimages and broadcast
+    /// `TakerSwapWatcherData` on the taker coin's watcher gossipsub topic.
+    /// Returns an abort handle that stops the broadcast loop on drop, or `None`.
+    async fn maybe_broadcast_watcher_data(&self, taker_payment_hex: &[u8]) -> Option<AbortOnDropHandle> {
+        use super::{
+            broadcast_signed_msg_every,
+            swap_watcher::{SwapWatcherMsg, TakerSwapWatcherData, WATCHER_MSG_INTERVAL},
+            watcher_topic,
+        };
+
+        if !self.taker_coin.is_supported_by_watchers() || !self.maker_coin.is_supported_by_watchers() {
+            return None;
+        }
+
+        // Extract all data from the RwLock in a scope so the guard is dropped before any await
+        let (
+            taker_fee_hash,
+            maker_payment_hex,
+            secret_hash,
+            lock_duration,
+            swap_started_at,
+            taker_coin_start_block,
+            taker_payment_confirmations,
+            taker_payment_requires_nota,
+            maker_coin_start_block,
+            maker_pub,
+            time_lock,
+            my_pub,
+        ) = {
+            let r = self.r();
+            let taker_fee_hash = match &r.taker_fee {
+                Some(fee) => fee.tx_hex.0.clone(),
+                None => {
+                    warn!("Watcher broadcast skipped: no taker fee tx available");
+                    return None;
+                },
+            };
+            let maker_payment_hex = match &r.maker_payment {
+                Some(mp) => mp.tx_hex.0.clone(),
+                None => {
+                    warn!("Watcher broadcast skipped: no maker payment tx available");
+                    return None;
+                },
+            };
+            (
+                taker_fee_hash,
+                maker_payment_hex,
+                r.secret_hash.0.to_vec(),
+                r.data.lock_duration,
+                r.data.started_at,
+                r.data.taker_coin_start_block,
+                r.data.taker_payment_confirmations,
+                r.data.taker_payment_requires_nota,
+                r.data.maker_coin_start_block,
+                r.other_maker_coin_htlc_pub.to_vec(),
+                r.data.taker_payment_lock as u32,
+                r.my_taker_coin_htlc_keypair.public_slice().to_vec(),
+            )
+        };
+
+        // Compute preimages via WatcherOps — these return futures01
+        let maker_preimage_tx = match self
+            .taker_coin
+            .create_maker_payment_spend_preimage(
+                &maker_payment_hex,
+                time_lock,
+                &maker_pub,
+                &secret_hash,
+                &[], // swap_unique_data — unused in default/UTXO impls
+            )
+            .compat()
+            .await
+        {
+            Ok(tx) => tx.tx_hex(),
+            Err(e) => {
+                warn!("Watcher: failed to create maker payment spend preimage: {:?}", e);
+                return None;
+            },
+        };
+
+        let taker_refund_tx = match self
+            .taker_coin
+            .create_taker_payment_refund_preimage(
+                taker_payment_hex,
+                time_lock,
+                &my_pub,
+                &secret_hash,
+                &[], // swap_unique_data — unused in default/UTXO impls
+            )
+            .compat()
+            .await
+        {
+            Ok(tx) => tx.tx_hex(),
+            Err(e) => {
+                warn!("Watcher: failed to create taker payment refund preimage: {:?}", e);
+                return None;
+            },
+        };
+
+        let watcher_data = TakerSwapWatcherData {
+            uuid: self.uuid,
+            secret_hash,
+            maker_payment_spend_preimage: maker_preimage_tx,
+            taker_payment_refund_preimage: taker_refund_tx,
+            swap_started_at,
+            lock_duration,
+            taker_coin: self.taker_coin.ticker().to_owned(),
+            taker_fee_hash,
+            taker_payment_hash: taker_payment_hex.to_vec(),
+            taker_coin_start_block,
+            taker_payment_confirmations,
+            taker_payment_requires_nota,
+            maker_coin: self.maker_coin.ticker().to_owned(),
+            maker_pub,
+            maker_payment_hash: maker_payment_hex,
+            maker_coin_start_block,
+        };
+
+        let topic = watcher_topic(self.taker_coin.ticker());
+        let msg = SwapWatcherMsg::TakerSwapWatcherMsg(watcher_data);
+        Some(broadcast_signed_msg_every(
+            self.ctx.clone(),
+            topic,
+            msg,
+            WATCHER_MSG_INTERVAL,
+            self.p2p_privkey,
+        ))
+    }
+
     async fn wait_for_taker_payment_spend(&self) -> Result<(Option<TakerSwapCommand>, Vec<TakerSwapEvent>), String> {
         let tx_hex = self.r().taker_payment.as_ref().unwrap().tx_hex.0.clone();
-        let msg = SwapMsg::TakerPayment(tx_hex);
+        let msg = SwapMsg::TakerPayment(tx_hex.clone());
         let send_abort_handle =
             broadcast_swap_message_every(self.ctx.clone(), swap_topic(&self.uuid), msg, 600., self.p2p_privkey);
+
+        // Broadcast watcher data if both coins support watchers
+        let _watcher_abort_handle = self.maybe_broadcast_watcher_data(&tx_hex).await;
 
         let wait_duration = (self.r().data.lock_duration * 4) / 5;
         let wait_taker_payment = self.r().data.started_at + wait_duration;

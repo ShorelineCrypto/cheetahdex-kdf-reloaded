@@ -70,7 +70,7 @@ pub use ethcore_transaction::SignedTransaction as SignedEthTx;
 pub use rlp;
 
 mod web3_transport;
-use crate::{DexFee, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput};
+use crate::{DexFee, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput, WatcherOps};
 use common::mm_number::MmNumber;
 use ethkey::{sign, verify_address};
 use serialization::{CompactInteger, Serializable, Stream};
@@ -1111,6 +1111,9 @@ impl SwapOps for EthCoin {
         None
     }
 }
+
+#[async_trait]
+impl WatcherOps for EthCoin {}
 
 #[cfg_attr(test, mockable)]
 impl MarketCoinOps for EthCoin {

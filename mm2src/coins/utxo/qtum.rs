@@ -23,7 +23,7 @@ use crate::{
     eth, CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DelegationError, DelegationFut, DexFee,
     GetWithdrawSenderAddress, NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, SignatureResult, StakingInfosFut,
     SwapOps, TradePreimageValue, TransactionFut, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
-    ValidatePaymentInput, VerificationResult, WithdrawFut, WithdrawSenderAddress,
+    ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut, WithdrawSenderAddress,
 };
 use common::mm_metrics::MetricsArc;
 use common::mm_number::MmNumber;
@@ -727,6 +727,13 @@ impl SwapOps for QtumCoin {
 
     fn get_htlc_key_pair(&self) -> Option<KeyPair> {
         utxo_common::get_htlc_key_pair(self)
+    }
+}
+
+#[async_trait]
+impl WatcherOps for QtumCoin {
+    fn is_supported_by_watchers(&self) -> bool {
+        true
     }
 }
 

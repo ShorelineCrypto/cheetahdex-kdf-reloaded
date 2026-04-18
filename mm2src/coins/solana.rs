@@ -1,4 +1,4 @@
-use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, TradeFee, TransactionEnum};
+use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, TradeFee, TransactionEnum, WatcherOps};
 use crate::solana::solana_common::{lamports_to_sol, PrepareTransferData, SufficientBalanceError};
 use crate::solana::spl::SplTokenInfo;
 use crate::{
@@ -645,6 +645,9 @@ impl SwapOps for SolanaCoin {
         todo!()
     }
 }
+
+#[async_trait]
+impl WatcherOps for SolanaCoin {}
 
 #[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
 #[async_trait]

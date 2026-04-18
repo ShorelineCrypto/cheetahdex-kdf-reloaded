@@ -5,7 +5,7 @@ use super::{
 use crate::{
     BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, SignatureResult,
     TradePreimageFut, TradePreimageResult, TradePreimageValue, UnexpectedDerivationMethod, ValidateAddressResult,
-    ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawFut, WithdrawRequest,
+    ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -276,6 +276,9 @@ impl SwapOps for TestCoin {
         unimplemented!()
     }
 }
+
+#[async_trait]
+impl WatcherOps for TestCoin {}
 
 #[async_trait]
 #[mockable]

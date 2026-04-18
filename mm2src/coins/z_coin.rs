@@ -16,7 +16,7 @@ use crate::{
     NegotiateSwapContractAddrErr, NumConversError, RawTransactionFut, RawTransactionRequest, SignatureError,
     SignatureResult, SwapOps, TradeFee, TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionDetails,
     TransactionEnum, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
-    ValidatePaymentInput, VerificationError, VerificationResult, WithdrawFut, WithdrawRequest,
+    ValidatePaymentInput, VerificationError, VerificationResult, WatcherOps, WithdrawFut, WithdrawRequest,
 };
 use crate::{Transaction, WithdrawError};
 use async_trait::async_trait;
@@ -1285,6 +1285,9 @@ impl SwapOps for ZCoin {
         Some(KeyPair::random_compressed())
     }
 }
+
+#[async_trait]
+impl WatcherOps for ZCoin {}
 
 #[async_trait]
 impl MmCoin for ZCoin {

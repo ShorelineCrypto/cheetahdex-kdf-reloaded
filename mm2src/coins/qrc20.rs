@@ -25,8 +25,8 @@ use crate::{
     MmCoin, NegotiateSwapContractAddrErr, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest, SignatureResult,
     SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
     TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TransactionType, UnexpectedDerivationMethod,
-    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFee,
-    WithdrawFut, WithdrawRequest, WithdrawResult,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawError,
+    WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -1081,6 +1081,9 @@ impl SwapOps for Qrc20Coin {
         utxo_common::get_htlc_key_pair(self)
     }
 }
+
+#[async_trait]
+impl WatcherOps for Qrc20Coin {}
 
 impl MarketCoinOps for Qrc20Coin {
     fn ticker(&self) -> &str {

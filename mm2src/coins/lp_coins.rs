@@ -676,6 +676,104 @@ pub trait SwapOps {
     fn get_htlc_key_pair(&self) -> Option<KeyPair>;
 }
 
+// ── Watcher Node Types ──────────────────────────────────────────────
+
+/// Input for watcher-side taker fee validation.
+#[derive(Clone, Debug)]
+pub struct WatcherValidateTakerFeeInput {
+    pub taker_fee_hash: Vec<u8>,
+    pub sender_pubkey: Vec<u8>,
+    pub min_block_number: u64,
+    pub fee_addr: Vec<u8>,
+    pub lock_duration: u64,
+}
+
+/// Input for watcher-side taker payment validation.
+#[derive(Clone, Debug)]
+pub struct WatcherValidatePaymentInput {
+    pub payment_tx: Vec<u8>,
+    pub taker_payment_refund_preimage: Vec<u8>,
+    pub time_lock: u32,
+    pub taker_pub: Vec<u8>,
+    pub maker_pub: Vec<u8>,
+    pub secret_hash: Vec<u8>,
+    pub amount: BigDecimal,
+    pub confirmations: u64,
+    pub min_block_number: u64,
+}
+
+/// Operations required for watcher node functionality.
+///
+/// Coins that support watcher nodes implement these methods to allow third-party
+/// watchers to validate, spend, or refund swap payments when one party disappears.
+#[async_trait]
+pub trait WatcherOps {
+    /// Whether this coin supports being monitored by watcher nodes.
+    fn is_supported_by_watchers(&self) -> bool {
+        false
+    }
+
+    /// Watcher-specific taker fee validation (retrieves tx from chain by hash).
+    fn watcher_validate_taker_fee(
+        &self,
+        _input: WatcherValidateTakerFeeInput,
+    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        Box::new(futures01::future::err(
+            "watcher_validate_taker_fee not supported".into(),
+        ))
+    }
+
+    /// Watcher-specific taker payment validation (checks script, amounts, confirmations).
+    fn watcher_validate_taker_payment(
+        &self,
+        _input: WatcherValidatePaymentInput,
+    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        Box::new(futures01::future::err(
+            "watcher_validate_taker_payment not supported".into(),
+        ))
+    }
+
+    /// Create a preimage transaction that spends the maker payment (watcher executes on success).
+    fn create_maker_payment_spend_preimage(
+        &self,
+        _maker_payment_tx: &[u8],
+        _time_lock: u32,
+        _maker_pub: &[u8],
+        _secret_hash: &[u8],
+        _swap_unique_data: &[u8],
+    ) -> TransactionFut {
+        Box::new(futures01::future::err(TransactionErr::Plain(
+            "create_maker_payment_spend_preimage not supported".into(),
+        )))
+    }
+
+    /// Create a preimage transaction that refunds the taker payment (watcher executes on timeout).
+    fn create_taker_payment_refund_preimage(
+        &self,
+        _taker_payment_tx: &[u8],
+        _time_lock: u32,
+        _maker_pub: &[u8],
+        _secret_hash: &[u8],
+        _swap_unique_data: &[u8],
+    ) -> TransactionFut {
+        Box::new(futures01::future::err(TransactionErr::Plain(
+            "create_taker_payment_refund_preimage not supported".into(),
+        )))
+    }
+
+    /// Watcher search for how a swap tx was spent (by secret reveal or by refund).
+    async fn watcher_search_for_swap_tx_spend(
+        &self,
+        _time_lock: u32,
+        _other_pub: &[u8],
+        _secret_hash: &[u8],
+        _tx: &[u8],
+        _search_from_block: u64,
+    ) -> Result<Option<FoundSwapTxSpend>, String> {
+        Err("watcher_search_for_swap_tx_spend not supported".into())
+    }
+}
+
 /// Operations that coins have independently from the MarketMaker.
 /// That is, things implemented by the coin wallets or public coin services.
 pub trait MarketCoinOps {
@@ -1840,7 +1938,7 @@ impl From<CoinFindError> for VerificationError {
 
 /// NB: Implementations are expected to follow the pImpl idiom, providing cheap reference-counted cloning and garbage collection.
 #[async_trait]
-pub trait MmCoin: SwapOps + MarketCoinOps + fmt::Debug + Send + Sync + 'static {
+pub trait MmCoin: SwapOps + WatcherOps + MarketCoinOps + fmt::Debug + Send + Sync + 'static {
     // `MmCoin` is an extension fulcrum for something that doesn't fit the `MarketCoinOps`. Practical examples:
     // name (might be required for some APIs, CoinMarketCap for instance);
     // coin statistics that we might want to share with UI;

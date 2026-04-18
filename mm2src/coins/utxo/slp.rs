@@ -17,8 +17,8 @@ use crate::{
     NegotiateSwapContractAddrErr, NumConversError, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest,
     SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
     TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod,
-    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationError, VerificationResult, WithdrawError,
-    WithdrawFee, WithdrawFut, WithdrawRequest,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationError, VerificationResult, WatcherOps,
+    WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
 use bitcrypto::dhash160;
@@ -1597,6 +1597,9 @@ impl SwapOps for SlpToken {
         utxo_common::get_htlc_key_pair(&self.platform_coin)
     }
 }
+
+#[async_trait]
+impl WatcherOps for SlpToken {}
 
 impl From<GenSlpSpendErr> for TradePreimageError {
     fn from(slp: GenSlpSpendErr) -> TradePreimageError {

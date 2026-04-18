@@ -73,8 +73,10 @@ use mm2_core::mm_ctx::{from_ctx, MmArc};
 use mm2_err_handle::prelude::*;
 use mm2_libp2p::{decode_signed, encode_and_sign, pub_sub_topic, TopicPrefix};
 use mm2_net_config::NetConfig;
+use parking_lot::Mutex as PaMutex;
 use primitives::hash::{H160, H264};
 use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json};
+use serde::Serialize;
 use serde_json::{self as json, Value as Json};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -99,6 +101,8 @@ mod recreate_swap_data;
 mod saved_swap;
 #[path = "lp_swap/swap_lock.rs"]
 mod swap_lock;
+#[path = "lp_swap/swap_watcher.rs"]
+pub mod swap_watcher;
 #[path = "lp_swap/taker_swap.rs"]
 mod taker_swap;
 #[path = "lp_swap/trade_preimage.rs"]
@@ -121,6 +125,7 @@ pub use pubkey_banning::{ban_pubkey_rpc, is_pubkey_banned, list_banned_pubkeys_r
 pub use recreate_swap_data::recreate_swap_data;
 pub use saved_swap::{SavedSwap, SavedSwapError, SavedSwapIo, SavedSwapResult};
 use std::num::NonZeroUsize;
+pub use swap_watcher::{process_watcher_msg, watcher_topic, SwapWatcherMsg, TakerSwapWatcherData, WATCHER_PREFIX};
 use taker_swap::TakerSwapEvent;
 pub use taker_swap::{
     calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available, run_taker_swap,
@@ -132,6 +137,9 @@ pub use trade_preimage::trade_preimage_rpc;
 pub const SWAP_PREFIX: TopicPrefix = "swap";
 
 pub const TX_HELPER_PREFIX: TopicPrefix = "txhlp";
+
+/// Simple map for watcher deduplication. Key: taker_fee_hash, Value: expiry timestamp (seconds).
+pub type WatcherEntryMap = HashMap<Vec<u8>, u64>;
 
 cfg_wasm32! {
     use mm2_db::indexed_db::{ConstructibleDb, DbLocked};
@@ -218,6 +226,32 @@ pub fn broadcast_p2p_tx_msg(ctx: &MmArc, topic: String, msg: &TransactionEnum, p
 
     let encoded_msg = encode_and_sign(&msg.tx_hex(), &p2p_private).unwrap();
     broadcast_p2p_msg(ctx, vec![topic], encoded_msg, from);
+}
+
+/// Spawns a loop that encodes, signs, and broadcasts a serializable message on `topic`
+/// every `interval` seconds. Returns an `AbortOnDropHandle` to stop it.
+pub fn broadcast_signed_msg_every<T: 'static + Serialize + Clone + Send>(
+    ctx: MmArc,
+    topic: String,
+    msg: T,
+    interval: f64,
+    p2p_privkey: Option<KeyPair>,
+) -> AbortOnDropHandle {
+    let fut = async move {
+        loop {
+            let (p2p_private, from) = match &p2p_privkey {
+                Some(keypair) => (keypair.private_bytes(), Some(keypair.libp2p_peer_id())),
+                None => (ctx.secp256k1_key_pair().private().secret.take(), None),
+            };
+            if let Ok(encoded) = encode_and_sign(&msg, &p2p_private) {
+                broadcast_p2p_msg(&ctx, vec![topic.clone()], encoded, from);
+            }
+            Timer::sleep(interval).await;
+        }
+    };
+    let (abortable, abort_handle) = abortable(fut);
+    spawn(abortable.unwrap_or_else(|_| ()));
+    AbortOnDropHandle(abort_handle)
 }
 
 pub async fn process_msg(ctx: MmArc, topic: &str, msg: &[u8]) {
@@ -396,6 +430,9 @@ struct SwapsContext {
     /// Very unpleasant consequences
     shutdown_rx: async_std_sync::Receiver<()>,
     swap_msgs: Mutex<HashMap<Uuid, SwapMsgStore>>,
+    /// Deduplication map for taker swap watchers. Key = taker_fee_hash, value = expiry timestamp.
+    /// Prevents multiple watchers from running for the same swap simultaneously.
+    pub taker_swap_watchers: PaMutex<WatcherEntryMap>,
     #[cfg(target_arch = "wasm32")]
     swap_db: ConstructibleDb<SwapDb>,
 }
@@ -423,6 +460,7 @@ impl SwapsContext {
                 banned_pubkeys: Mutex::new(HashMap::new()),
                 shutdown_rx,
                 swap_msgs: Mutex::new(HashMap::new()),
+                taker_swap_watchers: PaMutex::new(HashMap::new()),
                 #[cfg(target_arch = "wasm32")]
                 swap_db: ConstructibleDb::new(ctx),
             })

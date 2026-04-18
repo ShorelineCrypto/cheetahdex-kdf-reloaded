@@ -171,6 +171,10 @@ async fn process_p2p_message(
                     }
                 }
             },
+            Some(lp_swap::WATCHER_PREFIX) => {
+                lp_swap::process_watcher_msg(ctx.clone(), &message.data).await;
+                to_propagate = true;
+            },
             None | Some(_) => (),
         }
     }
