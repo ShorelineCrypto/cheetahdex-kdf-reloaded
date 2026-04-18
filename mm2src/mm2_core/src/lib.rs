@@ -13,7 +13,9 @@ pub enum DbNamespaceId {
 }
 
 impl Default for DbNamespaceId {
-    fn default() -> Self { DbNamespaceId::Main }
+    fn default() -> Self {
+        DbNamespaceId::Main
+    }
 }
 
 impl DbNamespaceId {

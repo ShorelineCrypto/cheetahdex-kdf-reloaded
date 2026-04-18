@@ -1,43 +1,57 @@
-use crate::{adex_ping::AdexPing,
-            network::{get_all_network_seednodes, NETID_7777},
-            peers_exchange::{PeerAddresses, PeersExchange},
-            request_response::{build_request_response_behaviour, PeerRequest, PeerResponse, RequestResponseBehaviour,
-                               RequestResponseBehaviourEvent, RequestResponseSender},
-            runtime::{SwarmRuntimeOps, SWARM_RUNTIME},
-            NetworkInfo, NetworkPorts, RelayAddress, RelayAddressError};
-use atomicdex_gossipsub::{Gossipsub, GossipsubConfigBuilder, GossipsubEvent, GossipsubMessage, MessageId, Topic,
-                          TopicHash};
+use crate::{
+    adex_ping::AdexPing,
+    network::{get_all_network_seednodes, NETID_7777},
+    peers_exchange::{PeerAddresses, PeersExchange},
+    request_response::{
+        build_request_response_behaviour, PeerRequest, PeerResponse, RequestResponseBehaviour,
+        RequestResponseBehaviourEvent, RequestResponseSender,
+    },
+    runtime::{SwarmRuntimeOps, SWARM_RUNTIME},
+    NetworkInfo, NetworkPorts, RelayAddress, RelayAddressError,
+};
+use atomicdex_gossipsub::{
+    Gossipsub, GossipsubConfigBuilder, GossipsubEvent, GossipsubMessage, MessageId, Topic, TopicHash,
+};
 use derive_more::Display;
-use futures::{channel::{mpsc::{channel, Receiver, Sender},
-                        oneshot},
-              future::{abortable, join_all, poll_fn, AbortHandle},
-              Future, SinkExt, StreamExt};
+use futures::{
+    channel::{
+        mpsc::{channel, Receiver, Sender},
+        oneshot,
+    },
+    future::{abortable, join_all, poll_fn, AbortHandle},
+    Future, SinkExt, StreamExt,
+};
 use futures_rustls::rustls;
 use libp2p::core::transport::Boxed as BoxedTransport;
-use libp2p::{core::{ConnectedPoint, Multiaddr, Transport},
-             identity,
-             multiaddr::Protocol,
-             noise,
-             request_response::ResponseChannel,
-             swarm::{NetworkBehaviourEventProcess, Swarm},
-             NetworkBehaviour, PeerId};
+use libp2p::{
+    core::{ConnectedPoint, Multiaddr, Transport},
+    identity,
+    multiaddr::Protocol,
+    noise,
+    request_response::ResponseChannel,
+    swarm::{NetworkBehaviourEventProcess, Swarm},
+    NetworkBehaviour, PeerId,
+};
 use libp2p_floodsub::{Floodsub, FloodsubEvent, Topic as FloodsubTopic};
 use log::{debug, error, info};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use std::{collections::hash_map::{DefaultHasher, HashMap},
-          hash::{Hash, Hasher},
-          iter,
-          net::IpAddr,
-          task::{Context, Poll},
-          time::Duration};
+use std::{
+    collections::hash_map::{DefaultHasher, HashMap},
+    hash::{Hash, Hasher},
+    iter,
+    net::IpAddr,
+    task::{Context, Poll},
+    time::Duration,
+};
 use void::Void;
 use wasm_timer::{Instant, Interval};
 
 pub type AdexCmdTx = Sender<AdexBehaviourCmd>;
 pub type AdexEventRx = Receiver<AdexBehaviourEvent>;
 
-#[cfg(test)] mod tests;
+#[cfg(test)]
+mod tests;
 
 pub const PEERS_TOPIC: &str = "PEERS";
 const CONNECTED_RELAYS_CHECK_INTERVAL: Duration = Duration::from_secs(30);
@@ -86,11 +100,15 @@ pub async fn get_relay_mesh(mut cmd_tx: AdexCmdTx) -> Vec<String> {
 pub struct AdexResponseChannel(ResponseChannel<PeerResponse>);
 
 impl From<ResponseChannel<PeerResponse>> for AdexResponseChannel {
-    fn from(res: ResponseChannel<PeerResponse>) -> Self { AdexResponseChannel(res) }
+    fn from(res: ResponseChannel<PeerResponse>) -> Self {
+        AdexResponseChannel(res)
+    }
 }
 
 impl From<AdexResponseChannel> for ResponseChannel<PeerResponse> {
-    fn from(res: AdexResponseChannel) -> Self { res.0 }
+    fn from(res: AdexResponseChannel) -> Self {
+        res.0
+    }
 }
 
 #[derive(Debug)]
@@ -258,7 +276,9 @@ impl AtomicDexBehaviour {
         }
     }
 
-    fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) { (self.spawn_fn)(Box::new(Box::pin(fut))) }
+    fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) {
+        (self.spawn_fn)(Box::new(Box::pin(fut)))
+    }
 
     fn process_cmd(&mut self, cmd: AdexBehaviourCmd) {
         match cmd {
@@ -403,17 +423,27 @@ impl AtomicDexBehaviour {
         self.floodsub.publish(FloodsubTopic::new(PEERS_TOPIC), serialized);
     }
 
-    pub fn connected_relays_len(&self) -> usize { self.gossipsub.connected_relays_len() }
+    pub fn connected_relays_len(&self) -> usize {
+        self.gossipsub.connected_relays_len()
+    }
 
-    pub fn relay_mesh_len(&self) -> usize { self.gossipsub.relay_mesh_len() }
+    pub fn relay_mesh_len(&self) -> usize {
+        self.gossipsub.relay_mesh_len()
+    }
 
-    pub fn received_messages_in_period(&self) -> (Duration, usize) { self.gossipsub.get_received_messages_in_period() }
+    pub fn received_messages_in_period(&self) -> (Duration, usize) {
+        self.gossipsub.get_received_messages_in_period()
+    }
 
-    pub fn connected_peers_len(&self) -> usize { self.gossipsub.get_num_peers() }
+    pub fn connected_peers_len(&self) -> usize {
+        self.gossipsub.get_num_peers()
+    }
 }
 
 impl NetworkBehaviourEventProcess<GossipsubEvent> for AtomicDexBehaviour {
-    fn inject_event(&mut self, event: GossipsubEvent) { self.notify_on_adex_event(event.into()); }
+    fn inject_event(&mut self, event: GossipsubEvent) {
+        self.notify_on_adex_event(event.into());
+    }
 }
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for AtomicDexBehaviour {
@@ -558,7 +588,9 @@ pub enum AdexBehaviourError {
 }
 
 impl From<RelayAddressError> for AdexBehaviourError {
-    fn from(e: RelayAddressError) -> Self { AdexBehaviourError::ParsingRelayAddress(e) }
+    fn from(e: RelayAddressError) -> Self {
+        AdexBehaviourError::ParsingRelayAddress(e)
+    }
 }
 
 pub struct WssCerts {
@@ -591,7 +623,9 @@ impl NodeType {
         }
     }
 
-    pub fn is_relay(&self) -> bool { matches!(self, NodeType::Relay { .. } | NodeType::RelayInMemory { .. }) }
+    pub fn is_relay(&self) -> bool {
+        matches!(self, NodeType::Relay { .. } | NodeType::RelayInMemory { .. })
+    }
 
     pub fn wss_certs(&self) -> Option<&WssCerts> {
         match self {

@@ -3,8 +3,9 @@
 use crate::prelude::*;
 use async_trait::async_trait;
 use coins::utxo::rpc_clients::UtxoRpcError;
-use coins::{lp_coinfind, lp_coinfind_or_err, BalanceError, CoinProtocol, CoinsContext, MmCoinEnum,
-            UnexpectedDerivationMethod};
+use coins::{
+    lp_coinfind, lp_coinfind_or_err, BalanceError, CoinProtocol, CoinsContext, MmCoinEnum, UnexpectedDerivationMethod,
+};
 use common::{HttpStatusCode, StatusCode};
 use derive_more::Display;
 use mm2_core::mm_ctx::MmArc;
@@ -107,7 +108,8 @@ where
         return MmError::err(EnableTokenError::TokenIsAlreadyActivated(req.ticker));
     }
 
-    let (_, token_protocol): (_, Token::ProtocolInfo) = coin_conf_with_protocol(&ctx, &req.ticker).mm_err(Into::into)?;
+    let (_, token_protocol): (_, Token::ProtocolInfo) =
+        coin_conf_with_protocol(&ctx, &req.ticker).mm_err(Into::into)?;
 
     let platform_coin = lp_coinfind_or_err(&ctx, token_protocol.platform_coin_ticker())
         .await
@@ -121,7 +123,9 @@ where
     })?;
 
     let (token, activation_result) =
-        Token::enable_token(req.ticker, platform_coin, req.activation_params, token_protocol).await.mm_err(Into::into)?;
+        Token::enable_token(req.ticker, platform_coin, req.activation_params, token_protocol)
+            .await
+            .mm_err(Into::into)?;
 
     let coins_ctx = CoinsContext::from_ctx(&ctx).unwrap();
     coins_ctx

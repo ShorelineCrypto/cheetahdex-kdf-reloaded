@@ -1,5 +1,5 @@
-use std::ops::Deref;
 use crate::Error;
+use std::ops::Deref;
 
 pub trait DisplayLayout {
     type Target: Deref<Target = [u8]>;

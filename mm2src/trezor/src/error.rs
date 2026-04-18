@@ -54,15 +54,21 @@ impl From<Failure> for OperationFailure {
 }
 
 impl From<OperationFailure> for TrezorError {
-    fn from(failure: OperationFailure) -> Self { TrezorError::Failure(failure) }
+    fn from(failure: OperationFailure) -> Self {
+        TrezorError::Failure(failure)
+    }
 }
 
 impl From<DecodeError> for TrezorError {
-    fn from(e: DecodeError) -> Self { TrezorError::ProtocolError(e.to_string()) }
+    fn from(e: DecodeError) -> Self {
+        TrezorError::ProtocolError(e.to_string())
+    }
 }
 
 impl From<EncodeError> for TrezorError {
-    fn from(e: EncodeError) -> Self { TrezorError::Internal(e.to_string()) }
+    fn from(e: EncodeError) -> Self {
+        TrezorError::Internal(e.to_string())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

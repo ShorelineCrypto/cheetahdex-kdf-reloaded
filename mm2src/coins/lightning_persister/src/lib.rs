@@ -1,6 +1,5 @@
 //! Utilities that handle persisting Rust-Lightning data to disk via standard filesystem APIs.
 
-
 pub mod storage;
 mod util;
 
@@ -12,9 +11,11 @@ extern crate lightning;
 extern crate secp256k1;
 extern crate serde_json;
 
-use crate::storage::{ChannelType, ChannelVisibility, ClosedChannelsFilter, DbStorage, FileSystemStorage,
-                     GetClosedChannelsResult, GetPaymentsResult, HTLCStatus, NodesAddressesMap,
-                     NodesAddressesMapShared, PaymentInfo, PaymentType, PaymentsFilter, Scorer, SqlChannelDetails};
+use crate::storage::{
+    ChannelType, ChannelVisibility, ClosedChannelsFilter, DbStorage, FileSystemStorage, GetClosedChannelsResult,
+    GetPaymentsResult, HTLCStatus, NodesAddressesMap, NodesAddressesMapShared, PaymentInfo, PaymentType,
+    PaymentsFilter, Scorer, SqlChannelDetails,
+};
 use crate::util::DiskWriteable;
 use async_trait::async_trait;
 use bitcoin::blockdata::constants::genesis_block;
@@ -24,9 +25,10 @@ use bitcoin::Network;
 use common::{async_blocking, now_ms, PagingOptionsEnum};
 use db_common::sqlite::rusqlite::{Error as SqlError, Row, ToSql, NO_PARAMS};
 use db_common::sqlite::sql_builder::SqlBuilder;
-use db_common::sqlite::{h256_option_slice_from_row, h256_slice_from_row, offset_by_id, query_single_row,
-                        sql_text_conversion_err, string_from_row, validate_table_name, SqliteConnShared,
-                        CHECK_TABLE_EXISTS_SQL};
+use db_common::sqlite::{
+    h256_option_slice_from_row, h256_slice_from_row, offset_by_id, query_single_row, sql_text_conversion_err,
+    string_from_row, validate_table_name, SqliteConnShared, CHECK_TABLE_EXISTS_SQL,
+};
 use lightning::chain;
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lightning::chain::chainmonitor;
@@ -73,7 +75,9 @@ pub struct LightningPersister {
 }
 
 impl<Signer: Sign> DiskWriteable for ChannelMonitor<Signer> {
-    fn write_to_file(&self, writer: &mut fs::File) -> Result<(), Error> { self.write(writer) }
+    fn write_to_file(&self, writer: &mut fs::File) -> Result<(), Error> {
+        self.write(writer)
+    }
 }
 
 impl<Signer: Sign, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> DiskWriteable
@@ -85,12 +89,18 @@ where
     F::Target: FeeEstimator,
     L::Target: Logger,
 {
-    fn write_to_file(&self, writer: &mut fs::File) -> Result<(), std::io::Error> { self.write(writer) }
+    fn write_to_file(&self, writer: &mut fs::File) -> Result<(), std::io::Error> {
+        self.write(writer)
+    }
 }
 
-fn channels_history_table(ticker: &str) -> String { ticker.to_owned() + "_channels_history" }
+fn channels_history_table(ticker: &str) -> String {
+    ticker.to_owned() + "_channels_history"
+}
 
-fn payments_history_table(ticker: &str) -> String { ticker.to_owned() + "_payments_history" }
+fn payments_history_table(ticker: &str) -> String {
+    ticker.to_owned() + "_payments_history"
+}
 
 fn create_channels_history_table_sql(for_coin: &str) -> Result<String, SqlError> {
     let table_name = channels_history_table(for_coin);
@@ -577,10 +587,14 @@ impl LightningPersister {
     }
 
     /// Get the directory which was provided when this persister was initialized.
-    pub fn main_path(&self) -> PathBuf { self.main_path.clone() }
+    pub fn main_path(&self) -> PathBuf {
+        self.main_path.clone()
+    }
 
     /// Get the backup directory which was provided when this persister was initialized.
-    pub fn backup_path(&self) -> Option<PathBuf> { self.backup_path.clone() }
+    pub fn backup_path(&self) -> Option<PathBuf> {
+        self.backup_path.clone()
+    }
 
     pub(crate) fn monitor_path(&self) -> PathBuf {
         let mut path = self.main_path();
@@ -1558,10 +1572,13 @@ mod tests {
             bits: 42,
             nonce: 42,
         };
-        connect_block(&nodes[1], &Block {
-            header,
-            txdata: vec![node_txn[0].clone(), node_txn[0].clone()],
-        });
+        connect_block(
+            &nodes[1],
+            &Block {
+                header,
+                txdata: vec![node_txn[0].clone(), node_txn[0].clone()],
+            },
+        );
         check_closed_broadcast!(nodes[1], true);
         check_closed_event!(nodes[1], 1, ClosureReason::CommitmentTxConfirmed);
         check_added_monitors!(nodes[1], 1);

@@ -2,7 +2,6 @@
 ///
 /// Counterpart to encrypt.rs. Always verifies the HMAC tag before decrypting
 /// to prevent padding oracle and other attacks.
-
 use crate::encrypt::EncryptedData;
 use aes::Aes256;
 use cbc::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};

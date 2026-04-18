@@ -22,9 +22,11 @@ use futures::prelude::*;
 use log::debug;
 use quickcheck::{QuickCheck, TestResult};
 use rand::{random, seq::SliceRandom, SeedableRng};
-use std::{pin::Pin,
-          task::{Context, Poll},
-          time::Duration};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use atomicdex_gossipsub::{Gossipsub, GossipsubConfigBuilder, GossipsubEvent, Topic};
 use futures::StreamExt;

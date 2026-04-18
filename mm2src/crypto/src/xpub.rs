@@ -8,7 +8,6 @@
 /// - `xpub` (0x0488B21E) — BIP44/BIP32 P2PKH
 /// - `ypub` (0x049D7CB2) — BIP49 P2WPKH-in-P2SH
 /// - `zpub` (0x04B24746) — BIP84 native P2WPKH
-
 use derive_more::Display;
 
 /// Standard xpub magic prefix bytes (0x0488B21E).

@@ -16,7 +16,9 @@ macro_rules! impl_hash {
         pub struct $name(pub [u8; $size]);
 
         impl Default for $name {
-            fn default() -> Self { $name([0; $size]) }
+            fn default() -> Self {
+                $name([0; $size])
+            }
         }
 
         impl fmt::Debug for $name {
@@ -29,7 +31,9 @@ macro_rules! impl_hash {
         where
             $other: From<T>,
         {
-            fn from(o: T) -> Self { $name($other::from(o).take()) }
+            fn from(o: T) -> Self {
+                $name($other::from(o).take())
+            }
         }
 
         impl FromStr for $name {
@@ -43,12 +47,16 @@ macro_rules! impl_hash {
 
         #[allow(clippy::from_over_into)]
         impl Into<$other> for $name {
-            fn into(self) -> $other { $other::from(self.0) }
+            fn into(self) -> $other {
+                $other::from(self.0)
+            }
         }
 
         #[allow(clippy::from_over_into)]
         impl Into<Vec<u8>> for $name {
-            fn into(self) -> Vec<u8> { self.0.to_vec() }
+            fn into(self) -> Vec<u8> {
+                self.0.to_vec()
+            }
         }
 
         impl Eq for $name {}

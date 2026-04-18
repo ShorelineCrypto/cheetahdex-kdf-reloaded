@@ -29,7 +29,9 @@ pub enum ChecksumType {
 }
 
 impl Default for ChecksumType {
-    fn default() -> ChecksumType { ChecksumType::DSHA256 }
+    fn default() -> ChecksumType {
+        ChecksumType::DSHA256
+    }
 }
 
 /// RIPEMD160
@@ -74,15 +76,21 @@ pub fn keccak256(input: &[u8]) -> H256 {
 
 /// Double Keccak-256
 #[inline]
-pub fn dkeccak256(input: &[u8]) -> H256 { keccak256(&*keccak256(input)) }
+pub fn dkeccak256(input: &[u8]) -> H256 {
+    keccak256(&*keccak256(input))
+}
 
 /// SHA-256 and RIPEMD160
 #[inline]
-pub fn dhash160(input: &[u8]) -> H160 { ripemd160(&*sha256(input)) }
+pub fn dhash160(input: &[u8]) -> H160 {
+    ripemd160(&*sha256(input))
+}
 
 /// Double SHA-256
 #[inline]
-pub fn dhash256(input: &[u8]) -> H256 { sha256(&*sha256(input)) }
+pub fn dhash256(input: &[u8]) -> H256 {
+    sha256(&*sha256(input))
+}
 
 /// SipHash-2-4
 #[inline]
@@ -94,7 +102,9 @@ pub fn siphash24(key0: u64, key1: u64, input: &[u8]) -> u64 {
 
 /// Double Groestl-512
 #[inline]
-pub fn dgroestl512(input: &[u8]) -> H512 { groestl512(&*groestl512(input)) }
+pub fn dgroestl512(input: &[u8]) -> H512 {
+    groestl512(&*groestl512(input))
+}
 
 /// Data checksum
 #[inline]
@@ -111,9 +121,9 @@ pub fn checksum(data: &[u8], sum_type: &ChecksumType) -> H32 {
 #[cfg(test)]
 mod tests {
     use super::{checksum, dhash160, dhash256, ripemd160, sha1, sha256, siphash24};
+    use crate::ChecksumType;
     use primitives::bytes::Bytes;
     use primitives::hash::{H160, H256, H32};
-    use crate::ChecksumType;
 
     #[test]
     fn test_ripemd160() {

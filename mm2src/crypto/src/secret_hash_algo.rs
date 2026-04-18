@@ -2,7 +2,6 @@
 ///
 /// Atomic swaps use hash locks where the secret must be hashed to create the lock.
 /// Different chains may require different hash algorithms for their scripts.
-
 use bitcrypto::{dhash160, sha256};
 
 /// Available hash algorithms for creating HTLC secret hashes.

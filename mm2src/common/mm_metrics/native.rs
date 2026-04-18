@@ -75,7 +75,9 @@ pub trait TrySink {
 }
 
 impl TrySink for MetricsArc {
-    fn try_sink(&self) -> Option<Sink> { self.0.sink().ok() }
+    fn try_sink(&self) -> Option<Sink> {
+        self.0.sink().ok()
+    }
 }
 
 impl TrySink for MetricsWeak {
@@ -90,11 +92,15 @@ pub struct Clock {
 }
 
 impl From<Sink> for Clock {
-    fn from(sink: Sink) -> Self { Clock { sink } }
+    fn from(sink: Sink) -> Self {
+        Clock { sink }
+    }
 }
 
 impl ClockOps for Clock {
-    fn now(&self) -> u64 { self.sink.now() }
+    fn now(&self) -> u64 {
+        self.sink.now()
+    }
 }
 
 #[derive(Default)]
@@ -133,7 +139,9 @@ impl MetricsOps for Metrics {
         Ok(())
     }
 
-    fn clock(&self) -> Result<Clock, String> { self.sink().map_err(|e| ERRL!("{}", e)).map(Clock::from) }
+    fn clock(&self) -> Result<Clock, String> {
+        self.sink().map_err(|e| ERRL!("{}", e)).map(Clock::from)
+    }
 
     fn collect_json(&self) -> Result<Json, String> {
         let receiver = try_s!(self.try_receiver());
@@ -153,7 +161,9 @@ impl Metrics {
         self.receiver.ok_or("metrics system is not initialized yet".into())
     }
 
-    fn sink(&self) -> Result<Sink, String> { Ok(try_s!(self.try_receiver()).sink()) }
+    fn sink(&self) -> Result<Sink, String> {
+        Ok(try_s!(self.try_receiver()).sink())
+    }
 
     /// Collect the metrics in Prometheus format.
     pub fn collect_prometheus_format(&self) -> Result<String, String> {
@@ -260,9 +270,13 @@ impl TagObserver {
 }
 
 impl Observer for TagObserver {
-    fn observe_counter(&mut self, key: Key, value: u64) { self.insert_metric(key, Integer::Unsigned(value)) }
+    fn observe_counter(&mut self, key: Key, value: u64) {
+        self.insert_metric(key, Integer::Unsigned(value))
+    }
 
-    fn observe_gauge(&mut self, key: Key, value: i64) { self.insert_metric(key, Integer::Signed(value)) }
+    fn observe_gauge(&mut self, key: Key, value: i64) {
+        self.insert_metric(key, Integer::Signed(value))
+    }
 
     fn observe_histogram(&mut self, key: Key, values: &[u64]) {
         let entry = self.histograms.entry(key).or_insert({
@@ -364,7 +378,9 @@ impl JsonObserver {
         }
     }
 
-    fn into_json(self) -> Result<Json, String> { json::to_value(self.metrics).map_err(|err| ERRL!("{}", err)) }
+    fn into_json(self) -> Result<Json, String> {
+        json::to_value(self.metrics).map_err(|err| ERRL!("{}", err))
+    }
 }
 
 /// Exports metrics by converting them to a Tag format and log them using log::Status.

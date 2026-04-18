@@ -2,7 +2,8 @@
 //! running properly, and (2) either can or should be run in the background. See docs for
 //! [`BackgroundProcessor`] for more details on the nitty-gritty.
 
-#[macro_use] extern crate lightning;
+#[macro_use]
+extern crate lightning;
 
 use lightning::chain;
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
@@ -342,7 +343,9 @@ impl BackgroundProcessor {
 }
 
 impl Drop for BackgroundProcessor {
-    fn drop(&mut self) { self.stop_and_join_thread().unwrap(); }
+    fn drop(&mut self) {
+        self.stop_and_join_thread().unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -380,7 +383,9 @@ mod tests {
     #[derive(Clone, Eq, Hash, PartialEq)]
     struct TestDescriptor {}
     impl SocketDescriptor for TestDescriptor {
-        fn send_data(&mut self, _data: &[u8], _resume_read: bool) -> usize { 0 }
+        fn send_data(&mut self, _data: &[u8], _resume_read: bool) -> usize {
+            0
+        }
 
         fn disconnect_socket(&mut self) {}
     }
@@ -517,14 +522,20 @@ mod tests {
 
         for i in 0..num_nodes {
             for j in (i + 1)..num_nodes {
-                nodes[i].node.peer_connected(&nodes[j].node.get_our_node_id(), &Init {
-                    features: InitFeatures::known(),
-                    remote_network_address: None,
-                });
-                nodes[j].node.peer_connected(&nodes[i].node.get_our_node_id(), &Init {
-                    features: InitFeatures::known(),
-                    remote_network_address: None,
-                });
+                nodes[i].node.peer_connected(
+                    &nodes[j].node.get_our_node_id(),
+                    &Init {
+                        features: InitFeatures::known(),
+                        remote_network_address: None,
+                    },
+                );
+                nodes[j].node.peer_connected(
+                    &nodes[i].node.get_our_node_id(),
+                    &Init {
+                        features: InitFeatures::known(),
+                        remote_network_address: None,
+                    },
+                );
             }
         }
 
@@ -649,7 +660,9 @@ mod tests {
             }
         }
     }
-    fn confirm_transaction(node: &mut Node, tx: &Transaction) { confirm_transaction_depth(node, tx, ANTI_REORG_DELAY); }
+    fn confirm_transaction(node: &mut Node, tx: &Transaction) {
+        confirm_transaction_depth(node, tx, ANTI_REORG_DELAY);
+    }
 
     #[test]
     fn test_background_processor() {

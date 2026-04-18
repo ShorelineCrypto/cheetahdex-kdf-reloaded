@@ -1,7 +1,8 @@
 use crate::context::CoinsActivationContext;
 use crate::prelude::*;
-use crate::standalone_coin::init_standalone_coin_error::{InitStandaloneCoinError, InitStandaloneCoinStatusError,
-                                                         InitStandaloneCoinUserActionError};
+use crate::standalone_coin::init_standalone_coin_error::{
+    InitStandaloneCoinError, InitStandaloneCoinStatusError, InitStandaloneCoinUserActionError,
+};
 use async_trait::async_trait;
 use coins::{lp_coinfind, lp_register_coin, MmCoinEnum, RegisterCoinError, RegisterCoinParams};
 use common::{log, SuccessResponse};
@@ -126,7 +127,9 @@ pub async fn init_standalone_coin_user_action<Standalone: InitStandaloneCoinActi
     let mut task_manager = Standalone::rpc_task_manager(&coins_act_ctx)
         .lock()
         .map_to_mm(|poison| InitStandaloneCoinUserActionError::Internal(poison.to_string()))?;
-    task_manager.on_user_action(req.task_id, req.user_action).mm_err(Into::into)?;
+    task_manager
+        .on_user_action(req.task_id, req.user_action)
+        .mm_err(Into::into)?;
     Ok(SuccessResponse::new())
 }
 
@@ -173,7 +176,9 @@ where
 
         let tx_history = self.request.activation_params.tx_history();
 
-        lp_register_coin(&self.ctx, coin.into(), RegisterCoinParams { ticker, tx_history }).await.mm_err(Into::into)?;
+        lp_register_coin(&self.ctx, coin.into(), RegisterCoinParams { ticker, tx_history })
+            .await
+            .mm_err(Into::into)?;
 
         Ok(result)
     }

@@ -13,7 +13,9 @@ pub type SqliteConnWeak = Weak<Mutex<Connection>>;
 
 pub const CHECK_TABLE_EXISTS_SQL: &str = "SELECT name FROM sqlite_master WHERE type='table' AND name=?1;";
 
-pub fn string_from_row(row: &Row<'_>) -> Result<String, SqlError> { row.get(0) }
+pub fn string_from_row(row: &Row<'_>) -> Result<String, SqlError> {
+    row.get(0)
+}
 
 pub fn query_single_row<T, P, F>(conn: &Connection, query: &str, params: P, map_fn: F) -> Result<Option<T>, SqlError>
 where

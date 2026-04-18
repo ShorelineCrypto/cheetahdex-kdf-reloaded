@@ -1,9 +1,9 @@
 use super::RepresentH256;
 use crate::hash::H256;
-use hex::FromHex;
 use crate::merkle_root::merkle_root;
-use ser::deserialize;
 use crate::{BlockHeader, Transaction};
+use hex::FromHex;
+use ser::deserialize;
 
 #[derive(Debug, PartialEq, Clone, Serializable, Deserializable)]
 pub struct Block {

@@ -50,7 +50,9 @@ const ALL_NETID_7777_SEEDNODES: &[(&str, &str)] = &[
 ];
 
 #[cfg(target_arch = "wasm32")]
-pub fn get_all_network_seednodes(_netid: u16) -> Vec<(PeerId, RelayAddress)> { Vec::new() }
+pub fn get_all_network_seednodes(_netid: u16) -> Vec<(PeerId, RelayAddress)> {
+    Vec::new()
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_all_network_seednodes(netid: u16) -> Vec<(PeerId, RelayAddress)> {

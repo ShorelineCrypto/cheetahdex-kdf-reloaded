@@ -7,8 +7,10 @@ use serde::Serialize;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
-#[macro_use] extern crate ser_error_derive;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate ser_error_derive;
+#[macro_use]
+extern crate serde_derive;
 
 mod handle;
 mod manager;
@@ -63,7 +65,9 @@ pub enum TaskStatusError {
 }
 
 impl From<TimeoutError> for RpcTaskError {
-    fn from(e: TimeoutError) -> Self { RpcTaskError::Timeout(e.duration) }
+    fn from(e: TimeoutError) -> Self {
+        RpcTaskError::Timeout(e.duration)
+    }
 }
 
 /// We can't simplify the generic types because there are places where the [`RpcTaskStatus::map_err`] method is used.

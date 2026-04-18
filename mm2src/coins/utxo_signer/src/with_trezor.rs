@@ -3,8 +3,10 @@ use crate::sign_params::{SendingOutputInfo, SpendingInputInfo, UtxoSignTxParams}
 use crate::{TxProvider, UtxoSignTxError, UtxoSignTxResult};
 use chain::{Transaction as UtxoTx, TransactionOutput};
 use common::log::debug;
-use crypto::trezor::utxo::{PrevTx, PrevTxInput, PrevTxOutput, TrezorInputScriptType, TrezorUtxoCoin, TxOutput,
-                           TxSignResult, UnsignedTxInput, UnsignedUtxoTx};
+use crypto::trezor::utxo::{
+    PrevTx, PrevTxInput, PrevTxOutput, TrezorInputScriptType, TrezorUtxoCoin, TxOutput, TxSignResult, UnsignedTxInput,
+    UnsignedUtxoTx,
+};
 use crypto::trezor::TrezorClient;
 use keys::bytes::Bytes;
 use mm2_err_handle::prelude::*;
@@ -117,7 +119,11 @@ impl<TxP: TxProvider + Send + Sync> TrezorTxSigner<TxP> {
     }
 
     async fn get_trezor_prev_tx(&self, prev_tx_hash: &H256Json) -> UtxoSignTxResult<PrevTx> {
-        let prev_verbose = self.tx_provider.get_rpc_transaction(prev_tx_hash).await.mm_err(Into::into)?;
+        let prev_verbose = self
+            .tx_provider
+            .get_rpc_transaction(prev_tx_hash)
+            .await
+            .mm_err(Into::into)?;
         let prev_utxo: UtxoTx =
             deserialize(prev_verbose.hex.as_slice()).map_to_mm(|e| UtxoSignTxError::Transport(e.to_string()))?;
 
@@ -179,5 +185,7 @@ impl<TxP: TxProvider + Send + Sync> TrezorTxSigner<TxP> {
     }
 
     /// https://github.com/trezor/trezor-utxo-lib/blob/trezor/src/transaction.js#L405
-    fn is_overwinter_compatible(&self) -> bool { self.params.unsigned_tx.version > 3 }
+    fn is_overwinter_compatible(&self) -> bool {
+        self.params.unsigned_tx.version > 3
+    }
 }

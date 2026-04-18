@@ -33,7 +33,9 @@ pub enum PrivKeyError {
     Bip39Parsing(#[from] Bip39Error),
     #[error("private_from_seed: Error parsing provided WIF: {0}")]
     WifSecp256k1Parsing(KeysError),
-    #[error("private_from_seed: Error parsing raw secp256k1 private key, expected 0x prefixed 32 byte hex string: {0}")]
+    #[error(
+        "private_from_seed: Error parsing raw secp256k1 private key, expected 0x prefixed 32 byte hex string: {0}"
+    )]
     RawSecp256k1Parsing(#[from] FromHexError),
     #[error("GlobalHDAccountCtx::new: Failed to calculate secp256k1 master xpriv from bip39 seed: {0}")]
     Secp256k1MasterKey(Bip32Error),
@@ -132,7 +134,9 @@ pub struct SerializableSecp256k1Keypair {
 }
 
 impl PartialEq for SerializableSecp256k1Keypair {
-    fn eq(&self, other: &Self) -> bool { self.inner.public() == other.inner.public() }
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.public() == other.inner.public()
+    }
 }
 
 impl Eq for SerializableSecp256k1Keypair {}
@@ -144,11 +148,17 @@ impl SerializableSecp256k1Keypair {
         })
     }
 
-    pub fn key_pair(&self) -> &KeyPair { &self.inner }
+    pub fn key_pair(&self) -> &KeyPair {
+        &self.inner
+    }
 
-    pub fn public_slice(&self) -> &[u8] { self.inner.public_slice() }
+    pub fn public_slice(&self) -> &[u8] {
+        self.inner.public_slice()
+    }
 
-    pub fn priv_key(&self) -> [u8; 32] { self.inner.private().secret.take() }
+    pub fn priv_key(&self) -> [u8; 32] {
+        self.inner.private().secret.take()
+    }
 
     pub fn random() -> Self {
         SerializableSecp256k1Keypair {
@@ -156,11 +166,15 @@ impl SerializableSecp256k1Keypair {
         }
     }
 
-    pub fn into_inner(self) -> KeyPair { self.inner }
+    pub fn into_inner(self) -> KeyPair {
+        self.inner
+    }
 }
 
 impl From<KeyPair> for SerializableSecp256k1Keypair {
-    fn from(inner: KeyPair) -> Self { SerializableSecp256k1Keypair { inner } }
+    fn from(inner: KeyPair) -> Self {
+        SerializableSecp256k1Keypair { inner }
+    }
 }
 
 impl Serialize for SerializableSecp256k1Keypair {

@@ -6,7 +6,6 @@
 /// 2. Compute HMAC-SHA256 over (IV || ciphertext) for authentication
 ///
 /// Always verify HMAC before decrypting (done in decrypt.rs).
-
 use aes::Aes256;
 use cbc::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
 use hmac::{Hmac, Mac};

@@ -1,5 +1,5 @@
-use crypto::dhash256;
 use crate::hash::{H256, H512};
+use crypto::dhash256;
 
 #[inline]
 fn concat<T>(a: T, b: T) -> H512

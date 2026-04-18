@@ -130,7 +130,9 @@ pub struct ResultGuard<T> {
 
 impl<T> ResultGuard<T> {
     /// The private constructor.
-    fn new(result: T) -> Self { ResultGuard { result } }
+    fn new(result: T) -> Self {
+        ResultGuard { result }
+    }
 }
 
 #[cfg(test)]
@@ -184,7 +186,9 @@ mod tests {
         type Ctx = AuthCtx;
         type Result = Result<UserId, ErrorType>;
 
-        async fn on_changed(self: Box<Self>, _ctx: &mut Self::Ctx) -> Self::Result { Ok(self.user_id) }
+        async fn on_changed(self: Box<Self>, _ctx: &mut Self::Ctx) -> Self::Result {
+            Ok(self.user_id)
+        }
     }
 
     #[async_trait]
@@ -192,7 +196,9 @@ mod tests {
         type Ctx = AuthCtx;
         type Result = Result<UserId, ErrorType>;
 
-        async fn on_changed(self: Box<Self>, _ctx: &mut Self::Ctx) -> Self::Result { Err(self.error) }
+        async fn on_changed(self: Box<Self>, _ctx: &mut Self::Ctx) -> Self::Result {
+            Err(self.error)
+        }
     }
 
     #[async_trait]

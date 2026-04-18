@@ -204,7 +204,9 @@ pub struct TimedMutexGuard<'a, T>(futures::lock::MutexGuard<'a, T>);
 /// allowing the application to implement timeouts, status updates and shutdowns.
 pub struct TimedAsyncMutex<T>(AsyncMutex<T>);
 impl<T> TimedAsyncMutex<T> {
-    pub fn new(v: T) -> TimedAsyncMutex<T> { TimedAsyncMutex(AsyncMutex::new(v)) }
+    pub fn new(v: T) -> TimedAsyncMutex<T> {
+        TimedAsyncMutex(AsyncMutex::new(v))
+    }
 
     /// Like `AsyncMutex::lock` but invokes the `tick` callback periodically.  
     /// `tick` returns a time till the next tick, or an error to abort the locking attempt.  

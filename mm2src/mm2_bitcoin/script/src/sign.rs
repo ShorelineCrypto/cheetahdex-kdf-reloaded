@@ -1,15 +1,16 @@
 //! Transaction signer
 
-use blake2b_simd::Params as Blake2b;
 use crate::bytes::Bytes;
-use chain::{JoinSplit, OutPoint, ShieldedOutput, ShieldedSpend, Transaction, TransactionInput, TransactionOutput,
-            TxHashAlgo};
-use crypto::{dhash256, sha256};
 use crate::hash::{H256, H512};
+use crate::{Builder, Script};
+use blake2b_simd::Params as Blake2b;
+use chain::{
+    JoinSplit, OutPoint, ShieldedOutput, ShieldedSpend, Transaction, TransactionInput, TransactionOutput, TxHashAlgo,
+};
+use crypto::{dhash256, sha256};
 use keys::KeyPair;
 use ser::Stream;
 use serde::Deserialize;
-use crate::{Builder, Script};
 
 const ZCASH_PREVOUTS_HASH_PERSONALIZATION: &[u8] = b"ZcashPrevoutHash";
 const ZCASH_SEQUENCE_HASH_PERSONALIZATION: &[u8] = b"ZcashSequencHash";
@@ -38,7 +39,9 @@ pub enum SighashBase {
 }
 
 impl From<SighashBase> for u32 {
-    fn from(s: SighashBase) -> Self { s as u32 }
+    fn from(s: SighashBase) -> Self {
+        s as u32
+    }
 }
 
 #[cfg_attr(feature = "cargo-clippy", allow(clippy::doc_markdown))]
@@ -596,14 +599,15 @@ fn blake_2b_256_personal(input: &[u8], personal: &[u8]) -> H256 {
 
 #[cfg(test)]
 mod tests {
-    use super::{blake_2b_256_personal, Sighash, SighashBase, SignatureVersion, TransactionInputSigner,
-                UnsignedTransactionInput};
+    use super::{
+        blake_2b_256_personal, Sighash, SighashBase, SignatureVersion, TransactionInputSigner, UnsignedTransactionInput,
+    };
     use crate::bytes::Bytes;
-    use chain::{OutPoint, Transaction, TransactionOutput};
     use crate::hash::{H160, H256};
-    use keys::{Address, AddressHashEnum, Private};
     use crate::script::Script;
     use crate::sign::SignerHashAlgo;
+    use chain::{OutPoint, Transaction, TransactionOutput};
+    use keys::{Address, AddressHashEnum, Private};
 
     // http://www.righto.com/2014/02/bitcoins-hard-way-using-raw-bitcoin.html
     // https://blockchain.info/rawtx/81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48

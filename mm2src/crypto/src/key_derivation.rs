@@ -5,7 +5,6 @@
 /// - **SLIP-0021**: Deterministic symmetric-key derivation from a master seed
 ///
 /// Both methods derive a pair of keys: one for AES encryption and one for HMAC authentication.
-
 use crate::slip21;
 use derive_more::Display;
 use zeroize::Zeroize;
@@ -31,10 +30,7 @@ pub enum KeyDerivationDetails {
     /// Argon2id password-based key derivation.
     /// Used when encrypting mnemonic with a user-provided password.
     #[serde(rename = "argon2")]
-    Argon2 {
-        params: Argon2Params,
-        salt: Vec<u8>,
-    },
+    Argon2 { params: Argon2Params, salt: Vec<u8> },
     /// SLIP-0021 deterministic key derivation from a master seed.
     /// Used when encrypting mnemonic with its own seed (self-encryption).
     #[serde(rename = "slip0021")]

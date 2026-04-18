@@ -4,7 +4,6 @@
 /// - Generating new BIP39 mnemonics with configurable word count
 /// - Encrypting mnemonics with a password (Argon2) or seed (SLIP-0021)
 /// - Decrypting previously encrypted mnemonics
-
 use crate::decrypt::decrypt_data;
 use crate::encrypt::{encrypt_data, EncryptedData};
 use crate::key_derivation::{derive_keys_for_mnemonic, Argon2Params, KeyDerivationDetails, KeyDerivationError};
@@ -49,10 +48,8 @@ pub struct EncryptedMnemonicData {
 pub fn generate_mnemonic(word_count: usize) -> Result<Mnemonic, MnemonicError> {
     let entropy_bits = word_count_to_entropy_bits(word_count)?;
     let mut entropy = vec![0u8; entropy_bits / 8];
-    common::os_rng(&mut entropy)
-        .map_err(|e| MnemonicError::GenerationError(format!("RNG error: {e}")))?;
-    Mnemonic::from_entropy(&entropy)
-        .map_err(|e| MnemonicError::GenerationError(e.to_string()))
+    common::os_rng(&mut entropy).map_err(|e| MnemonicError::GenerationError(format!("RNG error: {e}")))?;
+    Mnemonic::from_entropy(&entropy).map_err(|e| MnemonicError::GenerationError(e.to_string()))
 }
 
 /// Encrypts a mnemonic phrase using a password with Argon2 key derivation.
@@ -64,18 +61,14 @@ pub fn generate_mnemonic(word_count: usize) -> Result<Mnemonic, MnemonicError> {
 /// # Security
 /// Uses Argon2id with parameters tuned for reasonable security vs. performance tradeoff.
 /// The salt is randomly generated per encryption.
-pub fn encrypt_mnemonic(
-    mnemonic_str: &str,
-    password: &str,
-) -> Result<EncryptedMnemonicData, MnemonicError> {
+pub fn encrypt_mnemonic(mnemonic_str: &str, password: &str) -> Result<EncryptedMnemonicData, MnemonicError> {
     // Validate the mnemonic first
     let _ = Mnemonic::parse_in_normalized(bip39::Language::English, mnemonic_str)
         .map_err(|e| MnemonicError::InvalidMnemonic(e.to_string()))?;
 
     // Generate random salt for Argon2
     let mut salt = [0u8; 32];
-    common::os_rng(&mut salt)
-        .map_err(|e| MnemonicError::EncryptionError(format!("RNG error: {e}")))?;
+    common::os_rng(&mut salt).map_err(|e| MnemonicError::EncryptionError(format!("RNG error: {e}")))?;
 
     // Default Argon2 parameters — balanced for security and performance
     let argon2_params = Argon2Params {
@@ -93,15 +86,9 @@ pub fn encrypt_mnemonic(
 
     // Generate random IV for AES-CBC
     let mut iv = [0u8; 16];
-    common::os_rng(&mut iv)
-        .map_err(|e| MnemonicError::EncryptionError(format!("RNG error: {e}")))?;
+    common::os_rng(&mut iv).map_err(|e| MnemonicError::EncryptionError(format!("RNG error: {e}")))?;
 
-    let encrypted_data = encrypt_data(
-        mnemonic_str.as_bytes(),
-        &keys.encryption_key,
-        &iv,
-        &keys.hmac_key,
-    );
+    let encrypted_data = encrypt_data(mnemonic_str.as_bytes(), &keys.encryption_key, &iv, &keys.hmac_key);
 
     Ok(EncryptedMnemonicData {
         encrypted_data,
@@ -114,10 +101,7 @@ pub fn encrypt_mnemonic(
 /// # Arguments
 /// * `encrypted` - The encrypted mnemonic bundle
 /// * `password` - The password used during encryption
-pub fn decrypt_mnemonic(
-    encrypted: &EncryptedMnemonicData,
-    password: &str,
-) -> Result<String, MnemonicError> {
+pub fn decrypt_mnemonic(encrypted: &EncryptedMnemonicData, password: &str) -> Result<String, MnemonicError> {
     let keys = derive_keys_for_mnemonic(password.as_bytes(), &encrypted.key_derivation)?;
 
     let decrypted = decrypt_data(&encrypted.encrypted_data, &keys.encryption_key, &keys.hmac_key)
@@ -172,10 +156,8 @@ mod tests {
         let mnemonic_str = mnemonic.to_string();
         let password = "test_password_123";
 
-        let encrypted = encrypt_mnemonic(&mnemonic_str, password)
-            .expect("encryption should succeed");
-        let decrypted = decrypt_mnemonic(&encrypted, password)
-            .expect("decryption should succeed");
+        let encrypted = encrypt_mnemonic(&mnemonic_str, password).expect("encryption should succeed");
+        let decrypted = decrypt_mnemonic(&encrypted, password).expect("decryption should succeed");
 
         assert_eq!(decrypted, mnemonic_str);
     }
@@ -185,8 +167,7 @@ mod tests {
         let mnemonic = generate_mnemonic(12).unwrap();
         let mnemonic_str = mnemonic.to_string();
 
-        let encrypted = encrypt_mnemonic(&mnemonic_str, "correct_password")
-            .expect("encryption should succeed");
+        let encrypted = encrypt_mnemonic(&mnemonic_str, "correct_password").expect("encryption should succeed");
         let result = decrypt_mnemonic(&encrypted, "wrong_password");
 
         assert!(result.is_err());

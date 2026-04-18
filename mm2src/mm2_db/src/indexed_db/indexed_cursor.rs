@@ -49,8 +49,9 @@
 //! because ['RICK', 'MORTY', 13] < ['RICK', 'MORTY', 13, 1000000030],
 //! although it is expected to be within the specified bounds.
 
-use crate::indexed_db::db_driver::cursor::{CollectCursorAction, CollectItemAction, CursorBoundValue, CursorOps,
-                                           DbFilter, IdbCursorBuilder};
+use crate::indexed_db::db_driver::cursor::{
+    CollectCursorAction, CollectItemAction, CursorBoundValue, CursorOps, DbFilter, IdbCursorBuilder,
+};
 pub use crate::indexed_db::db_driver::cursor::{CursorError, CursorResult};
 use crate::indexed_db::{ItemId, TableSignature};
 use async_trait::async_trait;
@@ -216,7 +217,9 @@ pub trait CollectCursor<Table: DeserializeOwned> {
 
 #[async_trait]
 impl<Table: DeserializeOwned + 'static, T: CollectCursorImpl<Table> + Send> CollectCursor<Table> for T {
-    async fn collect(self) -> CursorResult<Vec<(ItemId, Table)>> { self.collect_impl().await }
+    async fn collect(self) -> CursorResult<Vec<(ItemId, Table)>> {
+        self.collect_impl().await
+    }
 }
 
 #[async_trait]
@@ -362,7 +365,9 @@ impl<'a, Table: TableSignature> CollectCursorImpl<Table> for DbSingleKeyCursor<'
         }
     }
 
-    fn event_tx(&self) -> DbCursorEventTx { self.event_tx.clone() }
+    fn event_tx(&self) -> DbCursorEventTx {
+        self.event_tx.clone()
+    }
 }
 
 /// `DbSingleKeyBoundCursor` doesn't implement `WithOnly` trait, because indexes MUST start with `only` values.
@@ -416,7 +421,9 @@ impl<'a, Table: TableSignature> CollectCursorImpl<Table> for DbSingleKeyBoundCur
         }
     }
 
-    fn event_tx(&self) -> DbCursorEventTx { self.event_tx.clone() }
+    fn event_tx(&self) -> DbCursorEventTx {
+        self.event_tx.clone()
+    }
 }
 
 pub struct DbMultiKeyCursor<'a, Table: TableSignature> {
@@ -470,7 +477,9 @@ impl<'a, Table: TableSignature> CollectCursorImpl<Table> for DbMultiKeyCursor<'a
         }
     }
 
-    fn event_tx(&self) -> DbCursorEventTx { self.event_tx.clone() }
+    fn event_tx(&self) -> DbCursorEventTx {
+        self.event_tx.clone()
+    }
 }
 
 /// `DbMultiKeyBoundCursor` doesn't implement `WithOnly` trait, because indexes MUST start with `only` values.
@@ -513,7 +522,9 @@ impl<'a, Table: TableSignature> CollectCursorImpl<Table> for DbMultiKeyBoundCurs
         }
     }
 
-    fn event_tx(&self) -> DbCursorEventTx { self.event_tx.clone() }
+    fn event_tx(&self) -> DbCursorEventTx {
+        self.event_tx.clone()
+    }
 }
 
 async fn send_event_recv_response<Event, Result>(
@@ -568,7 +579,9 @@ mod tests {
     }
 
     impl TableSignature for SwapTable {
-        fn table_name() -> &'static str { "swap_test_table" }
+        fn table_name() -> &'static str {
+            "swap_test_table"
+        }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, _new_version: u32) -> OnUpgradeResult<()> {
             if old_version > 0 {

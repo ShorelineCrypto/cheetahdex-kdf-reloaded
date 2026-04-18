@@ -6,9 +6,13 @@ use std::pin::Pin;
 use std::thread;
 use std::time::Duration;
 
-pub fn spawn(future: impl Future03<Output = ()> + Send + 'static) { crate::wio::CORE.0.spawn(future); }
+pub fn spawn(future: impl Future03<Output = ()> + Send + 'static) {
+    crate::wio::CORE.0.spawn(future);
+}
 
-pub fn spawn_boxed(future: Box<dyn Future03<Output = ()> + Send + Unpin + 'static>) { spawn(future); }
+pub fn spawn_boxed(future: Box<dyn Future03<Output = ()> + Send + Unpin + 'static>) {
+    spawn(future);
+}
 
 /// Schedule the given `future` to be executed shortly after the given `utc` time is reached.
 pub fn spawn_after(utc: f64, future: impl Future03<Output = ()> + Send + 'static) {
@@ -82,7 +86,9 @@ pub struct Timer {
 }
 
 impl Timer {
-    pub fn till(till_utc: f64) -> Timer { Timer { till_utc } }
+    pub fn till(till_utc: f64) -> Timer {
+        Timer { till_utc }
+    }
     pub fn sleep(seconds: f64) -> Timer {
         Timer {
             till_utc: now_float() + seconds,
@@ -94,7 +100,9 @@ impl Timer {
             till_utc: now_float() + seconds,
         }
     }
-    pub fn till_utc(&self) -> f64 { self.till_utc }
+    pub fn till_utc(&self) -> f64 {
+        self.till_utc
+    }
 }
 
 impl Future03 for Timer {

@@ -31,11 +31,17 @@ pub struct TopicHash {
 }
 
 impl TopicHash {
-    pub fn from_raw(hash: impl Into<String>) -> TopicHash { TopicHash { hash: hash.into() } }
+    pub fn from_raw(hash: impl Into<String>) -> TopicHash {
+        TopicHash { hash: hash.into() }
+    }
 
-    pub fn into_string(self) -> String { self.hash }
+    pub fn into_string(self) -> String {
+        self.hash
+    }
 
-    pub fn as_str(&self) -> &str { &self.hash }
+    pub fn as_str(&self) -> &str {
+        &self.hash
+    }
 }
 
 /// A gossipsub topic.
@@ -45,7 +51,9 @@ pub struct Topic {
 }
 
 impl Topic {
-    pub fn new(topic: String) -> Self { Topic { topic } }
+    pub fn new(topic: String) -> Self {
+        Topic { topic }
+    }
 
     /// Creates a `TopicHash` by SHA256 hashing the topic then base64 encoding the
     /// hash.
@@ -71,9 +79,13 @@ impl Topic {
 }
 
 impl fmt::Display for Topic {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", self.topic) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.topic)
+    }
 }
 
 impl fmt::Display for TopicHash {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", self.hash) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.hash)
+    }
 }

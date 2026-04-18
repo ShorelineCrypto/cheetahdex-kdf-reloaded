@@ -5,6 +5,7 @@
 //!
 //! https://en.bitcoin.it/wiki/Address
 
+use crate::{AddressHashEnum, CashAddrType, CashAddress, DisplayLayout, Error, SegwitAddress};
 use base58::{FromBase58, ToBase58};
 use crypto::{checksum, dgroestl512, dhash256, keccak256, ChecksumType};
 use derive_more::Display;
@@ -12,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
-use crate::{AddressHashEnum, CashAddrType, CashAddress, DisplayLayout, Error, SegwitAddress};
 
 /// There are two address formats currently in use.
 /// https://bitcoin.org/en/developer-reference#address-conversion
@@ -65,15 +65,23 @@ pub enum AddressFormat {
 }
 
 impl Default for AddressFormat {
-    fn default() -> Self { AddressFormat::Standard }
+    fn default() -> Self {
+        AddressFormat::Standard
+    }
 }
 
 impl AddressFormat {
-    pub fn is_segwit(&self) -> bool { matches!(*self, AddressFormat::Segwit) }
+    pub fn is_segwit(&self) -> bool {
+        matches!(*self, AddressFormat::Segwit)
+    }
 
-    pub fn is_cashaddress(&self) -> bool { matches!(*self, AddressFormat::CashAddress { .. }) }
+    pub fn is_cashaddress(&self) -> bool {
+        matches!(*self, AddressFormat::CashAddress { .. })
+    }
 
-    pub fn is_legacy(&self) -> bool { matches!(*self, AddressFormat::Standard) }
+    pub fn is_legacy(&self) -> bool {
+        matches!(*self, AddressFormat::Standard)
+    }
 }
 
 // TODO add ScriptType field to this struct for easier use of output_script function
@@ -115,7 +123,9 @@ pub struct AddressDisplayLayout(Vec<u8>);
 impl Deref for AddressDisplayLayout {
     type Target = [u8];
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl DisplayLayout for Address {
@@ -216,7 +226,9 @@ impl FromStr for Address {
 }
 
 impl From<&'static str> for Address {
-    fn from(s: &'static str) -> Self { s.parse().unwrap() }
+    fn from(s: &'static str) -> Self {
+        s.parse().unwrap()
+    }
 }
 
 impl Address {

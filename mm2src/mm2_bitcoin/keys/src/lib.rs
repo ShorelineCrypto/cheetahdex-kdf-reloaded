@@ -9,7 +9,8 @@ extern crate primitives;
 extern crate rustc_hex as hex;
 extern crate secp256k1;
 extern crate serde;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
 mod address;
 mod cashaddress;
@@ -54,9 +55,13 @@ pub enum AddressHashEnum {
 }
 
 impl AddressHashEnum {
-    pub fn default_address_hash() -> Self { AddressHashEnum::AddressHash(H160::default()) }
+    pub fn default_address_hash() -> Self {
+        AddressHashEnum::AddressHash(H160::default())
+    }
 
-    pub fn default_witness_script_hash() -> Self { AddressHashEnum::WitnessScriptHash(H256::default()) }
+    pub fn default_witness_script_hash() -> Self {
+        AddressHashEnum::WitnessScriptHash(H256::default())
+    }
 
     pub fn copy_from_slice(&mut self, src: &[u8]) {
         match self {
@@ -72,9 +77,13 @@ impl AddressHashEnum {
         }
     }
 
-    pub fn is_address_hash(&self) -> bool { matches!(*self, AddressHashEnum::AddressHash(_)) }
+    pub fn is_address_hash(&self) -> bool {
+        matches!(*self, AddressHashEnum::AddressHash(_))
+    }
 
-    pub fn is_witness_script_hash(&self) -> bool { matches!(*self, AddressHashEnum::WitnessScriptHash(_)) }
+    pub fn is_witness_script_hash(&self) -> bool {
+        matches!(*self, AddressHashEnum::WitnessScriptHash(_))
+    }
 }
 
 impl fmt::Display for AddressHashEnum {
@@ -87,7 +96,9 @@ impl fmt::Display for AddressHashEnum {
 }
 
 impl From<H160> for AddressHashEnum {
-    fn from(hash: H160) -> Self { AddressHashEnum::AddressHash(hash) }
+    fn from(hash: H160) -> Self {
+        AddressHashEnum::AddressHash(hash)
+    }
 }
 
 lazy_static! {

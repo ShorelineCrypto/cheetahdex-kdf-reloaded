@@ -1,13 +1,13 @@
 use crate::compact::Compact;
-use crypto::dhash256;
 use crate::hash::H256;
+use crate::transaction::{deserialize_tx, TxType};
+use crate::{OutPoint, Transaction};
+use crypto::dhash256;
 use hex::FromHex;
 use primitives::bytes::Bytes;
 use primitives::U256;
 use ser::{deserialize, serialize, Deserializable, Reader, Serializable, Stream};
 use std::io;
-use crate::transaction::{deserialize_tx, TxType};
-use crate::{OutPoint, Transaction};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum BlockHeaderNonce {

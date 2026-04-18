@@ -16,11 +16,17 @@ extern "C" {
     fn clearTimeout(id: i32);
 }
 
-pub fn spawn(future: impl Future<Output = ()> + Send + 'static) { spawn_local(future) }
+pub fn spawn(future: impl Future<Output = ()> + Send + 'static) {
+    spawn_local(future)
+}
 
-pub fn spawn_boxed(future: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) { spawn_local(future) }
+pub fn spawn_boxed(future: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) {
+    spawn_local(future)
+}
 
-pub fn spawn_local(future: impl Future<Output = ()> + 'static) { wasm_bindgen_futures::spawn_local(future) }
+pub fn spawn_local(future: impl Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(future)
+}
 
 /// The timer uses [`setTimeout`] and [`clearTimeout`] for scheduling.
 /// See the [example](https://rustwasm.github.io/docs/wasm-bindgen/reference/passing-rust-closures-to-js.html#heap-allocated-closures).
@@ -81,7 +87,9 @@ impl Timer {
 
 /// When the `Timer` is destroyed, cancel its `setTimeout` timer.
 impl Drop for Timer {
-    fn drop(&mut self) { clearTimeout(self.timeout_id) }
+    fn drop(&mut self) {
+        clearTimeout(self.timeout_id)
+    }
 }
 
 impl Future for Timer {

@@ -37,11 +37,15 @@ impl From<RpcTaskError> for InitUtxoStandardError {
 
 impl From<CryptoInitError> for InitUtxoStandardError {
     /// `CryptoCtx` is expected to be initialized already.
-    fn from(crypto_err: CryptoInitError) -> Self { InitUtxoStandardError::Internal(crypto_err.to_string()) }
+    fn from(crypto_err: CryptoInitError) -> Self {
+        InitUtxoStandardError::Internal(crypto_err.to_string())
+    }
 }
 
 impl From<CryptoCtxError> for InitUtxoStandardError {
-    fn from(e: CryptoCtxError) -> Self { InitUtxoStandardError::Internal(e.to_string()) }
+    fn from(e: CryptoCtxError) -> Self {
+        InitUtxoStandardError::Internal(e.to_string())
+    }
 }
 
 impl From<InitUtxoStandardError> for InitStandaloneCoinError {

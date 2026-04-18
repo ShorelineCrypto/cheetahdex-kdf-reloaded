@@ -1,11 +1,13 @@
-use crate::SECP_VERIFY;
-use crypto::dhash160;
 use crate::hash::{H160, H264, H520};
-use hex::ToHex;
-use secp256k1::{recovery::{RecoverableSignature, RecoveryId},
-                Message as SecpMessage, PublicKey, Signature as SecpSignature};
-use std::{fmt, ops};
+use crate::SECP_VERIFY;
 use crate::{CompactSignature, Error, Message, Signature};
+use crypto::dhash160;
+use hex::ToHex;
+use secp256k1::{
+    recovery::{RecoverableSignature, RecoveryId},
+    Message as SecpMessage, PublicKey, Signature as SecpSignature,
+};
+use std::{fmt, ops};
 
 /// Secret public key
 #[derive(Copy, Clone)]
@@ -17,7 +19,9 @@ pub enum Public {
 }
 
 impl Default for Public {
-    fn default() -> Public { Public::Compressed(H264::default()) }
+    fn default() -> Public {
+        Public::Compressed(H264::default())
+    }
 }
 
 impl Public {
@@ -37,7 +41,9 @@ impl Public {
         }
     }
 
-    pub fn address_hash(&self) -> H160 { dhash160(self) }
+    pub fn address_hash(&self) -> H160 {
+        dhash160(self)
+    }
 
     pub fn verify(&self, message: &Message, signature: &Signature) -> Result<bool, Error> {
         let public = match self {
@@ -100,5 +106,7 @@ impl fmt::Debug for Public {
 }
 
 impl fmt::Display for Public {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.to_hex::<String>().fmt(f) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.to_hex::<String>().fmt(f)
+    }
 }

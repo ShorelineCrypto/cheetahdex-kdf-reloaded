@@ -25,7 +25,9 @@ pub struct Topic(String);
 impl Topic {
     /// Returns the id of the topic.
     #[inline]
-    pub fn id(&self) -> &str { &self.0 }
+    pub fn id(&self) -> &str {
+        &self.0
+    }
 
     pub fn new<S>(name: S) -> Topic
     where
@@ -36,5 +38,7 @@ impl Topic {
 }
 
 impl From<Topic> for String {
-    fn from(topic: Topic) -> String { topic.0 }
+    fn from(topic: Topic) -> String {
+        topic.0
+    }
 }

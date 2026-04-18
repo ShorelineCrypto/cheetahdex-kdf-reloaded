@@ -44,7 +44,9 @@ impl TryFromCoinProtocol for SplProtocolConf {
 }
 
 impl TokenProtocolParams for SplProtocolConf {
-    fn platform_coin_ticker(&self) -> &str { &self.platform_coin_ticker }
+    fn platform_coin_ticker(&self) -> &str {
+        &self.platform_coin_ticker
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -63,7 +65,9 @@ pub enum SplInitError {
 }
 
 impl From<SplTokenCreationError> for SplInitError {
-    fn from(e: SplTokenCreationError) -> Self { SplInitError::TokenCreationFailed(e) }
+    fn from(e: SplTokenCreationError) -> Self {
+        SplInitError::TokenCreationFailed(e)
+    }
 }
 
 impl From<SplInitError> for EnableTokenError {
@@ -95,7 +99,8 @@ impl TokenActivationOps for SplToken {
             ticker,
             protocol_conf.token_contract_address,
             platform_coin,
-        ).mm_err(Into::into)?;
+        )
+        .mm_err(Into::into)?;
         let balance = token
             .my_balance()
             .compat()

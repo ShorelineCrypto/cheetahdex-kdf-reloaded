@@ -34,7 +34,9 @@ pub enum CryptoInitError {
 }
 
 impl From<PrivKeyError> for CryptoInitError {
-    fn from(e: PrivKeyError) -> Self { CryptoInitError::InvalidPassphrase(e) }
+    fn from(e: PrivKeyError) -> Self {
+        CryptoInitError::InvalidPassphrase(e)
+    }
 }
 
 #[derive(Debug, Display)]
@@ -99,7 +101,9 @@ impl CryptoCtx {
 
     /// Returns the key pair policy (Iguana or GlobalHDAccount).
     #[inline]
-    pub fn key_pair_policy(&self) -> &KeyPairPolicy { &self.key_pair_policy }
+    pub fn key_pair_policy(&self) -> &KeyPairPolicy {
+        &self.key_pair_policy
+    }
 
     /// This is our public ID, allowing us to be different from other peers.
     /// Also used for P2P message verification.
@@ -118,29 +122,41 @@ impl CryptoCtx {
     /// If `key_pair_policy` is `Iguana`, this key-pair is also used for coin activation.
     /// Use carefully — prefer matching on `key_pair_policy()` for coin operations.
     #[inline]
-    pub fn mm2_internal_key_pair(&self) -> &KeyPair { &self.secp256k1_key_pair }
+    pub fn mm2_internal_key_pair(&self) -> &KeyPair {
+        &self.secp256k1_key_pair
+    }
 
     /// Returns `secp256k1` public key for mm2 internal purposes.
     #[inline]
-    pub fn mm2_internal_pubkey(&self) -> PublicKey { *self.secp256k1_key_pair.public() }
+    pub fn mm2_internal_pubkey(&self) -> PublicKey {
+        *self.secp256k1_key_pair.public()
+    }
 
     /// Returns `secp256k1` public key as hex string.
     #[inline]
-    pub fn mm2_internal_pubkey_hex(&self) -> String { hex::encode(&*self.mm2_internal_pubkey()) }
+    pub fn mm2_internal_pubkey_hex(&self) -> String {
+        hex::encode(&*self.mm2_internal_pubkey())
+    }
 
     /// Returns `secp256k1` private key as `Secret` bytes.
     ///
     /// # Security
     /// If `key_pair_policy` is `Iguana`, this private key is used for coin activation.
     #[inline]
-    pub fn mm2_internal_privkey_secret(&self) -> Secp256k1Secret { self.secp256k1_key_pair.private().secret }
+    pub fn mm2_internal_privkey_secret(&self) -> Secp256k1Secret {
+        self.secp256k1_key_pair.private().secret
+    }
 
     /// Returns `secp256k1` private key as a byte slice.
     #[inline]
-    pub fn mm2_internal_privkey_slice(&self) -> &[u8] { self.secp256k1_key_pair.private().secret.as_slice() }
+    pub fn mm2_internal_privkey_slice(&self) -> &[u8] {
+        self.secp256k1_key_pair.private().secret.as_slice()
+    }
 
     #[inline]
-    pub fn hw_ctx(&self) -> Option<HardwareWalletArc> { self.hw_ctx.read().to_option().cloned() }
+    pub fn hw_ctx(&self) -> Option<HardwareWalletArc> {
+        self.hw_ctx.read().to_option().cloned()
+    }
 
     /// Returns an `RIPEMD160(SHA256(x))` where x is secp256k1 pubkey that identifies
     /// a Hardware Wallet device or an HD master private key.
@@ -254,8 +270,7 @@ impl KeyPairPolicyBuilder {
                 Ok((secp256k1_key_pair, KeyPairPolicy::Iguana))
             },
             KeyPairPolicyBuilder::GlobalHDAccount => {
-                let (mm2_internal_key_pair, global_hd_ctx) =
-                    GlobalHDAccountCtx::new(passphrase).mm_err(Into::into)?;
+                let (mm2_internal_key_pair, global_hd_ctx) = GlobalHDAccountCtx::new(passphrase).mm_err(Into::into)?;
                 let key_pair_policy = KeyPairPolicy::GlobalHDAccount(global_hd_ctx.into_arc());
                 Ok((mm2_internal_key_pair, key_pair_policy))
             },

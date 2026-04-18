@@ -14,13 +14,20 @@
 #![feature(negative_impls)]
 #![feature(auto_traits)]
 
-#[macro_use] extern crate arrayref;
-#[macro_use] extern crate fomat_macros;
-#[macro_use] extern crate gstuff;
-#[macro_use] extern crate lazy_static;
-#[macro_use] pub extern crate serde_derive;
-#[macro_use] pub extern crate serde_json;
-#[macro_use] extern crate ser_error_derive;
+#[macro_use]
+extern crate arrayref;
+#[macro_use]
+extern crate fomat_macros;
+#[macro_use]
+extern crate gstuff;
+#[macro_use]
+extern crate lazy_static;
+#[macro_use]
+pub extern crate serde_derive;
+#[macro_use]
+pub extern crate serde_json;
+#[macro_use]
+extern crate ser_error_derive;
 
 /// Implements a `From` for `enum` with a variant name matching the name of the type stored.
 ///
@@ -33,7 +40,9 @@
 macro_rules! ifrom {
     ($enum: ident, $id: ident) => {
         impl From<$id> for $enum {
-            fn from(t: $id) -> $enum { $enum::$id(t) }
+            fn from(t: $id) -> $enum {
+                $enum::$id(t)
+            }
         }
     };
 }
@@ -94,7 +103,8 @@ pub mod custom_iter;
 pub mod duplex_mutex;
 pub mod mm_number;
 pub mod seri;
-#[path = "patterns/state_machine.rs"] pub mod state_machine;
+#[path = "patterns/state_machine.rs"]
+pub mod state_machine;
 pub mod time_cache;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -109,8 +119,10 @@ pub mod wio;
 #[path = "executor/wasm_executor.rs"]
 pub mod executor;
 
-#[cfg(target_arch = "wasm32")] pub mod wasm;
-#[cfg(target_arch = "wasm32")] pub use wasm::*;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+#[cfg(target_arch = "wasm32")]
+pub use wasm::*;
 
 use backtrace::SymbolName;
 pub use futures::compat::Future01CompatExt;
@@ -147,7 +159,8 @@ use uuid::Uuid;
 pub use http::StatusCode;
 pub use serde;
 
-#[cfg(not(target_arch = "wasm32"))] pub mod for_c;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod for_c;
 
 cfg_native! {
     pub use gstuff::{now_float, now_ms};
@@ -178,7 +191,9 @@ impl<X> !NotSame for (X, X) {}
 impl<T: ?Sized> NotSame for Box<T> {}
 
 /// Converts u64 satoshis to f64
-pub fn sat_to_f(sat: u64) -> f64 { sat as f64 / SATOSHIS as f64 }
+pub fn sat_to_f(sat: u64) -> f64 {
+    sat as f64 / SATOSHIS as f64
+}
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
@@ -229,7 +244,9 @@ impl<'de> de::Deserialize<'de> for bits256 {
         struct Bits256Visitor;
         impl<'de> de::Visitor<'de> for Bits256Visitor {
             type Value = bits256;
-            fn expecting(&self, fm: &mut fmt::Formatter) -> fmt::Result { fm.write_str("a byte array") }
+            fn expecting(&self, fm: &mut fmt::Formatter) -> fmt::Result {
+                fm.write_str("a byte array")
+            }
             fn visit_seq<S>(self, mut seq: S) -> Result<bits256, S::Error>
             where
                 S: de::SeqAccess<'de>,
@@ -262,23 +279,33 @@ impl<'de> de::Deserialize<'de> for bits256 {
 }
 
 impl fmt::Debug for bits256 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { (self as &dyn fmt::Display).fmt(f) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        (self as &dyn fmt::Display).fmt(f)
+    }
 }
 
 impl From<[u8; 32]> for bits256 {
-    fn from(bytes: [u8; 32]) -> Self { bits256 { bytes } }
+    fn from(bytes: [u8; 32]) -> Self {
+        bits256 { bytes }
+    }
 }
 
 impl bits256 {
     /// Returns true if the hash is not zero.  
     /// Port of `#define bits256_nonz`.
-    pub fn nonz(&self) -> bool { self.bytes.iter().any(|ch| *ch != 0) }
+    pub fn nonz(&self) -> bool {
+        self.bytes.iter().any(|ch| *ch != 0)
+    }
 }
 
-pub fn nonz(k: [u8; 32]) -> bool { k.iter().any(|ch| *ch != 0) }
+pub fn nonz(k: [u8; 32]) -> bool {
+    k.iter().any(|ch| *ch != 0)
+}
 
 pub const SATOSHIDEN: i64 = 100_000_000;
-pub fn dstr(x: i64, decimals: u8) -> f64 { x as f64 / 10.0_f64.powf(decimals as f64) }
+pub fn dstr(x: i64, decimals: u8) -> f64 {
+    x as f64 / 10.0_f64.powf(decimals as f64)
+}
 
 /// Apparently helps to workaround `double` fluctuations occuring on *certain* systems.
 /// cf. https://stackoverflow.com/questions/19804472/double-randomly-adds-0-000000000000001.
@@ -292,7 +319,9 @@ pub const SMALLVAL: f64 = 0.000_000_000_000_001; // 1e-15f64
 /// that is it doesn't need to be recycled in Rust.
 /// Plus we don't check the slice for zeroes, most of our code doesn't need that extra check.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn str_to_malloc(s: &str) -> *mut c_char { slice_to_malloc(s.as_bytes()) as *mut c_char }
+pub fn str_to_malloc(s: &str) -> *mut c_char {
+    slice_to_malloc(s.as_bytes()) as *mut c_char
+}
 
 /// Helps sharing a byte slice with C code by allocating a zero-terminated string with the C standard library allocator.
 #[cfg(not(target_arch = "wasm32"))]
@@ -345,10 +374,14 @@ pub fn black_box<T>(v: T) -> T {
 #[derive(Debug)]
 pub struct RaiiRm<'a>(pub &'a Path);
 impl<'a> AsRef<Path> for RaiiRm<'a> {
-    fn as_ref(&self) -> &Path { self.0 }
+    fn as_ref(&self) -> &Path {
+        self.0
+    }
 }
 impl<'a> Drop for RaiiRm<'a> {
-    fn drop(&mut self) { let _ = std::fs::remove_file(self); }
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self);
+    }
 }
 
 /// Using a static buffer in order to minimize the chance of heap and stack allocations in the signal handler.
@@ -531,7 +564,9 @@ pub fn set_panic_hook() {
 pub fn double_panic_crash() {
     struct Panicker;
     impl Drop for Panicker {
-        fn drop(&mut self) { panic!("panic in drop") }
+        fn drop(&mut self) {
+            panic!("panic in drop")
+        }
     }
     let panicker = Panicker;
     if 1 < 2 {
@@ -652,11 +687,15 @@ impl SerializationError {
 pub struct SuccessResponse(&'static str);
 
 impl SuccessResponse {
-    pub fn new() -> SuccessResponse { SuccessResponse("success") }
+    pub fn new() -> SuccessResponse {
+        SuccessResponse("success")
+    }
 }
 
 impl Default for SuccessResponse {
-    fn default() -> Self { SuccessResponse::new() }
+    fn default() -> Self {
+        SuccessResponse::new()
+    }
 }
 
 #[derive(Serialize)]
@@ -670,7 +709,9 @@ pub fn err_to_rpc_json_string(err: &str) -> String {
     json::to_string(&err).unwrap()
 }
 
-pub fn err_tp_rpc_json(error: String) -> Json { json::to_value(ErrResponse { error }).unwrap() }
+pub fn err_tp_rpc_json(error: String) -> Json {
+    json::to_value(ErrResponse { error }).unwrap()
+}
 
 /// Returns the `{error: $msg}` JSON response with the given HTTP `status`.
 /// Also logs the error (if possible).
@@ -864,7 +905,9 @@ pub fn var(name: &str) -> Result<String, String> {
 
 /// TODO make it wasm32 only
 #[cfg(target_arch = "wasm32")]
-pub fn var(_name: &str) -> Result<String, String> { ERR!("Environment variable not supported in WASM") }
+pub fn var(_name: &str) -> Result<String, String> {
+    ERR!("Environment variable not supported in WASM")
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn block_on<F>(f: F) -> F::Output
@@ -900,7 +943,9 @@ where
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn now_ms() -> u64 { js_sys::Date::now() as u64 }
+pub fn now_ms() -> u64 {
+    js_sys::Date::now() as u64
+}
 
 #[cfg(target_arch = "wasm32")]
 pub fn now_float() -> f64 {
@@ -910,7 +955,9 @@ pub fn now_float() -> f64 {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn temp_dir() -> PathBuf { env::temp_dir() }
+pub fn temp_dir() -> PathBuf {
+    env::temp_dir()
+}
 
 /// If the `MM_LOG` variable is present then tries to open that file.  
 /// Prints a warning to `stdout` if there's a problem opening the file.  
@@ -998,7 +1045,9 @@ pub fn writeln(line: &str) {
     append_log_tail(line);
 }
 
-pub fn small_rng() -> SmallRng { SmallRng::seed_from_u64(now_ms()) }
+pub fn small_rng() -> SmallRng {
+    SmallRng::seed_from_u64(now_ms())
+}
 
 lazy_static! {
     /// Maps helper request ID to the corresponding Waker,
@@ -1045,7 +1094,9 @@ pub struct OrdRange<T>(RangeInclusive<T>);
 impl<T> Deref for OrdRange<T> {
     type Target = RangeInclusive<T>;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl<T: PartialOrd> OrdRange<T> {
@@ -1061,18 +1112,30 @@ impl<T: PartialOrd> OrdRange<T> {
 
 impl<T: Copy> OrdRange<T> {
     /// Flatten a start-end pair into the vector.
-    pub fn flatten(&self) -> Vec<T> { vec![*self.start(), *self.end()] }
+    pub fn flatten(&self) -> Vec<T> {
+        vec![*self.start(), *self.end()]
+    }
 }
 
-pub const fn true_f() -> bool { true }
+pub const fn true_f() -> bool {
+    true
+}
 
-pub const fn ten() -> usize { 10 }
+pub const fn ten() -> usize {
+    10
+}
 
-pub const fn ten_f64() -> f64 { 10. }
+pub const fn ten_f64() -> f64 {
+    10.
+}
 
-pub const fn one_hundred() -> usize { 100 }
+pub const fn one_hundred() -> usize {
+    100
+}
 
-pub fn one() -> NonZeroUsize { NonZeroUsize::new(1).unwrap() }
+pub fn one() -> NonZeroUsize {
+    NonZeroUsize::new(1).unwrap()
+}
 
 #[derive(Debug, Deserialize)]
 pub struct PagingOptions {
@@ -1084,7 +1147,9 @@ pub struct PagingOptions {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn new_uuid() -> Uuid { Uuid::new_v4() }
+pub fn new_uuid() -> Uuid {
+    Uuid::new_v4()
+}
 
 pub fn first_char_to_upper(input: &str) -> String {
     let mut v: Vec<char> = input.chars().collect();
@@ -1168,7 +1233,9 @@ impl<I> SequentialCount<I>
 where
     I: Iterator,
 {
-    fn new(iter: I) -> Self { SequentialCount { iter: iter.peekable() } }
+    fn new(iter: I) -> Self {
+        SequentialCount { iter: iter.peekable() }
+    }
 }
 
 /// https://stackoverflow.com/questions/32702386/iterator-adapter-that-counts-repeated-characters
@@ -1245,7 +1312,9 @@ impl<Id> PagingOptionsEnum<Id> {
 }
 
 impl<Id> Default for PagingOptionsEnum<Id> {
-    fn default() -> Self { PagingOptionsEnum::PageNumber(NonZeroUsize::new(1).expect("1 > 0")) }
+    fn default() -> Self {
+        PagingOptionsEnum::PageNumber(NonZeroUsize::new(1).expect("1 > 0"))
+    }
 }
 
 /// Fills `dest` with cryptographically secure random bytes from the OS entropy source.

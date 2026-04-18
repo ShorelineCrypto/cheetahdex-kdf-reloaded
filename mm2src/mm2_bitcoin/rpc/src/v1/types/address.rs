@@ -23,7 +23,9 @@ pub struct AddressVisitor;
 impl<'b> Visitor<'b> for AddressVisitor {
     type Value = Address;
 
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result { formatter.write_str("an address") }
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an address")
+    }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
     where
@@ -65,9 +67,9 @@ pub mod vec {
 
 #[cfg(test)]
 mod tests {
+    use crate::v1::types;
     use keys::Address;
     use serde_json;
-    use crate::v1::types;
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct TestStruct {
@@ -82,7 +84,9 @@ mod tests {
     }
 
     impl TestStruct {
-        fn new(address: Address) -> Self { TestStruct { address } }
+        fn new(address: Address) -> Self {
+            TestStruct { address }
+        }
     }
 
     #[test]

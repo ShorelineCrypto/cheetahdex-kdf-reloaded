@@ -1,13 +1,16 @@
 use futures::channel::{mpsc, oneshot};
 use mm2_err_handle::prelude::*;
 
-#[cfg(target_arch = "wasm32")] pub mod webusb_driver;
+#[cfg(target_arch = "wasm32")]
+pub mod webusb_driver;
 #[cfg(target_arch = "wasm32")]
 pub use webusb_driver::WebUsbError;
 
 // #[cfg(not(target_arch = "wasm32"))] pub mod hid_driver;
-#[cfg(not(target_arch = "wasm32"))] pub mod libusb;
-#[cfg(not(target_arch = "wasm32"))] pub use libusb::UsbError;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod libusb;
+#[cfg(not(target_arch = "wasm32"))]
+pub use libusb::UsbError;
 
 trait InternalError: Sized {
     fn internal(e: String) -> Self;

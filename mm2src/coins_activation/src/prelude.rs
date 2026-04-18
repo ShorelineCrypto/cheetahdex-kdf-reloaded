@@ -15,7 +15,9 @@ pub trait TxHistory {
 }
 
 impl TxHistory for UtxoActivationParams {
-    fn tx_history(&self) -> bool { self.tx_history }
+    fn tx_history(&self) -> bool {
+        self.tx_history
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]

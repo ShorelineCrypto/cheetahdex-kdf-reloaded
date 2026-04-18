@@ -5,7 +5,6 @@
 ///
 /// Used to derive encryption/authentication keys for mnemonic self-encryption,
 /// where the mnemonic's own seed protects the encrypted mnemonic.
-
 use derive_more::Display;
 use hmac::{Hmac, Mac};
 use sha2::Sha512;
@@ -44,8 +43,8 @@ pub fn derive_key_from_path(seed: &[u8], path: &[&str]) -> Result<[u8; 32], Slip
 
     // Iterate through path labels, deriving child nodes
     for label in path {
-        let mut child_mac = HmacSha512::new_from_slice(&node[..32])
-            .map_err(|e| Slip21Error::DerivationError(e.to_string()))?;
+        let mut child_mac =
+            HmacSha512::new_from_slice(&node[..32]).map_err(|e| Slip21Error::DerivationError(e.to_string()))?;
         // Each child derivation prepends 0x00 to the label
         child_mac.update(&[0x00]);
         child_mac.update(label.as_bytes());
@@ -62,10 +61,7 @@ pub fn derive_key_from_path(seed: &[u8], path: &[&str]) -> Result<[u8; 32], Slip
 ///
 /// This provides deterministic encryption where the mnemonic's own seed
 /// is used to derive the encryption keys.
-pub fn encrypt_with_slip21(
-    mnemonic_data: &[u8],
-    seed: &[u8],
-) -> Result<crate::encrypt::EncryptedData, Slip21Error> {
+pub fn encrypt_with_slip21(mnemonic_data: &[u8], seed: &[u8]) -> Result<crate::encrypt::EncryptedData, Slip21Error> {
     let encryption_key = derive_key_from_path(seed, &ENCRYPTION_KEY_PATH)?;
     let authentication_key = derive_key_from_path(seed, &AUTHENTICATION_KEY_PATH)?;
 

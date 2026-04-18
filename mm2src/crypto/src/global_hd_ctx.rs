@@ -6,13 +6,10 @@
 ///
 /// This context is stored in `CryptoCtx` when the user initializes with a BIP39 mnemonic
 /// (as opposed to a legacy Iguana passphrase).
-
 use crate::privkey::{bip39_seed_from_mnemonic, key_pair_from_secret, PrivKeyError};
 use bip32::ExtendedPrivateKey;
 use common::drop_mutability;
-use ed25519_dalek_bip32::{
-    DerivationPath as Ed25519DerivationPath, ExtendedSigningKey,
-};
+use ed25519_dalek_bip32::{DerivationPath as Ed25519DerivationPath, ExtendedSigningKey};
 use hw_common::primitives::DerivationPath;
 use keys::{KeyPair, Secret as Secp256k1Secret};
 use mm2_err_handle::prelude::*;
@@ -37,7 +34,9 @@ pub struct GlobalHDAccountArc(Arc<GlobalHDAccountCtx>);
 
 impl Deref for GlobalHDAccountArc {
     type Target = GlobalHDAccountCtx;
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 /// Global HD account context holding the master BIP39 seed and derived master keys.
@@ -72,11 +71,10 @@ impl GlobalHDAccountCtx {
     pub fn new(mnemonic_str: &str) -> Result<(Mm2InternalKeyPair, GlobalHDAccountCtx), MmError<PrivKeyError>> {
         let bip39_seed = bip39_seed_from_mnemonic(mnemonic_str)?;
         let bip39_secp_priv_key: ExtendedPrivateKey<secp256k1::SecretKey> =
-            ExtendedPrivateKey::new(bip39_seed.0)
-                .map_to_mm(PrivKeyError::Secp256k1MasterKey)?;
+            ExtendedPrivateKey::new(bip39_seed.0).map_to_mm(PrivKeyError::Secp256k1MasterKey)?;
 
-        let ed25519_master_priv_key = ExtendedSigningKey::from_seed(&bip39_seed.0)
-            .map_to_mm(PrivKeyError::Ed25519MasterKey)?;
+        let ed25519_master_priv_key =
+            ExtendedSigningKey::from_seed(&bip39_seed.0).map_to_mm(PrivKeyError::Ed25519MasterKey)?;
 
         // Derive the mm2 internal key pair for P2P identity.
         // Path: m/44'/141'/2147483647/0/0
@@ -106,10 +104,14 @@ impl GlobalHDAccountCtx {
     }
 
     /// Returns a reference to the root BIP39 seed.
-    pub fn root_seed(&self) -> &Bip39Seed { &self.bip39_seed }
+    pub fn root_seed(&self) -> &Bip39Seed {
+        &self.bip39_seed
+    }
 
     /// Returns the root BIP39 seed as a byte slice.
-    pub fn root_seed_bytes(&self) -> &[u8] { &self.bip39_seed.0 }
+    pub fn root_seed_bytes(&self) -> &[u8] {
+        &self.bip39_seed.0
+    }
 
     /// Returns the root BIP32 secp256k1 extended private key.
     pub fn root_priv_key(&self) -> &ExtendedPrivateKey<secp256k1::SecretKey> {
@@ -164,8 +166,8 @@ mod tests {
 
     #[test]
     fn test_global_hd_ctx_creation() {
-        let (key_pair, ctx) = GlobalHDAccountCtx::new(TEST_MNEMONIC)
-            .expect("should create HD context from valid mnemonic");
+        let (key_pair, ctx) =
+            GlobalHDAccountCtx::new(TEST_MNEMONIC).expect("should create HD context from valid mnemonic");
 
         // Key pair should be compressed (33 bytes)
         assert_eq!(key_pair.public().len(), 33);
@@ -191,10 +193,8 @@ mod tests {
     #[test]
     fn test_derive_secp256k1_secret() {
         let (_kp, ctx) = GlobalHDAccountCtx::new(TEST_MNEMONIC).unwrap();
-        let path = DerivationPath::from_str("m/44'/141'/0'/0/0")
-            .expect("valid derivation path");
-        let secret = ctx.derive_secp256k1_secret(&path)
-            .expect("derivation should succeed");
+        let path = DerivationPath::from_str("m/44'/141'/0'/0/0").expect("valid derivation path");
+        let secret = ctx.derive_secp256k1_secret(&path).expect("derivation should succeed");
         // Secret should be 32 bytes
         assert_eq!(secret.as_slice().len(), 32);
     }

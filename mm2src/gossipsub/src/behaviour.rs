@@ -21,8 +21,9 @@
 use crate::config::GossipsubConfig;
 use crate::handler::GossipsubHandler;
 use crate::mcache::MessageCache;
-use crate::protocol::{GossipsubControlAction, GossipsubMessage, GossipsubSubscription, GossipsubSubscriptionAction,
-                      MessageId};
+use crate::protocol::{
+    GossipsubControlAction, GossipsubMessage, GossipsubSubscription, GossipsubSubscriptionAction, MessageId,
+};
 use crate::topic::{Topic, TopicHash};
 use common::time_cache::{Entry as TimeCacheEntry, TimeCache};
 use futures::prelude::*;
@@ -190,7 +191,9 @@ impl Gossipsub {
         true
     }
 
-    pub fn is_subscribed(&self, topic_hash: &TopicHash) -> bool { self.mesh.contains_key(topic_hash) }
+    pub fn is_subscribed(&self, topic_hash: &TopicHash) -> bool {
+        self.mesh.contains_key(topic_hash)
+    }
 
     /// Unsubscribes from a topic.
     ///
@@ -386,9 +389,13 @@ impl Gossipsub {
         for peer_id in added_peers {
             // Send a GRAFT control message
             info!("JOIN: Sending Graft message to peer: {:?}", peer_id);
-            Self::control_pool_add(&mut self.control_pool, peer_id, GossipsubControlAction::Graft {
-                topic_hash: topic_hash.clone(),
-            });
+            Self::control_pool_add(
+                &mut self.control_pool,
+                peer_id,
+                GossipsubControlAction::Graft {
+                    topic_hash: topic_hash.clone(),
+                },
+            );
         }
         debug!("Completed JOIN for topic: {:?}", topic_hash);
     }
@@ -402,9 +409,13 @@ impl Gossipsub {
             for peer in peers {
                 // Send a PRUNE control message
                 info!("LEAVE: Sending PRUNE to peer: {:?}", peer);
-                Self::control_pool_add(&mut self.control_pool, peer, GossipsubControlAction::Prune {
-                    topic_hash: topic_hash.clone(),
-                });
+                Self::control_pool_add(
+                    &mut self.control_pool,
+                    peer,
+                    GossipsubControlAction::Prune {
+                        topic_hash: topic_hash.clone(),
+                    },
+                );
             }
         }
         debug!("Completed LEAVE for topic: {:?}", topic_hash);
@@ -435,9 +446,13 @@ impl Gossipsub {
         if !iwant_ids.is_empty() {
             // Send the list of IWANT control messages
             debug!("IHAVE: Sending IWANT message");
-            Self::control_pool_add(&mut self.control_pool, *peer_id, GossipsubControlAction::IWant {
-                message_ids: iwant_ids.iter().cloned().collect(),
-            });
+            Self::control_pool_add(
+                &mut self.control_pool,
+                *peer_id,
+                GossipsubControlAction::IWant {
+                    message_ids: iwant_ids.iter().cloned().collect(),
+                },
+            );
         }
         debug!("Completed IHAVE handling for peer: {:?}", peer_id);
     }
@@ -832,10 +847,14 @@ impl Gossipsub {
             });
             for peer in to_msg_peers {
                 // send an IHAVE message
-                Self::control_pool_add(&mut self.control_pool, peer, GossipsubControlAction::IHave {
-                    topic_hash: topic_hash.clone(),
-                    message_ids: message_ids.clone(),
-                });
+                Self::control_pool_add(
+                    &mut self.control_pool,
+                    peer,
+                    GossipsubControlAction::IHave {
+                        topic_hash: topic_hash.clone(),
+                        message_ids: message_ids.clone(),
+                    },
+                );
             }
         }
         debug!("Completed gossip");
@@ -1051,32 +1070,50 @@ impl Gossipsub {
         }
     }
 
-    pub fn get_mesh_peers(&self, topic: &TopicHash) -> Vec<PeerId> { self.mesh.get(topic).cloned().unwrap_or_default() }
+    pub fn get_mesh_peers(&self, topic: &TopicHash) -> Vec<PeerId> {
+        self.mesh.get(topic).cloned().unwrap_or_default()
+    }
 
     pub fn get_topic_peers(&self, topic: &TopicHash) -> Vec<PeerId> {
         self.topic_peers.get(topic).cloned().unwrap_or_default()
     }
 
-    pub fn get_num_peers(&self) -> usize { self.peer_topics.len() }
+    pub fn get_num_peers(&self) -> usize {
+        self.peer_topics.len()
+    }
 
     pub fn get_peers_connections(&self) -> HashMap<PeerId, Vec<(ConnectionId, ConnectedPoint)>> {
         self.peer_connections.clone()
     }
 
-    pub fn get_mesh(&self) -> &HashMap<TopicHash, Vec<PeerId>> { &self.mesh }
+    pub fn get_mesh(&self) -> &HashMap<TopicHash, Vec<PeerId>> {
+        &self.mesh
+    }
 
-    pub fn get_relay_mesh(&self) -> Vec<PeerId> { self.relays_mesh.iter().map(|(peer, _)| peer).cloned().collect() }
+    pub fn get_relay_mesh(&self) -> Vec<PeerId> {
+        self.relays_mesh.iter().map(|(peer, _)| peer).cloned().collect()
+    }
 
-    pub fn relay_mesh_len(&self) -> usize { self.relays_mesh.len() }
+    pub fn relay_mesh_len(&self) -> usize {
+        self.relays_mesh.len()
+    }
 
-    pub fn get_all_topic_peers(&self) -> &HashMap<TopicHash, Vec<PeerId>> { &self.topic_peers }
+    pub fn get_all_topic_peers(&self) -> &HashMap<TopicHash, Vec<PeerId>> {
+        &self.topic_peers
+    }
 
-    pub fn get_all_peer_topics(&self) -> &HashMap<PeerId, Vec<TopicHash>> { &self.peer_topics }
+    pub fn get_all_peer_topics(&self) -> &HashMap<PeerId, Vec<TopicHash>> {
+        &self.peer_topics
+    }
 
     /// Get count of received messages in the [`GossipsubConfig::duplicate_cache_time`] period.
-    pub fn get_received_messages_in_period(&self) -> (Duration, usize) { (self.received.ttl(), self.received.len()) }
+    pub fn get_received_messages_in_period(&self) -> (Duration, usize) {
+        (self.received.ttl(), self.received.len())
+    }
 
-    pub fn get_config(&self) -> &GossipsubConfig { &self.config }
+    pub fn get_config(&self) -> &GossipsubConfig {
+        &self.config
+    }
 
     /// Adds peers to relays mesh and notifies them they are added
     fn add_peers_to_relays_mesh(&mut self, peers: Vec<PeerId>) {
@@ -1237,13 +1274,21 @@ impl Gossipsub {
         }
     }
 
-    pub fn is_relay(&self) -> bool { self.config.i_am_relay }
+    pub fn is_relay(&self) -> bool {
+        self.config.i_am_relay
+    }
 
-    pub fn connected_relays(&self) -> Vec<PeerId> { self.connected_relays.iter().cloned().collect() }
+    pub fn connected_relays(&self) -> Vec<PeerId> {
+        self.connected_relays.iter().cloned().collect()
+    }
 
-    pub fn connected_relays_len(&self) -> usize { self.connected_relays.len() }
+    pub fn connected_relays_len(&self) -> usize {
+        self.connected_relays.len()
+    }
 
-    pub fn is_connected_to_addr(&self, addr: &Multiaddr) -> bool { self.connected_addresses.contains(addr) }
+    pub fn is_connected_to_addr(&self, addr: &Multiaddr) -> bool {
+        self.connected_addresses.contains(addr)
+    }
 }
 
 impl NetworkBehaviour for Gossipsub {
@@ -1254,7 +1299,9 @@ impl NetworkBehaviour for Gossipsub {
         GossipsubHandler::new(self.config.protocol_id.clone(), self.config.max_transmit_size)
     }
 
-    fn addresses_of_peer(&mut self, _: &PeerId) -> Vec<Multiaddr> { Vec::new() }
+    fn addresses_of_peer(&mut self, _: &PeerId) -> Vec<Multiaddr> {
+        Vec::new()
+    }
 
     fn inject_connection_established(
         &mut self,

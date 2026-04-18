@@ -1,8 +1,8 @@
 //! Script numeric
 
 use crate::bytes::Bytes;
-use std::ops;
 use crate::Error;
+use std::ops;
 
 /// Script numeric
 ///
@@ -25,35 +25,51 @@ impl From<bool> for Num {
 }
 
 impl From<u8> for Num {
-    fn from(i: u8) -> Self { Num { value: i as i64 } }
+    fn from(i: u8) -> Self {
+        Num { value: i as i64 }
+    }
 }
 
 impl From<u32> for Num {
-    fn from(i: u32) -> Self { Num { value: i as i64 } }
+    fn from(i: u32) -> Self {
+        Num { value: i as i64 }
+    }
 }
 
 impl From<usize> for Num {
-    fn from(i: usize) -> Self { Num { value: i as i64 } }
+    fn from(i: usize) -> Self {
+        Num { value: i as i64 }
+    }
 }
 
 impl From<i32> for Num {
-    fn from(i: i32) -> Self { Num { value: i as i64 } }
+    fn from(i: i32) -> Self {
+        Num { value: i as i64 }
+    }
 }
 
 impl From<i64> for Num {
-    fn from(i: i64) -> Self { Num { value: i } }
+    fn from(i: i64) -> Self {
+        Num { value: i }
+    }
 }
 
 impl From<Num> for i64 {
-    fn from(n: Num) -> Self { n.value }
+    fn from(n: Num) -> Self {
+        n.value
+    }
 }
 
 impl From<Num> for u32 {
-    fn from(n: Num) -> Self { n.value as u32 }
+    fn from(n: Num) -> Self {
+        n.value as u32
+    }
 }
 
 impl From<Num> for usize {
-    fn from(n: Num) -> Self { n.value as usize }
+    fn from(n: Num) -> Self {
+        n.value as usize
+    }
 }
 
 impl Num {
@@ -180,9 +196,13 @@ impl Num {
         result.into()
     }
 
-    pub fn is_negative(&self) -> bool { self.value < 0 }
+    pub fn is_negative(&self) -> bool {
+        self.value < 0
+    }
 
-    pub fn is_zero(&self) -> bool { self.value == 0 }
+    pub fn is_zero(&self) -> bool {
+        self.value == 0
+    }
 
     pub fn abs(&self) -> Num {
         if self.value < 0 {
@@ -196,35 +216,47 @@ impl Num {
 impl ops::BitAnd for Num {
     type Output = Self;
 
-    fn bitand(self, rhs: Self) -> Self::Output { (self.value & rhs.value).into() }
+    fn bitand(self, rhs: Self) -> Self::Output {
+        (self.value & rhs.value).into()
+    }
 }
 
 impl ops::Add for Num {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output { (self.value + rhs.value).into() }
+    fn add(self, rhs: Self) -> Self::Output {
+        (self.value + rhs.value).into()
+    }
 }
 
 impl ops::Sub for Num {
     type Output = Self;
 
-    fn sub(self, rhs: Self) -> Self::Output { (self.value - rhs.value).into() }
+    fn sub(self, rhs: Self) -> Self::Output {
+        (self.value - rhs.value).into()
+    }
 }
 
 impl ops::Neg for Num {
     type Output = Self;
 
-    fn neg(self) -> Self::Output { (-self.value).into() }
+    fn neg(self) -> Self::Output {
+        (-self.value).into()
+    }
 }
 
 impl ops::Div for Num {
     type Output = Self;
 
-    fn div(self, rhs: Self) -> Self::Output { (self.value / rhs.value).into() }
+    fn div(self, rhs: Self) -> Self::Output {
+        (self.value / rhs.value).into()
+    }
 }
 
 impl ops::Rem for Num {
     type Output = Self;
 
-    fn rem(self, rhs: Self) -> Self::Output { (self.value % rhs.value).into() }
+    fn rem(self, rhs: Self) -> Self::Output {
+        (self.value % rhs.value).into()
+    }
 }

@@ -93,7 +93,9 @@ pub trait RegisterTokenInfo<T: TokenOf<PlatformCoin = Self>> {
 }
 
 impl From<std::convert::Infallible> for InitTokensAsMmCoinsError {
-    fn from(e: Infallible) -> Self { match e {} }
+    fn from(e: Infallible) -> Self {
+        match e {}
+    }
 }
 
 #[async_trait]
@@ -121,7 +123,8 @@ where
                     protocol,
                 })
             })
-            .collect::<Result<Vec<_>, _>>().mm_err(Into::into)?;
+            .collect::<Result<Vec<_>, _>>()
+            .mm_err(Into::into)?;
 
         let tokens = self.enable_tokens(token_params).await.mm_err(Into::into)?;
         for token in tokens.iter() {
@@ -295,10 +298,14 @@ where
         platform_protocol,
         priv_key,
     )
-    .await.mm_err(Into::into)?;
+    .await
+    .mm_err(Into::into)?;
     let mut mm_tokens = Vec::new();
     for initializer in platform_coin.token_initializers() {
-        let tokens = initializer.enable_tokens_as_mm_coins(ctx.clone(), &req.request).await.mm_err(Into::into)?;
+        let tokens = initializer
+            .enable_tokens_as_mm_coins(ctx.clone(), &req.request)
+            .await
+            .mm_err(Into::into)?;
         mm_tokens.extend(tokens);
     }
 

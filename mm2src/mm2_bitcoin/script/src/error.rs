@@ -1,7 +1,7 @@
 //! Interpreter errors
 
-use std::fmt;
 use crate::Opcode;
+use std::fmt;
 
 /// Interpreter errors
 #[derive(Debug, PartialEq)]

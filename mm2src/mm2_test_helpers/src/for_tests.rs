@@ -106,7 +106,9 @@ pub struct RaiiKill {
     running: bool,
 }
 impl RaiiKill {
-    pub fn from_handle(handle: Child) -> RaiiKill { RaiiKill { handle, running: true } }
+    pub fn from_handle(handle: Child) -> RaiiKill {
+        RaiiKill { handle, running: true }
+    }
     pub fn running(&mut self) -> bool {
         if !self.running {
             return false;
@@ -468,13 +470,19 @@ impl MarketMakerIt {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn mm_dump(&self) -> (RaiiDump, RaiiDump) { mm_dump(&self.log_path) }
+    pub fn mm_dump(&self) -> (RaiiDump, RaiiDump) {
+        mm_dump(&self.log_path)
+    }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn mm_dump(&self) -> (RaiiDump, RaiiDump) { (RaiiDump {}, RaiiDump {}) }
+    pub fn mm_dump(&self) -> (RaiiDump, RaiiDump) {
+        (RaiiDump {}, RaiiDump {})
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn my_seed_addr(&self) -> String { format!("{}", self.ip) }
+    pub fn my_seed_addr(&self) -> String {
+        format!("{}", self.ip)
+    }
 
     /// # Panic
     ///

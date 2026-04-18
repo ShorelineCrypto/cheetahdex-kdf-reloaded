@@ -6,7 +6,6 @@
 ///
 /// The currently active wallet name is recorded in `MmCtx::wallet_name` (write-once)
 /// during startup. Only inactive wallets can be deleted.
-
 use common::HttpStatusCode;
 use crypto::{decrypt_mnemonic, encrypt_mnemonic, EncryptedMnemonicData, MnemonicError};
 use derive_more::Display;
@@ -84,9 +83,7 @@ mod storage {
         if !path.exists() {
             return Err(format!("Wallet '{}' not found", wallet_name));
         }
-        remove_file_async(path)
-            .await
-            .map_err(|e| format!("delete error: {e}"))
+        remove_file_async(path).await.map_err(|e| format!("delete error: {e}"))
     }
 }
 
@@ -237,10 +234,7 @@ pub async fn get_wallet_names_rpc(
         .await
         .map_err(|e| MmError::new(WalletError::StorageError(e)))?;
 
-    let active_wallet = ctx
-        .wallet_name
-        .as_option()
-        .and_then(|opt| opt.clone());
+    let active_wallet = ctx.wallet_name.as_option().and_then(|opt| opt.clone());
 
     Ok(GetWalletNamesResponse {
         wallet_names,
@@ -274,8 +268,7 @@ pub async fn delete_wallet_rpc(
         .ok_or_else(|| MmError::new(WalletError::WalletNotFound(req.wallet_name.clone())))?;
 
     // Verify password by attempting decryption
-    decrypt_mnemonic(&encrypted, &req.password)
-        .map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+    decrypt_mnemonic(&encrypted, &req.password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
 
     // Password verified — delete the wallet file
     delete_wallet(&ctx, &req.wallet_name)
@@ -323,8 +316,8 @@ pub async fn initialize_wallet_passphrase(
 
     if let Some(encrypted) = existing {
         // Wallet exists — verify passphrase matches
-        let stored_mnemonic = decrypt_mnemonic(&encrypted, password)
-            .map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+        let stored_mnemonic =
+            decrypt_mnemonic(&encrypted, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
         if stored_mnemonic != passphrase {
             return MmError::err(WalletError::InvalidRequest(
                 "Passphrase doesn't match the stored wallet. Create a new wallet to use a different passphrase"
@@ -535,7 +528,12 @@ mod tests {
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let password = "init_test_pw";
 
-        let result = block_on(initialize_wallet_passphrase(&ctx, mnemonic, Some("init-wallet"), Some(password)));
+        let result = block_on(initialize_wallet_passphrase(
+            &ctx,
+            mnemonic,
+            Some("init-wallet"),
+            Some(password),
+        ));
         assert_eq!(result.unwrap(), Some("init-wallet".to_string()));
 
         // wallet_name should be set on ctx

@@ -1,11 +1,11 @@
 use super::bytes::Bytes;
 use super::hash::H256;
 use super::script::ScriptType;
+use crate::v1::types;
 use keys::Address;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use crate::v1::types;
 
 /// Hex-encoded transaction
 pub type RawTransaction = Bytes;
@@ -82,7 +82,9 @@ pub struct TransactionOutputScript {
 }
 
 impl TransactionOutputScript {
-    pub fn is_empty(&self) -> bool { self.asm.is_empty() && self.hex.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.asm.is_empty() && self.hex.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -119,7 +121,9 @@ pub struct LelantusInput {
 }
 
 impl TransactionInputEnum {
-    pub fn is_coinbase(&self) -> bool { matches!(self, TransactionInputEnum::Coinbase(_)) }
+    pub fn is_coinbase(&self) -> bool {
+        matches!(self, TransactionInputEnum::Coinbase(_))
+    }
 }
 
 /// Signed transaction input
@@ -160,7 +164,9 @@ pub struct SignedTransactionOutput {
 }
 
 impl SignedTransactionOutput {
-    pub fn is_empty(&self) -> bool { self.value == Some(0.0) && self.script.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.value == Some(0.0) && self.script.is_empty()
+    }
 }
 
 fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
@@ -219,7 +225,9 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn is_coinbase(&self) -> bool { self.vin.iter().any(|input| input.is_coinbase()) }
+    pub fn is_coinbase(&self) -> bool {
+        self.vin.iter().any(|input| input.is_coinbase())
+    }
 }
 
 /// Return value of `getrawtransaction` method
@@ -244,9 +252,13 @@ impl Serialize for GetRawTransactionResponse {
 }
 
 impl TransactionOutputs {
-    pub fn len(&self) -> usize { self.outputs.len() }
+    pub fn len(&self) -> usize {
+        self.outputs.len()
+    }
 
-    pub fn is_empty(&self) -> bool { self.outputs.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
+    }
 }
 
 impl Serialize for TransactionOutputs {

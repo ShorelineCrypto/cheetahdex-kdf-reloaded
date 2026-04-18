@@ -1,8 +1,8 @@
+use crate::BlockHeader;
 use crypto::dhash256;
 use primitives::bytes::Bytes;
 use primitives::hash::H256;
 use ser::serialize;
-use crate::BlockHeader;
 
 pub const MIN_RAW_HEADER_SIZE: usize = 80_usize;
 
@@ -55,9 +55,9 @@ impl From<BlockHeader> for RawBlockHeader {
 
 #[cfg(test)]
 mod raw_block_header_tests {
+    use crate::raw_block::RawBlockHeader;
     use hex::FromHex;
     use primitives::hash::H256;
-    use crate::raw_block::RawBlockHeader;
 
     #[test]
     fn test_raw_header() {

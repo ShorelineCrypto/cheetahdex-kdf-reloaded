@@ -1,14 +1,14 @@
 //! Secret with additional network identifier and format type
 
-use crate::SECP_SIGN;
 use crate::address::detect_checksum;
+use crate::SECP_SIGN;
+use crate::{DisplayLayout, Error, Message, Secret, Signature};
 use base58::{FromBase58, ToBase58};
 use crypto::{checksum, ChecksumType};
 use hex::ToHex;
 use secp256k1::{Message as SecpMessage, SecretKey};
 use std::fmt;
 use std::str::FromStr;
-use crate::{DisplayLayout, Error, Message, Secret, Signature};
 
 /// Secret with additional network prefix and format type
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -100,7 +100,9 @@ impl fmt::Debug for Private {
 }
 
 impl fmt::Display for Private {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.layout().to_base58().fmt(f) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.layout().to_base58().fmt(f)
+    }
 }
 
 impl FromStr for Private {
@@ -116,7 +118,9 @@ impl FromStr for Private {
 }
 
 impl From<&'static str> for Private {
-    fn from(s: &'static str) -> Self { s.parse().unwrap() }
+    fn from(s: &'static str) -> Self {
+        s.parse().unwrap()
+    }
 }
 
 #[cfg(test)]

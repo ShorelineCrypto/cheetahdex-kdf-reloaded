@@ -1,8 +1,8 @@
 //! Script builder
 
 use crate::bytes::Bytes;
-use keys::{AddressHashEnum, Public};
 use crate::{Num, Opcode, Script};
+use keys::{AddressHashEnum, Public};
 
 /// Script builder
 #[derive(Default)]
@@ -72,7 +72,9 @@ impl Builder {
     }
 
     /// Appends num push operation to the end of script
-    pub fn push_num(self, num: Num) -> Self { self.push_data(&num.to_bytes()) }
+    pub fn push_num(self, num: Num) -> Self {
+        self.push_data(&num.to_bytes())
+    }
 
     /// Appends bytes push operation to the end od script
     pub fn push_bytes(mut self, bytes: &[u8]) -> Self {
@@ -137,8 +139,12 @@ impl Builder {
     }
 
     /// Builds final script
-    pub fn into_script(self) -> Script { Script::new(self.data) }
+    pub fn into_script(self) -> Script {
+        Script::new(self.data)
+    }
 
     /// Builds final script bytes
-    pub fn into_bytes(self) -> Bytes { self.data }
+    pub fn into_bytes(self) -> Bytes {
+        self.data
+    }
 }

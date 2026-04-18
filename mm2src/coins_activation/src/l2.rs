@@ -107,7 +107,8 @@ where
         return MmError::err(EnableL2Error::L2IsAlreadyActivated(req.ticker));
     }
 
-    let (coin_conf_json, l2_protocol): (Json, L2::ProtocolInfo) = coin_conf_with_protocol(&ctx, &req.ticker).mm_err(Into::into)?;
+    let (coin_conf_json, l2_protocol): (Json, L2::ProtocolInfo) =
+        coin_conf_with_protocol(&ctx, &req.ticker).mm_err(Into::into)?;
     let coin_conf = L2::coin_conf_from_json(coin_conf_json).mm_err(Into::into)?;
 
     let platform_coin = lp_coinfind_or_err(&ctx, l2_protocol.platform_coin_ticker())
@@ -124,7 +125,9 @@ where
 
     let validated_params = L2::validate_activation_params(req.activation_params).mm_err(Into::into)?;
 
-    let (l2, activation_result) = L2::enable_l2(&ctx, platform_coin, validated_params, l2_protocol, coin_conf).await.mm_err(Into::into)?;
+    let (l2, activation_result) = L2::enable_l2(&ctx, platform_coin, validated_params, l2_protocol, coin_conf)
+        .await
+        .mm_err(Into::into)?;
 
     let coins_ctx = CoinsContext::from_ctx(&ctx).unwrap();
     coins_ctx
