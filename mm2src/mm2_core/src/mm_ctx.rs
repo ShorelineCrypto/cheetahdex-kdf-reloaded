@@ -110,6 +110,9 @@ pub struct MmCtx {
     #[cfg(not(target_arch = "wasm32"))]
     pub sqlite_connection: Constructible<Arc<Mutex<Connection>>>,
     pub mm_version: String,
+    /// Name of the currently active wallet (set once during init).
+    /// `None` if running without wallet persistence (e.g. hw-only or legacy mode).
+    pub wallet_name: Constructible<Option<String>>,
     pub mm_init_ctx: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
     pub abort_handlers: Mutex<Vec<AbortHandle>>,
     #[cfg(target_arch = "wasm32")]
@@ -147,6 +150,7 @@ impl MmCtx {
             #[cfg(not(target_arch = "wasm32"))]
             sqlite_connection: Constructible::default(),
             mm_version: "".into(),
+            wallet_name: Constructible::default(),
             mm_init_ctx: Mutex::new(None),
             abort_handlers: Mutex::new(Vec::new()),
             #[cfg(target_arch = "wasm32")]
@@ -201,6 +205,23 @@ impl MmCtx {
             Path::new("DB")
         };
         path.join(hex::encode(&**self.rmd160()))
+    }
+
+    /// Directory for wallet files (encrypted mnemonics).
+    /// Sits at the DB root level (not per-identity), since wallet files must be
+    /// accessible before the passphrase-derived identity is known.
+    pub fn wallets_dir(&self) -> PathBuf {
+        let base = if let Some(dbdir) = self.conf["dbdir"].as_str() {
+            let dbdir = dbdir.trim();
+            if !dbdir.is_empty() {
+                PathBuf::from(dbdir)
+            } else {
+                PathBuf::from("DB")
+            }
+        } else {
+            PathBuf::from("DB")
+        };
+        base.join("wallets")
     }
 
     pub fn netid(&self) -> u16 {

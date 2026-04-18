@@ -39,7 +39,7 @@ pub use global_hd_ctx::{derive_secp256k1_secret, GlobalHDAccountArc};
 
 // Re-exports from encrypt/mnemonic
 pub use encrypt::EncryptedData;
-pub use mnemonic::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic, MnemonicError};
+pub use mnemonic::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic, EncryptedMnemonicData, MnemonicError};
 
 // Re-exports from hw_client
 pub use hw_client::TrezorConnectProcessor;

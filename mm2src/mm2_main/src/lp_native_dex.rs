@@ -158,6 +158,8 @@ pub enum MmInitError {
         netid: u16,
         supported: &'static [u16],
     },
+    #[display(fmt = "Wallet error: {}", _0)]
+    WalletError(String),
 }
 
 impl From<P2PInitError> for MmInitError {
@@ -427,6 +429,19 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
             field: "passphrase".to_owned(),
             error: e.to_string(),
         })?;
+
+    // Optionally persist the passphrase as an encrypted wallet file.
+    // If wallet_name is set in config, the passphrase is encrypted with wallet_password
+    // and saved (or verified against an existing wallet file).
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let wallet_name = ctx.conf["wallet_name"].as_str();
+        let wallet_password = ctx.conf["wallet_password"].as_str();
+        crate::mm2::lp_wallet::initialize_wallet_passphrase(&ctx, &passphrase, wallet_name, wallet_password)
+            .await
+            .map_err(|e| MmError::new(MmInitError::WalletError(e.to_string())))?;
+    }
+
     CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase).mm_err(Into::into)?;
     lp_init_continue(ctx.clone()).await?;
 

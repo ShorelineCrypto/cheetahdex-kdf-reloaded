@@ -51,6 +51,7 @@ cfg_native! {
         send_payment, LightningCoin};
     use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
+    use crate::mm2::lp_wallet::{create_wallet_rpc, delete_wallet_rpc, get_wallet_names_rpc};
 }
 
 pub async fn process_single_request(
@@ -180,11 +181,14 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         native_only_methods => match native_only_methods {
             "close_channel" => handle_mmrpc(ctx, request, close_channel).await,
             "connect_to_lightning_node" => handle_mmrpc(ctx, request, connect_to_lightning_node).await,
+            "create_wallet" => handle_mmrpc(ctx, request, create_wallet_rpc).await,
+            "delete_wallet" => handle_mmrpc(ctx, request, delete_wallet_rpc).await,
             "enable_lightning" => handle_mmrpc(ctx, request, enable_l2::<LightningCoin>).await,
             "generate_invoice" => handle_mmrpc(ctx, request, generate_invoice).await,
             "get_channel_details" => handle_mmrpc(ctx, request, get_channel_details).await,
             "get_claimable_balances" => handle_mmrpc(ctx, request, get_claimable_balances).await,
             "get_payment_details" => handle_mmrpc(ctx, request, get_payment_details).await,
+            "get_wallet_names" => handle_mmrpc(ctx, request, get_wallet_names_rpc).await,
             "init_z_coin" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
             "init_z_coin_status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
             "init_z_coin_user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,

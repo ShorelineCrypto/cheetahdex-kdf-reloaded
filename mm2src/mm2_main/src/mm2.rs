@@ -72,6 +72,9 @@ pub mod lp_ordermatch;
 pub mod lp_stats;
 #[path = "lp_swap.rs"]
 pub mod lp_swap;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "lp_wallet.rs"]
+pub mod lp_wallet;
 #[path = "rpc.rs"]
 pub mod rpc;
 
