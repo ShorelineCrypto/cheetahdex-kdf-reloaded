@@ -56,7 +56,7 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
         "servers": servers,
     });
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
-    let priv_key_policy = PrivKeyBuildPolicy::IguanaPrivKey(&[]);
+    let priv_key_policy = PrivKeyBuildPolicy::IguanaPrivKey(keys::Secret::default());
     let builder = UtxoArcBuilder::new(
         &ctx,
         TEST_COIN_NAME,

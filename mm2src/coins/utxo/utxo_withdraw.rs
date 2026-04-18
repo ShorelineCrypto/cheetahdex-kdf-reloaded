@@ -347,6 +347,7 @@ where
 
         let sign_policy = match self.coin.as_ref().priv_key_policy {
             PrivKeyPolicy::KeyPair(ref key_pair) => SignPolicy::WithKeyPair(key_pair),
+            PrivKeyPolicy::HDWallet { ref activated_key, .. } => SignPolicy::WithKeyPair(activated_key),
             PrivKeyPolicy::Trezor => {
                 let trezor_client = self.trezor_client().await?;
                 SignPolicy::WithTrezor(trezor_client)

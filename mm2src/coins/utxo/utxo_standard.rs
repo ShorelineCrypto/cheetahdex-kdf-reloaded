@@ -60,7 +60,7 @@ pub async fn utxo_standard_coin_with_priv_key(
     activation_params: &UtxoActivationParams,
     priv_key: &[u8],
 ) -> Result<UtxoStandardCoin, String> {
-    let priv_key_policy = PrivKeyBuildPolicy::IguanaPrivKey(priv_key);
+    let priv_key_policy = PrivKeyBuildPolicy::IguanaPrivKey(keys::Secret::from(priv_key));
     let coin = try_s!(
         UtxoArcBuilder::new(
             ctx,

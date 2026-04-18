@@ -16,7 +16,7 @@ use crate::rpc_command::init_scan_for_new_addresses::{
 };
 use crate::rpc_command::init_withdraw::{InitWithdrawCoin, WithdrawTaskHandle};
 use crate::utxo::utxo_builder::{
-    MergeUtxoArcOps, UtxoCoinBuildError, UtxoCoinBuilder, UtxoCoinBuilderCommonOps,
+    MergeUtxoArcOps, UtxoCoinBuildError, UtxoCoinBuilder, UtxoCoinBuilderCommonOps, UtxoFieldsWithGlobalHDBuilder,
     UtxoFieldsWithHardwareWalletBuilder, UtxoFieldsWithIguanaPrivKeyBuilder,
 };
 use crate::{
@@ -204,7 +204,7 @@ pub struct QtumCoinBuilder<'a> {
     ticker: &'a str,
     conf: &'a Json,
     activation_params: &'a UtxoActivationParams,
-    priv_key_policy: PrivKeyBuildPolicy<'a>,
+    priv_key_policy: PrivKeyBuildPolicy,
 }
 
 #[async_trait]
@@ -232,6 +232,8 @@ impl<'a> UtxoCoinBuilderCommonOps for QtumCoinBuilder<'a> {
 
 impl<'a> UtxoFieldsWithIguanaPrivKeyBuilder for QtumCoinBuilder<'a> {}
 
+impl<'a> UtxoFieldsWithGlobalHDBuilder for QtumCoinBuilder<'a> {}
+
 impl<'a> UtxoFieldsWithHardwareWalletBuilder for QtumCoinBuilder<'a> {}
 
 #[async_trait]
@@ -239,7 +241,7 @@ impl<'a> UtxoCoinBuilder for QtumCoinBuilder<'a> {
     type ResultCoin = QtumCoin;
     type Error = UtxoCoinBuildError;
 
-    fn priv_key_policy(&self) -> PrivKeyBuildPolicy<'_> {
+    fn priv_key_policy(&self) -> PrivKeyBuildPolicy {
         self.priv_key_policy.clone()
     }
 
@@ -262,7 +264,7 @@ impl<'a> QtumCoinBuilder<'a> {
         ticker: &'a str,
         conf: &'a Json,
         activation_params: &'a UtxoActivationParams,
-        priv_key_policy: PrivKeyBuildPolicy<'a>,
+        priv_key_policy: PrivKeyBuildPolicy,
     ) -> Self {
         QtumCoinBuilder {
             ctx,
@@ -304,7 +306,7 @@ pub async fn qtum_coin_with_priv_key(
     activation_params: &UtxoActivationParams,
     priv_key: &[u8],
 ) -> Result<QtumCoin, String> {
-    let priv_key_policy = PrivKeyBuildPolicy::IguanaPrivKey(priv_key);
+    let priv_key_policy = PrivKeyBuildPolicy::IguanaPrivKey(keys::Secret::from(priv_key));
     let coin = try_s!(
         QtumCoinBuilder::new(ctx, ticker, conf, activation_params, priv_key_policy)
             .build()

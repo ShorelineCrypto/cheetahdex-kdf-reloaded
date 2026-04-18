@@ -18,8 +18,10 @@ use async_trait::async_trait;
 use chain::TxHashAlgo;
 use common::executor::{spawn, Timer};
 use common::small_rng;
+use crypto::GlobalHDAccountArc;
 use crypto::{
-    Bip32DerPathError, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoCtxError, CryptoInitError, HwWalletType,
+    Bip32DerPathError, Bip32DerPathOps, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoCtxError, CryptoInitError,
+    HwWalletType,
 };
 use derive_more::Display;
 use futures::channel::mpsc;
@@ -118,17 +120,24 @@ impl From<HDWalletStorageError> for UtxoCoinBuildError {
 }
 
 #[async_trait]
-pub trait UtxoCoinBuilder: UtxoFieldsWithIguanaPrivKeyBuilder + UtxoFieldsWithHardwareWalletBuilder {
+pub trait UtxoCoinBuilder:
+    UtxoFieldsWithIguanaPrivKeyBuilder + UtxoFieldsWithGlobalHDBuilder + UtxoFieldsWithHardwareWalletBuilder
+{
     type ResultCoin;
     type Error: NotMmError;
 
-    fn priv_key_policy(&self) -> PrivKeyBuildPolicy<'_>;
+    fn priv_key_policy(&self) -> PrivKeyBuildPolicy;
 
     async fn build(self) -> MmResult<Self::ResultCoin, Self::Error>;
 
     async fn build_utxo_fields(&self) -> UtxoCoinBuildResult<UtxoCoinFields> {
         match self.priv_key_policy() {
-            PrivKeyBuildPolicy::IguanaPrivKey(priv_key) => self.build_utxo_fields_with_iguana_priv_key(priv_key).await,
+            PrivKeyBuildPolicy::IguanaPrivKey(priv_key) => {
+                self.build_utxo_fields_with_iguana_priv_key(priv_key.as_slice()).await
+            },
+            PrivKeyBuildPolicy::GlobalHDAccount(global_hd_ctx) => {
+                self.build_utxo_fields_with_global_hd(global_hd_ctx).await
+            },
             PrivKeyBuildPolicy::Trezor => self.build_utxo_fields_with_trezor().await,
         }
     }
@@ -175,6 +184,113 @@ pub trait UtxoFieldsWithIguanaPrivKeyBuilder: UtxoCoinBuilderCommonOps {
         let my_script_pubkey = output_script(&my_address, ScriptType::P2PKH).to_bytes();
         let derivation_method = DerivationMethod::Iguana(my_address);
         let priv_key_policy = PrivKeyPolicy::KeyPair(key_pair);
+
+        let rpc_client = self.rpc_client().await?;
+        let tx_fee = self.tx_fee(&rpc_client).await?;
+        let decimals = self.decimals(&rpc_client).await?;
+        let dust_amount = self.dust_amount();
+
+        let initial_history_state = self.initial_history_state();
+        let tx_hash_algo = self.tx_hash_algo();
+        let check_utxo_maturity = self.check_utxo_maturity();
+        let tx_cache = self.tx_cache();
+        let block_headers_storage = self.block_headers_storage()?;
+
+        let coin = UtxoCoinFields {
+            conf,
+            decimals,
+            dust_amount,
+            rpc_client,
+            priv_key_policy,
+            derivation_method,
+            history_sync_state: Mutex::new(initial_history_state),
+            tx_cache,
+            block_headers_storage,
+            recently_spent_outpoints: AsyncMutex::new(RecentlySpentOutPoints::new(my_script_pubkey)),
+            tx_fee,
+            tx_hash_algo,
+            check_utxo_maturity,
+        };
+        Ok(coin)
+    }
+}
+
+#[async_trait]
+pub trait UtxoFieldsWithGlobalHDBuilder: UtxoCoinBuilderCommonOps + UtxoFieldsWithHardwareWalletBuilder {
+    async fn build_utxo_fields_with_global_hd(
+        &self,
+        global_hd_ctx: GlobalHDAccountArc,
+    ) -> UtxoCoinBuildResult<UtxoCoinFields> {
+        let ticker = self.ticker().to_owned();
+        let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), &ticker)
+            .build()
+            .mm_err(Into::into)?;
+
+        // Derive key pair at the default activated address: m/44'/coin_type'/0'/0/0
+        let derivation_path = self.derivation_path().mm_err(Into::into)?;
+
+        // Build the full derivation path to the first receiving address.
+        let mut full_path = derivation_path.to_derivation_path();
+        // account 0' (hardened)
+        full_path.push(
+            crypto::ChildNumber::new(0, true)
+                .map_err(|_| UtxoCoinBuildError::Internal("failed to create hardened child number".to_owned()))?,
+        );
+        // external chain 0 (non-hardened)
+        full_path.push(
+            crypto::ChildNumber::new(0, false)
+                .map_err(|_| UtxoCoinBuildError::Internal("failed to create child number".to_owned()))?,
+        );
+        // address index 0 (non-hardened)
+        full_path.push(
+            crypto::ChildNumber::new(0, false)
+                .map_err(|_| UtxoCoinBuildError::Internal("failed to create child number".to_owned()))?,
+        );
+
+        let secret = global_hd_ctx
+            .derive_secp256k1_secret(&full_path)
+            .mm_err(|e| UtxoCoinBuildError::Internal(e.to_string()))?;
+
+        let private = Private {
+            prefix: conf.wif_prefix,
+            secret,
+            compressed: true,
+            checksum_type: conf.checksum_type,
+        };
+        let key_pair = KeyPair::from_private(private).map_to_mm(|e| UtxoCoinBuildError::Internal(e.to_string()))?;
+
+        let addr_format = self.address_format()?;
+        let activated_address = Address {
+            prefix: conf.pub_addr_prefix,
+            t_addr_prefix: conf.pub_t_addr_prefix,
+            hash: AddressHashEnum::AddressHash(key_pair.public().address_hash()),
+            checksum_type: conf.checksum_type,
+            hrp: conf.bech32_hrp.clone(),
+            addr_format: addr_format.clone(),
+        };
+        let my_script_pubkey = output_script(&activated_address, ScriptType::P2PKH).to_bytes();
+
+        // Store both the active key pair and the root extended key for future derivation.
+        let priv_key_policy = PrivKeyPolicy::HDWallet {
+            activated_key: key_pair,
+            bip39_secp_priv_key: global_hd_ctx.root_priv_key().clone(),
+        };
+
+        // Build the HD wallet structure for multi-account support.
+        let hd_wallet_storage = HDWalletCoinStorage::init(self.ctx(), ticker).await.mm_err(Into::into)?;
+        let accounts = self
+            .load_hd_wallet_accounts(&hd_wallet_storage, &derivation_path)
+            .await?;
+        let gap_limit = self.gap_limit();
+        let hd_wallet = UtxoHDWallet {
+            hd_wallet_storage,
+            address_format: addr_format,
+            derivation_path,
+            accounts: HDAccountsMutex::new(accounts),
+            gap_limit,
+        };
+
+        let derivation_method = DerivationMethod::HDWallet(hd_wallet);
 
         let rpc_client = self.rpc_client().await?;
         let tx_fee = self.tx_fee(&rpc_client).await?;

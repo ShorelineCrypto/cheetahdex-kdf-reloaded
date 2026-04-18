@@ -41,7 +41,8 @@ use common::executor::{spawn, Timer};
 use common::mm_metrics::MetricsWeak;
 use common::mm_number::MmNumber;
 use common::{calc_total_pages, now_ms, ten, HttpStatusCode};
-use crypto::{Bip32Error, CryptoCtx, DerivationPath};
+use crypto::GlobalHDAccountArc;
+use crypto::{Bip32Error, CryptoCtx, CryptoCtxError, DerivationPath, KeyPairPolicy};
 use derive_more::Display;
 use futures::compat::Future01CompatExt;
 use futures::lock::Mutex as AsyncMutex;
@@ -334,6 +335,9 @@ pub struct RawTransactionRes {
     /// Raw bytes of signed transaction in hexadecimal string, this should be return hexadecimal encoded signed transaction for get_raw_transaction
     pub tx_hex: BytesJson,
 }
+
+/// A secp256k1 secret key used by Iguana (legacy single-key) mode.
+pub type IguanaPrivKey = keys::Secret;
 
 pub type SignatureResult<T> = Result<T, MmError<SignatureError>>;
 pub type VerificationResult<T> = Result<T, MmError<VerificationError>>;
@@ -2255,11 +2259,20 @@ impl CoinsContext {
 /// This enum is used in coin activation requests.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum PrivKeyActivationPolicy {
+    /// Use whatever key policy the CryptoCtx was initialized with (Iguana or GlobalHD).
+    ContextPrivKey,
+    /// Force legacy Iguana single-key mode.
     IguanaPrivKey,
     Trezor,
 }
 
 impl PrivKeyActivationPolicy {
+    /// The function can be used as a default deserialization constructor:
+    /// `#[serde(default = "PrivKeyActivationPolicy::context_priv_key")]`
+    pub fn context_priv_key() -> PrivKeyActivationPolicy {
+        PrivKeyActivationPolicy::ContextPrivKey
+    }
+
     /// The function can be used as a default deserialization constructor:
     /// `#[serde(default = "PrivKeyActivationPolicy::iguana_priv_key")]`
     pub fn iguana_priv_key() -> PrivKeyActivationPolicy {
@@ -2275,7 +2288,16 @@ impl PrivKeyActivationPolicy {
 
 #[derive(Debug)]
 pub enum PrivKeyPolicy<T> {
+    /// Legacy single-key (Iguana passphrase hashed to one key pair).
     KeyPair(T),
+    /// HD wallet mode: derived key at a specific BIP44 path, with the root extended key
+    /// available for deriving additional addresses.
+    HDWallet {
+        /// The key pair derived at the user's chosen address path.
+        activated_key: T,
+        /// The BIP32 root extended private key for deriving additional coin keys.
+        bip39_secp_priv_key: bip32::ExtendedPrivateKey<secp256k1::SecretKey>,
+    },
     Trezor,
 }
 
@@ -2283,6 +2305,7 @@ impl<T> PrivKeyPolicy<T> {
     pub fn key_pair(&self) -> Option<&T> {
         match self {
             PrivKeyPolicy::KeyPair(key_pair) => Some(key_pair),
+            PrivKeyPolicy::HDWallet { activated_key, .. } => Some(activated_key),
             PrivKeyPolicy::Trezor => None,
         }
     }
@@ -2291,17 +2314,30 @@ impl<T> PrivKeyPolicy<T> {
         self.key_pair()
             .or_mm_err(|| PrivKeyNotAllowed::HardwareWalletNotSupported)
     }
+
+    /// Returns true if this is an HD wallet policy.
+    pub fn is_hd_wallet(&self) -> bool {
+        matches!(self, PrivKeyPolicy::HDWallet { .. })
+    }
 }
 
 #[derive(Clone)]
-pub enum PrivKeyBuildPolicy<'a> {
-    IguanaPrivKey(&'a [u8]),
+pub enum PrivKeyBuildPolicy {
+    IguanaPrivKey(IguanaPrivKey),
+    GlobalHDAccount(GlobalHDAccountArc),
     Trezor,
 }
 
-impl<'a> PrivKeyBuildPolicy<'a> {
-    pub fn iguana_priv_key(crypto_ctx: &'a CryptoCtx) -> Self {
-        PrivKeyBuildPolicy::IguanaPrivKey(crypto_ctx.mm2_internal_privkey_slice())
+impl PrivKeyBuildPolicy {
+    /// Detects the `PrivKeyBuildPolicy` from the `CryptoCtx` key pair policy.
+    pub fn detect_priv_key_policy(ctx: &MmArc) -> MmResult<PrivKeyBuildPolicy, CryptoCtxError> {
+        let crypto_ctx = CryptoCtx::from_ctx(ctx)?;
+        match crypto_ctx.key_pair_policy() {
+            KeyPairPolicy::Iguana => Ok(PrivKeyBuildPolicy::IguanaPrivKey(
+                crypto_ctx.mm2_internal_privkey_secret(),
+            )),
+            KeyPairPolicy::GlobalHDAccount(global_hd) => Ok(PrivKeyBuildPolicy::GlobalHDAccount(global_hd.clone())),
+        }
     }
 }
 

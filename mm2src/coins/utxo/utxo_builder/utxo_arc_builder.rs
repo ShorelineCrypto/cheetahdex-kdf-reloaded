@@ -1,7 +1,7 @@
 use crate::utxo::utxo_block_header_storage::BlockHeaderStorage;
 use crate::utxo::utxo_builder::{
-    UtxoCoinBuildError, UtxoCoinBuilder, UtxoCoinBuilderCommonOps, UtxoFieldsWithHardwareWalletBuilder,
-    UtxoFieldsWithIguanaPrivKeyBuilder,
+    UtxoCoinBuildError, UtxoCoinBuilder, UtxoCoinBuilderCommonOps, UtxoFieldsWithGlobalHDBuilder,
+    UtxoFieldsWithHardwareWalletBuilder, UtxoFieldsWithIguanaPrivKeyBuilder,
 };
 use crate::utxo::utxo_common::{block_header_utxo_loop, merge_utxo_loop};
 use crate::utxo::{GetUtxoListOps, UtxoArc, UtxoCommonOps, UtxoWeak};
@@ -22,7 +22,7 @@ where
     ticker: &'a str,
     conf: &'a Json,
     activation_params: &'a UtxoActivationParams,
-    priv_key_policy: PrivKeyBuildPolicy<'a>,
+    priv_key_policy: PrivKeyBuildPolicy,
     constructor: F,
 }
 
@@ -35,7 +35,7 @@ where
         ticker: &'a str,
         conf: &'a Json,
         activation_params: &'a UtxoActivationParams,
-        priv_key_policy: PrivKeyBuildPolicy<'a>,
+        priv_key_policy: PrivKeyBuildPolicy,
         constructor: F,
     ) -> UtxoArcBuilder<'a, F, T> {
         UtxoArcBuilder {
@@ -76,6 +76,11 @@ impl<'a, F, T> UtxoFieldsWithIguanaPrivKeyBuilder for UtxoArcBuilder<'a, F, T> w
 {
 }
 
+impl<'a, F, T> UtxoFieldsWithGlobalHDBuilder for UtxoArcBuilder<'a, F, T> where
+    F: Fn(UtxoArc) -> T + Send + Sync + 'static
+{
+}
+
 impl<'a, F, T> UtxoFieldsWithHardwareWalletBuilder for UtxoArcBuilder<'a, F, T> where
     F: Fn(UtxoArc) -> T + Send + Sync + 'static
 {
@@ -90,7 +95,7 @@ where
     type ResultCoin = T;
     type Error = UtxoCoinBuildError;
 
-    fn priv_key_policy(&self) -> PrivKeyBuildPolicy<'_> {
+    fn priv_key_policy(&self) -> PrivKeyBuildPolicy {
         self.priv_key_policy.clone()
     }
 

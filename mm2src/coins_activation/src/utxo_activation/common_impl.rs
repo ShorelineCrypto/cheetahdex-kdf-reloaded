@@ -9,7 +9,7 @@ use coins::hd_pubkey::RpcTaskXPubExtractor;
 use coins::utxo::UtxoActivationParams;
 use coins::{MarketCoinOps, PrivKeyActivationPolicy, PrivKeyBuildPolicy};
 use crypto::hw_rpc_task::HwConnectStatuses;
-use crypto::CryptoCtx;
+use crypto::{CryptoCtx, CryptoCtxError};
 use futures::compat::Future01CompatExt;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -74,9 +74,23 @@ pub fn xpub_extractor_rpc_statuses() -> HwConnectStatuses<UtxoStandardInProgress
     }
 }
 
-pub fn priv_key_build_policy(crypto_ctx: &CryptoCtx, activation_policy: PrivKeyActivationPolicy) -> PrivKeyBuildPolicy {
+pub fn priv_key_build_policy(
+    ctx: &MmArc,
+    crypto_ctx: &CryptoCtx,
+    activation_policy: PrivKeyActivationPolicy,
+) -> MmResult<PrivKeyBuildPolicy, InitUtxoStandardError> {
     match activation_policy {
-        PrivKeyActivationPolicy::IguanaPrivKey => PrivKeyBuildPolicy::iguana_priv_key(crypto_ctx),
-        PrivKeyActivationPolicy::Trezor => PrivKeyBuildPolicy::Trezor,
+        PrivKeyActivationPolicy::ContextPrivKey => {
+            PrivKeyBuildPolicy::detect_priv_key_policy(ctx).mm_err(|e: CryptoCtxError| {
+                InitUtxoStandardError::CoinCreationError {
+                    ticker: String::new(),
+                    error: e.to_string(),
+                }
+            })
+        },
+        PrivKeyActivationPolicy::IguanaPrivKey => Ok(PrivKeyBuildPolicy::IguanaPrivKey(
+            crypto_ctx.mm2_internal_privkey_secret(),
+        )),
+        PrivKeyActivationPolicy::Trezor => Ok(PrivKeyBuildPolicy::Trezor),
     }
 }
