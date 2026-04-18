@@ -53,6 +53,7 @@ coins_activation = { path = "../coins_activation" }
 common = { path = "../common" }
 mm2_test_helpers = { path = "../mm2_test_helpers" }
 mm2_err_handle = { path = "../mm2_err_handle" }
+mm2_event_stream = { path = "../mm2_event_stream" }
 mm2_io = { path = "../mm2_io" }
 mm2_rpc = { path = "../mm2_rpc" }
 mm2_net = { path = "../mm2_net" }

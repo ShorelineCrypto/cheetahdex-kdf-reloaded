@@ -9,6 +9,7 @@ use futures::future::AbortHandle;
 use gstuff::{try_s, Constructible, ERR, ERRL};
 use keys::KeyPair;
 use lazy_static::lazy_static;
+use mm2_event_stream::StreamingManager;
 use primitives::hash::H160;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -66,6 +67,8 @@ pub struct MmCtx {
     pub log: log::LogArc,
     /// Tools and methods and to collect and export the MM metrics.
     pub metrics: MetricsArc,
+    /// Event streaming manager for real-time SSE subscriptions.
+    pub event_stream_manager: StreamingManager,
     /// Set to true after `lp_passphrase_init`, indicating that we have a usable state.
     ///
     /// Should be refactored away in the future. State should always be valid.
@@ -125,6 +128,7 @@ impl MmCtx {
             conf: Json::Object(json::Map::new()),
             log: log::LogArc::new(log),
             metrics: MetricsArc::new(),
+            event_stream_manager: StreamingManager::default(),
             initialized: Constructible::default(),
             rpc_started: Constructible::default(),
             stop: Constructible::default(),
@@ -238,6 +242,16 @@ impl MmCtx {
 
     pub fn p2p_in_memory_port(&self) -> Option<u64> {
         self.conf["p2p_in_memory_port"].as_u64()
+    }
+
+    /// Access-Control-Allow-Origin for the SSE endpoint.
+    /// Falls back to the `rpccors` config value, then `http://localhost:3000`.
+    pub fn event_stream_access_control(&self) -> String {
+        self.conf["event_stream_access_control"]
+            .as_str()
+            .or_else(|| self.conf["rpccors"].as_str())
+            .unwrap_or("http://localhost:3000")
+            .to_string()
     }
 
     /// True if the MarketMaker instance needs to stop.

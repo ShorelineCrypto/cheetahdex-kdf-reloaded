@@ -49,6 +49,10 @@ pub mod lp_commands;
 pub mod lp_commands_legacy;
 #[path = "rpc/rate_limiter.rs"]
 mod rate_limiter;
+#[path = "rpc/sse_handler.rs"]
+mod sse_handler;
+#[path = "rpc/streaming_activations/mod.rs"]
+pub mod streaming_activations;
 
 /// Lists the RPC method not requiring the "userpass" authentication.  
 /// None is also public to skip auth and display proper error in case of method is missing
@@ -266,6 +270,14 @@ async fn rpc_service(req: Request<Body>, ctx_h: u32, client: SocketAddr) -> Resp
     }
 
     let ctx = try_sf!(MmArc::from_ffi_handle(ctx_h));
+
+    // SSE endpoint: GET /event-stream?id=<client_id>
+    // Check the path before consuming the body for JSON parsing.
+    if req.uri().path() == sse_handler::SSE_ENDPOINT {
+        let (parts, _body) = req.into_parts();
+        return sse_handler::handle_sse(parts, ctx_h).await;
+    }
+
     // https://github.com/artemii235/SuperNET/issues/219
     let rpc_cors = match ctx.conf["rpccors"].as_str() {
         Some(s) => try_sf!(HeaderValue::from_str(s)),
