@@ -4,7 +4,6 @@ extern crate lazy_static;
 mod adex_ping;
 pub mod atomicdex_behaviour;
 mod ip_helpers;
-mod network;
 pub mod peers_exchange;
 pub mod relay_address;
 pub mod request_response;

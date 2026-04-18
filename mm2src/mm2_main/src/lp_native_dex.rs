@@ -20,7 +20,7 @@
 use bitcrypto::sha256;
 use coins::register_balance_update_handler;
 use common::executor::{spawn, spawn_boxed, Timer};
-use common::log::{info, warn};
+use common::log::{error, info, warn};
 use crypto::{CryptoCtx, CryptoInitError, HwError, HwProcessingError};
 use derive_more::Display;
 use mm2_core::mm_ctx::{MmArc, MmCtx};
@@ -410,6 +410,22 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
     // Validate netid against compiled network configurations ("deny except config exists").
     let netid = ctx.netid();
     if net_config_for(netid).is_none() {
+        let supported_desc: Vec<String> = SUPPORTED_NETIDS
+            .iter()
+            .filter_map(|&id| net_config_for(id).map(|cfg| format!("  netid {} — {}", id, cfg.network_name())))
+            .collect();
+        if netid == 0 {
+            error!(
+                "No 'netid' specified in MM2.json. You must set a supported network ID.\nSupported networks:\n{}",
+                supported_desc.join("\n")
+            );
+        } else {
+            error!(
+                "Unsupported netid {}: no compiled configuration.\nSupported networks:\n{}",
+                netid,
+                supported_desc.join("\n")
+            );
+        }
         return MmError::err(MmInitError::UnsupportedNetId {
             netid,
             supported: SUPPORTED_NETIDS,
@@ -491,7 +507,6 @@ async fn kick_start(ctx: MmArc) -> MmInitResult<()> {
 
 async fn init_p2p(ctx: MmArc) -> P2PResult<()> {
     let i_am_seed = ctx.conf["i_am_seed"].as_bool().unwrap_or(false);
-    let netid = ctx.netid();
 
     let seednodes = seednodes(&ctx)?;
 
@@ -509,7 +524,7 @@ async fn init_p2p(ctx: MmArc) -> P2PResult<()> {
         light_node_type(&ctx)?
     };
 
-    let spawn_result = spawn_gossipsub(netid, force_p2p_key, spawn_boxed, seednodes, node_type, move |swarm| {
+    let spawn_result = spawn_gossipsub(force_p2p_key, spawn_boxed, seednodes, node_type, move |swarm| {
         let behaviour = swarm.behaviour();
         mm_gauge!(
             ctx_on_poll.metrics,

@@ -120,7 +120,7 @@ mod tests {
             assert!(!cfg.dex_fee_addr_pubkey().is_empty());
             assert!(!cfg.dex_fee_addr_raw_pubkey().is_empty());
             assert!(!cfg.dex_fee_z_addr().is_empty());
-            assert!(!cfg.seed_nodes().is_empty());
+            // seed_nodes() may be empty — operators provide seeds via MM2.json config
         }
     }
 

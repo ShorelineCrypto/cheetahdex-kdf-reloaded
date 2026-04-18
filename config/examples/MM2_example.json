@@ -1,0 +1,7 @@
+{
+  "gui": "KDF-Reloaded",
+  "netid": 8762,
+  "rpc_password": "ENTER_UNIQUE_RPC_PASSWORD",
+  "passphrase": "ENTER_YOUR_SEED_PHRASE_HERE",
+  "seednodes": ["seed1.example.com", "seed2.example.com"]
+}

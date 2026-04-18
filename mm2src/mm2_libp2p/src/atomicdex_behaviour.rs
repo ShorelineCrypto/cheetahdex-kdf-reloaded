@@ -1,6 +1,5 @@
 use crate::{
     adex_ping::AdexPing,
-    network::{get_all_network_seednodes, NETID_7777},
     peers_exchange::{PeerAddresses, PeersExchange},
     request_response::{
         build_request_response_behaviour, PeerRequest, PeerResponse, RequestResponseBehaviour,
@@ -39,7 +38,6 @@ use rand::Rng;
 use std::{
     collections::hash_map::{DefaultHasher, HashMap},
     hash::{Hash, Hasher},
-    iter,
     net::IpAddr,
     task::{Context, Poll},
     time::Duration,
@@ -261,8 +259,6 @@ pub struct AtomicDexBehaviour {
     spawn_fn: fn(Box<dyn Future<Output = ()> + Send + Unpin + 'static>) -> (),
     #[behaviour(ignore)]
     cmd_rx: Receiver<AdexBehaviourCmd>,
-    #[behaviour(ignore)]
-    netid: u16,
     gossipsub: Gossipsub,
     request_response: RequestResponseBehaviour,
     peers_exchange: PeersExchange,
@@ -448,18 +444,15 @@ impl NetworkBehaviourEventProcess<GossipsubEvent> for AtomicDexBehaviour {
 
 impl NetworkBehaviourEventProcess<FloodsubEvent> for AtomicDexBehaviour {
     fn inject_event(&mut self, event: FloodsubEvent) {
-        // do not process peer announce on 7777 temporary
-        if self.netid != NETID_7777 {
-            if let FloodsubEvent::Message(message) = &event {
-                for topic in &message.topics {
-                    if topic == &FloodsubTopic::new(PEERS_TOPIC) {
-                        let addresses: PeerAddresses = match rmp_serde::from_read_ref(&message.data) {
-                            Ok(a) => a,
-                            Err(_) => return,
-                        };
-                        self.peers_exchange
-                            .add_peer_addresses_to_known_peers(&message.source, addresses);
-                    }
+        if let FloodsubEvent::Message(message) = &event {
+            for topic in &message.topics {
+                if topic == &FloodsubTopic::new(PEERS_TOPIC) {
+                    let addresses: PeerAddresses = match rmp_serde::from_read_ref(&message.data) {
+                        Ok(a) => a,
+                        Err(_) => return,
+                    };
+                    self.peers_exchange
+                        .add_peer_addresses_to_known_peers(&message.source, addresses);
                 }
             }
         }
@@ -641,7 +634,6 @@ impl NodeType {
 /// 3. our peer_id
 /// 4. abort handle to stop the P2P processing fut.
 pub async fn spawn_gossipsub(
-    netid: u16,
     force_key: Option<[u8; 32]>,
     spawn_fn: fn(Box<dyn Future<Output = ()> + Send + Unpin + 'static>) -> (),
     to_dial: Vec<RelayAddress>,
@@ -650,7 +642,7 @@ pub async fn spawn_gossipsub(
 ) -> Result<(Sender<AdexBehaviourCmd>, AdexEventRx, PeerId, AbortHandle), AdexBehaviourError> {
     let (result_tx, result_rx) = futures::channel::oneshot::channel();
     let fut = async move {
-        let result = start_gossipsub(netid, force_key, spawn_fn, to_dial, node_type, on_poll);
+        let result = start_gossipsub(force_key, spawn_fn, to_dial, node_type, on_poll);
         result_tx.send(result).unwrap();
     };
 
@@ -670,7 +662,6 @@ pub async fn spawn_gossipsub(
 /// `panicked at 'there is no reactor running, must be called from the context of a Tokio 1.x runtime'`.
 #[allow(clippy::too_many_arguments)]
 fn start_gossipsub(
-    netid: u16,
     force_key: Option<[u8; 32]>,
     spawn_fn: fn(Box<dyn Future<Output = ()> + Send + Unpin + 'static>) -> (),
     to_dial: Vec<RelayAddress>,
@@ -727,20 +718,11 @@ fn start_gossipsub(
             .max_transmit_size(1024 * 1024 - 100)
             .build();
         // build a gossipsub network behaviour
-        let mut gossipsub = Gossipsub::new(local_peer_id, gossipsub_config);
+        let gossipsub = Gossipsub::new(local_peer_id, gossipsub_config);
 
-        let floodsub = Floodsub::new(local_peer_id, netid != NETID_7777);
+        let floodsub = Floodsub::new(local_peer_id, true);
 
-        let mut peers_exchange = PeersExchange::new(network_info);
-        if !network_info.in_memory() {
-            // Please note WASM nodes don't support `PeersExchange` currently,
-            // so `get_all_network_seednodes` returns an empty list.
-            for (peer_id, addr) in get_all_network_seednodes(netid) {
-                let multiaddr = addr.try_to_multiaddr(network_info)?;
-                peers_exchange.add_peer_addresses_to_known_peers(&peer_id, iter::once(multiaddr).collect());
-                gossipsub.add_explicit_relay(peer_id);
-            }
-        }
+        let peers_exchange = PeersExchange::new(network_info);
 
         // build a request-response network behaviour
         let request_response = build_request_response_behaviour();
@@ -753,7 +735,6 @@ fn start_gossipsub(
             event_tx,
             spawn_fn,
             cmd_rx,
-            netid,
             gossipsub,
             request_response,
             peers_exchange,

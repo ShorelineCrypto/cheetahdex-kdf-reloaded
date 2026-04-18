@@ -30,9 +30,8 @@ const DEX_FEE_ADDR_PUBKEY: &str = "03a778d9bd346fa704cf3e2508cd074d93a1bbc1e504f
 const DEX_FEE_Z_ADDR: &str = "zs1lgdrlg6kv6lmf0n9ps2uhj6sc8rdn30vx44qzu7hqa5ms4a4fwytlr8yuwrqyvhk6l6r5fevw50";
 
 /// Seed nodes for P2P bootstrapping on netid 6133.
-/// GLEEC moved seed nodes to runtime config; these are placeholder entries
-/// for the compile-time fallback. Operators should set `"seednodes"` in MM2.json.
-const SEED_NODES: &[&str] = &["seed1.defimania.live", "seed2.defimania.live", "seed3.defimania.live"];
+/// No hardcoded seeds — operators must provide `"seednodes"` in MM2.json.
+const SEED_NODES: &[&str] = &[];
 
 lazy_static! {
     static ref DEX_FEE_ADDR_RAW: Vec<u8> =

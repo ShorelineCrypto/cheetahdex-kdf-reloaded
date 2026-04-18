@@ -29,7 +29,7 @@ impl Node {
     {
         let node_type = NodeType::RelayInMemory { port };
         let seednodes = seednodes.into_iter().map(RelayAddress::Memory).collect();
-        let (cmd_tx, mut event_rx, peer_id, _) = spawn_gossipsub(333, None, spawn_boxed, seednodes, node_type, |_| {})
+        let (cmd_tx, mut event_rx, peer_id, _) = spawn_gossipsub(None, spawn_boxed, seednodes, node_type, |_| {})
             .await
             .expect("Error spawning AdexBehaviour");
 
