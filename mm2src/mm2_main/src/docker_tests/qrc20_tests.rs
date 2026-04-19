@@ -7,7 +7,7 @@ use coins::utxo::rpc_clients::UtxoRpcClientEnum;
 use coins::utxo::utxo_common::big_decimal_from_sat;
 use coins::utxo::{UtxoActivationParams, UtxoCommonOps};
 use coins::{
-    FeeApproxStage, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, TradePreimageValue, TransactionEnum,
+    DexFee, FeeApproxStage, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, TradePreimageValue, TransactionEnum,
     ValidatePaymentInput,
 };
 use common::log::debug;
@@ -1029,8 +1029,9 @@ fn test_get_max_taker_vol_and_trade_with_dynamic_trade_fee(coin: QtumCoin, priv_
         &expected_max_taker_vol,
         &qtum_dex_fee_threshold,
     );
+    let dex_fee = DexFee::Standard(dex_fee_amount);
     let _taker_fee_tx = coin
-        .send_taker_fee(net_cfg.dex_fee_addr_raw_pubkey(), dex_fee_amount.to_decimal(), &[])
+        .send_taker_fee(&dex_fee, net_cfg.dex_fee_addr_raw_pubkey(), &[])
         .wait()
         .expect("!send_taker_fee");
 
