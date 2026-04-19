@@ -1394,6 +1394,8 @@ pub async fn active_swaps_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>
 
 #[cfg(test)]
 mod lp_swap_tests {
+    use coins::{MarketCoinOps, MmCoinEnum, TestCoin};
+    use mocktopus::mocking::*;
     use serialization::{deserialize, serialize};
 
     use super::*;
@@ -1764,5 +1766,123 @@ mod lp_swap_tests {
         let expected_share: MmNumber = (3, 4).into();
         let actual_share: MmNumber = net_cfg.dex_fee_share().into();
         assert_eq!(actual_share, expected_share);
+    }
+
+    /// Helper: create a TestCoin wrapped in MmCoinEnum with min_tx_amount mocked.
+    fn mock_taker_coin(ticker: &'static str) -> MmCoinEnum {
+        TestCoin::ticker.mock_safe(move |_| MockResult::Return(ticker));
+        TestCoin::min_tx_amount
+            .mock_safe(|_| MockResult::Return(BigDecimal::from_str("0.00001").unwrap()));
+        MmCoinEnum::Test(TestCoin::new(ticker))
+    }
+
+    /// On netid 8762 (burn_enabled=false), compute_dex_fee must return DexFee::Standard.
+    #[test]
+    fn test_compute_dex_fee_standard_on_8762() {
+        let net_cfg = mm2_net_config::net_config_or_panic(8762);
+        let taker_coin = mock_taker_coin("BTC");
+        let trade_amount = MmNumber::from(1);
+
+        let fee = compute_dex_fee(net_cfg, &taker_coin, "ETH", &trade_amount);
+        match &fee {
+            DexFee::Standard(amount) => {
+                assert!(*amount > MmNumber::from(0), "fee should be positive");
+                // For BTC/ETH (no KMD discount), rate is 1/777
+                let expected = &trade_amount / &MmNumber::from(777);
+                assert_eq!(*amount, expected);
+            },
+            other => panic!("expected DexFee::Standard on netid 8762, got {:?}", other),
+        }
+    }
+
+    /// On netid 6133 (burn_enabled=true, share=3/4), compute_dex_fee should produce
+    /// DexFee::WithBurn with fee_amount = total*3/4, burn_amount = total*1/4.
+    #[test]
+    fn test_compute_dex_fee_with_burn_on_6133() {
+        let net_cfg = mm2_net_config::net_config_or_panic(6133);
+        let taker_coin = mock_taker_coin("BTC");
+        let trade_amount = MmNumber::from(1);
+
+        let fee = compute_dex_fee(net_cfg, &taker_coin, "ETH", &trade_amount);
+        match &fee {
+            DexFee::WithBurn {
+                fee_amount,
+                burn_amount,
+                burn_destination,
+            } => {
+                // Total = fee_amount + burn_amount
+                let total = fee_amount + burn_amount;
+                assert!(total > MmNumber::from(0), "total fee should be positive");
+                // share = 3/4, so fee_amount = total * 3/4
+                let share: MmNumber = (3, 4).into();
+                assert_eq!(*fee_amount, &total * &share);
+                assert_eq!(*burn_amount, &total - fee_amount);
+                // BTC is not KMD, so burn goes to PreBurnAccount
+                assert_eq!(*burn_destination, DexFeeBurnDestination::PreBurnAccount);
+            },
+            other => panic!("expected DexFee::WithBurn on netid 6133, got {:?}", other),
+        }
+    }
+
+    /// On netid 6133 with KMD as taker coin (discount rate), burn goes to KmdOpReturn.
+    #[test]
+    fn test_compute_dex_fee_kmd_burn_destination() {
+        let net_cfg = mm2_net_config::net_config_or_panic(6133);
+        let taker_coin = mock_taker_coin("KMD");
+        let trade_amount = MmNumber::from(10);
+
+        let fee = compute_dex_fee(net_cfg, &taker_coin, "BTC", &trade_amount);
+        match &fee {
+            DexFee::WithBurn {
+                burn_destination, ..
+            } => {
+                assert_eq!(*burn_destination, DexFeeBurnDestination::KmdOpReturn);
+            },
+            other => panic!("expected DexFee::WithBurn for KMD on netid 6133, got {:?}", other),
+        }
+    }
+
+    /// When trade amount is tiny enough that burn portion < min_tx_amount,
+    /// compute_dex_fee should fall back to DexFee::Standard even on a burn-enabled netid.
+    #[test]
+    fn test_compute_dex_fee_fallback_to_standard_on_tiny_amount() {
+        let net_cfg = mm2_net_config::net_config_or_panic(6133);
+        // Use a very high min_tx_amount so the burn portion is below it
+        TestCoin::ticker.mock_safe(|_| MockResult::Return("BTC"));
+        TestCoin::min_tx_amount.mock_safe(|_| MockResult::Return(BigDecimal::from(100)));
+        let taker_coin = MmCoinEnum::Test(TestCoin::new("BTC"));
+
+        // With trade_amount=1, total fee ≈ 1/777 ≈ 0.001287.
+        // burn portion (25%) ≈ 0.000322, way below min_tx_amount=100.
+        // Should fall back to Standard.
+        let trade_amount = MmNumber::from(1);
+        let fee = compute_dex_fee(net_cfg, &taker_coin, "ETH", &trade_amount);
+        match &fee {
+            DexFee::Standard(amount) => {
+                assert!(*amount > MmNumber::from(0));
+            },
+            other => panic!("expected DexFee::Standard fallback, got {:?}", other),
+        }
+    }
+
+    /// compute_dex_fee total_spend_amount should equal dex_fee_amount_from_taker_coin
+    /// (the underlying total before the burn split).
+    #[test]
+    fn test_compute_dex_fee_total_matches_raw_calculation() {
+        for &netid in &[8762u16, 6133] {
+            let net_cfg = mm2_net_config::net_config_or_panic(netid);
+            let taker_coin = mock_taker_coin("DOGE");
+            let trade_amount = MmNumber::from(100);
+
+            let expected_total =
+                dex_fee_amount_from_taker_coin(net_cfg, &taker_coin, "BTC", &trade_amount);
+            let fee = compute_dex_fee(net_cfg, &taker_coin, "BTC", &trade_amount);
+            assert_eq!(
+                fee.total_spend_amount(),
+                expected_total,
+                "total_spend_amount mismatch on netid {}",
+                netid
+            );
+        }
     }
 }

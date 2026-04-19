@@ -397,6 +397,12 @@ fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
 
     let mut orderbook = ordermatch_ctx.orderbook.lock();
+
+    // Record this UUID so that a late-arriving create message won't resurrect the order.
+    orderbook
+        .recently_cancelled
+        .insert(uuid, pubkey.to_string());
+
     if let Some(order) = orderbook.order_set.get(&uuid) {
         if order.pubkey == pubkey {
             orderbook.remove_order_trie_update(uuid);
@@ -2426,7 +2432,9 @@ fn collect_orderbook_metrics(ctx: &MmArc, orderbook: &Orderbook) {
     }
 }
 
-#[derive(Default)]
+/// How long to remember a cancelled order UUID to guard against out-of-order P2P messages.
+const RECENTLY_CANCELLED_TIMEOUT: Duration = Duration::from_secs(120);
+
 struct Orderbook {
     /// A map from (base, rel).
     ordered: HashMap<(String, String), BTreeSet<OrderedByPriceOrder>>,
@@ -2442,6 +2450,25 @@ struct Orderbook {
     topics_subscribed_to: HashMap<String, OrderbookRequestingState>,
     /// MemoryDB instance to store Patricia Tries data
     memory_db: MemoryDB<Blake2Hasher64>,
+    /// Recently cancelled order UUIDs mapped to the cancelling pubkey.
+    /// Guards against re-creation when P2P cancel arrives before the create message.
+    recently_cancelled: TimeCache<Uuid, String>,
+}
+
+impl Default for Orderbook {
+    fn default() -> Self {
+        Orderbook {
+            ordered: HashMap::default(),
+            pairs_existing_for_base: HashMap::default(),
+            pairs_existing_for_rel: HashMap::default(),
+            unordered: HashMap::default(),
+            order_set: HashMap::default(),
+            pubkeys_state: HashMap::default(),
+            topics_subscribed_to: HashMap::default(),
+            memory_db: MemoryDB::default(),
+            recently_cancelled: TimeCache::new(RECENTLY_CANCELLED_TIMEOUT),
+        }
+    }
 }
 
 fn hashed_null_node<T: TrieConfiguration>() -> TrieHash<T> {
@@ -2464,6 +2491,12 @@ impl Orderbook {
     }
 
     fn insert_or_update_order_update_trie(&mut self, order: OrderbookItem) {
+        // Ignore orders that were recently cancelled — guards against out-of-order P2P messages.
+        if self.recently_cancelled.get(&order.uuid) == Some(&order.pubkey) {
+            log::warn!("Order {} was recently cancelled, ignoring insert", order.uuid);
+            return;
+        }
+
         let zero = BigRational::from_integer(0.into());
         if order.max_volume <= zero || order.price <= zero || order.min_volume < zero {
             self.remove_order_trie_update(order.uuid);

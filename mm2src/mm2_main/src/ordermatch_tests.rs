@@ -2263,6 +2263,50 @@ fn test_orderbook_insert_or_update_order() {
     orderbook.insert_or_update_order_update_trie(order);
 }
 
+/// If a cancel message arrives before the create message, the create should be silently ignored.
+#[test]
+fn test_recently_cancelled_blocks_insert() {
+    let (_, pubkey, secret) = make_ctx_for_tests();
+    let mut orderbook = Orderbook::default();
+    let order = make_random_orders(pubkey.clone(), &secret, "C1".into(), "C2".into(), 1).remove(0);
+    let uuid = order.uuid;
+
+    // Simulate cancel arriving first
+    orderbook
+        .recently_cancelled
+        .insert(uuid, pubkey.clone());
+
+    // Now try to insert — should be silently dropped
+    orderbook.insert_or_update_order_update_trie(order);
+    assert!(
+        orderbook.order_set.get(&uuid).is_none(),
+        "order should NOT have been inserted after recent cancellation"
+    );
+}
+
+/// If a cancel is recorded for pubkey A but the insert comes from pubkey B (different sender),
+/// it should go through (the pubkeys don't match the recently_cancelled entry).
+#[test]
+fn test_recently_cancelled_allows_different_pubkey() {
+    let (_, pubkey_a, _) = make_ctx_for_tests();
+    let (pubkey_b, secret_b) = pubkey_and_secret_for_test("different passphrase");
+    let mut orderbook = Orderbook::default();
+    let order = make_random_orders(pubkey_b.clone(), &secret_b, "C1".into(), "C2".into(), 1).remove(0);
+    let uuid = order.uuid;
+
+    // Cancel recorded for pubkey_a — not the order's pubkey
+    orderbook
+        .recently_cancelled
+        .insert(uuid, pubkey_a);
+
+    // Insert from pubkey_b should succeed
+    orderbook.insert_or_update_order_update_trie(order);
+    assert!(
+        orderbook.order_set.get(&uuid).is_some(),
+        "order from a different pubkey should be inserted"
+    );
+}
+
 fn pair_trie_root_by_pub(ctx: &MmArc, pubkey: &str, pair: &str) -> H64 {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).unwrap();
     let orderbook = ordermatch_ctx.orderbook.lock();
