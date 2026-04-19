@@ -47,6 +47,7 @@ use mocktopus::macros::*;
 use num_traits::identities::Zero;
 use parking_lot::Mutex as PaMutex;
 use rpc::v1::types::H256 as H256Json;
+use mm2_event_stream::StreamerId;
 use serde_json::{self as json, Value as Json};
 use sp_trie::{delta_trie_root, MemoryDB, Trie, TrieConfiguration, TrieDB, TrieDBMut, TrieHash, TrieMut};
 use std::collections::hash_map::{Entry, HashMap};
@@ -102,6 +103,10 @@ mod order_requests_tracker;
 mod orderbook_depth;
 #[path = "lp_ordermatch/orderbook_rpc.rs"]
 mod orderbook_rpc;
+#[path = "lp_ordermatch/order_events.rs"]
+pub(crate) mod order_events;
+#[path = "lp_ordermatch/orderbook_events.rs"]
+pub(crate) mod orderbook_events;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "ordermatch_tests.rs"]
 pub mod ordermatch_tests;
@@ -389,18 +394,32 @@ async fn request_and_fill_orderbook(ctx: &MmArc, base: &str, rel: &str) -> Resul
 /// Note this function locks the [`OrdermatchContext::orderbook`] mutex.
 fn insert_or_update_order(ctx: &MmArc, item: OrderbookItem) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
+    let p2p_item = OrderbookP2PItem::from(item.clone());
     let mut orderbook = ordermatch_ctx.orderbook.lock();
-    orderbook.insert_or_update_order_update_trie(item)
+    let topic = orderbook_topic_from_base_rel(&item.base, &item.rel);
+    orderbook.insert_or_update_order_update_trie(item);
+    drop(orderbook);
+    let _ = ctx.event_stream_manager.send_fn(
+        &StreamerId::OrderbookUpdate { topic },
+        || orderbook_events::OrderbookItemChangeEvent::NewOrUpdatedItem(Box::new(p2p_item)),
+    );
 }
 
 /// Insert or update our own maker order, tracking per-order P2P pubkeys (ZHTLC).
 fn insert_or_update_my_order(ctx: &MmArc, item: OrderbookItem, my_order: &MakerOrder) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
+    let p2p_item = OrderbookP2PItem::from(item.clone());
     let mut orderbook = ordermatch_ctx.orderbook.lock();
+    let topic = orderbook_topic_from_base_rel(&item.base, &item.rel);
     orderbook.insert_or_update_order_update_trie(item);
     if let Some(ref key) = my_order.p2p_privkey {
         orderbook.my_p2p_pubkeys.insert(hex::encode(key.public_slice()));
     }
+    drop(orderbook);
+    let _ = ctx.event_stream_manager.send_fn(
+        &StreamerId::OrderbookUpdate { topic },
+        || orderbook_events::OrderbookItemChangeEvent::NewOrUpdatedItem(Box::new(p2p_item)),
+    );
 }
 
 fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
@@ -415,7 +434,13 @@ fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
 
     if let Some(order) = orderbook.order_set.get(&uuid) {
         if order.pubkey == pubkey {
+            let topic = orderbook_topic_from_base_rel(&order.base, &order.rel);
             orderbook.remove_order_trie_update(uuid);
+            drop(orderbook);
+            let _ = ctx.event_stream_manager.send_fn(
+                &StreamerId::OrderbookUpdate { topic },
+                || orderbook_events::OrderbookItemChangeEvent::RemovedItem(uuid),
+            );
         }
     }
 }
@@ -423,9 +448,17 @@ fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
 fn delete_my_order(ctx: &MmArc, uuid: Uuid, p2p_privkey: Option<&SerializableSecp256k1Keypair>) {
     let ordermatch_ctx: Arc<OrdermatchContext> = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
     let mut orderbook = ordermatch_ctx.orderbook.lock();
+    let topic = orderbook.order_set.get(&uuid).map(|o| orderbook_topic_from_base_rel(&o.base, &o.rel));
     orderbook.remove_order_trie_update(uuid);
     if let Some(key) = p2p_privkey {
         orderbook.my_p2p_pubkeys.remove(&hex::encode(key.public_slice()));
+    }
+    drop(orderbook);
+    if let Some(topic) = topic {
+        let _ = ctx.event_stream_manager.send_fn(
+            &StreamerId::OrderbookUpdate { topic },
+            || orderbook_events::OrderbookItemChangeEvent::RemovedItem(uuid),
+        );
     }
 }
 
@@ -3466,7 +3499,11 @@ async fn process_taker_request(ctx: MmArc, from_pubkey: H256Json, taker_request:
                     connected: None,
                     last_updated: now_ms(),
                 };
-                order.matches.insert(maker_match.request.uuid, maker_match);
+                order.matches.insert(maker_match.request.uuid, maker_match.clone());
+                let _ = ctx.event_stream_manager.send_fn(
+                    &StreamerId::OrderStatus,
+                    || order_events::OrderStatusEvent::MakerMatch(maker_match),
+                );
                 storage
                     .update_active_maker_order(&order)
                     .await
@@ -3634,7 +3671,7 @@ pub async fn sell(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, String> {
 
 /// Created when maker order is matched with taker request
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct MakerMatch {
+pub(crate) struct MakerMatch {
     request: TakerRequest,
     reserved: MakerReserved,
     connect: Option<TakerConnect>,
@@ -3644,7 +3681,7 @@ struct MakerMatch {
 
 /// Created upon taker request broadcast
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct TakerMatch {
+pub(crate) struct TakerMatch {
     reserved: MakerReserved,
     connect: TakerConnect,
     connected: Option<MakerConnected>,
@@ -3779,7 +3816,7 @@ pub async fn lp_auto_buy(
 /// Orderbook Item P2P message
 /// DO NOT CHANGE - it will break backwards compatibility
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-struct OrderbookP2PItem {
+pub(crate) struct OrderbookP2PItem {
     pubkey: String,
     base: String,
     rel: String,

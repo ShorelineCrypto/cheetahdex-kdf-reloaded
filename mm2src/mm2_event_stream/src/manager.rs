@@ -1,4 +1,5 @@
 use parking_lot::RwLock;
+use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -12,6 +13,10 @@ struct StreamerInfo {
     shutdown_tx: Option<oneshot::Sender<()>>,
     /// Client IDs subscribed to this streamer.
     subscribers: HashSet<u64>,
+    /// Type-erased data input sender for external event pushes.
+    /// For `NoDataIn` streamers this channel exists but can never be fed
+    /// (no value of the uninhabited `NoDataIn` type can be constructed).
+    data_in: Box<dyn Any + Send + Sync>,
 }
 
 /// Per-client bookkeeping.
@@ -99,6 +104,7 @@ impl StreamingManager {
         // Streamer not running — spawn it.
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (ready_tx, ready_rx) = oneshot::channel();
+        let (data_tx, data_rx) = mpsc::unbounded_channel::<S::DataInType>();
         let broadcaster = Broadcaster {
             inner: self.inner.clone(),
         };
@@ -114,6 +120,7 @@ impl StreamingManager {
                         s.insert(client_id);
                         s
                     },
+                    data_in: Box::new(data_tx),
                 },
             );
             if let Some(client) = inner.clients.get_mut(&client_id) {
@@ -125,7 +132,9 @@ impl StreamingManager {
         let manager_inner = self.inner.clone();
         let sid_clone = sid.clone();
         tokio::spawn(async move {
-            streamer.handle(broadcaster, ready_tx, shutdown_rx).await;
+            streamer
+                .handle(broadcaster, ready_tx, shutdown_rx, data_rx)
+                .await;
             // Cleanup when the streamer exits (for any reason).
             let mut inner = manager_inner.write();
             inner.streamers.remove(&sid_clone);
@@ -208,6 +217,43 @@ impl StreamingManager {
         }
     }
 
+    /// Send data to a running streamer's input channel.
+    ///
+    /// The data is type-erased: `T` must match the streamer's `DataInType`.
+    /// Returns `Err` if the streamer is not running or the type doesn't match.
+    pub fn send<T: Send + 'static>(&self, streamer_id: &StreamerId, data: T) -> Result<(), String> {
+        let inner = self.inner.read();
+        let info = inner
+            .streamers
+            .get(streamer_id)
+            .ok_or_else(|| format!("Streamer {:?} not found or not running", streamer_id))?;
+        let tx = info
+            .data_in
+            .downcast_ref::<mpsc::UnboundedSender<T>>()
+            .ok_or("Type mismatch for data input channel")?;
+        tx.send(data)
+            .map_err(|e| format!("Failed to send data to streamer: {}", e))
+    }
+
+    /// Same as `send`, but computes data lazily (only if the streamer is running).
+    pub fn send_fn<T: Send + 'static>(
+        &self,
+        streamer_id: &StreamerId,
+        data_fn: impl FnOnce() -> T,
+    ) -> Result<(), String> {
+        let inner = self.inner.read();
+        let info = inner
+            .streamers
+            .get(streamer_id)
+            .ok_or_else(|| format!("Streamer {:?} not found or not running", streamer_id))?;
+        let tx = info
+            .data_in
+            .downcast_ref::<mpsc::UnboundedSender<T>>()
+            .ok_or("Type mismatch for data input channel")?;
+        tx.send(data_fn())
+            .map_err(|e| format!("Failed to send data to streamer: {}", e))
+    }
+
     /// Returns true if the given streamer is currently running.
     pub fn is_active(&self, streamer_id: &StreamerId) -> bool {
         let inner = self.inner.read();
@@ -236,6 +282,7 @@ mod tests {
             broadcaster: Broadcaster,
             ready_tx: oneshot::Sender<Result<(), String>>,
             shutdown_rx: oneshot::Receiver<()>,
+            _data_rx: mpsc::UnboundedReceiver<crate::NoDataIn>,
         ) {
             let _ = ready_tx.send(Ok(()));
             // Emit one event, then wait for shutdown.

@@ -18,7 +18,8 @@ pub enum StreamerId {
     Balance(String),
     Network,
     SwapStatus(String),
-    OrderStatus(String),
+    OrderStatus,
+    OrderbookUpdate { topic: String },
 }
 
 impl fmt::Display for StreamerId {
@@ -28,7 +29,8 @@ impl fmt::Display for StreamerId {
             StreamerId::Balance(coin) => write!(f, "BALANCE:{}", coin),
             StreamerId::Network => write!(f, "NETWORK"),
             StreamerId::SwapStatus(uuid) => write!(f, "SWAP_STATUS:{}", uuid),
-            StreamerId::OrderStatus(uuid) => write!(f, "ORDER_STATUS:{}", uuid),
+            StreamerId::OrderStatus => write!(f, "ORDER_STATUS"),
+            StreamerId::OrderbookUpdate { topic } => write!(f, "ORDERBOOK:{}", topic),
         }
     }
 }
@@ -54,14 +56,9 @@ impl Broadcaster {
 }
 
 /// Marker type for streamers that don't receive external data.
+/// Since this enum has no variants, `mpsc::UnboundedReceiver<NoDataIn>`
+/// will never yield a value, which is exactly what self-driven streamers need.
 pub enum NoDataIn {}
-
-/// Trait bound for the data input channel a streamer receives.
-/// Streamers that need external pushes use `mpsc::Receiver<T>`;
-/// self-driven streamers use `NoDataIn`.
-pub trait StreamHandlerInput<T>: Send + 'static {}
-impl<T: Send + 'static> StreamHandlerInput<T> for mpsc::Receiver<T> {}
-impl StreamHandlerInput<NoDataIn> for () {}
 
 /// Core trait for all event streamers.
 ///
@@ -82,10 +79,12 @@ pub trait EventStreamer: Sized + Send + 'static {
     /// * `broadcaster` — use to emit events to subscribed clients
     /// * `ready_tx` — send `Ok(())` when initialization is done, or `Err` to abort
     /// * `shutdown_rx` — resolves when the streamer should stop
+    /// * `data_rx` — channel for receiving external data pushes (empty for `NoDataIn`)
     async fn handle(
         self,
         broadcaster: Broadcaster,
         ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
         shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+        data_rx: mpsc::UnboundedReceiver<Self::DataInType>,
     );
 }

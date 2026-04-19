@@ -59,6 +59,7 @@ impl EventStreamer for BalanceEventStreamer {
         broadcaster: Broadcaster,
         ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
         shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+        _data_rx: tokio::sync::mpsc::UnboundedReceiver<mm2_event_stream::NoDataIn>,
     ) {
         // Verify the coin exists before signalling readiness.
         let coin = match lp_coinfind(&self.ctx, &self.ticker).await {

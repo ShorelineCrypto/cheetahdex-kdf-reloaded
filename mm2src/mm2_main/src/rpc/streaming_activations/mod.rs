@@ -4,6 +4,8 @@
 /// enabling or disabling real-time event streams per client.
 pub mod balance;
 pub mod heartbeat;
+pub mod orderbook;
+pub mod orders;
 
 use common::HttpStatusCode;
 use derive_more::Display;

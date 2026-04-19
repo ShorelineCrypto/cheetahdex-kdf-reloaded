@@ -52,6 +52,7 @@ impl EventStreamer for HeartbeatStreamer {
         broadcaster: Broadcaster,
         ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
         shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+        _data_rx: tokio::sync::mpsc::UnboundedReceiver<mm2_event_stream::NoDataIn>,
     ) {
         // Signal readiness immediately.
         let _ = ready_tx.send(Ok(()));
