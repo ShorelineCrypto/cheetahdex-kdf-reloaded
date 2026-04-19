@@ -1,10 +1,10 @@
-use super::{orderbook_address, subscribe_to_orderbook_topic, OrdermatchContext, RpcOrderbookEntry};
+use super::{is_my_order, mm2_internal_pubkey_hex, orderbook_address, subscribe_to_orderbook_topic, OrdermatchContext,
+            RpcOrderbookEntry};
 use crate::mm2::lp_ordermatch::{addr_format_from_protocol_info, RpcOrderbookEntryV2};
 use coins::{address_by_coin_conf_and_pubkey_str, coin_conf, is_wallet_only_conf};
 use common::log::warn;
 use common::mm_number::{BigRational, MmNumberMultiRepr};
 use common::{mm_number::MmNumber, now_ms, HttpStatusCode};
-use crypto::CryptoCtx;
 use derive_more::Display;
 use http::{Response, StatusCode};
 use mm2_core::mm_ctx::MmArc;
@@ -136,7 +136,7 @@ pub async fn orderbook_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, S
 
     try_s!(subscribe_to_orderbook_topic(&ctx, &base_ticker, &rel_ticker, request_orderbook).await);
     let orderbook = ordermatch_ctx.orderbook.lock();
-    let my_pubsecp = try_s!(CryptoCtx::from_ctx(&ctx)).mm2_internal_pubkey_hex();
+    let my_pubsecp = try_s!(mm2_internal_pubkey_hex(&ctx));
 
     let mut asks = match orderbook.unordered.get(&(base_ticker.clone(), rel_ticker.clone())) {
         Some(uuids) => {
@@ -154,7 +154,7 @@ pub async fn orderbook_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, S
                     &ask.pubkey,
                     address_format,
                 ));
-                let is_mine = my_pubsecp == ask.pubkey;
+                let is_mine = is_my_order(&ask.pubkey, &my_pubsecp, &orderbook.my_p2p_pubkeys);
                 orderbook_entries.push(ask.as_rpc_entry_ask(address, is_mine));
             }
             orderbook_entries
@@ -181,7 +181,7 @@ pub async fn orderbook_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, S
                     &bid.pubkey,
                     address_format,
                 ));
-                let is_mine = my_pubsecp == bid.pubkey;
+                let is_mine = is_my_order(&bid.pubkey, &my_pubsecp, &orderbook.my_p2p_pubkeys);
                 orderbook_entries.push(bid.as_rpc_entry_bid(address, is_mine));
             }
             orderbook_entries
@@ -218,6 +218,7 @@ pub enum OrderbookRpcError {
     BaseRelSameOrderbookTickersAndProtocols,
     CoinConfigNotFound(String),
     CoinIsWalletOnly(String),
+    InternalError(String),
     P2PSubscribeError(String),
 }
 
@@ -228,7 +229,7 @@ impl HttpStatusCode for OrderbookRpcError {
             | OrderbookRpcError::BaseRelSameOrderbookTickersAndProtocols
             | OrderbookRpcError::CoinConfigNotFound(_)
             | OrderbookRpcError::CoinIsWalletOnly(_) => StatusCode::BAD_REQUEST,
-            OrderbookRpcError::P2PSubscribeError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            OrderbookRpcError::InternalError(_) | OrderbookRpcError::P2PSubscribeError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -298,9 +299,8 @@ pub async fn orderbook_rpc_v2(
         .map_to_mm(OrderbookRpcError::P2PSubscribeError)?;
 
     let orderbook = ordermatch_ctx.orderbook.lock();
-    let my_pubsecp = CryptoCtx::from_ctx(&ctx)
-        .expect("ctx is available")
-        .mm2_internal_pubkey_hex();
+    let my_pubsecp = mm2_internal_pubkey_hex(&ctx)
+        .map_to_mm(OrderbookRpcError::InternalError)?;
 
     let mut asks = match orderbook.unordered.get(&(base_ticker.clone(), rel_ticker.clone())) {
         Some(uuids) => {
@@ -321,7 +321,7 @@ pub async fn orderbook_rpc_v2(
                         continue;
                     },
                 };
-                let is_mine = my_pubsecp == ask.pubkey;
+                let is_mine = is_my_order(&ask.pubkey, &my_pubsecp, &orderbook.my_p2p_pubkeys);
                 orderbook_entries.push(ask.as_rpc_v2_entry_ask(address, is_mine));
             }
             orderbook_entries
@@ -351,7 +351,7 @@ pub async fn orderbook_rpc_v2(
                         continue;
                     },
                 };
-                let is_mine = my_pubsecp == bid.pubkey;
+                let is_mine = is_my_order(&bid.pubkey, &my_pubsecp, &orderbook.my_p2p_pubkeys);
                 orderbook_entries.push(bid.as_rpc_v2_entry_bid(address, is_mine));
             }
             orderbook_entries

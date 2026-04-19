@@ -1,6 +1,6 @@
 use super::{
-    addr_format_from_protocol_info, BaseRelProtocolInfo, OrderConfirmationsSettings, OrderbookP2PItemWithProof,
-    OrdermatchContext, OrdermatchRequest,
+    addr_format_from_protocol_info, is_my_order, mm2_internal_pubkey_hex, BaseRelProtocolInfo,
+    OrderConfirmationsSettings, OrderbookP2PItemWithProof, OrdermatchContext, OrdermatchRequest,
 };
 use crate::mm2::lp_network::{request_any_relay, P2PRequest};
 use crate::mm2::lp_ordermatch::{orderbook_address, RpcOrderbookEntryV2};
@@ -128,6 +128,11 @@ pub async fn best_orders_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>,
     if is_wallet_only_ticker(&ctx, &req.coin) {
         return ERR!("Coin {} is wallet only", &req.coin);
     }
+    let my_pubsecp = try_s!(mm2_internal_pubkey_hex(&ctx));
+    let my_p2p_pubkeys = {
+        let orderbook = ordermatch_ctx.orderbook.lock();
+        orderbook.my_p2p_pubkeys.clone()
+    };
     let p2p_request = OrdermatchRequest::BestOrders {
         coin: ordermatch_ctx.orderbook_ticker_bypass(&req.coin),
         action: req.action,
@@ -172,9 +177,10 @@ pub async fn best_orders_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>,
                         },
                     };
                 let conf_settings = p2p_response.conf_infos.get(&order.uuid);
+                let is_mine = is_my_order(&order.pubkey, &my_pubsecp, &my_p2p_pubkeys);
                 let entry = match req.action {
-                    BestOrdersAction::Buy => order.as_rpc_best_orders_buy(address, conf_settings, false),
-                    BestOrdersAction::Sell => order.as_rpc_best_orders_sell(address, conf_settings, false),
+                    BestOrdersAction::Buy => order.as_rpc_best_orders_buy(address, conf_settings, is_mine),
+                    BestOrdersAction::Sell => order.as_rpc_best_orders_sell(address, conf_settings, is_mine),
                 };
                 response.entry(coin.clone()).or_insert_with(Vec::new).push(entry);
             }
@@ -217,6 +223,11 @@ pub async fn best_orders_rpc_v2(
         return MmError::err(BestOrdersRpcError::CoinIsWalletOnly(req.coin));
     }
     let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).unwrap();
+    let my_pubsecp = mm2_internal_pubkey_hex(&ctx).map_to_mm(|e| BestOrdersRpcError::P2PError(e))?;
+    let my_p2p_pubkeys = {
+        let orderbook = ordermatch_ctx.orderbook.lock();
+        orderbook.my_p2p_pubkeys.clone()
+    };
     let p2p_request = OrdermatchRequest::BestOrders {
         coin: ordermatch_ctx.orderbook_ticker_bypass(&req.coin),
         action: req.action,
@@ -261,9 +272,10 @@ pub async fn best_orders_rpc_v2(
                     },
                 };
                 let conf_settings = p2p_response.conf_infos.get(&order.uuid);
+                let is_mine = is_my_order(&order.pubkey, &my_pubsecp, &my_p2p_pubkeys);
                 let entry = match req.action {
-                    BestOrdersAction::Buy => order.as_rpc_best_orders_buy_v2(address, conf_settings, false),
-                    BestOrdersAction::Sell => order.as_rpc_best_orders_sell_v2(address, conf_settings, false),
+                    BestOrdersAction::Buy => order.as_rpc_best_orders_buy_v2(address, conf_settings, is_mine),
+                    BestOrdersAction::Sell => order.as_rpc_best_orders_sell_v2(address, conf_settings, is_mine),
                 };
                 orders.entry(coin.clone()).or_insert_with(Vec::new).push(entry);
             }

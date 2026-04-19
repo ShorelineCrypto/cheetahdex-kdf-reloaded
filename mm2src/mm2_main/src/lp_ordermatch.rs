@@ -350,9 +350,13 @@ async fn request_and_fill_orderbook(ctx: &MmArc, base: &str, rel: &str) -> Resul
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).unwrap();
     let mut orderbook = ordermatch_ctx.orderbook.lock();
 
-    let my_pubkey = ctx.secp256k1_key_pair().public();
+    let my_pubsecp = mm2_internal_pubkey_hex(ctx)?;
     let alb_pair = alb_ordered_pair(base, rel);
     for (pubkey, GetOrderbookPubkeyItem { orders, .. }) in pubkey_orders {
+        if is_my_order(&pubkey, &my_pubsecp, &orderbook.my_p2p_pubkeys) {
+            continue;
+        }
+
         let pubkey_bytes = match hex::decode(&pubkey) {
             Ok(b) => b,
             Err(e) => {
@@ -360,10 +364,6 @@ async fn request_and_fill_orderbook(ctx: &MmArc, base: &str, rel: &str) -> Resul
                 continue;
             },
         };
-        if pubkey_bytes.as_slice() == my_pubkey.as_ref() {
-            continue;
-        }
-
         if is_pubkey_banned(ctx, &pubkey_bytes[1..].into()) {
             log::warn!("Pubkey {} is banned", pubkey);
             continue;
@@ -385,12 +385,22 @@ async fn request_and_fill_orderbook(ctx: &MmArc, base: &str, rel: &str) -> Resul
     Ok(())
 }
 
-/// Insert or update an order `req`.
-/// Note this function locks the [`OrdermatchContext::orderbook`] async mutex.
+/// Insert or update a peer's order.
+/// Note this function locks the [`OrdermatchContext::orderbook`] mutex.
 fn insert_or_update_order(ctx: &MmArc, item: OrderbookItem) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
     let mut orderbook = ordermatch_ctx.orderbook.lock();
     orderbook.insert_or_update_order_update_trie(item)
+}
+
+/// Insert or update our own maker order, tracking per-order P2P pubkeys (ZHTLC).
+fn insert_or_update_my_order(ctx: &MmArc, item: OrderbookItem, my_order: &MakerOrder) {
+    let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
+    let mut orderbook = ordermatch_ctx.orderbook.lock();
+    orderbook.insert_or_update_order_update_trie(item);
+    if let Some(ref key) = my_order.p2p_privkey {
+        orderbook.my_p2p_pubkeys.insert(hex::encode(key.public_slice()));
+    }
 }
 
 fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
@@ -410,10 +420,36 @@ fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
     }
 }
 
-fn delete_my_order(ctx: &MmArc, uuid: Uuid) {
+fn delete_my_order(ctx: &MmArc, uuid: Uuid, p2p_privkey: Option<&SerializableSecp256k1Keypair>) {
     let ordermatch_ctx: Arc<OrdermatchContext> = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
     let mut orderbook = ordermatch_ctx.orderbook.lock();
     orderbook.remove_order_trie_update(uuid);
+    if let Some(key) = p2p_privkey {
+        orderbook.my_p2p_pubkeys.remove(&hex::encode(key.public_slice()));
+    }
+}
+
+/// Check if an orderbook entry belongs to this node.
+///
+/// Privacy coins (ZHTLC) use a random keypair per order, so the order's pubkey
+/// won't match the persistent secp256k1 key. We check both the persistent pubkey
+/// and the set of per-order P2P pubkeys tracked in `Orderbook::my_p2p_pubkeys`.
+#[inline(always)]
+fn is_my_order(order_pubkey: &str, my_pub: &Option<String>, my_p2p_pubkeys: &HashSet<String>) -> bool {
+    my_pub.as_deref() == Some(order_pubkey) || my_p2p_pubkeys.contains(order_pubkey)
+}
+
+/// Retrieve this node's persistent secp256k1 pubkey as hex, or `None` if the
+/// crypto context has not been initialized yet (browse / no-login mode).
+pub(crate) fn mm2_internal_pubkey_hex(ctx: &MmArc) -> Result<Option<String>, String> {
+    use crypto::CryptoCtxError;
+    match CryptoCtx::from_ctx(ctx) {
+        Ok(crypto_ctx) => Ok(Some(crypto_ctx.mm2_internal_pubkey_hex())),
+        Err(e) => match e.get_inner() {
+            CryptoCtxError::NotInitialized => Ok(None),
+            CryptoCtxError::Internal(msg) => Err(msg.clone()),
+        },
+    }
 }
 
 fn remove_pubkey_pair_orders(orderbook: &mut Orderbook, pubkey: &str, alb_pair: &str) {
@@ -959,8 +995,8 @@ fn maker_order_created_p2p_notify(
     };
 
     let encoded_msg = encode_and_sign(&to_broadcast, key_pair.private_ref()).unwrap();
-    let order: OrderbookItem = (message, hex::encode(key_pair.public_slice())).into();
-    insert_or_update_order(&ctx, order);
+    let orderbook_item: OrderbookItem = (message, hex::encode(key_pair.public_slice())).into();
+    insert_or_update_my_order(&ctx, orderbook_item, order);
     broadcast_p2p_msg(&ctx, vec![topic], encoded_msg, peer_id);
 }
 
@@ -997,7 +1033,7 @@ fn maker_order_cancelled_p2p_notify(ctx: MmArc, order: &MakerOrder) {
         timestamp: now_ms() / 1000,
         pair_trie_root: H64::default(),
     });
-    delete_my_order(&ctx, order.uuid);
+    delete_my_order(&ctx, order.uuid, order.p2p_privkey.as_ref());
     log::debug!("maker_order_cancelled_p2p_notify called, message {:?}", message);
     broadcast_ordermatch_message(&ctx, vec![order.orderbook_topic()], message, order.p2p_keypair());
 }
@@ -2453,6 +2489,9 @@ struct Orderbook {
     /// Recently cancelled order UUIDs mapped to the cancelling pubkey.
     /// Guards against re-creation when P2P cancel arrives before the create message.
     recently_cancelled: TimeCache<Uuid, String>,
+    /// Per-order P2P pubkeys owned by this node (e.g. ZHTLC random keypairs).
+    /// Used by `is_my_order()` alongside the persistent secp256k1 pubkey.
+    my_p2p_pubkeys: HashSet<String>,
 }
 
 impl Default for Orderbook {
@@ -2467,6 +2506,7 @@ impl Default for Orderbook {
             topics_subscribed_to: HashMap::default(),
             memory_db: MemoryDB::default(),
             recently_cancelled: TimeCache::new(RECENTLY_CANCELLED_TIMEOUT),
+            my_p2p_pubkeys: HashSet::default(),
         }
     }
 }
