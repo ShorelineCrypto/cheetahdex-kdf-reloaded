@@ -10,7 +10,7 @@
 /// - `HDPathToCoin` — First 2 levels (purpose + coin_type)
 /// - `HDPathToAccount` — First 3 levels (purpose through account_id)
 use crate::bip32_child::{
-    Bip32Child, Bip32ChildValue, Bip32DerPathError, Bip32DerPathOps, Bip44Tail, HardenedValue, NonHardenedValue,
+    Bip32Child, Bip32ChildValue, Bip32DerPathError, Bip44Tail, HardenedValue, NonHardenedValue,
 };
 use crate::bip44::{Bip44Chain, Bip44ChainValue};
 use bip32::ChildNumber;

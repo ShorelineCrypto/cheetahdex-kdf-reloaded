@@ -24,9 +24,7 @@ macro_rules! impl_hash {
 
         impl Clone for $name {
             fn clone(&self) -> Self {
-                let mut result = Self::default();
-                result.copy_from_slice(&self.0);
-                result
+                *self
             }
         }
 
@@ -45,7 +43,7 @@ macro_rules! impl_hash {
         impl<'a> From<&'a [u8]> for $name {
             fn from(slc: &[u8]) -> Self {
                 let mut inner = [0u8; $size];
-                inner[..].clone_from_slice(&slc[0..$size]);
+                inner[..].copy_from_slice(&slc[0..$size]);
                 $name(inner)
             }
         }
@@ -136,7 +134,6 @@ macro_rules! impl_hash {
                 H: Hasher,
             {
                 state.write(&self.0);
-                state.finish();
             }
         }
 

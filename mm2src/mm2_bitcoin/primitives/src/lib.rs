@@ -1,5 +1,6 @@
 #![allow(clippy::assign_op_pattern)]
 #![allow(clippy::ptr_offset_with_cast)]
+#![allow(clippy::manual_div_ceil)]
 
 extern crate byteorder;
 extern crate rustc_hex as hex;

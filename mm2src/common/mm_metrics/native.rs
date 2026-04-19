@@ -189,11 +189,11 @@ enum Integer {
     Unsigned(u64),
 }
 
-impl ToString for Integer {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for Integer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Integer::Signed(x) => format!("{}", x),
-            Integer::Unsigned(x) => format!("{}", x),
+            Integer::Signed(x) => write!(f, "{}", x),
+            Integer::Unsigned(x) => write!(f, "{}", x),
         }
     }
 }
@@ -764,10 +764,8 @@ mod tests {
 
         let actual = actual["metrics"].as_array_mut().unwrap();
         for expected in expected["metrics"].as_array().unwrap() {
-            let index = actual.iter().position(|metric| metric == expected).expect(&format!(
-                "Couldn't find expected metric: {:?} in {:?}",
-                expected, actual
-            ));
+            let index = actual.iter().position(|metric| metric == expected).unwrap_or_else(|| panic!("Couldn't find expected metric: {:?} in {:?}",
+                expected, actual));
             actual.remove(index);
         }
 

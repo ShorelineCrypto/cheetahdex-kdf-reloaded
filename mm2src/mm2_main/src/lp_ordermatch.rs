@@ -88,8 +88,8 @@ mod best_orders;
 #[path = "lp_ordermatch/lp_bot.rs"]
 mod lp_bot;
 pub use lp_bot::{
-    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot, StartSimpleMakerBotRequest,
-    TradingBotEvent, KMD_PRICE_ENDPOINT,
+    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot,
+    StartSimpleMakerBotRequest, TradingBotEvent, KMD_PRICE_ENDPOINT,
 };
 
 #[path = "lp_ordermatch/my_orders_storage.rs"]
@@ -416,7 +416,7 @@ fn remove_pubkey_pair_orders(orderbook: &mut Orderbook, pubkey: &str, alb_pair: 
         None => return,
     };
 
-    if pubkey_state.trie_roots.get(alb_pair).is_none() {
+    if !pubkey_state.trie_roots.contains_key(alb_pair) {
         return;
     }
 
@@ -822,10 +822,10 @@ fn process_sync_pubkey_orderbook_state(
 
             let delta_result = match pubkey_state.order_pairs_trie_state_history.get(&pair) {
                 Some(history) => {
-                    DeltaOrFullTrie::from_history(history, root, *actual_pair_root, &orderbook.memory_db, &order_getter)
+                    DeltaOrFullTrie::from_history(history, root, *actual_pair_root, &orderbook.memory_db, order_getter)
                 },
                 None => {
-                    get_full_trie(actual_pair_root, &orderbook.memory_db, &order_getter).map(DeltaOrFullTrie::FullTrie)
+                    get_full_trie(actual_pair_root, &orderbook.memory_db, order_getter).map(DeltaOrFullTrie::FullTrie)
                 },
             };
 
@@ -896,11 +896,11 @@ fn test_alb_ordered_pair() {
 
 #[allow(dead_code)]
 fn parse_orderbook_pair_from_topic(topic: &str) -> Option<(&str, &str)> {
-    let mut split = topic.split(|maybe_sep| maybe_sep == TOPIC_SEPARATOR);
+    let mut split = topic.split(TOPIC_SEPARATOR);
     match split.next() {
         Some(ORDERBOOK_PREFIX) => match split.next() {
             Some(maybe_pair) => {
-                let colon = maybe_pair.find(|maybe_colon| maybe_colon == ':');
+                let colon = maybe_pair.find(':');
                 match colon {
                     Some(index) => {
                         if index + 1 < maybe_pair.len() {
@@ -1471,30 +1471,24 @@ impl<'a> TakerOrderBuilder<'a> {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data")]
+#[derive(Default)]
 pub enum MatchBy {
+    #[default]
     Any,
     Orders(HashSet<Uuid>),
     Pubkeys(HashSet<H256Json>),
 }
 
-impl Default for MatchBy {
-    fn default() -> Self {
-        MatchBy::Any
-    }
-}
 
 #[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data")]
+#[derive(Default)]
 enum OrderType {
     FillOrKill,
+    #[default]
     GoodTillCancelled,
 }
 
-impl Default for OrderType {
-    fn default() -> Self {
-        OrderType::GoodTillCancelled
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TakerOrder {
@@ -2528,7 +2522,7 @@ impl Orderbook {
 
         let base_rel = (order.base.clone(), order.rel.clone());
 
-        let ordered = self.ordered.entry(base_rel.clone()).or_insert_with(BTreeSet::new);
+        let ordered = self.ordered.entry(base_rel.clone()).or_default();
 
         // have to clone to drop immutable ordered borrow
         let existing = ordered
@@ -2546,27 +2540,24 @@ impl Orderbook {
 
         self.pairs_existing_for_base
             .entry(order.base.clone())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(order.rel.clone());
 
         self.pairs_existing_for_rel
             .entry(order.rel.clone())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(order.base.clone());
 
         self.unordered
             .entry(base_rel)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(order.uuid);
 
         self.order_set.insert(order.uuid, order);
     }
 
     fn remove_order_trie_update(&mut self, uuid: Uuid) -> Option<OrderbookItem> {
-        let order = match self.order_set.remove(&uuid) {
-            Some(order) => order,
-            None => return None,
-        };
+        let order = self.order_set.remove(&uuid)?;
         let base_rel = (order.base.clone(), order.rel.clone());
 
         // create an `order_to_delete` that allows to find and remove an element from `self.ordered` by hash
@@ -4193,7 +4184,7 @@ pub struct TakerConnectForRpc<'a> {
 }
 
 impl<'a> From<&'a TakerConnect> for TakerConnectForRpc<'a> {
-    fn from(connect: &'a TakerConnect) -> TakerConnectForRpc {
+    fn from(connect: &'a TakerConnect) -> TakerConnectForRpc<'a> {
         TakerConnectForRpc {
             taker_order_uuid: &connect.taker_order_uuid,
             maker_order_uuid: &connect.maker_order_uuid,
@@ -4214,7 +4205,7 @@ pub struct MakerConnectedForRpc<'a> {
 }
 
 impl<'a> From<&'a MakerConnected> for MakerConnectedForRpc<'a> {
-    fn from(connected: &'a MakerConnected) -> MakerConnectedForRpc {
+    fn from(connected: &'a MakerConnected) -> MakerConnectedForRpc<'a> {
         MakerConnectedForRpc {
             taker_order_uuid: &connected.taker_order_uuid,
             maker_order_uuid: &connected.maker_order_uuid,
@@ -4226,7 +4217,7 @@ impl<'a> From<&'a MakerConnected> for MakerConnectedForRpc<'a> {
 }
 
 impl<'a> From<&'a MakerReserved> for MakerReservedForRpc<'a> {
-    fn from(reserved: &MakerReserved) -> MakerReservedForRpc {
+    fn from(reserved: &MakerReserved) -> MakerReservedForRpc<'_> {
         MakerReservedForRpc {
             base: &reserved.base,
             rel: &reserved.rel,
@@ -4255,7 +4246,7 @@ struct MakerMatchForRpc<'a> {
 
 #[allow(clippy::needless_borrow)]
 impl<'a> From<&'a MakerMatch> for MakerMatchForRpc<'a> {
-    fn from(maker_match: &'a MakerMatch) -> MakerMatchForRpc {
+    fn from(maker_match: &'a MakerMatch) -> MakerMatchForRpc<'a> {
         MakerMatchForRpc {
             request: (&maker_match.request).into(),
             reserved: (&maker_match.reserved).into(),
@@ -4715,7 +4706,7 @@ pub enum Order {
 }
 
 impl<'a> From<&'a Order> for OrderForRpc<'a> {
-    fn from(order: &'a Order) -> OrderForRpc {
+    fn from(order: &'a Order) -> OrderForRpc<'a> {
         match order {
             Order::Maker(o) => OrderForRpc::Maker(MakerOrderForRpc::from(o)),
             Order::Taker(o) => OrderForRpc::Taker(TakerOrderForRpc::from(o)),
@@ -4964,7 +4955,7 @@ struct MakerOrderForMyOrdersRpc<'a> {
 }
 
 impl<'a> From<&'a MakerOrder> for MakerOrderForMyOrdersRpc<'a> {
-    fn from(order: &'a MakerOrder) -> MakerOrderForMyOrdersRpc {
+    fn from(order: &'a MakerOrder) -> MakerOrderForMyOrdersRpc<'a> {
         MakerOrderForMyOrdersRpc {
             order: order.into(),
             cancellable: order.is_cancellable(),
@@ -4983,7 +4974,7 @@ struct TakerMatchForRpc<'a> {
 
 #[allow(clippy::needless_borrow)]
 impl<'a> From<&'a TakerMatch> for TakerMatchForRpc<'a> {
-    fn from(taker_match: &'a TakerMatch) -> TakerMatchForRpc {
+    fn from(taker_match: &'a TakerMatch) -> TakerMatchForRpc<'a> {
         TakerMatchForRpc {
             reserved: (&taker_match.reserved).into(),
             connect: (&taker_match.connect).into(),
@@ -5006,7 +4997,7 @@ struct TakerOrderForRpc<'a> {
 
 #[allow(clippy::needless_borrow)]
 impl<'a> From<&'a TakerOrder> for TakerOrderForRpc<'a> {
-    fn from(order: &'a TakerOrder) -> TakerOrderForRpc {
+    fn from(order: &'a TakerOrder) -> TakerOrderForRpc<'a> {
         TakerOrderForRpc {
             created_at: order.created_at,
             request: (&order.request).into(),
@@ -5285,7 +5276,7 @@ pub async fn cancel_all_orders_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec
 /// # Safety
 ///
 /// The function locks [`MmCtx::p2p_ctx`] and [`MmCtx::ordermatch_ctx`]
-pub(self) async fn subscribe_to_orderbook_topic(
+ async fn subscribe_to_orderbook_topic(
     ctx: &MmArc,
     base: &str,
     rel: &str,

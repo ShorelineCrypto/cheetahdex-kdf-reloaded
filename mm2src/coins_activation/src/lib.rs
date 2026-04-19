@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 mod bch_with_tokens_activation;
 mod context;
 mod l2;

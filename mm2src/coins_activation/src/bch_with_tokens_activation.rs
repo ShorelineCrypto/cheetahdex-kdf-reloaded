@@ -293,7 +293,7 @@ impl PlatformWithTokensActivationOps for BchCoin {
     fn start_history_background_fetching(
         &self,
         metrics: MetricsArc,
-        storage: impl TxHistoryStorage + Send + 'static,
+        storage: impl TxHistoryStorage + 'static,
         initial_balance: BigDecimal,
     ) -> AbortHandle {
         let ticker = self.ticker().to_owned();

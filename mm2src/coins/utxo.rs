@@ -22,7 +22,7 @@
 pub mod bch;
 pub mod bch_and_slp_tx_history;
 mod bchd_grpc;
-#[allow(clippy::all)]
+#[allow(clippy::all, dead_code)]
 #[rustfmt::skip]
 #[path = "utxo/pb.rs"]
 mod bchd_pb;

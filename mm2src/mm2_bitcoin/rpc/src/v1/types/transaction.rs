@@ -310,7 +310,7 @@ impl<'a> Deserialize<'a> for TransactionOutputs {
                             script_data: value,
                         }));
                     } else {
-                        let address = types::address::AddressVisitor::default().visit_str(&key)?;
+                        let address = types::address::AddressVisitor.visit_str(&key)?;
                         let amount: f64 = visitor.next_value()?;
                         outputs.push(TransactionOutput::Address(TransactionOutputWithAddress {
                             address,

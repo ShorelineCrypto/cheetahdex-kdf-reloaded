@@ -472,7 +472,7 @@ pub fn get_mm2config(first_arg: Option<&str>) -> Result<Json, String> {
 /// Runs LP_main with result of `get_mm2config()`.
 ///
 /// * `ctx_cb` - Invoked with the MM context handle,
-///              allowing the `run_lp_main` caller to communicate with MM.
+///   allowing the `run_lp_main` caller to communicate with MM.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_lp_main(first_arg: Option<&str>, ctx_cb: &dyn Fn(u32)) -> Result<(), String> {
     let conf = get_mm2config(first_arg)?;
@@ -509,7 +509,7 @@ fn on_update_config(args: &[OsString]) -> Result<(), String> {
     let formatter = json::ser::PrettyFormatter::with_indent(b"\t");
     let mut ser = json::Serializer::with_formatter(buf, formatter);
     try_s!(result.serialize(&mut ser));
-    try_s!(std::fs::write(&dst_path, ser.into_inner()));
+    try_s!(std::fs::write(dst_path, ser.into_inner()));
     Ok(())
 }
 

@@ -51,6 +51,7 @@ fn _in_place(path: &dyn AsRef<Path>, update: &mut dyn FnMut(Vec<u8>) -> Vec<u8>)
 /// Please expand this enum if it is necessary.
 enum TargetArch {
     Wasm32,
+    #[allow(dead_code)]
     Other(String),
 }
 

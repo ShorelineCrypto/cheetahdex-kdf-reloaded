@@ -540,7 +540,7 @@ fn maintain_connection_to_relays(swarm: &mut AtomicDexSwarm, bootstrap_addresses
             .filter(|peer| !relays_mesh.contains(peer))
             .collect();
         for peer in not_in_mesh.choose_multiple(&mut rng, to_disconnect_num) {
-            if !swarm.behaviour().peers_exchange.is_reserved_peer(*peer) {
+            if !swarm.behaviour().peers_exchange.is_reserved_peer(peer) {
                 info!("Disconnecting peer {}", peer);
                 if Swarm::disconnect_peer_id(swarm, **peer).is_err() {
                     error!("Peer {} disconnect error", peer);
@@ -864,7 +864,7 @@ fn build_dns_ws_transport(
 fn build_memory_transport(
     noise_keys: libp2p::noise::AuthenticKeypair<libp2p::noise::X25519Spec>,
 ) -> BoxedTransport<(PeerId, libp2p::core::muxing::StreamMuxerBox)> {
-    let transport = libp2p::core::transport::MemoryTransport::default();
+    let transport = libp2p::core::transport::MemoryTransport;
     upgrade_transport(transport, noise_keys)
 }
 

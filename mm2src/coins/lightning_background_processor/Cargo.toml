@@ -9,6 +9,16 @@ Utilities to perform required background tasks for Rust Lightning.
 """
 edition = "2021"
 
+# The lightning `log_*!` macros check `cfg(feature = "max_level_*")` at compile-time.
+# Declaring them avoids unexpected-cfg warnings without enabling any of them.
+[features]
+max_level_off = []
+max_level_error = []
+max_level_warn = []
+max_level_info = []
+max_level_debug = []
+max_level_trace = []
+
 [dependencies]
 bitcoin = "0.27.1"
 lightning = { git = "https://github.com/shamardy/rust-lightning", branch = "0.0.106", features = ["std"] }

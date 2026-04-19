@@ -164,7 +164,7 @@ impl Gossipsub {
             return false;
         }
 
-        let peers: Vec<_> = self.peer_topics.iter().map(|(peer_id, _)| *peer_id).collect();
+        let peers: Vec<_> = self.peer_topics.keys().copied().collect();
         for peer_id in peers {
             let mut fixed_event = None; // initialise the event once if needed
             if fixed_event.is_none() {
@@ -382,7 +382,7 @@ impl Gossipsub {
             added_peers.extend_from_slice(&new_peers);
             // add them to the mesh
             debug!("JOIN: Inserting {:?} random peers into the mesh", new_peers.len());
-            let mesh_peers = self.mesh.entry(topic_hash.clone()).or_insert_with(Vec::new);
+            let mesh_peers = self.mesh.entry(topic_hash.clone()).or_default();
             mesh_peers.extend_from_slice(&new_peers);
         }
 
@@ -547,7 +547,7 @@ impl Gossipsub {
     /// Handles IAmrelay control message, does nothing if remote peer already subscribed to some topic
     fn handle_i_am_relay(&mut self, peer_id: &PeerId, is_relay: bool) {
         debug!("Handling IAmrelay message for peer: {:?}", peer_id);
-        if self.peer_topics.entry(*peer_id).or_insert_with(Vec::new).is_empty() && is_relay {
+        if self.peer_topics.entry(*peer_id).or_default().is_empty() && is_relay {
             info!("IAmrelay: Adding peer: {:?} to the relays list", peer_id);
             self.connected_relays.insert(*peer_id);
             if self.relays_mesh.len() < self.config.mesh_n_low {
@@ -647,7 +647,7 @@ impl Gossipsub {
             let peer_list = self
                 .topic_peers
                 .entry(subscription.topic_hash.clone())
-                .or_insert_with(Vec::new);
+                .or_default();
 
             match subscription.action {
                 GossipsubSubscriptionAction::Subscribe => {
@@ -973,7 +973,7 @@ impl Gossipsub {
                 control_msgs: Vec::new(),
             });
 
-            let relays: Vec<_> = self.relays_mesh.iter().map(|(relay, _)| *relay).collect();
+            let relays: Vec<_> = self.relays_mesh.keys().copied().collect();
             for relay in relays {
                 if let Some(received_from_peers) = self.received.get(&msg_id) {
                     if received_from_peers.contains(&relay) {
@@ -1045,7 +1045,7 @@ impl Gossipsub {
         peer: PeerId,
         control: GossipsubControlAction,
     ) {
-        control_pool.entry(peer).or_insert_with(Vec::new).push(control);
+        control_pool.entry(peer).or_default().push(control);
     }
 
     /// Produces a `TopicHash` for a topic given the gossipsub configuration.
@@ -1091,7 +1091,7 @@ impl Gossipsub {
     }
 
     pub fn get_relay_mesh(&self) -> Vec<PeerId> {
-        self.relays_mesh.iter().map(|(peer, _)| peer).cloned().collect()
+        self.relays_mesh.keys().cloned().collect()
     }
 
     pub fn relay_mesh_len(&self) -> usize {
@@ -1313,7 +1313,7 @@ impl NetworkBehaviour for Gossipsub {
     ) {
         self.peer_connections
             .entry(*id)
-            .or_insert_with(Default::default)
+            .or_default()
             .push((*conn_id, point.clone()));
         self.connected_addresses.push(point.get_remote_address().clone());
 
@@ -1383,7 +1383,7 @@ impl NetworkBehaviour for Gossipsub {
         debug!("Peer disconnected: {:?}", peer_id);
         {
             let topics = match self.peer_topics.get(peer_id) {
-                Some(topics) => (topics),
+                Some(topics) => topics,
                 None => {
                     warn!("Disconnected node, not in connected nodes");
                     return;

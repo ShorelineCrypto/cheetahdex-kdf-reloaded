@@ -164,7 +164,7 @@ pub trait PlatformWithTokensActivationOps: Into<MmCoinEnum> {
     fn start_history_background_fetching(
         &self,
         metrics: MetricsArc,
-        storage: impl TxHistoryStorage + Send + 'static,
+        storage: impl TxHistoryStorage + 'static,
         initial_balance: BigDecimal,
     ) -> AbortHandle;
 }

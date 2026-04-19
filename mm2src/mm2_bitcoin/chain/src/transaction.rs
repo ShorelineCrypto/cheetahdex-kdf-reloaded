@@ -221,16 +221,13 @@ impl TryFrom<Transaction> for ExtTransaction {
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Default)]
 pub enum TxHashAlgo {
+    #[default]
     DSHA256,
     SHA256,
 }
 
-impl Default for TxHashAlgo {
-    fn default() -> Self {
-        TxHashAlgo::DSHA256
-    }
-}
 
 impl Transaction {
     pub fn hash(&self) -> H256 {

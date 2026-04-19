@@ -22,18 +22,18 @@
 //! 1. AFee: OP_DUP OP_HASH160 FEE_RMD160 OP_EQUALVERIFY OP_CHECKSIG
 //!
 //! 2. BPayment:
-//! OP_IF
-//! <now + LOCKTIME*2> OP_CLTV OP_DROP <bob_pub> OP_CHECKSIG
-//! OP_ELSE
-//! OP_SIZE 32 OP_EQUALVERIFY OP_HASH160 <hash(bob_privN)> OP_EQUALVERIFY <alice_pub> OP_CHECKSIG
-//! OP_ENDIF
+//!    OP_IF
+//!    <now + LOCKTIME*2> OP_CLTV OP_DROP <bob_pub> OP_CHECKSIG
+//!    OP_ELSE
+//!    OP_SIZE 32 OP_EQUALVERIFY OP_HASH160 <hash(bob_privN)> OP_EQUALVERIFY <alice_pub> OP_CHECKSIG
+//!    OP_ENDIF
 //!
 //! 3. APayment:
-//! OP_IF
-//! <now + LOCKTIME> OP_CLTV OP_DROP <alice_pub> OP_CHECKSIG
-//! OP_ELSE
-//! OP_SIZE 32 OP_EQUALVERIFY OP_HASH160 <hash(bob_privN)> OP_EQUALVERIFY <bob_pub> OP_CHECKSIG
-//! OP_ENDIF
+//!    OP_IF
+//!    <now + LOCKTIME> OP_CLTV OP_DROP <alice_pub> OP_CHECKSIG
+//!    OP_ELSE
+//!    OP_SIZE 32 OP_EQUALVERIFY OP_HASH160 <hash(bob_privN)> OP_EQUALVERIFY <bob_pub> OP_CHECKSIG
+//!    OP_ENDIF
 //!
 
 /******************************************************************************
@@ -63,7 +63,7 @@ use common::{
     bits256, calc_total_pages,
     executor::{spawn, Timer},
     log::{error, info},
-    mm_number::{BigDecimal, BigRational, MmNumber},
+    mm_number::{BigDecimal, MmNumber},
     now_ms, var, PagingOptions,
 };
 use derive_more::Display;
@@ -112,6 +112,7 @@ mod trade_preimage;
 #[path = "lp_swap/swap_wasm_db.rs"]
 mod swap_wasm_db;
 
+#[allow(unused_imports)]
 pub use check_balance::{check_other_coin_balance_for_swap, CheckBalanceError};
 use keys::KeyPair;
 use maker_swap::MakerSwapEvent;
@@ -123,14 +124,17 @@ use my_swaps_storage::{MySwapsOps, MySwapsStorage};
 use pubkey_banning::BanReason;
 pub use pubkey_banning::{ban_pubkey_rpc, is_pubkey_banned, list_banned_pubkeys_rpc, unban_pubkeys_rpc};
 pub use recreate_swap_data::recreate_swap_data;
+#[allow(unused_imports)]
 pub use saved_swap::{SavedSwap, SavedSwapError, SavedSwapIo, SavedSwapResult};
 use std::num::NonZeroUsize;
+#[allow(unused_imports)]
 pub use swap_watcher::{process_watcher_msg, watcher_topic, SwapWatcherMsg, TakerSwapWatcherData, WATCHER_PREFIX};
 use taker_swap::TakerSwapEvent;
+#[allow(unused_imports)]
 pub use taker_swap::{
-    calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available, run_taker_swap,
-    taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap, TakerSwapPreparedParams,
-    TakerTradePreimage,
+    calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available,
+    run_taker_swap, taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap,
+    TakerSwapPreparedParams, TakerTradePreimage,
 };
 pub use trade_preimage::trade_preimage_rpc;
 
@@ -950,7 +954,7 @@ struct MySwapStatusResponse<'a> {
 }
 
 impl<'a> From<&'a SavedSwap> for MySwapStatusResponse<'a> {
-    fn from(swap: &'a SavedSwap) -> MySwapStatusResponse {
+    fn from(swap: &'a SavedSwap) -> MySwapStatusResponse<'a> {
         MySwapStatusResponse {
             swap,
             my_info: swap.get_my_info(),

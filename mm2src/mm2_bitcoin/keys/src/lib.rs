@@ -1,4 +1,5 @@
 //! Bitcoin keys.
+#![allow(unused_assignments)] // CashAddress fields used in cfg-gated code paths
 
 extern crate base58;
 extern crate bech32;

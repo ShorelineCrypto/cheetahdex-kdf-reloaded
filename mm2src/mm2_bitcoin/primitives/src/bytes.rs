@@ -37,7 +37,7 @@ impl Bytes {
     }
 }
 
-impl<'a> From<&'a [u8]> for Bytes {
+impl From<&[u8]> for Bytes {
     fn from(v: &[u8]) -> Self {
         Bytes(v.into())
     }

@@ -277,7 +277,7 @@ fn default_seednodes(netid: u16) -> Vec<RelayAddress> {
         Some(cfg) => cfg
             .seed_nodes()
             .iter()
-            .filter_map(|seed| addr_to_ipv4_string(*seed).ok())
+            .filter_map(|seed| addr_to_ipv4_string(seed).ok())
             .map(RelayAddress::IPv4)
             .collect(),
         None => Vec::new(),
@@ -363,7 +363,7 @@ fn migrate_db(ctx: &MmArc) -> MmInitResult<()> {
         migration_1(ctx);
         current_migration = 1;
     }
-    std::fs::write(&migration_num_path, &current_migration.to_le_bytes())
+    std::fs::write(&migration_num_path, current_migration.to_le_bytes())
         .map_to_mm(|e| MmInitError::ErrorDbMigrating(e.to_string()))?;
     Ok(())
 }

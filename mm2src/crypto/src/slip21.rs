@@ -61,6 +61,7 @@ pub fn derive_key_from_path(seed: &[u8], path: &[&str]) -> Result<[u8; 32], Slip
 ///
 /// This provides deterministic encryption where the mnemonic's own seed
 /// is used to derive the encryption keys.
+#[allow(dead_code)] // Infrastructure for wallet management RPCs
 pub fn encrypt_with_slip21(mnemonic_data: &[u8], seed: &[u8]) -> Result<crate::encrypt::EncryptedData, Slip21Error> {
     let encryption_key = derive_key_from_path(seed, &ENCRYPTION_KEY_PATH)?;
     let authentication_key = derive_key_from_path(seed, &AUTHENTICATION_KEY_PATH)?;
@@ -78,6 +79,7 @@ pub fn encrypt_with_slip21(mnemonic_data: &[u8], seed: &[u8]) -> Result<crate::e
 }
 
 /// Decrypts mnemonic data using SLIP-0021 derived keys.
+#[allow(dead_code)] // Infrastructure for wallet management RPCs
 pub fn decrypt_with_slip21(
     encrypted_data: &crate::encrypt::EncryptedData,
     seed: &[u8],

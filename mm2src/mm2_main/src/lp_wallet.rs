@@ -7,7 +7,7 @@
 /// The currently active wallet name is recorded in `MmCtx::wallet_name` (write-once)
 /// during startup. Only inactive wallets can be deleted.
 use common::HttpStatusCode;
-use crypto::{decrypt_mnemonic, encrypt_mnemonic, EncryptedMnemonicData, MnemonicError};
+use crypto::{decrypt_mnemonic, encrypt_mnemonic};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;

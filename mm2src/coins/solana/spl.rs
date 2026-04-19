@@ -313,7 +313,7 @@ impl MarketCoinOps for SplToken {
     }
 }
 
-#[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
+#[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl SwapOps for SplToken {
     fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
@@ -459,7 +459,7 @@ impl SwapOps for SplToken {
 #[async_trait]
 impl WatcherOps for SplToken {}
 
-#[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
+#[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl MmCoin for SplToken {
     fn is_asset_chain(&self) -> bool {

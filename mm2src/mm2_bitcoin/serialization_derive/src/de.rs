@@ -14,10 +14,9 @@ pub fn impl_deserializable(ast: &syn::DeriveInput) -> quote::Tokens {
 
     let name = &ast.ident;
 
-    let dummy_const = syn::Ident::new(format!("_IMPL_DESERIALIZABLE_FOR_{}", name));
-    let impl_block = quote! {
+    quote! {
         impl serialization::Deserializable for #name {
-            fn deserialize<T>(reader: &mut serialization::Reader<T>) -> Result<Self, serialization::Error> where T: io::Read {
+            fn deserialize<T>(reader: &mut serialization::Reader<T>) -> Result<Self, serialization::Error> where T: std::io::Read {
                 let result = #name {
                     #(#stmts)*
                 };
@@ -25,15 +24,6 @@ pub fn impl_deserializable(ast: &syn::DeriveInput) -> quote::Tokens {
                 Ok(result)
             }
         }
-    };
-
-    quote! {
-        #[allow(non_upper_case_globals, unused_attributes, unused_qualifications)]
-        const #dummy_const: () = {
-            extern crate serialization;
-            use std::io;
-            #impl_block
-        };
     }
 }
 

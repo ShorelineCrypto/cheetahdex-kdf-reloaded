@@ -20,8 +20,7 @@ pub fn impl_serializable(ast: &syn::DeriveInput) -> quote::Tokens {
 
     let name = &ast.ident;
 
-    let dummy_const = syn::Ident::new(format!("_IMPL_SERIALIZABLE_FOR_{}", name));
-    let impl_block = quote! {
+    quote! {
         impl serialization::Serializable for #name {
             fn serialize(&self, stream: &mut serialization::Stream) {
                 #(#stmts)*
@@ -31,14 +30,6 @@ pub fn impl_serializable(ast: &syn::DeriveInput) -> quote::Tokens {
                 #(#size_stmts)+*
             }
         }
-    };
-
-    quote! {
-        #[allow(non_upper_case_globals, unused_attributes, unused_qualifications)]
-        const #dummy_const: () = {
-            extern crate serialization;
-            #impl_block
-        };
     }
 }
 

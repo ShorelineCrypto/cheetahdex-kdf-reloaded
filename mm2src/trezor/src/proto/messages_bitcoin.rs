@@ -530,7 +530,7 @@ pub struct TxInput {
     #[prost(enumeration = "DecredStakingSpendType", optional, tag = "18")]
     pub decred_staking_spend: ::core::option::Option<i32>,
 }
-///* Data type for transaction output to be signed.
+/// Data type for transaction output to be signed.
 /// @embed
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TxOutput {
@@ -559,7 +559,7 @@ pub struct TxOutput {
     #[prost(uint32, optional, tag = "11")]
     pub orig_index: ::core::option::Option<u32>,
 }
-///* Data type for metadata about previous transaction which contains the UTXO being spent.
+/// Data type for metadata about previous transaction which contains the UTXO being spent.
 /// @embed
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PrevTx {
@@ -609,7 +609,7 @@ pub struct PrevInput {
     #[prost(uint32, optional, tag = "9")]
     pub decred_tree: ::core::option::Option<u32>,
 }
-///* Data type for outputs of previous transactions.
+/// Data type for outputs of previous transactions.
 /// @embed
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PrevOutput {

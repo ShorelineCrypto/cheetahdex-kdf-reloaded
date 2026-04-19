@@ -1,8 +1,11 @@
+#![allow(dead_code)] // Protobuf scaffolding — many message types defined for protocol completeness
+
 #[macro_use]
 extern crate serde_derive;
 
 pub mod client;
 pub mod error;
+#[allow(dead_code)]
 mod proto;
 pub mod response;
 mod response_processor;

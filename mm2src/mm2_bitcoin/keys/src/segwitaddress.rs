@@ -188,7 +188,7 @@ mod tests {
     use crypto::sha256;
 
     fn hex_to_bytes(s: &str) -> Option<Vec<u8>> {
-        if s.len() % 2 == 0 {
+        if s.len().is_multiple_of(2) {
             (0..s.len())
                 .step_by(2)
                 .map(|i| s.get(i..i + 2).and_then(|sub| u8::from_str_radix(sub, 16).ok()))
@@ -206,7 +206,7 @@ mod tests {
         let public_key = Public::from_slice(&bytes).unwrap();
         let hash = public_key.address_hash();
         let hrp = "bc";
-        let addr = SegwitAddress::new(&AddressHashEnum::AddressHash(hash.into()), hrp.to_string());
+        let addr = SegwitAddress::new(&AddressHashEnum::AddressHash(hash), hrp.to_string());
         assert_eq!(&addr.to_string(), "bc1qvzvkjn4q3nszqxrv3nraga2r822xjty3ykvkuw");
         assert_eq!(addr.address_type(), Some(AddressType::P2wpkh));
     }
@@ -217,7 +217,7 @@ mod tests {
         let bytes = hex_to_bytes(script).unwrap();
         let hash = sha256(&bytes);
         let hrp = "bc";
-        let addr = SegwitAddress::new(&AddressHashEnum::WitnessScriptHash(hash.into()), hrp.to_string());
+        let addr = SegwitAddress::new(&AddressHashEnum::WitnessScriptHash(hash), hrp.to_string());
         assert_eq!(
             &addr.to_string(),
             "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"

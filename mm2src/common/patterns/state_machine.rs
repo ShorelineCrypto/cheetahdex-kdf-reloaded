@@ -19,7 +19,7 @@ impl<Ctx: Send + 'static, Result: 'static> StateMachine<Ctx, Result> {
     pub fn from_ctx(ctx: Ctx) -> Self {
         StateMachine {
             ctx,
-            phantom: std::marker::PhantomData::default(),
+            phantom: std::marker::PhantomData,
         }
     }
 

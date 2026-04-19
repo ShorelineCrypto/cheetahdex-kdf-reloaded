@@ -126,7 +126,7 @@ pub async fn migrate_sqlite_database(ctx: &MmArc, mut current_migration: i64) ->
         current_migration += 1;
         transaction.execute(
             "INSERT INTO migration (current_migration) VALUES (?1);",
-            &[current_migration],
+            [current_migration],
         )?;
         transaction.commit()?;
     }

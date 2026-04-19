@@ -27,8 +27,8 @@ use crate::mm2::lp_ordermatch::lp_bot::simple_market_maker_bot::{
 };
 use crate::mm2::lp_swap::MakerSwapStatusChanged;
 pub use simple_market_maker_bot::{
-    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot, StartSimpleMakerBotRequest,
-    KMD_PRICE_ENDPOINT,
+    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot,
+    StartSimpleMakerBotRequest, KMD_PRICE_ENDPOINT,
 };
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -207,6 +207,7 @@ pub struct TickerInfos {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Default)]
 pub enum Provider {
     #[serde(rename = "binance")]
     Binance,
@@ -219,14 +220,10 @@ pub enum Provider {
     #[serde(rename = "nomics")]
     Nomics,
     #[serde(rename = "unknown", other)]
+    #[default]
     Unknown,
 }
 
-impl Default for Provider {
-    fn default() -> Self {
-        Provider::Unknown
-    }
-}
 
 #[derive(Default)]
 pub struct TradingBotContext {
@@ -249,7 +246,7 @@ pub struct ArcTradingBotContext(Arc<TradingBotContext>);
 impl Deref for ArcTradingBotContext {
     type Target = TradingBotContext;
     fn deref(&self) -> &TradingBotContext {
-        &*self.0
+        &self.0
     }
 }
 

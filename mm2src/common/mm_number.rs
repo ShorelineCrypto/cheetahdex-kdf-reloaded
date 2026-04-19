@@ -145,6 +145,7 @@ pub fn from_dec_to_ratio(d: &BigDecimal) -> BigRational {
 /// 1. big rational representation,
 /// 2. decimal string e.g. "0.1"
 /// 3. fraction object e.g. { "numer":"2", "denom":"3" }
+///
 /// IMPORTANT: the deserialization implementation works properly from JSON only!
 /// Consider using BigRational type directly for other serde implementations
 impl<'de> Deserialize<'de> for MmNumber {
@@ -435,7 +436,7 @@ mod tests {
         for num in vals {
             let decimal: BigDecimal = BigDecimal::from_str(num).unwrap();
             let expected: MmNumber = from_dec_to_ratio(&decimal).into();
-            let actual: MmNumber = json::from_str(&num).unwrap();
+            let actual: MmNumber = json::from_str(num).unwrap();
             assert_eq!(expected, actual);
         }
     }

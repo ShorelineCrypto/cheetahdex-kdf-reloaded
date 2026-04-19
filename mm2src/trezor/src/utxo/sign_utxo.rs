@@ -33,7 +33,7 @@ impl<'a> TrezorSession<'a> {
     /// # Fail
     ///
     /// Currently, this method fails if a device requests a PIN.
-    pub async fn sign_utxo_tx<'b>(&'b mut self, unsigned: UnsignedUtxoTx) -> TrezorResult<TxSignResult> {
+    pub async fn sign_utxo_tx(&mut self, unsigned: UnsignedUtxoTx) -> TrezorResult<TxSignResult> {
         use proto_bitcoin::tx_request::RequestType as ProtoTxRequestType;
 
         let mut result = TxSignResult::new_with_inputs_count(unsigned.inputs.len());
@@ -93,8 +93,8 @@ impl<'a> TrezorSession<'a> {
         }
     }
 
-    async fn send_prev_tx_meta<'b>(
-        &'b mut self,
+    async fn send_prev_tx_meta(
+        &mut self,
         unsigned: &UnsignedUtxoTx,
         prev_tx_hash: &[u8],
     ) -> TrezorResult<proto_bitcoin::TxRequest> {
@@ -105,8 +105,8 @@ impl<'a> TrezorSession<'a> {
         self.call(req, result_handler).await?.ack_all().await
     }
 
-    async fn send_prev_input<'b>(
-        &'b mut self,
+    async fn send_prev_input(
+        &mut self,
         unsigned: &UnsignedUtxoTx,
         request_details: &proto_bitcoin::tx_request::TxRequestDetailsType,
         prev_tx_hash: &[u8],
@@ -123,8 +123,8 @@ impl<'a> TrezorSession<'a> {
         self.call(req, result_handler).await?.ack_all().await
     }
 
-    async fn send_prev_output<'b>(
-        &'b mut self,
+    async fn send_prev_output(
+        &mut self,
         unsigned: &UnsignedUtxoTx,
         request_details: &proto_bitcoin::tx_request::TxRequestDetailsType,
         prev_tx_hash: &[u8],
@@ -141,8 +141,8 @@ impl<'a> TrezorSession<'a> {
         self.call(req, result_handler).await?.ack_all().await
     }
 
-    async fn send_input<'b>(
-        &'b mut self,
+    async fn send_input(
+        &mut self,
         unsigned: &UnsignedUtxoTx,
         request_details: &proto_bitcoin::tx_request::TxRequestDetailsType,
     ) -> TrezorResult<proto_bitcoin::TxRequest> {
@@ -156,8 +156,8 @@ impl<'a> TrezorSession<'a> {
         self.call(req, result_handler).await?.ack_all().await
     }
 
-    async fn send_output<'b>(
-        &'b mut self,
+    async fn send_output(
+        &mut self,
         unsigned: &UnsignedUtxoTx,
         request_details: &proto_bitcoin::tx_request::TxRequestDetailsType,
     ) -> TrezorResult<proto_bitcoin::TxRequest> {
@@ -171,8 +171,8 @@ impl<'a> TrezorSession<'a> {
         self.call(req, result_handler).await?.ack_all().await
     }
 
-    async fn send_extra_data<'b>(
-        &'b mut self,
+    async fn send_extra_data(
+        &mut self,
         unsigned: &UnsignedUtxoTx,
         request_details: &proto_bitcoin::tx_request::TxRequestDetailsType,
         prev_tx_hash: &[u8],

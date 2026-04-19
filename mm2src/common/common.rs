@@ -11,6 +11,7 @@
 //!                   binary
 
 #![allow(uncommon_codepoints)]
+#![allow(clippy::result_large_err)] // JsonRpcError is intentionally large for rich context
 #![feature(negative_impls)]
 #![feature(auto_traits)]
 
@@ -149,7 +150,7 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::ops::{Add, Deref, Div, RangeInclusive};
 use std::os::raw::{c_char, c_void};
-use std::panic::{set_hook, PanicInfo};
+use std::panic::{set_hook, PanicHookInfo};
 use std::path::Path;
 use std::ptr::read_volatile;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -328,7 +329,7 @@ pub fn str_to_malloc(s: &str) -> *mut c_char {
 pub fn slice_to_malloc(bytes: &[u8]) -> *mut u8 {
     unsafe {
         let buf = malloc(bytes.len() + 1) as *mut u8;
-        std::intrinsics::copy(bytes.as_ptr(), buf, bytes.len());
+        std::ptr::copy(bytes.as_ptr(), buf, bytes.len());
         *buf.add(bytes.len()) = 0;
         buf
     }
@@ -352,10 +353,11 @@ pub unsafe fn c_char_to_string(ptr: *mut c_char) -> Result<String, String> {
 /// Frees C raw pointer
 /// Does nothing in case of null pointer input
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn free_c_ptr(ptr: *mut c_void) {
     unsafe {
         if !ptr.is_null() {
-            free(ptr as *mut libc::c_void);
+            free(ptr);
         }
     }
 }
@@ -399,7 +401,7 @@ fn trace_name_buf() -> PaMutexGuard<'static, [u8; 128]> {
 /// Some common and less than useful frames are skipped.
 pub fn stack_trace_frame(instr_ptr: *mut c_void, buf: &mut dyn Write, symbol: &backtrace::Symbol) {
     let filename = match symbol.filename() {
-        Some(path) => match path.components().rev().next() {
+        Some(path) => match path.components().next_back() {
             Some(c) => c.as_os_str().to_string_lossy(),
             None => "??".into(),
         },
@@ -465,7 +467,7 @@ pub fn stack_trace_frame(instr_ptr: *mut c_void, buf: &mut dyn Write, symbol: &b
 ///
 /// * `format` - Generates the string representation of a frame.
 /// * `output` - Function used to print the stack trace.
-///              Printing immediately, without buffering, should make the tracing somewhat more reliable.
+///   Printing immediately, without buffering, should make the tracing somewhat more reliable.
 pub fn stack_trace(
     format: &mut dyn FnMut(*mut c_void, &mut dyn Write, &backtrace::Symbol),
     output: &mut dyn FnMut(&str),
@@ -522,7 +524,7 @@ fn output_pc_mem_addr(output: &mut dyn FnMut(&str)) {
 /// (The default Rust handler doesn't have the means to print the message).
 #[cfg(target_arch = "wasm32")]
 pub fn set_panic_hook() {
-    set_hook(Box::new(|info: &PanicInfo| {
+    set_hook(Box::new(|info: &PanicHookInfo| {
         let mut trace = String::new();
         stack_trace(&mut stack_trace_frame, &mut |l| trace.push_str(l));
         console_err!("{}", info);
@@ -538,9 +540,9 @@ pub fn set_panic_hook() {
 pub fn set_panic_hook() {
     use std::sync::atomic::AtomicBool;
 
-    thread_local! {static ENTERED: AtomicBool = AtomicBool::new(false);}
+    thread_local! {static ENTERED: AtomicBool = const { AtomicBool::new(false) };}
 
-    set_hook(Box::new(|info: &PanicInfo| {
+    set_hook(Box::new(|info: &PanicHookInfo| {
         // Stack tracing and logging might panic (in `println!` for example).
         // Let us detect this and do nothing on second panic.
         // We'll likely still get a crash after the hook is finished
@@ -627,6 +629,7 @@ pub trait HttpStatusCode {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[allow(dead_code)] // Scaffolding for hosted HTTP support
 struct HostedHttpRequest {
     method: String,
     uri: String,
@@ -635,6 +638,7 @@ struct HostedHttpRequest {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[allow(dead_code)] // Scaffolding for hosted HTTP support
 struct HostedHttpResponse {
     status: u16,
     headers: HashMap<String, String>,
@@ -767,10 +771,10 @@ impl<R: Send + 'static> RefreshedExternalResource<R> {
     ///
     /// * `every_n_sec` - Desired number of seconds between the syncs.
     /// * `timeout_sec` - Start a new `sync` and drop the old `Future` if it fails to finish after this number of seconds.
-    ///                   Automatically bumped to be at least `every_n_sec` large.
+    ///   Automatically bumped to be at least `every_n_sec` large.
     /// * `sync` - Generates the `Future` that should synchronize with the external resource in background.
-    ///            Note that we'll tail the `Future`, polling the tail from the shared asynchronous reactor;
-    ///            *spawn* the `Future` onto a different reactor if the shared asynchronous reactor is not the best option.
+    ///   Note that we'll tail the `Future`, polling the tail from the shared asynchronous reactor;
+    ///   *spawn* the `Future` onto a different reactor if the shared asynchronous reactor is not the best option.
     pub fn new(every_n_sec: f64, timeout_sec: f64, sync: ExternalResourceSync<R>) -> RefreshedExternalResource<R> {
         assert_eq!(size_of::<usize>(), 8);
         RefreshedExternalResource {
@@ -1175,7 +1179,7 @@ pub fn median<T: Add<Output = T> + Div<Output = T> + Copy + From<u8> + Ord>(inpu
     }
     input.sort();
     let median_index = input.len() / 2;
-    if input.len() % 2 == 0 {
+    if input.len().is_multiple_of(2) {
         Some((input[median_index - 1] + input[median_index]) / T::from(2u8))
     } else {
         Some(input[median_index])
@@ -1205,7 +1209,7 @@ pub fn calc_total_pages(entries_len: usize, limit: usize) -> usize {
         return 0;
     }
     let pages_num = entries_len / limit;
-    if entries_len % limit == 0 {
+    if entries_len.is_multiple_of(limit) {
         pages_num
     } else {
         pages_num + 1
@@ -1281,15 +1285,13 @@ pub fn is_acceptable_input_on_repeated_characters(entry: &str, limit: usize) -> 
 
 #[test]
 fn test_is_acceptable_input_on_repeated_characters() {
-    assert_eq!(is_acceptable_input_on_repeated_characters("Hello", 3), true);
-    assert_eq!(is_acceptable_input_on_repeated_characters("Hellooo", 3), false);
-    assert_eq!(
-        is_acceptable_input_on_repeated_characters("SuperStrongPassword123*", 3),
-        true
+    assert!(is_acceptable_input_on_repeated_characters("Hello", 3));
+    assert!(!is_acceptable_input_on_repeated_characters("Hellooo", 3));
+    assert!(
+        is_acceptable_input_on_repeated_characters("SuperStrongPassword123*", 3)
     );
-    assert_eq!(
-        is_acceptable_input_on_repeated_characters("SuperStrongaaaPassword123*", 3),
-        false
+    assert!(
+        !is_acceptable_input_on_repeated_characters("SuperStrongaaaPassword123*", 3)
     );
 }
 

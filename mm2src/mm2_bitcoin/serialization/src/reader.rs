@@ -177,7 +177,7 @@ where
         Ok(result)
     }
 
-    #[cfg_attr(feature = "cargo-clippy", allow(clippy::wrong_self_convention))]
+    #[allow(clippy::wrong_self_convention)]
     pub fn is_finished(&mut self) -> bool {
         if self.peeked.is_some() {
             return false;

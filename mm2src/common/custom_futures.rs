@@ -111,7 +111,6 @@ where
     fn sink_mut(&mut self) -> &mut T {
         self.sink
             .as_mut()
-            .take()
             .expect("Attempted to poll SendAll after completion")
     }
 
@@ -126,7 +125,6 @@ where
     fn stream_mut(&mut self) -> &mut Fuse<U> {
         self.stream
             .as_mut()
-            .take()
             .expect("Attempted to poll SendAll after completion")
     }
 
@@ -197,7 +195,7 @@ where
     }
 }
 
-pub struct TimedMutexGuard<'a, T>(futures::lock::MutexGuard<'a, T>);
+pub struct TimedMutexGuard<'a, T>(#[allow(dead_code)] futures::lock::MutexGuard<'a, T>);
 //impl<'a, T> Drop for TimedMutexGuard<'a, T> {fn drop (&mut self) {}}
 
 /// Like `AsyncMutex` but periodically invokes a callback,
@@ -305,5 +303,5 @@ unsafe impl<F> Send for Timeout<F> where F: Send {}
 #[test]
 fn test_timeout() {
     let _err = crate::block_on(Timer::sleep(0.4).timeout(Duration::from_secs_f64(0.1))).expect_err("Expected timeout");
-    let _ok = crate::block_on(Timer::sleep(0.1).timeout(Duration::from_secs_f64(0.2))).expect("Expected future");
+    crate::block_on(Timer::sleep(0.1).timeout(Duration::from_secs_f64(0.2))).expect("Expected future");
 }

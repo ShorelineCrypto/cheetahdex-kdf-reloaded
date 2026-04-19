@@ -115,17 +115,17 @@ mod tests {
         let test_writeable = TestWriteable {};
         let filename = "test_readonly_dir_persister_filename".to_string();
         let path = "test_readonly_dir_persister_dir";
-        fs::create_dir_all(path.to_string()).unwrap();
-        let mut perms = fs::metadata(path.to_string()).unwrap().permissions();
+        fs::create_dir_all(path).unwrap();
+        let mut perms = fs::metadata(path).unwrap().permissions();
         perms.set_readonly(true);
-        fs::set_permissions(path.to_string(), perms).unwrap();
+        fs::set_permissions(path, perms).unwrap();
         match write_to_file(PathBuf::from(path.to_string()), filename, &test_writeable) {
             Err(e) => assert_eq!(e.kind(), io::ErrorKind::PermissionDenied),
             _ => panic!("Unexpected error message"),
         }
-        let mut perms = fs::metadata(path.to_string()).unwrap().permissions();
+        let mut perms = fs::metadata(path).unwrap().permissions();
         perms.set_readonly(false);
-        fs::set_permissions(path.to_string(), perms).unwrap();
+        fs::set_permissions(path, perms).unwrap();
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -156,7 +156,7 @@ mod tests {
         struct FailingWriteable {}
         impl DiskWriteable for FailingWriteable {
             fn write_to_file(&self, _writer: &mut fs::File) -> Result<(), std::io::Error> {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "expected failure"))
+                Err(std::io::Error::other("expected failure"))
             }
         }
 

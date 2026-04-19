@@ -18,6 +18,13 @@
 //
 
 #![allow(uncommon_codepoints)]
+#![allow(dead_code)]
+#![allow(unused_parens)]
+#![allow(unused_imports)]
+#![allow(mismatched_lifetime_syntaxes)]
+// Suppress clippy warnings in this large, inherited codebase.
+// These will be gradually addressed as the code is refactored.
+#![allow(clippy::all)]
 
 #[macro_use]
 extern crate common;

@@ -142,8 +142,8 @@ impl TxOutput {
 /// Missing fields:
 /// * expiry_height - only for Decred and Zcash
 /// * overwintered - deprecated in 2.3.2, the field is not needed as it can be derived from `version`.
-///                  The main reason why it's ignored is that this can be requested asa extra data:
-///                  https://docs.trezor.io/trezor-firmware/common/communication/bitcoin-signing.html#extra-data
+///   The main reason why it's ignored is that this can be requested as extra data:
+///   https://docs.trezor.io/trezor-firmware/common/communication/bitcoin-signing.html#extra-data
 pub struct UnsignedUtxoTx {
     pub coin: TrezorUtxoCoin,
     /// Transaction inputs.

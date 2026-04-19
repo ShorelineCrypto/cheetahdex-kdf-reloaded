@@ -17,7 +17,7 @@ fn strip_0x_prefix(s: &str) -> &str {
 ///
 /// * `s` - The hex string
 fn deserialize_hex(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
-    hex::decode(&strip_0x_prefix(s))
+    hex::decode(strip_0x_prefix(s))
 }
 
 /// Deserialize a hex string into bytes.

@@ -129,11 +129,8 @@ impl Serializable for BlockHeader {
         }
         s.append(&self.previous_header_hash);
         s.append(&self.merkle_root_hash);
-        match &self.hash_final_sapling_root {
-            Some(h) => {
-                s.append(h);
-            },
-            None => (),
+        if let Some(h) = &self.hash_final_sapling_root {
+            s.append(h);
         };
         s.append(&self.time);
         s.append(&self.bits);

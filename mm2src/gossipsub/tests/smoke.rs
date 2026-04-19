@@ -138,7 +138,7 @@ fn build_node() -> (Multiaddr, Swarm<Gossipsub>) {
     let key = identity::Keypair::generate_ed25519();
     let public_key = key.public();
 
-    let transport = MemoryTransport::default()
+    let transport = MemoryTransport
         .upgrade(upgrade::Version::V1)
         .authenticate(PlainText2Config {
             local_public_key: public_key.clone(),
@@ -159,7 +159,7 @@ fn build_node() -> (Multiaddr, Swarm<Gossipsub>) {
         .history_length(10)
         .history_gossip(10)
         .build();
-    let behaviour = Gossipsub::new(peer_id.clone(), config);
+    let behaviour = Gossipsub::new(peer_id, config);
     let mut swarm = Swarm::new(transport, behaviour, peer_id);
 
     let port = 1 + random::<u64>();
@@ -176,7 +176,7 @@ fn multi_hop_propagation() {
     let _ = env_logger::try_init();
 
     fn prop(num_nodes: u8, seed: u64) -> TestResult {
-        if num_nodes < 2 || num_nodes > 50 {
+        if !(2..=50).contains(&num_nodes) {
             return TestResult::discard();
         }
 

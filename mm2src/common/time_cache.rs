@@ -183,7 +183,7 @@ where
         }
     }
 
-    pub fn entry(&mut self, key: Key) -> Entry<Key, Value> {
+    pub fn entry(&mut self, key: Key) -> Entry<'_, Key, Value> {
         let now = Instant::now();
         self.remove_expired_keys(now);
         match self.map.entry(key) {
@@ -247,11 +247,11 @@ where
         self.ttl
     }
 
-    pub fn iter(&self) -> Iter<Key, ExpiringElement<Value>> {
+    pub fn iter(&self) -> Iter<'_, Key, ExpiringElement<Value>> {
         self.map.iter()
     }
 
-    pub fn keys(&self) -> Keys<Key, ExpiringElement<Value>> {
+    pub fn keys(&self) -> Keys<'_, Key, ExpiringElement<Value>> {
         self.map.keys()
     }
 }

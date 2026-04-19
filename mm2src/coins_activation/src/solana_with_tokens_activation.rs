@@ -150,7 +150,7 @@ impl TryFromCoinProtocol for SolanaProtocolInfo {
         Self: Sized,
     {
         match proto {
-            CoinProtocol::SOLANA {} => Ok(SolanaProtocolInfo {}),
+            CoinProtocol::SOLANA => Ok(SolanaProtocolInfo {}),
             protocol => MmError::err(protocol),
         }
     }
@@ -242,7 +242,7 @@ impl PlatformWithTokensActivationOps for SolanaCoin {
     fn start_history_background_fetching(
         &self,
         _metrics: MetricsArc,
-        _storage: impl TxHistoryStorage + Send + 'static,
+        _storage: impl TxHistoryStorage + 'static,
         _initial_balance: BigDecimal,
     ) -> AbortHandle {
         todo!()

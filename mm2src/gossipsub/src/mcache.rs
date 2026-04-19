@@ -133,13 +133,13 @@ mod tests {
         let data: Vec<u8> = vec![u8x];
         let sequence_number = x;
 
-        let m = GossipsubMessage {
+        
+        GossipsubMessage {
             source,
             data,
             sequence_number,
             topics,
-        };
-        m
+        }
     }
 
     #[test]
@@ -173,8 +173,8 @@ mod tests {
 
         let fetched = mc.get(&(mc.msg_id)(&m));
 
-        assert_eq!(fetched.is_none(), false);
-        assert_eq!(fetched.is_some(), true);
+        assert!(!fetched.is_none());
+        assert!(fetched.is_some());
 
         // Make sure it is the same fetched message
         match fetched {
@@ -198,7 +198,7 @@ mod tests {
         // Try to get an incorrect ID
         let wrong_id = MessageId(String::from("wrongid"));
         let fetched = mc.get(&wrong_id);
-        assert_eq!(fetched.is_none(), true);
+        assert!(fetched.is_none());
     }
 
     #[test]
@@ -209,7 +209,7 @@ mod tests {
         // Try to get an incorrect ID
         let wrong_string = MessageId(String::from("imempty"));
         let fetched = mc.get(&wrong_string);
-        assert_eq!(fetched.is_none(), true);
+        assert!(fetched.is_none());
     }
 
     #[test]
@@ -247,7 +247,7 @@ mod tests {
         mc.shift();
 
         // Ensure the shift occurred
-        assert!(mc.history[0].len() == 0);
+        assert!(mc.history[0].is_empty());
         assert!(mc.history[1].len() == 10);
 
         // Make sure no messages deleted
@@ -270,14 +270,14 @@ mod tests {
         mc.shift();
 
         // Ensure the shift occurred
-        assert!(mc.history[0].len() == 0);
+        assert!(mc.history[0].is_empty());
         assert!(mc.history[1].len() == 10);
 
         mc.shift();
 
         assert!(mc.history[2].len() == 10);
-        assert!(mc.history[1].len() == 0);
-        assert!(mc.history[0].len() == 0);
+        assert!(mc.history[1].is_empty());
+        assert!(mc.history[0].is_empty());
     }
 
     #[test]

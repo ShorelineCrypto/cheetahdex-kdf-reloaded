@@ -79,9 +79,7 @@ macro_rules! impl_hash {
 
         impl PartialOrd for $name {
             fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                let self_ref: &[u8] = &self.0;
-                let other_ref: &[u8] = &other.0;
-                self_ref.partial_cmp(other_ref)
+                Some(self.cmp(other))
             }
         }
 
@@ -196,10 +194,7 @@ mod tests {
         }
 
         let str_reversed = "XXXYYY";
-        match H256::from_str(str_reversed) {
-            Ok(_) => panic!("unexpected"),
-            _ => (),
-        }
+        if let Ok(_) = H256::from_str(str_reversed) { panic!("unexpected") }
     }
 
     #[test]

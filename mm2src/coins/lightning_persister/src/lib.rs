@@ -66,7 +66,6 @@ use std::sync::{Arc, Mutex};
 /// Corollary: especially when dealing with larger amounts of money, it is best
 /// practice to have multiple channel data backups and not rely only on one
 /// LightningPersister.
-
 pub struct LightningPersister {
     storage_ticker: String,
     main_path: PathBuf,
@@ -709,7 +708,7 @@ impl LightningPersister {
                 ));
             }
 
-            let contents = fs::read(&file.path())?;
+            let contents = fs::read(file.path())?;
             let mut buffer = Cursor::new(&contents);
             match <(BlockHash, ChannelMonitor<Signer>)>::read(&mut buffer, &*keys_manager) {
                 Ok((blockhash, channel_monitor)) => {
@@ -1368,10 +1367,7 @@ mod tests {
         fn drop(&mut self) {
             // We test for invalid directory names, so it's OK if directory removal
             // fails.
-            match fs::remove_dir_all(&self.main_path) {
-                Err(e) => println!("Failed to remove test persister directory: {}", e),
-                _ => {},
-            }
+            if let Err(e) = fs::remove_dir_all(&self.main_path) { println!("Failed to remove test persister directory: {}", e) }
         }
     }
 
@@ -1405,9 +1401,7 @@ mod tests {
                 closure_reason: {
                     Some(
                         rng.sample_iter(&Alphanumeric)
-                            .take(30)
-                            .map(char::from)
-                            .collect::<String>(),
+                            .take(30).collect::<String>(),
                     )
                 },
                 claiming_tx: {
@@ -1443,14 +1437,14 @@ mod tests {
                 }
             };
             let status_rng: u8 = rng.gen();
-            let status = if status_rng % 3 == 0 {
+            let status = if status_rng.is_multiple_of(3) {
                 HTLCStatus::Succeeded
             } else if status_rng % 3 == 1 {
                 HTLCStatus::Pending
             } else {
                 HTLCStatus::Failed
             };
-            let description: String = rng.sample_iter(&Alphanumeric).take(30).map(char::from).collect();
+            let description: String = rng.sample_iter(&Alphanumeric).take(30).collect();
             let info = PaymentInfo {
                 payment_hash: {
                     rng.fill_bytes(&mut bytes);
@@ -1503,7 +1497,7 @@ mod tests {
             &chanmon_cfgs[0].logger,
             &chanmon_cfgs[0].fee_estimator,
             &persister_0,
-            &node_cfgs[0].keys_manager,
+            node_cfgs[0].keys_manager,
         );
         let chain_mon_1 = test_utils::TestChainMonitor::new(
             Some(&chanmon_cfgs[1].chain_source),
@@ -1511,7 +1505,7 @@ mod tests {
             &chanmon_cfgs[1].logger,
             &chanmon_cfgs[1].fee_estimator,
             &persister_1,
-            &node_cfgs[1].keys_manager,
+            node_cfgs[1].keys_manager,
         );
         node_cfgs[0].chain_monitor = chain_mon_0;
         node_cfgs[1].chain_monitor = chain_mon_1;
@@ -1931,8 +1925,7 @@ mod tests {
 
         let result = block_on(persister.get_payments_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
         let expected_payments_vec: Vec<PaymentInfo> = payments
-            .iter()
-            .map(|p| p.clone())
+            .iter().cloned()
             .filter(|p| p.payment_type == PaymentType::InboundPayment)
             .collect();
         let expected_payments = if expected_payments_vec.len() > 10 {
@@ -1947,8 +1940,7 @@ mod tests {
         filter.status = Some(HTLCStatus::Succeeded);
         let result = block_on(persister.get_payments_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
         let expected_payments_vec: Vec<PaymentInfo> = expected_payments_vec
-            .iter()
-            .map(|p| p.clone())
+            .iter().cloned()
             .filter(|p| p.status == HTLCStatus::Succeeded)
             .collect();
         let expected_payments = if expected_payments_vec.len() > 10 {
@@ -1967,9 +1959,8 @@ mod tests {
         filter.description = Some(substr.to_string());
         let result = block_on(persister.get_payments_by_filter(Some(filter), paging, limit)).unwrap();
         let expected_payments_vec: Vec<PaymentInfo> = payments
-            .iter()
-            .map(|p| p.clone())
-            .filter(|p| p.description.contains(&substr))
+            .iter().cloned()
+            .filter(|p| p.description.contains(substr))
             .collect();
         let expected_payments = if expected_payments_vec.len() > 10 {
             expected_payments_vec[..10].to_vec()
@@ -2077,8 +2068,7 @@ mod tests {
         let result =
             block_on(persister.get_closed_channels_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
         let expected_channels_vec: Vec<SqlChannelDetails> = channels
-            .iter()
-            .map(|chan| chan.clone())
+            .iter().cloned()
             .filter(|chan| chan.is_outbound)
             .collect();
         let expected_channels = if expected_channels_vec.len() > 10 {
@@ -2094,8 +2084,7 @@ mod tests {
         let result =
             block_on(persister.get_closed_channels_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
         let expected_channels_vec: Vec<SqlChannelDetails> = expected_channels_vec
-            .iter()
-            .map(|chan| chan.clone())
+            .iter().cloned()
             .filter(|chan| chan.is_public)
             .collect();
         let expected_channels = if expected_channels_vec.len() > 10 {
@@ -2113,8 +2102,7 @@ mod tests {
         filter.channel_id = Some(channel_id.clone());
         let result = block_on(persister.get_closed_channels_by_filter(Some(filter), paging, limit)).unwrap();
         let expected_channels_vec: Vec<SqlChannelDetails> = channels
-            .iter()
-            .map(|chan| chan.clone())
+            .iter().cloned()
             .filter(|chan| chan.channel_id == channel_id)
             .collect();
         let expected_channels = if expected_channels_vec.len() > 10 {

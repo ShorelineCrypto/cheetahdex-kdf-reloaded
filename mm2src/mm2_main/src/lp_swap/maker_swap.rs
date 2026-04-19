@@ -5,8 +5,7 @@ use super::pubkey_banning::ban_pubkey_on_failed_swap;
 use super::swap_lock::{SwapLock, SwapLockOps};
 use super::trade_preimage::{TradePreimageRequest, TradePreimageRpcError, TradePreimageRpcResult};
 use super::{
-    broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap, compute_dex_fee,
-    dex_fee_amount_from_taker_coin, get_locked_amount, recv_swap_msg, swap_topic, AtomicSwap, LockedAmount, MySwapInfo,
+    broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap, compute_dex_fee, get_locked_amount, recv_swap_msg, swap_topic, AtomicSwap, LockedAmount, MySwapInfo,
     NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap,
     SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext, TransactionIdentifier,
     WAIT_CONFIRM_INTERVAL,
@@ -207,10 +206,10 @@ pub struct MakerSwap {
 }
 
 impl MakerSwap {
-    fn w(&self) -> RwLockWriteGuard<MakerSwapMut> {
+    fn w(&self) -> RwLockWriteGuard<'_, MakerSwapMut> {
         self.mutable.write().unwrap()
     }
-    fn r(&self) -> RwLockReadGuard<MakerSwapMut> {
+    fn r(&self) -> RwLockReadGuard<'_, MakerSwapMut> {
         self.mutable.read().unwrap()
     }
 
@@ -718,7 +717,7 @@ impl MakerSwap {
             .maker_coin
             .check_if_my_payment_sent(
                 self.r().data.maker_payment_lock as u32,
-                &**self.r().my_maker_coin_htlc_keypair.public(),
+                self.r().my_maker_coin_htlc_keypair.public(),
                 &*self.r().other_maker_coin_htlc_pub,
                 &*dhash160(&self.r().data.secret.0),
                 self.r().data.maker_coin_start_block,
@@ -732,7 +731,7 @@ impl MakerSwap {
                 None => {
                     let payment_fut = self.maker_coin.send_maker_payment(
                         self.r().data.maker_payment_lock as u32,
-                        &**self.r().my_maker_coin_htlc_keypair.public(),
+                        self.r().my_maker_coin_htlc_keypair.public(),
                         &*self.r().other_maker_coin_htlc_pub,
                         &*dhash160(&self.r().data.secret.0),
                         self.maker_amount.clone(),

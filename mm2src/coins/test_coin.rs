@@ -38,7 +38,7 @@ impl TestCoin {
 }
 
 #[mockable]
-#[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
+#[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 impl MarketCoinOps for TestCoin {
     fn ticker(&self) -> &str {
         &self.ticker
@@ -129,7 +129,7 @@ impl MarketCoinOps for TestCoin {
 
 #[async_trait]
 #[mockable]
-#[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
+#[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 impl SwapOps for TestCoin {
     fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         unimplemented!()
@@ -282,7 +282,7 @@ impl WatcherOps for TestCoin {}
 
 #[async_trait]
 #[mockable]
-#[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
+#[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 impl MmCoin for TestCoin {
     fn is_asset_chain(&self) -> bool {
         unimplemented!()

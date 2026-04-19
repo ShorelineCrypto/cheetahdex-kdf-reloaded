@@ -208,7 +208,7 @@ impl MmCtx {
         } else {
             Path::new("DB")
         };
-        path.join(hex::encode(&**self.rmd160()))
+        path.join(hex::encode(**self.rmd160()))
     }
 
     /// Directory for wallet files (encrypted mnemonics).
@@ -313,7 +313,7 @@ impl MmCtx {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn sqlite_connection(&self) -> MutexGuard<Connection> {
+    pub fn sqlite_connection(&self) -> MutexGuard<'_, Connection> {
         self.sqlite_connection
             .or(&|| panic!("sqlite_connection is not initialized"))
             .lock()
@@ -410,6 +410,7 @@ lazy_static! {
 ///
 /// In the integration tests we're using this to create new native contexts.
 #[derive(Serialize, Deserialize)]
+#[allow(dead_code)] // Scaffolding for portable context serialization
 struct PortableCtx {
     // Sending the `conf` as a string in order for bencode not to mess with JSON, and for wire readability.
     conf: String,
@@ -418,6 +419,7 @@ struct PortableCtx {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[allow(dead_code)] // Scaffolding for native context serialization
 struct NativeCtx {
     ffi_handle: u32,
 }
@@ -464,7 +466,7 @@ impl MmArc {
                 }
             }
         };
-        crate::executor::spawn(fut);
+        common::executor::spawn(fut);
     }
 
     #[cfg(feature = "track-ctx-pointer")]

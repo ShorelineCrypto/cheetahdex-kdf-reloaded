@@ -1,4 +1,9 @@
 #![allow(uncommon_codepoints)]
+#![allow(dead_code)]
+#![allow(mismatched_lifetime_syntaxes)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::diverging_sub_expression)]
+#![allow(clippy::explicit_auto_deref)]
 #![recursion_limit = "512"]
 
 #[macro_use]

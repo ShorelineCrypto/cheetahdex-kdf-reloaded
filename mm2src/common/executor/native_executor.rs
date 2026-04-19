@@ -60,7 +60,7 @@ pub fn spawn_after(utc: f64, future: impl Future03<Output = ()> + Send + 'static
                     };
                     tasks
                         .entry(Duration::from_secs_f64(utc))
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(f)
                 }
             })

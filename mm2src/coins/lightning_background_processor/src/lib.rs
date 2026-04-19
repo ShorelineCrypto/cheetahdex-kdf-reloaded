@@ -431,14 +431,11 @@ mod tests {
     impl Drop for Node {
         fn drop(&mut self) {
             let data_dir = self.persister.main_path();
-            match fs::remove_dir_all(data_dir.clone()) {
-                Err(e) => println!(
-                    "Failed to remove test persister directory {}: {}",
-                    data_dir.to_str().unwrap(),
-                    e
-                ),
-                _ => {},
-            }
+            if let Err(e) = fs::remove_dir_all(data_dir.clone()) { println!(
+                "Failed to remove test persister directory {}: {}",
+                data_dir.to_str().unwrap(),
+                e
+            ) }
         }
     }
 
@@ -803,7 +800,7 @@ mod tests {
         let nodes = create_nodes(2, "test_persist_error".to_string());
         open_channel!(nodes[0], nodes[1], 100000);
 
-        let persister = |_: &_| Err(std::io::Error::new(std::io::ErrorKind::Other, "test"));
+        let persister = |_: &_| Err(std::io::Error::other("test"));
         let event_handler = |_: &_| {};
         let bg_processor = BackgroundProcessor::start(
             persister,

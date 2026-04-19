@@ -503,7 +503,7 @@ impl MarketCoinOps for SolanaCoin {
     }
 }
 
-#[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
+#[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl SwapOps for SolanaCoin {
     fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
@@ -649,7 +649,7 @@ impl SwapOps for SolanaCoin {
 #[async_trait]
 impl WatcherOps for SolanaCoin {}
 
-#[allow(clippy::forget_ref, clippy::forget_copy, clippy::cast_ref_to_mut)]
+#[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl MmCoin for SolanaCoin {
     fn is_asset_chain(&self) -> bool {

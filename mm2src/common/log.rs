@@ -113,7 +113,7 @@ impl Gravity {
 
 thread_local! {
     /// If set, pulls the `chunk2log` (aka `log!`) invocations into the gravity of another thread.
-    static GRAVITY: RefCell<Option<Weak<Gravity>>> = RefCell::new (None)
+    static GRAVITY: RefCell<Option<Weak<Gravity>>> = const { RefCell::new (None) }
 }
 
 #[doc(hidden)]
@@ -556,7 +556,7 @@ impl StatusHandle {
     /// It is not enforced by the logging/dashboard subsystem.
     ///
     /// * `ms` - The time, in milliseconds since UNIX epoch,
-    ///          when the operation is bound to end regardless of its status (aka a timeout).
+    ///   when the operation is bound to end regardless of its status (aka a timeout).
     pub fn deadline(&self, ms: u64) {
         if let Some(ref status) = self.status {
             status.deadline.store(ms, Ordering::Relaxed)
@@ -569,7 +569,7 @@ impl StatusHandle {
     /// It is not enforced by the logging/dashboard subsystem.
     ///
     /// * `ms` - The time, in milliseconds since the creation of the status,
-    ///          when the operation is bound to end (aka a timeout).
+    ///   when the operation is bound to end (aka a timeout).
     pub fn timeframe(&self, ms: u64) {
         if let Some(ref status) = self.status {
             let start = status.start.load(Ordering::Relaxed);
@@ -629,7 +629,7 @@ pub struct LogArc(pub Arc<LogState>);
 impl Deref for LogArc {
     type Target = LogState;
     fn deref(&self) -> &LogState {
-        &*self.0
+        &self.0
     }
 }
 
@@ -742,7 +742,7 @@ async fn log_dashboard_sometimes(dashboardʷ: Weak<DuplexMutex<Vec<Arc<Status>>>
             None => break,
         };
         let dashboard = dashboard.sleeplock(77).await.unwrap();
-        log_dashboard_sometimesʹ(&*dashboard, &mut dashboard_logging);
+        log_dashboard_sometimesʹ(&dashboard, &mut dashboard_logging);
     }
 }
 
@@ -795,7 +795,7 @@ impl LogState {
 
     pub fn with_tail(&self, cb: &mut dyn FnMut(&VecDeque<LogEntry>)) {
         match self.tail.spinlock(77) {
-            Ok(tail) => cb(&*tail),
+            Ok(tail) => cb(&tail),
             Err(_err) => writeln("with_tail] !spinlock"),
         }
     }
@@ -811,7 +811,7 @@ impl LogState {
         if let Some(ref gravity) = *gravity {
             gravity.flush();
             match gravity.tail.spinlock(77) {
-                Ok(tail) => cb(&*tail),
+                Ok(tail) => cb(&tail),
                 Err(_err) => writeln("with_gravity_tail] !spinlock"),
             }
         }
@@ -1071,7 +1071,7 @@ impl Drop for LogState {
 }
 
 #[derive(Debug)]
-pub struct UnknownLogLevel(String);
+pub struct UnknownLogLevel(#[allow(dead_code)] String);
 
 impl FromStr for LogLevel {
     type Err = UnknownLogLevel;
@@ -1211,7 +1211,7 @@ pub mod tests {
         {
             let dashboard = log.dashboard.spinlock(77).unwrap();
             let mut dashboard_logging = super::DashboardLogging::default();
-            super::log_dashboard_sometimesʹ(&*dashboard, &mut dashboard_logging);
+            super::log_dashboard_sometimesʹ(&dashboard, &mut dashboard_logging);
         }
 
         log.with_gravity_tail(&mut |tail| {

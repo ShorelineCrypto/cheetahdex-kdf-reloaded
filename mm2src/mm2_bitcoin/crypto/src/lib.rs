@@ -22,17 +22,14 @@ use std::hash::Hasher;
 /// SMART uses keccak
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Default)]
 pub enum ChecksumType {
+    #[default]
     DSHA256,
     DGROESTL512,
     KECCAK256,
 }
 
-impl Default for ChecksumType {
-    fn default() -> ChecksumType {
-        ChecksumType::DSHA256
-    }
-}
 
 /// RIPEMD160
 #[inline]
