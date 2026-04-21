@@ -30,6 +30,27 @@ pub struct BestOrdersRequest {
     volume: MmNumber,
 }
 
+/// How to select best orders in the v2 RPC: by total volume or by count.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", content = "value")]
+pub enum RequestBestOrdersBy {
+    #[serde(rename = "volume")]
+    Volume(MmNumber),
+    #[serde(rename = "number")]
+    Number(usize),
+}
+
+/// V2 best-orders request supporting both volume-based and number-based queries,
+/// plus an optional flag to exclude our own orders from results.
+#[derive(Debug, Deserialize)]
+pub struct BestOrdersRequestV2 {
+    coin: String,
+    action: BestOrdersAction,
+    request_by: RequestBestOrdersBy,
+    #[serde(default)]
+    exclude_mine: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct BestOrdersP2PRes {
     orders: HashMap<String, Vec<OrderbookP2PItemWithProof>>,
@@ -101,6 +122,71 @@ pub fn process_best_orders_p2p_request(
                     if collected_volume >= required_volume {
                         break;
                     }
+                },
+                None => {
+                    log::debug!("No order with uuid {:?}", ordered.uuid);
+                    continue;
+                },
+            };
+        }
+        match action {
+            BestOrdersAction::Buy => result.insert(pair.1, best_orders),
+            BestOrdersAction::Sell => result.insert(pair.0, best_orders),
+        };
+    }
+    let response = BestOrdersP2PRes {
+        orders: result,
+        protocol_infos,
+        conf_infos,
+    };
+    let encoded = rmp_serde::to_vec_named(&response).expect("rmp_serde::to_vec_named should not fail here");
+    Ok(Some(encoded))
+}
+
+/// P2P handler: return the top `number` best-priced orders per pair for `coin`.
+pub fn process_best_orders_p2p_request_by_number(
+    ctx: MmArc,
+    coin: String,
+    action: BestOrdersAction,
+    number: usize,
+) -> Result<Option<Vec<u8>>, String> {
+    let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).expect("ordermatch_ctx must exist at this point");
+    let orderbook = ordermatch_ctx.orderbook.lock();
+    let search_pairs_in = match action {
+        BestOrdersAction::Buy => &orderbook.pairs_existing_for_base,
+        BestOrdersAction::Sell => &orderbook.pairs_existing_for_rel,
+    };
+    let tickers = match search_pairs_in.get(&coin) {
+        Some(tickers) => tickers,
+        None => return Ok(None),
+    };
+    let mut result = HashMap::new();
+    let pairs = tickers.iter().map(|ticker| match action {
+        BestOrdersAction::Buy => (coin.clone(), ticker.clone()),
+        BestOrdersAction::Sell => (ticker.clone(), coin.clone()),
+    });
+
+    let mut protocol_infos = HashMap::new();
+    let mut conf_infos = HashMap::new();
+
+    for pair in pairs {
+        let orders = match orderbook.ordered.get(&pair) {
+            Some(orders) => orders,
+            None => {
+                log::debug!("No orders for pair {:?}", pair);
+                continue;
+            },
+        };
+        let mut best_orders = vec![];
+        for ordered in orders.iter().take(number) {
+            match orderbook.order_set.get(&ordered.uuid) {
+                Some(o) => {
+                    let order_w_proof = orderbook.orderbook_item_with_proof(o.clone());
+                    protocol_infos.insert(order_w_proof.order.uuid, order_w_proof.order.base_rel_proto_info());
+                    if let Some(info) = order_w_proof.order.conf_settings {
+                        conf_infos.insert(order_w_proof.order.uuid, info);
+                    }
+                    best_orders.push(order_w_proof.into());
                 },
                 None => {
                     log::debug!("No order with uuid {:?}", ordered.uuid);
@@ -217,7 +303,7 @@ pub struct BestOrdersV2Response {
 
 pub async fn best_orders_rpc_v2(
     ctx: MmArc,
-    req: BestOrdersRequest,
+    req: BestOrdersRequestV2,
 ) -> Result<BestOrdersV2Response, MmError<BestOrdersRpcError>> {
     if is_wallet_only_ticker(&ctx, &req.coin) {
         return MmError::err(BestOrdersRpcError::CoinIsWalletOnly(req.coin));
@@ -228,10 +314,19 @@ pub async fn best_orders_rpc_v2(
         let orderbook = ordermatch_ctx.orderbook.lock();
         orderbook.my_p2p_pubkeys.clone()
     };
-    let p2p_request = OrdermatchRequest::BestOrders {
-        coin: ordermatch_ctx.orderbook_ticker_bypass(&req.coin),
-        action: req.action,
-        volume: req.volume.into(),
+
+    // Build the appropriate P2P request based on query type (volume vs count).
+    let p2p_request = match req.request_by {
+        RequestBestOrdersBy::Volume(ref mm_number) => OrdermatchRequest::BestOrders {
+            coin: ordermatch_ctx.orderbook_ticker_bypass(&req.coin),
+            action: req.action,
+            volume: mm_number.to_ratio(),
+        },
+        RequestBestOrdersBy::Number(size) => OrdermatchRequest::BestOrdersByNumber {
+            coin: ordermatch_ctx.orderbook_ticker_bypass(&req.coin),
+            action: req.action,
+            number: size,
+        },
     };
 
     let best_orders_res = request_any_relay::<BestOrdersP2PRes>(ctx.clone(), P2PRequest::Ordermatch(p2p_request))
@@ -255,6 +350,10 @@ pub async fn best_orders_rpc_v2(
             }
             for order_w_proof in orders_w_proofs {
                 let order = order_w_proof.order;
+                let is_mine = is_my_order(&order.pubkey, &my_pubsecp, &my_p2p_pubkeys);
+                if req.exclude_mine && is_mine {
+                    continue;
+                }
                 let empty_proto_info = BaseRelProtocolInfo::default();
                 let proto_infos = p2p_response
                     .protocol_infos
@@ -272,7 +371,6 @@ pub async fn best_orders_rpc_v2(
                     },
                 };
                 let conf_settings = p2p_response.conf_infos.get(&order.uuid);
-                let is_mine = is_my_order(&order.pubkey, &my_pubsecp, &my_p2p_pubkeys);
                 let entry = match req.action {
                     BestOrdersAction::Buy => order.as_rpc_best_orders_buy_v2(address, conf_settings, is_mine),
                     BestOrdersAction::Sell => order.as_rpc_best_orders_sell_v2(address, conf_settings, is_mine),

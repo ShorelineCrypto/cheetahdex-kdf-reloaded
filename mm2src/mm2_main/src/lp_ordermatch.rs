@@ -592,6 +592,12 @@ pub enum OrdermatchRequest {
     OrderbookDepth {
         pairs: Vec<(String, String)>,
     },
+    /// Request best orders for a specific coin and action limited by the number of results.
+    BestOrdersByNumber {
+        coin: String,
+        action: BestOrdersAction,
+        number: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -643,6 +649,9 @@ pub fn process_peer_request(ctx: MmArc, request: OrdermatchRequest) -> Result<Op
         },
         OrdermatchRequest::BestOrders { coin, action, volume } => {
             best_orders::process_best_orders_p2p_request(ctx, coin, action, volume)
+        },
+        OrdermatchRequest::BestOrdersByNumber { coin, action, number } => {
+            best_orders::process_best_orders_p2p_request_by_number(ctx, coin, action, number)
         },
         OrdermatchRequest::OrderbookDepth { pairs } => orderbook_depth::process_orderbook_depth_p2p_request(ctx, pairs),
     }
