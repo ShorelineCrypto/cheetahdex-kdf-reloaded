@@ -58,10 +58,7 @@ pub fn spawn_after(utc: f64, future: impl Future03<Output = ()> + Send + 'static
                         Err(channel::RecvTimeoutError::Disconnected) => break,
                         Err(channel::RecvTimeoutError::Timeout) => continue,
                     };
-                    tasks
-                        .entry(Duration::from_secs_f64(utc))
-                        .or_default()
-                        .push(f)
+                    tasks.entry(Duration::from_secs_f64(utc)).or_default().push(f)
                 }
             })
             .expect("Can't spawn a spawn_after thread");

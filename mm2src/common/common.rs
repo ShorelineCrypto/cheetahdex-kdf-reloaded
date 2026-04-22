@@ -1287,12 +1287,11 @@ pub fn is_acceptable_input_on_repeated_characters(entry: &str, limit: usize) -> 
 fn test_is_acceptable_input_on_repeated_characters() {
     assert!(is_acceptable_input_on_repeated_characters("Hello", 3));
     assert!(!is_acceptable_input_on_repeated_characters("Hellooo", 3));
-    assert!(
-        is_acceptable_input_on_repeated_characters("SuperStrongPassword123*", 3)
-    );
-    assert!(
-        !is_acceptable_input_on_repeated_characters("SuperStrongaaaPassword123*", 3)
-    );
+    assert!(is_acceptable_input_on_repeated_characters("SuperStrongPassword123*", 3));
+    assert!(!is_acceptable_input_on_repeated_characters(
+        "SuperStrongaaaPassword123*",
+        3
+    ));
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

@@ -431,11 +431,13 @@ mod tests {
     impl Drop for Node {
         fn drop(&mut self) {
             let data_dir = self.persister.main_path();
-            if let Err(e) = fs::remove_dir_all(data_dir.clone()) { println!(
-                "Failed to remove test persister directory {}: {}",
-                data_dir.to_str().unwrap(),
-                e
-            ) }
+            if let Err(e) = fs::remove_dir_all(data_dir.clone()) {
+                println!(
+                    "Failed to remove test persister directory {}: {}",
+                    data_dir.to_str().unwrap(),
+                    e
+                )
+            }
         }
     }
 

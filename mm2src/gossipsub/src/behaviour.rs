@@ -644,10 +644,7 @@ impl Gossipsub {
 
         for subscription in subscriptions {
             // get the peers from the mapping, or insert empty lists if topic doesn't exist
-            let peer_list = self
-                .topic_peers
-                .entry(subscription.topic_hash.clone())
-                .or_default();
+            let peer_list = self.topic_peers.entry(subscription.topic_hash.clone()).or_default();
 
             match subscription.action {
                 GossipsubSubscriptionAction::Subscribe => {

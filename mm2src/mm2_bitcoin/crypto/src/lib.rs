@@ -21,15 +21,13 @@ use std::hash::Hasher;
 /// GRS uses double groestl512
 /// SMART uses keccak
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Default)]
 pub enum ChecksumType {
     #[default]
     DSHA256,
     DGROESTL512,
     KECCAK256,
 }
-
 
 /// RIPEMD160
 #[inline]

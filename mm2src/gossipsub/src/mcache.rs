@@ -133,7 +133,6 @@ mod tests {
         let data: Vec<u8> = vec![u8x];
         let sequence_number = x;
 
-        
         GossipsubMessage {
             source,
             data,

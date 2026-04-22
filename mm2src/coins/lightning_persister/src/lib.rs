@@ -1367,7 +1367,9 @@ mod tests {
         fn drop(&mut self) {
             // We test for invalid directory names, so it's OK if directory removal
             // fails.
-            if let Err(e) = fs::remove_dir_all(&self.main_path) { println!("Failed to remove test persister directory: {}", e) }
+            if let Err(e) = fs::remove_dir_all(&self.main_path) {
+                println!("Failed to remove test persister directory: {}", e)
+            }
         }
     }
 
@@ -1398,12 +1400,7 @@ mod tests {
                     rng.fill_bytes(&mut bytes);
                     Some(hex::encode(bytes))
                 },
-                closure_reason: {
-                    Some(
-                        rng.sample_iter(&Alphanumeric)
-                            .take(30).collect::<String>(),
-                    )
-                },
+                closure_reason: { Some(rng.sample_iter(&Alphanumeric).take(30).collect::<String>()) },
                 claiming_tx: {
                     rng.fill_bytes(&mut bytes);
                     Some(hex::encode(bytes))
@@ -1925,7 +1922,8 @@ mod tests {
 
         let result = block_on(persister.get_payments_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
         let expected_payments_vec: Vec<PaymentInfo> = payments
-            .iter().cloned()
+            .iter()
+            .cloned()
             .filter(|p| p.payment_type == PaymentType::InboundPayment)
             .collect();
         let expected_payments = if expected_payments_vec.len() > 10 {
@@ -1940,7 +1938,8 @@ mod tests {
         filter.status = Some(HTLCStatus::Succeeded);
         let result = block_on(persister.get_payments_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
         let expected_payments_vec: Vec<PaymentInfo> = expected_payments_vec
-            .iter().cloned()
+            .iter()
+            .cloned()
             .filter(|p| p.status == HTLCStatus::Succeeded)
             .collect();
         let expected_payments = if expected_payments_vec.len() > 10 {
@@ -1959,7 +1958,8 @@ mod tests {
         filter.description = Some(substr.to_string());
         let result = block_on(persister.get_payments_by_filter(Some(filter), paging, limit)).unwrap();
         let expected_payments_vec: Vec<PaymentInfo> = payments
-            .iter().cloned()
+            .iter()
+            .cloned()
             .filter(|p| p.description.contains(substr))
             .collect();
         let expected_payments = if expected_payments_vec.len() > 10 {
@@ -2067,10 +2067,8 @@ mod tests {
 
         let result =
             block_on(persister.get_closed_channels_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
-        let expected_channels_vec: Vec<SqlChannelDetails> = channels
-            .iter().cloned()
-            .filter(|chan| chan.is_outbound)
-            .collect();
+        let expected_channels_vec: Vec<SqlChannelDetails> =
+            channels.iter().cloned().filter(|chan| chan.is_outbound).collect();
         let expected_channels = if expected_channels_vec.len() > 10 {
             expected_channels_vec[..10].to_vec()
         } else {
@@ -2084,7 +2082,8 @@ mod tests {
         let result =
             block_on(persister.get_closed_channels_by_filter(Some(filter.clone()), paging.clone(), limit)).unwrap();
         let expected_channels_vec: Vec<SqlChannelDetails> = expected_channels_vec
-            .iter().cloned()
+            .iter()
+            .cloned()
             .filter(|chan| chan.is_public)
             .collect();
         let expected_channels = if expected_channels_vec.len() > 10 {
@@ -2102,7 +2101,8 @@ mod tests {
         filter.channel_id = Some(channel_id.clone());
         let result = block_on(persister.get_closed_channels_by_filter(Some(filter), paging, limit)).unwrap();
         let expected_channels_vec: Vec<SqlChannelDetails> = channels
-            .iter().cloned()
+            .iter()
+            .cloned()
             .filter(|chan| chan.channel_id == channel_id)
             .collect();
         let expected_channels = if expected_channels_vec.len() > 10 {

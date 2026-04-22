@@ -109,9 +109,7 @@ where
     T::SinkError: From<U::Error>,
 {
     fn sink_mut(&mut self) -> &mut T {
-        self.sink
-            .as_mut()
-            .expect("Attempted to poll SendAll after completion")
+        self.sink.as_mut().expect("Attempted to poll SendAll after completion")
     }
 
     pub fn new(sink: T, stream: U) -> SendAll<T, U> {

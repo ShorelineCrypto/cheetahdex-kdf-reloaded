@@ -37,7 +37,7 @@ pub(crate) mod test_utils {
 
     fn to_test_case(val: &serde_json::Value) -> TestCase {
         let o = val.get("output");
-        
+
         let output: &serde_json::Value = match o {
             Some(v) => v,
             None => &serde_json::Value::Null,

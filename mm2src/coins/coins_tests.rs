@@ -15,11 +15,9 @@ mod hd_wallet_integration {
     #[test]
     fn test_detect_priv_key_policy_returns_global_hd() {
         let ctx = MmCtxBuilder::default().into_mm_arc();
-        CryptoCtx::init_with_global_hd_account(ctx.clone(), TEST_MNEMONIC)
-            .expect("CryptoCtx HD init should succeed");
+        CryptoCtx::init_with_global_hd_account(ctx.clone(), TEST_MNEMONIC).expect("CryptoCtx HD init should succeed");
 
-        let policy = PrivKeyBuildPolicy::detect_priv_key_policy(&ctx)
-            .expect("detect_priv_key_policy should succeed");
+        let policy = PrivKeyBuildPolicy::detect_priv_key_policy(&ctx).expect("detect_priv_key_policy should succeed");
 
         assert!(
             matches!(policy, PrivKeyBuildPolicy::GlobalHDAccount(_)),
@@ -33,8 +31,7 @@ mod hd_wallet_integration {
         CryptoCtx::init_with_iguana_passphrase(ctx.clone(), TEST_MNEMONIC)
             .expect("CryptoCtx Iguana init should succeed");
 
-        let policy = PrivKeyBuildPolicy::detect_priv_key_policy(&ctx)
-            .expect("detect_priv_key_policy should succeed");
+        let policy = PrivKeyBuildPolicy::detect_priv_key_policy(&ctx).expect("detect_priv_key_policy should succeed");
 
         assert!(
             matches!(policy, PrivKeyBuildPolicy::IguanaPrivKey(_)),
@@ -168,7 +165,6 @@ mod hd_wallet_integration {
         );
     }
 }
-
 
 #[test]
 fn test_update_coin_config_success() {

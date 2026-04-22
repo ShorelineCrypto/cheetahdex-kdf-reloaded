@@ -105,7 +105,9 @@ mod tests {
         let subscriptions = gs.events.iter().fold(vec![], |mut collected_subscriptions, e| match e {
             NetworkBehaviourAction::NotifyHandler { event, .. } => {
                 for s in &event.subscriptions {
-                    if s.action == GossipsubSubscriptionAction::Subscribe { collected_subscriptions.push(s.clone()) };
+                    if s.action == GossipsubSubscriptionAction::Subscribe {
+                        collected_subscriptions.push(s.clone())
+                    };
                 }
                 collected_subscriptions
             },
@@ -157,7 +159,9 @@ mod tests {
         let subscriptions = gs.events.iter().fold(vec![], |mut collected_subscriptions, e| match e {
             NetworkBehaviourAction::NotifyHandler { event, .. } => {
                 for s in &event.subscriptions {
-                    if s.action == GossipsubSubscriptionAction::Unsubscribe { collected_subscriptions.push(s.clone()) };
+                    if s.action == GossipsubSubscriptionAction::Unsubscribe {
+                        collected_subscriptions.push(s.clone())
+                    };
                 }
                 collected_subscriptions
             },
@@ -227,7 +231,9 @@ mod tests {
             .iter()
             .fold(vec![], |mut collected_grafts, (_, controls)| {
                 for c in controls.iter() {
-                    if let GossipsubControlAction::Graft { topic_hash: _ } = c { collected_grafts.push(c.clone()) }
+                    if let GossipsubControlAction::Graft { topic_hash: _ } = c {
+                        collected_grafts.push(c.clone())
+                    }
                 }
                 collected_grafts
             });
@@ -269,7 +275,9 @@ mod tests {
             .iter()
             .fold(vec![], |mut collected_grafts, (_, controls)| {
                 for c in controls.iter() {
-                    if let GossipsubControlAction::Graft { topic_hash: _ } = c { collected_grafts.push(c.clone()) }
+                    if let GossipsubControlAction::Graft { topic_hash: _ } = c {
+                        collected_grafts.push(c.clone())
+                    }
                 }
                 collected_grafts
             });

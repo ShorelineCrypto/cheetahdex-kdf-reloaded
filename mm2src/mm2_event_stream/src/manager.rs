@@ -132,9 +132,7 @@ impl StreamingManager {
         let manager_inner = self.inner.clone();
         let sid_clone = sid.clone();
         tokio::spawn(async move {
-            streamer
-                .handle(broadcaster, ready_tx, shutdown_rx, data_rx)
-                .await;
+            streamer.handle(broadcaster, ready_tx, shutdown_rx, data_rx).await;
             // Cleanup when the streamer exits (for any reason).
             let mut inner = manager_inner.write();
             inner.streamers.remove(&sid_clone);
