@@ -69,8 +69,9 @@ use crate::mm2::lp_network::{
 };
 use crate::mm2::lp_swap::{
     calc_max_maker_vol, check_balance_for_maker_swap, check_balance_for_taker_swap, check_other_coin_balance_for_swap,
-    insert_new_swap_to_db, is_pubkey_banned, lp_atomic_locktime, run_maker_swap, run_taker_swap, AtomicLocktimeVersion,
-    MakerSwap, RunMakerSwapInput, RunTakerSwapInput, SwapConfirmationsSettings, TakerSwap,
+    insert_new_swap_to_db, is_pubkey_banned, lp_atomic_locktime, run_maker_swap, run_taker_swap,
+    swap_versioning::SwapVersion, AtomicLocktimeVersion, MakerSwap, RunMakerSwapInput, RunTakerSwapInput,
+    SwapConfirmationsSettings, TakerSwap,
 };
 
 pub use best_orders::{best_orders_rpc, best_orders_rpc_v2};
@@ -92,10 +93,9 @@ cfg_wasm32! {
 mod best_orders;
 #[path = "lp_ordermatch/lp_bot.rs"]
 mod lp_bot;
-pub use lp_bot::{
-    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot, StartSimpleMakerBotRequest,
-    TradingBotEvent, KMD_PRICE_ENDPOINT,
-};
+#[cfg(test)]
+pub use lp_bot::{process_price_request, StartSimpleMakerBotRequest, KMD_PRICE_ENDPOINT};
+pub use lp_bot::{start_simple_market_maker_bot, stop_simple_market_maker_bot, TradingBotEvent};
 
 #[path = "lp_ordermatch/my_orders_storage.rs"]
 mod my_orders_storage;
@@ -507,8 +507,7 @@ fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
         if let Some(order) = orderbook.order_set.get(&uuid) {
             if order.pubkey == pubkey {
                 let topic = orderbook_topic_from_base_rel(&order.base, &order.rel);
-                let op = orderbook.index_remove(uuid).map(|(_removed, op)| (topic, op));
-                op
+                orderbook.index_remove(uuid).map(|(_removed, op)| (topic, op))
             } else {
                 None
             }
@@ -1270,6 +1269,9 @@ pub struct TakerRequest {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rel_protocol_info: Option<Vec<u8>>,
+    /// Swap protocol version this taker request supports.
+    #[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]
+    pub swap_version: SwapVersion,
 }
 
 impl TakerRequest {
@@ -1290,6 +1292,7 @@ impl TakerRequest {
             conf_settings: Some(message.conf_settings),
             base_protocol_info: message.base_protocol_info,
             rel_protocol_info: message.rel_protocol_info,
+            swap_version: message.swap_version,
         }
     }
 
@@ -1335,6 +1338,7 @@ impl From<TakerOrder> for new_protocol::OrdermatchMessage {
             conf_settings: taker_order.request.conf_settings.unwrap(),
             base_protocol_info: taker_order.request.base_protocol_info,
             rel_protocol_info: taker_order.request.rel_protocol_info,
+            swap_version: taker_order.request.swap_version,
         })
     }
 }
@@ -1364,6 +1368,7 @@ pub struct TakerOrderBuilder<'a> {
     min_volume: Option<MmNumber>,
     timeout: u64,
     save_in_history: bool,
+    swap_version: SwapVersion,
 }
 
 pub enum TakerOrderBuildError {
@@ -1443,6 +1448,7 @@ impl<'a> TakerOrderBuilder<'a> {
             order_type: OrderType::GoodTillCancelled,
             timeout: TAKER_ORDER_TIMEOUT,
             save_in_history: true,
+            swap_version: SwapVersion::default(),
         }
     }
 
@@ -1583,6 +1589,7 @@ impl<'a> TakerOrderBuilder<'a> {
                 conf_settings: self.conf_settings,
                 base_protocol_info: Some(self.base_coin.coin_protocol_info()),
                 rel_protocol_info: Some(self.rel_coin.coin_protocol_info()),
+                swap_version: self.swap_version,
             },
             matches: Default::default(),
             min_volume,
@@ -1613,6 +1620,7 @@ impl<'a> TakerOrderBuilder<'a> {
                 conf_settings: self.conf_settings,
                 base_protocol_info: Some(self.base_coin.coin_protocol_info()),
                 rel_protocol_info: Some(self.rel_coin.coin_protocol_info()),
+                swap_version: self.swap_version,
             },
             matches: HashMap::new(),
             min_volume: Default::default(),
@@ -1790,6 +1798,10 @@ pub struct MakerOrder {
     /// lives until explicitly cancelled or until balance is insufficient.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_in_minutes: Option<u16>,
+    /// Swap protocol version this order supports.  Legacy (V1) is the default.
+    /// When both maker and taker advertise V2, the V2 state-machine swap is used.
+    #[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]
+    pub swap_version: SwapVersion,
 }
 
 pub struct MakerOrderBuilder<'a> {
@@ -1803,6 +1815,7 @@ pub struct MakerOrderBuilder<'a> {
     conf_settings: Option<OrderConfirmationsSettings>,
     save_in_history: bool,
     timeout_in_minutes: Option<u16>,
+    swap_version: SwapVersion,
 }
 
 pub enum MakerOrderBuildError {
@@ -1950,6 +1963,7 @@ impl<'a> MakerOrderBuilder<'a> {
             conf_settings: None,
             save_in_history: true,
             timeout_in_minutes: None,
+            swap_version: SwapVersion::default(),
         }
     }
 
@@ -1990,6 +2004,11 @@ impl<'a> MakerOrderBuilder<'a> {
 
     pub fn with_timeout(mut self, timeout_in_minutes: Option<u16>) -> Self {
         self.timeout_in_minutes = timeout_in_minutes;
+        self
+    }
+
+    pub fn with_swap_version(mut self, swap_version: SwapVersion) -> Self {
+        self.swap_version = swap_version;
         self
     }
 
@@ -2049,6 +2068,7 @@ impl<'a> MakerOrderBuilder<'a> {
             rel_orderbook_ticker: self.rel_orderbook_ticker,
             p2p_privkey,
             timeout_in_minutes: self.timeout_in_minutes,
+            swap_version: self.swap_version,
         })
     }
 
@@ -2073,6 +2093,7 @@ impl<'a> MakerOrderBuilder<'a> {
             rel_orderbook_ticker: None,
             p2p_privkey: None,
             timeout_in_minutes: None,
+            swap_version: SwapVersion::default(),
         }
     }
 }
@@ -2218,6 +2239,7 @@ impl From<TakerOrder> for MakerOrder {
                 rel_orderbook_ticker: taker_order.rel_orderbook_ticker,
                 p2p_privkey: taker_order.p2p_privkey,
                 timeout_in_minutes: None,
+                swap_version: taker_order.request.swap_version,
             },
             // The "buy" taker order is recreated with reversed pair as Maker order is always considered as "sell"
             TakerAction::Buy => {
@@ -2241,6 +2263,7 @@ impl From<TakerOrder> for MakerOrder {
                     rel_orderbook_ticker: taker_order.base_orderbook_ticker,
                     p2p_privkey: taker_order.p2p_privkey,
                     timeout_in_minutes: None,
+                    swap_version: taker_order.request.swap_version,
                 }
             },
         }
@@ -2293,6 +2316,9 @@ pub struct MakerReserved {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rel_protocol_info: Option<Vec<u8>>,
+    /// Swap protocol version the maker advertises with this reservation.
+    #[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]
+    pub swap_version: SwapVersion,
 }
 
 impl MakerReserved {
@@ -2326,6 +2352,7 @@ impl MakerReserved {
             conf_settings: Some(message.conf_settings),
             base_protocol_info: message.base_protocol_info,
             rel_protocol_info: message.rel_protocol_info,
+            swap_version: message.swap_version,
         }
     }
 }
@@ -2342,6 +2369,7 @@ impl From<MakerReserved> for new_protocol::OrdermatchMessage {
             conf_settings: maker_reserved.conf_settings.unwrap(),
             base_protocol_info: maker_reserved.base_protocol_info,
             rel_protocol_info: maker_reserved.rel_protocol_info,
+            swap_version: maker_reserved.swap_version,
         })
     }
 }
@@ -2540,7 +2568,7 @@ impl<Key, Value> TrieDiffHistory<Key, Value> {
 
 type TrieOrderHistory = TrieDiffHistory<Uuid, OrderbookItem>;
 
-struct OrderbookPubkeyState {
+pub(crate) struct OrderbookPubkeyState {
     /// Timestamp of the latest keep alive message received
     last_keep_alive: u64,
     /// The map storing historical data about specific pair subtrie changes
@@ -3960,6 +3988,7 @@ async fn process_taker_request(ctx: MmArc, from_pubkey: H256Json, taker_request:
                     }),
                     base_protocol_info: Some(base_coin.coin_protocol_info()),
                     rel_protocol_info: Some(rel_coin.coin_protocol_info()),
+                    swap_version: order.swap_version,
                 };
                 let topic = order.orderbook_topic();
                 log::debug!("Request matched sending reserved {:?}", reserved);

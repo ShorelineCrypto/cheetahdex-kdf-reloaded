@@ -26,10 +26,9 @@ use crate::mm2::lp_ordermatch::lp_bot::simple_market_maker_bot::{
     tear_down_bot, BOT_DEFAULT_REFRESH_RATE, PRECISION_FOR_NOTIFICATION,
 };
 use crate::mm2::lp_swap::MakerSwapStatusChanged;
-pub use simple_market_maker_bot::{
-    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot, StartSimpleMakerBotRequest,
-    KMD_PRICE_ENDPOINT,
-};
+#[cfg(test)]
+pub use simple_market_maker_bot::{process_price_request, StartSimpleMakerBotRequest, KMD_PRICE_ENDPOINT};
+pub use simple_market_maker_bot::{start_simple_market_maker_bot, stop_simple_market_maker_bot};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "simple_market_maker_tests.rs"]

@@ -309,7 +309,7 @@ pub async fn best_orders_rpc_v2(
         return MmError::err(BestOrdersRpcError::CoinIsWalletOnly(req.coin));
     }
     let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).unwrap();
-    let my_pubsecp = mm2_internal_pubkey_hex(&ctx).map_to_mm(|e| BestOrdersRpcError::P2PError(e))?;
+    let my_pubsecp = mm2_internal_pubkey_hex(&ctx).map_to_mm(BestOrdersRpcError::P2PError)?;
     let my_p2p_pubkeys = {
         let orderbook = ordermatch_ctx.orderbook.lock();
         orderbook.my_p2p_pubkeys.clone()

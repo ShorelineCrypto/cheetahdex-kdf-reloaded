@@ -101,6 +101,8 @@ mod recreate_swap_data;
 mod saved_swap;
 #[path = "lp_swap/swap_lock.rs"]
 mod swap_lock;
+#[path = "lp_swap/swap_versioning.rs"]
+pub mod swap_versioning;
 #[path = "lp_swap/swap_watcher.rs"]
 pub mod swap_watcher;
 #[path = "lp_swap/taker_swap.rs"]

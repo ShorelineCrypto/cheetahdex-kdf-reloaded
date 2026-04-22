@@ -1,5 +1,6 @@
 use super::{MatchBy as SuperMatchBy, TakerAction};
 use crate::mm2::lp_ordermatch::{AlbOrderedOrderbookPair, OrderConfirmationsSettings, H64};
+use crate::mm2::lp_swap::swap_versioning::SwapVersion;
 use common::mm_number::{BigRational, MmNumber};
 use common::now_ms;
 use compact_uuid::CompactUuid;
@@ -272,6 +273,8 @@ pub struct TakerRequest {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rel_protocol_info: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]
+    pub swap_version: SwapVersion,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -289,6 +292,8 @@ pub struct MakerReserved {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rel_protocol_info: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "SwapVersion::is_legacy")]
+    pub swap_version: SwapVersion,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
