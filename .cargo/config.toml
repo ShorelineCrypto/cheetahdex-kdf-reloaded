@@ -10,7 +10,7 @@
 # - docker_tests:    `custom_test_frameworks` + `test` (test harness)
 #                    (RUSTC_BOOTSTRAP matches binary target name, not package name)
 # - mocktopus, mocktopus_macros: test mocking framework (nightly only)
-RUSTC_BOOTSTRAP = "common,mm2_err_handle,docker_tests,mocktopus,mocktopus_macros"
+RUSTC_BOOTSTRAP = "common,mm2_err_handle,mm2_state_machine,docker_tests,mocktopus,mocktopus_macros"
 
 [target.wasm32-unknown-unknown]
 runner = 'wasm-bindgen-test-runner-0.2.78'
