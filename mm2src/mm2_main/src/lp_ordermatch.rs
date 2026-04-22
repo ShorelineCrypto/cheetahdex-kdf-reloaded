@@ -34,7 +34,10 @@ use common::{bits256, log, new_uuid, now_ms};
 use crypto::privkey::SerializableSecp256k1Keypair;
 use crypto::CryptoCtx;
 use derive_more::Display;
-use futures::{compat::Future01CompatExt, lock::Mutex as AsyncMutex, TryFutureExt};
+use futures::channel::mpsc::{unbounded, UnboundedSender};
+use futures::{compat::Future01CompatExt, lock::Mutex as AsyncMutex, StreamExt, TryFutureExt};
+#[cfg(test)]
+use futures::channel::oneshot;
 use hash256_std_hasher::Hash256StdHasher;
 use hash_db::Hasher;
 use http::Response;
@@ -45,7 +48,7 @@ use mm2_libp2p::{decode_signed, encode_and_sign, encode_message, pub_sub_topic, 
 #[cfg(test)]
 use mocktopus::macros::*;
 use num_traits::identities::Zero;
-use parking_lot::Mutex as PaMutex;
+use parking_lot::{Mutex as PaMutex, RwLock as PaRwLock};
 use rpc::v1::types::H256 as H256Json;
 use mm2_event_stream::StreamerId;
 use serde_json::{self as json, Value as Json};
@@ -200,52 +203,55 @@ fn process_pubkey_full_trie(
     orderbook: &mut Orderbook,
     new_trie_orders: PubkeyOrders,
     params: ProcessTrieParams,
-) -> H64 {
-    remove_pubkey_pair_orders(orderbook, params.pubkey, params.alb_pair);
+) -> Vec<TrieOp> {
+    // 1) Index-only removal of existing orders for (pubkey, pair)
+    orderbook.index_remove_pubkey_pair_orders(params.pubkey, params.alb_pair);
 
+    // 2) Start with a single ClearPair op to reset trie/history/root for (pubkey, pair)
+    let mut ops = vec![TrieOp::ClearPair {
+        pubkey: params.pubkey.to_owned(),
+        alb_pair: params.alb_pair.to_owned(),
+    }];
+
+    // 3) Re-insert all incoming orders (index + trie ops)
     for (uuid, order) in new_trie_orders {
-        orderbook.insert_or_update_order_update_trie(OrderbookItem::from_p2p_and_info(
+        let item = OrderbookItem::from_p2p_and_info(
             order,
             params.protocol_infos.get(&uuid).cloned().unwrap_or_default(),
             params.conf_infos.get(&uuid).cloned(),
-        ));
+        );
+        let mut insert_ops = orderbook.index_insert_or_update(item);
+        ops.append(&mut insert_ops);
     }
 
-    let new_root = pubkey_state_mut(&mut orderbook.pubkeys_state, params.pubkey)
-        .trie_roots
-        .get(params.alb_pair)
-        .copied()
-        .unwrap_or_default();
-    new_root
+    ops
 }
 
 fn process_trie_delta(
     orderbook: &mut Orderbook,
     delta_orders: HashMap<Uuid, Option<OrderbookP2PItem>>,
     params: ProcessTrieParams,
-) -> H64 {
-    for (uuid, order) in delta_orders {
-        match order {
-            Some(order) => orderbook.insert_or_update_order_update_trie(OrderbookItem::from_p2p_and_info(
-                order,
-                params.protocol_infos.get(&uuid).cloned().unwrap_or_default(),
-                params.conf_infos.get(&uuid).cloned(),
-            )),
+) -> Vec<TrieOp> {
+    let mut ops = Vec::with_capacity(delta_orders.len());
+    for (uuid, maybe_order) in delta_orders {
+        match maybe_order {
+            Some(order) => {
+                let item = OrderbookItem::from_p2p_and_info(
+                    order,
+                    params.protocol_infos.get(&uuid).cloned().unwrap_or_default(),
+                    params.conf_infos.get(&uuid).cloned(),
+                );
+                let mut insert_ops = orderbook.index_insert_or_update(item);
+                ops.append(&mut insert_ops);
+            },
             None => {
-                orderbook.remove_order_trie_update(uuid);
+                if let Some((_removed, op)) = orderbook.index_remove(uuid) {
+                    ops.push(op);
+                }
             },
         }
     }
-
-    let new_root = match orderbook.pubkeys_state.get(params.pubkey) {
-        Some(pubkey_state) => pubkey_state
-            .trie_roots
-            .get(params.alb_pair)
-            .copied()
-            .unwrap_or_default(),
-        None => H64::default(),
-    };
-    new_root
+    ops
 }
 
 async fn process_orders_keep_alive(
@@ -256,10 +262,17 @@ async fn process_orders_keep_alive(
     i_am_relay: bool,
 ) -> bool {
     let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).expect("from_ctx failed");
-    let to_request = ordermatch_ctx
-        .orderbook
-        .lock()
-        .process_keep_alive(&from_pubkey, keep_alive, i_am_relay);
+    let to_request = {
+        let subscribed_topics: HashSet<String> = {
+            let subs = ordermatch_ctx.orderbook_subscriptions.read();
+            subs.keys().cloned().collect()
+        };
+
+        let mut trie_store = ordermatch_ctx.trie_store.lock();
+        trie_store.prepare_sync_request_for_keep_alive(&from_pubkey, keep_alive, i_am_relay, |topic: &str| {
+            subscribed_topics.contains(topic)
+        })
+    };
 
     let req = match to_request {
         Some(req) => req,
@@ -276,40 +289,61 @@ async fn process_orders_keep_alive(
         _ => return false,
     };
 
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
-    for (pair, diff) in response.pair_orders_diff {
-        let params = ProcessTrieParams {
-            pubkey: &from_pubkey,
-            alb_pair: &pair,
-            protocol_infos: &response.protocol_infos,
-            conf_infos: &response.conf_infos,
-        };
-        let _new_root = match diff {
-            DeltaOrFullTrie::Delta(delta) => process_trie_delta(&mut orderbook, delta, params),
-            DeltaOrFullTrie::FullTrie(values) => process_pubkey_full_trie(&mut orderbook, values, params),
-        };
+    // Phase 1: derive all index mutations and collect trie ops under the Orderbook lock
+    let ops = {
+        let mut orderbook = ordermatch_ctx.orderbook.lock();
+        let mut ops = Vec::new();
+        for (pair, diff) in response.pair_orders_diff {
+            let params = ProcessTrieParams {
+                pubkey: &from_pubkey,
+                alb_pair: &pair,
+                protocol_infos: &response.protocol_infos,
+                conf_infos: &response.conf_infos,
+            };
+            let mut pair_ops = match diff {
+                DeltaOrFullTrie::Delta(delta) => process_trie_delta(&mut orderbook, delta, params),
+                DeltaOrFullTrie::FullTrie(values) => process_pubkey_full_trie(&mut orderbook, values, params),
+            };
+            ops.append(&mut pair_ops);
+        }
+        ops
+    };
+
+    // Phase 2: enqueue trie ops for background application
+    if !ops.is_empty() {
+        let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(ops);
     }
+
     true
 }
 
 fn process_maker_order_updated(ctx: MmArc, from_pubkey: String, updated_msg: new_protocol::MakerOrderUpdated) -> bool {
     let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).expect("from_ctx failed");
     let uuid = updated_msg.uuid();
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
-    match orderbook.find_order_by_uuid_and_pubkey(&uuid, &from_pubkey) {
-        Some(mut order) => {
-            order.apply_updated(&updated_msg);
-            orderbook.insert_or_update_order_update_trie(order);
-            true
-        },
-        None => {
-            log::warn!(
-                "Couldn't find an order {}, ignoring, it will be synced upon pubkey keep alive",
-                uuid
-            );
-            false
-        },
+
+    // Phase 1: mutate in-memory order and build trie ops
+    let ops = {
+        let mut orderbook = ordermatch_ctx.orderbook.lock();
+        match orderbook.find_order_by_uuid_and_pubkey(&uuid, &from_pubkey) {
+            Some(mut order) => {
+                order.apply_updated(&updated_msg);
+                orderbook.index_insert_or_update(order)
+            },
+            None => {
+                log::warn!(
+                    "Couldn't find an order {}, ignoring, it will be synced upon pubkey keep alive",
+                    uuid
+                );
+                return false;
+            },
+        }
+    };
+
+    // Phase 2: enqueue trie ops
+    if !ops.is_empty() {
+        let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(ops);
     }
+    true
 }
 
 // fn verify_pubkey_orderbook(orderbook: &GetOrderbookPubkeyItem) -> Result<(), String> {
@@ -353,39 +387,55 @@ async fn request_and_fill_orderbook(ctx: &MmArc, base: &str, rel: &str) -> Resul
     };
 
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).unwrap();
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
 
     let my_pubsecp = mm2_internal_pubkey_hex(ctx)?;
-    let alb_pair = alb_ordered_pair(base, rel);
-    for (pubkey, GetOrderbookPubkeyItem { orders, .. }) in pubkey_orders {
-        if is_my_order(&pubkey, &my_pubsecp, &orderbook.my_p2p_pubkeys) {
-            continue;
+
+    // Phase 1: build all index mutations and collect trie ops under the Orderbook lock
+    let ops = {
+        let mut orderbook = ordermatch_ctx.orderbook.lock();
+
+        let alb_pair = alb_ordered_pair(base, rel);
+        let mut all_ops = Vec::new();
+
+        for (pubkey, GetOrderbookPubkeyItem { orders, .. }) in pubkey_orders {
+            if is_my_order(&pubkey, &my_pubsecp, &orderbook.my_p2p_pubkeys) {
+                continue;
+            }
+
+            let pubkey_bytes = match hex::decode(&pubkey) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!("Error {} decoding pubkey {}", e, pubkey);
+                    continue;
+                },
+            };
+            if is_pubkey_banned(ctx, &pubkey_bytes[1..].into()) {
+                log::warn!("Pubkey {} is banned", pubkey);
+                continue;
+            }
+            let params = ProcessTrieParams {
+                pubkey: &pubkey,
+                alb_pair: &alb_pair,
+                protocol_infos: &protocol_infos,
+                conf_infos: &conf_infos,
+            };
+            let mut pair_ops = process_pubkey_full_trie(&mut orderbook, orders, params);
+            all_ops.append(&mut pair_ops);
         }
 
-        let pubkey_bytes = match hex::decode(&pubkey) {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!("Error {} decoding pubkey {}", e, pubkey);
-                continue;
-            },
-        };
-        if is_pubkey_banned(ctx, &pubkey_bytes[1..].into()) {
-            log::warn!("Pubkey {} is banned", pubkey);
-            continue;
-        }
-        let params = ProcessTrieParams {
-            pubkey: &pubkey,
-            alb_pair: &alb_pair,
-            protocol_infos: &protocol_infos,
-            conf_infos: &conf_infos,
-        };
-        let _new_root = process_pubkey_full_trie(&mut orderbook, orders, params);
+        all_ops
+    };
+
+    // Phase 2: enqueue trie ops
+    if !ops.is_empty() {
+        let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(ops);
     }
 
     let topic = orderbook_topic_from_base_rel(base, rel);
-    orderbook
-        .topics_subscribed_to
-        .insert(topic, OrderbookRequestingState::Requested);
+    {
+        let mut subs = ordermatch_ctx.orderbook_subscriptions.write();
+        subs.insert(topic, OrderbookRequestingState::Requested);
+    }
 
     Ok(())
 }
@@ -395,10 +445,19 @@ async fn request_and_fill_orderbook(ctx: &MmArc, base: &str, rel: &str) -> Resul
 fn insert_or_update_order(ctx: &MmArc, item: OrderbookItem) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
     let p2p_item = OrderbookP2PItem::from(item.clone());
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
     let topic = orderbook_topic_from_base_rel(&item.base, &item.rel);
-    orderbook.insert_or_update_order_update_trie(item);
-    drop(orderbook);
+
+    // Phase 1: index under Orderbook lock
+    let ops = {
+        let mut orderbook = ordermatch_ctx.orderbook.lock();
+        orderbook.index_insert_or_update(item)
+    };
+
+    // Phase 2: enqueue trie ops
+    if !ops.is_empty() {
+        let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(ops);
+    }
+
     let _ = ctx.event_stream_manager.send_fn(
         &StreamerId::OrderbookUpdate { topic },
         || orderbook_events::OrderbookItemChangeEvent::NewOrUpdatedItem(Box::new(p2p_item)),
@@ -409,13 +468,23 @@ fn insert_or_update_order(ctx: &MmArc, item: OrderbookItem) {
 fn insert_or_update_my_order(ctx: &MmArc, item: OrderbookItem, my_order: &MakerOrder) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
     let p2p_item = OrderbookP2PItem::from(item.clone());
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
     let topic = orderbook_topic_from_base_rel(&item.base, &item.rel);
-    orderbook.insert_or_update_order_update_trie(item);
-    if let Some(ref key) = my_order.p2p_privkey {
-        orderbook.my_p2p_pubkeys.insert(hex::encode(key.public_slice()));
+
+    // Phase 1: index + my_p2p_pubkeys under Orderbook lock
+    let ops = {
+        let mut orderbook = ordermatch_ctx.orderbook.lock();
+        let ops = orderbook.index_insert_or_update(item);
+        if let Some(ref key) = my_order.p2p_privkey {
+            orderbook.my_p2p_pubkeys.insert(hex::encode(key.public_slice()));
+        }
+        ops
+    };
+
+    // Phase 2: enqueue trie ops
+    if !ops.is_empty() {
+        let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(ops);
     }
-    drop(orderbook);
+
     let _ = ctx.event_stream_manager.send_fn(
         &StreamerId::OrderbookUpdate { topic },
         || orderbook_events::OrderbookItemChangeEvent::NewOrUpdatedItem(Box::new(p2p_item)),
@@ -425,36 +494,57 @@ fn insert_or_update_my_order(ctx: &MmArc, item: OrderbookItem, my_order: &MakerO
 fn delete_order(ctx: &MmArc, pubkey: &str, uuid: Uuid) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
 
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
+    // Phase 1: update index and collect trie op
+    let maybe_op = {
+        let mut orderbook = ordermatch_ctx.orderbook.lock();
 
-    // Record this UUID so that a late-arriving create message won't resurrect the order.
-    orderbook
-        .recently_cancelled
-        .insert(uuid, pubkey.to_string());
+        // Record this UUID so that a late-arriving create message won't resurrect the order.
+        orderbook
+            .recently_cancelled
+            .insert(uuid, pubkey.to_string());
 
-    if let Some(order) = orderbook.order_set.get(&uuid) {
-        if order.pubkey == pubkey {
-            let topic = orderbook_topic_from_base_rel(&order.base, &order.rel);
-            orderbook.remove_order_trie_update(uuid);
-            drop(orderbook);
-            let _ = ctx.event_stream_manager.send_fn(
-                &StreamerId::OrderbookUpdate { topic },
-                || orderbook_events::OrderbookItemChangeEvent::RemovedItem(uuid),
-            );
+        if let Some(order) = orderbook.order_set.get(&uuid) {
+            if order.pubkey == pubkey {
+                let topic = orderbook_topic_from_base_rel(&order.base, &order.rel);
+                let op = orderbook.index_remove(uuid).map(|(_removed, op)| (topic, op));
+                op
+            } else {
+                None
+            }
+        } else {
+            None
         }
+    };
+
+    // Phase 2: enqueue trie op and emit SSE event
+    if let Some((topic, op)) = maybe_op {
+        let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(vec![op]);
+        let _ = ctx.event_stream_manager.send_fn(
+            &StreamerId::OrderbookUpdate { topic },
+            || orderbook_events::OrderbookItemChangeEvent::RemovedItem(uuid),
+        );
     }
 }
 
 fn delete_my_order(ctx: &MmArc, uuid: Uuid, p2p_privkey: Option<&SerializableSecp256k1Keypair>) {
     let ordermatch_ctx: Arc<OrdermatchContext> = OrdermatchContext::from_ctx(ctx).expect("from_ctx failed");
-    let mut orderbook = ordermatch_ctx.orderbook.lock();
-    let topic = orderbook.order_set.get(&uuid).map(|o| orderbook_topic_from_base_rel(&o.base, &o.rel));
-    orderbook.remove_order_trie_update(uuid);
-    if let Some(key) = p2p_privkey {
-        orderbook.my_p2p_pubkeys.remove(&hex::encode(key.public_slice()));
+
+    // Phase 1: index remove + pubkey cleanup
+    let result = {
+        let mut orderbook = ordermatch_ctx.orderbook.lock();
+        let topic = orderbook.order_set.get(&uuid).map(|o| orderbook_topic_from_base_rel(&o.base, &o.rel));
+        let op = orderbook.index_remove(uuid).map(|(_removed, op)| op);
+        if let Some(key) = p2p_privkey {
+            orderbook.my_p2p_pubkeys.remove(&hex::encode(key.public_slice()));
+        }
+        (topic, op)
+    };
+
+    // Phase 2: enqueue trie op and emit SSE event
+    if let Some(op) = result.1 {
+        let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(vec![op]);
     }
-    drop(orderbook);
-    if let Some(topic) = topic {
+    if let Some(topic) = result.0 {
         let _ = ctx.event_stream_manager.send_fn(
             &StreamerId::OrderbookUpdate { topic },
             || orderbook_events::OrderbookItemChangeEvent::RemovedItem(uuid),
@@ -483,40 +573,6 @@ pub(crate) fn mm2_internal_pubkey_hex(ctx: &MmArc) -> Result<Option<String>, Str
             CryptoCtxError::Internal(msg) => Err(msg.clone()),
         },
     }
-}
-
-fn remove_pubkey_pair_orders(orderbook: &mut Orderbook, pubkey: &str, alb_pair: &str) {
-    let pubkey_state = match orderbook.pubkeys_state.get_mut(pubkey) {
-        Some(state) => state,
-        None => return,
-    };
-
-    if !pubkey_state.trie_roots.contains_key(alb_pair) {
-        return;
-    }
-
-    pubkey_state.order_pairs_trie_state_history.remove(alb_pair.into());
-
-    let mut orders_to_remove = Vec::with_capacity(pubkey_state.orders_uuids.len());
-    pubkey_state.orders_uuids.retain(|(uuid, alb)| {
-        if alb == alb_pair {
-            orders_to_remove.push(*uuid);
-            false
-        } else {
-            true
-        }
-    });
-
-    for order in orders_to_remove {
-        orderbook.remove_order_trie_update(order);
-    }
-
-    let pubkey_state = match orderbook.pubkeys_state.get_mut(pubkey) {
-        Some(state) => state,
-        None => return,
-    };
-
-    pubkey_state.trie_roots.remove(alb_pair);
 }
 
 /// Attempts to decode a message and process it returning whether the message is valid and worth rebroadcasting
@@ -739,12 +795,14 @@ fn process_get_orderbook_request(ctx: MmArc, base: String, rel: String) -> Resul
         return ERR!("Orderbook too large");
     }
 
+    let trie_store = ordermatch_ctx.trie_store.lock();
+
     let orders_to_send = pubkeys_orders
         .uuids_by_pubkey
         .into_iter()
         .map(|(pubkey, orders)| {
-            let pubkey_state = orderbook.pubkeys_state.get(&pubkey).ok_or(ERRL!(
-                "Orderbook::pubkeys_state is expected to contain the {:?} pubkey",
+            let pubkey_state = trie_store.pubkeys_state.get(&pubkey).ok_or(ERRL!(
+                "TrieStore::pubkeys_state is expected to contain the {:?} pubkey",
                 pubkey
             ))?;
 
@@ -890,7 +948,8 @@ fn process_sync_pubkey_orderbook_state(
 ) -> Result<Option<SyncPubkeyOrderbookStateRes>, String> {
     let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).unwrap();
     let orderbook = ordermatch_ctx.orderbook.lock();
-    let pubkey_state = match orderbook.pubkeys_state.get(&pubkey) {
+    let trie_store = ordermatch_ctx.trie_store.lock();
+    let pubkey_state = match trie_store.pubkeys_state.get(&pubkey) {
         Some(s) => s,
         None => return Ok(None),
     };
@@ -906,10 +965,10 @@ fn process_sync_pubkey_orderbook_state(
 
             let delta_result = match pubkey_state.order_pairs_trie_state_history.get(&pair) {
                 Some(history) => {
-                    DeltaOrFullTrie::from_history(history, root, *actual_pair_root, &orderbook.memory_db, order_getter)
+                    DeltaOrFullTrie::from_history(history, root, *actual_pair_root, &trie_store.memory_db, order_getter)
                 },
                 None => {
-                    get_full_trie(actual_pair_root, &orderbook.memory_db, order_getter).map(DeltaOrFullTrie::FullTrie)
+                    get_full_trie(actual_pair_root, &trie_store.memory_db, order_getter).map(DeltaOrFullTrie::FullTrie)
                 },
             };
 
@@ -1049,7 +1108,15 @@ fn process_my_maker_order_updated(ctx: &MmArc, message: &new_protocol::MakerOrde
     let uuid = message.uuid();
     if let Some(mut order) = orderbook.find_order_by_uuid(&uuid) {
         order.apply_updated(message);
-        orderbook.insert_or_update_order_update_trie(order);
+        // Phase 1: index update under orderbook lock, collect trie ops
+        let ops = orderbook.index_insert_or_update(order);
+        drop(orderbook);
+        // Phase 2: enqueue trie ops
+        if !ops.is_empty() {
+            if let Err(e) = ordermatch_ctx.trie_ops_tx.unbounded_send(ops) {
+                error!("Failed to send trie ops: {}", e);
+            }
+        }
     }
 }
 
@@ -2289,8 +2356,8 @@ impl From<MakerConnected> for new_protocol::OrdermatchMessage {
     }
 }
 
-fn broadcast_keep_alive_for_pub(ctx: &MmArc, pubkey: &str, orderbook: &Orderbook, p2p_privkey: Option<&KeyPair>) {
-    let state = match orderbook.pubkeys_state.get(pubkey) {
+fn broadcast_keep_alive_for_pub(ctx: &MmArc, pubkey: &str, trie_store: &TrieStore, p2p_privkey: Option<&KeyPair>) {
+    let state = match trie_store.pubkeys_state.get(pubkey) {
         Some(s) => s,
         None => return,
     };
@@ -2330,13 +2397,13 @@ pub async fn broadcast_maker_orders_keep_alive_loop(ctx: MmArc) {
                 // but it seems to keep holding the guard
                 drop(order);
                 let pubsecp = hex::encode(p2p_privkey.public_slice());
-                let orderbook = ordermatch_ctx.orderbook.lock();
-                broadcast_keep_alive_for_pub(&ctx, &pubsecp, &orderbook, Some(p2p_privkey.key_pair()));
+                let trie_store = ordermatch_ctx.trie_store.lock();
+                broadcast_keep_alive_for_pub(&ctx, &pubsecp, &trie_store, Some(p2p_privkey.key_pair()));
             }
         }
 
-        let orderbook = ordermatch_ctx.orderbook.lock();
-        broadcast_keep_alive_for_pub(&ctx, &persistent_pubsecp, &orderbook, None);
+        let trie_store = ordermatch_ctx.trie_store.lock();
+        broadcast_keep_alive_for_pub(&ctx, &persistent_pubsecp, &trie_store, None);
     }
 }
 
@@ -2371,6 +2438,33 @@ enum OrderbookRequestingState {
 }
 
 type H64 = [u8; 8];
+
+/// A narrow contract for trie mutations. The Orderbook builds these ops,
+/// TrieStore applies them (and only TrieStore mutates MemoryDB/history).
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+enum TrieOp {
+    /// Reset an entire (pubkey, pair) subtrie.
+    /// Drops the subtrie's root and delta history for this (pubkey, pair).
+    ClearPair { pubkey: String, alb_pair: String },
+    Insert {
+        pubkey: String,
+        alb_pair: String,
+        uuid: Uuid,
+        /// Full OrderbookItem is needed to maintain delta history.
+        order: OrderbookItem,
+    },
+    Remove {
+        pubkey: String,
+        alb_pair: String,
+        uuid: Uuid,
+    },
+    /// Remove all trie state for a pubkey after prior per-UUID removals have been applied.
+    RemovePubkey { pubkey: String },
+    #[cfg(test)]
+    /// Barrier op: notify when all previous ops have been applied.
+    Flush(oneshot::Sender<()>),
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct TrieDiff<Key, Value> {
@@ -2490,24 +2584,222 @@ fn collect_orderbook_metrics(_ctx: &MmArc, _orderbook: &Orderbook) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn collect_orderbook_metrics(ctx: &MmArc, orderbook: &Orderbook) {
-    use parity_util_mem::malloc_size;
-
-    fn history_committed_changes(history: &TimeCache<AlbOrderedOrderbookPair, TrieOrderHistory>) -> i64 {
-        let total = history.iter().fold(0usize, |total, (_alb_pair, history)| {
-            total + history.get_element().inner.len()
-        });
-        total as i64
-    }
-
-    let memory_db_size = malloc_size(&orderbook.memory_db);
     mm_gauge!(ctx.metrics, "orderbook.len", orderbook.order_set.len() as i64);
-    mm_gauge!(ctx.metrics, "orderbook.memory_db", memory_db_size as i64);
+}
 
-    // TODO remove metrics below after testing
-    for (pubkey, pubkey_state) in orderbook.pubkeys_state.iter() {
-        mm_gauge!(ctx.metrics, "orders_uuids", pubkey_state.orders_uuids.len() as i64, "pubkey" => pubkey.clone());
-        mm_gauge!(ctx.metrics, "history.commited_changes", history_committed_changes(&pubkey_state.order_pairs_trie_state_history), "pubkey" => pubkey.clone());
+/// Trie-related state extracted from `Orderbook` to reduce contention on the main
+/// order index. All trie operations go through this store via the async TrieOp channel.
+#[derive(Default)]
+pub(crate) struct TrieStore {
+    /// A map of orderbook states of known maker pubkeys.
+    pub(crate) pubkeys_state: HashMap<String, OrderbookPubkeyState>,
+    /// MemoryDB instance to store Patricia Tries data.
+    pub(crate) memory_db: MemoryDB<Blake2Hasher64>,
+}
+
+impl TrieStore {
+    /// Apply a sequence of trie operations produced by the Orderbook.
+    /// This is the only place mutating MemoryDB and trie histories.
+    fn apply_ops<I>(&mut self, ops: I)
+    where
+        I: IntoIterator<Item = TrieOp>,
+    {
+        #[derive(Default)]
+        struct Group {
+            clear: bool,
+            inserts: Vec<(Uuid, OrderbookItem)>,
+            removes: Vec<Uuid>,
+        }
+
+        // 1) Group ops by (pubkey, alb_pair) to minimize repeated trie/historical touches.
+        let mut groups: HashMap<(String, String), Group> = HashMap::new();
+        let mut pubkeys_to_remove: HashSet<String> = HashSet::new();
+        #[cfg(test)]
+        let mut flush_senders: Vec<oneshot::Sender<()>> = Vec::new();
+
+        for op in ops {
+            match op {
+                TrieOp::ClearPair { pubkey, alb_pair } => {
+                    groups.entry((pubkey, alb_pair)).or_default().clear = true;
+                },
+                TrieOp::Insert {
+                    pubkey,
+                    alb_pair,
+                    uuid,
+                    order,
+                } => {
+                    let g = groups.entry((pubkey, alb_pair)).or_default();
+                    g.inserts.push((uuid, order));
+                },
+                TrieOp::Remove {
+                    pubkey,
+                    alb_pair,
+                    uuid,
+                } => {
+                    groups.entry((pubkey, alb_pair)).or_default().removes.push(uuid);
+                },
+                TrieOp::RemovePubkey { pubkey } => {
+                    pubkeys_to_remove.insert(pubkey);
+                },
+                #[cfg(test)]
+                TrieOp::Flush(done) => {
+                    flush_senders.push(done);
+                },
+            }
+        }
+
+        // 2) Apply per group: ClearPair (if any) -> all Inserts -> all Removes
+        for ((pubkey, alb_pair), g) in groups {
+            if g.clear {
+                self.apply_clear_pair(&pubkey, &alb_pair);
+            }
+            for (uuid, order) in g.inserts {
+                self.apply_insert(&pubkey, &alb_pair, uuid, order);
+            }
+            for uuid in g.removes {
+                self.apply_remove(&pubkey, &alb_pair, uuid);
+            }
+        }
+
+        // 3) Remove entire pubkey states after their per-UUID removals have been processed.
+        for pubkey in pubkeys_to_remove {
+            self.pubkeys_state.remove(&pubkey);
+        }
+
+        #[cfg(test)]
+        for tx in flush_senders {
+            let _ = tx.send(());
+        }
     }
+
+    fn apply_insert(&mut self, pubkey: &str, alb_pair: &str, uuid: Uuid, order: OrderbookItem) {
+        let pubkey_state = pubkey_state_mut(&mut self.pubkeys_state, pubkey);
+        let pair_root = order_pair_root_mut(&mut pubkey_state.trie_roots, alb_pair);
+        let prev_root = *pair_root;
+
+        pubkey_state.orders_uuids.insert((uuid, alb_pair.to_owned()));
+
+        {
+            let mut pair_trie = match get_trie_mut(&mut self.memory_db, pair_root) {
+                Ok(trie) => trie,
+                Err(e) => {
+                    log::error!("Error {} getting trie with root {:?}", e, prev_root);
+                    return;
+                },
+            };
+            let order_bytes = order.trie_state_bytes();
+            if let Err(e) = pair_trie.insert(uuid.as_bytes(), &order_bytes) {
+                log::error!("Error {:?} on insertion to trie. Key {}", e, uuid);
+                return;
+            };
+        }
+
+        if prev_root != H64::default() {
+            let history = pair_history_mut(&mut pubkey_state.order_pairs_trie_state_history, alb_pair);
+            history.insert_new_diff(
+                prev_root,
+                TrieDiff {
+                    delta: vec![(uuid, Some(order))],
+                    next_root: *pair_root,
+                },
+            );
+        }
+    }
+
+    fn apply_remove(&mut self, pubkey: &str, alb_pair: &str, uuid: Uuid) {
+        let pubkey_state = pubkey_state_mut(&mut self.pubkeys_state, pubkey);
+        let pair_state = order_pair_root_mut(&mut pubkey_state.trie_roots, alb_pair);
+        let old_state = *pair_state;
+
+        pubkey_state.orders_uuids.remove(&(uuid, alb_pair.to_owned()));
+
+        *pair_state = match delta_trie_root::<Layout, _, _, _, _, _>(
+            &mut self.memory_db,
+            old_state,
+            vec![(*uuid.as_bytes(), None::<Vec<u8>>)],
+        ) {
+            Ok(root) => root,
+            Err(_) => {
+                log::error!("Failed to get existing trie with root {:?}", pair_state);
+                return;
+            },
+        };
+
+        if pubkey_state.order_pairs_trie_state_history.get(&alb_pair.to_owned()).is_some() {
+            let history = pair_history_mut(&mut pubkey_state.order_pairs_trie_state_history, alb_pair);
+            history.insert_new_diff(
+                old_state,
+                TrieDiff {
+                    delta: vec![(uuid, None)],
+                    next_root: *pair_state,
+                },
+            );
+        }
+    }
+
+    fn apply_clear_pair(&mut self, pubkey: &str, alb_pair: &str) {
+        if let Some(pubkey_state) = self.pubkeys_state.get_mut(pubkey) {
+            pubkey_state.order_pairs_trie_state_history.remove(alb_pair.into());
+            pubkey_state.orders_uuids.retain(|(_uuid, pair)| pair != alb_pair);
+            pubkey_state.trie_roots.remove(alb_pair);
+        }
+    }
+
+    /// Build a SyncPubkeyOrderbookState request if keep-alive indicates our local trie roots are stale.
+    /// Topic subscription is provided via `is_subscribed` callback to avoid touching Orderbook.
+    fn prepare_sync_request_for_keep_alive(
+        &mut self,
+        from_pubkey: &str,
+        message: new_protocol::PubkeyKeepAlive,
+        i_am_relay: bool,
+        is_subscribed: impl Fn(&str) -> bool,
+    ) -> Option<OrdermatchRequest> {
+        let pubkey_state = pubkey_state_mut(&mut self.pubkeys_state, from_pubkey);
+        pubkey_state.last_keep_alive = message.timestamp;
+
+        let mut trie_roots_to_request = HashMap::new();
+        for (alb_pair, trie_root) in message.trie_roots {
+            let topic = orderbook_topic_from_ordered_pair(&alb_pair);
+            let subscribed = is_subscribed(&topic);
+            if !subscribed && !i_am_relay {
+                continue;
+            }
+
+            if trie_root == H64::default() || trie_root == hashed_null_node::<Layout>() {
+                log::debug!(
+                    "Received zero or hashed_null_node pair {} trie root from pub {}",
+                    alb_pair,
+                    from_pubkey
+                );
+                continue;
+            }
+
+            let actual_trie_root = order_pair_root_mut(&mut pubkey_state.trie_roots, &alb_pair);
+            if *actual_trie_root != trie_root {
+                trie_roots_to_request.insert(alb_pair, trie_root);
+            }
+        }
+
+        if trie_roots_to_request.is_empty() {
+            return None;
+        }
+
+        Some(OrdermatchRequest::SyncPubkeyOrderbookState {
+            pubkey: from_pubkey.to_owned(),
+            trie_roots: trie_roots_to_request,
+        })
+    }
+}
+
+fn spawn_trie_store_worker(_ctx: &MmArc, trie_store: Arc<PaMutex<TrieStore>>) -> UnboundedSender<Vec<TrieOp>> {
+    let (tx, mut rx) = unbounded::<Vec<TrieOp>>();
+    common::executor::spawn(async move {
+        while let Some(ops) = rx.next().await {
+            let mut store = trie_store.lock();
+            store.apply_ops(ops);
+        }
+    });
+    tx
 }
 
 /// How long to remember a cancelled order UUID to guard against out-of-order P2P messages.
@@ -2523,11 +2815,6 @@ struct Orderbook {
     /// A map from (base, rel).
     unordered: HashMap<(String, String), HashSet<Uuid>>,
     order_set: HashMap<Uuid, OrderbookItem>,
-    /// a map of orderbook states of known maker pubkeys
-    pubkeys_state: HashMap<String, OrderbookPubkeyState>,
-    topics_subscribed_to: HashMap<String, OrderbookRequestingState>,
-    /// MemoryDB instance to store Patricia Tries data
-    memory_db: MemoryDB<Blake2Hasher64>,
     /// Recently cancelled order UUIDs mapped to the cancelling pubkey.
     /// Guards against re-creation when P2P cancel arrives before the create message.
     recently_cancelled: TimeCache<Uuid, String>,
@@ -2544,9 +2831,6 @@ impl Default for Orderbook {
             pairs_existing_for_rel: HashMap::default(),
             unordered: HashMap::default(),
             order_set: HashMap::default(),
-            pubkeys_state: HashMap::default(),
-            topics_subscribed_to: HashMap::default(),
-            memory_db: MemoryDB::default(),
             recently_cancelled: TimeCache::new(RECENTLY_CANCELLED_TIMEOUT),
             my_p2p_pubkeys: HashSet::default(),
         }
@@ -2572,68 +2856,39 @@ impl Orderbook {
         self.order_set.get(uuid).cloned()
     }
 
-    fn insert_or_update_order_update_trie(&mut self, order: OrderbookItem) {
-        // Ignore orders that were recently cancelled — guards against out-of-order P2P messages.
+    /// Index-only method: updates in-memory indices and returns the trie mutations
+    /// that must be applied by TrieStore. No trie/memory_db mutation happens here.
+    fn index_insert_or_update(&mut self, order: OrderbookItem) -> Vec<TrieOp> {
         if self.recently_cancelled.get(&order.uuid) == Some(&order.pubkey) {
             log::warn!("Order {} was recently cancelled, ignoring insert", order.uuid);
-            return;
+            return Vec::new();
         }
 
+        let mut trie_ops = vec![];
         let zero = BigRational::from_integer(0.into());
+
         if order.max_volume <= zero || order.price <= zero || order.min_volume < zero {
-            self.remove_order_trie_update(order.uuid);
-            return;
-        } // else insert the order
-
-        self.insert_or_update_order(order.clone());
-
-        let pubkey_state = pubkey_state_mut(&mut self.pubkeys_state, &order.pubkey);
-
-        let alb_ordered = alb_ordered_pair(&order.base, &order.rel);
-        let pair_root = order_pair_root_mut(&mut pubkey_state.trie_roots, &alb_ordered);
-        let prev_root = *pair_root;
-
-        pubkey_state.orders_uuids.insert((order.uuid, alb_ordered.clone()));
-
-        {
-            let mut pair_trie = match get_trie_mut(&mut self.memory_db, pair_root) {
-                Ok(trie) => trie,
-                Err(e) => {
-                    log::error!("Error getting {} trie with root {:?}", e, prev_root);
-                    return;
-                },
-            };
-            let order_bytes = order.trie_state_bytes();
-            if let Err(e) = pair_trie.insert(order.uuid.as_bytes(), &order_bytes) {
-                log::error!(
-                    "Error {:?} on insertion to trie. Key {}, value {:?}",
-                    e,
-                    order.uuid,
-                    order_bytes
-                );
-                return;
-            };
+            if let Some((_removed, op)) = self.index_remove(order.uuid) {
+                trie_ops.push(op);
+            }
+            return trie_ops;
         }
 
-        if prev_root != H64::default() {
-            let history = pair_history_mut(&mut pubkey_state.order_pairs_trie_state_history, &alb_ordered);
-            history.insert_new_diff(
-                prev_root,
-                TrieDiff {
-                    delta: vec![(order.uuid, Some(order.clone()))],
-                    next_root: *pair_root,
-                },
-            );
-        }
+        let alb_pair = alb_ordered_pair(&order.base, &order.rel);
+        let op = TrieOp::Insert {
+            pubkey: order.pubkey.clone(),
+            alb_pair,
+            uuid: order.uuid,
+            order: order.clone(),
+        };
+        self.index_insert_or_update_inner(order);
+        trie_ops.push(op);
+        trie_ops
     }
 
-    fn insert_or_update_order(&mut self, order: OrderbookItem) {
+    /// Pure index update (no trie changes): replaces/creates an order in memory structures.
+    fn index_insert_or_update_inner(&mut self, order: OrderbookItem) {
         log::debug!("Inserting order {:?}", order);
-        let zero = BigRational::from_integer(0.into());
-        if order.max_volume <= zero || order.price <= zero || order.min_volume < zero {
-            self.remove_order_trie_update(order.uuid);
-            return;
-        } // else insert the order
 
         let base_rel = (order.base.clone(), order.rel.clone());
 
@@ -2663,19 +2918,17 @@ impl Orderbook {
             .or_default()
             .insert(order.base.clone());
 
-        self.unordered
-            .entry(base_rel)
-            .or_default()
-            .insert(order.uuid);
+        self.unordered.entry(base_rel).or_default().insert(order.uuid);
 
         self.order_set.insert(order.uuid, order);
     }
 
-    fn remove_order_trie_update(&mut self, uuid: Uuid) -> Option<OrderbookItem> {
+    /// Pure index removal (no trie changes): removes from in-memory indices
+    /// and returns the removed order and TrieOp.
+    fn index_remove(&mut self, uuid: Uuid) -> Option<(OrderbookItem, TrieOp)> {
         let order = self.order_set.remove(&uuid)?;
         let base_rel = (order.base.clone(), order.rel.clone());
 
-        // create an `order_to_delete` that allows to find and remove an element from `self.ordered` by hash
         let order_to_delete = OrderedByPriceOrder {
             price: order.price.clone().into(),
             uuid,
@@ -2689,91 +2942,44 @@ impl Orderbook {
         }
 
         if let Some(orders) = self.unordered.get_mut(&base_rel) {
-            // use the same uuid to remove an order
             orders.remove(&order_to_delete.uuid);
             if orders.is_empty() {
                 self.unordered.remove(&base_rel);
             }
         }
 
-        let alb_ordered = alb_ordered_pair(&order.base, &order.rel);
-        let pubkey_state = pubkey_state_mut(&mut self.pubkeys_state, &order.pubkey);
-        let pair_state = order_pair_root_mut(&mut pubkey_state.trie_roots, &alb_ordered);
-        let old_state = *pair_state;
-
-        let to_remove = &(uuid, alb_ordered.clone());
-        pubkey_state.orders_uuids.remove(to_remove);
-
-        *pair_state = match delta_trie_root::<Layout, _, _, _, _, _>(
-            &mut self.memory_db,
-            *pair_state,
-            vec![(*order.uuid.as_bytes(), None::<Vec<u8>>)],
-        ) {
-            Ok(root) => root,
-            Err(_) => {
-                log::error!("Failed to get existing trie with root {:?}", pair_state);
-                return Some(order);
-            },
+        let alb_pair = alb_ordered_pair(&order.base, &order.rel);
+        let op = TrieOp::Remove {
+            pubkey: order.pubkey.clone(),
+            alb_pair,
+            uuid,
         };
 
-        if pubkey_state.order_pairs_trie_state_history.get(&alb_ordered).is_some() {
-            let history = pair_history_mut(&mut pubkey_state.order_pairs_trie_state_history, &alb_ordered);
-            history.insert_new_diff(
-                old_state,
-                TrieDiff {
-                    delta: vec![(uuid, None)],
-                    next_root: *pair_state,
-                },
-            );
-        }
-        Some(order)
+        Some((order, op))
     }
 
-    fn is_subscribed_to(&self, topic: &str) -> bool {
-        self.topics_subscribed_to.contains_key(topic)
-    }
+    /// Index-only removal of all orders for a (pubkey, pair). Trie cleanup is handled
+    /// by a single ClearPair op at the trie layer.
+    fn index_remove_pubkey_pair_orders(&mut self, pubkey: &str, alb_pair: &str) {
+        let (base, rel) = match alb_pair.split_once(':') {
+            Some((a, b)) => (a, b),
+            None => return,
+        };
 
-    fn process_keep_alive(
-        &mut self,
-        from_pubkey: &str,
-        message: new_protocol::PubkeyKeepAlive,
-        i_am_relay: bool,
-    ) -> Option<OrdermatchRequest> {
-        let pubkey_state = pubkey_state_mut(&mut self.pubkeys_state, from_pubkey);
+        let pairs = [(base.to_owned(), rel.to_owned()), (rel.to_owned(), base.to_owned())];
 
-        let mut trie_roots_to_request = HashMap::new();
-        for (alb_pair, trie_root) in message.trie_roots {
-            let subscribed = self
-                .topics_subscribed_to
-                .contains_key(&orderbook_topic_from_ordered_pair(&alb_pair));
-            if !subscribed && !i_am_relay {
-                continue;
-            }
-
-            if trie_root == H64::default() || trie_root == hashed_null_node::<Layout>() {
-                log::debug!(
-                    "Received zero or hashed_null_node pair {} trie root from pub {}",
-                    alb_pair,
-                    from_pubkey
-                );
-
-                continue;
-            }
-            let actual_trie_root = order_pair_root_mut(&mut pubkey_state.trie_roots, &alb_pair);
-            if *actual_trie_root != trie_root {
-                trie_roots_to_request.insert(alb_pair, trie_root);
+        for pair in pairs {
+            if let Some(uuids) = self.unordered.get(&pair).cloned() {
+                for uuid in uuids {
+                    if let Some(order) = self.order_set.get(&uuid) {
+                        if order.pubkey == pubkey {
+                            // ignore the trie op here — ClearPair handles it at the trie layer
+                            let _ = self.index_remove(uuid);
+                        }
+                    }
+                }
             }
         }
-
-        if trie_roots_to_request.is_empty() {
-            pubkey_state.last_keep_alive = message.timestamp;
-            return None;
-        }
-
-        Some(OrdermatchRequest::SyncPubkeyOrderbookState {
-            pubkey: from_pubkey.to_owned(),
-            trie_roots: trie_roots_to_request,
-        })
     }
 
     fn orderbook_item_with_proof(&self, order: OrderbookItem) -> OrderbookItemWithProof {
@@ -2785,11 +2991,16 @@ impl Orderbook {
     }
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), derive(Default))]
 struct OrdermatchContext {
     pub my_maker_orders: PaMutex<HashMap<Uuid, Arc<AsyncMutex<MakerOrder>>>>,
     pub my_taker_orders: AsyncMutex<HashMap<Uuid, TakerOrder>>,
     pub orderbook: PaMutex<Orderbook>,
+    /// Trie data store extracted from `Orderbook` to reduce contention.
+    pub trie_store: Arc<PaMutex<TrieStore>>,
+    /// Sender to enqueue trie mutations for background application.
+    pub trie_ops_tx: UnboundedSender<Vec<TrieOp>>,
+    /// Tracks which orderbook topics we are subscribed to, separate from the order index.
+    pub orderbook_subscriptions: PaRwLock<HashMap<String, OrderbookRequestingState>>,
     /// The map from coin original ticker to the orderbook ticker
     /// It is used to share the same orderbooks for concurrently activated coins with different protocols
     /// E.g. BTC and BTC-Segwit
@@ -2801,6 +3012,37 @@ struct OrdermatchContext {
     pending_maker_reserved: AsyncMutex<HashMap<Uuid, Vec<MakerReserved>>>,
     #[cfg(target_arch = "wasm32")]
     ordermatch_db: ConstructibleDb<OrdermatchDb>,
+}
+
+#[cfg(test)]
+impl Default for OrdermatchContext {
+    /// Creates a test `OrdermatchContext` with a live trie-ops channel+worker.
+    /// The receiver side is spawned as a local future (requires an active async
+    /// runtime or the `common::executor` threadpool).
+    fn default() -> Self {
+        let trie_store = Arc::new(PaMutex::new(TrieStore::default()));
+        let (trie_ops_tx, mut trie_ops_rx) = unbounded::<Vec<TrieOp>>();
+        let ts = trie_store.clone();
+        // Drive the worker on the common executor so trie ops are applied even in
+        // unit-test contexts that don't have a full MmCtx runtime.
+        common::executor::spawn(async move {
+            while let Some(ops) = trie_ops_rx.next().await {
+                let mut store = ts.lock();
+                store.apply_ops(ops);
+            }
+        });
+        OrdermatchContext {
+            my_maker_orders: Default::default(),
+            my_taker_orders: Default::default(),
+            orderbook: Default::default(),
+            trie_store,
+            trie_ops_tx,
+            orderbook_subscriptions: PaRwLock::new(HashMap::default()),
+            pending_maker_reserved: Default::default(),
+            orderbook_tickers: Default::default(),
+            original_tickers: Default::default(),
+        }
+    }
 }
 
 pub fn init_ordermatch_context(ctx: &MmArc) -> OrdermatchInitResult<()> {
@@ -2828,10 +3070,16 @@ pub fn init_ordermatch_context(ctx: &MmArc) -> OrdermatchInitResult<()> {
         }
     }
 
+    let trie_store = Arc::new(PaMutex::new(TrieStore::default()));
+    let trie_ops_tx = spawn_trie_store_worker(ctx, trie_store.clone());
+
     let ordermatch_context = OrdermatchContext {
         my_maker_orders: Default::default(),
         my_taker_orders: Default::default(),
         orderbook: Default::default(),
+        trie_store,
+        trie_ops_tx,
+        orderbook_subscriptions: PaRwLock::new(HashMap::default()),
         pending_maker_reserved: Default::default(),
         orderbook_tickers,
         original_tickers,
@@ -2849,23 +3097,42 @@ impl OrdermatchContext {
     /// Obtains a reference to this crate context, creating it if necessary.
     #[cfg(not(target_arch = "wasm32"))]
     fn from_ctx(ctx: &MmArc) -> Result<Arc<OrdermatchContext>, String> {
+        let ctx2 = ctx.clone();
         Ok(try_s!(from_ctx(&ctx.ordermatch_ctx, move || {
-            Ok(OrdermatchContext::default())
+            let trie_store = Arc::new(PaMutex::new(TrieStore::default()));
+            let trie_ops_tx = spawn_trie_store_worker(&ctx2, trie_store.clone());
+            Ok(OrdermatchContext {
+                my_maker_orders: Default::default(),
+                my_taker_orders: Default::default(),
+                orderbook: Default::default(),
+                trie_store,
+                trie_ops_tx,
+                orderbook_subscriptions: PaRwLock::new(HashMap::default()),
+                pending_maker_reserved: Default::default(),
+                orderbook_tickers: Default::default(),
+                original_tickers: Default::default(),
+            })
         })))
     }
 
     /// Obtains a reference to this crate context, creating it if necessary.
     #[cfg(target_arch = "wasm32")]
     fn from_ctx(ctx: &MmArc) -> Result<Arc<OrdermatchContext>, String> {
+        let ctx2 = ctx.clone();
         Ok(try_s!(from_ctx(&ctx.ordermatch_ctx, move || {
+            let trie_store = Arc::new(PaMutex::new(TrieStore::default()));
+            let trie_ops_tx = spawn_trie_store_worker(&ctx2, trie_store.clone());
             Ok(OrdermatchContext {
                 my_maker_orders: Default::default(),
                 my_taker_orders: Default::default(),
                 orderbook: Default::default(),
+                trie_store,
+                trie_ops_tx,
+                orderbook_subscriptions: PaRwLock::new(HashMap::default()),
                 pending_maker_reserved: Default::default(),
                 orderbook_tickers: Default::default(),
                 original_tickers: Default::default(),
-                ordermatch_db: ConstructibleDb::new(ctx),
+                ordermatch_db: ConstructibleDb::new(&ctx2),
             })
         })))
     }
@@ -2879,6 +3146,14 @@ impl OrdermatchContext {
 
     fn orderbook_ticker(&self, ticker: &str) -> Option<String> {
         self.orderbook_tickers.get(ticker).cloned()
+    }
+
+    /// Block until the background trie worker has applied all previously enqueued ops.
+    #[cfg(test)]
+    pub fn wait_trie_ops_flushed(&self) {
+        let (tx, rx) = oneshot::channel::<()>();
+        let _ = self.trie_ops_tx.unbounded_send(vec![TrieOp::Flush(tx)]);
+        let _ = futures::executor::block_on(rx);
     }
 
     fn orderbook_ticker_bypass(&self, ticker: &str) -> String {
@@ -3083,11 +3358,13 @@ pub async fn lp_ordermatch_loop(ctx: MmArc) {
         check_balance_for_maker_orders(ctx.clone(), &ordermatch_ctx).await;
 
         {
-            // remove "timed out" pubkeys states with their orders from orderbook
-            let mut orderbook = ordermatch_ctx.orderbook.lock();
+            // Remove "timed out" pubkeys states with their orders from orderbook.
+            // Phase 1: identify stale pubkeys and their orders using trie_store,
+            // then remove index entries under orderbook lock, collecting trie ops.
+            let trie_store = ordermatch_ctx.trie_store.lock();
             let mut uuids_to_remove = vec![];
             let mut pubkeys_to_remove = vec![];
-            for (pubkey, state) in orderbook.pubkeys_state.iter() {
+            for (pubkey, state) in trie_store.pubkeys_state.iter() {
                 let to_keep = pubkey == &my_pubsecp || state.last_keep_alive + maker_order_timeout > now_ms() / 1000;
                 if !to_keep {
                     for (uuid, _) in &state.orders_uuids {
@@ -3096,15 +3373,28 @@ pub async fn lp_ordermatch_loop(ctx: MmArc) {
                     pubkeys_to_remove.push(pubkey.clone());
                 }
             }
+            drop(trie_store);
 
-            for uuid in uuids_to_remove {
-                orderbook.remove_order_trie_update(uuid);
-            }
-            for pubkey in pubkeys_to_remove {
-                orderbook.pubkeys_state.remove(&pubkey);
+            let mut ops = Vec::new();
+            {
+                let mut orderbook = ordermatch_ctx.orderbook.lock();
+                for uuid in uuids_to_remove {
+                    if let Some((_item, op)) = orderbook.index_remove(uuid) {
+                        ops.push(op);
+                    }
+                }
+                for pubkey in &pubkeys_to_remove {
+                    ops.push(TrieOp::RemovePubkey { pubkey: pubkey.clone() });
+                }
+                collect_orderbook_metrics(&ctx, &orderbook);
             }
 
-            collect_orderbook_metrics(&ctx, &orderbook);
+            // Phase 2: enqueue trie ops (orderbook lock released)
+            if !ops.is_empty() {
+                if let Err(e) = ordermatch_ctx.trie_ops_tx.unbounded_send(ops) {
+                    error!("Failed to send trie ops: {}", e);
+                }
+            }
         }
 
         {
@@ -3204,8 +3494,8 @@ pub async fn clean_memory_loop(ctx_weak: MmWeak) {
             }
 
             let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).unwrap();
-            let mut orderbook = ordermatch_ctx.orderbook.lock();
-            orderbook.memory_db.purge();
+            let mut trie_store = ordermatch_ctx.trie_store.lock();
+            trie_store.memory_db.purge();
         }
         Timer::sleep(600.).await;
     }
@@ -5405,9 +5695,9 @@ pub async fn cancel_all_orders_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec
     let topic = orderbook_topic_from_base_rel(base, rel);
     let is_orderbook_filled = {
         let ordermatch_ctx = try_s!(OrdermatchContext::from_ctx(ctx));
-        let mut orderbook = ordermatch_ctx.orderbook.lock();
+        let mut subscriptions = ordermatch_ctx.orderbook_subscriptions.write();
 
-        match orderbook.topics_subscribed_to.entry(topic.clone()) {
+        match subscriptions.entry(topic.clone()) {
             Entry::Vacant(e) => {
                 // we weren't subscribed to the topic yet
                 e.insert(OrderbookRequestingState::NotRequested {
