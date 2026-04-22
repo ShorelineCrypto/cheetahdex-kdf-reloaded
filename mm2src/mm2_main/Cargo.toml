@@ -110,6 +110,7 @@ spv_validation = { path = "../mm2_bitcoin/spv_validation" }
 sp-runtime-interface = { version = "6.0.0", default-features = false, features = ["disable_target_static_assertions"] }
 sp-trie = { version = "6.0", default-features = false }
 
+timed-map = { version = "1.6", features = ["rustc-hash"] }
 trie-db = { version = "0.23.1", default-features = false }
 trie-root = "0.16.0"
 uuid = { version = "0.7", features = ["serde", "v4"] }
@@ -117,6 +118,7 @@ wasm-timer = "0.2.4"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { version = "0.3.27" }
+timed-map = { version = "1.6", features = ["rustc-hash", "wasm"] }
 wasm-bindgen = { version = "0.2.88" }
 wasm-bindgen-futures = { version = "0.4.1" }
 wasm-bindgen-test = { version = "0.3.1" }

@@ -132,9 +132,9 @@ pub use swap_watcher::{process_watcher_msg, watcher_topic, SwapWatcherMsg, Taker
 use taker_swap::TakerSwapEvent;
 #[allow(unused_imports)]
 pub use taker_swap::{
-    calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available,
-    run_taker_swap, taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap,
-    TakerSwapPreparedParams, TakerTradePreimage,
+    calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available, run_taker_swap,
+    taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap, TakerSwapPreparedParams,
+    TakerTradePreimage,
 };
 pub use trade_preimage::trade_preimage_rpc;
 
@@ -1771,8 +1771,7 @@ mod lp_swap_tests {
     /// Helper: create a TestCoin wrapped in MmCoinEnum with min_tx_amount mocked.
     fn mock_taker_coin(ticker: &'static str) -> MmCoinEnum {
         TestCoin::ticker.mock_safe(move |_| MockResult::Return(ticker));
-        TestCoin::min_tx_amount
-            .mock_safe(|_| MockResult::Return(BigDecimal::from_str("0.00001").unwrap()));
+        TestCoin::min_tx_amount.mock_safe(|_| MockResult::Return(BigDecimal::from_str("0.00001").unwrap()));
         MmCoinEnum::Test(TestCoin::new(ticker))
     }
 
@@ -1833,9 +1832,7 @@ mod lp_swap_tests {
 
         let fee = compute_dex_fee(net_cfg, &taker_coin, "BTC", &trade_amount);
         match &fee {
-            DexFee::WithBurn {
-                burn_destination, ..
-            } => {
+            DexFee::WithBurn { burn_destination, .. } => {
                 assert_eq!(*burn_destination, DexFeeBurnDestination::KmdOpReturn);
             },
             other => panic!("expected DexFee::WithBurn for KMD on netid 6133, got {:?}", other),
@@ -1874,8 +1871,7 @@ mod lp_swap_tests {
             let taker_coin = mock_taker_coin("DOGE");
             let trade_amount = MmNumber::from(100);
 
-            let expected_total =
-                dex_fee_amount_from_taker_coin(net_cfg, &taker_coin, "BTC", &trade_amount);
+            let expected_total = dex_fee_amount_from_taker_coin(net_cfg, &taker_coin, "BTC", &trade_amount);
             let fee = compute_dex_fee(net_cfg, &taker_coin, "BTC", &trade_amount);
             assert_eq!(
                 fee.total_spend_amount(),

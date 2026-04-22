@@ -1,7 +1,7 @@
 //! RPC activation of the per-pair orderbook streamer.
 
-use crate::mm2::lp_ordermatch::orderbook_events::OrderbookStreamer;
 use super::{EnableStreamingResponse, StreamingError};
+use crate::mm2::lp_ordermatch::orderbook_events::OrderbookStreamer;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use serde::Deserialize;

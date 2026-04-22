@@ -27,8 +27,8 @@ use crate::mm2::lp_ordermatch::lp_bot::simple_market_maker_bot::{
 };
 use crate::mm2::lp_swap::MakerSwapStatusChanged;
 pub use simple_market_maker_bot::{
-    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot,
-    StartSimpleMakerBotRequest, KMD_PRICE_ENDPOINT,
+    process_price_request, start_simple_market_maker_bot, stop_simple_market_maker_bot, StartSimpleMakerBotRequest,
+    KMD_PRICE_ENDPOINT,
 };
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -206,8 +206,7 @@ pub struct TickerInfos {
     change_24_h_provider: Provider,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 pub enum Provider {
     #[serde(rename = "binance")]
     Binance,
@@ -223,7 +222,6 @@ pub enum Provider {
     #[default]
     Unknown,
 }
-
 
 #[derive(Default)]
 pub struct TradingBotContext {

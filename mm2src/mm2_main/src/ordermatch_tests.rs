@@ -34,6 +34,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
 
     let request = TakerRequest {
@@ -72,6 +73,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
 
     let request = TakerRequest {
@@ -110,6 +112,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
 
     let request = TakerRequest {
@@ -148,6 +151,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
 
     let request = TakerRequest {
@@ -186,6 +190,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
 
     let request = TakerRequest {
@@ -224,6 +229,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
 
     let request = TakerRequest {
@@ -264,6 +270,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
     let request = TakerRequest {
         base: "KMD".to_owned(),
@@ -304,6 +311,7 @@ fn test_match_maker_order_and_taker_request() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
     let request = TakerRequest {
         base: "REL".to_owned(),
@@ -375,6 +383,7 @@ fn test_maker_order_available_amount() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
     maker.matches.insert(
         Uuid::new_v4(),
@@ -949,11 +958,12 @@ fn prepare_for_cancel_by(ctx: &MmArc) -> mpsc::Receiver<AdexBehaviourCmd> {
     p2p_ctx.store_to_mm_arc(ctx);
 
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).unwrap();
-    let mut maker_orders = ordermatch_ctx.my_maker_orders.lock();
+    let mut maker_orders = ordermatch_ctx.maker_orders_ctx.lock();
     let mut taker_orders = block_on(ordermatch_ctx.my_taker_orders.lock());
 
-    maker_orders.insert(
+    maker_orders.insert_raw(
         Uuid::from_bytes([0; 16]),
+        "RICK".into(),
         Arc::new(AsyncMutex::new(MakerOrder {
             uuid: Uuid::from_bytes([0; 16]),
             base: "RICK".into(),
@@ -971,10 +981,13 @@ fn prepare_for_cancel_by(ctx: &MmArc) -> mpsc::Receiver<AdexBehaviourCmd> {
             base_orderbook_ticker: None,
             rel_orderbook_ticker: None,
             p2p_privkey: None,
+            timeout_in_minutes: None,
         })),
+        None,
     );
-    maker_orders.insert(
+    maker_orders.insert_raw(
         Uuid::from_bytes([1; 16]),
+        "MORTY".into(),
         Arc::new(AsyncMutex::new(MakerOrder {
             uuid: Uuid::from_bytes([1; 16]),
             base: "MORTY".into(),
@@ -992,10 +1005,13 @@ fn prepare_for_cancel_by(ctx: &MmArc) -> mpsc::Receiver<AdexBehaviourCmd> {
             base_orderbook_ticker: None,
             rel_orderbook_ticker: None,
             p2p_privkey: None,
+            timeout_in_minutes: None,
         })),
+        None,
     );
-    maker_orders.insert(
+    maker_orders.insert_raw(
         Uuid::from_bytes([2; 16]),
+        "MORTY".into(),
         Arc::new(AsyncMutex::new(MakerOrder {
             uuid: Uuid::from_bytes([2; 16]),
             base: "MORTY".into(),
@@ -1013,7 +1029,9 @@ fn prepare_for_cancel_by(ctx: &MmArc) -> mpsc::Receiver<AdexBehaviourCmd> {
             base_orderbook_ticker: None,
             rel_orderbook_ticker: None,
             p2p_privkey: None,
+            timeout_in_minutes: None,
         })),
+        None,
     );
     taker_orders.insert(
         Uuid::from_bytes([3; 16]),
@@ -1203,6 +1221,7 @@ fn test_maker_order_was_updated() {
         base_orderbook_ticker: None,
         rel_orderbook_ticker: None,
         p2p_privkey: None,
+        timeout_in_minutes: None,
     };
     let mut update_msg = MakerOrderUpdated::new(maker_order.uuid);
     update_msg.with_new_price(BigRational::from_integer(2.into()));
@@ -1223,10 +1242,13 @@ fn lp_connect_start_bob_should_not_be_invoked_if_order_match_already_connected()
         )
         .into_mm_arc();
     let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).unwrap();
-    ordermatch_ctx
-        .my_maker_orders
-        .lock()
-        .insert(maker_order.uuid, Arc::new(AsyncMutex::new(maker_order)));
+    {
+        let order_arc = Arc::new(AsyncMutex::new(maker_order.clone()));
+        ordermatch_ctx
+            .maker_orders_ctx
+            .lock()
+            .add_order(&maker_order, order_arc);
+    }
 
     static mut CONNECT_START_CALLED: bool = false;
     lp_connect_start_bob.mock_safe(|_, _, _| {
@@ -1251,16 +1273,20 @@ fn should_process_request_only_once() {
         )
         .into_mm_arc();
     let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).unwrap();
-    ordermatch_ctx
-        .my_maker_orders
-        .lock()
-        .insert(maker_order.uuid, Arc::new(AsyncMutex::new(maker_order)));
+    {
+        let order_arc = Arc::new(AsyncMutex::new(maker_order.clone()));
+        ordermatch_ctx
+            .maker_orders_ctx
+            .lock()
+            .add_order(&maker_order, order_arc);
+    }
     let request: TakerRequest = json::from_str(
         r#"{"base":"ETH","rel":"JST","base_amount":"0.1","base_amount_rat":[[1,[1]],[1,[10]]],"rel_amount":"0.2","rel_amount_rat":[[1,[1]],[1,[5]]],"action":"Buy","uuid":"2f9afe84-7a89-4194-8947-45fba563118f","method":"request","sender_pubkey":"031d4256c4bc9f99ac88bf3dba21773132281f65f9bf23a59928bce08961e2f3","dest_pub_key":"0000000000000000000000000000000000000000000000000000000000000000","match_by":{"type":"Any"}}"#,
     ).unwrap();
     block_on(process_taker_request(ctx, Default::default(), request));
-    let maker_orders = ordermatch_ctx.my_maker_orders.lock();
-    let order = block_on(maker_orders.get(&uuid).unwrap().lock());
+    let maker_orders = ordermatch_ctx.maker_orders_ctx.lock();
+    let order_mutex = maker_orders.get_order(&uuid).unwrap();
+    let order = block_on(order_mutex.lock());
     // when new request is processed match is replaced with new instance resetting
     // connect and connected to None so by checking is_some we check that request message is ignored
     assert!(order
@@ -2279,9 +2305,7 @@ fn test_recently_cancelled_blocks_insert() {
     let uuid = order.uuid;
 
     // Simulate cancel arriving first
-    orderbook
-        .recently_cancelled
-        .insert(uuid, pubkey.clone());
+    orderbook.recently_cancelled.insert(uuid, pubkey.clone());
 
     // Now try to insert — should be silently dropped
     orderbook.index_insert_or_update(order);
@@ -2302,9 +2326,7 @@ fn test_recently_cancelled_allows_different_pubkey() {
     let uuid = order.uuid;
 
     // Cancel recorded for pubkey_a — not the order's pubkey
-    orderbook
-        .recently_cancelled
-        .insert(uuid, pubkey_a);
+    orderbook.recently_cancelled.insert(uuid, pubkey_a);
 
     // Insert from pubkey_b should succeed
     orderbook.index_insert_or_update(order);
@@ -2334,7 +2356,11 @@ fn clone_orderbook_memory_db(ctx: &MmArc) -> MemoryDB<Blake2Hasher64> {
 
 fn remove_order(ctx: &MmArc, uuid: Uuid) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).unwrap();
-    let op = ordermatch_ctx.orderbook.lock().index_remove(uuid).map(|(_removed, op)| op);
+    let op = ordermatch_ctx
+        .orderbook
+        .lock()
+        .index_remove(uuid)
+        .map(|(_removed, op)| op);
     if let Some(op) = op {
         let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(vec![op]);
         ordermatch_ctx.wait_trie_ops_flushed();
