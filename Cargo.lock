@@ -4425,6 +4425,7 @@ dependencies = [
  "mm2_net",
  "mm2_net_config",
  "mm2_rpc",
+ "mm2_state_machine",
  "mm2_test_helpers",
  "mocktopus",
  "num-traits",

@@ -91,6 +91,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod check_balance;
 #[path = "lp_swap/maker_swap.rs"]
 mod maker_swap;
+#[path = "lp_swap/maker_swap_v2.rs"]
+pub mod maker_swap_v2;
 #[path = "lp_swap/my_swaps_storage.rs"]
 mod my_swaps_storage;
 #[path = "lp_swap/pubkey_banning.rs"]
@@ -101,12 +103,16 @@ mod recreate_swap_data;
 mod saved_swap;
 #[path = "lp_swap/swap_lock.rs"]
 mod swap_lock;
+#[path = "lp_swap/swap_v2_common.rs"]
+pub mod swap_v2_common;
 #[path = "lp_swap/swap_versioning.rs"]
 pub mod swap_versioning;
 #[path = "lp_swap/swap_watcher.rs"]
 pub mod swap_watcher;
 #[path = "lp_swap/taker_swap.rs"]
 mod taker_swap;
+#[path = "lp_swap/taker_swap_v2.rs"]
+pub mod taker_swap_v2;
 #[path = "lp_swap/trade_preimage.rs"]
 mod trade_preimage;
 
@@ -565,7 +571,7 @@ pub fn active_swaps(ctx: &MmArc) -> Result<Vec<Uuid>, String> {
     Ok(uuids)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct SwapConfirmationsSettings {
     pub maker_coin_confs: u64,
     pub maker_coin_nota: bool,

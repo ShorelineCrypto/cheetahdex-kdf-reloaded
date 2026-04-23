@@ -56,6 +56,7 @@ mm2_err_handle = { path = "../mm2_err_handle" }
 mm2_event_stream = { path = "../mm2_event_stream" }
 mm2_io = { path = "../mm2_io" }
 mm2_rpc = { path = "../mm2_rpc" }
+mm2_state_machine = { path = "../mm2_state_machine" }
 mm2_net = { path = "../mm2_net" }
 mm2_net_config = { path = "../mm2_net_config" }
 mm2_core = { path = "../mm2_core" }
