@@ -26,6 +26,7 @@ primitives = { path = "../mm2_bitcoin/primitives" }
 keys = { path = "../mm2_bitcoin/keys" }
 common = { path = "../common" }
 db_common = { path = "../db_common" }
+mm2_metrics = { path = "../mm2_metrics" }
 mm2_rpc = { path = "../mm2_rpc" }
 mm2_event_stream = { path = "../mm2_event_stream" }
 lazy_static = "1.4"

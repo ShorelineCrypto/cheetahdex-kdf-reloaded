@@ -1,5 +1,5 @@
 use super::*;
-use crate::executor::{spawn, Timer};
+use common::executor::{spawn, Timer};
 use gstuff::Constructible;
 use hdrhistogram::Histogram;
 use itertools::Itertools;
@@ -11,21 +11,20 @@ use std::collections::HashMap;
 use std::fmt::Write as WriteFmt;
 use std::slice::Iter;
 
-use crate::log::{LogArc, Tag};
+use common::log::{LogArc, Tag};
 pub use metrics_runtime::Sink;
 
 /// Increment counter if an MmArc is not dropped yet and metrics system is initialized already.
 #[macro_export]
 macro_rules! mm_counter {
     ($metrics:expr, $name:expr, $value:expr) => {{
-        if let Some(mut sink) = $crate::mm_metrics::TrySink::try_sink(&$metrics) {
+        if let Some(mut sink) = $crate::TrySink::try_sink(&$metrics) {
             sink.increment_counter($name, $value);
         }
     }};
     ($metrics:expr, $name:expr, $value:expr, $($label_key:expr => $label_val:expr),+) => {{
-        use metrics::labels;
-        if let Some(mut sink) = $crate::mm_metrics::TrySink::try_sink(&$metrics) {
-            let labels = labels!( $($label_key => $label_val),+ );
+        if let Some(mut sink) = $crate::TrySink::try_sink(&$metrics) {
+            let labels = vec![$($crate::MetricLabel::new($label_key, $label_val)),+];
             sink.increment_counter_with_labels($name, $value, labels);
         }
     }};
@@ -35,15 +34,14 @@ macro_rules! mm_counter {
 #[macro_export]
 macro_rules! mm_gauge {
     ($metrics:expr, $name:expr, $value:expr) => {{
-        if let Some(mut sink) = $crate::mm_metrics::TrySink::try_sink(&$metrics) {
+        if let Some(mut sink) = $crate::TrySink::try_sink(&$metrics) {
             sink.update_gauge($name, $value);
         }
     }};
 
     ($metrics:expr, $name:expr, $value:expr, $($label_key:expr => $label_val:expr),+) => {{
-        use metrics::labels;
-        if let Some(mut sink) = $crate::mm_metrics::TrySink::try_sink(&$metrics) {
-            let labels = labels!( $($label_key => $label_val),+ );
+        if let Some(mut sink) = $crate::TrySink::try_sink(&$metrics) {
+            let labels = vec![$($crate::MetricLabel::new($label_key, $label_val)),+];
             sink.update_gauge_with_labels($name, $value, labels);
         }
     }};
@@ -53,15 +51,14 @@ macro_rules! mm_gauge {
 #[macro_export]
 macro_rules! mm_timing {
     ($metrics:expr, $name:expr, $start:expr, $end:expr) => {{
-        if let Some(mut sink) = $crate::mm_metrics::TrySink::try_sink(&$metrics) {
+        if let Some(mut sink) = $crate::TrySink::try_sink(&$metrics) {
             sink.record_timing($name, $start, $end);
         }
     }};
 
     ($metrics:expr, $name:expr, $start:expr, $end:expr, $($label_key:expr => $label_val:expr),+) => {{
-        use metrics::labels;
-        if let Some(mut sink) = $crate::mm_metrics::TrySink::try_sink(&$metrics) {
-            let labels = labels!( $($label_key => $label_val),+ );
+        if let Some(mut sink) = $crate::TrySink::try_sink(&$metrics) {
+            let labels = vec![$($crate::MetricLabel::new($label_key, $label_val)),+];
             sink.record_timing_with_labels($name, $start, $end, labels);
         }
     }};
@@ -609,8 +606,8 @@ pub mod prometheus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_on;
-    use crate::log::LogState;
+    use common::block_on;
+    use common::log::LogState;
 
     #[test]
     fn test_initialization() {
@@ -627,60 +624,6 @@ mod tests {
         assert!(metrics.try_sink().is_some());
     }
 
-    #[test]
-    #[ignore]
-    fn test_dashboard() {
-        let log_state = LogArc::new(LogState::in_memory());
-        let metrics = MetricsArc::new();
-
-        metrics.init_with_dashboard(log_state.weak(), 5.).unwrap();
-        let clock = metrics.clock().unwrap();
-
-        let start = clock.now();
-
-        mm_counter!(metrics, "rpc.traffic.tx", 62, "coin" => "BTC");
-        mm_counter!(metrics, "rpc.traffic.rx", 105, "coin"=> "BTC");
-
-        mm_counter!(metrics, "rpc.traffic.tx", 54, "coin" => "KMD");
-        mm_counter!(metrics, "rpc.traffic.rx", 158, "coin" => "KMD");
-
-        mm_gauge!(metrics, "rpc.connection.count", 3, "coin" => "KMD");
-
-        let end = clock.now();
-        mm_timing!(metrics,
-                   "rpc.query.spent_time",
-                   start,
-                   end,
-                   "coin" => "KMD",
-                   "method" => "blockchain.transaction.get");
-
-        block_on(async { Timer::sleep(6.).await });
-
-        mm_counter!(metrics, "rpc.traffic.tx", 30, "coin" => "BTC");
-        mm_counter!(metrics, "rpc.traffic.rx", 44, "coin" => "BTC");
-
-        mm_gauge!(metrics, "rpc.connection.count", 5, "coin" => "KMD");
-
-        let end = clock.now();
-        mm_timing!(metrics,
-                   "rpc.query.spent_time",
-                   start,
-                   end,
-                   "coin"=> "KMD",
-                   "method"=>"blockchain.transaction.get");
-
-        // measure without labels
-        mm_counter!(metrics, "test.counter", 0);
-        mm_gauge!(metrics, "test.gauge", 1);
-        let end = clock.now();
-        mm_timing!(metrics, "test.uptime", start, end);
-
-        block_on(async { Timer::sleep(6.).await });
-    }
-
-    /// There is a problem inside the `metrics` crate:
-    /// histograms are lost or ignored sometimes when `metrics::Controller::observe` is called.
-    /// Because of this, the `mm_timing` macro usage is commented out.
     #[test]
     fn test_collect_json() {
         let metrics = MetricsArc::new();
@@ -701,23 +644,7 @@ mod tests {
         // counter, gauge and timing may be collected also by sink API
         mm_gauge!(metrics, "rpc.connection.count", 5, "coin" => "KMD");
 
-        // mm_timing!(metrics,
-        //            "rpc.query.spent_time",
-        //            // ~ 1 second
-        //            34381019796149, // start
-        //            34382022725155, // end
-        //            "coin" => "KMD",
-        //            "method" => "blockchain.transaction.get");
-        //
-        // mm_timing!(metrics,
-        //            "rpc.query.spent_time",
-        //            // ~ 2 second
-        //            34382022774105, // start
-        //            34384023173373, // end
-        //            "coin" => "KMD",
-        //            "method" => "blockchain.transaction.get");
-
-        let expected = json!({
+        let expected = json::json!({
             "metrics": [
                 {
                     "key": "rpc.traffic.tx",
@@ -743,14 +670,6 @@ mod tests {
                     "type": "counter",
                     "value": 158
                 },
-                // {
-                //     "count": 2,
-                //     "key": "rpc.query.spent_time",
-                //     "labels": { "coin": "KMD", "method": "blockchain.transaction.get" },
-                //     "max": 2000683007,
-                //     "min": 1002438656,
-                //     "type": "histogram"
-                // },
                 {
                     "key": "rpc.connection.count",
                     "labels": { "coin": "KMD" },

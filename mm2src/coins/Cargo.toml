@@ -29,6 +29,7 @@ cfg-if = "1.0"
 chain = { path = "../mm2_bitcoin/chain" }
 common = { path = "../common" }
 mm2_core = { path = "../mm2_core" }
+mm2_metrics = { path = "../mm2_metrics" }
 mm2_err_handle = { path = "../mm2_err_handle" }
 mm2_net = { path = "../mm2_net" }
 mm2_db = { path = "../mm2_db" }

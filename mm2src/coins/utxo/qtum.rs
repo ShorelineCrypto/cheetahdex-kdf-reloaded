@@ -25,13 +25,13 @@ use crate::{
     SwapOps, TradePreimageValue, TransactionFut, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
     ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut, WithdrawSenderAddress,
 };
-use common::mm_metrics::MetricsArc;
 use common::mm_number::MmNumber;
 use crypto::trezor::utxo::TrezorUtxoCoin;
 use crypto::Bip44Chain;
 use ethereum_types::H160;
 use futures::{FutureExt, TryFutureExt};
 use keys::AddressHashEnum;
+use mm2_metrics::MetricsArc;
 use serde::Serialize;
 use serialization::CoinVariant;
 use utxo_signer::UtxoSignerOps;

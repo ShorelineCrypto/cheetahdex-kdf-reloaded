@@ -20,6 +20,9 @@ extern crate gstuff;
 extern crate lazy_static;
 #[cfg(test)]
 #[macro_use]
+extern crate mm2_metrics;
+#[cfg(test)]
+#[macro_use]
 extern crate serde_json;
 #[cfg(test)]
 #[macro_use]

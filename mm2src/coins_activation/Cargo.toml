@@ -10,6 +10,7 @@ async-trait = "0.1"
 coins = { path = "../coins" }
 common = { path = "../common" }
 mm2_err_handle = { path = "../mm2_err_handle" }
+mm2_metrics = { path = "../mm2_metrics" }
 mm2_core = { path = "../mm2_core" }
 crypto = { path = "../crypto" }
 derive_more = "0.99"

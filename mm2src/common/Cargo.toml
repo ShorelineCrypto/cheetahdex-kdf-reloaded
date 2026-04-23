@@ -79,17 +79,12 @@ anyhow = "1.0"
 chrono = "0.4"
 crossterm = "0.20"
 gstuff = { version = "0.7", features = ["crossterm"] }
-hdrhistogram = { version = "7.0", default-features = false, features = ["sync"] }
 hyper = { version = "0.14.11", features = ["client", "http2", "server", "tcp"] }
 # using webpki-tokio to avoid rejecting valid certificates
 # got "invalid certificate: UnknownIssuer" for https://ropsten.infura.io on iOS using default-features
 hyper-rustls = { version = "0.23", default-features = false, features = ["http1", "http2", "webpki-tokio"] }
 libc = { version = "0.2" }
 log4rs = { version = "1.0", default-features = false, features = ["console_appender", "pattern_encoder"] }
-metrics = { version = "0.12" }
-metrics-runtime = { version = "0.13", default-features = false, features = ["metrics-observer-prometheus"] }
-metrics-core = { version = "0.5" }
-metrics-util = { version = "0.3" }
 tokio = { version = "1.7", features = ["io-util", "rt-multi-thread", "net"] }
 
 [build-dependencies]

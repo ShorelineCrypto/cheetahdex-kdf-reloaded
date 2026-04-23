@@ -1,7 +1,7 @@
 use super::*;
-use crate::now_ms;
+use common::now_ms;
 
-/// The dummy macro that imitates [`crate::mm_metrics::native::mm_counter`].
+/// The dummy macro that imitates [`crate::native::mm_counter`].
 /// These macros borrow the `$metrics`, `$name`, `$value` and takes ownership of the `$label_key`, `$label_val` to prevent the `unused_variable` warning.
 /// The labels have to be moved because [`metrics_runtime::Sink::increment_counter_with_labels`] also takes ownership of the labels.
 #[macro_export]
@@ -15,7 +15,7 @@ macro_rules! mm_counter {
     }};
 }
 
-/// The dummy macro that imitates [`crate::mm_metrics::native::mm_gauge`].
+/// The dummy macro that imitates [`crate::native::mm_gauge`].
 /// These macros borrow the `$metrics`, `$name`, `$value` and takes ownership of the `$label_key`, `$label_val` to prevent the `unused_variable` warning.
 /// The labels have to be moved because [`metrics_runtime::Sink::update_gauge_with_labels`] also takes ownership of the labels.
 #[macro_export]
@@ -29,7 +29,7 @@ macro_rules! mm_gauge {
     }};
 }
 
-/// The dummy macro that imitates [`crate::mm_metrics::native::mm_timing`].
+/// The dummy macro that imitates [`crate::native::mm_timing`].
 /// These macros borrow the `$metrics`, `$name`, `$start`, `$end` and takes ownership of the `$label_key`, `$label_val` to prevent the `unused_variable` warning.
 /// The labels have to be moved because [`metrics_runtime::Sink::record_timing_with_labels`] also takes ownership of the labels.
 #[macro_export]

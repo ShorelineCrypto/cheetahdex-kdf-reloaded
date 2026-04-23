@@ -18,7 +18,6 @@
 //
 use coins::lp_coinfind;
 use common::executor::spawn;
-use common::mm_metrics::{ClockOps, MetricsOps};
 use common::{log, Future01CompatExt};
 use derive_more::Display;
 use futures::{channel::oneshot, StreamExt};
@@ -33,6 +32,7 @@ use mm2_libp2p::{
     decode_message, encode_message, DecodingError, GossipsubMessage, Libp2pPublic, Libp2pSecpPublic, MessageId,
     NetworkPorts, PeerId, TOPIC_SEPARATOR,
 };
+use mm2_metrics::{ClockOps, MetricsOps};
 #[cfg(test)]
 use mocktopus::macros::*;
 use parking_lot::Mutex as PaMutex;

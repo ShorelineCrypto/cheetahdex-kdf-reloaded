@@ -1123,6 +1123,7 @@ dependencies = [
  "mm2_db",
  "mm2_err_handle",
  "mm2_io",
+ "mm2_metrics",
  "mm2_net",
  "mm2_test_helpers",
  "mocktopus",
@@ -1188,6 +1189,7 @@ dependencies = [
  "hex 0.4.2",
  "mm2_core",
  "mm2_err_handle",
+ "mm2_metrics",
  "rpc",
  "rpc_task",
  "ser_error",
@@ -1226,7 +1228,6 @@ dependencies = [
  "futures-cpupool",
  "getrandom 0.2.6",
  "gstuff",
- "hdrhistogram 7.1.0",
  "hex 0.4.2",
  "http 0.2.7",
  "http-body 0.1.0",
@@ -1240,10 +1241,6 @@ dependencies = [
  "lightning",
  "log 0.4.29",
  "log4rs",
- "metrics",
- "metrics-core",
- "metrics-runtime",
- "metrics-util",
  "mm2_number",
  "num-bigint 0.4.6",
  "num-rational",
@@ -4306,6 +4303,7 @@ dependencies = [
  "keys",
  "lazy_static",
  "mm2_event_stream",
+ "mm2_metrics",
  "mm2_rpc",
  "primitives",
  "rand 0.7.3",
@@ -4450,6 +4448,7 @@ dependencies = [
  "mm2_err_handle",
  "mm2_event_stream",
  "mm2_io",
+ "mm2_metrics",
  "mm2_net",
  "mm2_net_config",
  "mm2_rpc",
@@ -4490,6 +4489,27 @@ dependencies = [
  "wasm-timer",
  "web-sys",
  "winapi",
+]
+
+[[package]]
+name = "mm2_metrics"
+version = "0.1.0"
+dependencies = [
+ "base64 0.10.1",
+ "common",
+ "fomat-macros 0.2.1",
+ "futures 0.3.15",
+ "gstuff",
+ "hdrhistogram 7.1.0",
+ "http 0.2.7",
+ "hyper",
+ "itertools",
+ "metrics",
+ "metrics-core",
+ "metrics-runtime",
+ "metrics-util",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4584,6 +4604,7 @@ dependencies = [
  "lazy_static",
  "mm2_core",
  "mm2_io",
+ "mm2_metrics",
  "mm2_net",
  "rand 0.7.3",
  "regex",

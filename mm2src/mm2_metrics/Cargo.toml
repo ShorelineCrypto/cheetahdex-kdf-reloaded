@@ -1,0 +1,24 @@
+[package]
+name = "mm2_metrics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+fomat-macros = "0.2"
+gstuff = { version = "0.7" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+base64 = "0.10.0"
+futures = { version = "0.3", package = "futures" }
+gstuff = { version = "0.7" }
+hdrhistogram = { version = "7.0", default-features = false, features = ["sync"] }
+http = "0.2"
+hyper = { version = "0.14.11", features = ["server", "http1", "tcp"] }
+itertools = "0.10"
+metrics = { version = "0.12" }
+metrics-core = { version = "0.5" }
+metrics-runtime = { version = "0.13", default-features = false, features = ["metrics-observer-prometheus"] }
+metrics-util = { version = "0.3" }

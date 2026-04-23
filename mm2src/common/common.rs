@@ -94,8 +94,6 @@ macro_rules! try_h {
 pub mod jsonrpc_client;
 #[macro_use]
 pub mod log;
-#[macro_use]
-pub mod mm_metrics;
 
 /// Generate a struct with decimal, fraction and rational fields for a number.
 ///

@@ -1,4 +1,12 @@
-use crate::log::LogWeak;
+#[macro_use]
+extern crate common;
+#[macro_use]
+extern crate fomat_macros;
+#[macro_use]
+extern crate gstuff;
+
+use common::log::LogWeak;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -7,6 +15,9 @@ use std::sync::{Arc, Weak};
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{prometheus, Clock, Metrics, TrySink};
+// Re-export Label so macros can reference it via $crate::MetricLabel.
+#[cfg(not(target_arch = "wasm32"))]
+pub use metrics_core::Label as MetricLabel;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
