@@ -42,6 +42,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+// Re-export entry points for mm2_bin_lib.
+pub use mm2::lp_main;
+#[cfg(not(target_arch = "wasm32"))]
+pub use mm2::{mm2_main, run_lp_main};
+
 static LP_MAIN_RUNNING: AtomicBool = AtomicBool::new(false);
 static CTX: AtomicU32 = AtomicU32::new(0);
 

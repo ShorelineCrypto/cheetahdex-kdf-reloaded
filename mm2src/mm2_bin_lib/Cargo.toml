@@ -1,0 +1,27 @@
+[package]
+name = "mm2_bin_lib"
+version = "0.1.0"
+edition = "2021"
+default-run = "mm2_reloaded"
+
+[[bin]]
+name = "mm2_reloaded"
+path = "src/main.rs"
+
+[lib]
+name = "mm2_bin_lib"
+path = "src/lib.rs"
+
+[dependencies]
+common.workspace = true
+mm2_core = { path = "../mm2_core" }
+mm2_main = { path = "../mm2_main" }
+serde_json.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+gstuff.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde.workspace = true
+wasm-bindgen = "0.2.50"
+wasm-bindgen-futures = "0.4.21"
