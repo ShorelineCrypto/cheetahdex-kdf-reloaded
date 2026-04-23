@@ -1244,6 +1244,7 @@ dependencies = [
  "metrics-core",
  "metrics-runtime",
  "metrics-util",
+ "mm2_number",
  "num-bigint 0.4.6",
  "num-rational",
  "num-traits",
@@ -4499,6 +4500,19 @@ dependencies = [
  "hex 0.4.2",
  "lazy_static",
  "num-rational",
+]
+
+[[package]]
+name = "mm2_number"
+version = "0.1.0"
+dependencies = [
+ "bigdecimal",
+ "num-bigint 0.4.6",
+ "num-rational",
+ "num-traits",
+ "paste",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -31,6 +31,7 @@ members = [
     "mm2src/mm2_main",
     "mm2src/mm2_net",
     "mm2src/mm2_net_config",
+    "mm2src/mm2_number",
     "mm2src/mm2_state_machine",
     "mm2src/mm2_io",
     "mm2src/mm2_rpc",

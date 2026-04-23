@@ -97,12 +97,52 @@ pub mod log;
 #[macro_use]
 pub mod mm_metrics;
 
-pub mod big_int_str;
+/// Generate a struct with decimal, fraction and rational fields for a number.
+///
+/// Available to downstream crates via `#[macro_use] extern crate common;`.
+#[macro_export]
+macro_rules! construct_detailed {
+    ($name:ident, $field:ident) => {
+        $crate::mm_number::paste! {
+            #[derive(Clone, Debug, Serialize)]
+            pub struct $name {
+                $field: $crate::mm_number::BigDecimal,
+                [<$field _fraction>]: $crate::mm_number::Fraction,
+                [<$field _rat>]: $crate::mm_number::BigRational,
+            }
+
+            impl From<$crate::mm_number::MmNumber> for $name {
+                fn from(mm_num: $crate::mm_number::MmNumber) -> Self {
+                    Self {
+                        $field: mm_num.to_decimal(),
+                        [<$field _fraction>]: mm_num.to_fraction(),
+                        [<$field _rat>]: mm_num.to_ratio(),
+                    }
+                }
+            }
+
+            #[allow(dead_code)]
+            impl $name {
+                pub fn as_ratio(&self) -> &$crate::mm_number::BigRational {
+                    &self.[<$field _rat>]
+                }
+            }
+        }
+    };
+}
+
+pub mod big_int_str {
+    //! Re-exported from [`mm2_number`].
+    pub use mm2_number::BigIntStr;
+}
 pub mod crash_reports;
 pub mod custom_futures;
 pub mod custom_iter;
 pub mod duplex_mutex;
-pub mod mm_number;
+pub mod mm_number {
+    //! Re-exported from [`mm2_number`].
+    pub use mm2_number::*;
+}
 pub mod seri;
 #[path = "patterns/state_machine.rs"]
 pub mod state_machine;
