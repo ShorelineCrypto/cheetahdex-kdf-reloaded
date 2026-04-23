@@ -3270,6 +3270,7 @@ checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
 dependencies = [
  "autocfg 1.5.0",
  "hashbrown 0.11.2",
+ "serde",
 ]
 
 [[package]]
@@ -4352,6 +4353,23 @@ dependencies = [
  "ser_error_derive",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mm2_eth"
+version = "0.1.0"
+dependencies = [
+ "ethabi",
+ "ethereum-types 0.4.2",
+ "ethkey",
+ "hex 0.4.2",
+ "indexmap",
+ "mm2_err_handle",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "tiny-keccak 2.0.2",
+ "web3",
 ]
 
 [[package]]
