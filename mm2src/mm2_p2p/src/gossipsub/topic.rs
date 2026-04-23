@@ -18,7 +18,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use crate::rpc_proto;
+use super::rpc_proto;
 use base64::encode;
 use prost::Message;
 use sha2::{Digest, Sha256};

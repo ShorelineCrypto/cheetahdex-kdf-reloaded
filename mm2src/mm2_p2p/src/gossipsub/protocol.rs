@@ -18,16 +18,16 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use crate::behaviour::GossipsubRpc;
-use crate::rpc_proto;
-use crate::topic::TopicHash;
+use super::behaviour::GossipsubRpc;
+use super::rpc_proto;
+use super::topic::TopicHash;
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use bytes::BytesMut;
 use futures::future;
 use futures::prelude::*;
 use futures_codec::{Decoder, Encoder, Framed};
-use libp2p_core::{InboundUpgrade, OutboundUpgrade, PeerId, UpgradeInfo};
+use libp2p::core::{InboundUpgrade, OutboundUpgrade, PeerId, UpgradeInfo};
 use prost::Message as ProtobufMessage;
 use std::{borrow::Cow, io, iter, pin::Pin};
 use unsigned_varint::codec;

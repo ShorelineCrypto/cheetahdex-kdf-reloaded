@@ -18,15 +18,15 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use crate::behaviour::GossipsubRpc;
-use crate::protocol::{GossipsubCodec, ProtocolConfig};
+use super::behaviour::GossipsubRpc;
+use super::protocol::{GossipsubCodec, ProtocolConfig};
 use futures::prelude::*;
 use futures_codec::Framed;
-use libp2p_core::upgrade::{InboundUpgrade, OutboundUpgrade};
-use libp2p_swarm::handler::{
+use libp2p::core::upgrade::{InboundUpgrade, OutboundUpgrade};
+use libp2p::swarm::handler::{
     ConnectionHandler, ConnectionHandlerEvent, ConnectionHandlerUpgrErr, KeepAlive, SubstreamProtocol,
 };
-use libp2p_swarm::NegotiatedSubstream;
+use libp2p::swarm::NegotiatedSubstream;
 use log::{debug, error, trace, warn};
 use smallvec::SmallVec;
 use std::{

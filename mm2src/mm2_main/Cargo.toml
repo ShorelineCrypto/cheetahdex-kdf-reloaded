@@ -86,7 +86,7 @@ lazy_static = "1.4"
 # ledger = { path = "../ledger" }
 libc = "0.2"
 metrics = "0.12"
-mm2-libp2p = { path = "../mm2_libp2p" }
+mm2_p2p = { path = "../mm2_p2p" }
 num-traits = "0.2"
 rpc = { path = "../mm2_bitcoin/rpc" }
 rpc_task = { path = "../rpc_task" }

@@ -1,3 +1,7 @@
+use crate::floodsub::{Floodsub, FloodsubEvent, Topic as FloodsubTopic};
+use crate::gossipsub::{
+    Gossipsub, GossipsubConfigBuilder, GossipsubEvent, GossipsubMessage, MessageId, Topic, TopicHash,
+};
 use crate::{
     adex_ping::AdexPing,
     peers_exchange::{PeerAddresses, PeersExchange},
@@ -7,9 +11,6 @@ use crate::{
     },
     runtime::{SwarmRuntimeOps, SWARM_RUNTIME},
     NetworkInfo, NetworkPorts, RelayAddress, RelayAddressError,
-};
-use atomicdex_gossipsub::{
-    Gossipsub, GossipsubConfigBuilder, GossipsubEvent, GossipsubMessage, MessageId, Topic, TopicHash,
 };
 use derive_more::Display;
 use futures::{
@@ -31,7 +32,6 @@ use libp2p::{
     swarm::{NetworkBehaviourEventProcess, Swarm},
     NetworkBehaviour, PeerId,
 };
-use libp2p_floodsub::{Floodsub, FloodsubEvent, Topic as FloodsubTopic};
 use log::{debug, error, info};
 use rand::seq::SliceRandom;
 use rand::Rng;

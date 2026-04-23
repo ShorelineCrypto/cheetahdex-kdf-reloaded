@@ -20,8 +20,8 @@
 
 extern crate fnv;
 
-use crate::protocol::{GossipsubMessage, MessageId};
-use crate::topic::TopicHash;
+use super::protocol::{GossipsubMessage, MessageId};
+use super::topic::TopicHash;
 use std::collections::HashMap;
 
 /// CacheEntry stored in the history.
@@ -124,8 +124,8 @@ impl MessageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Topic, TopicHash};
-    use libp2p_core::PeerId;
+    use crate::gossipsub::{Topic, TopicHash};
+    use libp2p::core::PeerId;
 
     fn gen_testm(x: u64, topics: Vec<TopicHash>) -> GossipsubMessage {
         let u8x: u8 = x as u8;

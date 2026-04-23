@@ -23,8 +23,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use crate::GossipsubConfigBuilder;
-    use libp2p_core::Endpoint;
+    use crate::gossipsub::GossipsubConfigBuilder;
+    use libp2p::core::Endpoint;
     use std::net::IpAddr;
     use std::str::FromStr;
 

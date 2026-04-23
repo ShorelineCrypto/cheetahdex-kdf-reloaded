@@ -3,6 +3,8 @@ extern crate lazy_static;
 
 mod adex_ping;
 pub mod atomicdex_behaviour;
+pub mod floodsub;
+pub mod gossipsub;
 mod ip_helpers;
 pub mod peers_exchange;
 pub mod relay_address;
@@ -16,7 +18,7 @@ use secp256k1::{
 use sha2::{Digest, Sha256};
 
 pub use atomicdex_behaviour::{spawn_gossipsub, AdexBehaviourError, NodeType, WssCerts};
-pub use atomicdex_gossipsub::{GossipsubEvent, GossipsubMessage, MessageId};
+pub use gossipsub::{GossipsubEvent, GossipsubMessage, MessageId};
 pub use libp2p::identity::error::DecodingError;
 pub use libp2p::identity::secp256k1::PublicKey as Libp2pSecpPublic;
 pub use libp2p::identity::PublicKey as Libp2pPublic;

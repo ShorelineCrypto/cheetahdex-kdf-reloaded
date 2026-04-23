@@ -18,14 +18,14 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use crate::protocol::{
+use super::protocol::{
     FloodsubMessage, FloodsubProtocol, FloodsubRpc, FloodsubSubscription, FloodsubSubscriptionAction,
 };
-use crate::topic::Topic;
-use crate::FloodsubConfig;
+use super::topic::Topic;
+use super::FloodsubConfig;
 use cuckoofilter::CuckooFilter;
-use libp2p_core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
-use libp2p_swarm::{
+use libp2p::core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
+use libp2p::swarm::{
     IntoConnectionHandler, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, OneShotHandler, PollParameters,
 };
 use smallvec::SmallVec;

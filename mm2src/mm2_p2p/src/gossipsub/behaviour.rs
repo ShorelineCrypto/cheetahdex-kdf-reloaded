@@ -18,17 +18,17 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use crate::config::GossipsubConfig;
-use crate::handler::GossipsubHandler;
-use crate::mcache::MessageCache;
-use crate::protocol::{
+use super::config::GossipsubConfig;
+use super::handler::GossipsubHandler;
+use super::mcache::MessageCache;
+use super::protocol::{
     GossipsubControlAction, GossipsubMessage, GossipsubSubscription, GossipsubSubscriptionAction, MessageId,
 };
-use crate::topic::{Topic, TopicHash};
+use super::topic::{Topic, TopicHash};
 use common::time_cache::{Entry as TimeCacheEntry, TimeCache};
 use futures::prelude::*;
-use libp2p_core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
-use libp2p_swarm::{IntoConnectionHandler, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, PollParameters};
+use libp2p::core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
+use libp2p::swarm::{IntoConnectionHandler, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, PollParameters};
 use log::{debug, error, info, trace, warn};
 use rand::seq::SliceRandom;
 use smallvec::SmallVec;
@@ -106,7 +106,7 @@ impl Gossipsub {
     /// Creates a `Gossipsub` struct given a set of parameters specified by `gs_config`.
     pub fn new(local_peer_id: PeerId, gs_config: GossipsubConfig) -> Self {
         let local_peer_id = if gs_config.no_source_id {
-            PeerId::from_bytes(&crate::config::IDENTITY_SOURCE).expect("Valid peer id")
+            PeerId::from_bytes(&super::config::IDENTITY_SOURCE).expect("Valid peer id")
         } else {
             local_peer_id
         };

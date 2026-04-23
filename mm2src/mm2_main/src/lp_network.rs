@@ -24,15 +24,15 @@ use futures::{channel::oneshot, StreamExt};
 use keys::KeyPair;
 use mm2_core::mm_ctx::{MmArc, MmWeak};
 use mm2_err_handle::prelude::*;
-use mm2_libp2p::atomicdex_behaviour::{
+use mm2_metrics::{ClockOps, MetricsOps};
+use mm2_p2p::atomicdex_behaviour::{
     AdexBehaviourCmd, AdexBehaviourEvent, AdexCmdTx, AdexEventRx, AdexResponse, AdexResponseChannel,
 };
-use mm2_libp2p::peers_exchange::PeerAddresses;
-use mm2_libp2p::{
+use mm2_p2p::peers_exchange::PeerAddresses;
+use mm2_p2p::{
     decode_message, encode_message, DecodingError, GossipsubMessage, Libp2pPublic, Libp2pSecpPublic, MessageId,
     NetworkPorts, PeerId, TOPIC_SEPARATOR,
 };
-use mm2_metrics::{ClockOps, MetricsOps};
 #[cfg(test)]
 use mocktopus::macros::*;
 use parking_lot::Mutex as PaMutex;

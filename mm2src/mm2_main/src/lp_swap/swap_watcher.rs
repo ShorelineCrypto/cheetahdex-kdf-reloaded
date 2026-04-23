@@ -20,7 +20,7 @@ use common::now_ms;
 use common::state_machine::prelude::*;
 use futures::compat::Future01CompatExt;
 use mm2_core::mm_ctx::MmArc;
-use mm2_libp2p::TopicPrefix;
+use mm2_p2p::TopicPrefix;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -512,14 +512,14 @@ impl Drop for SwapWatcherLock {
 
 /// Build the gossipsub topic for watcher messages of a given coin.
 pub fn watcher_topic(coin_ticker: &str) -> String {
-    mm2_libp2p::pub_sub_topic(WATCHER_PREFIX, coin_ticker)
+    mm2_p2p::pub_sub_topic(WATCHER_PREFIX, coin_ticker)
 }
 
 /// Process an incoming watcher gossipsub message.
 /// Verifies the message signature, extracts watcher data, and spawns the
 /// watcher state machine if both coins are enabled and support watchers.
 pub async fn process_watcher_msg(ctx: MmArc, msg: &[u8]) {
-    let (watcher_msg, _raw, verified_pubkey) = match mm2_libp2p::decode_signed::<SwapWatcherMsg>(msg) {
+    let (watcher_msg, _raw, verified_pubkey) = match mm2_p2p::decode_signed::<SwapWatcherMsg>(msg) {
         Ok(m) => m,
         Err(e) => {
             warn!("Failed to decode watcher message: {:?}", e);
