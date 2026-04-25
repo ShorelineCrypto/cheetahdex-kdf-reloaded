@@ -100,6 +100,32 @@ fn migration_6() -> Vec<(&'static str, Vec<String>)> {
     ]
 }
 
+/// Add V2 swap columns to my_swaps table: swap_type, is_finished, events_json, and
+/// additional fields for V2 swap persistence (volumes, fees, secrets, locktimes, etc.).
+fn migration_7() -> Vec<(&'static str, Vec<String>)> {
+    vec![
+        ("ALTER TABLE my_swaps ADD COLUMN swap_type INTEGER NOT NULL DEFAULT 0;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN is_finished INTEGER NOT NULL DEFAULT 0;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN events_json TEXT NOT NULL DEFAULT '[]';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN maker_volume TEXT NOT NULL DEFAULT '';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN taker_volume TEXT NOT NULL DEFAULT '';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN premium TEXT NOT NULL DEFAULT '';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN dex_fee TEXT NOT NULL DEFAULT '';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN dex_fee_burn TEXT NOT NULL DEFAULT '';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN secret BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN secret_hash BLOB NOT NULL DEFAULT X'';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN secret_hash_algo INTEGER NOT NULL DEFAULT 0;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN p2p_privkey BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN lock_duration INTEGER NOT NULL DEFAULT 0;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN maker_coin_confs INTEGER NOT NULL DEFAULT 1;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN maker_coin_nota INTEGER NOT NULL DEFAULT 0;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN taker_coin_confs INTEGER NOT NULL DEFAULT 1;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN taker_coin_nota INTEGER NOT NULL DEFAULT 0;", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN other_p2p_pub BLOB NOT NULL DEFAULT X'';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN swap_version INTEGER NOT NULL DEFAULT 0;", vec![]),
+    ]
+}
+
 async fn statements_for_migration(ctx: &MmArc, current_migration: i64) -> Option<Vec<(&'static str, Vec<String>)>> {
     match current_migration {
         1 => Some(migration_1(ctx).await),
@@ -108,6 +134,7 @@ async fn statements_for_migration(ctx: &MmArc, current_migration: i64) -> Option
         4 => Some(migration_4()),
         5 => Some(migration_5()),
         6 => Some(migration_6()),
+        7 => Some(migration_7()),
         _ => None,
     }
 }

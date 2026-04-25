@@ -82,6 +82,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, Weak};
+use swap_v2_common::{ActiveSwapV2Info, SwapV2Msg, SwapV2MsgStore};
 use uuid::Uuid;
 
 #[cfg(feature = "custom-swap-locktime")]
@@ -149,6 +150,16 @@ pub use trade_preimage::trade_preimage_rpc;
 pub const SWAP_PREFIX: TopicPrefix = "swap";
 
 pub const TX_HELPER_PREFIX: TopicPrefix = "txhlp";
+
+/// V2 swap P2P topic prefix.
+pub const SWAP_V2_PREFIX: TopicPrefix = "swapv2";
+
+/// Swap type discriminant for legacy V1 swaps in the DB.
+pub const LEGACY_SWAP_TYPE: u8 = 0;
+/// Swap type discriminant for maker V2 swaps in the DB.
+pub const MAKER_SWAP_V2_TYPE: u8 = 1;
+/// Swap type discriminant for taker V2 swaps in the DB.
+pub const TAKER_SWAP_V2_TYPE: u8 = 2;
 
 /// Simple map for watcher deduplication. Key: taker_fee_hash, Value: expiry timestamp (seconds).
 pub type WatcherEntryMap = HashMap<Vec<u8>, u64>;
@@ -327,6 +338,141 @@ pub fn tx_helper_topic(coin: &str) -> String {
     pub_sub_topic(TX_HELPER_PREFIX, coin)
 }
 
+/// Returns the P2P topic for a V2 swap: `swapv2/<uuid>`.
+pub fn swap_v2_topic(uuid: &Uuid) -> String {
+    pub_sub_topic(SWAP_V2_PREFIX, &uuid.to_string())
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// V2 swap P2P messaging
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Broadcast a V2 swap message once on the given topic.
+pub fn broadcast_swap_v2_msg(ctx: &MmArc, topic: String, msg: SwapV2Msg, p2p_keypair: &Option<KeyPair>) {
+    let (p2p_private, from) = match p2p_keypair {
+        Some(kp) => (kp.private_bytes(), Some(kp.libp2p_peer_id())),
+        None => (ctx.secp256k1_key_pair().private().secret.take(), None),
+    };
+    if let Ok(encoded) = encode_and_sign(&msg, &p2p_private) {
+        broadcast_p2p_msg(ctx, vec![topic], encoded, from);
+    }
+}
+
+/// Broadcast a V2 swap message every `interval` seconds.  Returns an abort handle
+/// that stops broadcasting when dropped.
+pub fn broadcast_swap_v2_msg_every(
+    ctx: MmArc,
+    topic: String,
+    msg: SwapV2Msg,
+    interval: f64,
+    p2p_keypair: Option<KeyPair>,
+) -> AbortOnDropHandle {
+    let fut = async move {
+        loop {
+            broadcast_swap_v2_msg(&ctx, topic.clone(), msg.clone(), &p2p_keypair);
+            Timer::sleep(interval).await;
+        }
+    };
+    let (abortable, abort_handle) = abortable(fut);
+    spawn(abortable.unwrap_or_else(|_| ()));
+    AbortOnDropHandle(abort_handle)
+}
+
+/// Process an incoming V2 swap message from P2P.
+///
+/// Decodes the signed envelope, verifies the sender matches the expected
+/// counterparty, then routes the inner `SwapV2Msg` variant to the
+/// appropriate slot in the per-swap `SwapV2MsgStore`.
+pub fn process_swap_v2_msg(ctx: &MmArc, topic: &str, msg_bytes: &[u8], expected_sender: &[u8; 33]) {
+    let (decoded_msg, _sig, sender_pubkey) = match decode_signed::<SwapV2Msg>(msg_bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            debug!("Failed to decode V2 swap msg on {}: {:?}", topic, e);
+            return;
+        },
+    };
+
+    // Verify sender matches the expected counterparty.
+    if sender_pubkey.unprefixed() != &expected_sender[1..] {
+        warn!(
+            "V2 swap msg on {} from unexpected sender (got {:?})",
+            topic,
+            sender_pubkey.unprefixed()
+        );
+        return;
+    }
+
+    // Extract UUID from topic: "swapv2/<uuid>"
+    let uuid_str = match topic.strip_prefix("swapv2/") {
+        Some(s) => s,
+        None => {
+            warn!("V2 swap msg on unexpected topic format: {}", topic);
+            return;
+        },
+    };
+    let uuid = match Uuid::from_str(uuid_str) {
+        Ok(u) => u,
+        Err(_) => {
+            warn!("V2 swap msg with invalid UUID in topic: {}", topic);
+            return;
+        },
+    };
+
+    let swap_ctx = match SwapsContext::from_ctx(ctx) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut stores = swap_ctx.swap_v2_msgs.lock().unwrap();
+    if let Some(store) = stores.get_mut(&uuid) {
+        match decoded_msg {
+            SwapV2Msg::MakerNegotiation(data) => store.maker_negotiation = Some(data),
+            SwapV2Msg::TakerNegotiation(data) => store.taker_negotiation = Some(data),
+            SwapV2Msg::MakerNegotiated(data) => store.maker_negotiated = Some(data),
+            SwapV2Msg::TakerFundingInfo(data) => store.taker_funding_info = Some(data),
+            SwapV2Msg::MakerPaymentInfo(data) => store.maker_payment_info = Some(data),
+            SwapV2Msg::TakerPaymentInfo(data) => store.taker_payment_info = Some(data),
+            SwapV2Msg::TakerPaymentSpendPreimage(data) => store.taker_payment_spend_preimage = Some(data),
+        }
+    } else {
+        debug!("No V2 msg store for swap {}", uuid);
+    }
+}
+
+/// Wait for a specific V2 swap message, polling the per-swap store.
+///
+/// The `getter` closure extracts the desired message from the store and returns
+/// `Some(T)` once it arrives. Returns `Err` on timeout.
+pub async fn recv_swap_v2_msg<T>(
+    ctx: MmArc,
+    mut getter: impl FnMut(&mut SwapV2MsgStore) -> Option<T>,
+    uuid: &Uuid,
+    timeout: u64,
+) -> Result<T, String> {
+    let started = now_ms() / 1000;
+    let timeout = BASIC_COMM_TIMEOUT + timeout;
+    let wait_until = started + timeout;
+    loop {
+        Timer::sleep(1.).await;
+        let swap_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+        let mut msgs = swap_ctx.swap_v2_msgs.lock().unwrap();
+        if let Some(store) = msgs.get_mut(uuid) {
+            if let Some(msg) = getter(store) {
+                return Ok(msg);
+            }
+        }
+        let now = now_ms() / 1000;
+        if now > wait_until {
+            return ERR!("V2 swap msg timeout ({} > {})", now - started, timeout);
+        }
+    }
+}
+
+/// Interval for broadcasting negotiation messages (seconds).
+pub const NEGOTIATE_SEND_INTERVAL: f64 = 30.0;
+
+/// Interval for broadcasting transaction info messages (seconds).
+pub const TX_INFO_SEND_INTERVAL: f64 = 600.0;
+
 async fn recv_swap_msg<T>(
     ctx: MmArc,
     mut getter: impl FnMut(&mut SwapMsgStore) -> Option<T>,
@@ -442,6 +588,10 @@ struct SwapsContext {
     /// Very unpleasant consequences
     shutdown_rx: async_std_sync::Receiver<()>,
     swap_msgs: Mutex<HashMap<Uuid, SwapMsgStore>>,
+    /// Per-swap message stores for V2 protocol messages. Keyed by swap UUID.
+    swap_v2_msgs: Mutex<HashMap<Uuid, SwapV2MsgStore>>,
+    /// Active V2 swaps currently running (for status queries).
+    active_swaps_v2: Mutex<Vec<ActiveSwapV2Info>>,
     /// Deduplication map for taker swap watchers. Key = taker_fee_hash, value = expiry timestamp.
     /// Prevents multiple watchers from running for the same swap simultaneously.
     pub taker_swap_watchers: PaMutex<WatcherEntryMap>,
@@ -472,6 +622,8 @@ impl SwapsContext {
                 banned_pubkeys: Mutex::new(HashMap::new()),
                 shutdown_rx,
                 swap_msgs: Mutex::new(HashMap::new()),
+                swap_v2_msgs: Mutex::new(HashMap::new()),
+                active_swaps_v2: Mutex::new(Vec::new()),
                 taker_swap_watchers: PaMutex::new(HashMap::new()),
                 #[cfg(target_arch = "wasm32")]
                 swap_db: ConstructibleDb::new(ctx),
@@ -482,6 +634,33 @@ impl SwapsContext {
     pub fn init_msg_store(&self, uuid: Uuid, accept_only_from: bits256) {
         let store = SwapMsgStore::new(accept_only_from);
         self.swap_msgs.lock().unwrap().insert(uuid, store);
+    }
+
+    /// Initialise a V2 message store for the given swap UUID.
+    /// Messages from senders other than `accept_only_from` are silently dropped.
+    pub fn init_v2_msg_store(&self, uuid: Uuid, _accept_only_from: [u8; 33]) {
+        let store = SwapV2MsgStore::default();
+        self.swap_v2_msgs.lock().unwrap().insert(uuid, store);
+    }
+
+    /// Remove the V2 message store for a finished swap.
+    pub fn remove_v2_msg_store(&self, uuid: &Uuid) {
+        self.swap_v2_msgs.lock().unwrap().remove(uuid);
+    }
+
+    /// Register an active V2 swap for RPC queries.
+    pub fn add_active_swap_v2(&self, info: ActiveSwapV2Info) {
+        self.active_swaps_v2.lock().unwrap().push(info);
+    }
+
+    /// Remove an active V2 swap by UUID.
+    pub fn remove_active_swap_v2(&self, uuid: &Uuid) {
+        self.active_swaps_v2.lock().unwrap().retain(|s| &s.uuid != uuid);
+    }
+
+    /// Return a snapshot of currently active V2 swaps.
+    pub fn active_swaps_v2_snapshot(&self) -> Vec<ActiveSwapV2Info> {
+        self.active_swaps_v2.lock().unwrap().clone()
     }
 
     #[cfg(target_arch = "wasm32")]
