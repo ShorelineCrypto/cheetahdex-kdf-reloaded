@@ -7,6 +7,15 @@ use db_common::sqlite::rusqlite::{Connection, Error as SqlError, Result as SqlRe
 use db_common::sqlite::sql_builder::SqlBuilder;
 use mm2_core::mm_ctx::MmArc;
 use std::convert::TryInto;
+use uuid::Uuid;
+
+/// Query to select V2 swap data for RPC display by uuid.
+/// Column order must match `MySwapForRpc::from_row` field order.
+pub const SELECT_MY_SWAP_V2_FOR_RPC_BY_UUID: &str =
+    "SELECT my_coin, other_coin, uuid, started_at, is_finished, events_json, \
+     maker_volume, taker_volume, premium, dex_fee, lock_duration, \
+     maker_coin_confs, maker_coin_nota, taker_coin_confs, taker_coin_nota, swap_version \
+     FROM my_swaps WHERE uuid = ?1;";
 
 const MY_SWAPS_TABLE: &str = "my_swaps";
 
@@ -24,13 +33,24 @@ macro_rules! CREATE_MY_SWAPS_TABLE {
         );"
     };
 }
-const INSERT_MY_SWAP: &str = "INSERT INTO my_swaps (my_coin, other_coin, uuid, started_at) VALUES (?1, ?2, ?3, ?4)";
+const INSERT_MY_SWAP: &str =
+    "INSERT INTO my_swaps (my_coin, other_coin, uuid, started_at, swap_type) VALUES (?1, ?2, ?3, ?4, ?5)";
 
-pub fn insert_new_swap(ctx: &MmArc, my_coin: &str, other_coin: &str, uuid: &str, started_at: &str) -> SqlResult<()> {
+pub fn insert_new_swap(
+    ctx: &MmArc,
+    my_coin: &str,
+    other_coin: &str,
+    uuid: &str,
+    started_at: &str,
+    swap_type: u8,
+) -> SqlResult<()> {
     debug!("Inserting new swap {} to the SQLite database", uuid);
     let conn = ctx.sqlite_connection();
-    let params = [my_coin, other_coin, uuid, started_at];
-    conn.execute(INSERT_MY_SWAP, &params).map(|_| ())
+    conn.execute(
+        INSERT_MY_SWAP,
+        &[my_coin, other_coin, uuid, started_at, &swap_type.to_string()],
+    )
+    .map(|_| ())
 }
 
 /// Returns SQL statements to initially fill my_swaps table using existing DB with JSON files
@@ -120,8 +140,9 @@ pub fn select_uuids_by_my_swaps_filter(
         return Ok(MyRecentSwapsUuids::default());
     }
 
-    // query the uuids finally
+    // query the uuids and swap types
     query_builder.field("uuid");
+    query_builder.field("swap_type");
     query_builder.order_desc("started_at");
 
     let skipped = match paging_options {
@@ -141,14 +162,22 @@ pub fn select_uuids_by_my_swaps_filter(
     let uuids_query = query_builder.sql().expect("SQL query builder should never fail here");
     debug!("Trying to execute SQL query {} with params {:?}", uuids_query, params);
     let mut stmt = conn.prepare(&uuids_query)?;
-    let uuids = stmt
-        .query_map_named(params_as_trait.as_slice(), |row| row.get(0))?
-        .collect::<SqlResult<Vec<String>>>()?;
-    let uuids: SqlResult<Vec<_>, _> = uuids.into_iter().map(|uuid| uuid.parse()).collect();
-    let uuids = uuids?;
+    let uuids_and_types = stmt
+        .query_map_named(params_as_trait.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<SqlResult<Vec<(String, i64)>>>()?;
+    let uuids_and_types: Result<Vec<_>, SelectRecentSwapsUuidsErr> = uuids_and_types
+        .into_iter()
+        .map(|(uuid_str, swap_type)| {
+            let uuid: Uuid = uuid_str.parse()?;
+            Ok((uuid, swap_type as u8))
+        })
+        .collect();
+    let uuids_and_types = uuids_and_types?;
 
     Ok(MyRecentSwapsUuids {
-        uuids,
+        uuids_and_types,
         total_count,
         skipped,
     })

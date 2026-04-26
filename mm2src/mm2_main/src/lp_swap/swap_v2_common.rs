@@ -26,7 +26,7 @@ use derive_more::Display;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use mm2_state_machine::storable_state_machine::{StateMachineDbRepr, StateMachineStorage};
-use rpc::v1::types::Bytes as BytesJson;
+use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -359,10 +359,18 @@ impl StateMachineDbRepr for TakerSwapDbRepr {
 
 cfg_native! {
     use async_trait::async_trait;
+    use crypto::secret_hash_algo::SecretHashAlgo;
     use db_common::sqlite::rusqlite::params;
     use serde_json;
     use std::str::FromStr;
     use super::{MAKER_SWAP_V2_TYPE, TAKER_SWAP_V2_TYPE};
+
+    fn secret_hash_algo_to_i64(algo: SecretHashAlgo) -> i64 {
+        match algo {
+            SecretHashAlgo::DHASH160 => 0,
+            SecretHashAlgo::SHA256 => 1,
+        }
+    }
 
     /// SQLite-backed storage for V2 maker swaps.
     pub struct MakerSwapStorage {
@@ -381,8 +389,7 @@ cfg_native! {
         type Error = MmError<SwapStateMachineError>;
 
         async fn store_repr(&mut self, id: Self::MachineId, repr: Self::DbRepr) -> Result<(), Self::Error> {
-            insert_swap_v2(&self.ctx, &id, &repr.maker_coin, &repr.taker_coin,
-                           repr.started_at, MAKER_SWAP_V2_TYPE, &repr)
+            insert_swap_v2_maker(&self.ctx, &id, &repr)
                 .map_to_mm(|e| SwapStateMachineError::Storage(e.to_string()))
         }
 
@@ -429,8 +436,7 @@ cfg_native! {
         type Error = MmError<SwapStateMachineError>;
 
         async fn store_repr(&mut self, id: Self::MachineId, repr: Self::DbRepr) -> Result<(), Self::Error> {
-            insert_swap_v2(&self.ctx, &id, &repr.taker_coin, &repr.maker_coin,
-                           repr.started_at, TAKER_SWAP_V2_TYPE, &repr)
+            insert_swap_v2_taker(&self.ctx, &id, &repr)
                 .map_to_mm(|e| SwapStateMachineError::Storage(e.to_string()))
         }
 
@@ -463,25 +469,82 @@ cfg_native! {
     // ── SQL helper functions ────────────────────────────────────────────
 
     /// Insert a new V2 swap record into the my_swaps table.
-    fn insert_swap_v2<R: Serialize>(
-        ctx: &MmArc,
-        uuid: &Uuid,
-        my_coin: &str,
-        other_coin: &str,
-        started_at: u64,
-        swap_type: u8,
-        _repr: &R,
-    ) -> Result<(), String> {
+    /// For maker swaps: my_coin = maker_coin, other_coin = taker_coin.
+    /// For taker swaps: my_coin = taker_coin, other_coin = maker_coin.
+    fn insert_swap_v2_maker(ctx: &MmArc, uuid: &Uuid, repr: &MakerSwapDbRepr) -> Result<(), String> {
         let conn = ctx.sqlite_connection();
         let uuid_str = uuid.to_string();
         let events_json = serde_json::to_string(&serde_json::json!([])).unwrap();
+        let maker_vol_str = repr.maker_volume.to_decimal().to_string();
+        let taker_vol_str = repr.taker_volume.to_decimal().to_string();
+        let premium_str = repr.taker_premium.to_decimal().to_string();
+        let dex_fee_str = repr.dex_fee_amount.to_decimal().to_string();
+        let dex_fee_burn_str = repr.dex_fee_burn.to_decimal().to_string();
+        let secret: Vec<u8> = repr.maker_secret.0.to_vec();
+        let secret_hash: Vec<u8> = repr.maker_secret_hash.to_vec();
+        let secret_hash_algo: i64 = secret_hash_algo_to_i64(repr.secret_hash_algo);
+        let p2p_privkey: Vec<u8> = repr.p2p_keypair.as_ref().map(|k| k.0.clone()).unwrap_or_default();
+        let other_p2p_pub: Vec<u8> = repr.taker_p2p_pub.to_vec();
+
         conn.execute(
-            "INSERT INTO my_swaps (my_coin, other_coin, uuid, started_at, swap_type, is_finished, events_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
-            params![my_coin, other_coin, uuid_str, started_at as i64, swap_type as i64, events_json],
+            "INSERT INTO my_swaps (
+                my_coin, other_coin, uuid, started_at, swap_type, is_finished, events_json,
+                maker_volume, taker_volume, premium, dex_fee, dex_fee_burn,
+                secret, secret_hash, secret_hash_algo, p2p_privkey, lock_duration,
+                maker_coin_confs, maker_coin_nota, taker_coin_confs, taker_coin_nota,
+                other_p2p_pub, swap_version
+            ) VALUES (?1,?2,?3,?4,?5,0,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+            params![
+                repr.maker_coin, repr.taker_coin, uuid_str, repr.started_at as i64,
+                MAKER_SWAP_V2_TYPE as i64, events_json,
+                maker_vol_str, taker_vol_str, premium_str, dex_fee_str, dex_fee_burn_str,
+                secret, secret_hash, secret_hash_algo, p2p_privkey,
+                repr.lock_duration as i64,
+                repr.conf_settings.maker_coin_confs as i64, repr.conf_settings.maker_coin_nota as i64,
+                repr.conf_settings.taker_coin_confs as i64, repr.conf_settings.taker_coin_nota as i64,
+                other_p2p_pub, repr.swap_version as i64,
+            ],
         )
         .map(|_| ())
-        .map_err(|e| format!("Failed to insert V2 swap {}: {}", uuid, e))
+        .map_err(|e| format!("Failed to insert V2 maker swap {}: {}", uuid, e))
+    }
+
+    fn insert_swap_v2_taker(ctx: &MmArc, uuid: &Uuid, repr: &TakerSwapDbRepr) -> Result<(), String> {
+        let conn = ctx.sqlite_connection();
+        let uuid_str = uuid.to_string();
+        let events_json = serde_json::to_string(&serde_json::json!([])).unwrap();
+        let maker_vol_str = repr.maker_volume.to_decimal().to_string();
+        let taker_vol_str = repr.taker_volume.to_decimal().to_string();
+        let premium_str = repr.taker_premium.to_decimal().to_string();
+        let dex_fee_str = repr.dex_fee_amount.to_decimal().to_string();
+        let dex_fee_burn_str = repr.dex_fee_burn.to_decimal().to_string();
+        let secret: Vec<u8> = repr.taker_secret.0.to_vec();
+        let secret_hash: Vec<u8> = repr.taker_secret_hash.to_vec();
+        let secret_hash_algo: i64 = secret_hash_algo_to_i64(repr.secret_hash_algo);
+        let p2p_privkey: Vec<u8> = repr.p2p_keypair.as_ref().map(|k| k.0.clone()).unwrap_or_default();
+        let other_p2p_pub: Vec<u8> = repr.maker_p2p_pub.to_vec();
+
+        conn.execute(
+            "INSERT INTO my_swaps (
+                my_coin, other_coin, uuid, started_at, swap_type, is_finished, events_json,
+                maker_volume, taker_volume, premium, dex_fee, dex_fee_burn,
+                secret, secret_hash, secret_hash_algo, p2p_privkey, lock_duration,
+                maker_coin_confs, maker_coin_nota, taker_coin_confs, taker_coin_nota,
+                other_p2p_pub, swap_version
+            ) VALUES (?1,?2,?3,?4,?5,0,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+            params![
+                repr.taker_coin, repr.maker_coin, uuid_str, repr.started_at as i64,
+                TAKER_SWAP_V2_TYPE as i64, events_json,
+                maker_vol_str, taker_vol_str, premium_str, dex_fee_str, dex_fee_burn_str,
+                secret, secret_hash, secret_hash_algo, p2p_privkey,
+                repr.lock_duration as i64,
+                repr.conf_settings.maker_coin_confs as i64, repr.conf_settings.maker_coin_nota as i64,
+                repr.conf_settings.taker_coin_confs as i64, repr.conf_settings.taker_coin_nota as i64,
+                other_p2p_pub, repr.swap_version as i64,
+            ],
+        )
+        .map(|_| ())
+        .map_err(|e| format!("Failed to insert V2 taker swap {}: {}", uuid, e))
     }
 
     /// Check if a V2 swap record exists for the given UUID.
@@ -531,59 +594,145 @@ cfg_native! {
     }
 
     /// Get the full swap DB repr for a V2 swap.
-    /// We reconstruct it from the row data + deserialized events.
-    fn get_swap_repr<R: for<'de> Deserialize<'de>>(ctx: &MmArc, uuid: &Uuid, _swap_type: u8) -> Result<R, String> {
+    /// We reconstruct it from the row columns + deserialized events.
+    fn get_swap_repr<R: for<'de> Deserialize<'de>>(ctx: &MmArc, uuid: &Uuid, swap_type: u8) -> Result<R, String> {
         let conn = ctx.sqlite_connection();
         let uuid_str = uuid.to_string();
 
-        // For V2 swaps, the full representation is stored serialized in events_json
-        // alongside the basic row fields. We use a simpler approach: store the full
-        // DbRepr as JSON in a separate column. But since we're using the existing
-        // my_swaps schema which stores events_json as just events, we need a different
-        // approach. Let's store the full repr serialized.
-        //
-        // Actually — we store events atomically via append. The full repr is only
-        // needed for recreate_machine. We rebuild it from the events_json + row fields.
-        //
-        // For now, we use a hybrid approach: the initial repr is implicitly stored
-        // in the row columns, and events are in events_json. But that requires
-        // deserialization logic that knows the column layout.
-        //
-        // Simpler: store the FULL DbRepr as JSON in events_json (overwriting with
-        // {events: [...], ...fields...} on every event append). This matches GLEEC's
-        // WASM approach (SavedSwapTable stores full repr).
-        //
-        // For MVP, we read events from events_json and reconstruct a minimal repr.
-        // The full repr approach is TODO for production.
-
-        // Read the events_json and basic fields
         let row = conn
             .query_row(
-                "SELECT my_coin, other_coin, started_at, events_json FROM my_swaps WHERE uuid = ?1",
+                "SELECT my_coin, other_coin, started_at, events_json,
+                        maker_volume, taker_volume, premium, dex_fee, dex_fee_burn,
+                        secret, secret_hash, secret_hash_algo, p2p_privkey,
+                        lock_duration, maker_coin_confs, maker_coin_nota,
+                        taker_coin_confs, taker_coin_nota, other_p2p_pub, swap_version
+                 FROM my_swaps WHERE uuid = ?1",
                 params![uuid_str],
                 |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
+                    Ok(SwapV2Row {
+                        my_coin: row.get(0)?,
+                        other_coin: row.get(1)?,
+                        started_at: row.get::<_, i64>(2)? as u64,
+                        events_json: row.get(3)?,
+                        maker_volume: row.get(4)?,
+                        taker_volume: row.get(5)?,
+                        premium: row.get(6)?,
+                        dex_fee: row.get(7)?,
+                        dex_fee_burn: row.get(8)?,
+                        secret: row.get(9)?,
+                        secret_hash: row.get(10)?,
+                        secret_hash_algo: row.get::<_, i64>(11)? as u8,
+                        p2p_privkey: row.get(12)?,
+                        lock_duration: row.get::<_, i64>(13)? as u64,
+                        maker_coin_confs: row.get::<_, i64>(14)? as u64,
+                        maker_coin_nota: row.get::<_, i64>(15)? != 0,
+                        taker_coin_confs: row.get::<_, i64>(16)? as u64,
+                        taker_coin_nota: row.get::<_, i64>(17)? != 0,
+                        other_p2p_pub: row.get(18)?,
+                        swap_version: row.get::<_, i64>(19)? as u8,
+                    })
                 },
             )
             .map_err(|e| format!("Failed to read swap repr for {}: {}", uuid, e))?;
 
-        // TODO: This is a simplified approach. For full production use, we should store
-        // the complete DbRepr serialized. For now we store + retrieve only events.
-        let _my_coin = row.0;
-        let _other_coin = row.1;
-        let _started_at = row.2 as u64;
-        let _events_str = row.3;
+        // Build the full repr as JSON, then deserialize to R.
+        // This works because MakerSwapDbRepr and TakerSwapDbRepr are both Deserialize.
+        let events_val: serde_json::Value = serde_json::from_str(&row.events_json)
+            .map_err(|e| format!("Failed to parse events_json for {}: {}", uuid, e))?;
 
-        Err(format!(
-            "get_swap_repr: full repr reconstruction not yet implemented for swap {}. \
-             Use recreate_machine with event replay instead.",
-            uuid
-        ))
+        let mut secret_arr = [0u8; 32];
+        let len = row.secret.len().min(32);
+        secret_arr[..len].copy_from_slice(&row.secret[..len]);
+        let secret_h256 = H256Json::from(secret_arr);
+
+        let p2p_keypair = if row.p2p_privkey.iter().any(|&b| b != 0) {
+            Some(serde_json::json!(row.p2p_privkey))
+        } else {
+            None
+        };
+
+        let secret_hash_algo_str = match row.secret_hash_algo {
+            1 => "SHA256",
+            _ => "DHASH160",
+        };
+
+        let conf_settings = serde_json::json!({
+            "maker_coin_confs": row.maker_coin_confs,
+            "maker_coin_nota": row.maker_coin_nota,
+            "taker_coin_confs": row.taker_coin_confs,
+            "taker_coin_nota": row.taker_coin_nota,
+        });
+
+        let repr_json = if swap_type == MAKER_SWAP_V2_TYPE {
+            serde_json::json!({
+                "maker_coin": row.my_coin,
+                "maker_volume": row.maker_volume,
+                "maker_secret": secret_h256,
+                "maker_secret_hash": row.secret_hash,
+                "secret_hash_algo": secret_hash_algo_str,
+                "started_at": row.started_at,
+                "lock_duration": row.lock_duration,
+                "taker_coin": row.other_coin,
+                "taker_volume": row.taker_volume,
+                "taker_premium": row.premium,
+                "dex_fee_amount": row.dex_fee,
+                "dex_fee_burn": row.dex_fee_burn,
+                "conf_settings": conf_settings,
+                "uuid": uuid_str,
+                "p2p_keypair": p2p_keypair,
+                "events": events_val,
+                "taker_p2p_pub": row.other_p2p_pub,
+                "swap_version": row.swap_version,
+            })
+        } else {
+            serde_json::json!({
+                "maker_coin": row.other_coin,
+                "maker_volume": row.maker_volume,
+                "taker_secret": secret_h256,
+                "taker_secret_hash": row.secret_hash,
+                "secret_hash_algo": secret_hash_algo_str,
+                "started_at": row.started_at,
+                "lock_duration": row.lock_duration,
+                "taker_coin": row.my_coin,
+                "taker_volume": row.taker_volume,
+                "taker_premium": row.premium,
+                "dex_fee_amount": row.dex_fee,
+                "dex_fee_burn": row.dex_fee_burn,
+                "conf_settings": conf_settings,
+                "uuid": uuid_str,
+                "p2p_keypair": p2p_keypair,
+                "events": events_val,
+                "maker_p2p_pub": row.other_p2p_pub,
+                "swap_version": row.swap_version,
+            })
+        };
+
+        serde_json::from_value(repr_json)
+            .map_err(|e| format!("Failed to deserialize swap repr for {}: {}", uuid, e))
+    }
+
+    /// Helper struct to hold a row from my_swaps.
+    struct SwapV2Row {
+        my_coin: String,
+        other_coin: String,
+        started_at: u64,
+        events_json: String,
+        maker_volume: String,
+        taker_volume: String,
+        premium: String,
+        dex_fee: String,
+        dex_fee_burn: String,
+        secret: Vec<u8>,
+        secret_hash: Vec<u8>,
+        secret_hash_algo: u8,
+        p2p_privkey: Vec<u8>,
+        lock_duration: u64,
+        maker_coin_confs: u64,
+        maker_coin_nota: bool,
+        taker_coin_confs: u64,
+        taker_coin_nota: bool,
+        other_p2p_pub: Vec<u8>,
+        swap_version: u8,
     }
 
     /// Get UUIDs of all unfinished V2 swaps of the given type.

@@ -17,7 +17,7 @@ pub enum StreamerId {
     Heartbeat,
     Balance(String),
     Network,
-    SwapStatus(String),
+    SwapStatus,
     OrderStatus,
     OrderbookUpdate { topic: String },
 }
@@ -28,7 +28,7 @@ impl fmt::Display for StreamerId {
             StreamerId::Heartbeat => write!(f, "HEARTBEAT"),
             StreamerId::Balance(coin) => write!(f, "BALANCE:{}", coin),
             StreamerId::Network => write!(f, "NETWORK"),
-            StreamerId::SwapStatus(uuid) => write!(f, "SWAP_STATUS:{}", uuid),
+            StreamerId::SwapStatus => write!(f, "SWAP_STATUS"),
             StreamerId::OrderStatus => write!(f, "ORDER_STATUS"),
             StreamerId::OrderbookUpdate { topic } => write!(f, "ORDERBOOK:{}", topic),
         }

@@ -10,7 +10,11 @@ use crate::{
         add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,
         stop_version_stat_collection, update_version_stat_collection,
     },
-    mm2::lp_swap::{recreate_swap_data, trade_preimage_rpc},
+    mm2::lp_swap::{get_locked_amount_rpc, max_maker_vol, recreate_swap_data, trade_preimage_rpc},
+    mm2::lp_swap::swap_v2_rpcs::{
+        active_swaps_rpc as active_swaps_rpc_v2, my_recent_swaps_rpc as my_recent_swaps_rpc_v2,
+        my_swap_status_rpc,
+    },
     mm2::rpc::lp_commands::{get_public_key, get_public_key_hash},
 };
 use coins::hd_wallet::get_new_address;
@@ -140,6 +144,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
 
     match request.method.as_str() {
         "account_balance" => handle_mmrpc(ctx, request, account_balance).await,
+        "active_swaps" => handle_mmrpc(ctx, request, active_swaps_rpc_v2).await,
         "add_delegation" => handle_mmrpc(ctx, request, add_delegation).await,
         "add_node_to_version_stat" => handle_mmrpc(ctx, request, add_node_to_version_stat).await,
         "best_orders" => handle_mmrpc(ctx, request, best_orders_rpc_v2).await,
@@ -151,6 +156,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_public_key_hash" => handle_mmrpc(ctx, request, get_public_key_hash).await,
         "get_raw_transaction" => handle_mmrpc(ctx, request, get_raw_transaction).await,
         "get_staking_infos" => handle_mmrpc(ctx, request, get_staking_infos).await,
+        "get_locked_amount" => handle_mmrpc(ctx, request, get_locked_amount_rpc).await,
         "init_create_new_account" => handle_mmrpc(ctx, request, init_create_new_account).await,
         "init_create_new_account_status" => handle_mmrpc(ctx, request, init_create_new_account_status).await,
         "init_create_new_account_user_action" => handle_mmrpc(ctx, request, init_create_new_account_user_action).await,
@@ -168,6 +174,9 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             handle_mmrpc(ctx, request, init_standalone_coin_user_action::<UtxoStandardCoin>).await
         },
         "init_withdraw" => handle_mmrpc(ctx, request, init_withdraw).await,
+        "max_maker_vol" => handle_mmrpc(ctx, request, max_maker_vol).await,
+        "my_recent_swaps" => handle_mmrpc(ctx, request, my_recent_swaps_rpc_v2).await,
+        "my_swap_status" => handle_mmrpc(ctx, request, my_swap_status_rpc).await,
         "my_tx_history" => handle_mmrpc(ctx, request, my_tx_history_v2_rpc).await,
         "orderbook" => handle_mmrpc(ctx, request, orderbook_rpc_v2).await,
         "recreate_swap_data" => handle_mmrpc(ctx, request, recreate_swap_data).await,
@@ -226,6 +235,7 @@ async fn rpc_streaming_dispatcher(
         "heartbeat::enable" => handle_mmrpc(ctx, request, streaming_activations::heartbeat::enable_heartbeat).await,
         "order_status::enable" => handle_mmrpc(ctx, request, streaming_activations::orders::enable_order_status).await,
         "orderbook::enable" => handle_mmrpc(ctx, request, streaming_activations::orderbook::enable_orderbook).await,
+        "swap_status::enable" => handle_mmrpc(ctx, request, streaming_activations::swaps::enable_swap_status).await,
         _ => MmError::err(DispatcherError::NoSuchMethod),
     }
 }

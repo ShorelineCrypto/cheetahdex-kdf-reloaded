@@ -544,10 +544,129 @@ where
         let swap_ctx = super::SwapsContext::from_ctx(&self.ctx).expect("SwapsContext should exist");
         swap_ctx.remove_active_swap_v2(&self.uuid);
         swap_ctx.remove_v2_msg_store(&self.uuid);
+
+        // Clean up V2 locked amounts for both coins.
+        let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+        let maker_ticker = self.maker_coin.ticker();
+        if let Some(entries) = locked.get_mut(maker_ticker) {
+            entries.retain(|info| info.swap_uuid != self.uuid);
+        }
+        let taker_ticker = self.taker_coin.ticker();
+        if let Some(entries) = locked.get_mut(taker_ticker) {
+            entries.retain(|info| info.swap_uuid != self.uuid);
+        }
     }
 
-    fn on_event(&mut self, _event: &TakerSwapEvent) {}
-    fn on_kickstart_event(&mut self, _event: TakerSwapEvent) {}
+    fn on_event(&mut self, event: &TakerSwapEvent) {
+        match event {
+            TakerSwapEvent::Initialized {
+                taker_payment_fee, ..
+            } => {
+                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
+                    .expect("from_ctx should not fail at this point");
+                let taker_coin_ticker: String = self.taker_coin.ticker().into();
+                let new_locked = super::LockedAmountV2Info {
+                    swap_uuid: self.uuid,
+                    locked_amount: super::LockedAmount {
+                        coin: taker_coin_ticker.clone(),
+                        amount: &self.taker_volume + &self.taker_premium,
+                        trade_fee: Some(coins::TradeFee {
+                            coin: taker_coin_ticker.clone(),
+                            amount: taker_payment_fee.clone(),
+                            paid_from_trading_vol: false,
+                        }),
+                    },
+                };
+                swaps_ctx
+                    .locked_amounts_v2
+                    .lock()
+                    .unwrap()
+                    .entry(taker_coin_ticker)
+                    .or_default()
+                    .push(new_locked);
+            },
+            TakerSwapEvent::TakerFundingSent { .. } => {
+                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
+                    .expect("from_ctx should not fail at this point");
+                let ticker = self.taker_coin.ticker();
+                if let Some(taker_coin_locked) =
+                    swaps_ctx.locked_amounts_v2.lock().unwrap().get_mut(ticker)
+                {
+                    taker_coin_locked.retain(|locked| locked.swap_uuid != self.uuid);
+                };
+            },
+            TakerSwapEvent::Negotiated { .. }
+            | TakerSwapEvent::TakerFundingRefundRequired { .. }
+            | TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived { .. }
+            | TakerSwapEvent::TakerPaymentSent { .. }
+            | TakerSwapEvent::TakerPaymentSentPreimageSendingSkipped { .. }
+            | TakerSwapEvent::TakerPaymentRefundRequired { .. }
+            | TakerSwapEvent::MakerPaymentConfirmed { .. }
+            | TakerSwapEvent::TakerPaymentSpent { .. }
+            | TakerSwapEvent::MakerPaymentSpent { .. }
+            | TakerSwapEvent::TakerFundingRefunded { .. }
+            | TakerSwapEvent::TakerPaymentRefunded { .. }
+            | TakerSwapEvent::Aborted { .. }
+            | TakerSwapEvent::Completed => (),
+        }
+        // Send a notification to the swap status streamer about a new event.
+        self.ctx
+            .event_stream_manager
+            .send_fn(&mm2_event_stream::StreamerId::SwapStatus, || {
+                super::swap_events::SwapStatusEvent::TakerV2 {
+                    uuid: self.uuid,
+                    event: event.clone(),
+                }
+            })
+            .ok();
+    }
+
+    fn on_kickstart_event(&mut self, event: TakerSwapEvent) {
+        match event {
+            TakerSwapEvent::Initialized {
+                taker_payment_fee, ..
+            }
+            | TakerSwapEvent::Negotiated {
+                taker_payment_fee, ..
+            } => {
+                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
+                    .expect("from_ctx should not fail at this point");
+                let taker_coin_ticker: String = self.taker_coin.ticker().into();
+                let new_locked = super::LockedAmountV2Info {
+                    swap_uuid: self.uuid,
+                    locked_amount: super::LockedAmount {
+                        coin: taker_coin_ticker.clone(),
+                        amount: &self.taker_volume + &self.taker_premium,
+                        trade_fee: Some(coins::TradeFee {
+                            coin: taker_coin_ticker.clone(),
+                            amount: taker_payment_fee,
+                            paid_from_trading_vol: false,
+                        }),
+                    },
+                };
+                swaps_ctx
+                    .locked_amounts_v2
+                    .lock()
+                    .unwrap()
+                    .entry(taker_coin_ticker)
+                    .or_default()
+                    .push(new_locked);
+            },
+            TakerSwapEvent::TakerFundingSent { .. }
+            | TakerSwapEvent::TakerFundingRefundRequired { .. }
+            | TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived { .. }
+            | TakerSwapEvent::TakerPaymentSent { .. }
+            | TakerSwapEvent::TakerPaymentSentPreimageSendingSkipped { .. }
+            | TakerSwapEvent::TakerPaymentRefundRequired { .. }
+            | TakerSwapEvent::MakerPaymentConfirmed { .. }
+            | TakerSwapEvent::TakerPaymentSpent { .. }
+            | TakerSwapEvent::MakerPaymentSpent { .. }
+            | TakerSwapEvent::TakerFundingRefunded { .. }
+            | TakerSwapEvent::TakerPaymentRefunded { .. }
+            | TakerSwapEvent::Aborted { .. }
+            | TakerSwapEvent::Completed => (),
+        }
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

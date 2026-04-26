@@ -88,6 +88,23 @@ pub mod tables {
         pub my_coin: String,
         pub other_coin: String,
         pub started_at: u32,
+        /// Swap type discriminant (LEGACY_SWAP_TYPE / MAKER_SWAP_V2_TYPE / TAKER_SWAP_V2_TYPE).
+        /// Defaults to 0 (legacy) for backwards compatibility.
+        #[serde(default)]
+        pub swap_type: u8,
+        /// Whether the swap has finished.
+        #[serde(default)]
+        pub is_finished: BoolAsInt,
+    }
+
+    /// Helper for storing booleans as integers in IndexedDB.
+    #[derive(Debug, Default, Serialize, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct BoolAsInt(u8);
+
+    impl BoolAsInt {
+        pub fn as_bool(&self) -> bool { self.0 != 0 }
+        pub fn from_bool(v: bool) -> Self { BoolAsInt(v as u8) }
     }
 
     impl TableSignature for MySwapsFiltersTable {

@@ -562,14 +562,122 @@ where
             .expect("SwapsContext should exist");
         swap_ctx.remove_active_swap_v2(&self.uuid);
         swap_ctx.remove_v2_msg_store(&self.uuid);
+
+        // Clean up V2 locked amounts for both coins.
+        let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+        let maker_ticker = self.maker_coin.ticker();
+        if let Some(entries) = locked.get_mut(maker_ticker) {
+            entries.retain(|info| info.swap_uuid != self.uuid);
+        }
+        let taker_ticker = self.taker_coin.ticker();
+        if let Some(entries) = locked.get_mut(taker_ticker) {
+            entries.retain(|info| info.swap_uuid != self.uuid);
+        }
     }
 
-    fn on_event(&mut self, _event: &MakerSwapEvent) {
-        // TODO P6.7: Locked amounts + SSE streaming
+    fn on_event(&mut self, event: &MakerSwapEvent) {
+        match event {
+            MakerSwapEvent::Initialized {
+                maker_payment_trade_fee, ..
+            } => {
+                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
+                    .expect("from_ctx should not fail at this point");
+                let maker_coin_ticker: String = self.maker_coin.ticker().into();
+                let new_locked = super::LockedAmountV2Info {
+                    swap_uuid: self.uuid,
+                    locked_amount: super::LockedAmount {
+                        coin: maker_coin_ticker.clone(),
+                        amount: self.maker_volume.clone(),
+                        trade_fee: Some(coins::TradeFee {
+                            coin: maker_coin_ticker.clone(),
+                            amount: maker_payment_trade_fee.clone(),
+                            paid_from_trading_vol: false,
+                        }),
+                    },
+                };
+                swaps_ctx
+                    .locked_amounts_v2
+                    .lock()
+                    .unwrap()
+                    .entry(maker_coin_ticker)
+                    .or_default()
+                    .push(new_locked);
+            },
+            MakerSwapEvent::MakerPaymentSentFundingSpendGenerated { .. } => {
+                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
+                    .expect("from_ctx should not fail at this point");
+                let ticker = self.maker_coin.ticker();
+                if let Some(maker_coin_locked) =
+                    swaps_ctx.locked_amounts_v2.lock().unwrap().get_mut(ticker)
+                {
+                    maker_coin_locked.retain(|locked| locked.swap_uuid != self.uuid);
+                };
+            },
+            MakerSwapEvent::WaitingForTakerFunding { .. }
+            | MakerSwapEvent::TakerFundingReceived { .. }
+            | MakerSwapEvent::MakerPaymentRefundRequired { .. }
+            | MakerSwapEvent::MakerPaymentRefunded { .. }
+            | MakerSwapEvent::TakerPaymentReceived { .. }
+            | MakerSwapEvent::TakerPaymentReceivedPreimageSkipped { .. }
+            | MakerSwapEvent::TakerPaymentSpent { .. }
+            | MakerSwapEvent::Aborted { .. }
+            | MakerSwapEvent::Completed => (),
+        }
+        // Send a notification to the swap status streamer about a new event.
+        self.ctx
+            .event_stream_manager
+            .send_fn(&mm2_event_stream::StreamerId::SwapStatus, || {
+                super::swap_events::SwapStatusEvent::MakerV2 {
+                    uuid: self.uuid,
+                    event: event.clone(),
+                }
+            })
+            .ok();
     }
 
-    fn on_kickstart_event(&mut self, _event: MakerSwapEvent) {
-        // TODO P6.7: Re-establish locked amounts on recovery
+    fn on_kickstart_event(&mut self, event: MakerSwapEvent) {
+        match event {
+            MakerSwapEvent::Initialized {
+                maker_payment_trade_fee, ..
+            }
+            | MakerSwapEvent::WaitingForTakerFunding {
+                maker_payment_trade_fee, ..
+            }
+            | MakerSwapEvent::TakerFundingReceived {
+                maker_payment_trade_fee, ..
+            } => {
+                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
+                    .expect("from_ctx should not fail at this point");
+                let maker_coin_ticker: String = self.maker_coin.ticker().into();
+                let new_locked = super::LockedAmountV2Info {
+                    swap_uuid: self.uuid,
+                    locked_amount: super::LockedAmount {
+                        coin: maker_coin_ticker.clone(),
+                        amount: self.maker_volume.clone(),
+                        trade_fee: Some(coins::TradeFee {
+                            coin: maker_coin_ticker.clone(),
+                            amount: maker_payment_trade_fee,
+                            paid_from_trading_vol: false,
+                        }),
+                    },
+                };
+                swaps_ctx
+                    .locked_amounts_v2
+                    .lock()
+                    .unwrap()
+                    .entry(maker_coin_ticker)
+                    .or_default()
+                    .push(new_locked);
+            },
+            MakerSwapEvent::MakerPaymentSentFundingSpendGenerated { .. }
+            | MakerSwapEvent::MakerPaymentRefundRequired { .. }
+            | MakerSwapEvent::MakerPaymentRefunded { .. }
+            | MakerSwapEvent::TakerPaymentReceived { .. }
+            | MakerSwapEvent::TakerPaymentReceivedPreimageSkipped { .. }
+            | MakerSwapEvent::TakerPaymentSpent { .. }
+            | MakerSwapEvent::Aborted { .. }
+            | MakerSwapEvent::Completed => (),
+        }
     }
 }
 

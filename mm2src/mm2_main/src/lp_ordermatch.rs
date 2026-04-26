@@ -1179,7 +1179,7 @@ impl BalanceTradeFeeUpdatedHandler for BalanceUpdateOrdermatchHandler {
         // Get the max maker available volume to check if the wallet balances are sufficient for the issued maker orders.
         // Note although the maker orders are issued already, but they are not matched yet, so pass the `OrderIssue` stage.
         let new_volume = match calc_max_maker_vol(&ctx, coin, new_balance, FeeApproxStage::OrderIssue).await {
-            Ok(v) => v,
+            Ok(info) => info.volume,
             Err(e) if e.get_inner().not_sufficient_balance() => MmNumber::from(0),
             Err(e) => {
                 log::warn!("Couldn't handle the 'balance_updated' event: {}", e);
@@ -3628,7 +3628,7 @@ pub async fn lp_ordermatch_loop(ctx: MmArc) {
                 };
                 let max_vol = match calc_max_maker_vol(&ctx, &base, &current_balance, FeeApproxStage::OrderIssue).await
                 {
-                    Ok(max) => max,
+                    Ok(info) => info.volume,
                     Err(e) => {
                         log::info!("Error {} on balance check to kickstart order {}, cancelling", e, uuid);
                         to_cancel.push(uuid);
@@ -4945,9 +4945,10 @@ async fn get_max_volume(ctx: &MmArc, my_coin: &MmCoinEnum, other_coin: &MmCoinEn
     try_s!(check_other_coin_balance_for_swap(ctx, other_coin, None, other_coin_trade_fee).await);
     // calculate max maker volume
     // note the `calc_max_maker_vol` returns [`CheckBalanceError::NotSufficientBalance`] error if the balance of `base_coin` is not sufficient
-    Ok(try_s!(
+    let info = try_s!(
         calc_max_maker_vol(ctx, my_coin, &my_balance, FeeApproxStage::OrderIssue).await
-    ))
+    );
+    Ok(info.volume)
 }
 
 pub async fn create_maker_order(ctx: &MmArc, req: SetPriceReq) -> Result<MakerOrder, String> {

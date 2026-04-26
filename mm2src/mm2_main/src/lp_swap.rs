@@ -57,18 +57,18 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use coins::{lp_coinfind, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee, TransactionEnum};
+use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee, TransactionEnum};
 use common::log::{debug, warn};
 use common::{
     bits256, calc_total_pages,
     executor::{spawn, Timer},
     log::{error, info},
-    mm_number::{BigDecimal, MmNumber},
-    now_ms, var, PagingOptions,
+    mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
+    now_ms, var, HttpStatusCode, PagingOptions,
 };
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
-use http::Response;
+use http::{Response, StatusCode};
 use mm2_core::mm_ctx::{from_ctx, MmArc};
 use mm2_err_handle::prelude::*;
 use mm2_net_config::NetConfig;
@@ -94,6 +94,8 @@ mod check_balance;
 mod maker_swap;
 #[path = "lp_swap/maker_swap_v2.rs"]
 pub mod maker_swap_v2;
+#[path = "lp_swap/max_maker_vol_rpc.rs"]
+mod max_maker_vol_rpc;
 #[path = "lp_swap/my_swaps_storage.rs"]
 mod my_swaps_storage;
 #[path = "lp_swap/pubkey_banning.rs"]
@@ -102,10 +104,14 @@ mod pubkey_banning;
 mod recreate_swap_data;
 #[path = "lp_swap/saved_swap.rs"]
 mod saved_swap;
+#[path = "lp_swap/swap_events.rs"]
+pub(crate) mod swap_events;
 #[path = "lp_swap/swap_lock.rs"]
 mod swap_lock;
 #[path = "lp_swap/swap_v2_common.rs"]
 pub mod swap_v2_common;
+#[path = "lp_swap/swap_v2_rpcs.rs"]
+pub(crate) mod swap_v2_rpcs;
 #[path = "lp_swap/swap_versioning.rs"]
 pub mod swap_versioning;
 #[path = "lp_swap/swap_watcher.rs"]
@@ -146,6 +152,7 @@ pub use taker_swap::{
     TakerTradePreimage,
 };
 pub use trade_preimage::trade_preimage_rpc;
+pub use max_maker_vol_rpc::max_maker_vol;
 
 pub const SWAP_PREFIX: TopicPrefix = "swap";
 
@@ -578,6 +585,13 @@ impl From<TakerSwapEvent> for SwapEvent {
     }
 }
 
+/// V2 swap locked amount information, keyed by coin ticker in SwapsContext.
+#[derive(Debug)]
+struct LockedAmountV2Info {
+    swap_uuid: Uuid,
+    locked_amount: LockedAmount,
+}
+
 struct SwapsContext {
     running_swaps: Mutex<Vec<Weak<dyn AtomicSwap>>>,
     banned_pubkeys: Mutex<HashMap<H256Json, BanReason>>,
@@ -592,6 +606,8 @@ struct SwapsContext {
     swap_v2_msgs: Mutex<HashMap<Uuid, SwapV2MsgStore>>,
     /// Active V2 swaps currently running (for status queries).
     active_swaps_v2: Mutex<Vec<ActiveSwapV2Info>>,
+    /// V2 swap locked amounts, keyed by coin ticker.
+    locked_amounts_v2: Mutex<HashMap<String, Vec<LockedAmountV2Info>>>,
     /// Deduplication map for taker swap watchers. Key = taker_fee_hash, value = expiry timestamp.
     /// Prevents multiple watchers from running for the same swap simultaneously.
     pub taker_swap_watchers: PaMutex<WatcherEntryMap>,
@@ -624,6 +640,7 @@ impl SwapsContext {
                 swap_msgs: Mutex::new(HashMap::new()),
                 swap_v2_msgs: Mutex::new(HashMap::new()),
                 active_swaps_v2: Mutex::new(Vec::new()),
+                locked_amounts_v2: Mutex::new(HashMap::new()),
                 taker_swap_watchers: PaMutex::new(HashMap::new()),
                 #[cfg(target_arch = "wasm32")]
                 swap_db: ConstructibleDb::new(ctx),
@@ -672,9 +689,10 @@ impl SwapsContext {
 /// Get total amount of selected coin locked by all currently ongoing swaps
 pub fn get_locked_amount(ctx: &MmArc, coin: &str) -> MmNumber {
     let swap_ctx = SwapsContext::from_ctx(ctx).unwrap();
-    let swap_lock = swap_ctx.running_swaps.lock().unwrap();
 
-    swap_lock
+    // V1 locked amounts (from running_swaps)
+    let swap_lock = swap_ctx.running_swaps.lock().unwrap();
+    let v1_total = swap_lock
         .iter()
         .filter_map(|swap| swap.upgrade())
         .flat_map(|swap| swap.locked_amount())
@@ -688,7 +706,78 @@ pub fn get_locked_amount(ctx: &MmArc, coin: &str) -> MmNumber {
                 }
             }
             total_amount
+        });
+    drop(swap_lock);
+
+    // V2 locked amounts
+    let locked_v2 = swap_ctx.locked_amounts_v2.lock().unwrap();
+    let v2_total = locked_v2
+        .get(coin)
+        .map(|entries| {
+            entries.iter().fold(MmNumber::from(0), |mut total, info| {
+                total += info.locked_amount.amount.clone();
+                if let Some(ref fee) = info.locked_amount.trade_fee {
+                    if fee.coin == coin && !fee.paid_from_trading_vol {
+                        total += fee.amount.clone();
+                    }
+                }
+                total
+            })
         })
+        .unwrap_or_else(|| MmNumber::from(0));
+
+    v1_total + v2_total
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// get_locked_amount RPC
+// ────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct GetLockedAmountReq {
+    coin: String,
+}
+
+#[derive(Serialize)]
+pub struct GetLockedAmountResp {
+    coin: String,
+    locked_amount: MmNumberMultiRepr,
+}
+
+#[derive(Debug, Display, Serialize, SerializeErrorType)]
+#[serde(tag = "error_type", content = "error_data")]
+pub enum GetLockedAmountRpcError {
+    #[display(fmt = "No such coin: {coin}")]
+    NoSuchCoin { coin: String },
+}
+
+impl HttpStatusCode for GetLockedAmountRpcError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            GetLockedAmountRpcError::NoSuchCoin { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<CoinFindError> for GetLockedAmountRpcError {
+    fn from(e: CoinFindError) -> Self {
+        match e {
+            CoinFindError::NoSuchCoin { coin } => GetLockedAmountRpcError::NoSuchCoin { coin },
+        }
+    }
+}
+
+pub async fn get_locked_amount_rpc(
+    ctx: MmArc,
+    req: GetLockedAmountReq,
+) -> Result<GetLockedAmountResp, MmError<GetLockedAmountRpcError>> {
+    lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    let locked_amount = get_locked_amount(&ctx, &req.coin);
+
+    Ok(GetLockedAmountResp {
+        coin: req.coin,
+        locked_amount: locked_amount.into(),
+    })
 }
 
 /// Get number of currently running swaps
@@ -738,15 +827,18 @@ pub fn active_swaps_using_coin(ctx: &MmArc, coin: &str) -> Result<Vec<Uuid>, Str
     Ok(uuids)
 }
 
-pub fn active_swaps(ctx: &MmArc) -> Result<Vec<Uuid>, String> {
+pub fn active_swaps(ctx: &MmArc) -> Result<Vec<(Uuid, u8)>, String> {
     let swap_ctx = try_s!(SwapsContext::from_ctx(ctx));
     let swaps = try_s!(swap_ctx.running_swaps.lock());
-    let mut uuids = vec![];
-    for swap in swaps.iter() {
-        if let Some(swap) = swap.upgrade() {
-            uuids.push(*swap.uuid())
-        }
-    }
+    let mut uuids: Vec<(Uuid, u8)> = swaps
+        .iter()
+        .filter_map(|swap| swap.upgrade())
+        .map(|swap| (*swap.uuid(), LEGACY_SWAP_TYPE))
+        .collect();
+    drop(swaps);
+
+    let v2_swaps = swap_ctx.active_swaps_v2_snapshot();
+    uuids.extend(v2_swaps.iter().map(|info| (info.uuid, info.swap_type as u8)));
     Ok(uuids)
 }
 
@@ -1057,8 +1149,20 @@ pub async fn insert_new_swap_to_db(
     uuid: Uuid,
     started_at: u64,
 ) -> Result<(), String> {
+    // Legacy V1 swaps default to LEGACY_SWAP_TYPE
+    insert_new_swap_to_db_with_type(ctx, my_coin, other_coin, uuid, started_at, LEGACY_SWAP_TYPE).await
+}
+
+pub async fn insert_new_swap_to_db_with_type(
+    ctx: MmArc,
+    my_coin: &str,
+    other_coin: &str,
+    uuid: Uuid,
+    started_at: u64,
+    swap_type: u8,
+) -> Result<(), String> {
     MySwapsStorage::new(ctx)
-        .save_new_swap(my_coin, other_coin, uuid, started_at)
+        .save_new_swap(my_coin, other_coin, uuid, started_at, swap_type)
         .await
         .map_err(|e| ERRL!("{}", e))
 }
@@ -1236,14 +1340,16 @@ pub async fn all_swaps_uuids_by_filter(ctx: MmArc, req: Json) -> Result<Response
             .await
     );
 
+    let uuids: Vec<Uuid> = db_result.uuids_and_types.iter().map(|(u, _)| *u).collect();
+    let found_records = uuids.len();
     let res_js = json!({
         "result": {
-            "uuids": db_result.uuids,
+            "uuids": uuids,
             "my_coin": filter.my_coin,
             "other_coin": filter.other_coin,
             "from_timestamp": filter.from_timestamp,
             "to_timestamp": filter.to_timestamp,
-            "found_records": db_result.uuids.len(),
+            "found_records": found_records,
         },
     });
     let res = try_s!(json::to_vec(&res_js));
@@ -1260,8 +1366,9 @@ pub struct MyRecentSwapsReq {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct MyRecentSwapsUuids {
-    /// UUIDs of swaps matching the query
-    pub uuids: Vec<Uuid>,
+    /// UUIDs and types of swaps matching the query.
+    /// The `u8` is the swap type discriminant (LEGACY_SWAP_TYPE / MAKER_SWAP_V2_TYPE / TAKER_SWAP_V2_TYPE).
+    pub uuids_and_types: Vec<(Uuid, u8)>,
     /// Total count of swaps matching the query
     pub total_count: usize,
     /// The number of skipped UUIDs
@@ -1301,8 +1408,8 @@ pub async fn my_recent_swaps(ctx: MmArc, req: MyRecentSwapsReq) -> MyRecentSwaps
         Err(_) => return Err(MmError::new(MyRecentSwapsErr::UnableToQuerySwapStorage)),
     };
 
-    let mut swaps = Vec::with_capacity(db_result.uuids.len());
-    for uuid in db_result.uuids.iter() {
+    let mut swaps = Vec::with_capacity(db_result.uuids_and_types.len());
+    for (uuid, _swap_type) in db_result.uuids_and_types.iter() {
         let swap = match SavedSwap::load_my_swap_from_db(&ctx, *uuid).await {
             Ok(Some(swap)) => swap,
             Ok(None) => {
@@ -1319,7 +1426,7 @@ pub async fn my_recent_swaps(ctx: MmArc, req: MyRecentSwapsReq) -> MyRecentSwaps
         limit: req.paging_options.limit,
         skipped: db_result.skipped,
         total: db_result.total_count,
-        found_records: db_result.uuids.len(),
+        found_records: db_result.uuids_and_types.len(),
         page_number: req.paging_options.page_number,
         total_pages: calc_total_pages(db_result.total_count, req.paging_options.limit),
         swaps,
@@ -1336,8 +1443,8 @@ pub async fn my_recent_swaps_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u
     );
 
     // iterate over uuids trying to parse the corresponding files content and add to result vector
-    let mut swaps = Vec::with_capacity(db_result.uuids.len());
-    for uuid in db_result.uuids.iter() {
+    let mut swaps = Vec::with_capacity(db_result.uuids_and_types.len());
+    for (uuid, _swap_type) in db_result.uuids_and_types.iter() {
         let swap_json = match SavedSwap::load_my_swap_from_db(&ctx, *uuid).await {
             Ok(Some(swap)) => json::to_value(MySwapStatusResponse::from(&swap)).unwrap(),
             Ok(None) => {
@@ -1361,7 +1468,7 @@ pub async fn my_recent_swaps_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u
             "total": db_result.total_count,
             "page_number": req.paging_options.page_number,
             "total_pages": calc_total_pages(db_result.total_count, req.paging_options.limit),
-            "found_records": db_result.uuids.len(),
+            "found_records": db_result.uuids_and_types.len(),
         },
     });
     let res = try_s!(json::to_vec(&res_js));
@@ -1414,6 +1521,59 @@ pub async fn swap_kick_starts(ctx: MmArc) -> Result<HashSet<String>, String> {
             kickstart_thread_handler(ctx, swap, maker_coin_ticker, taker_coin_ticker).await
         });
     }
+
+    // === V2 maker swaps ===
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use swap_v2_common::MakerSwapStorage;
+        use mm2_state_machine::storable_state_machine::StateMachineStorage;
+
+        let maker_storage = MakerSwapStorage::new(ctx.clone());
+        let unfinished_maker = try_s!(maker_storage.get_unfinished().await);
+        for uuid in unfinished_maker {
+            info!("Trying to kickstart maker V2 swap {}", uuid);
+            let repr = match maker_storage.get_repr(uuid).await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Error {} getting DB repr of maker swap {}", e, uuid);
+                    continue;
+                },
+            };
+            coins.insert(repr.maker_coin.clone());
+            coins.insert(repr.taker_coin.clone());
+            let ctx2 = ctx.clone();
+            std::thread::spawn(move || {
+                common::block_on(v2_kickstart_handler(ctx2, repr.maker_coin.clone(), repr.taker_coin.clone(), uuid))
+            });
+        }
+    }
+
+    // === V2 taker swaps ===
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use swap_v2_common::TakerSwapStorage;
+        use mm2_state_machine::storable_state_machine::StateMachineStorage;
+
+        let taker_storage = TakerSwapStorage::new(ctx.clone());
+        let unfinished_taker = try_s!(taker_storage.get_unfinished().await);
+        for uuid in unfinished_taker {
+            info!("Trying to kickstart taker V2 swap {}", uuid);
+            let repr = match taker_storage.get_repr(uuid).await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Error {} getting DB repr of taker swap {}", e, uuid);
+                    continue;
+                },
+            };
+            coins.insert(repr.maker_coin.clone());
+            coins.insert(repr.taker_coin.clone());
+            let ctx2 = ctx.clone();
+            std::thread::spawn(move || {
+                common::block_on(v2_kickstart_handler(ctx2, repr.taker_coin.clone(), repr.maker_coin.clone(), uuid))
+            });
+        }
+    }
+
     Ok(coins)
 }
 
@@ -1477,6 +1637,55 @@ async fn kickstart_thread_handler(ctx: MmArc, swap: SavedSwap, maker_coin_ticker
             .await;
         },
     }
+}
+
+/// V2 swap kickstart handler. Waits for both coins to activate then logs that
+/// full V2 kickstart recovery will be available once coins implement the V2
+/// swap operation traits.
+#[cfg(not(target_arch = "wasm32"))]
+async fn v2_kickstart_handler(ctx: MmArc, my_coin_ticker: String, other_coin_ticker: String, uuid: Uuid) {
+    // Wait for both coins to activate.
+    let _my_coin = loop {
+        match lp_coinfind(&ctx, &my_coin_ticker).await {
+            Ok(Some(c)) => break c,
+            Ok(None) => {
+                info!(
+                    "Can't kickstart V2 swap {} until the coin {} is activated",
+                    uuid, my_coin_ticker,
+                );
+                Timer::sleep(5.).await;
+            },
+            Err(e) => {
+                error!("Error {} on {} find attempt for V2 swap {}", e, my_coin_ticker, uuid);
+                return;
+            },
+        };
+    };
+
+    let _other_coin = loop {
+        match lp_coinfind(&ctx, &other_coin_ticker).await {
+            Ok(Some(c)) => break c,
+            Ok(None) => {
+                info!(
+                    "Can't kickstart V2 swap {} until the coin {} is activated",
+                    uuid, other_coin_ticker,
+                );
+                Timer::sleep(5.).await;
+            },
+            Err(e) => {
+                error!("Error {} on {} find attempt for V2 swap {}", e, other_coin_ticker, uuid);
+                return;
+            },
+        };
+    };
+
+    // TODO: Once coins implement MakerCoinSwapOpsV2/TakerCoinSwapOpsV2, dispatch
+    // to the appropriate `swap_kickstart_handler` based on coin type, similar to
+    // how GLEEC does coin-variant matching. For now we log a warning.
+    warn!(
+        "V2 swap {} ({}/{}) found unfinished but V2 kickstart recovery requires coin-level V2 ops support",
+        uuid, my_coin_ticker, other_coin_ticker,
+    );
 }
 
 pub async fn coins_needed_for_kick_start(ctx: MmArc) -> Result<Response<Vec<u8>>, String> {
@@ -1556,7 +1765,8 @@ struct ActiveSwapsRes {
 
 pub async fn active_swaps_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, String> {
     let req: ActiveSwapsReq = try_s!(json::from_value(req));
-    let uuids = try_s!(active_swaps(&ctx));
+    let uuids_with_types = try_s!(active_swaps(&ctx));
+    let uuids: Vec<Uuid> = uuids_with_types.iter().map(|(u, _)| *u).collect();
     let statuses = if req.include_status {
         let mut map = HashMap::new();
         for uuid in uuids.iter() {
