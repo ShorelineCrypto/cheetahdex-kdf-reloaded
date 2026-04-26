@@ -37,7 +37,8 @@ use coins::utxo::qtum::QtumCoin;
 use coins::utxo::slp::SlpToken;
 use coins::utxo::utxo_standard::UtxoStandardCoin;
 use coins::{
-    add_delegation, get_raw_transaction, get_staking_infos, remove_delegation, sign_message, verify_message, withdraw,
+    add_delegation, get_raw_transaction, get_staking_infos, remove_delegation, sign_message, sign_raw_transaction,
+    verify_message, withdraw,
 };
 use coins_activation::{
     enable_l2, enable_platform_coin_with_tokens, enable_token, init_standalone_coin, init_standalone_coin_status,
@@ -164,6 +165,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_public_key_hash" => handle_mmrpc(ctx, request, get_public_key_hash).await,
         "get_raw_transaction" => handle_mmrpc(ctx, request, get_raw_transaction).await,
         "get_staking_infos" => handle_mmrpc(ctx, request, get_staking_infos).await,
+        "sign_raw_transaction" => handle_mmrpc(ctx, request, sign_raw_transaction).await,
         "get_locked_amount" => handle_mmrpc(ctx, request, get_locked_amount_rpc).await,
         "init_create_new_account" => handle_mmrpc(ctx, request, init_create_new_account).await,
         "init_create_new_account_status" => handle_mmrpc(ctx, request, init_create_new_account_status).await,

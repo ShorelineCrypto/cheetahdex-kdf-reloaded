@@ -61,10 +61,11 @@ use super::{
     BalanceError, BalanceFut, CoinBalance, CoinProtocol, CoinTransportMetrics, CoinsContext, FeeApproxStage,
     FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin, NegotiateSwapContractAddrErr, NumConversError,
     NumConversResult, RawTransactionError, RawTransactionFut, RawTransactionRequest, RawTransactionRes,
-    RawTransactionResult, RpcClientType, RpcTransportEventHandler, RpcTransportEventHandlerShared, SignatureError,
-    SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
-    Transaction, TransactionDetails, TransactionEnum, UnexpectedDerivationMethod, ValidateAddressResult,
-    VerificationError, VerificationResult, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
+    RawTransactionResult, RpcClientType, RpcTransportEventHandler, RpcTransportEventHandlerShared,
+    SignEthTransactionParams, SignRawTransactionEnum, SignRawTransactionRequest, SignatureError, SignatureResult,
+    SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue, Transaction,
+    TransactionDetails, TransactionEnum, UnexpectedDerivationMethod, ValidateAddressResult, VerificationError,
+    VerificationResult, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
 };
 pub use ethcore_transaction::SignedTransaction as SignedEthTx;
 pub use rlp;
@@ -1397,6 +1398,73 @@ impl MarketCoinOps for EthCoin {
         let pow = self.decimals / 3;
         MmNumber::from(1) / MmNumber::from(10u64.pow(pow as u32))
     }
+
+    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
+        let coin = self.clone();
+        let args = args.clone();
+        Box::new(sign_raw_eth_tx_impl(coin, args).boxed().compat())
+    }
+}
+
+/// Signs a raw ETH transaction with the coin's keypair.
+async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest) -> RawTransactionResult {
+    let eth_args = match &args.tx {
+        SignRawTransactionEnum::ETH(params) => params,
+        _ => {
+            return MmError::err(RawTransactionError::InvalidParam(
+                "ETH type expected".to_string(),
+            ))
+        },
+    };
+
+    let value = wei_from_big_decimal(
+        eth_args.value.as_ref().unwrap_or(&BigDecimal::from(0)),
+        coin.decimals,
+    )
+    .mm_err(|e| RawTransactionError::InvalidParam(e.to_string()))?;
+
+    let action = if let Some(to) = &eth_args.to {
+        Action::Call(
+            Address::from_str(to)
+                .map_to_mm(|e| RawTransactionError::InvalidParam(e.to_string()))?,
+        )
+    } else {
+        Action::Create
+    };
+
+    let data = hex::decode(eth_args.data.as_deref().unwrap_or(""))
+        .map_to_mm(|e| RawTransactionError::DecodeError(e.to_string()))?;
+
+    let gas_price = wei_from_big_decimal(&eth_args.gas_price, 9)
+        .mm_err(|e| RawTransactionError::InvalidParam(e.to_string()))?;
+    let gas_limit = U256::from(eth_args.gas_limit);
+
+    let nonce_fut = get_addr_nonce(coin.my_address, coin.web3_instances.clone()).compat();
+    let nonce = match select(nonce_fut, Timer::sleep(30.)).await {
+        Either::Left((Ok(n), _)) => n,
+        Either::Left((Err(e), _)) => return MmError::err(RawTransactionError::Transport(e)),
+        Either::Right(_) => {
+            return MmError::err(RawTransactionError::Transport(
+                "Get address nonce timed out".to_string(),
+            ))
+        },
+    };
+
+    let tx = UnSignedEthTx {
+        nonce,
+        value,
+        action,
+        data,
+        gas: gas_limit,
+        gas_price,
+    };
+
+    let signed = tx.sign(coin.key_pair.secret(), coin.chain_id);
+    let bytes = rlp::encode(&signed);
+
+    Ok(RawTransactionRes {
+        tx_hex: BytesJson::from(bytes.to_vec()),
+    })
 }
 
 pub fn signed_eth_tx_from_bytes(bytes: &[u8]) -> Result<SignedEthTx, String> {

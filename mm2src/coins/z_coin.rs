@@ -13,10 +13,11 @@ use crate::utxo::{
 };
 use crate::{
     BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
-    NegotiateSwapContractAddrErr, NumConversError, RawTransactionFut, RawTransactionRequest, SignatureError,
-    SignatureResult, SwapOps, TradeFee, TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionDetails,
-    TransactionEnum, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
-    ValidatePaymentInput, VerificationError, VerificationResult, WatcherOps, WithdrawFut, WithdrawRequest,
+    NegotiateSwapContractAddrErr, NumConversError, RawTransactionFut, RawTransactionRequest, SignRawTransactionRequest,
+    SignatureError, SignatureResult, SwapOps, TradeFee, TradePreimageFut, TradePreimageResult, TradePreimageValue,
+    TransactionDetails, TransactionEnum, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationError, VerificationResult, WatcherOps,
+    WithdrawFut, WithdrawRequest,
 };
 use crate::{Transaction, WithdrawError};
 use async_trait::async_trait;
@@ -923,6 +924,10 @@ impl MarketCoinOps for ZCoin {
 
     fn min_trading_vol(&self) -> MmNumber {
         utxo_common::min_trading_vol(self.as_ref())
+    }
+
+    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
+        Box::new(utxo_common::sign_raw_tx(self.clone(), args.clone()).boxed().compat())
     }
 
     fn is_privacy(&self) -> bool {

@@ -15,10 +15,10 @@ use crate::utxo::{
 use crate::{
     BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
     NegotiateSwapContractAddrErr, NumConversError, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest,
-    SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
-    TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TxFeeDetails, UnexpectedDerivationMethod,
-    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationError, VerificationResult, WatcherOps,
-    WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest,
+    SignRawTransactionRequest, SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut,
+    TradePreimageResult, TradePreimageValue, TransactionDetails, TransactionEnum, TransactionErr, TransactionFut,
+    TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
+    VerificationError, VerificationResult, WatcherOps, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
 use bitcrypto::dhash160;
@@ -1279,6 +1279,10 @@ impl MarketCoinOps for SlpToken {
 
     fn min_trading_vol(&self) -> MmNumber {
         big_decimal_from_sat_unsigned(1, self.decimals()).into()
+    }
+
+    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
+        Box::new(utxo_common::sign_raw_tx(self.clone(), args.clone()).boxed().compat())
     }
 }
 

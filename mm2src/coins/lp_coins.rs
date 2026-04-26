@@ -310,17 +310,35 @@ pub enum RawTransactionError {
     HashNotExist(String),
     #[display(fmt = "Internal error: {}", _0)]
     InternalError(String),
+    #[display(fmt = "Transaction decode error: {}", _0)]
+    DecodeError(String),
+    #[display(fmt = "Invalid param: {}", _0)]
+    InvalidParam(String),
+    #[display(fmt = "Non-existent previous output: {}", _0)]
+    NonExistentPrevOutputError(String),
+    #[display(fmt = "Signing error: {}", _0)]
+    SigningError(String),
+    #[display(fmt = "Not implemented for this coin {}", coin)]
+    NotImplemented { coin: String },
+    #[display(fmt = "Transaction error {}", _0)]
+    TransactionError(String),
 }
 
 impl HttpStatusCode for RawTransactionError {
     fn status_code(&self) -> StatusCode {
         match self {
-            RawTransactionError::NoSuchCoin { .. }
-            | RawTransactionError::InvalidHashError(_)
-            | RawTransactionError::HashNotExist(_) => StatusCode::BAD_REQUEST,
-            RawTransactionError::Transport(_) | RawTransactionError::InternalError(_) => {
+            RawTransactionError::InternalError(_) | RawTransactionError::SigningError(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             },
+            RawTransactionError::NoSuchCoin { .. }
+            | RawTransactionError::InvalidHashError(_)
+            | RawTransactionError::HashNotExist(_)
+            | RawTransactionError::DecodeError(_)
+            | RawTransactionError::InvalidParam(_)
+            | RawTransactionError::NonExistentPrevOutputError(_)
+            | RawTransactionError::TransactionError(_) => StatusCode::BAD_REQUEST,
+            RawTransactionError::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
+            RawTransactionError::Transport(_) => StatusCode::BAD_GATEWAY,
         }
     }
 }
@@ -343,6 +361,58 @@ pub struct RawTransactionRequest {
 pub struct RawTransactionRes {
     /// Raw bytes of signed transaction in hexadecimal string, this should be return hexadecimal encoded signed transaction for get_raw_transaction
     pub tx_hex: BytesJson,
+}
+
+/// Previous utxo transaction data for signing
+#[derive(Clone, Debug, Deserialize)]
+pub struct PrevTxns {
+    /// transaction hash
+    pub tx_hash: String,
+    /// transaction output index
+    pub index: u32,
+    /// transaction output script pub key
+    pub script_pub_key: String,
+    /// transaction output amount
+    pub amount: BigDecimal,
+}
+
+/// sign_raw_transaction RPC request's params for signing raw utxo transactions
+#[derive(Clone, Debug, Deserialize)]
+pub struct SignUtxoTransactionParams {
+    /// unsigned utxo transaction in hex
+    pub tx_hex: String,
+    /// optional data of previous transactions referred by unsigned transaction inputs
+    pub prev_txns: Option<Vec<PrevTxns>>,
+}
+
+/// sign_raw_transaction RPC request's params for signing raw eth transactions
+#[derive(Clone, Debug, Deserialize)]
+pub struct SignEthTransactionParams {
+    /// Eth transfer value
+    pub value: Option<BigDecimal>,
+    /// Eth to address
+    pub to: Option<String>,
+    /// Eth contract data
+    pub data: Option<String>,
+    /// Eth gas use limit
+    pub gas_limit: u64,
+    /// Legacy gas price in gwei
+    pub gas_price: BigDecimal,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", content = "tx")]
+pub enum SignRawTransactionEnum {
+    UTXO(SignUtxoTransactionParams),
+    ETH(SignEthTransactionParams),
+}
+
+/// sign_raw_transaction RPC request
+#[derive(Clone, Debug, Deserialize)]
+pub struct SignRawTransactionRequest {
+    pub coin: String,
+    #[serde(flatten)]
+    pub tx: SignRawTransactionEnum,
 }
 
 /// A secp256k1 secret key used by Iguana (legacy single-key) mode.
@@ -860,6 +930,15 @@ pub trait MarketCoinOps {
 
     /// Get the minimum amount to trade.
     fn min_trading_vol(&self) -> MmNumber;
+
+    /// Signs a raw transaction without broadcasting.
+    /// Default implementation returns NotImplemented for coins that don't support it.
+    fn sign_raw_tx(&self, _args: &SignRawTransactionRequest) -> RawTransactionFut {
+        let coin = self.ticker().to_string();
+        Box::new(futures01::future::err(
+            MmError::new(RawTransactionError::NotImplemented { coin }),
+        ))
+    }
 
     fn is_privacy(&self) -> bool {
         false
@@ -3352,6 +3431,11 @@ pub async fn withdraw(ctx: MmArc, req: WithdrawRequest) -> WithdrawResult {
 pub async fn get_raw_transaction(ctx: MmArc, req: RawTransactionRequest) -> RawTransactionResult {
     let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
     coin.get_raw_transaction(req).compat().await
+}
+
+pub async fn sign_raw_transaction(ctx: MmArc, req: SignRawTransactionRequest) -> RawTransactionResult {
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    coin.sign_raw_tx(&req).compat().await
 }
 
 pub async fn sign_message(ctx: MmArc, req: SignatureRequest) -> SignatureResult<SignatureResponse> {

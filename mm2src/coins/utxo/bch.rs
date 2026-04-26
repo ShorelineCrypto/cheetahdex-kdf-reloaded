@@ -8,9 +8,9 @@ use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilder};
 use crate::utxo::utxo_common::big_decimal_from_sat_unsigned;
 use crate::{
     BlockHeightAndTime, CanRefundHtlc, CoinBalance, CoinProtocol, DexFee, NegotiateSwapContractAddrErr,
-    PrivKeyBuildPolicy, RawTransactionFut, RawTransactionRequest, SignatureResult, SwapOps, TradePreimageValue,
-    TransactionFut, TransactionType, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
-    ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut,
+    PrivKeyBuildPolicy, RawTransactionFut, RawTransactionRequest, SignRawTransactionRequest, SignatureResult, SwapOps,
+    TradePreimageValue, TransactionFut, TransactionType, TxFeeDetails, UnexpectedDerivationMethod,
+    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut,
 };
 use common::log::warn;
 use common::mm_number::MmNumber;
@@ -1216,6 +1216,10 @@ impl MarketCoinOps for BchCoin {
 
     fn min_trading_vol(&self) -> MmNumber {
         utxo_common::min_trading_vol(self.as_ref())
+    }
+
+    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
+        Box::new(utxo_common::sign_raw_tx(self.clone(), args.clone()).boxed().compat())
     }
 }
 

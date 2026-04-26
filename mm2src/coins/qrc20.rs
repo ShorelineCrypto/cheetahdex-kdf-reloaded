@@ -22,11 +22,11 @@ use crate::utxo::{
 };
 use crate::{
     BalanceError, BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps,
-    MmCoin, NegotiateSwapContractAddrErr, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest, SignatureResult,
-    SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue,
-    TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TransactionType, UnexpectedDerivationMethod,
-    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawError,
-    WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
+    MmCoin, NegotiateSwapContractAddrErr, PrivKeyNotAllowed, RawTransactionFut, RawTransactionRequest,
+    SignRawTransactionRequest, SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut,
+    TradePreimageResult, TradePreimageValue, TransactionDetails, TransactionEnum, TransactionErr, TransactionFut,
+    TransactionType, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
+    VerificationResult, WatcherOps, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
 };
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -1217,6 +1217,10 @@ impl MarketCoinOps for Qrc20Coin {
     fn min_trading_vol(&self) -> MmNumber {
         let pow = self.utxo.decimals / 3;
         MmNumber::from(1) / MmNumber::from(10u64.pow(pow as u32))
+    }
+
+    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
+        Box::new(utxo_common::sign_raw_tx(self.clone(), args.clone()).boxed().compat())
     }
 }
 

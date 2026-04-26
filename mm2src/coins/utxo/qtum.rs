@@ -21,9 +21,10 @@ use crate::utxo::utxo_builder::{
 };
 use crate::{
     eth, CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DelegationError, DelegationFut, DexFee,
-    GetWithdrawSenderAddress, NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, SignatureResult, StakingInfosFut,
-    SwapOps, TradePreimageValue, TransactionFut, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
-    ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut, WithdrawSenderAddress,
+    GetWithdrawSenderAddress, NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, RawTransactionFut,
+    SignRawTransactionRequest, SignatureResult, StakingInfosFut, SwapOps, TradePreimageValue, TransactionFut,
+    UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult,
+    WatcherOps, WithdrawFut, WithdrawSenderAddress,
 };
 use common::mm_number::MmNumber;
 use crypto::trezor::utxo::TrezorUtxoCoin;
@@ -838,6 +839,10 @@ impl MarketCoinOps for QtumCoin {
 
     fn min_trading_vol(&self) -> MmNumber {
         utxo_common::min_trading_vol(self.as_ref())
+    }
+
+    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
+        Box::new(utxo_common::sign_raw_tx(self.clone(), args.clone()).boxed().compat())
     }
 }
 

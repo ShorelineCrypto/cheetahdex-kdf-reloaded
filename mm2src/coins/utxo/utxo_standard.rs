@@ -18,9 +18,9 @@ use crate::rpc_command::init_withdraw::{InitWithdrawCoin, WithdrawTaskHandle};
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilder};
 use crate::{
     CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DexFee, GetWithdrawSenderAddress,
-    NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, SignatureResult, SwapOps, TradePreimageValue, TransactionFut,
-    ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WatcherOps, WithdrawFut,
-    WithdrawSenderAddress,
+    NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, RawTransactionFut, SignRawTransactionRequest, SignatureResult,
+    SwapOps, TradePreimageValue, TransactionFut, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
+    VerificationResult, WatcherOps, WithdrawFut, WithdrawSenderAddress,
 };
 use common::mm_number::MmNumber;
 use crypto::trezor::utxo::TrezorUtxoCoin;
@@ -587,6 +587,10 @@ impl MarketCoinOps for UtxoStandardCoin {
 
     fn min_trading_vol(&self) -> MmNumber {
         utxo_common::min_trading_vol(self.as_ref())
+    }
+
+    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
+        Box::new(utxo_common::sign_raw_tx(self.clone(), args.clone()).boxed().compat())
     }
 }
 
