@@ -23,6 +23,7 @@ use coins::rpc_command::account_balance::account_balance;
 use coins::rpc_command::consolidate_utxos::consolidate_utxos_rpc;
 use coins::rpc_command::fetch_utxos::fetch_utxos_rpc;
 use coins::rpc_command::get_current_mtp::get_current_mtp_rpc;
+use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::rpc_command::get_enabled_coins::get_enabled_coins_rpc;
 use coins::rpc_command::get_private_keys::get_private_keys;
 use coins::rpc_command::init_create_account::{
@@ -159,6 +160,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "fetch_utxos" => handle_mmrpc(ctx, request, fetch_utxos_rpc).await,
         "get_current_mtp" => handle_mmrpc(ctx, request, get_current_mtp_rpc).await,
         "get_enabled_coins" => handle_mmrpc(ctx, request, get_enabled_coins_rpc).await,
+        "get_eth_estimated_fee_per_gas" => handle_mmrpc(ctx, request, get_eth_estimated_fee_per_gas).await,
         "get_new_address" => handle_mmrpc(ctx, request, get_new_address).await,
         "get_private_keys" => handle_mmrpc(ctx, request, get_private_keys).await,
         "get_public_key" => handle_mmrpc(ctx, request, get_public_key).await,

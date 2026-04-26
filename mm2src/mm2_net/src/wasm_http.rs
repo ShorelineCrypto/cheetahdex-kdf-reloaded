@@ -23,6 +23,17 @@ pub async fn slurp_url(url: &str) -> SlurpResult {
         .map(|(status_code, response)| (status_code, HeaderMap::new(), response.into_bytes()))
 }
 
+/// Executes a GET request with custom headers, returning the response status, headers and body.
+pub async fn slurp_url_with_headers(url: &str, headers: Vec<(&str, &str)>) -> SlurpResult {
+    let mut req = FetchRequest::get(url);
+    for (key, value) in headers {
+        req = req.header(key, value);
+    }
+    req.request_str()
+        .await
+        .map(|(status_code, response)| (status_code, HeaderMap::new(), response.into_bytes()))
+}
+
 /// Executes a POST request, returning the response status, headers and body.
 /// Please note the return header map is empty, because `wasm_bindgen` doesn't provide the way to extract all headers.
 pub async fn slurp_post_json(url: &str, body: String) -> SlurpResult {

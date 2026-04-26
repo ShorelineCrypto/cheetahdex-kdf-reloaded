@@ -58,6 +58,16 @@ pub async fn slurp_url(url: &str) -> SlurpResult {
     slurp_req(req).await
 }
 
+/// Executes a GET request with custom headers, returning the response status, headers and body.
+pub async fn slurp_url_with_headers(url: &str, headers: Vec<(&str, &str)>) -> SlurpResult {
+    let mut builder = Request::builder().uri(url);
+    for (key, value) in headers {
+        builder = builder.header(key, value);
+    }
+    let req = builder.body(Vec::new())?;
+    slurp_req(req).await
+}
+
 /// Executes a POST request, returning the response status, headers and body.
 pub async fn slurp_post_json(url: &str, body: String) -> SlurpResult {
     let request = Request::builder()

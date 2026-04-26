@@ -71,6 +71,7 @@ pub use ethcore_transaction::SignedTransaction as SignedEthTx;
 pub use rlp;
 
 mod web3_transport;
+pub mod fee_estimation;
 use crate::{DexFee, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput, WatcherOps};
 use common::mm_number::MmNumber;
 use ethkey::{sign, verify_address};
@@ -3042,6 +3043,53 @@ impl EthCoin {
         };
         Box::new(fut.boxed().compat())
     }
+
+    /// Get EIP-1559 gas fee estimates (base fee + priority fees at low/medium/high levels).
+    /// When `use_simple` is true, only the internal fee-history estimator is used.
+    /// Otherwise, tries the configured gas api provider first, falling back to simple.
+    pub async fn get_eip1559_gas_fee(
+        &self,
+        use_simple: bool,
+    ) -> Web3RpcResult<fee_estimation::eip1559::FeePerGasEstimated> {
+        use fee_estimation::eip1559::simple::FeePerGasSimpleEstimator;
+        use fee_estimation::eip1559::{GasApiConfig, GasApiProvider};
+        use fee_estimation::eip1559::infura::InfuraGasApiCaller;
+        use fee_estimation::eip1559::block_native::BlocknativeGasApiCaller;
+
+        let coin = self.clone();
+        let ctx =
+            MmArc::from_weak(&coin.ctx).or_mm_err(|| Web3RpcError::Internal("ctx is null".into()))?;
+
+        let gas_api_conf = ctx.conf["gas_api"].clone();
+        if gas_api_conf.is_null() || use_simple {
+            return FeePerGasSimpleEstimator::estimate_fee_by_history(&coin)
+                .await
+                .mm_err(|e| Web3RpcError::Internal(e.to_string()));
+        }
+
+        let gas_api_conf: GasApiConfig = serde_json::from_value(gas_api_conf)
+            .map_to_mm(|e| Web3RpcError::InvalidResponse(format!("Invalid gas_api config: {}", e)))?;
+
+        let provider_result = match gas_api_conf.provider {
+            GasApiProvider::Infura => InfuraGasApiCaller::fetch_fee_estimation(&gas_api_conf.url).await,
+            GasApiProvider::Blocknative => BlocknativeGasApiCaller::fetch_fee_estimation(&gas_api_conf.url).await,
+        };
+
+        match provider_result {
+            Ok(fees) => Ok(fees),
+            Err(provider_err) => {
+                error!("Gas api provider failed: {}, using internal estimator", provider_err);
+                FeePerGasSimpleEstimator::estimate_fee_by_history(&coin)
+                    .await
+                    .mm_err(|history_err| {
+                        Web3RpcError::Internal(format!(
+                            "All gas api requests failed. Provider: {}, History: {}",
+                            provider_err, history_err
+                        ))
+                    })
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -3376,6 +3424,16 @@ pub fn wei_from_big_decimal(amount: &BigDecimal, decimals: u8) -> NumConversResu
     U256::from_dec_str(&amount)
         .map_err(|e| format!("{:?}", e))
         .map_to_mm(NumConversError::new)
+}
+
+/// Convert a BigDecimal amount in gwei to U256 in wei (multiply by 10^9).
+pub fn wei_from_gwei_decimal(amount: &BigDecimal) -> NumConversResult<U256> {
+    wei_from_big_decimal(amount, 9)
+}
+
+/// Convert a U256 in wei to BigDecimal in gwei (divide by 10^9).
+pub fn wei_to_gwei_decimal(amount: U256) -> NumConversResult<BigDecimal> {
+    u256_to_big_decimal(amount, 9)
 }
 
 impl Transaction for SignedEthTx {
