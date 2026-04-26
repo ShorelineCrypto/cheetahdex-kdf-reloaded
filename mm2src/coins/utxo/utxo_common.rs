@@ -3851,6 +3851,117 @@ pub async fn block_header_utxo_loop<T: UtxoCommonOps>(weak: UtxoWeak, constructo
     }
 }
 
+#[derive(Deserialize)]
+#[serde(default)]
+pub struct MergeConditions {
+    pub merge_at: usize,
+    pub max_merge_at_once: usize,
+}
+
+impl Default for MergeConditions {
+    fn default() -> Self {
+        MergeConditions {
+            merge_at: 50,
+            max_merge_at_once: 50,
+        }
+    }
+}
+
+pub enum UtxoMergeError {
+    BadMergeConditions(String),
+    InternalError(String),
+}
+
+pub async fn merge_utxos<Coin>(
+    coin: &Coin,
+    from_address: &Address,
+    to_script_pubkey: &Script,
+    merge_conditions: &MergeConditions,
+    broadcast: bool,
+) -> MmResult<(UtxoTx, Vec<UnspentInfo>), UtxoMergeError>
+where
+    Coin: UtxoCommonOps + GetUtxoListOps + UtxoTxGenerationOps + UtxoTxBroadcastOps,
+{
+    let ticker = &coin.as_ref().conf.ticker;
+    let (unspents, recently_spent) = coin.get_unspent_ordered_list(from_address).await.mm_err(|e| {
+        UtxoMergeError::InternalError(format!("Error in get_unspent_ordered_list for coin={ticker}: {e}"))
+    })?;
+
+    if unspents.len() < merge_conditions.merge_at {
+        return Err(UtxoMergeError::BadMergeConditions(format!(
+            "Not enough unspent UTXOs to merge for coin={ticker}, found={}, required={}",
+            unspents.len(),
+            merge_conditions.merge_at
+        ))
+        .into());
+    }
+    let unspents: Vec<_> = unspents.into_iter().take(merge_conditions.max_merge_at_once).collect();
+    if unspents.len() < 2 {
+        return Err(UtxoMergeError::BadMergeConditions(format!(
+            "No point of merging only a single UTXO (coin={ticker})"
+        ))
+        .into());
+    }
+
+    let value = unspents.iter().fold(0, |sum, unspent| sum + unspent.value);
+    let output = TransactionOutput {
+        value,
+        script_pubkey: to_script_pubkey.to_bytes(),
+    };
+
+    if broadcast {
+        let tx = generate_and_send_tx(
+            coin,
+            unspents.clone(),
+            None,
+            FeePolicy::DeductFromOutput(0),
+            recently_spent,
+            vec![output],
+        )
+        .await
+        .map_to_mm(|e| UtxoMergeError::InternalError(format!("Error in generate_and_send_tx for coin={ticker}: {e:?}")))?;
+        Ok((tx, unspents))
+    } else {
+        drop(recently_spent);
+
+        let my_address = coin
+            .as_ref()
+            .derivation_method
+            .iguana_or_err()
+            .mm_err(|e| UtxoMergeError::InternalError(format!("No iguana address for coin={ticker}: {e}")))?;
+        let key_pair = coin
+            .as_ref()
+            .priv_key_policy
+            .key_pair_or_err()
+            .mm_err(|e| UtxoMergeError::InternalError(format!("No key pair for coin={ticker}: {e}")))?;
+
+        let builder = UtxoTxBuilder::new(coin)
+            .add_available_inputs(unspents.clone())
+            .add_outputs(vec![output])
+            .with_fee_policy(FeePolicy::DeductFromOutput(0));
+        let (unsigned, _) = builder
+            .build()
+            .await
+            .mm_err(|e| UtxoMergeError::InternalError(format!("Error in tx build for coin={ticker}: {e}")))?;
+
+        let signature_version = match &my_address.addr_format {
+            UtxoAddressFormat::Segwit => SignatureVersion::WitnessV0,
+            _ => coin.as_ref().conf.signature_version,
+        };
+        let prev_script = Builder::build_p2pkh(&my_address.hash);
+        let tx = sign_tx(
+            unsigned,
+            key_pair,
+            prev_script,
+            signature_version,
+            coin.as_ref().conf.fork_id,
+        )
+        .mm_err(|e| UtxoMergeError::InternalError(format!("Error signing tx for coin={ticker}: {e}")))?;
+
+        Ok((tx, unspents))
+    }
+}
+
 pub async fn merge_utxo_loop<T>(
     weak: UtxoWeak,
     merge_at: usize,

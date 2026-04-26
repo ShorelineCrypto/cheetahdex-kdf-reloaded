@@ -1,4 +1,8 @@
 pub mod account_balance;
+pub mod consolidate_utxos;
+pub mod fetch_utxos;
+pub mod get_current_mtp;
+pub mod get_enabled_coins;
 pub mod get_private_keys;
 pub mod hd_account_balance_rpc_error;
 pub mod init_create_account;

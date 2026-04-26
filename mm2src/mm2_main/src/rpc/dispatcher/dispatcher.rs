@@ -20,6 +20,10 @@ use crate::{
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
 use coins::rpc_command::account_balance::account_balance;
+use coins::rpc_command::consolidate_utxos::consolidate_utxos_rpc;
+use coins::rpc_command::fetch_utxos::fetch_utxos_rpc;
+use coins::rpc_command::get_current_mtp::get_current_mtp_rpc;
+use coins::rpc_command::get_enabled_coins::get_enabled_coins_rpc;
 use coins::rpc_command::get_private_keys::get_private_keys;
 use coins::rpc_command::init_create_account::{
     init_create_new_account, init_create_new_account_status, init_create_new_account_user_action,
@@ -148,8 +152,12 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "add_delegation" => handle_mmrpc(ctx, request, add_delegation).await,
         "add_node_to_version_stat" => handle_mmrpc(ctx, request, add_node_to_version_stat).await,
         "best_orders" => handle_mmrpc(ctx, request, best_orders_rpc_v2).await,
+        "consolidate_utxos" => handle_mmrpc(ctx, request, consolidate_utxos_rpc).await,
         "enable_bch_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<BchCoin>).await,
         "enable_slp" => handle_mmrpc(ctx, request, enable_token::<SlpToken>).await,
+        "fetch_utxos" => handle_mmrpc(ctx, request, fetch_utxos_rpc).await,
+        "get_current_mtp" => handle_mmrpc(ctx, request, get_current_mtp_rpc).await,
+        "get_enabled_coins" => handle_mmrpc(ctx, request, get_enabled_coins_rpc).await,
         "get_new_address" => handle_mmrpc(ctx, request, get_new_address).await,
         "get_private_keys" => handle_mmrpc(ctx, request, get_private_keys).await,
         "get_public_key" => handle_mmrpc(ctx, request, get_public_key).await,
