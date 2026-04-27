@@ -70,10 +70,13 @@ use super::{
 pub use ethcore_transaction::SignedTransaction as SignedEthTx;
 pub use rlp;
 
-mod web3_transport;
+pub mod eth_hd_wallet;
 pub mod fee_estimation;
+mod web3_transport;
+use crate::DerivationMethod;
 use crate::{DexFee, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput, WatcherOps};
 use common::mm_number::MmNumber;
+use eth_hd_wallet::EthHDWallet;
 use ethkey::{sign, verify_address};
 use serialization::{CompactInteger, Serializable, Stream};
 use web3_transport::{EthFeeHistoryNamespace, Web3Transport};
@@ -323,6 +326,8 @@ pub struct EthCoinImpl {
     chain_id: Option<u64>,
     /// the block range used for eth_getLogs
     logs_block_range: u64,
+    /// HD wallet derivation method. Iguana when using a single key pair, HDWallet for BIP44 HD.
+    pub derivation_method: DerivationMethod<Address, EthHDWallet>,
 }
 
 #[derive(Clone, Debug)]
@@ -1411,24 +1416,14 @@ impl MarketCoinOps for EthCoin {
 async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest) -> RawTransactionResult {
     let eth_args = match &args.tx {
         SignRawTransactionEnum::ETH(params) => params,
-        _ => {
-            return MmError::err(RawTransactionError::InvalidParam(
-                "ETH type expected".to_string(),
-            ))
-        },
+        _ => return MmError::err(RawTransactionError::InvalidParam("ETH type expected".to_string())),
     };
 
-    let value = wei_from_big_decimal(
-        eth_args.value.as_ref().unwrap_or(&BigDecimal::from(0)),
-        coin.decimals,
-    )
-    .mm_err(|e| RawTransactionError::InvalidParam(e.to_string()))?;
+    let value = wei_from_big_decimal(eth_args.value.as_ref().unwrap_or(&BigDecimal::from(0)), coin.decimals)
+        .mm_err(|e| RawTransactionError::InvalidParam(e.to_string()))?;
 
     let action = if let Some(to) = &eth_args.to {
-        Action::Call(
-            Address::from_str(to)
-                .map_to_mm(|e| RawTransactionError::InvalidParam(e.to_string()))?,
-        )
+        Action::Call(Address::from_str(to).map_to_mm(|e| RawTransactionError::InvalidParam(e.to_string()))?)
     } else {
         Action::Create
     };
@@ -1436,8 +1431,8 @@ async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest) ->
     let data = hex::decode(eth_args.data.as_deref().unwrap_or(""))
         .map_to_mm(|e| RawTransactionError::DecodeError(e.to_string()))?;
 
-    let gas_price = wei_from_big_decimal(&eth_args.gas_price, 9)
-        .mm_err(|e| RawTransactionError::InvalidParam(e.to_string()))?;
+    let gas_price =
+        wei_from_big_decimal(&eth_args.gas_price, 9).mm_err(|e| RawTransactionError::InvalidParam(e.to_string()))?;
     let gas_limit = U256::from(eth_args.gas_limit);
 
     let nonce_fut = get_addr_nonce(coin.my_address, coin.web3_instances.clone()).compat();
@@ -3051,14 +3046,13 @@ impl EthCoin {
         &self,
         use_simple: bool,
     ) -> Web3RpcResult<fee_estimation::eip1559::FeePerGasEstimated> {
+        use fee_estimation::eip1559::block_native::BlocknativeGasApiCaller;
+        use fee_estimation::eip1559::infura::InfuraGasApiCaller;
         use fee_estimation::eip1559::simple::FeePerGasSimpleEstimator;
         use fee_estimation::eip1559::{GasApiConfig, GasApiProvider};
-        use fee_estimation::eip1559::infura::InfuraGasApiCaller;
-        use fee_estimation::eip1559::block_native::BlocknativeGasApiCaller;
 
         let coin = self.clone();
-        let ctx =
-            MmArc::from_weak(&coin.ctx).or_mm_err(|| Web3RpcError::Internal("ctx is null".into()))?;
+        let ctx = MmArc::from_weak(&coin.ctx).or_mm_err(|| Web3RpcError::Internal("ctx is null".into()))?;
 
         let gas_api_conf = ctx.conf["gas_api"].clone();
         if gas_api_conf.is_null() || use_simple {
@@ -3676,6 +3670,7 @@ pub async fn eth_coin_from_conf_and_request(
         required_confirmations,
         chain_id: conf["chain_id"].as_u64(),
         logs_block_range: conf["logs_block_range"].as_u64().unwrap_or(DEFAULT_LOGS_BLOCK_RANGE),
+        derivation_method: DerivationMethod::Iguana(my_address),
     };
     Ok(EthCoin(Arc::new(coin)))
 }

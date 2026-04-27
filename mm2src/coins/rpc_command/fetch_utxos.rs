@@ -1,9 +1,9 @@
+use bigdecimal::BigDecimal;
 use common::HttpStatusCode;
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
-use bigdecimal::BigDecimal;
 
 use crate::{
     lp_coinfind_or_err,
@@ -72,9 +72,10 @@ pub async fn fetch_utxos_rpc(ctx: MmArc, req: FetchUtxosRequest) -> MmResult<Fet
     match coin {
         MmCoinEnum::UtxoCoin(ref coin) => match &coin.as_ref().derivation_method {
             DerivationMethod::Iguana(my_address) => {
-                let (unspents, _) = coin.get_unspent_ordered_list(my_address).await.mm_err(|e| {
-                    FetchUtxosError::Internal(format!("Couldn't fetch unspent UTXOs: {e}"))
-                })?;
+                let (unspents, _) = coin
+                    .get_unspent_ordered_list(my_address)
+                    .await
+                    .mm_err(|e| FetchUtxosError::Internal(format!("Couldn't fetch unspent UTXOs: {e}")))?;
 
                 let decimals = coin.as_ref().decimals;
                 let addresses_utxos = if unspents.is_empty() {

@@ -117,8 +117,8 @@ mod native_impl {
 mod wasm_impl {
     use super::*;
     use crate::mm2::lp_swap::swap_wasm_db::cursor_prelude::*;
-    use crate::mm2::lp_swap::swap_wasm_db::{DbTransactionError, InitDbError, MySwapsFiltersTable};
     use crate::mm2::lp_swap::swap_wasm_db::tables::BoolAsInt;
+    use crate::mm2::lp_swap::swap_wasm_db::{DbTransactionError, InitDbError, MySwapsFiltersTable};
     use crate::mm2::lp_swap::SwapsContext;
     use std::collections::BTreeSet;
     use uuid::Uuid;

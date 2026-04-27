@@ -10,20 +10,19 @@ use crate::{
         add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,
         stop_version_stat_collection, update_version_stat_collection,
     },
-    mm2::lp_swap::{get_locked_amount_rpc, max_maker_vol, recreate_swap_data, trade_preimage_rpc},
     mm2::lp_swap::swap_v2_rpcs::{
-        active_swaps_rpc as active_swaps_rpc_v2, my_recent_swaps_rpc as my_recent_swaps_rpc_v2,
-        my_swap_status_rpc,
+        active_swaps_rpc as active_swaps_rpc_v2, my_recent_swaps_rpc as my_recent_swaps_rpc_v2, my_swap_status_rpc,
     },
+    mm2::lp_swap::{get_locked_amount_rpc, max_maker_vol, recreate_swap_data, trade_preimage_rpc},
     mm2::rpc::lp_commands::{get_public_key, get_public_key_hash},
 };
+use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
 use coins::rpc_command::account_balance::account_balance;
 use coins::rpc_command::consolidate_utxos::consolidate_utxos_rpc;
 use coins::rpc_command::fetch_utxos::fetch_utxos_rpc;
 use coins::rpc_command::get_current_mtp::get_current_mtp_rpc;
-use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::rpc_command::get_enabled_coins::get_enabled_coins_rpc;
 use coins::rpc_command::get_private_keys::get_private_keys;
 use coins::rpc_command::init_create_account::{

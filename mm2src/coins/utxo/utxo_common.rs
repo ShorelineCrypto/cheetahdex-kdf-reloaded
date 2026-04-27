@@ -15,10 +15,9 @@ use crate::utxo::tx_cache::TxCacheResult;
 use crate::utxo::utxo_withdraw::{InitUtxoWithdraw, StandardUtxoWithdraw, UtxoWithdraw};
 use crate::{
     CanRefundHtlc, CoinBalance, CoinWithDerivationMethod, DexFee, DexFeeBurnDestination, GetWithdrawSenderAddress,
-    HDAddressId, RawTransactionError, RawTransactionRequest, RawTransactionRes, RawTransactionResult,
-    SignatureError, SignatureResult, TradePreimageValue, TransactionFut, TxFeeDetails, ValidateAddressResult,
-    ValidateFeeArgs, ValidatePaymentInput, VerificationError, VerificationResult, WithdrawFrom, WithdrawResult,
-    WithdrawSenderAddress,
+    HDAddressId, RawTransactionError, RawTransactionRequest, RawTransactionRes, RawTransactionResult, SignatureError,
+    SignatureResult, TradePreimageValue, TransactionFut, TxFeeDetails, ValidateAddressResult, ValidateFeeArgs,
+    ValidatePaymentInput, VerificationError, VerificationResult, WithdrawFrom, WithdrawResult, WithdrawSenderAddress,
 };
 use bigdecimal::BigDecimal;
 use bitcrypto::dhash256;
@@ -3920,7 +3919,9 @@ where
             vec![output],
         )
         .await
-        .map_to_mm(|e| UtxoMergeError::InternalError(format!("Error in generate_and_send_tx for coin={ticker}: {e:?}")))?;
+        .map_to_mm(|e| {
+            UtxoMergeError::InternalError(format!("Error in generate_and_send_tx for coin={ticker}: {e:?}"))
+        })?;
         Ok((tx, unspents))
     } else {
         drop(recently_spent);
@@ -4023,8 +4024,8 @@ async fn sign_raw_utxo_tx<T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps>(
 ) -> RawTransactionResult {
     let tx_bytes =
         hex::decode(args.tx_hex.as_bytes()).map_to_mm(|e| RawTransactionError::DecodeError(e.to_string()))?;
-    let tx: UtxoTx =
-        deserialize(tx_bytes.as_slice()).map_to_mm(|e| RawTransactionError::DecodeError(format!("Failed to deserialize transaction: {e}")))?;
+    let tx: UtxoTx = deserialize(tx_bytes.as_slice())
+        .map_to_mm(|e| RawTransactionError::DecodeError(format!("Failed to deserialize transaction: {e}")))?;
 
     // Collect amounts for each input from prev_txns or from chain lookup.
     // We need amounts to set on the TransactionInputSigner's inputs.

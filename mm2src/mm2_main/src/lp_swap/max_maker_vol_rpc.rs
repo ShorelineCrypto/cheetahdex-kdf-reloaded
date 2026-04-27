@@ -1,12 +1,12 @@
 use coins::{lp_coinfind_or_err, CoinFindError};
+use common::mm_number::MmNumberMultiRepr;
 use common::HttpStatusCode;
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
-use common::mm_number::MmNumberMultiRepr;
-use serde::{Deserialize, Serialize};
 use ser_error_derive::SerializeErrorType;
+use serde::{Deserialize, Serialize};
 
 use super::check_balance::CheckBalanceError;
 use super::maker_swap::{get_max_maker_vol, CoinVolumeInfo};
@@ -53,16 +53,19 @@ pub enum MaxMakerVolRpcError {
         required: String,
         locked_by_swaps: Option<String>,
     },
-    #[display(fmt = "The volume {} of the {} coin less than minimum transaction amount {}", volume, coin, threshold)]
+    #[display(
+        fmt = "The volume {} of the {} coin less than minimum transaction amount {}",
+        volume,
+        coin,
+        threshold
+    )]
     VolumeTooLow {
         coin: String,
         volume: String,
         threshold: String,
     },
     #[display(fmt = "No such coin: {}", coin)]
-    NoSuchCoin {
-        coin: String,
-    },
+    NoSuchCoin { coin: String },
     #[display(fmt = "Transport error: {}", _0)]
     Transport(String),
     #[display(fmt = "Internal error: {}", _0)]

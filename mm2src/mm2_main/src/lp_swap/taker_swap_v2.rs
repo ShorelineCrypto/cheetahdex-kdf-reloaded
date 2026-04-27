@@ -18,17 +18,16 @@
 //! - Any early state → `Aborted`
 
 use coins::{
-    CanRefundHtlc, DexFee, FeeApproxStage, GenTakerFundingSpendArgs,
-    GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2, MmCoin,
-    RefundFundingSecretArgs, RefundTakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs,
-    SwapTxTypeWithSecretHash, TakerCoinSwapOpsV2, ToBytes, TradePreimageValue, Transaction,
-    TxPreimageWithSig, ValidateMakerPaymentArgs,
+    CanRefundHtlc, DexFee, FeeApproxStage, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2,
+    MmCoin, RefundFundingSecretArgs, RefundTakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs,
+    SwapTxTypeWithSecretHash, TakerCoinSwapOpsV2, ToBytes, TradePreimageValue, Transaction, TxPreimageWithSig,
+    ValidateMakerPaymentArgs,
 };
 use common::executor::Timer;
 use common::log::{error, info, warn};
 use common::mm_number::MmNumber;
-use futures::compat::Future01CompatExt;
 use crypto::secret_hash_algo::SecretHashAlgo;
+use futures::compat::Future01CompatExt;
 use keys::KeyPair;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -133,7 +132,9 @@ pub enum TakerSwapEvent {
         taker_payment_refund: BytesJson,
         reason: AbortReason,
     },
-    Aborted { reason: AbortReason },
+    Aborted {
+        reason: AbortReason,
+    },
     Completed,
 }
 
@@ -194,11 +195,21 @@ where
     MakerCoin: MmCoin + MakerCoinSwapOpsV2,
     TakerCoin: MmCoin + TakerCoinSwapOpsV2,
 {
-    pub fn maker_payment_conf_timeout(&self) -> u64 { self.started_at + self.lock_duration / 3 }
-    pub fn taker_funding_locktime(&self) -> u64 { self.started_at + 3 * self.lock_duration }
-    pub fn taker_payment_locktime(&self) -> u64 { self.started_at + self.lock_duration }
-    pub fn unique_data(&self) -> Vec<u8> { self.uuid.as_bytes().to_vec() }
-    pub fn taker_secret_hash(&self) -> Vec<u8> { self.secret_hash_algo.hash_secret(self.taker_secret.as_slice()) }
+    pub fn maker_payment_conf_timeout(&self) -> u64 {
+        self.started_at + self.lock_duration / 3
+    }
+    pub fn taker_funding_locktime(&self) -> u64 {
+        self.started_at + 3 * self.lock_duration
+    }
+    pub fn taker_payment_locktime(&self) -> u64 {
+        self.started_at + self.lock_duration
+    }
+    pub fn unique_data(&self) -> Vec<u8> {
+        self.uuid.as_bytes().to_vec()
+    }
+    pub fn taker_secret_hash(&self) -> Vec<u8> {
+        self.secret_hash_algo.hash_secret(self.taker_secret.as_slice())
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -207,138 +218,307 @@ where
 
 pub struct Initialize<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>(PhantomData<(M, T)>);
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Default for Initialize<M, T> {
-    fn default() -> Self { Initialize(PhantomData) }
+    fn default() -> Self {
+        Initialize(PhantomData)
+    }
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> std::fmt::Debug for Initialize<M, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("Initialize").finish() }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Initialize").finish()
+    }
 }
 
 pub struct Initialized<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub taker_payment_fee: MmNumber, pub maker_payment_spend_fee: MmNumber,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub taker_payment_fee: MmNumber,
+    pub maker_payment_spend_fee: MmNumber,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Initialized<M, T> {
-    pub fn new(mb: u64, tb: u64, tf: MmNumber, mf: MmNumber) -> Self { Initialized { maker_coin_start_block: mb, taker_coin_start_block: tb, taker_payment_fee: tf, maker_payment_spend_fee: mf, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, tf: MmNumber, mf: MmNumber) -> Self {
+        Initialized {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            taker_payment_fee: tf,
+            maker_payment_spend_fee: mf,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct Negotiated<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub negotiation_data: StoredTakerNegotiationData, pub taker_payment_fee: MmNumber, pub maker_payment_spend_fee: MmNumber,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub taker_payment_fee: MmNumber,
+    pub maker_payment_spend_fee: MmNumber,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Negotiated<M, T> {
-    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: MmNumber, mf: MmNumber) -> Self { Negotiated { maker_coin_start_block: mb, taker_coin_start_block: tb, negotiation_data: nd, taker_payment_fee: tf, maker_payment_spend_fee: mf, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: MmNumber, mf: MmNumber) -> Self {
+        Negotiated {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            negotiation_data: nd,
+            taker_payment_fee: tf,
+            maker_payment_spend_fee: mf,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerFundingSent<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub negotiation_data: StoredTakerNegotiationData, pub taker_funding: BytesJson,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub taker_funding: BytesJson,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerFundingSent<M, T> {
-    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: BytesJson) -> Self { TakerFundingSent { maker_coin_start_block: mb, taker_coin_start_block: tb, negotiation_data: nd, taker_funding: tf, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: BytesJson) -> Self {
+        TakerFundingSent {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            negotiation_data: nd,
+            taker_funding: tf,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct MakerPaymentAndFundingSpendPreimgReceived<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub negotiation_data: StoredTakerNegotiationData, pub taker_funding: BytesJson,
-    pub funding_spend_preimage: StoredTxPreimage, pub maker_payment: BytesJson,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub taker_funding: BytesJson,
+    pub funding_spend_preimage: StoredTxPreimage,
+    pub maker_payment: BytesJson,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> MakerPaymentAndFundingSpendPreimgReceived<M, T> {
-    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: BytesJson, fp: StoredTxPreimage, mp: BytesJson) -> Self { MakerPaymentAndFundingSpendPreimgReceived { maker_coin_start_block: mb, taker_coin_start_block: tb, negotiation_data: nd, taker_funding: tf, funding_spend_preimage: fp, maker_payment: mp, _p: PhantomData } }
+    pub fn new(
+        mb: u64,
+        tb: u64,
+        nd: StoredTakerNegotiationData,
+        tf: BytesJson,
+        fp: StoredTxPreimage,
+        mp: BytesJson,
+    ) -> Self {
+        MakerPaymentAndFundingSpendPreimgReceived {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            negotiation_data: nd,
+            taker_funding: tf,
+            funding_spend_preimage: fp,
+            maker_payment: mp,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct MakerPaymentConfirmed<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub negotiation_data: StoredTakerNegotiationData, pub taker_funding: BytesJson,
-    pub funding_spend_preimage: StoredTxPreimage, pub maker_payment: BytesJson,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub taker_funding: BytesJson,
+    pub funding_spend_preimage: StoredTxPreimage,
+    pub maker_payment: BytesJson,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> MakerPaymentConfirmed<M, T> {
-    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: BytesJson, fp: StoredTxPreimage, mp: BytesJson) -> Self { MakerPaymentConfirmed { maker_coin_start_block: mb, taker_coin_start_block: tb, negotiation_data: nd, taker_funding: tf, funding_spend_preimage: fp, maker_payment: mp, _p: PhantomData } }
+    pub fn new(
+        mb: u64,
+        tb: u64,
+        nd: StoredTakerNegotiationData,
+        tf: BytesJson,
+        fp: StoredTxPreimage,
+        mp: BytesJson,
+    ) -> Self {
+        MakerPaymentConfirmed {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            negotiation_data: nd,
+            taker_funding: tf,
+            funding_spend_preimage: fp,
+            maker_payment: mp,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerPaymentSent<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub negotiation_data: StoredTakerNegotiationData, pub taker_payment: BytesJson, pub maker_payment: BytesJson,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub taker_payment: BytesJson,
+    pub maker_payment: BytesJson,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymentSent<M, T> {
-    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tp: BytesJson, mp: BytesJson) -> Self { TakerPaymentSent { maker_coin_start_block: mb, taker_coin_start_block: tb, negotiation_data: nd, taker_payment: tp, maker_payment: mp, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tp: BytesJson, mp: BytesJson) -> Self {
+        TakerPaymentSent {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            negotiation_data: nd,
+            taker_payment: tp,
+            maker_payment: mp,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerPaymentSentPreimageSendingSkipped<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub negotiation_data: StoredTakerNegotiationData, pub taker_payment: BytesJson, pub maker_payment: BytesJson,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub taker_payment: BytesJson,
+    pub maker_payment: BytesJson,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymentSentPreimageSendingSkipped<M, T> {
-    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tp: BytesJson, mp: BytesJson) -> Self { TakerPaymentSentPreimageSendingSkipped { maker_coin_start_block: mb, taker_coin_start_block: tb, negotiation_data: nd, taker_payment: tp, maker_payment: mp, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tp: BytesJson, mp: BytesJson) -> Self {
+        TakerPaymentSentPreimageSendingSkipped {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            negotiation_data: nd,
+            taker_payment: tp,
+            maker_payment: mp,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerPaymentSpent<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub taker_payment_spend: BytesJson, pub maker_payment: BytesJson, pub negotiation_data: StoredTakerNegotiationData,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub taker_payment_spend: BytesJson,
+    pub maker_payment: BytesJson,
+    pub negotiation_data: StoredTakerNegotiationData,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymentSpent<M, T> {
-    pub fn new(mb: u64, tb: u64, tps: BytesJson, mp: BytesJson, nd: StoredTakerNegotiationData) -> Self { TakerPaymentSpent { maker_coin_start_block: mb, taker_coin_start_block: tb, taker_payment_spend: tps, maker_payment: mp, negotiation_data: nd, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, tps: BytesJson, mp: BytesJson, nd: StoredTakerNegotiationData) -> Self {
+        TakerPaymentSpent {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            taker_payment_spend: tps,
+            maker_payment: mp,
+            negotiation_data: nd,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct MakerPaymentSpent<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub maker_payment_spend: BytesJson, pub negotiation_data: StoredTakerNegotiationData,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub maker_payment_spend: BytesJson,
+    pub negotiation_data: StoredTakerNegotiationData,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> MakerPaymentSpent<M, T> {
-    pub fn new(mb: u64, tb: u64, mps: BytesJson, nd: StoredTakerNegotiationData) -> Self { MakerPaymentSpent { maker_coin_start_block: mb, taker_coin_start_block: tb, maker_payment_spend: mps, negotiation_data: nd, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, mps: BytesJson, nd: StoredTakerNegotiationData) -> Self {
+        MakerPaymentSpent {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            maker_payment_spend: mps,
+            negotiation_data: nd,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerFundingRefundRequired<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub maker_coin_start_block: u64, pub taker_coin_start_block: u64,
-    pub negotiation_data: StoredTakerNegotiationData, pub taker_funding: BytesJson, pub reason: AbortReason,
+    pub maker_coin_start_block: u64,
+    pub taker_coin_start_block: u64,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub taker_funding: BytesJson,
+    pub reason: AbortReason,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerFundingRefundRequired<M, T> {
-    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: BytesJson, r: AbortReason) -> Self { TakerFundingRefundRequired { maker_coin_start_block: mb, taker_coin_start_block: tb, negotiation_data: nd, taker_funding: tf, reason: r, _p: PhantomData } }
+    pub fn new(mb: u64, tb: u64, nd: StoredTakerNegotiationData, tf: BytesJson, r: AbortReason) -> Self {
+        TakerFundingRefundRequired {
+            maker_coin_start_block: mb,
+            taker_coin_start_block: tb,
+            negotiation_data: nd,
+            taker_funding: tf,
+            reason: r,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerPaymentRefundRequired<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub taker_payment: BytesJson, pub negotiation_data: StoredTakerNegotiationData, pub reason: AbortReason,
+    pub taker_payment: BytesJson,
+    pub negotiation_data: StoredTakerNegotiationData,
+    pub reason: AbortReason,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymentRefundRequired<M, T> {
-    pub fn new(tp: BytesJson, nd: StoredTakerNegotiationData, r: AbortReason) -> Self { TakerPaymentRefundRequired { taker_payment: tp, negotiation_data: nd, reason: r, _p: PhantomData } }
+    pub fn new(tp: BytesJson, nd: StoredTakerNegotiationData, r: AbortReason) -> Self {
+        TakerPaymentRefundRequired {
+            taker_payment: tp,
+            negotiation_data: nd,
+            reason: r,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerFundingRefunded<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub funding_tx: BytesJson, pub funding_tx_refund: BytesJson, pub reason: AbortReason,
+    pub funding_tx: BytesJson,
+    pub funding_tx_refund: BytesJson,
+    pub reason: AbortReason,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerFundingRefunded<M, T> {
-    pub fn new(ft: BytesJson, ftr: BytesJson, r: AbortReason) -> Self { TakerFundingRefunded { funding_tx: ft, funding_tx_refund: ftr, reason: r, _p: PhantomData } }
+    pub fn new(ft: BytesJson, ftr: BytesJson, r: AbortReason) -> Self {
+        TakerFundingRefunded {
+            funding_tx: ft,
+            funding_tx_refund: ftr,
+            reason: r,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct TakerPaymentRefunded<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub taker_payment: BytesJson, pub taker_payment_refund: BytesJson, pub reason: AbortReason,
+    pub taker_payment: BytesJson,
+    pub taker_payment_refund: BytesJson,
+    pub reason: AbortReason,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymentRefunded<M, T> {
-    pub fn new(tp: BytesJson, tpr: BytesJson, r: AbortReason) -> Self { TakerPaymentRefunded { taker_payment: tp, taker_payment_refund: tpr, reason: r, _p: PhantomData } }
+    pub fn new(tp: BytesJson, tpr: BytesJson, r: AbortReason) -> Self {
+        TakerPaymentRefunded {
+            taker_payment: tp,
+            taker_payment_refund: tpr,
+            reason: r,
+            _p: PhantomData,
+        }
+    }
 }
 
 pub struct Completed<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>(PhantomData<(M, T)>);
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Completed<M, T> {
-    pub fn new() -> Self { Completed(PhantomData) }
+    pub fn new() -> Self {
+        Completed(PhantomData)
+    }
 }
 
 pub struct Aborted<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
-    pub reason: AbortReason, _p: PhantomData<(M, T)>,
+    pub reason: AbortReason,
+    _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Aborted<M, T> {
-    pub fn new(reason: AbortReason) -> Self { Aborted { reason, _p: PhantomData } }
+    pub fn new(reason: AbortReason) -> Self {
+        Aborted {
+            reason,
+            _p: PhantomData,
+        }
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -346,56 +526,140 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Aborted<M, 
 // ────────────────────────────────────────────────────────────────────────────
 
 // Initialize →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialize<M, T>> for Initialized<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialize<M, T>> for Aborted<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialize<M, T>>
+    for Initialized<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialize<M, T>>
+    for Aborted<M, T>
+{
+}
 
 // Initialized →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialized<M, T>> for Negotiated<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialized<M, T>> for Aborted<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialized<M, T>>
+    for Negotiated<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialized<M, T>>
+    for Aborted<M, T>
+{
+}
 
 // Negotiated →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Negotiated<M, T>> for TakerFundingSent<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Negotiated<M, T>> for Aborted<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Negotiated<M, T>>
+    for TakerFundingSent<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Negotiated<M, T>>
+    for Aborted<M, T>
+{
+}
 
 // TakerFundingSent →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingSent<M, T>> for MakerPaymentAndFundingSpendPreimgReceived<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingSent<M, T>> for TakerFundingRefundRequired<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingSent<M, T>>
+    for MakerPaymentAndFundingSpendPreimgReceived<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingSent<M, T>>
+    for TakerFundingRefundRequired<M, T>
+{
+}
 
 // MakerPaymentAndFundingSpendPreimgReceived →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for MakerPaymentConfirmed<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for TakerPaymentSent<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for TakerPaymentSentPreimageSendingSkipped<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for TakerFundingRefundRequired<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>
+    TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for MakerPaymentConfirmed<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>
+    TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for TakerPaymentSent<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>
+    TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for TakerPaymentSentPreimageSendingSkipped<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>
+    TransitionFrom<MakerPaymentAndFundingSpendPreimgReceived<M, T>> for TakerFundingRefundRequired<M, T>
+{
+}
 
 // MakerPaymentConfirmed →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>> for TakerPaymentSent<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>> for TakerPaymentSentPreimageSendingSkipped<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>> for TakerFundingRefundRequired<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>> for TakerPaymentRefundRequired<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>>
+    for TakerPaymentSent<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>>
+    for TakerPaymentSentPreimageSendingSkipped<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>>
+    for TakerFundingRefundRequired<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentConfirmed<M, T>>
+    for TakerPaymentRefundRequired<M, T>
+{
+}
 
 // TakerPaymentSent →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSent<M, T>> for TakerPaymentSpent<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSent<M, T>> for TakerPaymentRefundRequired<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSent<M, T>>
+    for TakerPaymentSpent<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSent<M, T>>
+    for TakerPaymentRefundRequired<M, T>
+{
+}
 
 // TakerPaymentSentPreimageSendingSkipped →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSentPreimageSendingSkipped<M, T>> for TakerPaymentSpent<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSentPreimageSendingSkipped<M, T>> for TakerPaymentRefundRequired<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>
+    TransitionFrom<TakerPaymentSentPreimageSendingSkipped<M, T>> for TakerPaymentSpent<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>
+    TransitionFrom<TakerPaymentSentPreimageSendingSkipped<M, T>> for TakerPaymentRefundRequired<M, T>
+{
+}
 
 // TakerPaymentSpent →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSpent<M, T>> for MakerPaymentSpent<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSpent<M, T>> for Aborted<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSpent<M, T>>
+    for MakerPaymentSpent<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentSpent<M, T>>
+    for Aborted<M, T>
+{
+}
 
 // MakerPaymentSpent →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentSpent<M, T>> for Completed<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentSpent<M, T>> for TakerPaymentRefundRequired<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentSpent<M, T>>
+    for Completed<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<MakerPaymentSpent<M, T>>
+    for TakerPaymentRefundRequired<M, T>
+{
+}
 
 // TakerFundingRefundRequired →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingRefundRequired<M, T>> for TakerFundingRefunded<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingRefundRequired<M, T>> for Aborted<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingRefundRequired<M, T>>
+    for TakerFundingRefunded<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerFundingRefundRequired<M, T>>
+    for Aborted<M, T>
+{
+}
 
 // TakerPaymentRefundRequired →
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentRefundRequired<M, T>> for TakerPaymentRefunded<M, T> {}
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentRefundRequired<M, T>> for Aborted<M, T> {}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentRefundRequired<M, T>>
+    for TakerPaymentRefunded<M, T>
+{
+}
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<TakerPaymentRefundRequired<M, T>>
+    for Aborted<M, T>
+{
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // StorableStateMachine
@@ -433,17 +697,22 @@ where
             dex_fee_burn: MmNumber::default(),
             conf_settings: self.conf_settings,
             uuid: self.uuid,
-            p2p_keypair: self.p2p_keypair.as_ref().map(|kp| {
-                super::maker_swap_v2::SerializableKeypairBytes(kp.private().secret.to_vec())
-            }),
+            p2p_keypair: self
+                .p2p_keypair
+                .as_ref()
+                .map(|kp| super::maker_swap_v2::SerializableKeypairBytes(kp.private().secret.to_vec())),
             events: Vec::new(),
             maker_p2p_pub: BytesJson::from(self.maker_p2p_pubkey.clone()),
             swap_version: self.swap_version,
         }
     }
 
-    fn storage(&mut self) -> &mut Self::Storage { &mut self.storage }
-    fn id(&self) -> <Self::Storage as StateMachineStorage>::MachineId { self.uuid }
+    fn storage(&mut self) -> &mut Self::Storage {
+        &mut self.storage
+    }
+    fn id(&self) -> <Self::Storage as StateMachineStorage>::MachineId {
+        self.uuid
+    }
 
     async fn recreate_machine(
         uuid: Uuid,
@@ -457,32 +726,155 @@ where
         let last_event = repr.events.remove(repr.events.len() - 1);
 
         let current_state: Box<dyn RestoredState<StateMachine = Self>> = match last_event {
-            TakerSwapEvent::Initialized { maker_coin_start_block, taker_coin_start_block, taker_payment_fee, maker_payment_spend_fee } =>
-                Box::new(Initialized::new(maker_coin_start_block, taker_coin_start_block, taker_payment_fee, maker_payment_spend_fee)),
-            TakerSwapEvent::Negotiated { maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_payment_fee, maker_payment_spend_fee } =>
-                Box::new(Negotiated::new(maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_payment_fee, maker_payment_spend_fee)),
-            TakerSwapEvent::TakerFundingSent { maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding } =>
-                Box::new(TakerFundingSent::new(maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding)),
-            TakerSwapEvent::TakerFundingRefundRequired { maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding, reason } =>
-                Box::new(TakerFundingRefundRequired::new(maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding, reason)),
-            TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived { maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding, funding_spend_preimage, maker_payment } =>
-                Box::new(MakerPaymentAndFundingSpendPreimgReceived::new(maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding, funding_spend_preimage, maker_payment)),
-            TakerSwapEvent::MakerPaymentConfirmed { maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding, funding_spend_preimage, maker_payment } =>
-                Box::new(MakerPaymentConfirmed::new(maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_funding, funding_spend_preimage, maker_payment)),
-            TakerSwapEvent::TakerPaymentSent { maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_payment, maker_payment } =>
-                Box::new(TakerPaymentSent::new(maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_payment, maker_payment)),
-            TakerSwapEvent::TakerPaymentSentPreimageSendingSkipped { maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_payment, maker_payment } =>
-                Box::new(TakerPaymentSentPreimageSendingSkipped::new(maker_coin_start_block, taker_coin_start_block, negotiation_data, taker_payment, maker_payment)),
-            TakerSwapEvent::TakerPaymentRefundRequired { taker_payment, negotiation_data, reason } =>
-                Box::new(TakerPaymentRefundRequired::new(taker_payment, negotiation_data, reason)),
-            TakerSwapEvent::TakerPaymentSpent { maker_coin_start_block, taker_coin_start_block, taker_payment_spend, maker_payment, negotiation_data } =>
-                Box::new(TakerPaymentSpent::new(maker_coin_start_block, taker_coin_start_block, taker_payment_spend, maker_payment, negotiation_data)),
-            TakerSwapEvent::MakerPaymentSpent { maker_coin_start_block, taker_coin_start_block, maker_payment_spend, negotiation_data } =>
-                Box::new(MakerPaymentSpent::new(maker_coin_start_block, taker_coin_start_block, maker_payment_spend, negotiation_data)),
-            TakerSwapEvent::TakerFundingRefunded { .. } => return MmError::err(SwapRecreateError::Internal("Cannot recreate from TakerFundingRefunded".into())),
-            TakerSwapEvent::TakerPaymentRefunded { .. } => return MmError::err(SwapRecreateError::Internal("Cannot recreate from TakerPaymentRefunded".into())),
-            TakerSwapEvent::Aborted { .. } => return MmError::err(SwapRecreateError::Internal("Cannot recreate from Aborted".into())),
-            TakerSwapEvent::Completed => return MmError::err(SwapRecreateError::Internal("Cannot recreate from Completed".into())),
+            TakerSwapEvent::Initialized {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                taker_payment_fee,
+                maker_payment_spend_fee,
+            } => Box::new(Initialized::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                taker_payment_fee,
+                maker_payment_spend_fee,
+            )),
+            TakerSwapEvent::Negotiated {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_payment_fee,
+                maker_payment_spend_fee,
+            } => Box::new(Negotiated::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_payment_fee,
+                maker_payment_spend_fee,
+            )),
+            TakerSwapEvent::TakerFundingSent {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+            } => Box::new(TakerFundingSent::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+            )),
+            TakerSwapEvent::TakerFundingRefundRequired {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+                reason,
+            } => Box::new(TakerFundingRefundRequired::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+                reason,
+            )),
+            TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+                funding_spend_preimage,
+                maker_payment,
+            } => Box::new(MakerPaymentAndFundingSpendPreimgReceived::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+                funding_spend_preimage,
+                maker_payment,
+            )),
+            TakerSwapEvent::MakerPaymentConfirmed {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+                funding_spend_preimage,
+                maker_payment,
+            } => Box::new(MakerPaymentConfirmed::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_funding,
+                funding_spend_preimage,
+                maker_payment,
+            )),
+            TakerSwapEvent::TakerPaymentSent {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_payment,
+                maker_payment,
+            } => Box::new(TakerPaymentSent::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_payment,
+                maker_payment,
+            )),
+            TakerSwapEvent::TakerPaymentSentPreimageSendingSkipped {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_payment,
+                maker_payment,
+            } => Box::new(TakerPaymentSentPreimageSendingSkipped::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                negotiation_data,
+                taker_payment,
+                maker_payment,
+            )),
+            TakerSwapEvent::TakerPaymentRefundRequired {
+                taker_payment,
+                negotiation_data,
+                reason,
+            } => Box::new(TakerPaymentRefundRequired::new(taker_payment, negotiation_data, reason)),
+            TakerSwapEvent::TakerPaymentSpent {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                taker_payment_spend,
+                maker_payment,
+                negotiation_data,
+            } => Box::new(TakerPaymentSpent::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                taker_payment_spend,
+                maker_payment,
+                negotiation_data,
+            )),
+            TakerSwapEvent::MakerPaymentSpent {
+                maker_coin_start_block,
+                taker_coin_start_block,
+                maker_payment_spend,
+                negotiation_data,
+            } => Box::new(MakerPaymentSpent::new(
+                maker_coin_start_block,
+                taker_coin_start_block,
+                maker_payment_spend,
+                negotiation_data,
+            )),
+            TakerSwapEvent::TakerFundingRefunded { .. } => {
+                return MmError::err(SwapRecreateError::Internal(
+                    "Cannot recreate from TakerFundingRefunded".into(),
+                ))
+            },
+            TakerSwapEvent::TakerPaymentRefunded { .. } => {
+                return MmError::err(SwapRecreateError::Internal(
+                    "Cannot recreate from TakerPaymentRefunded".into(),
+                ))
+            },
+            TakerSwapEvent::Aborted { .. } => {
+                return MmError::err(SwapRecreateError::Internal("Cannot recreate from Aborted".into()))
+            },
+            TakerSwapEvent::Completed => {
+                return MmError::err(SwapRecreateError::Internal("Cannot recreate from Completed".into()))
+            },
         };
 
         let p2p_topic = super::swap_v2_topic(&uuid);
@@ -504,7 +896,12 @@ where
                 let mut secret = keys::Secret::default();
                 let len = k.0.len().min(secret.len());
                 secret[..len].copy_from_slice(&k.0[..len]);
-                let private = keys::Private { prefix: 0, secret, compressed: true, checksum_type: Default::default() };
+                let private = keys::Private {
+                    prefix: 0,
+                    secret,
+                    compressed: true,
+                    checksum_type: Default::default(),
+                };
                 KeyPair::from_private(private).ok()
             }),
             taker_secret: repr.taker_secret.into(),
@@ -559,11 +956,9 @@ where
 
     fn on_event(&mut self, event: &TakerSwapEvent) {
         match event {
-            TakerSwapEvent::Initialized {
-                taker_payment_fee, ..
-            } => {
-                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
-                    .expect("from_ctx should not fail at this point");
+            TakerSwapEvent::Initialized { taker_payment_fee, .. } => {
+                let swaps_ctx =
+                    super::SwapsContext::from_ctx(&self.ctx).expect("from_ctx should not fail at this point");
                 let taker_coin_ticker: String = self.taker_coin.ticker().into();
                 let new_locked = super::LockedAmountV2Info {
                     swap_uuid: self.uuid,
@@ -586,12 +981,10 @@ where
                     .push(new_locked);
             },
             TakerSwapEvent::TakerFundingSent { .. } => {
-                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
-                    .expect("from_ctx should not fail at this point");
+                let swaps_ctx =
+                    super::SwapsContext::from_ctx(&self.ctx).expect("from_ctx should not fail at this point");
                 let ticker = self.taker_coin.ticker();
-                if let Some(taker_coin_locked) =
-                    swaps_ctx.locked_amounts_v2.lock().unwrap().get_mut(ticker)
-                {
+                if let Some(taker_coin_locked) = swaps_ctx.locked_amounts_v2.lock().unwrap().get_mut(ticker) {
                     taker_coin_locked.retain(|locked| locked.swap_uuid != self.uuid);
                 };
             },
@@ -623,14 +1016,10 @@ where
 
     fn on_kickstart_event(&mut self, event: TakerSwapEvent) {
         match event {
-            TakerSwapEvent::Initialized {
-                taker_payment_fee, ..
-            }
-            | TakerSwapEvent::Negotiated {
-                taker_payment_fee, ..
-            } => {
-                let swaps_ctx = super::SwapsContext::from_ctx(&self.ctx)
-                    .expect("from_ctx should not fail at this point");
+            TakerSwapEvent::Initialized { taker_payment_fee, .. }
+            | TakerSwapEvent::Negotiated { taker_payment_fee, .. } => {
+                let swaps_ctx =
+                    super::SwapsContext::from_ctx(&self.ctx).expect("from_ctx should not fail at this point");
                 let taker_coin_ticker: String = self.taker_coin.ticker().into();
                 let new_locked = super::LockedAmountV2Info {
                     swap_uuid: self.uuid,
@@ -680,102 +1069,187 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> InitialStat
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for Initialized<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::Initialized { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, taker_payment_fee: self.taker_payment_fee.clone(), maker_payment_spend_fee: self.maker_payment_spend_fee.clone() }
+        TakerSwapEvent::Initialized {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            taker_payment_fee: self.taker_payment_fee.clone(),
+            maker_payment_spend_fee: self.maker_payment_spend_fee.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for Negotiated<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::Negotiated { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, negotiation_data: self.negotiation_data.clone(), taker_payment_fee: self.taker_payment_fee.clone(), maker_payment_spend_fee: self.maker_payment_spend_fee.clone() }
+        TakerSwapEvent::Negotiated {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            negotiation_data: self.negotiation_data.clone(),
+            taker_payment_fee: self.taker_payment_fee.clone(),
+            maker_payment_spend_fee: self.maker_payment_spend_fee.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerFundingSent<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerFundingSent { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, negotiation_data: self.negotiation_data.clone(), taker_funding: self.taker_funding.clone() }
+        TakerSwapEvent::TakerFundingSent {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            negotiation_data: self.negotiation_data.clone(),
+            taker_funding: self.taker_funding.clone(),
+        }
     }
 }
 
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for MakerPaymentAndFundingSpendPreimgReceived<M, T> {
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState
+    for MakerPaymentAndFundingSpendPreimgReceived<M, T>
+{
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, negotiation_data: self.negotiation_data.clone(), taker_funding: self.taker_funding.clone(), funding_spend_preimage: self.funding_spend_preimage.clone(), maker_payment: self.maker_payment.clone() }
+        TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            negotiation_data: self.negotiation_data.clone(),
+            taker_funding: self.taker_funding.clone(),
+            funding_spend_preimage: self.funding_spend_preimage.clone(),
+            maker_payment: self.maker_payment.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for MakerPaymentConfirmed<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::MakerPaymentConfirmed { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, negotiation_data: self.negotiation_data.clone(), taker_funding: self.taker_funding.clone(), funding_spend_preimage: self.funding_spend_preimage.clone(), maker_payment: self.maker_payment.clone() }
+        TakerSwapEvent::MakerPaymentConfirmed {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            negotiation_data: self.negotiation_data.clone(),
+            taker_funding: self.taker_funding.clone(),
+            funding_spend_preimage: self.funding_spend_preimage.clone(),
+            maker_payment: self.maker_payment.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerPaymentSent<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerPaymentSent { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, negotiation_data: self.negotiation_data.clone(), taker_payment: self.taker_payment.clone(), maker_payment: self.maker_payment.clone() }
+        TakerSwapEvent::TakerPaymentSent {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            negotiation_data: self.negotiation_data.clone(),
+            taker_payment: self.taker_payment.clone(),
+            maker_payment: self.maker_payment.clone(),
+        }
     }
 }
 
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerPaymentSentPreimageSendingSkipped<M, T> {
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState
+    for TakerPaymentSentPreimageSendingSkipped<M, T>
+{
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerPaymentSentPreimageSendingSkipped { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, negotiation_data: self.negotiation_data.clone(), taker_payment: self.taker_payment.clone(), maker_payment: self.maker_payment.clone() }
+        TakerSwapEvent::TakerPaymentSentPreimageSendingSkipped {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            negotiation_data: self.negotiation_data.clone(),
+            taker_payment: self.taker_payment.clone(),
+            maker_payment: self.maker_payment.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerPaymentSpent<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerPaymentSpent { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, taker_payment_spend: self.taker_payment_spend.clone(), maker_payment: self.maker_payment.clone(), negotiation_data: self.negotiation_data.clone() }
+        TakerSwapEvent::TakerPaymentSpent {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            taker_payment_spend: self.taker_payment_spend.clone(),
+            maker_payment: self.maker_payment.clone(),
+            negotiation_data: self.negotiation_data.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for MakerPaymentSpent<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::MakerPaymentSpent { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, maker_payment_spend: self.maker_payment_spend.clone(), negotiation_data: self.negotiation_data.clone() }
+        TakerSwapEvent::MakerPaymentSpent {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            maker_payment_spend: self.maker_payment_spend.clone(),
+            negotiation_data: self.negotiation_data.clone(),
+        }
     }
 }
 
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerFundingRefundRequired<M, T> {
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState
+    for TakerFundingRefundRequired<M, T>
+{
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerFundingRefundRequired { maker_coin_start_block: self.maker_coin_start_block, taker_coin_start_block: self.taker_coin_start_block, negotiation_data: self.negotiation_data.clone(), taker_funding: self.taker_funding.clone(), reason: self.reason.clone() }
+        TakerSwapEvent::TakerFundingRefundRequired {
+            maker_coin_start_block: self.maker_coin_start_block,
+            taker_coin_start_block: self.taker_coin_start_block,
+            negotiation_data: self.negotiation_data.clone(),
+            taker_funding: self.taker_funding.clone(),
+            reason: self.reason.clone(),
+        }
     }
 }
 
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerPaymentRefundRequired<M, T> {
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState
+    for TakerPaymentRefundRequired<M, T>
+{
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerPaymentRefundRequired { taker_payment: self.taker_payment.clone(), negotiation_data: self.negotiation_data.clone(), reason: self.reason.clone() }
+        TakerSwapEvent::TakerPaymentRefundRequired {
+            taker_payment: self.taker_payment.clone(),
+            negotiation_data: self.negotiation_data.clone(),
+            reason: self.reason.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerFundingRefunded<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerFundingRefunded { funding_tx: self.funding_tx.clone(), funding_tx_refund: self.funding_tx_refund.clone(), reason: self.reason.clone() }
+        TakerSwapEvent::TakerFundingRefunded {
+            funding_tx: self.funding_tx.clone(),
+            funding_tx_refund: self.funding_tx_refund.clone(),
+            reason: self.reason.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for TakerPaymentRefunded<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
     fn get_event(&self) -> TakerSwapEvent {
-        TakerSwapEvent::TakerPaymentRefunded { taker_payment: self.taker_payment.clone(), taker_payment_refund: self.taker_payment_refund.clone(), reason: self.reason.clone() }
+        TakerSwapEvent::TakerPaymentRefunded {
+            taker_payment: self.taker_payment.clone(),
+            taker_payment_refund: self.taker_payment_refund.clone(),
+            reason: self.reason.clone(),
+        }
     }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for Completed<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
-    fn get_event(&self) -> TakerSwapEvent { TakerSwapEvent::Completed }
+    fn get_event(&self) -> TakerSwapEvent {
+        TakerSwapEvent::Completed
+    }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for Aborted<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
-    fn get_event(&self) -> TakerSwapEvent { TakerSwapEvent::Aborted { reason: self.reason.clone() } }
+    fn get_event(&self) -> TakerSwapEvent {
+        TakerSwapEvent::Aborted {
+            reason: self.reason.clone(),
+        }
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -807,10 +1281,11 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
         };
 
         let stage = FeeApproxStage::StartSwap;
-        let taker_payment_trade_fee = match sm.taker_coin.get_sender_trade_fee(
-            TradePreimageValue::Exact(sm.taker_volume.to_decimal()),
-            stage.clone(),
-        ).await {
+        let taker_payment_trade_fee = match sm
+            .taker_coin
+            .get_sender_trade_fee(TradePreimageValue::Exact(sm.taker_volume.to_decimal()), stage.clone())
+            .await
+        {
             Ok(f) => f,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to get taker payment fee: {}", e));
@@ -833,9 +1308,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
-        let required = sm.taker_volume.to_decimal()
-            + sm.taker_premium.to_decimal()
-            + taker_payment_trade_fee.amount.to_decimal();
+        let required =
+            sm.taker_volume.to_decimal() + sm.taker_premium.to_decimal() + taker_payment_trade_fee.amount.to_decimal();
         if spendable < required {
             let reason = AbortReason::InternalError(format!(
                 "Insufficient balance: need {} but have {}",
@@ -915,11 +1389,19 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
         }
 
         // Parse maker HTLC pubkeys (validates they're well-formed).
-        if sm.maker_coin.parse_pubkey(&maker_negotiation.maker_coin_htlc_pub).is_err() {
+        if sm
+            .maker_coin
+            .parse_pubkey(&maker_negotiation.maker_coin_htlc_pub)
+            .is_err()
+        {
             let reason = AbortReason::NegotiationFailed("Invalid maker's maker-coin HTLC pubkey".into());
             return Self::change_state(Aborted::new(reason), sm).await;
         }
-        if sm.taker_coin.parse_pubkey(&maker_negotiation.taker_coin_htlc_pub).is_err() {
+        if sm
+            .taker_coin
+            .parse_pubkey(&maker_negotiation.taker_coin_htlc_pub)
+            .is_err()
+        {
             let reason = AbortReason::NegotiationFailed("Invalid maker's taker-coin HTLC pubkey".into());
             return Self::change_state(Aborted::new(reason), sm).await;
         }
@@ -965,9 +1447,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
         };
 
         if !maker_negotiated.negotiated {
-            let reason = AbortReason::MakerAborted(
-                maker_negotiated.reason.unwrap_or_else(|| "unknown".into()),
-            );
+            let reason = AbortReason::MakerAborted(maker_negotiated.reason.unwrap_or_else(|| "unknown".into()));
             return Self::change_state(Aborted::new(reason), sm).await;
         }
 
@@ -1157,7 +1637,9 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
 // then spend funding to create taker payment.
 
 #[async_trait::async_trait]
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for MakerPaymentAndFundingSpendPreimgReceived<M, T> {
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
+    for MakerPaymentAndFundingSpendPreimgReceived<M, T>
+{
     type StateMachine = TakerSwapStateMachine<M, T>;
     async fn on_changed(self: Box<Self>, sm: &mut Self::StateMachine) -> StateResult<Self::StateMachine> {
         let unique_data = sm.unique_data();
@@ -1169,10 +1651,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::FailedToParseMakerPayment(format!("{:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let taker_funding_tx = match sm.taker_coin.parse_tx(&self.taker_funding) {
@@ -1181,10 +1668,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::InternalError(format!("Failed to parse own funding tx: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
 
@@ -1195,10 +1687,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::InternalError(format!("Failed to parse maker's maker-coin pubkey: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let maker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&self.negotiation_data.taker_coin_htlc_pub) {
@@ -1207,10 +1704,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::InternalError(format!("Failed to parse maker's taker-coin pubkey: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
 
@@ -1228,23 +1730,36 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
             let reason = AbortReason::MakerPaymentValidationFailed(format!("{:?}", e));
             return Self::change_state(
                 TakerFundingRefundRequired::new(
-                    self.maker_coin_start_block, self.taker_coin_start_block,
-                    self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                ), sm,
-            ).await;
+                    self.maker_coin_start_block,
+                    self.taker_coin_start_block,
+                    self.negotiation_data.clone(),
+                    self.taker_funding.clone(),
+                    reason,
+                ),
+                sm,
+            )
+            .await;
         }
 
         // Derive taker's own taker-coin pubkey.
-        let taker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&sm.taker_coin.derive_htlc_pubkey_v2_bytes(&unique_data)) {
+        let taker_taker_coin_pub = match sm
+            .taker_coin
+            .parse_pubkey(&sm.taker_coin.derive_htlc_pubkey_v2_bytes(&unique_data))
+        {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own taker-coin pubkey: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
 
@@ -1265,10 +1780,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::FailedToParseFundingSpendPreimg(format!("{:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let signature = match sm.taker_coin.parse_signature(&self.funding_spend_preimage.signature) {
@@ -1277,65 +1797,97 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::FailedToParseFundingSpendSig(format!("{:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let preimage_with_sig = TxPreimageWithSig { preimage, signature };
 
-        if let Err(e) = sm.taker_coin.validate_taker_funding_spend_preimage(&gen_funding_spend_args, &preimage_with_sig).await {
+        if let Err(e) = sm
+            .taker_coin
+            .validate_taker_funding_spend_preimage(&gen_funding_spend_args, &preimage_with_sig)
+            .await
+        {
             let reason = AbortReason::FundingSpendPreimageValidationFailed(format!("{:?}", e));
             return Self::change_state(
                 TakerFundingRefundRequired::new(
-                    self.maker_coin_start_block, self.taker_coin_start_block,
-                    self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                ), sm,
-            ).await;
+                    self.maker_coin_start_block,
+                    self.taker_coin_start_block,
+                    self.negotiation_data.clone(),
+                    self.taker_funding.clone(),
+                    reason,
+                ),
+                sm,
+            )
+            .await;
         }
 
         // Step 3: Optional confirmation gate for maker payment.
         if sm.require_maker_payment_confirm {
-            let confirm_result = sm.maker_coin.wait_for_confirmations(
-                &maker_payment_tx.tx_hex(),
-                sm.conf_settings.maker_coin_confs,
-                sm.conf_settings.maker_coin_nota,
-                sm.maker_payment_conf_timeout(),
-                10,
-            ).compat().await;
+            let confirm_result = sm
+                .maker_coin
+                .wait_for_confirmations(
+                    &maker_payment_tx.tx_hex(),
+                    sm.conf_settings.maker_coin_confs,
+                    sm.conf_settings.maker_coin_nota,
+                    sm.maker_payment_conf_timeout(),
+                    10,
+                )
+                .compat()
+                .await;
             if let Err(e) = confirm_result {
                 warn!("Swap {}: maker payment not confirmed in time: {}", sm.uuid, e);
                 let reason = AbortReason::MakerPaymentNotConfirmedInTime(format!("{}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             }
             info!("Swap {}: maker payment confirmed, proceeding to spend funding", sm.uuid);
         }
 
         // Step 4: Spend funding → create taker payment.
-        let taker_payment_tx = match sm.taker_coin.sign_and_send_taker_funding_spend(
-            &preimage_with_sig,
-            &gen_funding_spend_args,
-            &unique_data,
-        ).await {
+        let taker_payment_tx = match sm
+            .taker_coin
+            .sign_and_send_taker_funding_spend(&preimage_with_sig, &gen_funding_spend_args, &unique_data)
+            .await
+        {
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::FailedToSendPayment(format!("Failed to send taker payment: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let taker_payment_bytes: BytesJson = taker_payment_tx.tx_hex().into();
-        info!("Taker swap {}: taker payment sent: {:?}", sm.uuid, taker_payment_tx.tx_hash());
+        info!(
+            "Taker swap {}: taker payment sent: {:?}",
+            sm.uuid,
+            taker_payment_tx.tx_hash()
+        );
 
         if sm.taker_coin.skip_taker_payment_spend_preimage() {
             Self::change_state(
@@ -1381,10 +1933,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::InternalError(format!("Failed to parse own funding tx: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let maker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&self.negotiation_data.taker_coin_htlc_pub) {
@@ -1393,22 +1950,35 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::InternalError(format!("Failed to parse maker's taker-coin pubkey: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
-        let taker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&sm.taker_coin.derive_htlc_pubkey_v2_bytes(&unique_data)) {
+        let taker_taker_coin_pub = match sm
+            .taker_coin
+            .parse_pubkey(&sm.taker_coin.derive_htlc_pubkey_v2_bytes(&unique_data))
+        {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own taker-coin pubkey: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
 
@@ -1428,10 +1998,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::InternalError(format!("Failed to parse preimage: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let signature = match sm.taker_coin.parse_signature(&self.funding_spend_preimage.signature) {
@@ -1440,47 +2015,71 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 let reason = AbortReason::InternalError(format!("Failed to parse signature: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let preimage_with_sig = TxPreimageWithSig { preimage, signature };
 
-        let taker_payment_tx = match sm.taker_coin.sign_and_send_taker_funding_spend(
-            &preimage_with_sig,
-            &gen_funding_spend_args,
-            &unique_data,
-        ).await {
+        let taker_payment_tx = match sm
+            .taker_coin
+            .sign_and_send_taker_funding_spend(&preimage_with_sig, &gen_funding_spend_args, &unique_data)
+            .await
+        {
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::FailedToSendPayment(format!("Failed to send taker payment: {:?}", e));
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block, self.taker_coin_start_block,
-                        self.negotiation_data.clone(), self.taker_funding.clone(), reason,
-                    ), sm,
-                ).await;
+                        self.maker_coin_start_block,
+                        self.taker_coin_start_block,
+                        self.negotiation_data.clone(),
+                        self.taker_funding.clone(),
+                        reason,
+                    ),
+                    sm,
+                )
+                .await;
             },
         };
         let taker_payment_bytes: BytesJson = taker_payment_tx.tx_hex().into();
-        info!("Taker swap {}: taker payment sent (post-confirm): {:?}", sm.uuid, taker_payment_tx.tx_hash());
+        info!(
+            "Taker swap {}: taker payment sent (post-confirm): {:?}",
+            sm.uuid,
+            taker_payment_tx.tx_hash()
+        );
 
         if sm.taker_coin.skip_taker_payment_spend_preimage() {
             Self::change_state(
                 TakerPaymentSentPreimageSendingSkipped::new(
-                    self.maker_coin_start_block, self.taker_coin_start_block,
-                    self.negotiation_data.clone(), taker_payment_bytes, self.maker_payment.clone(),
-                ), sm,
-            ).await
+                    self.maker_coin_start_block,
+                    self.taker_coin_start_block,
+                    self.negotiation_data.clone(),
+                    taker_payment_bytes,
+                    self.maker_payment.clone(),
+                ),
+                sm,
+            )
+            .await
         } else {
             Self::change_state(
                 TakerPaymentSent::new(
-                    self.maker_coin_start_block, self.taker_coin_start_block,
-                    self.negotiation_data.clone(), taker_payment_bytes, self.maker_payment.clone(),
-                ), sm,
-            ).await
+                    self.maker_coin_start_block,
+                    self.taker_coin_start_block,
+                    self.negotiation_data.clone(),
+                    taker_payment_bytes,
+                    self.maker_payment.clone(),
+                ),
+                sm,
+            )
+            .await
         }
     }
 }
@@ -1502,7 +2101,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(
                     TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
                     sm,
-                ).await;
+                )
+                .await;
             },
         };
         let maker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&self.negotiation_data.taker_coin_htlc_pub) {
@@ -1512,17 +2112,22 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(
                     TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
                     sm,
-                ).await;
+                )
+                .await;
             },
         };
-        let taker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&sm.taker_coin.derive_htlc_pubkey_v2_bytes(&unique_data)) {
+        let taker_taker_coin_pub = match sm
+            .taker_coin
+            .parse_pubkey(&sm.taker_coin.derive_htlc_pubkey_v2_bytes(&unique_data))
+        {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own taker-coin pubkey: {:?}", e));
                 return Self::change_state(
                     TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
                     sm,
-                ).await;
+                )
+                .await;
             },
         };
         let maker_address = sm.taker_coin.my_addr().await;
@@ -1540,14 +2145,19 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
         };
 
         // Generate taker payment spend preimage.
-        let preimage_result = match sm.taker_coin.gen_taker_payment_spend_preimage(&gen_spend_args, &unique_data).await {
+        let preimage_result = match sm
+            .taker_coin
+            .gen_taker_payment_spend_preimage(&gen_spend_args, &unique_data)
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 let reason = AbortReason::FailedToGenerateSpendPreimage(format!("{:?}", e));
                 return Self::change_state(
                     TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
                     sm,
-                ).await;
+                )
+                .await;
             },
         };
 
@@ -1566,11 +2176,11 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
 
         // Wait for maker to spend taker payment (reveals maker secret).
         let wait_until = sm.taker_payment_locktime();
-        match sm.taker_coin.find_taker_payment_spend_tx(
-            &taker_payment_tx,
-            self.maker_coin_start_block,
-            wait_until,
-        ).await {
+        match sm
+            .taker_coin
+            .find_taker_payment_spend_tx(&taker_payment_tx, self.maker_coin_start_block, wait_until)
+            .await
+        {
             Ok(spend_tx) => {
                 let spend_tx_bytes: BytesJson = spend_tx.tx_hex().into();
                 info!("Taker swap {}: taker payment spent by maker", sm.uuid);
@@ -1603,7 +2213,9 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
 // EVM/contract coins: skip preimage, just poll for maker spend.
 
 #[async_trait::async_trait]
-impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for TakerPaymentSentPreimageSendingSkipped<M, T> {
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
+    for TakerPaymentSentPreimageSendingSkipped<M, T>
+{
     type StateMachine = TakerSwapStateMachine<M, T>;
     async fn on_changed(self: Box<Self>, sm: &mut Self::StateMachine) -> StateResult<Self::StateMachine> {
         info!(
@@ -1618,20 +2230,24 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(
                     TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
                     sm,
-                ).await;
+                )
+                .await;
             },
         };
 
         // Wait for maker to spend taker payment.
         let wait_until = sm.taker_payment_locktime();
-        match sm.taker_coin.find_taker_payment_spend_tx(
-            &taker_payment_tx,
-            self.maker_coin_start_block,
-            wait_until,
-        ).await {
+        match sm
+            .taker_coin
+            .find_taker_payment_spend_tx(&taker_payment_tx, self.maker_coin_start_block, wait_until)
+            .await
+        {
             Ok(spend_tx) => {
                 let spend_tx_bytes: BytesJson = spend_tx.tx_hex().into();
-                info!("Taker swap {}: taker payment spent by maker (preimage skipped)", sm.uuid);
+                info!(
+                    "Taker swap {}: taker payment spent by maker (preimage skipped)",
+                    sm.uuid
+                );
                 Self::change_state(
                     TakerPaymentSpent::new(
                         self.maker_coin_start_block,
@@ -1676,7 +2292,11 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
         };
 
         // Extract the maker secret that was revealed when maker spent the taker payment.
-        let maker_secret = match sm.taker_coin.extract_secret_v2(&self.negotiation_data.maker_secret_hash, &spend_tx).await {
+        let maker_secret = match sm
+            .taker_coin
+            .extract_secret_v2(&self.negotiation_data.maker_secret_hash, &spend_tx)
+            .await
+        {
             Ok(secret) => secret,
             Err(e) => {
                 let reason = AbortReason::CouldNotExtractSecret(format!("{}", e));
@@ -1719,7 +2339,11 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             },
         };
         let maker_payment_spend_bytes: BytesJson = maker_payment_spend_tx.tx_hex().into();
-        info!("Taker swap {}: maker payment spent: {:?}", sm.uuid, maker_payment_spend_tx.tx_hash());
+        info!(
+            "Taker swap {}: maker payment spent: {:?}",
+            sm.uuid,
+            maker_payment_spend_tx.tx_hash()
+        );
 
         Self::change_state(
             MakerPaymentSpent::new(
@@ -1742,23 +2366,30 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
     type StateMachine = TakerSwapStateMachine<M, T>;
     async fn on_changed(self: Box<Self>, sm: &mut Self::StateMachine) -> StateResult<Self::StateMachine> {
         if sm.require_maker_payment_spend_confirm {
-            let confirm_result = sm.maker_coin.wait_for_confirmations(
-                &self.maker_payment_spend,
-                sm.conf_settings.maker_coin_confs,
-                sm.conf_settings.maker_coin_nota,
-                sm.taker_payment_locktime(),
-                10,
-            ).compat().await;
+            let confirm_result = sm
+                .maker_coin
+                .wait_for_confirmations(
+                    &self.maker_payment_spend,
+                    sm.conf_settings.maker_coin_confs,
+                    sm.conf_settings.maker_coin_nota,
+                    sm.taker_payment_locktime(),
+                    10,
+                )
+                .compat()
+                .await;
             if let Err(e) = confirm_result {
                 warn!("Swap {}: maker payment spend not confirmed in time: {}", sm.uuid, e);
                 let reason = AbortReason::MakerPaymentSpendNotConfirmedInTime(format!("{}", e));
                 return Self::change_state(
                     TakerPaymentRefundRequired::new(
                         // We don't have taker_payment bytes here; use empty as fallback
-                        BytesJson::default(), self.negotiation_data.clone(), reason,
+                        BytesJson::default(),
+                        self.negotiation_data.clone(),
+                        reason,
                     ),
                     sm,
-                ).await;
+                )
+                .await;
             }
         }
         info!("Taker swap {} completed successfully", sm.uuid);
@@ -1837,10 +2468,18 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
 
         // Wait until we can refund.
         loop {
-            match sm.taker_coin.can_refund_htlc(sm.taker_payment_locktime()).compat().await {
+            match sm
+                .taker_coin
+                .can_refund_htlc(sm.taker_payment_locktime())
+                .compat()
+                .await
+            {
                 Ok(CanRefundHtlc::CanRefundNow) => break,
                 Ok(CanRefundHtlc::HaveToWait(secs)) => {
-                    info!("Swap {}: waiting {} seconds for taker payment refund window", sm.uuid, secs);
+                    info!(
+                        "Swap {}: waiting {} seconds for taker payment refund window",
+                        sm.uuid, secs
+                    );
                     Timer::sleep(secs as f64).await;
                 },
                 Err(e) => {
@@ -1868,7 +2507,11 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
         match sm.taker_coin.refund_combined_taker_payment(refund_args).await {
             Ok(refund_tx) => {
                 let refund_tx_bytes: BytesJson = refund_tx.tx_hex().into();
-                info!("Taker swap {}: taker payment refunded: {:?}", sm.uuid, refund_tx.tx_hash());
+                info!(
+                    "Taker swap {}: taker payment refunded: {:?}",
+                    sm.uuid,
+                    refund_tx.tx_hash()
+                );
                 Self::change_state(
                     TakerPaymentRefunded::new(self.taker_payment.clone(), refund_tx_bytes, self.reason.clone()),
                     sm,

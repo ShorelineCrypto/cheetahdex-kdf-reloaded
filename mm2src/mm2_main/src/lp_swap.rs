@@ -57,7 +57,10 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee, TransactionEnum};
+use coins::{
+    lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee,
+    TransactionEnum,
+};
 use common::log::{debug, warn};
 use common::{
     bits256, calc_total_pages,
@@ -135,6 +138,7 @@ pub use maker_swap::{
     calc_max_maker_vol, check_balance_for_maker_swap, maker_swap_trade_preimage, run_maker_swap, MakerSavedEvent,
     MakerSavedSwap, MakerSwap, MakerSwapStatusChanged, MakerTradePreimage, RunMakerSwapInput,
 };
+pub use max_maker_vol_rpc::max_maker_vol;
 use my_swaps_storage::{MySwapsOps, MySwapsStorage};
 use pubkey_banning::BanReason;
 pub use pubkey_banning::{ban_pubkey_rpc, is_pubkey_banned, list_banned_pubkeys_rpc, unban_pubkeys_rpc};
@@ -152,7 +156,6 @@ pub use taker_swap::{
     TakerTradePreimage,
 };
 pub use trade_preimage::trade_preimage_rpc;
-pub use max_maker_vol_rpc::max_maker_vol;
 
 pub const SWAP_PREFIX: TopicPrefix = "swap";
 
@@ -1525,8 +1528,8 @@ pub async fn swap_kick_starts(ctx: MmArc) -> Result<HashSet<String>, String> {
     // === V2 maker swaps ===
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use swap_v2_common::MakerSwapStorage;
         use mm2_state_machine::storable_state_machine::StateMachineStorage;
+        use swap_v2_common::MakerSwapStorage;
 
         let maker_storage = MakerSwapStorage::new(ctx.clone());
         let unfinished_maker = try_s!(maker_storage.get_unfinished().await);
@@ -1543,7 +1546,12 @@ pub async fn swap_kick_starts(ctx: MmArc) -> Result<HashSet<String>, String> {
             coins.insert(repr.taker_coin.clone());
             let ctx2 = ctx.clone();
             std::thread::spawn(move || {
-                common::block_on(v2_kickstart_handler(ctx2, repr.maker_coin.clone(), repr.taker_coin.clone(), uuid))
+                common::block_on(v2_kickstart_handler(
+                    ctx2,
+                    repr.maker_coin.clone(),
+                    repr.taker_coin.clone(),
+                    uuid,
+                ))
             });
         }
     }
@@ -1551,8 +1559,8 @@ pub async fn swap_kick_starts(ctx: MmArc) -> Result<HashSet<String>, String> {
     // === V2 taker swaps ===
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use swap_v2_common::TakerSwapStorage;
         use mm2_state_machine::storable_state_machine::StateMachineStorage;
+        use swap_v2_common::TakerSwapStorage;
 
         let taker_storage = TakerSwapStorage::new(ctx.clone());
         let unfinished_taker = try_s!(taker_storage.get_unfinished().await);
@@ -1569,7 +1577,12 @@ pub async fn swap_kick_starts(ctx: MmArc) -> Result<HashSet<String>, String> {
             coins.insert(repr.taker_coin.clone());
             let ctx2 = ctx.clone();
             std::thread::spawn(move || {
-                common::block_on(v2_kickstart_handler(ctx2, repr.taker_coin.clone(), repr.maker_coin.clone(), uuid))
+                common::block_on(v2_kickstart_handler(
+                    ctx2,
+                    repr.taker_coin.clone(),
+                    repr.maker_coin.clone(),
+                    uuid,
+                ))
             });
         }
     }

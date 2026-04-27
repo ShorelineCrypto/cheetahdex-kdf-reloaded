@@ -42,11 +42,15 @@ impl HttpStatusCode for GetCurrentMtpError {
 }
 
 impl From<UtxoRpcError> for GetCurrentMtpError {
-    fn from(err: UtxoRpcError) -> Self { Self::RpcError(err.to_string()) }
+    fn from(err: UtxoRpcError) -> Self {
+        Self::RpcError(err.to_string())
+    }
 }
 
 impl From<CoinFindError> for GetCurrentMtpError {
-    fn from(err: CoinFindError) -> Self { Self::NoSuchCoin(err.to_string()) }
+    fn from(err: CoinFindError) -> Self {
+        Self::NoSuchCoin(err.to_string())
+    }
 }
 
 pub async fn get_current_mtp_rpc(

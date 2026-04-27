@@ -80,10 +80,10 @@ impl FeePerGasSimpleEstimator {
         let max_priority_fee_per_gas_gwei =
             wei_to_gwei_decimal(max_priority_fee_per_gas).unwrap_or_else(|_| BigDecimal::from(0));
 
-        let base_fee_mult = BigDecimal::from_f64(Self::ADJUST_BASE_FEE[level_index])
-            .unwrap_or_else(|| BigDecimal::from(0));
-        let priority_fee_mult = BigDecimal::from_f64(Self::ADJUST_PRIORITY_FEE[level_index])
-            .unwrap_or_else(|| BigDecimal::from(0));
+        let base_fee_mult =
+            BigDecimal::from_f64(Self::ADJUST_BASE_FEE[level_index]).unwrap_or_else(|| BigDecimal::from(0));
+        let priority_fee_mult =
+            BigDecimal::from_f64(Self::ADJUST_PRIORITY_FEE[level_index]).unwrap_or_else(|| BigDecimal::from(0));
 
         let max_fee_per_gas_dec = base_fee_gwei * base_fee_mult + max_priority_fee_per_gas_gwei * priority_fee_mult;
 
@@ -108,11 +108,7 @@ impl FeePerGasSimpleEstimator {
         Ok(FeePerGasEstimated {
             base_fee: predicted_base_fee,
             low: Self::priority_fee_for_level(PriorityLevelId::Low, latest_base_fee_gwei.clone(), fee_history)?,
-            medium: Self::priority_fee_for_level(
-                PriorityLevelId::Medium,
-                latest_base_fee_gwei.clone(),
-                fee_history,
-            )?,
+            medium: Self::priority_fee_for_level(PriorityLevelId::Medium, latest_base_fee_gwei.clone(), fee_history)?,
             high: Self::priority_fee_for_level(PriorityLevelId::High, latest_base_fee_gwei, fee_history)?,
             source: EstimationSource::Simple,
             base_fee_trend: String::default(),

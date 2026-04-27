@@ -13,12 +13,12 @@ use super::{
     TAKER_SWAP_V2_TYPE,
 };
 use common::log::{error, warn};
+use common::mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr};
 use common::{calc_total_pages, HttpStatusCode, PagingOptions};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
-use common::mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -74,17 +74,23 @@ pub enum SwapV2DbError {
 
 #[cfg(target_arch = "wasm32")]
 impl From<DbTransactionError> for SwapV2DbError {
-    fn from(e: DbTransactionError) -> Self { SwapV2DbError::DbTransaction(e) }
+    fn from(e: DbTransactionError) -> Self {
+        SwapV2DbError::DbTransaction(e)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<InitDbError> for SwapV2DbError {
-    fn from(e: InitDbError) -> Self { SwapV2DbError::InitDb(e) }
+    fn from(e: InitDbError) -> Self {
+        SwapV2DbError::InitDb(e)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<serde_json::Error> for SwapV2DbError {
-    fn from(e: serde_json::Error) -> Self { SwapV2DbError::Serde(e) }
+    fn from(e: serde_json::Error) -> Self {
+        SwapV2DbError::Serde(e)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -319,17 +325,23 @@ enum GetSwapDataErr {
 }
 
 impl From<SavedSwapError> for GetSwapDataErr {
-    fn from(e: SavedSwapError) -> Self { GetSwapDataErr::DbError(e.to_string()) }
+    fn from(e: SavedSwapError) -> Self {
+        GetSwapDataErr::DbError(e.to_string())
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SqlError> for GetSwapDataErr {
-    fn from(e: SqlError) -> Self { GetSwapDataErr::DbError(e.to_string()) }
+    fn from(e: SqlError) -> Self {
+        GetSwapDataErr::DbError(e.to_string())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<SwapV2DbError> for GetSwapDataErr {
-    fn from(e: SwapV2DbError) -> Self { GetSwapDataErr::DbError(e.to_string()) }
+    fn from(e: SwapV2DbError) -> Self {
+        GetSwapDataErr::DbError(e.to_string())
+    }
 }
 
 async fn get_swap_data_by_uuid_and_type(
@@ -376,12 +388,16 @@ pub(crate) enum MySwapStatusError {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SqlError> for MySwapStatusError {
-    fn from(e: SqlError) -> Self { MySwapStatusError::DbError(e.to_string()) }
+    fn from(e: SqlError) -> Self {
+        MySwapStatusError::DbError(e.to_string())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<SwapV2DbError> for MySwapStatusError {
-    fn from(e: SwapV2DbError) -> Self { MySwapStatusError::DbError(e.to_string()) }
+    fn from(e: SwapV2DbError) -> Self {
+        MySwapStatusError::DbError(e.to_string())
+    }
 }
 
 impl From<GetSwapDataErr> for MySwapStatusError {

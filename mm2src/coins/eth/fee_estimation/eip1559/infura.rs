@@ -1,11 +1,11 @@
 use super::{EstimationSource, FeePerGasEstimated, FeePerGasLevel};
 use crate::eth::{wei_from_gwei_decimal, Web3RpcError, Web3RpcResult};
 use crate::NumConversError;
+use bigdecimal::BigDecimal;
+use http::StatusCode;
 use mm2_err_handle::mm_error::MmError;
 use mm2_err_handle::prelude::*;
 use mm2_net::transport::slurp_url_with_headers;
-use bigdecimal::BigDecimal;
-use http::StatusCode;
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -61,9 +61,7 @@ impl TryFrom<InfuraFeePerGas> for FeePerGasEstimated {
             },
             high: FeePerGasLevel {
                 max_fee_per_gas: wei_from_gwei_decimal(&infura_fees.high.suggested_max_fee_per_gas)?,
-                max_priority_fee_per_gas: wei_from_gwei_decimal(
-                    &infura_fees.high.suggested_max_priority_fee_per_gas,
-                )?,
+                max_priority_fee_per_gas: wei_from_gwei_decimal(&infura_fees.high.suggested_max_priority_fee_per_gas)?,
                 min_wait_time: Some(infura_fees.high.min_wait_time_estimate),
                 max_wait_time: Some(infura_fees.high.max_wait_time_estimate),
             },
@@ -89,9 +87,7 @@ impl InfuraGasApiCaller {
         url: &str,
         headers: Vec<(&'static str, &'static str)>,
     ) -> Result<InfuraFeePerGas, MmError<String>> {
-        let resp = slurp_url_with_headers(url, headers)
-            .await
-            .mm_err(|e| e.to_string())?;
+        let resp = slurp_url_with_headers(url, headers).await.mm_err(|e| e.to_string())?;
         if resp.0 != StatusCode::OK {
             return MmError::err(format!("{} failed with status code {}", url, resp.0));
         }
@@ -103,8 +99,8 @@ impl InfuraGasApiCaller {
         let infura_fees = Self::make_request(&url, headers)
             .await
             .mm_err(Web3RpcError::Transport)?;
-        infura_fees.try_into().mm_err(|e: NumConversError| {
-            Web3RpcError::Internal(e.to_string())
-        })
+        infura_fees
+            .try_into()
+            .mm_err(|e: NumConversError| Web3RpcError::Internal(e.to_string()))
     }
 }

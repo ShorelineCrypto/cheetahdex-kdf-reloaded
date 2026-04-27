@@ -103,8 +103,12 @@ pub mod tables {
     pub struct BoolAsInt(u8);
 
     impl BoolAsInt {
-        pub fn as_bool(&self) -> bool { self.0 != 0 }
-        pub fn from_bool(v: bool) -> Self { BoolAsInt(v as u8) }
+        pub fn as_bool(&self) -> bool {
+            self.0 != 0
+        }
+        pub fn from_bool(v: bool) -> Self {
+            BoolAsInt(v as u8)
+        }
     }
 
     impl TableSignature for MySwapsFiltersTable {

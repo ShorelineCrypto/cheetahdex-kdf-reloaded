@@ -107,9 +107,7 @@ impl BlocknativeGasApiCaller {
         url: &str,
         headers: Vec<(&'static str, &'static str)>,
     ) -> Result<BlocknativeBlockPricesResponse, MmError<String>> {
-        let resp = slurp_url_with_headers(url, headers)
-            .await
-            .mm_err(|e| e.to_string())?;
+        let resp = slurp_url_with_headers(url, headers).await.mm_err(|e| e.to_string())?;
         if resp.0 != StatusCode::OK {
             return MmError::err(format!("{} failed with status code {}", url, resp.0));
         }
@@ -121,8 +119,8 @@ impl BlocknativeGasApiCaller {
         let block_prices = Self::make_request(&url, headers)
             .await
             .mm_err(Web3RpcError::Transport)?;
-        block_prices.try_into().mm_err(|e: NumConversError| {
-            Web3RpcError::Internal(e.to_string())
-        })
+        block_prices
+            .try_into()
+            .mm_err(|e: NumConversError| Web3RpcError::Internal(e.to_string()))
     }
 }

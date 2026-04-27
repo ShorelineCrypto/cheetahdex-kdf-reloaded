@@ -935,9 +935,9 @@ pub trait MarketCoinOps {
     /// Default implementation returns NotImplemented for coins that don't support it.
     fn sign_raw_tx(&self, _args: &SignRawTransactionRequest) -> RawTransactionFut {
         let coin = self.ticker().to_string();
-        Box::new(futures01::future::err(
-            MmError::new(RawTransactionError::NotImplemented { coin }),
-        ))
+        Box::new(futures01::future::err(MmError::new(
+            RawTransactionError::NotImplemented { coin },
+        )))
     }
 
     fn is_privacy(&self) -> bool {
