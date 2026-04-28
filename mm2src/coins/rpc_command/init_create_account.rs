@@ -108,6 +108,7 @@ impl RpcTask for InitCreateAccountTask {
             MmCoinEnum::QtumCoin(qtum) => {
                 create_new_account_helper(&self.ctx, qtum, self.req.params, task_handle).await
             },
+            MmCoinEnum::EthCoin(eth) => create_new_account_helper(&self.ctx, eth, self.req.params, task_handle).await,
             _ => MmError::err(HDWalletRpcError::CoinIsActivatedNotWithHDWallet),
         }
     }

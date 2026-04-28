@@ -546,6 +546,45 @@ async fn scan_for_new_addresses_impl(
 }
 
 // -------------------------------------------------------------------
+// AccountBalanceRpcOps for EthCoin
+// -------------------------------------------------------------------
+
+use crate::rpc_command::account_balance;
+use crate::rpc_command::account_balance::{AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
+use crate::rpc_command::hd_account_balance_rpc_error::HDAccountBalanceRpcError;
+
+#[async_trait]
+impl AccountBalanceRpcOps for EthCoin {
+    async fn account_balance_rpc(
+        &self,
+        params: AccountBalanceParams,
+    ) -> MmResult<HDAccountBalanceResponse, HDAccountBalanceRpcError> {
+        account_balance::common_impl::account_balance_rpc(self, params).await
+    }
+}
+
+// -------------------------------------------------------------------
+// InitCreateHDAccountRpcOps for EthCoin
+// -------------------------------------------------------------------
+
+use crate::coin_balance::HDAccountBalance;
+use crate::rpc_command::init_create_account::{self, CreateNewAccountParams, InitCreateHDAccountRpcOps};
+
+#[async_trait]
+impl InitCreateHDAccountRpcOps for EthCoin {
+    async fn init_create_account_rpc<XPubExtractor>(
+        &self,
+        params: CreateNewAccountParams,
+        xpub_extractor: &XPubExtractor,
+    ) -> MmResult<HDAccountBalance, HDWalletRpcError>
+    where
+        XPubExtractor: HDXPubExtractor + Sync,
+    {
+        init_create_account::common_impl::init_create_new_account_rpc(self, params, xpub_extractor).await
+    }
+}
+
+// -------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------
 
