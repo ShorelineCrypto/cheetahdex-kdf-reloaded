@@ -10,6 +10,7 @@ use crate::hd_wallet::{
 use crate::hd_wallet_storage::HDWalletCoinWithStorageOps;
 use crate::rpc_command::account_balance::{self, AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
 use crate::rpc_command::hd_account_balance_rpc_error::HDAccountBalanceRpcError;
+use crate::rpc_command::init_account_balance::{self, InitAccountBalanceParams, InitAccountBalanceRpcOps};
 use crate::rpc_command::init_create_account::{self, CreateNewAccountParams, InitCreateHDAccountRpcOps};
 use crate::rpc_command::init_scan_for_new_addresses::{
     self, InitScanAddressesRpcOps, ScanAddressesParams, ScanAddressesResponse,
@@ -1135,6 +1136,16 @@ impl InitScanAddressesRpcOps for QtumCoin {
         params: ScanAddressesParams,
     ) -> MmResult<ScanAddressesResponse, HDAccountBalanceRpcError> {
         init_scan_for_new_addresses::common_impl::scan_for_new_addresses_rpc(self, params).await
+    }
+}
+
+#[async_trait]
+impl InitAccountBalanceRpcOps for QtumCoin {
+    async fn init_account_balance_rpc(
+        &self,
+        params: InitAccountBalanceParams,
+    ) -> MmResult<HDAccountBalance, HDAccountBalanceRpcError> {
+        init_account_balance::common_impl::init_account_balance_rpc(self, params).await
     }
 }
 

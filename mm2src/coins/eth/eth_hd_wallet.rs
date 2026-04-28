@@ -568,7 +568,20 @@ impl AccountBalanceRpcOps for EthCoin {
 // -------------------------------------------------------------------
 
 use crate::coin_balance::HDAccountBalance;
+use crate::rpc_command::init_account_balance::{
+    self as init_account_balance_mod, InitAccountBalanceParams, InitAccountBalanceRpcOps,
+};
 use crate::rpc_command::init_create_account::{self, CreateNewAccountParams, InitCreateHDAccountRpcOps};
+
+#[async_trait]
+impl InitAccountBalanceRpcOps for EthCoin {
+    async fn init_account_balance_rpc(
+        &self,
+        params: InitAccountBalanceParams,
+    ) -> MmResult<HDAccountBalance, HDAccountBalanceRpcError> {
+        init_account_balance_mod::common_impl::init_account_balance_rpc(self, params).await
+    }
+}
 
 #[async_trait]
 impl InitCreateHDAccountRpcOps for EthCoin {

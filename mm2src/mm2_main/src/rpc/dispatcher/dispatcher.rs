@@ -25,6 +25,7 @@ use coins::rpc_command::fetch_utxos::fetch_utxos_rpc;
 use coins::rpc_command::get_current_mtp::get_current_mtp_rpc;
 use coins::rpc_command::get_enabled_coins::get_enabled_coins_rpc;
 use coins::rpc_command::get_private_keys::get_private_keys;
+use coins::rpc_command::init_account_balance::{init_account_balance, init_account_balance_status};
 use coins::rpc_command::init_create_account::{
     init_create_new_account, init_create_new_account_status, init_create_new_account_user_action,
 };
@@ -168,6 +169,8 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_staking_infos" => handle_mmrpc(ctx, request, get_staking_infos).await,
         "sign_raw_transaction" => handle_mmrpc(ctx, request, sign_raw_transaction).await,
         "get_locked_amount" => handle_mmrpc(ctx, request, get_locked_amount_rpc).await,
+        "init_account_balance" => handle_mmrpc(ctx, request, init_account_balance).await,
+        "init_account_balance_status" => handle_mmrpc(ctx, request, init_account_balance_status).await,
         "init_create_new_account" => handle_mmrpc(ctx, request, init_create_new_account).await,
         "init_create_new_account_status" => handle_mmrpc(ctx, request, init_create_new_account_status).await,
         "init_create_new_account_user_action" => handle_mmrpc(ctx, request, init_create_new_account_user_action).await,

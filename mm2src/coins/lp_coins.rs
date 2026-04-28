@@ -262,6 +262,7 @@ use hd_wallet::{HDAddress, HDAddressId};
 use qrc20::Qrc20ActivationParams;
 use qrc20::{qrc20_coin_from_conf_and_params, Qrc20Coin, Qrc20FeeDetails};
 use qtum::{Qrc20AddressError, ScriptHashTypeNotSupported};
+use rpc_command::init_account_balance::{AccountBalanceTaskManager, AccountBalanceTaskManagerShared};
 use rpc_command::init_create_account::{CreateAccountTaskManager, CreateAccountTaskManagerShared};
 use rpc_command::init_scan_for_new_addresses::{ScanAddressesTaskManager, ScanAddressesTaskManagerShared};
 use rpc_command::init_withdraw::{WithdrawTaskManager, WithdrawTaskManagerShared};
@@ -2747,6 +2748,7 @@ pub struct CoinsContext {
     withdraw_task_manager: WithdrawTaskManagerShared,
     create_account_manager: CreateAccountTaskManagerShared,
     scan_addresses_manager: ScanAddressesTaskManagerShared,
+    account_balance_task_manager: AccountBalanceTaskManagerShared,
     #[cfg(target_arch = "wasm32")]
     tx_history_db: SharedDb<TxHistoryDb>,
     #[cfg(target_arch = "wasm32")]
@@ -2773,6 +2775,7 @@ impl CoinsContext {
                 withdraw_task_manager: WithdrawTaskManager::new_shared(),
                 create_account_manager: CreateAccountTaskManager::new_shared(),
                 scan_addresses_manager: ScanAddressesTaskManager::new_shared(),
+                account_balance_task_manager: AccountBalanceTaskManager::new_shared(),
                 #[cfg(target_arch = "wasm32")]
                 tx_history_db: ConstructibleDb::new_shared(ctx),
                 #[cfg(target_arch = "wasm32")]
