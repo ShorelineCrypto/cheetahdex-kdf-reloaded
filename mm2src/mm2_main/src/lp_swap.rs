@@ -1015,7 +1015,9 @@ pub fn compute_dex_fee(
     let burn_destination = if taker_coin.ticker() == "KMD" {
         DexFeeBurnDestination::KmdOpReturn
     } else {
-        DexFeeBurnDestination::PreBurnAccount
+        DexFeeBurnDestination::PreBurnAccount {
+            burn_pubkey: net_cfg.burn_addr_raw_pubkey().to_vec(),
+        }
     };
 
     DexFee::WithBurn {
@@ -2147,7 +2149,9 @@ mod lp_swap_tests {
         let fee = DexFee::WithBurn {
             fee_amount: MmNumber::from("0.75"),
             burn_amount: MmNumber::from("0.25"),
-            burn_destination: DexFeeBurnDestination::PreBurnAccount,
+            burn_destination: DexFeeBurnDestination::PreBurnAccount {
+                burn_pubkey: vec![0x02; 33],
+            },
         };
         let display = format!("{}", fee);
         assert!(display.starts_with("WithBurn("));
@@ -2227,7 +2231,13 @@ mod lp_swap_tests {
                 assert_eq!(*fee_amount, &total * &share);
                 assert_eq!(*burn_amount, &total - fee_amount);
                 // BTC is not KMD, so burn goes to PreBurnAccount
-                assert_eq!(*burn_destination, DexFeeBurnDestination::PreBurnAccount);
+                match burn_destination {
+                    DexFeeBurnDestination::PreBurnAccount { burn_pubkey } => {
+                        let net_cfg = mm2_net_config::net_config_or_panic(6133);
+                        assert_eq!(burn_pubkey.as_slice(), net_cfg.burn_addr_raw_pubkey());
+                    },
+                    other => panic!("expected PreBurnAccount, got {:?}", other),
+                }
             },
             other => panic!("expected DexFee::WithBurn on netid 6133, got {:?}", other),
         }

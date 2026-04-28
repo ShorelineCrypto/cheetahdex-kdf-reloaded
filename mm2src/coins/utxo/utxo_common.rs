@@ -1129,14 +1129,19 @@ fn generate_taker_fee_tx_outputs(
                     value: burn_sat,
                     script_pubkey: Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes(),
                 },
-                DexFeeBurnDestination::PreBurnAccount => {
-                    // For PreBurn, use the same address format but a different pubkey
-                    // would be needed. For now, the burn goes to an OP_RETURN as well
-                    // since we don't have a separate burn address configured.
-                    // TODO: Add burn_addr_pubkey to NetConfig for PreBurnAccount support
+                DexFeeBurnDestination::PreBurnAccount { burn_pubkey } => {
+                    let burn_address = address_from_raw_pubkey(
+                        burn_pubkey,
+                        coin.as_ref().conf.pub_addr_prefix,
+                        coin.as_ref().conf.pub_t_addr_prefix,
+                        coin.as_ref().conf.checksum_type,
+                        coin.as_ref().conf.bech32_hrp.clone(),
+                        coin.addr_format().clone(),
+                    )
+                    .map_err(|e| format!("Failed to derive burn address: {}", e))?;
                     TransactionOutput {
                         value: burn_sat,
-                        script_pubkey: Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes(),
+                        script_pubkey: Builder::build_p2pkh(&burn_address.hash).to_bytes(),
                     }
                 },
             };
@@ -1579,8 +1584,19 @@ pub fn validate_fee<T: UtxoCommonOps>(
                 // Validate burn output (output_index + 1)
                 let burn_sat = try_s!(sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals));
                 let expected_burn_script = match burn_destination {
-                    DexFeeBurnDestination::KmdOpReturn | DexFeeBurnDestination::PreBurnAccount => {
+                    DexFeeBurnDestination::KmdOpReturn => {
                         Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
+                    },
+                    DexFeeBurnDestination::PreBurnAccount { burn_pubkey } => {
+                        let burn_address = try_s!(address_from_raw_pubkey(
+                            burn_pubkey,
+                            coin.as_ref().conf.pub_addr_prefix,
+                            coin.as_ref().conf.pub_t_addr_prefix,
+                            coin.as_ref().conf.checksum_type,
+                            coin.as_ref().conf.bech32_hrp.clone(),
+                            coin.addr_format().clone(),
+                        ));
+                        Builder::build_p2pkh(&burn_address.hash).to_bytes()
                     },
                 };
                 try_s!(validate_burn_output(

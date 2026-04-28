@@ -64,6 +64,18 @@ pub trait NetConfig: Send + Sync + 'static {
         BigRational::from_integer(1.into())
     }
 
+    /// Hex-encoded compressed public key for the burn address.
+    /// Only meaningful when `burn_enabled()` returns true.
+    fn burn_addr_pubkey(&self) -> &'static str {
+        ""
+    }
+
+    /// Raw bytes of the burn address public key (decoded from hex at startup).
+    /// Only meaningful when `burn_enabled()` returns true.
+    fn burn_addr_raw_pubkey(&self) -> &'static [u8] {
+        &[]
+    }
+
     // ── Seed Nodes ───────────────────────────────────────────────────
 
     /// DNS hostnames of seed nodes for P2P bootstrapping.
@@ -135,6 +147,9 @@ mod tests {
     fn test_netid_8762_no_burn() {
         let cfg = net_config_for(8762).unwrap();
         assert!(!cfg.burn_enabled());
+        // Non-burn networks should have empty burn pubkey (defaults)
+        assert!(cfg.burn_addr_pubkey().is_empty());
+        assert!(cfg.burn_addr_raw_pubkey().is_empty());
     }
 
     #[test]
@@ -145,6 +160,12 @@ mod tests {
         let share = cfg.dex_fee_share();
         let expected = BigRational::new(3.into(), 4.into()); // 3/4 = 0.75
         assert_eq!(share, expected);
+        // Burn pubkey should be non-empty on burn-enabled networks
+        assert!(!cfg.burn_addr_pubkey().is_empty());
+        assert!(!cfg.burn_addr_raw_pubkey().is_empty());
+        // Burn raw pubkey should match hex decode
+        let decoded = hex::decode(cfg.burn_addr_pubkey()).expect("burn pubkey hex should be valid");
+        assert_eq!(cfg.burn_addr_raw_pubkey(), decoded.as_slice());
     }
 
     #[test]

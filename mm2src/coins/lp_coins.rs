@@ -539,7 +539,8 @@ pub enum DexFeeBurnDestination {
     /// KMD-specific: value is attached to an OP_RETURN output (provably unspendable).
     KmdOpReturn,
     /// Non-KMD coins: value is sent to a designated burn address (P2PKH).
-    PreBurnAccount,
+    /// The `burn_pubkey` is the compressed public key of the burn address.
+    PreBurnAccount { burn_pubkey: Vec<u8> },
 }
 
 /// Represents the DEX fee for a taker swap, optionally split between a

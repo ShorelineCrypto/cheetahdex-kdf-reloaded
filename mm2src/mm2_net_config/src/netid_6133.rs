@@ -25,6 +25,12 @@ use crate::NetConfig;
 /// DEX fee recipient public key (compressed, hex) — GLEEC fee address.
 const DEX_FEE_ADDR_PUBKEY: &str = "03a778d9bd346fa704cf3e2508cd074d93a1bbc1e504fbecbb0a8d48e7cccbbf5c";
 
+/// Public key for the pre-burn address (compressed, hex).
+/// Receives the burn portion of DEX fees on non-KMD coins.
+/// Currently set to the same address as the fee address (burn effectively
+/// disabled at the address level — can be changed to a distinct key later).
+const BURN_ADDR_PUBKEY: &str = "03a778d9bd346fa704cf3e2508cd074d93a1bbc1e504fbecbb0a8d48e7cccbbf5c";
+
 /// Z-address for shielded DEX fee (Zcash-based coins).
 /// On GLEEC, the burn z-address is the same as the fee z-address (burn disabled for z-txs).
 const DEX_FEE_Z_ADDR: &str = "zs1lgdrlg6kv6lmf0n9ps2uhj6sc8rdn30vx44qzu7hqa5ms4a4fwytlr8yuwrqyvhk6l6r5fevw50";
@@ -36,6 +42,8 @@ const SEED_NODES: &[&str] = &[];
 lazy_static! {
     static ref DEX_FEE_ADDR_RAW: Vec<u8> =
         hex::decode(DEX_FEE_ADDR_PUBKEY).expect("netid_6133: invalid DEX_FEE_ADDR_PUBKEY hex");
+    static ref BURN_ADDR_RAW: Vec<u8> =
+        hex::decode(BURN_ADDR_PUBKEY).expect("netid_6133: invalid BURN_ADDR_PUBKEY hex");
 }
 
 pub struct Netid6133;
@@ -87,6 +95,14 @@ impl NetConfig for Netid6133 {
     fn dex_fee_share(&self) -> BigRational {
         // 3/4 = 0.75 → 75% to fee address, 25% burned
         BigRational::new(3.into(), 4.into())
+    }
+
+    fn burn_addr_pubkey(&self) -> &'static str {
+        BURN_ADDR_PUBKEY
+    }
+
+    fn burn_addr_raw_pubkey(&self) -> &'static [u8] {
+        &BURN_ADDR_RAW
     }
 
     fn seed_nodes(&self) -> &'static [&'static str] {

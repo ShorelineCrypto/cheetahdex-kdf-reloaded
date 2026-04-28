@@ -715,7 +715,9 @@ impl Deref for EthCoin {
 impl SwapOps for EthCoin {
     fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
         let address = try_tx_fus!(addr_from_raw_pubkey(fee_addr));
-        let amount = dex_fee.total_spend_amount();
+        // For EVM coins, only the fee portion is sent on-chain; the burn
+        // portion (if any) is implicit — not sent as a separate transfer.
+        let amount = dex_fee.fee_amount();
 
         Box::new(
             self.send_to_address(
@@ -859,8 +861,8 @@ impl SwapOps for EthCoin {
         };
         let sender_addr = try_fus!(addr_from_raw_pubkey(args.expected_sender));
         let fee_addr = try_fus!(addr_from_raw_pubkey(args.fee_addr));
-        // For EVM, burn is not supported — use total spend amount for validation
-        let amount = args.dex_fee.total_spend_amount().to_decimal();
+        // For EVM, only fee_amount is sent on-chain (burn portion is implicit)
+        let amount = args.dex_fee.fee_amount().to_decimal();
         let min_block_number = args.min_block_number;
 
         let fut = async move {
