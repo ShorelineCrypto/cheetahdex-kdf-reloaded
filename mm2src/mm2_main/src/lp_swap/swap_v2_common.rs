@@ -663,12 +663,17 @@ cfg_native! {
             "taker_coin_nota": row.taker_coin_nota,
         });
 
+        // BytesJson (rpc::v1::types::Bytes) serializes to/from hex strings,
+        // so we must wrap raw Vec<u8> in BytesJson before putting into json!().
+        let secret_hash_bytes = BytesJson::from(row.secret_hash);
+        let other_p2p_pub_bytes = BytesJson::from(row.other_p2p_pub);
+
         let repr_json = if swap_type == MAKER_SWAP_V2_TYPE {
             serde_json::json!({
                 "maker_coin": row.my_coin,
                 "maker_volume": row.maker_volume,
                 "maker_secret": secret_h256,
-                "maker_secret_hash": row.secret_hash,
+                "maker_secret_hash": secret_hash_bytes,
                 "secret_hash_algo": secret_hash_algo_str,
                 "started_at": row.started_at,
                 "lock_duration": row.lock_duration,
@@ -681,7 +686,7 @@ cfg_native! {
                 "uuid": uuid_str,
                 "p2p_keypair": p2p_keypair,
                 "events": events_val,
-                "taker_p2p_pub": row.other_p2p_pub,
+                "taker_p2p_pub": other_p2p_pub_bytes,
                 "swap_version": row.swap_version,
             })
         } else {
@@ -689,7 +694,7 @@ cfg_native! {
                 "maker_coin": row.other_coin,
                 "maker_volume": row.maker_volume,
                 "taker_secret": secret_h256,
-                "taker_secret_hash": row.secret_hash,
+                "taker_secret_hash": secret_hash_bytes,
                 "secret_hash_algo": secret_hash_algo_str,
                 "started_at": row.started_at,
                 "lock_duration": row.lock_duration,
@@ -702,7 +707,7 @@ cfg_native! {
                 "uuid": uuid_str,
                 "p2p_keypair": p2p_keypair,
                 "events": events_val,
-                "maker_p2p_pub": row.other_p2p_pub,
+                "maker_p2p_pub": other_p2p_pub_bytes,
                 "swap_version": row.swap_version,
             })
         };
@@ -950,5 +955,1005 @@ mod tests {
 
         let reason = AbortReason::FailedToSendTx("insufficient funds".into());
         assert!(format!("{}", reason).contains("insufficient funds"));
+    }
+
+    #[test]
+    fn test_abort_reason_display_all_variants() {
+        let cases: Vec<(AbortReason, &str)> = vec![
+            (AbortReason::NegotiationTimeout, "Negotiation timed out"),
+            (AbortReason::NegotiationFailed("bad".into()), "bad"),
+            (AbortReason::FailedToSendTx("tx err".into()), "tx err"),
+            (AbortReason::FailedToValidateTx("invalid".into()), "invalid"),
+            (AbortReason::ConfirmationTimeout("timeout".into()), "timeout"),
+            (AbortReason::FundingSpendError("spend".into()), "spend"),
+            (AbortReason::TakerAborted("taker".into()), "taker"),
+            (AbortReason::MakerAborted("maker".into()), "maker"),
+            (AbortReason::InternalError("internal".into()), "internal"),
+            (AbortReason::FailedToSendPayment("pay".into()), "pay"),
+            (AbortReason::DidNotReceiveMakerPayment("no pay".into()), "no pay"),
+            (AbortReason::FailedToParseMakerPayment("parse".into()), "parse"),
+            (AbortReason::FailedToParseFundingSpendPreimg("preimg".into()), "preimg"),
+            (AbortReason::FailedToParseFundingSpendSig("sig".into()), "sig"),
+            (AbortReason::MakerPaymentValidationFailed("fail".into()), "fail"),
+            (AbortReason::FundingSpendPreimageValidationFailed("bad".into()), "bad"),
+            (AbortReason::MakerPaymentNotConfirmedInTime("slow".into()), "slow"),
+            (AbortReason::FailedToGenerateSpendPreimage("gen".into()), "gen"),
+            (AbortReason::MakerDidNotSpendInTime("late".into()), "late"),
+            (AbortReason::CouldNotExtractSecret("secret".into()), "secret"),
+            (AbortReason::FailedToSpendMakerPayment("spend".into()), "spend"),
+            (AbortReason::MakerPaymentSpendNotConfirmedInTime("conf".into()), "conf"),
+            (AbortReason::TakerFundingRefundFailed("refund".into()), "refund"),
+            (AbortReason::TakerPaymentRefundFailed("refund".into()), "refund"),
+        ];
+        for (reason, expected_substr) in cases {
+            let display = format!("{}", reason);
+            assert!(
+                display.contains(expected_substr),
+                "AbortReason display '{}' doesn't contain '{}'",
+                display,
+                expected_substr
+            );
+        }
+    }
+
+    #[test]
+    fn test_swap_v2_msg_all_variants_serde() {
+        // MakerNegotiation
+        let msg = SwapV2Msg::MakerNegotiation(MakerNegotiation {
+            started_at: 100,
+            payment_locktime: 200,
+            secret_hash: BytesJson::from(vec![1]),
+            maker_coin_htlc_pub: BytesJson::from(vec![2]),
+            taker_coin_htlc_pub: BytesJson::from(vec![3]),
+            maker_coin_swap_contract: Some(BytesJson::from(vec![4])),
+            taker_coin_swap_contract: None,
+            taker_coin_address: "addr".into(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+
+        // TakerNegotiation::Continue
+        let msg = SwapV2Msg::TakerNegotiation(TakerNegotiation::Continue(TakerNegotiationData {
+            started_at: 100,
+            funding_locktime: 300,
+            payment_locktime: 200,
+            taker_secret_hash: BytesJson::from(vec![5]),
+            maker_coin_htlc_pub: BytesJson::from(vec![6]),
+            taker_coin_htlc_pub: BytesJson::from(vec![7]),
+            maker_coin_swap_contract: None,
+            taker_coin_swap_contract: Some(BytesJson::from(vec![8])),
+        }));
+        let json = serde_json::to_string(&msg).unwrap();
+        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+
+        // MakerNegotiated
+        let msg = SwapV2Msg::MakerNegotiated(MakerNegotiated {
+            negotiated: true,
+            reason: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+
+        let msg = SwapV2Msg::MakerNegotiated(MakerNegotiated {
+            negotiated: false,
+            reason: Some("bad terms".into()),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        match decoded {
+            SwapV2Msg::MakerNegotiated(n) => {
+                assert!(!n.negotiated);
+                assert_eq!(n.reason.unwrap(), "bad terms");
+            },
+            _ => panic!("Wrong variant"),
+        }
+
+        // TakerFundingInfo
+        let msg = SwapV2Msg::TakerFundingInfo(TakerFundingInfo {
+            tx_bytes: BytesJson::from(vec![0xAA]),
+            next_step_instructions: Some(vec![1, 2, 3]),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+
+        // MakerPaymentInfo
+        let msg = SwapV2Msg::MakerPaymentInfo(MakerPaymentInfo {
+            tx_bytes: BytesJson::from(vec![0xBB]),
+            next_step_instructions: None,
+            funding_preimage_sig: BytesJson::from(vec![0xCC]),
+            funding_preimage_tx: BytesJson::from(vec![0xDD]),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+
+        // TakerPaymentInfo
+        let msg = SwapV2Msg::TakerPaymentInfo(TakerPaymentInfo {
+            tx_bytes: BytesJson::from(vec![0xEE]),
+            next_step_instructions: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+
+        // TakerPaymentSpendPreimage
+        let msg = SwapV2Msg::TakerPaymentSpendPreimage(TakerPaymentSpendPreimage {
+            signature: BytesJson::from(vec![0xFF]),
+            tx_preimage: BytesJson::from(vec![0x11]),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_swap_v2_msg_store_population() {
+        let mut store = SwapV2MsgStore::default();
+
+        // All fields start as None
+        assert!(store.maker_negotiation.is_none());
+        assert!(store.taker_negotiation.is_none());
+        assert!(store.maker_negotiated.is_none());
+        assert!(store.taker_funding_info.is_none());
+        assert!(store.maker_payment_info.is_none());
+        assert!(store.taker_payment_info.is_none());
+        assert!(store.taker_payment_spend_preimage.is_none());
+
+        // Populate all fields
+        store.maker_negotiation = Some(MakerNegotiation {
+            started_at: 1,
+            payment_locktime: 2,
+            secret_hash: BytesJson::from(vec![]),
+            maker_coin_htlc_pub: BytesJson::from(vec![]),
+            taker_coin_htlc_pub: BytesJson::from(vec![]),
+            maker_coin_swap_contract: None,
+            taker_coin_swap_contract: None,
+            taker_coin_address: "addr".into(),
+        });
+        store.taker_negotiation = Some(TakerNegotiation::Abort("cancel".into()));
+        store.maker_negotiated = Some(MakerNegotiated {
+            negotiated: true,
+            reason: None,
+        });
+        store.taker_funding_info = Some(TakerFundingInfo {
+            tx_bytes: BytesJson::from(vec![1]),
+            next_step_instructions: None,
+        });
+        store.maker_payment_info = Some(MakerPaymentInfo {
+            tx_bytes: BytesJson::from(vec![2]),
+            next_step_instructions: None,
+            funding_preimage_sig: BytesJson::from(vec![3]),
+            funding_preimage_tx: BytesJson::from(vec![4]),
+        });
+        store.taker_payment_info = Some(TakerPaymentInfo {
+            tx_bytes: BytesJson::from(vec![5]),
+            next_step_instructions: None,
+        });
+        store.taker_payment_spend_preimage = Some(TakerPaymentSpendPreimage {
+            signature: BytesJson::from(vec![6]),
+            tx_preimage: BytesJson::from(vec![7]),
+        });
+
+        // All fields now populated
+        assert!(store.maker_negotiation.is_some());
+        assert!(store.taker_negotiation.is_some());
+        assert!(store.maker_negotiated.is_some());
+        assert!(store.taker_funding_info.is_some());
+        assert!(store.maker_payment_info.is_some());
+        assert!(store.taker_payment_info.is_some());
+        assert!(store.taker_payment_spend_preimage.is_some());
+
+        // Verify specific stored data
+        assert_eq!(store.maker_negotiation.as_ref().unwrap().started_at, 1);
+        match store.taker_negotiation.as_ref().unwrap() {
+            TakerNegotiation::Abort(reason) => assert_eq!(reason, "cancel"),
+            _ => panic!("Expected Abort"),
+        }
+    }
+
+    #[test]
+    fn test_maker_swap_event_all_variants_serde() {
+        use super::super::maker_swap_v2::MakerSwapEvent;
+        use common::mm_number::MmNumber;
+
+        let negotiation_data = StoredMakerNegotiationData {
+            taker_secret_hash: BytesJson::from(vec![1, 2]),
+            taker_coin_htlc_pub: BytesJson::from(vec![3, 4]),
+            maker_coin_htlc_pub: BytesJson::from(vec![5, 6]),
+            taker_coin_swap_contract: None,
+            maker_coin_swap_contract: None,
+            taker_payment_locktime: 1000,
+            taker_funding_locktime: 2000,
+        };
+
+        let events = vec![
+            MakerSwapEvent::Initialized {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                maker_payment_trade_fee: MmNumber::from("0.001"),
+                taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+            },
+            MakerSwapEvent::WaitingForTakerFunding {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                maker_payment_trade_fee: MmNumber::from("0.001"),
+            },
+            MakerSwapEvent::TakerFundingReceived {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_funding: BytesJson::from(vec![0xAA]),
+                maker_payment_trade_fee: MmNumber::from("0.001"),
+            },
+            MakerSwapEvent::MakerPaymentSentFundingSpendGenerated {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                maker_payment: BytesJson::from(vec![0xBB]),
+                taker_funding: BytesJson::from(vec![0xAA]),
+                funding_spend_preimage: StoredTxPreimage {
+                    preimage: BytesJson::from(vec![0xCC]),
+                    signature: BytesJson::from(vec![0xDD]),
+                },
+            },
+            MakerSwapEvent::MakerPaymentRefundRequired {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                maker_payment: BytesJson::from(vec![0xBB]),
+                reason: AbortReason::NegotiationTimeout,
+            },
+            MakerSwapEvent::MakerPaymentRefunded {
+                maker_payment: BytesJson::from(vec![0xBB]),
+                maker_payment_refund: BytesJson::from(vec![0xEE]),
+                reason: AbortReason::NegotiationTimeout,
+            },
+            MakerSwapEvent::TakerPaymentReceived {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                maker_payment: BytesJson::from(vec![0xBB]),
+                taker_payment: BytesJson::from(vec![0xFF]),
+            },
+            MakerSwapEvent::TakerPaymentReceivedPreimageSkipped {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                maker_payment: BytesJson::from(vec![0xBB]),
+                taker_payment: BytesJson::from(vec![0xFF]),
+            },
+            MakerSwapEvent::TakerPaymentSpent {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                maker_payment: BytesJson::from(vec![0xBB]),
+                taker_payment: BytesJson::from(vec![0xFF]),
+                taker_payment_spend: BytesJson::from(vec![0x11]),
+                negotiation_data: negotiation_data.clone(),
+            },
+            MakerSwapEvent::Aborted {
+                reason: AbortReason::InternalError("oops".into()),
+            },
+            MakerSwapEvent::Completed,
+        ];
+
+        for event in &events {
+            let json = serde_json::to_string(event).unwrap();
+            let back: MakerSwapEvent = serde_json::from_str(&json).unwrap();
+            // Verify roundtrip by re-serializing
+            let json2 = serde_json::to_string(&back).unwrap();
+            assert_eq!(json, json2, "MakerSwapEvent serde roundtrip mismatch");
+        }
+    }
+
+    #[test]
+    fn test_taker_swap_event_all_variants_serde() {
+        use super::super::taker_swap_v2::TakerSwapEvent;
+        use common::mm_number::MmNumber;
+
+        let negotiation_data = StoredTakerNegotiationData {
+            maker_secret_hash: BytesJson::from(vec![1, 2]),
+            maker_coin_htlc_pub: BytesJson::from(vec![3, 4]),
+            taker_coin_htlc_pub: BytesJson::from(vec![5, 6]),
+            maker_coin_swap_contract: None,
+            taker_coin_swap_contract: None,
+            maker_payment_locktime: 3000,
+            taker_coin_address: "Raddress".into(),
+        };
+
+        let events = vec![
+            TakerSwapEvent::Initialized {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                taker_payment_fee: MmNumber::from("0.001"),
+                maker_payment_spend_fee: MmNumber::from("0.002"),
+            },
+            TakerSwapEvent::Negotiated {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_payment_fee: MmNumber::from("0.001"),
+                maker_payment_spend_fee: MmNumber::from("0.002"),
+            },
+            TakerSwapEvent::TakerFundingSent {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_funding: BytesJson::from(vec![0xAA]),
+            },
+            TakerSwapEvent::TakerFundingRefundRequired {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_funding: BytesJson::from(vec![0xAA]),
+                reason: AbortReason::NegotiationTimeout,
+            },
+            TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_funding: BytesJson::from(vec![0xAA]),
+                funding_spend_preimage: StoredTxPreimage {
+                    preimage: BytesJson::from(vec![0xCC]),
+                    signature: BytesJson::from(vec![0xDD]),
+                },
+                maker_payment: BytesJson::from(vec![0xBB]),
+            },
+            TakerSwapEvent::MakerPaymentConfirmed {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_funding: BytesJson::from(vec![0xAA]),
+                funding_spend_preimage: StoredTxPreimage {
+                    preimage: BytesJson::from(vec![0xCC]),
+                    signature: BytesJson::from(vec![0xDD]),
+                },
+                maker_payment: BytesJson::from(vec![0xBB]),
+            },
+            TakerSwapEvent::TakerPaymentSent {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_payment: BytesJson::from(vec![0xEE]),
+                maker_payment: BytesJson::from(vec![0xBB]),
+            },
+            TakerSwapEvent::TakerPaymentSentPreimageSendingSkipped {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                negotiation_data: negotiation_data.clone(),
+                taker_payment: BytesJson::from(vec![0xEE]),
+                maker_payment: BytesJson::from(vec![0xBB]),
+            },
+            TakerSwapEvent::TakerPaymentRefundRequired {
+                taker_payment: BytesJson::from(vec![0xEE]),
+                negotiation_data: negotiation_data.clone(),
+                reason: AbortReason::ConfirmationTimeout("too slow".into()),
+            },
+            TakerSwapEvent::TakerPaymentSpent {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                taker_payment_spend: BytesJson::from(vec![0x11]),
+                maker_payment: BytesJson::from(vec![0xBB]),
+                negotiation_data: negotiation_data.clone(),
+            },
+            TakerSwapEvent::MakerPaymentSpent {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                maker_payment_spend: BytesJson::from(vec![0x22]),
+                negotiation_data: negotiation_data.clone(),
+            },
+            TakerSwapEvent::TakerFundingRefunded {
+                funding_tx: BytesJson::from(vec![0xAA]),
+                funding_tx_refund: BytesJson::from(vec![0x33]),
+                reason: AbortReason::TakerFundingRefundFailed("failed".into()),
+            },
+            TakerSwapEvent::TakerPaymentRefunded {
+                taker_payment: BytesJson::from(vec![0xEE]),
+                taker_payment_refund: BytesJson::from(vec![0x44]),
+                reason: AbortReason::TakerPaymentRefundFailed("failed".into()),
+            },
+            TakerSwapEvent::Aborted {
+                reason: AbortReason::InternalError("oops".into()),
+            },
+            TakerSwapEvent::Completed,
+        ];
+
+        for event in &events {
+            let json = serde_json::to_string(event).unwrap();
+            let back: TakerSwapEvent = serde_json::from_str(&json).unwrap();
+            let json2 = serde_json::to_string(&back).unwrap();
+            assert_eq!(json, json2, "TakerSwapEvent serde roundtrip mismatch");
+        }
+    }
+
+    #[test]
+    fn test_maker_swap_db_repr_serde_roundtrip() {
+        use super::super::maker_swap_v2::{MakerSwapDbRepr, MakerSwapEvent, SerializableKeypairBytes};
+        use super::super::SwapConfirmationsSettings;
+        use common::mm_number::MmNumber;
+        use rpc::v1::types::H256 as H256Json;
+
+        let repr = MakerSwapDbRepr {
+            maker_coin: "RICK".into(),
+            maker_volume: MmNumber::from("10.5"),
+            maker_secret: H256Json::from([0xABu8; 32]),
+            maker_secret_hash: BytesJson::from(vec![
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+            ]),
+            secret_hash_algo: crypto::secret_hash_algo::SecretHashAlgo::DHASH160,
+            started_at: 1700000000,
+            lock_duration: 7200,
+            taker_coin: "MORTY".into(),
+            taker_volume: MmNumber::from("20.5"),
+            taker_premium: MmNumber::from("0.1"),
+            dex_fee_amount: MmNumber::from("0.01"),
+            dex_fee_burn: MmNumber::from("0.005"),
+            conf_settings: SwapConfirmationsSettings {
+                maker_coin_confs: 1,
+                maker_coin_nota: false,
+                taker_coin_confs: 2,
+                taker_coin_nota: true,
+            },
+            uuid: Uuid::new_v4(),
+            p2p_keypair: Some(SerializableKeypairBytes(vec![0xDE; 32])),
+            events: vec![
+                MakerSwapEvent::Initialized {
+                    maker_coin_start_block: 100,
+                    taker_coin_start_block: 200,
+                    maker_payment_trade_fee: MmNumber::from("0.001"),
+                    taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                },
+                MakerSwapEvent::Completed,
+            ],
+            taker_p2p_pub: BytesJson::from(vec![0x02; 33]),
+            swap_version: 2,
+        };
+
+        let json = serde_json::to_string(&repr).unwrap();
+        let back: MakerSwapDbRepr = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.maker_coin, "RICK");
+        assert_eq!(back.taker_coin, "MORTY");
+        assert_eq!(back.uuid, repr.uuid);
+        assert_eq!(back.events.len(), 2);
+        assert_eq!(back.swap_version, 2);
+        assert_eq!(back.conf_settings.taker_coin_nota, true);
+    }
+
+    #[test]
+    fn test_taker_swap_db_repr_serde_roundtrip() {
+        use super::super::taker_swap_v2::{TakerSwapDbRepr, TakerSwapEvent};
+        use super::super::SwapConfirmationsSettings;
+        use common::mm_number::MmNumber;
+        use rpc::v1::types::H256 as H256Json;
+
+        let repr = TakerSwapDbRepr {
+            maker_coin: "RICK".into(),
+            maker_volume: MmNumber::from("10.5"),
+            taker_secret: H256Json::from([0xCDu8; 32]),
+            taker_secret_hash: BytesJson::from(vec![
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+            ]),
+            secret_hash_algo: crypto::secret_hash_algo::SecretHashAlgo::SHA256,
+            started_at: 1700000000,
+            lock_duration: 7200,
+            taker_coin: "MORTY".into(),
+            taker_volume: MmNumber::from("20.5"),
+            taker_premium: MmNumber::from("0.1"),
+            dex_fee_amount: MmNumber::from("0.01"),
+            dex_fee_burn: MmNumber::from("0.005"),
+            conf_settings: SwapConfirmationsSettings {
+                maker_coin_confs: 3,
+                maker_coin_nota: true,
+                taker_coin_confs: 1,
+                taker_coin_nota: false,
+            },
+            uuid: Uuid::new_v4(),
+            p2p_keypair: None,
+            events: vec![
+                TakerSwapEvent::Initialized {
+                    maker_coin_start_block: 100,
+                    taker_coin_start_block: 200,
+                    taker_payment_fee: MmNumber::from("0.001"),
+                    maker_payment_spend_fee: MmNumber::from("0.002"),
+                },
+                TakerSwapEvent::Completed,
+            ],
+            maker_p2p_pub: BytesJson::from(vec![0x03; 33]),
+            swap_version: 2,
+        };
+
+        let json = serde_json::to_string(&repr).unwrap();
+        let back: TakerSwapDbRepr = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.maker_coin, "RICK");
+        assert_eq!(back.taker_coin, "MORTY");
+        assert_eq!(back.uuid, repr.uuid);
+        assert_eq!(back.events.len(), 2);
+        assert_eq!(back.swap_version, 2);
+        assert_eq!(back.conf_settings.maker_coin_nota, true);
+    }
+
+    #[test]
+    fn test_swap_v2_type_values() {
+        assert_eq!(SwapV2Type::MakerV2 as u8, 1);
+        assert_eq!(SwapV2Type::TakerV2 as u8, 2);
+    }
+
+    #[test]
+    fn test_active_swap_v2_info() {
+        let uuid = Uuid::new_v4();
+        let info = ActiveSwapV2Info {
+            uuid,
+            maker_coin: "RICK".into(),
+            taker_coin: "MORTY".into(),
+            swap_type: SwapV2Type::MakerV2,
+        };
+        assert_eq!(info.uuid, uuid);
+        assert_eq!(info.maker_coin, "RICK");
+        assert_eq!(info.taker_coin, "MORTY");
+        assert_eq!(info.swap_type, SwapV2Type::MakerV2);
+    }
+
+    #[test]
+    fn test_state_machine_db_repr_add_event() {
+        use super::super::maker_swap_v2::{MakerSwapDbRepr, MakerSwapEvent};
+        use super::super::SwapConfirmationsSettings;
+        use common::mm_number::MmNumber;
+        use mm2_state_machine::storable_state_machine::StateMachineDbRepr;
+        use rpc::v1::types::H256 as H256Json;
+
+        let mut repr = MakerSwapDbRepr {
+            maker_coin: "RICK".into(),
+            maker_volume: MmNumber::from("1"),
+            maker_secret: H256Json::from([0u8; 32]),
+            maker_secret_hash: BytesJson::from(vec![0u8; 20]),
+            secret_hash_algo: crypto::secret_hash_algo::SecretHashAlgo::DHASH160,
+            started_at: 0,
+            lock_duration: 3600,
+            taker_coin: "MORTY".into(),
+            taker_volume: MmNumber::from("1"),
+            taker_premium: MmNumber::from("0"),
+            dex_fee_amount: MmNumber::from("0"),
+            dex_fee_burn: MmNumber::from("0"),
+            conf_settings: SwapConfirmationsSettings {
+                maker_coin_confs: 1,
+                maker_coin_nota: false,
+                taker_coin_confs: 1,
+                taker_coin_nota: false,
+            },
+            uuid: Uuid::new_v4(),
+            p2p_keypair: None,
+            events: vec![],
+            taker_p2p_pub: BytesJson::from(vec![0u8; 33]),
+            swap_version: 2,
+        };
+
+        assert_eq!(repr.events.len(), 0);
+
+        repr.add_event(MakerSwapEvent::Initialized {
+            maker_coin_start_block: 1,
+            taker_coin_start_block: 2,
+            maker_payment_trade_fee: MmNumber::from("0.001"),
+            taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+        });
+        assert_eq!(repr.events.len(), 1);
+
+        repr.add_event(MakerSwapEvent::Completed);
+        assert_eq!(repr.events.len(), 2);
+    }
+
+    // ── Native-only DB integration tests ────────────────────────────────
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod db_tests {
+        use super::super::super::maker_swap_v2::{MakerSwapDbRepr, MakerSwapEvent, SerializableKeypairBytes};
+        use super::super::super::taker_swap_v2::{TakerSwapDbRepr, TakerSwapEvent};
+        use super::super::super::{SwapConfirmationsSettings, MAKER_SWAP_V2_TYPE, TAKER_SWAP_V2_TYPE};
+        use super::super::*;
+        use common::block_on;
+        use common::mm_number::MmNumber;
+        use db_common::sqlite::rusqlite::Connection;
+        use mm2_core::mm_ctx::MmCtxBuilder;
+        use mm2_state_machine::storable_state_machine::StateMachineStorage;
+        use rpc::v1::types::H256 as H256Json;
+        use std::sync::{Arc, Mutex};
+        use uuid::Uuid;
+
+        /// Create an MmArc with an in-memory SQLite DB, fully migrated.
+        fn setup_test_ctx() -> mm2_core::mm_ctx::MmArc {
+            let ctx = MmCtxBuilder::default().into_mm_arc();
+            let conn = Connection::open_in_memory().unwrap();
+            let _ = ctx.sqlite_connection.pin(Arc::new(Mutex::new(conn)));
+            // Run init + migrations to create schema with V2 columns
+            block_on(crate::mm2::database::init_and_migrate_db(&ctx)).unwrap();
+            ctx
+        }
+
+        fn sample_maker_repr(uuid: Uuid) -> MakerSwapDbRepr {
+            MakerSwapDbRepr {
+                maker_coin: "RICK".into(),
+                maker_volume: MmNumber::from("10"),
+                maker_secret: H256Json::from([0xABu8; 32]),
+                maker_secret_hash: BytesJson::from(vec![1u8; 20]),
+                secret_hash_algo: crypto::secret_hash_algo::SecretHashAlgo::DHASH160,
+                started_at: 1700000000,
+                lock_duration: 7200,
+                taker_coin: "MORTY".into(),
+                taker_volume: MmNumber::from("20"),
+                taker_premium: MmNumber::from("0.1"),
+                dex_fee_amount: MmNumber::from("0.01"),
+                dex_fee_burn: MmNumber::from("0.005"),
+                conf_settings: SwapConfirmationsSettings {
+                    maker_coin_confs: 1,
+                    maker_coin_nota: false,
+                    taker_coin_confs: 2,
+                    taker_coin_nota: true,
+                },
+                uuid,
+                p2p_keypair: Some(SerializableKeypairBytes(vec![0xDE; 32])),
+                events: vec![],
+                taker_p2p_pub: BytesJson::from(vec![0x02; 33]),
+                swap_version: 2,
+            }
+        }
+
+        fn sample_taker_repr(uuid: Uuid) -> TakerSwapDbRepr {
+            TakerSwapDbRepr {
+                maker_coin: "RICK".into(),
+                maker_volume: MmNumber::from("10"),
+                taker_secret: H256Json::from([0xCDu8; 32]),
+                taker_secret_hash: BytesJson::from(vec![2u8; 20]),
+                secret_hash_algo: crypto::secret_hash_algo::SecretHashAlgo::SHA256,
+                started_at: 1700000000,
+                lock_duration: 7200,
+                taker_coin: "MORTY".into(),
+                taker_volume: MmNumber::from("20"),
+                taker_premium: MmNumber::from("0.1"),
+                dex_fee_amount: MmNumber::from("0.01"),
+                dex_fee_burn: MmNumber::from("0.005"),
+                conf_settings: SwapConfirmationsSettings {
+                    maker_coin_confs: 3,
+                    maker_coin_nota: true,
+                    taker_coin_confs: 1,
+                    taker_coin_nota: false,
+                },
+                uuid,
+                p2p_keypair: None,
+                events: vec![],
+                maker_p2p_pub: BytesJson::from(vec![0x03; 33]),
+                swap_version: 2,
+            }
+        }
+
+        #[test]
+        fn test_maker_swap_storage_full_lifecycle() {
+            let ctx = setup_test_ctx();
+            let uuid = Uuid::new_v4();
+            let repr = sample_maker_repr(uuid);
+
+            let mut storage = MakerSwapStorage::new(ctx.clone());
+
+            // Initially no record
+            assert!(!block_on(storage.has_record_for(&uuid)).unwrap());
+
+            // Store repr
+            block_on(storage.store_repr(uuid, repr.clone())).unwrap();
+
+            // Now has record
+            assert!(block_on(storage.has_record_for(&uuid)).unwrap());
+
+            // get_repr roundtrip — verify core fields
+            let loaded: MakerSwapDbRepr = block_on(storage.get_repr(uuid)).unwrap();
+            assert_eq!(loaded.maker_coin, "RICK");
+            assert_eq!(loaded.taker_coin, "MORTY");
+            assert_eq!(loaded.started_at, 1700000000);
+            assert_eq!(loaded.lock_duration, 7200);
+            assert_eq!(loaded.swap_version, 2);
+            assert_eq!(loaded.events.len(), 0);
+
+            // Append events
+            let event1 = MakerSwapEvent::Initialized {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                maker_payment_trade_fee: MmNumber::from("0.001"),
+                taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+            };
+            block_on(storage.store_event(uuid, event1)).unwrap();
+
+            let event2 = MakerSwapEvent::Completed;
+            block_on(storage.store_event(uuid, event2)).unwrap();
+
+            // Read events back
+            let events: Vec<MakerSwapEvent> = read_swap_v2_events(&ctx, &uuid).unwrap();
+            assert_eq!(events.len(), 2);
+            // Verify first event
+            match &events[0] {
+                MakerSwapEvent::Initialized {
+                    maker_coin_start_block,
+                    taker_coin_start_block,
+                    ..
+                } => {
+                    assert_eq!(*maker_coin_start_block, 100);
+                    assert_eq!(*taker_coin_start_block, 200);
+                },
+                _ => panic!("Expected Initialized event"),
+            }
+            match &events[1] {
+                MakerSwapEvent::Completed => {},
+                _ => panic!("Expected Completed event"),
+            }
+
+            // Swap type
+            assert_eq!(get_swap_type(&ctx, &uuid).unwrap(), MAKER_SWAP_V2_TYPE);
+
+            // Unfinished list
+            let unfinished = block_on(storage.get_unfinished()).unwrap();
+            assert!(unfinished.contains(&uuid));
+
+            // Mark finished
+            block_on(storage.mark_finished(uuid)).unwrap();
+
+            // No longer in unfinished
+            let unfinished = block_on(storage.get_unfinished()).unwrap();
+            assert!(!unfinished.contains(&uuid));
+        }
+
+        #[test]
+        fn test_taker_swap_storage_full_lifecycle() {
+            let ctx = setup_test_ctx();
+            let uuid = Uuid::new_v4();
+            let repr = sample_taker_repr(uuid);
+
+            let mut storage = TakerSwapStorage::new(ctx.clone());
+
+            assert!(!block_on(storage.has_record_for(&uuid)).unwrap());
+
+            block_on(storage.store_repr(uuid, repr.clone())).unwrap();
+            assert!(block_on(storage.has_record_for(&uuid)).unwrap());
+
+            let loaded: TakerSwapDbRepr = block_on(storage.get_repr(uuid)).unwrap();
+            assert_eq!(loaded.maker_coin, "RICK");
+            assert_eq!(loaded.taker_coin, "MORTY");
+            assert_eq!(loaded.started_at, 1700000000);
+            assert_eq!(loaded.swap_version, 2);
+
+            // Append events
+            let event1 = TakerSwapEvent::Initialized {
+                maker_coin_start_block: 100,
+                taker_coin_start_block: 200,
+                taker_payment_fee: MmNumber::from("0.001"),
+                maker_payment_spend_fee: MmNumber::from("0.002"),
+            };
+            block_on(storage.store_event(uuid, event1)).unwrap();
+
+            let event2 = TakerSwapEvent::Completed;
+            block_on(storage.store_event(uuid, event2)).unwrap();
+
+            let events: Vec<TakerSwapEvent> = read_swap_v2_events(&ctx, &uuid).unwrap();
+            assert_eq!(events.len(), 2);
+
+            assert_eq!(get_swap_type(&ctx, &uuid).unwrap(), TAKER_SWAP_V2_TYPE);
+
+            let unfinished = block_on(storage.get_unfinished()).unwrap();
+            assert!(unfinished.contains(&uuid));
+
+            block_on(storage.mark_finished(uuid)).unwrap();
+            let unfinished = block_on(storage.get_unfinished()).unwrap();
+            assert!(!unfinished.contains(&uuid));
+        }
+
+        #[test]
+        fn test_multiple_swaps_unfinished_tracking() {
+            let ctx = setup_test_ctx();
+            let mut maker_storage = MakerSwapStorage::new(ctx.clone());
+            let mut taker_storage = TakerSwapStorage::new(ctx.clone());
+
+            let maker_uuid1 = Uuid::new_v4();
+            let maker_uuid2 = Uuid::new_v4();
+            let taker_uuid1 = Uuid::new_v4();
+
+            block_on(maker_storage.store_repr(maker_uuid1, sample_maker_repr(maker_uuid1))).unwrap();
+            block_on(maker_storage.store_repr(maker_uuid2, sample_maker_repr(maker_uuid2))).unwrap();
+            block_on(taker_storage.store_repr(taker_uuid1, sample_taker_repr(taker_uuid1))).unwrap();
+
+            // All maker swaps unfinished
+            let maker_unfinished = block_on(maker_storage.get_unfinished()).unwrap();
+            assert_eq!(maker_unfinished.len(), 2);
+            assert!(maker_unfinished.contains(&maker_uuid1));
+            assert!(maker_unfinished.contains(&maker_uuid2));
+
+            // Taker unfinished
+            let taker_unfinished = block_on(taker_storage.get_unfinished()).unwrap();
+            assert_eq!(taker_unfinished.len(), 1);
+            assert!(taker_unfinished.contains(&taker_uuid1));
+
+            // Finish one maker swap
+            block_on(maker_storage.mark_finished(maker_uuid1)).unwrap();
+            let maker_unfinished = block_on(maker_storage.get_unfinished()).unwrap();
+            assert_eq!(maker_unfinished.len(), 1);
+            assert!(maker_unfinished.contains(&maker_uuid2));
+
+            // Taker unfinished unchanged
+            let taker_unfinished = block_on(taker_storage.get_unfinished()).unwrap();
+            assert_eq!(taker_unfinished.len(), 1);
+        }
+
+        #[test]
+        fn test_get_swap_type_dispatch() {
+            let ctx = setup_test_ctx();
+            let maker_uuid = Uuid::new_v4();
+            let taker_uuid = Uuid::new_v4();
+
+            let mut maker_storage = MakerSwapStorage::new(ctx.clone());
+            let mut taker_storage = TakerSwapStorage::new(ctx.clone());
+
+            block_on(maker_storage.store_repr(maker_uuid, sample_maker_repr(maker_uuid))).unwrap();
+            block_on(taker_storage.store_repr(taker_uuid, sample_taker_repr(taker_uuid))).unwrap();
+
+            assert_eq!(get_swap_type(&ctx, &maker_uuid).unwrap(), MAKER_SWAP_V2_TYPE);
+            assert_eq!(get_swap_type(&ctx, &taker_uuid).unwrap(), TAKER_SWAP_V2_TYPE);
+
+            // Non-existent UUID should error
+            let missing = Uuid::new_v4();
+            assert!(get_swap_type(&ctx, &missing).is_err());
+        }
+
+        #[test]
+        fn test_append_multiple_events_preserves_order() {
+            let ctx = setup_test_ctx();
+            let uuid = Uuid::new_v4();
+            let mut storage = MakerSwapStorage::new(ctx.clone());
+
+            block_on(storage.store_repr(uuid, sample_maker_repr(uuid))).unwrap();
+
+            let negotiation_data = StoredMakerNegotiationData {
+                taker_secret_hash: BytesJson::from(vec![1, 2]),
+                taker_coin_htlc_pub: BytesJson::from(vec![3, 4]),
+                maker_coin_htlc_pub: BytesJson::from(vec![5, 6]),
+                taker_coin_swap_contract: None,
+                maker_coin_swap_contract: None,
+                taker_payment_locktime: 1000,
+                taker_funding_locktime: 2000,
+            };
+
+            // Append a sequence of events matching the happy path
+            let events_to_store = vec![
+                MakerSwapEvent::Initialized {
+                    maker_coin_start_block: 100,
+                    taker_coin_start_block: 200,
+                    maker_payment_trade_fee: MmNumber::from("0.001"),
+                    taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                },
+                MakerSwapEvent::WaitingForTakerFunding {
+                    maker_coin_start_block: 100,
+                    taker_coin_start_block: 200,
+                    negotiation_data: negotiation_data.clone(),
+                    maker_payment_trade_fee: MmNumber::from("0.001"),
+                },
+                MakerSwapEvent::TakerFundingReceived {
+                    maker_coin_start_block: 100,
+                    taker_coin_start_block: 200,
+                    negotiation_data: negotiation_data.clone(),
+                    taker_funding: BytesJson::from(vec![0xAA]),
+                    maker_payment_trade_fee: MmNumber::from("0.001"),
+                },
+                MakerSwapEvent::Completed,
+            ];
+
+            for event in &events_to_store {
+                block_on(storage.store_event(uuid, event.clone())).unwrap();
+            }
+
+            let loaded_events: Vec<MakerSwapEvent> = read_swap_v2_events(&ctx, &uuid).unwrap();
+            assert_eq!(loaded_events.len(), 4);
+
+            // Verify order by checking discriminants
+            assert!(matches!(loaded_events[0], MakerSwapEvent::Initialized { .. }));
+            assert!(matches!(
+                loaded_events[1],
+                MakerSwapEvent::WaitingForTakerFunding { .. }
+            ));
+            assert!(matches!(loaded_events[2], MakerSwapEvent::TakerFundingReceived { .. }));
+            assert!(matches!(loaded_events[3], MakerSwapEvent::Completed));
+        }
+
+        #[test]
+        fn test_maker_repr_db_roundtrip_with_events() {
+            let ctx = setup_test_ctx();
+            let uuid = Uuid::new_v4();
+            let mut storage = MakerSwapStorage::new(ctx.clone());
+
+            block_on(storage.store_repr(uuid, sample_maker_repr(uuid))).unwrap();
+
+            // Store events
+            block_on(storage.store_event(
+                uuid,
+                MakerSwapEvent::Initialized {
+                    maker_coin_start_block: 42,
+                    taker_coin_start_block: 84,
+                    maker_payment_trade_fee: MmNumber::from("0.001"),
+                    taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                },
+            ))
+            .unwrap();
+
+            // get_repr should include the events
+            let loaded: MakerSwapDbRepr = block_on(storage.get_repr(uuid)).unwrap();
+            assert_eq!(loaded.events.len(), 1);
+            match &loaded.events[0] {
+                MakerSwapEvent::Initialized {
+                    maker_coin_start_block, ..
+                } => assert_eq!(*maker_coin_start_block, 42),
+                _ => panic!("Expected Initialized"),
+            }
+
+            // Verify numeric fields survived the roundtrip
+            assert_eq!(loaded.maker_volume, MmNumber::from("10"));
+            assert_eq!(loaded.taker_volume, MmNumber::from("20"));
+            assert_eq!(loaded.taker_premium, MmNumber::from("0.1"));
+            assert_eq!(loaded.dex_fee_amount, MmNumber::from("0.01"));
+            assert_eq!(loaded.dex_fee_burn, MmNumber::from("0.005"));
+        }
+
+        #[test]
+        fn test_taker_repr_db_roundtrip_with_events() {
+            let ctx = setup_test_ctx();
+            let uuid = Uuid::new_v4();
+            let mut storage = TakerSwapStorage::new(ctx.clone());
+
+            block_on(storage.store_repr(uuid, sample_taker_repr(uuid))).unwrap();
+
+            block_on(storage.store_event(
+                uuid,
+                TakerSwapEvent::Initialized {
+                    maker_coin_start_block: 42,
+                    taker_coin_start_block: 84,
+                    taker_payment_fee: MmNumber::from("0.001"),
+                    maker_payment_spend_fee: MmNumber::from("0.002"),
+                },
+            ))
+            .unwrap();
+
+            let loaded: TakerSwapDbRepr = block_on(storage.get_repr(uuid)).unwrap();
+            assert_eq!(loaded.events.len(), 1);
+            match &loaded.events[0] {
+                TakerSwapEvent::Initialized {
+                    maker_coin_start_block, ..
+                } => assert_eq!(*maker_coin_start_block, 42),
+                _ => panic!("Expected Initialized"),
+            }
+            assert_eq!(loaded.maker_volume, MmNumber::from("10"));
+            assert_eq!(loaded.taker_volume, MmNumber::from("20"));
+        }
+
+        #[test]
+        fn test_swap_v2_conf_settings_db_roundtrip() {
+            let ctx = setup_test_ctx();
+            let uuid = Uuid::new_v4();
+            let mut storage = MakerSwapStorage::new(ctx.clone());
+
+            let mut repr = sample_maker_repr(uuid);
+            repr.conf_settings = SwapConfirmationsSettings {
+                maker_coin_confs: 5,
+                maker_coin_nota: true,
+                taker_coin_confs: 3,
+                taker_coin_nota: false,
+            };
+
+            block_on(storage.store_repr(uuid, repr)).unwrap();
+            let loaded: MakerSwapDbRepr = block_on(storage.get_repr(uuid)).unwrap();
+            assert_eq!(loaded.conf_settings.maker_coin_confs, 5);
+            assert_eq!(loaded.conf_settings.maker_coin_nota, true);
+            assert_eq!(loaded.conf_settings.taker_coin_confs, 3);
+            assert_eq!(loaded.conf_settings.taker_coin_nota, false);
+        }
+
+        #[test]
+        fn test_has_record_false_for_wrong_uuid() {
+            let ctx = setup_test_ctx();
+            let uuid = Uuid::new_v4();
+            let wrong_uuid = Uuid::new_v4();
+            let mut storage = MakerSwapStorage::new(ctx.clone());
+
+            block_on(storage.store_repr(uuid, sample_maker_repr(uuid))).unwrap();
+            assert!(block_on(storage.has_record_for(&uuid)).unwrap());
+            assert!(!block_on(storage.has_record_for(&wrong_uuid)).unwrap());
+        }
     }
 }
