@@ -1,0 +1,30 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [ reloaded-gplv2-base ]
+  pull_request:
+    branches: [ reloaded-gplv2-base ]
+
+jobs:
+  unit-tests:
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Rust toolchain
+        run: rustc --version && cargo --version
+
+      - name: Run coins_activation tests
+        run: cargo test -p coins_activation --lib
+
+      - name: Run ordermatch tests
+        run: cargo test -p mm2_main --lib ordermatch_tests
+
+      - name: Run ETH utility tests
+        run: cargo test -p coins --lib -- eth::eth_tests::test_addr_from_pubkey_str eth::eth_tests::test_gas_station_data eth::eth_tests::test_u256 eth::eth_tests::test_wei_from eth::eth_tests::test_wei_to
+
+      - name: Check formatting
+        run: cargo fmt -- --check 2>&1 | grep -v "^Warning:" | head -20; test "${PIPESTATUS[0]}" -eq 0
