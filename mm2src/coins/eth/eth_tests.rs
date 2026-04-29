@@ -40,6 +40,7 @@ fn eth_coin_for_test(
         EthCoinType::Erc20 { .. } => "JST".to_string(),
     };
 
+    let my_addr = key_pair.address();
     let eth_coin = EthCoin(Arc::new(EthCoinImpl {
         coin_type,
         decimals: 18,
@@ -47,7 +48,7 @@ fn eth_coin_for_test(
         gas_station_decimals: ETH_GAS_STATION_DECIMALS,
         history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
         gas_station_policy: GasStationPricePolicy::MeanAverageFast,
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
@@ -62,6 +63,7 @@ fn eth_coin_for_test(
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
     (ctx, eth_coin)
 }
@@ -204,13 +206,14 @@ fn send_and_refund_erc20_payment() {
     let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
     let web3 = Web3::new(transport);
     let ctx = MmCtxBuilder::new().into_mm_arc();
+    let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         ticker: "ETH".into(),
         coin_type: EthCoinType::Erc20 {
             platform: "ETH".to_string(),
             token_addr: Address::from("0xc0eb7AeD740E1796992A08962c15661bDEB58003"),
         },
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
@@ -229,6 +232,7 @@ fn send_and_refund_erc20_payment() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
 
     let payment = coin
@@ -273,10 +277,11 @@ fn send_and_refund_eth_payment() {
     let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
     let web3 = Web3::new(transport);
     let ctx = MmCtxBuilder::new().into_mm_arc();
+    let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         ticker: "ETH".into(),
         coin_type: EthCoinType::Eth,
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
@@ -295,6 +300,7 @@ fn send_and_refund_eth_payment() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
 
     let payment = coin
@@ -348,10 +354,11 @@ fn test_nonce_several_urls() {
     let web3_failing = Web3::new(failing_transport);
 
     let ctx = MmCtxBuilder::new().into_mm_arc();
+    let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         ticker: "ETH".into(),
         coin_type: EthCoinType::Eth,
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
@@ -380,6 +387,7 @@ fn test_nonce_several_urls() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
 
     log!("My address "[coin.my_address]);
@@ -406,6 +414,7 @@ fn test_wait_for_payment_spend_timeout() {
     let web3 = Web3::new(transport);
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
+    let my_addr = key_pair.address();
     let coin = EthCoinImpl {
         coin_type: EthCoinType::Eth,
         decimals: 18,
@@ -413,7 +422,7 @@ fn test_wait_for_payment_spend_timeout() {
         gas_station_decimals: ETH_GAS_STATION_DECIMALS,
         gas_station_policy: GasStationPricePolicy::MeanAverageFast,
         history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
@@ -428,6 +437,7 @@ fn test_wait_for_payment_spend_timeout() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     };
 
     let coin = EthCoin(Arc::new(coin));
@@ -467,6 +477,7 @@ fn test_search_for_swap_tx_spend_was_spent() {
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
     let swap_contract_address = Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94");
+    let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         coin_type: EthCoinType::Eth,
         decimals: 18,
@@ -474,7 +485,7 @@ fn test_search_for_swap_tx_spend_was_spent() {
         gas_station_decimals: ETH_GAS_STATION_DECIMALS,
         gas_station_policy: GasStationPricePolicy::MeanAverageFast,
         history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address,
@@ -489,6 +500,7 @@ fn test_search_for_swap_tx_spend_was_spent() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
 
     // raw transaction bytes of https://ropsten.etherscan.io/tx/0xb1c987e2ac79581bb8718267b5cb49a18274890494299239d1d0dfdb58d6d76a
@@ -573,6 +585,7 @@ fn test_search_for_swap_tx_spend_was_refunded() {
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
     let swap_contract_address = Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94");
+    let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         coin_type: EthCoinType::Erc20 {
             platform: "ETH".to_string(),
@@ -583,7 +596,7 @@ fn test_search_for_swap_tx_spend_was_refunded() {
         gas_station_decimals: ETH_GAS_STATION_DECIMALS,
         gas_station_policy: GasStationPricePolicy::MeanAverageFast,
         history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address,
@@ -598,6 +611,7 @@ fn test_search_for_swap_tx_spend_was_refunded() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
 
     // raw transaction bytes of https://ropsten.etherscan.io/tx/0xe18bbca69dea9a4624e1f5b0b2021d5fe4c8daa03f36084a8ba011b08e5cd938
@@ -1261,10 +1275,11 @@ fn test_message_hash() {
     let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
     let web3 = Web3::new(transport);
     let ctx = MmCtxBuilder::new().into_mm_arc();
+    let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         ticker: "ETH".into(),
         coin_type: EthCoinType::Eth,
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
@@ -1283,6 +1298,7 @@ fn test_message_hash() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
 
     let message_hash = coin.sign_message_hash("test").unwrap();
@@ -1301,10 +1317,11 @@ fn test_sign_verify_message() {
     let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
     let web3 = Web3::new(transport);
     let ctx = MmCtxBuilder::new().into_mm_arc();
+    let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         ticker: "ETH".into(),
         coin_type: EthCoinType::Eth,
-        my_address: key_pair.address(),
+        my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         key_pair,
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
@@ -1323,6 +1340,7 @@ fn test_sign_verify_message() {
         required_confirmations: 1.into(),
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(my_addr),
     }));
 
     let message = "test";
@@ -1333,4 +1351,121 @@ fn test_sign_verify_message() {
         .verify_message(&signature, message, "0xbAB36286672fbdc7B250804bf6D14Be0dF69fa29")
         .unwrap();
     assert!(is_valid);
+}
+
+// ---------------------------------------------------------------------------
+// addr_from_pubkey_str — pure pubkey-to-address conversion
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_addr_from_pubkey_str_valid() {
+    // Use secp256k1 to derive a proper compressed pubkey (33 bytes)
+    let secret = hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap();
+    let secp = secp256k1::Secp256k1::new();
+    let secret_key = secp256k1::SecretKey::from_slice(&secret).unwrap();
+    let pubkey = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let pubkey_hex = hex::encode(pubkey.serialize()); // 33-byte compressed
+    let addr = addr_from_pubkey_str(&pubkey_hex).unwrap();
+    // Should produce a valid Ethereum address (0x-prefixed, 42 chars)
+    assert!(addr.starts_with("0x"));
+    assert_eq!(addr.len(), 42);
+}
+
+#[test]
+fn test_addr_from_pubkey_str_invalid_hex() {
+    let result = addr_from_pubkey_str("not_a_hex_string");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_addr_from_pubkey_str_wrong_length() {
+    // Only 3 bytes instead of 33/65
+    let result = addr_from_pubkey_str("aabbcc");
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// wei_from_gwei_decimal — gwei to wei conversion
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_wei_from_gwei_decimal_one() {
+    use common::mm_number::BigDecimal;
+    let one_gwei: BigDecimal = "1".parse().unwrap();
+    let wei = wei_from_gwei_decimal(&one_gwei).unwrap();
+    assert_eq!(wei, U256::from(1_000_000_000u64));
+}
+
+#[test]
+fn test_wei_from_gwei_decimal_fractional() {
+    use common::mm_number::BigDecimal;
+    let half_gwei: BigDecimal = "0.5".parse().unwrap();
+    let wei = wei_from_gwei_decimal(&half_gwei).unwrap();
+    assert_eq!(wei, U256::from(500_000_000u64));
+}
+
+#[test]
+fn test_wei_from_gwei_decimal_large() {
+    use common::mm_number::BigDecimal;
+    let amount: BigDecimal = "100".parse().unwrap();
+    let wei = wei_from_gwei_decimal(&amount).unwrap();
+    assert_eq!(wei, U256::from(100_000_000_000u64));
+}
+
+// ---------------------------------------------------------------------------
+// GasStationData — JSON deserialization
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_gas_station_data_standard_format() {
+    let json = r#"{"average": 30, "fast": 50}"#;
+    let data: GasStationData = serde_json::from_str(json).unwrap();
+    // GasStationData fields are private — just verify it deserializes
+    let _ = format!("{:?}", serde_json::to_value(&data));
+}
+
+#[test]
+fn test_gas_station_data_matic_format() {
+    // Matic gas station uses "standard" instead of "average"
+    let json = r#"{"standard": 25, "fast": 40}"#;
+    let _data: GasStationData = serde_json::from_str(json).unwrap();
+}
+
+#[test]
+fn test_gas_station_data_missing_average() {
+    let json = r#"{"fast": 50}"#;
+    let result = serde_json::from_str::<GasStationData>(json);
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// u256_to_big_decimal — roundtrip with wei_from_big_decimal
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_u256_big_decimal_roundtrip() {
+    use common::mm_number::BigDecimal;
+    let original: BigDecimal = "1.5".parse().unwrap();
+    let wei = wei_from_big_decimal(&original, 18).unwrap();
+    let reconstructed = u256_to_big_decimal(wei, 18).unwrap();
+    assert_eq!(original, reconstructed);
+}
+
+#[test]
+fn test_u256_to_big_decimal_zero() {
+    let result = u256_to_big_decimal(U256::from(0), 18).unwrap();
+    assert_eq!(result, 0.into());
+}
+
+// ---------------------------------------------------------------------------
+// wei_to_gwei_decimal — inverse of wei_from_gwei_decimal
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_wei_to_gwei_roundtrip() {
+    use common::mm_number::BigDecimal;
+    let gwei: BigDecimal = "42.123456789".parse().unwrap();
+    let wei = wei_from_gwei_decimal(&gwei).unwrap();
+    let back = wei_to_gwei_decimal(wei).unwrap();
+    assert_eq!(gwei, back);
 }

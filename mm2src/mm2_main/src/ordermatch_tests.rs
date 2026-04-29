@@ -3452,3 +3452,359 @@ fn check_order_serde() {
     let order_json = include_str!("for_tests/check_order_serde_payload.json");
     let _order: Order = json::from_str(order_json).unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// Pure function tests — no MmArc, no coins required
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_alb_ordered_pair_reversed() {
+    // Same pair regardless of argument order
+    assert_eq!(alb_ordered_pair("A", "B"), alb_ordered_pair("B", "A"));
+}
+
+#[test]
+fn test_alb_ordered_pair_same_coin() {
+    assert_eq!("BTC:BTC", alb_ordered_pair("BTC", "BTC"));
+}
+
+#[test]
+fn test_alb_ordered_pair_case_sensitive() {
+    // Uppercase sorts before lowercase in ASCII
+    let pair = alb_ordered_pair("abc", "ABC");
+    assert!(pair.starts_with("ABC:"));
+}
+
+#[test]
+fn test_parse_orderbook_pair_empty_topic() {
+    assert_eq!(None, parse_orderbook_pair_from_topic(""));
+}
+
+#[test]
+fn test_parse_orderbook_pair_wrong_prefix() {
+    assert_eq!(None, parse_orderbook_pair_from_topic("swap/BTC:KMD"));
+}
+
+#[test]
+fn test_parse_orderbook_pair_no_colon() {
+    assert_eq!(None, parse_orderbook_pair_from_topic("orbk/BTCKMD"));
+}
+
+#[test]
+fn test_parse_orderbook_pair_only_prefix() {
+    assert_eq!(None, parse_orderbook_pair_from_topic("orbk/"));
+}
+
+#[test]
+fn test_parse_orderbook_pair_trailing_colon() {
+    // "orbk/BTC:" — second part is empty
+    assert_eq!(None, parse_orderbook_pair_from_topic("orbk/BTC:"));
+}
+
+#[test]
+fn test_parse_orderbook_pair_valid_roundtrip() {
+    let topic = orderbook_topic_from_base_rel("ETH", "BTC");
+    let parsed = parse_orderbook_pair_from_topic(&topic);
+    assert!(parsed.is_some());
+    let (a, b) = parsed.unwrap();
+    // The topic is built from alb_ordered_pair, so order is alphabetical
+    assert_eq!(a, "BTC");
+    assert_eq!(b, "ETH");
+}
+
+// ---------------------------------------------------------------------------
+// OrderConfirmationsSettings
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_order_conf_settings_reversed() {
+    let s = OrderConfirmationsSettings {
+        base_confs: 3,
+        base_nota: true,
+        rel_confs: 1,
+        rel_nota: false,
+    };
+    let r = s.reversed();
+    assert_eq!(r.base_confs, 1);
+    assert_eq!(r.base_nota, false);
+    assert_eq!(r.rel_confs, 3);
+    assert_eq!(r.rel_nota, true);
+}
+
+#[test]
+fn test_order_conf_settings_double_reverse_identity() {
+    let s = OrderConfirmationsSettings {
+        base_confs: 5,
+        base_nota: true,
+        rel_confs: 2,
+        rel_nota: false,
+    };
+    let double = s.reversed().reversed();
+    assert_eq!(double.base_confs, s.base_confs);
+    assert_eq!(double.base_nota, s.base_nota);
+    assert_eq!(double.rel_confs, s.rel_confs);
+    assert_eq!(double.rel_nota, s.rel_nota);
+}
+
+#[test]
+fn test_order_conf_settings_serde_roundtrip() {
+    let s = OrderConfirmationsSettings {
+        base_confs: 3,
+        base_nota: true,
+        rel_confs: 1,
+        rel_nota: false,
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let restored: OrderConfirmationsSettings = serde_json::from_str(&json).unwrap();
+    assert_eq!(s, restored);
+}
+
+#[test]
+fn test_order_conf_settings_default() {
+    let s = OrderConfirmationsSettings::default();
+    assert_eq!(s.base_confs, 0);
+    assert_eq!(s.rel_confs, 0);
+    assert!(!s.base_nota);
+    assert!(!s.rel_nota);
+}
+
+// ---------------------------------------------------------------------------
+// TakerOrderBuilder validation
+// ---------------------------------------------------------------------------
+
+fn make_test_coin_pair() -> (MmCoinEnum, MmCoinEnum) {
+    let base = MmCoinEnum::Test(TestCoin::new("BASE"));
+    let rel = MmCoinEnum::Test(TestCoin::new("REL"));
+    (base, rel)
+}
+
+fn default_conf_settings() -> OrderConfirmationsSettings {
+    OrderConfirmationsSettings {
+        base_confs: 1,
+        base_nota: false,
+        rel_confs: 1,
+        rel_nota: false,
+    }
+}
+
+fn nonzero_pubkey() -> H256Json {
+    H256Json::from([1u8; 32])
+}
+
+#[test]
+fn test_taker_builder_base_equal_rel() {
+    let coin = MmCoinEnum::Test(TestCoin::new("SAME"));
+    let err = TakerOrderBuilder::new(&coin, &coin)
+        .with_base_amount(10.into())
+        .with_rel_amount(10.into())
+        .with_sender_pubkey(nonzero_pubkey())
+        .with_conf_settings(default_conf_settings())
+        .build()
+        .unwrap_err();
+    assert!(matches!(err, TakerOrderBuildError::BaseEqualRel));
+}
+
+#[test]
+fn test_taker_builder_zero_pubkey() {
+    let (base, rel) = make_test_coin_pair();
+    let err = TakerOrderBuilder::new(&base, &rel)
+        .with_base_amount(10.into())
+        .with_rel_amount(10.into())
+        .with_conf_settings(default_conf_settings())
+        // sender_pubkey defaults to zero
+        .build()
+        .unwrap_err();
+    assert!(matches!(err, TakerOrderBuildError::SenderPubkeyIsZero));
+}
+
+#[test]
+fn test_taker_builder_no_conf_settings() {
+    let (base, rel) = make_test_coin_pair();
+    let err = TakerOrderBuilder::new(&base, &rel)
+        .with_base_amount(10.into())
+        .with_rel_amount(10.into())
+        .with_sender_pubkey(nonzero_pubkey())
+        // conf_settings not set
+        .build()
+        .unwrap_err();
+    assert!(matches!(err, TakerOrderBuildError::ConfsSettingsNotSet));
+}
+
+#[test]
+fn test_taker_builder_success() {
+    let (base, rel) = make_test_coin_pair();
+    let result = TakerOrderBuilder::new(&base, &rel)
+        .with_base_amount(10.into())
+        .with_rel_amount(20.into())
+        .with_sender_pubkey(nonzero_pubkey())
+        .with_conf_settings(default_conf_settings())
+        .build();
+    let order = match result {
+        Ok(o) => o,
+        Err(e) => panic!("build failed: {}", e),
+    };
+    assert_eq!(order.request.base, "BASE");
+    assert_eq!(order.request.rel, "REL");
+}
+
+// ---------------------------------------------------------------------------
+// MakerOrderBuilder validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_maker_builder_base_equal_rel() {
+    let coin = MmCoinEnum::Test(TestCoin::new("SAME"));
+    let err = MakerOrderBuilder::new(&coin, &coin)
+        .with_max_base_vol(10.into())
+        .with_price(1.into())
+        .with_conf_settings(default_conf_settings())
+        .build()
+        .unwrap_err();
+    assert!(matches!(err, MakerOrderBuildError::BaseEqualRel));
+}
+
+#[test]
+fn test_maker_builder_no_conf_settings() {
+    let (base, rel) = make_test_coin_pair();
+    let err = MakerOrderBuilder::new(&base, &rel)
+        .with_max_base_vol(10.into())
+        .with_price(1.into())
+        .build()
+        .unwrap_err();
+    assert!(matches!(err, MakerOrderBuildError::ConfSettingsNotSet));
+}
+
+#[test]
+fn test_maker_builder_price_too_low() {
+    let (base, rel) = make_test_coin_pair();
+    let err = MakerOrderBuilder::new(&base, &rel)
+        .with_max_base_vol(10.into())
+        .with_price(MmNumber::from(0))
+        .with_conf_settings(default_conf_settings())
+        .build()
+        .unwrap_err();
+    assert!(matches!(err, MakerOrderBuildError::PriceTooLow { .. }));
+}
+
+#[test]
+fn test_maker_builder_success() {
+    let (base, rel) = make_test_coin_pair();
+    let result = MakerOrderBuilder::new(&base, &rel)
+        .with_max_base_vol(10.into())
+        .with_price(1.into())
+        .with_conf_settings(default_conf_settings())
+        .build();
+    let order = match result {
+        Ok(o) => o,
+        Err(e) => panic!("build failed: {}", e),
+    };
+    assert_eq!(order.base, "BASE");
+    assert_eq!(order.rel, "REL");
+}
+
+// ---------------------------------------------------------------------------
+// TakerOrderBuildError — Display
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_taker_order_build_error_display() {
+    let e = TakerOrderBuildError::BaseEqualRel;
+    assert!(e.to_string().contains("same as base"));
+
+    let e = TakerOrderBuildError::SenderPubkeyIsZero;
+    assert!(e.to_string().contains("zero"));
+
+    let e = TakerOrderBuildError::ConfsSettingsNotSet;
+    assert!(e.to_string().contains("settings"));
+
+    let e = TakerOrderBuildError::BaseAmountTooLow {
+        actual: 1.into(),
+        threshold: 10.into(),
+    };
+    assert!(e.to_string().contains("too low"));
+}
+
+// ---------------------------------------------------------------------------
+// MakerOrderBuildError — Display
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_maker_order_build_error_display() {
+    let e = MakerOrderBuildError::BaseEqualRel;
+    assert!(e.to_string().contains("same as base"));
+
+    let e = MakerOrderBuildError::ConfSettingsNotSet;
+    assert!(e.to_string().contains("settings"));
+
+    let e = MakerOrderBuildError::PriceTooLow {
+        actual: MmNumber::from(0),
+        threshold: 1.into(),
+    };
+    assert!(e.to_string().contains("too low"));
+}
+
+// ---------------------------------------------------------------------------
+// TakerRequest — serde roundtrip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_taker_request_serde_roundtrip() {
+    let req = TakerRequest {
+        base: "BTC".into(),
+        rel: "KMD".into(),
+        base_amount: 1.into(),
+        rel_amount: 100.into(),
+        action: TakerAction::Buy,
+        uuid: Uuid::new_v4(),
+        sender_pubkey: H256Json::default(),
+        dest_pub_key: H256Json::default(),
+        match_by: MatchBy::Any,
+        conf_settings: Some(OrderConfirmationsSettings {
+            base_confs: 3,
+            base_nota: true,
+            rel_confs: 1,
+            rel_nota: false,
+        }),
+        base_protocol_info: None,
+        rel_protocol_info: None,
+        swap_version: SwapVersion::default(),
+    };
+    let json = serde_json::to_string(&req).unwrap();
+    let restored: TakerRequest = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.base, "BTC");
+    assert_eq!(restored.rel, "KMD");
+    assert_eq!(restored.action, TakerAction::Buy);
+}
+
+// ---------------------------------------------------------------------------
+// MatchBy variants serde
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_match_by_any_serde() {
+    let mb = MatchBy::Any;
+    let json = serde_json::to_string(&mb).unwrap();
+    let restored: MatchBy = serde_json::from_str(&json).unwrap();
+    assert!(matches!(restored, MatchBy::Any));
+}
+
+#[test]
+fn test_match_by_orders_serde() {
+    let uuids: HashSet<Uuid> = iter::once(Uuid::new_v4()).collect();
+    let mb = MatchBy::Orders(uuids.clone());
+    let json = serde_json::to_string(&mb).unwrap();
+    let restored: MatchBy = serde_json::from_str(&json).unwrap();
+    match restored {
+        MatchBy::Orders(u) => assert_eq!(u, uuids),
+        _ => panic!("Expected MatchBy::Orders"),
+    }
+}
+
+#[test]
+fn test_match_by_pubkeys_serde() {
+    let keys: HashSet<H256Json> = iter::once(H256Json::from([1u8; 32])).collect();
+    let mb = MatchBy::Pubkeys(keys);
+    let json = serde_json::to_string(&mb).unwrap();
+    let restored: MatchBy = serde_json::from_str(&json).unwrap();
+    assert!(matches!(restored, MatchBy::Pubkeys(_)));
+}
