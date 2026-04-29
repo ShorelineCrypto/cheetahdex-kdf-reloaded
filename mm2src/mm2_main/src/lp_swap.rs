@@ -69,6 +69,7 @@ use common::{
     mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
     now_ms, var, HttpStatusCode, PagingOptions,
 };
+use bitcrypto::sha256;
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
 use http::{Response, StatusCode};
@@ -79,13 +80,15 @@ use mm2_p2p::{decode_signed, encode_and_sign, pub_sub_topic, TopicPrefix};
 use parking_lot::Mutex as PaMutex;
 use primitives::hash::{H160, H264};
 use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json};
+use secp256k1::{PublicKey, SecretKey, Signature};
 use serde::Serialize;
 use serde_json::{self as json, Value as Json};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, Weak};
-use swap_v2_common::{ActiveSwapV2Info, SwapV2Msg, SwapV2MsgStore};
+use swap_v2_common::ActiveSwapV2Info;
+use swap_v2_pb::*;
 use uuid::Uuid;
 
 #[cfg(feature = "custom-swap-locktime")]
@@ -111,6 +114,9 @@ mod saved_swap;
 pub(crate) mod swap_events;
 #[path = "lp_swap/swap_lock.rs"]
 mod swap_lock;
+#[path = "lp_swap/komodefi.swap_v2.pb.rs"]
+#[rustfmt::skip]
+mod swap_v2_pb;
 #[path = "lp_swap/swap_v2_common.rs"]
 pub mod swap_v2_common;
 #[path = "lp_swap/swap_v2_rpcs.rs"]
@@ -132,7 +138,7 @@ mod swap_wasm_db;
 
 #[allow(unused_imports)]
 pub use check_balance::{check_other_coin_balance_for_swap, CheckBalanceError};
-use keys::KeyPair;
+use keys::{KeyPair, SECP_SIGN, SECP_VERIFY};
 use maker_swap::MakerSwapEvent;
 pub use maker_swap::{
     calc_max_maker_vol, check_balance_for_maker_swap, maker_swap_trade_preimage, run_maker_swap, MakerSavedEvent,
@@ -354,33 +360,52 @@ pub fn swap_v2_topic(uuid: &Uuid) -> String {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// V2 swap P2P messaging
+// V2 swap P2P messaging (protobuf / prost)
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Broadcast a V2 swap message once on the given topic.
-pub fn broadcast_swap_v2_msg(ctx: &MmArc, topic: String, msg: SwapV2Msg, p2p_keypair: &Option<KeyPair>) {
+/// Broadcast a V2 swap protobuf message once on the given topic.
+pub fn broadcast_swap_v2_message<T: prost::Message>(
+    ctx: &MmArc,
+    topic: String,
+    msg: &T,
+    p2p_keypair: &Option<KeyPair>,
+) {
+    use prost::Message;
+
     let (p2p_private, from) = match p2p_keypair {
         Some(kp) => (kp.private_bytes(), Some(kp.libp2p_peer_id())),
         None => (ctx.secp256k1_key_pair().private().secret.take(), None),
     };
-    if let Ok(encoded) = encode_and_sign(&msg, &p2p_private) {
-        broadcast_p2p_msg(ctx, vec![topic], encoded, from);
-    }
+    let encoded_msg = msg.encode_to_vec();
+
+    let secp_secret = SecretKey::from_slice(&p2p_private).expect("valid secret key");
+    let secp_message =
+        secp256k1::Message::from_slice(sha256(&encoded_msg).as_slice()).expect("sha256 is 32 bytes hash");
+    let signature = SECP_SIGN.sign(&secp_message, &secp_secret);
+
+    let signed_message = SignedMessage {
+        from: PublicKey::from_secret_key(&*SECP_SIGN, &secp_secret)
+            .serialize()
+            .into(),
+        signature: signature.serialize_compact().into(),
+        payload: encoded_msg,
+    };
+    broadcast_p2p_msg(ctx, vec![topic], signed_message.encode_to_vec(), from);
 }
 
-/// Broadcast a V2 swap message every `interval` seconds.  Returns an abort handle
-/// that stops broadcasting when dropped.
-pub fn broadcast_swap_v2_msg_every(
+/// Spawns the loop that broadcasts a protobuf message every `interval_sec` seconds,
+/// returning the AbortOnDropHandle to stop it.
+pub fn broadcast_swap_v2_msg_every<T: prost::Message + 'static>(
     ctx: MmArc,
     topic: String,
-    msg: SwapV2Msg,
-    interval: f64,
+    msg: T,
+    interval_sec: f64,
     p2p_keypair: Option<KeyPair>,
 ) -> AbortOnDropHandle {
     let fut = async move {
         loop {
-            broadcast_swap_v2_msg(&ctx, topic.clone(), msg.clone(), &p2p_keypair);
-            Timer::sleep(interval).await;
+            broadcast_swap_v2_message(&ctx, topic.clone(), &msg, &p2p_keypair);
+            Timer::sleep(interval_sec).await;
         }
     };
     let (abortable, abort_handle) = abortable(fut);
@@ -388,64 +413,65 @@ pub fn broadcast_swap_v2_msg_every(
     AbortOnDropHandle(abort_handle)
 }
 
-/// Process an incoming V2 swap message from P2P.
+/// Processes messages received during execution of the upgraded swap protocol.
 ///
-/// Decodes the signed envelope, verifies the sender matches the expected
-/// counterparty, then routes the inner `SwapV2Msg` variant to the
+/// Decodes the protobuf `SignedMessage` envelope, verifies the secp256k1 signature
+/// and the sender identity, then routes the inner `SwapMessage` variant to the
 /// appropriate slot in the per-swap `SwapV2MsgStore`.
-pub fn process_swap_v2_msg(ctx: &MmArc, topic: &str, msg_bytes: &[u8], expected_sender: &[u8; 33]) {
-    let (decoded_msg, _sig, sender_pubkey) = match decode_signed::<SwapV2Msg>(msg_bytes) {
-        Ok(m) => m,
-        Err(e) => {
-            debug!("Failed to decode V2 swap msg on {}: {:?}", topic, e);
-            return;
-        },
-    };
+pub fn process_swap_v2_msg(ctx: MmArc, topic: &str, msg: &[u8]) -> Result<(), String> {
+    use prost::Message;
 
-    // Verify sender matches the expected counterparty.
-    if sender_pubkey.unprefixed() != &expected_sender[1..] {
-        warn!(
-            "V2 swap msg on {} from unexpected sender (got {:?})",
-            topic,
-            sender_pubkey.unprefixed()
-        );
-        return;
-    }
+    let uuid = Uuid::from_str(topic).map_err(|e| format!("Invalid UUID in V2 swap topic: {}", e))?;
 
-    // Extract UUID from topic: "swapv2/<uuid>"
-    let uuid_str = match topic.strip_prefix("swapv2/") {
-        Some(s) => s,
-        None => {
-            warn!("V2 swap msg on unexpected topic format: {}", topic);
-            return;
-        },
-    };
-    let uuid = match Uuid::from_str(uuid_str) {
-        Ok(u) => u,
-        Err(_) => {
-            warn!("V2 swap msg with invalid UUID in topic: {}", topic);
-            return;
-        },
-    };
+    let swap_ctx = SwapsContext::from_ctx(&ctx).map_err(|e| e.to_string())?;
+    let mut msgs = swap_ctx.swap_v2_msgs.lock().unwrap();
+    if let Some(msg_store) = msgs.get_mut(&uuid) {
+        let signed_message =
+            SignedMessage::decode(msg).map_err(|e| format!("Failed to decode SignedMessage: {}", e))?;
 
-    let swap_ctx = match SwapsContext::from_ctx(ctx) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    let mut stores = swap_ctx.swap_v2_msgs.lock().unwrap();
-    if let Some(store) = stores.get_mut(&uuid) {
-        match decoded_msg {
-            SwapV2Msg::MakerNegotiation(data) => store.maker_negotiation = Some(data),
-            SwapV2Msg::TakerNegotiation(data) => store.taker_negotiation = Some(data),
-            SwapV2Msg::MakerNegotiated(data) => store.maker_negotiated = Some(data),
-            SwapV2Msg::TakerFundingInfo(data) => store.taker_funding_info = Some(data),
-            SwapV2Msg::MakerPaymentInfo(data) => store.maker_payment_info = Some(data),
-            SwapV2Msg::TakerPaymentInfo(data) => store.taker_payment_info = Some(data),
-            SwapV2Msg::TakerPaymentSpendPreimage(data) => store.taker_payment_spend_preimage = Some(data),
+        let pubkey = PublicKey::from_slice(&signed_message.from)
+            .map_err(|e| format!("Invalid sender pubkey: {}", e))?;
+        if pubkey != msg_store.accept_only_from {
+            return Err(format!("Unexpected sender: {}", pubkey));
         }
-    } else {
-        debug!("No V2 msg store for swap {}", uuid);
+
+        let signature = Signature::from_compact(&signed_message.signature)
+            .map_err(|e| format!("Invalid signature: {}", e))?;
+        let secp_message = secp256k1::Message::from_slice(sha256(&signed_message.payload).as_slice())
+            .expect("sha256 is 32 bytes hash");
+
+        SECP_VERIFY
+            .verify(&secp_message, &signature, &pubkey)
+            .map_err(|e| format!("Signature verification failed: {}", e))?;
+
+        let swap_message = SwapMessage::decode(signed_message.payload.as_slice())
+            .map_err(|e| format!("Failed to decode SwapMessage: {}", e))?;
+
+        let uuid_from_message = Uuid::from_slice(&swap_message.swap_uuid)
+            .map_err(|e| format!("Invalid swap_uuid in message: {}", e))?;
+
+        if uuid_from_message != uuid {
+            return Err(format!(
+                "uuid from message {} doesn't match uuid from topic {}",
+                uuid_from_message, uuid
+            ));
+        }
+
+        debug!("Processing swap v2 msg {:?} for uuid {}", swap_message, uuid);
+        match swap_message.inner {
+            Some(swap_message::Inner::MakerNegotiation(data)) => msg_store.maker_negotiation = Some(data),
+            Some(swap_message::Inner::TakerNegotiation(data)) => msg_store.taker_negotiation = Some(data),
+            Some(swap_message::Inner::MakerNegotiated(data)) => msg_store.maker_negotiated = Some(data),
+            Some(swap_message::Inner::TakerFundingInfo(data)) => msg_store.taker_funding = Some(data),
+            Some(swap_message::Inner::MakerPaymentInfo(data)) => msg_store.maker_payment = Some(data),
+            Some(swap_message::Inner::TakerPaymentInfo(data)) => msg_store.taker_payment = Some(data),
+            Some(swap_message::Inner::TakerPaymentSpendPreimage(data)) => {
+                msg_store.taker_payment_spend_preimage = Some(data)
+            },
+            None => return Err("swap_message.inner is None".into()),
+        }
     }
+    Ok(())
 }
 
 /// Wait for a specific V2 swap message, polling the per-swap store.
@@ -595,6 +621,34 @@ struct LockedAmountV2Info {
     locked_amount: LockedAmount,
 }
 
+/// Storage for P2P messages, which are exchanged during SwapV2 protocol execution.
+#[derive(Debug)]
+pub struct SwapV2MsgStore {
+    maker_negotiation: Option<MakerNegotiation>,
+    taker_negotiation: Option<TakerNegotiation>,
+    maker_negotiated: Option<MakerNegotiated>,
+    taker_funding: Option<TakerFundingInfo>,
+    maker_payment: Option<MakerPaymentInfo>,
+    taker_payment: Option<TakerPaymentInfo>,
+    taker_payment_spend_preimage: Option<TakerPaymentSpendPreimage>,
+    accept_only_from: PublicKey,
+}
+
+impl SwapV2MsgStore {
+    pub fn new(accept_only_from: PublicKey) -> Self {
+        SwapV2MsgStore {
+            maker_negotiation: None,
+            taker_negotiation: None,
+            maker_negotiated: None,
+            taker_funding: None,
+            maker_payment: None,
+            taker_payment: None,
+            taker_payment_spend_preimage: None,
+            accept_only_from,
+        }
+    }
+}
+
 struct SwapsContext {
     running_swaps: Mutex<Vec<Weak<dyn AtomicSwap>>>,
     banned_pubkeys: Mutex<HashMap<H256Json, BanReason>>,
@@ -658,8 +712,8 @@ impl SwapsContext {
 
     /// Initialise a V2 message store for the given swap UUID.
     /// Messages from senders other than `accept_only_from` are silently dropped.
-    pub fn init_v2_msg_store(&self, uuid: Uuid, _accept_only_from: [u8; 33]) {
-        let store = SwapV2MsgStore::default();
+    pub fn init_v2_msg_store(&self, uuid: Uuid, accept_only_from: PublicKey) {
+        let store = SwapV2MsgStore::new(accept_only_from);
         self.swap_v2_msgs.lock().unwrap().insert(uuid, store);
     }
 

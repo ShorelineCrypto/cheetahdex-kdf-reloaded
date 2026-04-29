@@ -161,6 +161,15 @@ async fn process_p2p_message(
                 lp_swap::process_msg(ctx.clone(), split.next().unwrap_or_default(), &message.data).await;
                 to_propagate = true;
             },
+            Some(lp_swap::SWAP_V2_PREFIX) => {
+                if let Err(e) =
+                    lp_swap::process_swap_v2_msg(ctx.clone(), split.next().unwrap_or_default(), &message.data)
+                {
+                    log::error!("{}", e);
+                    return;
+                }
+                to_propagate = true;
+            },
             Some(lp_swap::TX_HELPER_PREFIX) => {
                 if let Some(pair) = split.next() {
                     if let Ok(Some(coin)) = lp_coinfind(&ctx, pair).await {

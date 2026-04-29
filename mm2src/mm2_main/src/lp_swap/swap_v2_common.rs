@@ -49,108 +49,8 @@ pub const SWAP_TX_VISIBILITY_POLL_SECS: f64 = 1.0;
 /// negotiation messages before aborting.
 pub const NEGOTIATION_TIMEOUT_SEC: u64 = 90;
 
-/// The topic prefix used for V2 swap P2P messages.
+/// The topic prefix used for V2 swap P2P messages (canonical definition in lp_swap.rs).
 pub const SWAP_V2_PREFIX: &str = "swapv2";
-
-// ────────────────────────────────────────────────────────────────────────────
-// V2 swap P2P messages  (serde-JSON based, no protobuf yet)
-// ────────────────────────────────────────────────────────────────────────────
-
-/// V2 negotiation data sent by the maker at swap start.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MakerNegotiation {
-    pub started_at: u64,
-    pub payment_locktime: u64,
-    pub secret_hash: BytesJson,
-    pub maker_coin_htlc_pub: BytesJson,
-    pub taker_coin_htlc_pub: BytesJson,
-    pub maker_coin_swap_contract: Option<BytesJson>,
-    pub taker_coin_swap_contract: Option<BytesJson>,
-    pub taker_coin_address: String,
-}
-
-/// The taker's response to maker negotiation.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum TakerNegotiation {
-    /// The taker agrees and provides their negotiation data.
-    Continue(TakerNegotiationData),
-    /// The taker aborts with a reason.
-    Abort(String),
-}
-
-/// Taker negotiation data, sent inside `TakerNegotiation::Continue`.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TakerNegotiationData {
-    pub started_at: u64,
-    pub funding_locktime: u64,
-    pub payment_locktime: u64,
-    pub taker_secret_hash: BytesJson,
-    pub maker_coin_htlc_pub: BytesJson,
-    pub taker_coin_htlc_pub: BytesJson,
-    pub maker_coin_swap_contract: Option<BytesJson>,
-    pub taker_coin_swap_contract: Option<BytesJson>,
-}
-
-/// Maker's confirmation that negotiation succeeded.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MakerNegotiated {
-    pub negotiated: bool,
-    pub reason: Option<String>,
-}
-
-/// Taker tells maker about the funding transaction.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TakerFundingInfo {
-    pub tx_bytes: BytesJson,
-    pub next_step_instructions: Option<Vec<u8>>,
-}
-
-/// Maker tells taker about the maker payment and funding-spend preimage.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MakerPaymentInfo {
-    pub tx_bytes: BytesJson,
-    pub next_step_instructions: Option<Vec<u8>>,
-    pub funding_preimage_sig: BytesJson,
-    pub funding_preimage_tx: BytesJson,
-}
-
-/// Taker tells maker about the taker payment.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TakerPaymentInfo {
-    pub tx_bytes: BytesJson,
-    pub next_step_instructions: Option<Vec<u8>>,
-}
-
-/// Taker sends the preimage for the taker payment spend.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TakerPaymentSpendPreimage {
-    pub signature: BytesJson,
-    pub tx_preimage: BytesJson,
-}
-
-/// Multiplexed V2 swap message.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum SwapV2Msg {
-    MakerNegotiation(MakerNegotiation),
-    TakerNegotiation(TakerNegotiation),
-    MakerNegotiated(MakerNegotiated),
-    TakerFundingInfo(TakerFundingInfo),
-    MakerPaymentInfo(MakerPaymentInfo),
-    TakerPaymentInfo(TakerPaymentInfo),
-    TakerPaymentSpendPreimage(TakerPaymentSpendPreimage),
-}
-
-/// In-memory store for V2 swap P2P messages, analogous to `SwapMsgStore` for V1.
-#[derive(Debug, Default)]
-pub struct SwapV2MsgStore {
-    pub maker_negotiation: Option<MakerNegotiation>,
-    pub taker_negotiation: Option<TakerNegotiation>,
-    pub maker_negotiated: Option<MakerNegotiated>,
-    pub taker_funding_info: Option<TakerFundingInfo>,
-    pub maker_payment_info: Option<MakerPaymentInfo>,
-    pub taker_payment_info: Option<TakerPaymentInfo>,
-    pub taker_payment_spend_preimage: Option<TakerPaymentSpendPreimage>,
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Error / abort types
@@ -898,23 +798,30 @@ cfg_wasm32! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::swap_v2_pb::*;
 
     #[test]
-    fn test_swap_v2_msg_serde_roundtrip() {
-        let msg = SwapV2Msg::MakerNegotiation(MakerNegotiation {
+    fn test_swap_v2_protobuf_roundtrip() {
+        use prost::Message;
+
+        let maker_neg = MakerNegotiation {
             started_at: 1234567890,
             payment_locktime: 9999,
-            secret_hash: BytesJson::from(vec![1, 2, 3]),
-            maker_coin_htlc_pub: BytesJson::from(vec![4, 5, 6]),
-            taker_coin_htlc_pub: BytesJson::from(vec![7, 8, 9]),
+            secret_hash: vec![1, 2, 3],
+            maker_coin_htlc_pub: vec![4, 5, 6],
+            taker_coin_htlc_pub: vec![7, 8, 9],
             maker_coin_swap_contract: None,
             taker_coin_swap_contract: None,
             taker_coin_address: "R9abc123".into(),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let decoded: SwapV2Msg = serde_json::from_str(&json).unwrap();
-        match decoded {
-            SwapV2Msg::MakerNegotiation(n) => {
+        };
+        let swap_msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerNegotiation(maker_neg)),
+            swap_uuid: vec![0u8; 16],
+        };
+        let encoded = swap_msg.encode_to_vec();
+        let decoded = SwapMessage::decode(encoded.as_slice()).unwrap();
+        match decoded.inner {
+            Some(swap_message::Inner::MakerNegotiation(n)) => {
                 assert_eq!(n.started_at, 1234567890);
                 assert_eq!(n.payment_locktime, 9999);
                 assert_eq!(n.taker_coin_address, "R9abc123");
@@ -924,13 +831,26 @@ mod tests {
     }
 
     #[test]
-    fn test_taker_negotiation_abort_serde() {
-        let msg = SwapV2Msg::TakerNegotiation(TakerNegotiation::Abort("bad coin".into()));
-        let json = serde_json::to_string(&msg).unwrap();
-        let decoded: SwapV2Msg = serde_json::from_str(&json).unwrap();
-        match decoded {
-            SwapV2Msg::TakerNegotiation(TakerNegotiation::Abort(reason)) => {
-                assert_eq!(reason, "bad coin");
+    fn test_taker_negotiation_abort_protobuf() {
+        use prost::Message;
+
+        let taker_neg = TakerNegotiation {
+            action: Some(taker_negotiation::Action::Abort(Abort {
+                reason: "bad coin".into(),
+            })),
+        };
+        let swap_msg = SwapMessage {
+            inner: Some(swap_message::Inner::TakerNegotiation(taker_neg)),
+            swap_uuid: vec![0u8; 16],
+        };
+        let encoded = swap_msg.encode_to_vec();
+        let decoded = SwapMessage::decode(encoded.as_slice()).unwrap();
+        match decoded.inner {
+            Some(swap_message::Inner::TakerNegotiation(tn)) => match tn.action {
+                Some(taker_negotiation::Action::Abort(abort)) => {
+                    assert_eq!(abort.reason, "bad coin");
+                },
+                _ => panic!("Expected Abort"),
             },
             _ => panic!("Wrong variant"),
         }
@@ -997,51 +917,69 @@ mod tests {
     }
 
     #[test]
-    fn test_swap_v2_msg_all_variants_serde() {
+    fn test_swap_v2_protobuf_all_variants() {
+        use prost::Message;
+
+        let test_uuid = vec![1u8; 16];
+
         // MakerNegotiation
-        let msg = SwapV2Msg::MakerNegotiation(MakerNegotiation {
-            started_at: 100,
-            payment_locktime: 200,
-            secret_hash: BytesJson::from(vec![1]),
-            maker_coin_htlc_pub: BytesJson::from(vec![2]),
-            taker_coin_htlc_pub: BytesJson::from(vec![3]),
-            maker_coin_swap_contract: Some(BytesJson::from(vec![4])),
-            taker_coin_swap_contract: None,
-            taker_coin_address: "addr".into(),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerNegotiation(MakerNegotiation {
+                started_at: 100,
+                payment_locktime: 200,
+                secret_hash: vec![1],
+                maker_coin_htlc_pub: vec![2],
+                taker_coin_htlc_pub: vec![3],
+                maker_coin_swap_contract: Some(vec![4]),
+                taker_coin_swap_contract: None,
+                taker_coin_address: "addr".into(),
+            })),
+            swap_uuid: test_uuid.clone(),
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert!(matches!(decoded.inner, Some(swap_message::Inner::MakerNegotiation(_))));
 
         // TakerNegotiation::Continue
-        let msg = SwapV2Msg::TakerNegotiation(TakerNegotiation::Continue(TakerNegotiationData {
-            started_at: 100,
-            funding_locktime: 300,
-            payment_locktime: 200,
-            taker_secret_hash: BytesJson::from(vec![5]),
-            maker_coin_htlc_pub: BytesJson::from(vec![6]),
-            taker_coin_htlc_pub: BytesJson::from(vec![7]),
-            maker_coin_swap_contract: None,
-            taker_coin_swap_contract: Some(BytesJson::from(vec![8])),
-        }));
-        let json = serde_json::to_string(&msg).unwrap();
-        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::TakerNegotiation(TakerNegotiation {
+                action: Some(taker_negotiation::Action::Continue(TakerNegotiationData {
+                    started_at: 100,
+                    funding_locktime: 300,
+                    payment_locktime: 200,
+                    taker_secret_hash: vec![5],
+                    maker_coin_htlc_pub: vec![6],
+                    taker_coin_htlc_pub: vec![7],
+                    maker_coin_swap_contract: None,
+                    taker_coin_swap_contract: Some(vec![8]),
+                })),
+            })),
+            swap_uuid: test_uuid.clone(),
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert!(matches!(decoded.inner, Some(swap_message::Inner::TakerNegotiation(_))));
 
-        // MakerNegotiated
-        let msg = SwapV2Msg::MakerNegotiated(MakerNegotiated {
-            negotiated: true,
-            reason: None,
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        // MakerNegotiated (true)
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerNegotiated(MakerNegotiated {
+                negotiated: true,
+                reason: None,
+            })),
+            swap_uuid: test_uuid.clone(),
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert!(matches!(decoded.inner, Some(swap_message::Inner::MakerNegotiated(_))));
 
-        let msg = SwapV2Msg::MakerNegotiated(MakerNegotiated {
-            negotiated: false,
-            reason: Some("bad terms".into()),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let decoded: SwapV2Msg = serde_json::from_str(&json).unwrap();
-        match decoded {
-            SwapV2Msg::MakerNegotiated(n) => {
+        // MakerNegotiated (false + reason)
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerNegotiated(MakerNegotiated {
+                negotiated: false,
+                reason: Some("bad terms".into()),
+            })),
+            swap_uuid: test_uuid.clone(),
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        match decoded.inner {
+            Some(swap_message::Inner::MakerNegotiated(n)) => {
                 assert!(!n.negotiated);
                 assert_eq!(n.reason.unwrap(), "bad terms");
             },
@@ -1049,101 +987,132 @@ mod tests {
         }
 
         // TakerFundingInfo
-        let msg = SwapV2Msg::TakerFundingInfo(TakerFundingInfo {
-            tx_bytes: BytesJson::from(vec![0xAA]),
-            next_step_instructions: Some(vec![1, 2, 3]),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::TakerFundingInfo(TakerFundingInfo {
+                tx_bytes: vec![0xAA],
+                next_step_instructions: Some(vec![1, 2, 3]),
+            })),
+            swap_uuid: test_uuid.clone(),
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert!(matches!(decoded.inner, Some(swap_message::Inner::TakerFundingInfo(_))));
 
         // MakerPaymentInfo
-        let msg = SwapV2Msg::MakerPaymentInfo(MakerPaymentInfo {
-            tx_bytes: BytesJson::from(vec![0xBB]),
-            next_step_instructions: None,
-            funding_preimage_sig: BytesJson::from(vec![0xCC]),
-            funding_preimage_tx: BytesJson::from(vec![0xDD]),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerPaymentInfo(MakerPaymentInfo {
+                tx_bytes: vec![0xBB],
+                next_step_instructions: None,
+                funding_preimage_sig: vec![0xCC],
+                funding_preimage_tx: vec![0xDD],
+            })),
+            swap_uuid: test_uuid.clone(),
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert!(matches!(decoded.inner, Some(swap_message::Inner::MakerPaymentInfo(_))));
 
         // TakerPaymentInfo
-        let msg = SwapV2Msg::TakerPaymentInfo(TakerPaymentInfo {
-            tx_bytes: BytesJson::from(vec![0xEE]),
-            next_step_instructions: None,
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::TakerPaymentInfo(TakerPaymentInfo {
+                tx_bytes: vec![0xEE],
+                next_step_instructions: None,
+            })),
+            swap_uuid: test_uuid.clone(),
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert!(matches!(decoded.inner, Some(swap_message::Inner::TakerPaymentInfo(_))));
 
         // TakerPaymentSpendPreimage
-        let msg = SwapV2Msg::TakerPaymentSpendPreimage(TakerPaymentSpendPreimage {
-            signature: BytesJson::from(vec![0xFF]),
-            tx_preimage: BytesJson::from(vec![0x11]),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let _: SwapV2Msg = serde_json::from_str(&json).unwrap();
+        let msg = SwapMessage {
+            inner: Some(swap_message::Inner::TakerPaymentSpendPreimage(
+                TakerPaymentSpendPreimage {
+                    signature: vec![0xFF],
+                    tx_preimage: vec![0x11],
+                },
+            )),
+            swap_uuid: test_uuid,
+        };
+        let decoded = SwapMessage::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert!(matches!(
+            decoded.inner,
+            Some(swap_message::Inner::TakerPaymentSpendPreimage(_))
+        ));
     }
 
     #[test]
     fn test_swap_v2_msg_store_population() {
-        let mut store = SwapV2MsgStore::default();
+        use super::super::SwapV2MsgStore;
+
+        // secp256k1 requires a valid public key; use an uncompressed generator point
+        let pubkey = secp256k1::PublicKey::from_slice(&[
+            2, 0xc6, 0x04, 0x7f, 0x94, 0x41, 0xed, 0x7d, 0x6d, 0x30, 0x45, 0x40, 0x6e, 0x95,
+            0xc0, 0x7c, 0xd8, 0x5c, 0x77, 0x8e, 0x4b, 0x8c, 0xef, 0x3c, 0xa7, 0xab, 0xac, 0x09,
+            0xb9, 0x5c, 0x70, 0x9e, 0xe5,
+        ])
+        .unwrap();
+
+        let mut store = SwapV2MsgStore::new(pubkey);
 
         // All fields start as None
         assert!(store.maker_negotiation.is_none());
         assert!(store.taker_negotiation.is_none());
         assert!(store.maker_negotiated.is_none());
-        assert!(store.taker_funding_info.is_none());
-        assert!(store.maker_payment_info.is_none());
-        assert!(store.taker_payment_info.is_none());
+        assert!(store.taker_funding.is_none());
+        assert!(store.maker_payment.is_none());
+        assert!(store.taker_payment.is_none());
         assert!(store.taker_payment_spend_preimage.is_none());
 
-        // Populate all fields
+        // Populate all fields with protobuf types
         store.maker_negotiation = Some(MakerNegotiation {
             started_at: 1,
             payment_locktime: 2,
-            secret_hash: BytesJson::from(vec![]),
-            maker_coin_htlc_pub: BytesJson::from(vec![]),
-            taker_coin_htlc_pub: BytesJson::from(vec![]),
+            secret_hash: vec![],
+            maker_coin_htlc_pub: vec![],
+            taker_coin_htlc_pub: vec![],
             maker_coin_swap_contract: None,
             taker_coin_swap_contract: None,
             taker_coin_address: "addr".into(),
         });
-        store.taker_negotiation = Some(TakerNegotiation::Abort("cancel".into()));
+        store.taker_negotiation = Some(TakerNegotiation {
+            action: Some(taker_negotiation::Action::Abort(Abort {
+                reason: "cancel".into(),
+            })),
+        });
         store.maker_negotiated = Some(MakerNegotiated {
             negotiated: true,
             reason: None,
         });
-        store.taker_funding_info = Some(TakerFundingInfo {
-            tx_bytes: BytesJson::from(vec![1]),
+        store.taker_funding = Some(TakerFundingInfo {
+            tx_bytes: vec![1],
             next_step_instructions: None,
         });
-        store.maker_payment_info = Some(MakerPaymentInfo {
-            tx_bytes: BytesJson::from(vec![2]),
+        store.maker_payment = Some(MakerPaymentInfo {
+            tx_bytes: vec![2],
             next_step_instructions: None,
-            funding_preimage_sig: BytesJson::from(vec![3]),
-            funding_preimage_tx: BytesJson::from(vec![4]),
+            funding_preimage_sig: vec![3],
+            funding_preimage_tx: vec![4],
         });
-        store.taker_payment_info = Some(TakerPaymentInfo {
-            tx_bytes: BytesJson::from(vec![5]),
+        store.taker_payment = Some(TakerPaymentInfo {
+            tx_bytes: vec![5],
             next_step_instructions: None,
         });
         store.taker_payment_spend_preimage = Some(TakerPaymentSpendPreimage {
-            signature: BytesJson::from(vec![6]),
-            tx_preimage: BytesJson::from(vec![7]),
+            signature: vec![6],
+            tx_preimage: vec![7],
         });
 
         // All fields now populated
         assert!(store.maker_negotiation.is_some());
         assert!(store.taker_negotiation.is_some());
         assert!(store.maker_negotiated.is_some());
-        assert!(store.taker_funding_info.is_some());
-        assert!(store.maker_payment_info.is_some());
-        assert!(store.taker_payment_info.is_some());
+        assert!(store.taker_funding.is_some());
+        assert!(store.maker_payment.is_some());
+        assert!(store.taker_payment.is_some());
         assert!(store.taker_payment_spend_preimage.is_some());
 
         // Verify specific stored data
         assert_eq!(store.maker_negotiation.as_ref().unwrap().started_at, 1);
-        match store.taker_negotiation.as_ref().unwrap() {
-            TakerNegotiation::Abort(reason) => assert_eq!(reason, "cancel"),
+        match &store.taker_negotiation.as_ref().unwrap().action {
+            Some(taker_negotiation::Action::Abort(abort)) => assert_eq!(abort.reason, "cancel"),
             _ => panic!("Expected Abort"),
         }
     }

@@ -39,6 +39,7 @@ use uuid::Uuid;
 use super::swap_lock::SwapLock;
 use super::swap_v2_common::*;
 use super::SwapConfirmationsSettings;
+use super::swap_v2_pb::*;
 
 /// Maximum allowed difference between maker and taker `started_at` timestamps (seconds).
 const MAX_STARTED_AT_DIFF: u64 = 60;
@@ -825,10 +826,9 @@ where
         };
         let swap_ctx = super::SwapsContext::from_ctx(&self.ctx).expect("SwapsContext should exist");
         swap_ctx.add_active_swap_v2(swap_info);
-        let mut pubkey_buf = [0u8; 33];
-        let len = self.taker_p2p_pubkey.len().min(33);
-        pubkey_buf[..len].copy_from_slice(&self.taker_p2p_pubkey[..len]);
-        swap_ctx.init_v2_msg_store(self.uuid, pubkey_buf);
+        let accept_from = secp256k1::PublicKey::from_slice(&self.taker_p2p_pubkey)
+            .expect("taker_p2p_pubkey must be a valid 33-byte compressed pubkey");
+        swap_ctx.init_v2_msg_store(self.uuid, accept_from);
     }
 
     fn clean_up_context(&mut self) {
@@ -1199,16 +1199,19 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
         let taker_coin_htlc_pub = sm.taker_coin.derive_htlc_pubkey_v2_bytes(&unique_data);
         let taker_coin_address = format!("{}", sm.taker_coin.my_addr().await);
 
-        let negotiation_msg = SwapV2Msg::MakerNegotiation(MakerNegotiation {
-            started_at: sm.started_at,
-            payment_locktime: sm.maker_payment_locktime(),
-            secret_hash: sm.secret_hash().into(),
-            maker_coin_htlc_pub: maker_coin_htlc_pub.into(),
-            taker_coin_htlc_pub: taker_coin_htlc_pub.into(),
-            maker_coin_swap_contract: sm.maker_coin.swap_contract_address(),
-            taker_coin_swap_contract: sm.taker_coin.swap_contract_address(),
-            taker_coin_address,
-        });
+        let negotiation_msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerNegotiation(MakerNegotiation {
+                started_at: sm.started_at,
+                payment_locktime: sm.maker_payment_locktime(),
+                secret_hash: sm.secret_hash().to_vec(),
+                maker_coin_htlc_pub: maker_coin_htlc_pub.to_vec(),
+                taker_coin_htlc_pub: taker_coin_htlc_pub.to_vec(),
+                maker_coin_swap_contract: sm.maker_coin.swap_contract_address().map(|b| b.0),
+                taker_coin_swap_contract: sm.taker_coin.swap_contract_address().map(|b| b.0),
+                taker_coin_address,
+            })),
+            swap_uuid: sm.uuid.as_bytes().to_vec(),
+        };
 
         let _abort_handle = super::broadcast_swap_v2_msg_every(
             sm.ctx.clone(),
@@ -1234,10 +1237,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
             },
         };
 
-        let taker_data = match taker_negotiation {
-            TakerNegotiation::Continue(data) => data,
-            TakerNegotiation::Abort(reason) => {
-                return Self::change_state(Aborted::new(AbortReason::TakerAborted(reason)), sm).await;
+        let taker_data = match taker_negotiation.action {
+            Some(taker_negotiation::Action::Continue(data)) => data,
+            Some(taker_negotiation::Action::Abort(abort)) => {
+                return Self::change_state(Aborted::new(AbortReason::TakerAborted(abort.reason)), sm).await;
+            },
+            None => {
+                let reason = AbortReason::NegotiationFailed("Empty taker negotiation action".into());
+                return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
 
@@ -1284,11 +1291,11 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
         }
 
         let negotiation_data = StoredMakerNegotiationData {
-            taker_secret_hash: taker_data.taker_secret_hash,
-            taker_coin_htlc_pub: taker_data.taker_coin_htlc_pub,
-            maker_coin_htlc_pub: taker_data.maker_coin_htlc_pub,
-            taker_coin_swap_contract: taker_data.taker_coin_swap_contract,
-            maker_coin_swap_contract: taker_data.maker_coin_swap_contract,
+            taker_secret_hash: taker_data.taker_secret_hash.into(),
+            taker_coin_htlc_pub: taker_data.taker_coin_htlc_pub.into(),
+            maker_coin_htlc_pub: taker_data.maker_coin_htlc_pub.into(),
+            taker_coin_swap_contract: taker_data.taker_coin_swap_contract.map(Into::into),
+            maker_coin_swap_contract: taker_data.maker_coin_swap_contract.map(Into::into),
             taker_payment_locktime: taker_data.payment_locktime,
             taker_funding_locktime: taker_data.funding_locktime,
         };
@@ -1314,10 +1321,13 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for W
     type StateMachine = MakerSwapStateMachine<M, T>;
 
     async fn on_changed(self: Box<Self>, sm: &mut Self::StateMachine) -> StateResult<Self::StateMachine> {
-        let negotiated_msg = SwapV2Msg::MakerNegotiated(MakerNegotiated {
-            negotiated: true,
-            reason: None,
-        });
+        let negotiated_msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerNegotiated(MakerNegotiated {
+                negotiated: true,
+                reason: None,
+            })),
+            swap_uuid: sm.uuid.as_bytes().to_vec(),
+        };
         let _abort_handle = super::broadcast_swap_v2_msg_every(
             sm.ctx.clone(),
             sm.p2p_topic.clone(),
@@ -1328,7 +1338,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for W
 
         let funding_info = match super::recv_swap_v2_msg(
             sm.ctx.clone(),
-            |store| store.taker_funding_info.take(),
+            |store| store.taker_funding.take(),
             &sm.uuid,
             NEGOTIATION_TIMEOUT_SEC,
         )
@@ -1352,7 +1362,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for W
                 self.maker_coin_start_block,
                 self.taker_coin_start_block,
                 self.negotiation_data.clone(),
-                funding_info.tx_bytes,
+                funding_info.tx_bytes.into(),
                 self.maker_payment_trade_fee.clone(),
             ),
             sm,
@@ -1506,12 +1516,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
     type StateMachine = MakerSwapStateMachine<M, T>;
 
     async fn on_changed(self: Box<Self>, sm: &mut Self::StateMachine) -> StateResult<Self::StateMachine> {
-        let payment_info_msg = SwapV2Msg::MakerPaymentInfo(MakerPaymentInfo {
-            tx_bytes: self.maker_payment.clone(),
-            next_step_instructions: None,
-            funding_preimage_sig: self.funding_spend_preimage.signature.clone(),
-            funding_preimage_tx: self.funding_spend_preimage.preimage.clone(),
-        });
+        let payment_info_msg = SwapMessage {
+            inner: Some(swap_message::Inner::MakerPaymentInfo(MakerPaymentInfo {
+                tx_bytes: self.maker_payment.0.clone(),
+                next_step_instructions: None,
+                funding_preimage_sig: self.funding_spend_preimage.signature.0.clone(),
+                funding_preimage_tx: self.funding_spend_preimage.preimage.0.clone(),
+            })),
+            swap_uuid: sm.uuid.as_bytes().to_vec(),
+        };
         let _abort_handle = super::broadcast_swap_v2_msg_every(
             sm.ctx.clone(),
             sm.p2p_topic.clone(),

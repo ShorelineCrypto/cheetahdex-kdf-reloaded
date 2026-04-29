@@ -4285,6 +4285,8 @@ dependencies = [
  "parity-util-mem",
  "parking_lot 0.12.5",
  "primitives",
+ "prost 0.8.0",
+ "prost-build 0.10.3",
  "rand 0.6.5",
  "rand 0.7.3",
  "regex",
