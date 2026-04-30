@@ -2169,6 +2169,8 @@ pub enum ValidateSwapV2TxError {
     ABIError(String),
     #[display(fmt = "Protocol not supported: {}", _0)]
     ProtocolNotSupported(String),
+    #[display(fmt = "Overflow: {}", _0)]
+    Overflow(String),
 }
 
 /// Error validating a taker funding spend preimage.
@@ -2192,8 +2194,8 @@ pub enum ValidateTakerPaymentSpendPreimageError {
 /// Error when searching for a payment spend on-chain.
 #[derive(Debug, Display)]
 pub enum FindPaymentSpendError {
-    #[display(fmt = "Timeout waiting for payment spend")]
-    Timeout,
+    #[display(fmt = "Timeout waiting for payment spend (wait_until={}, now={})", wait_until, now)]
+    Timeout { wait_until: u64, now: u64 },
     #[display(fmt = "Invalid input tx: {}", _0)]
     InvalidInputTx(String),
     #[display(fmt = "Internal error: {}", _0)]

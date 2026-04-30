@@ -46,6 +46,7 @@ use serde_json::{self as json, Value as Json};
 use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -71,10 +72,18 @@ pub use ethcore_transaction::SignedTransaction as SignedEthTx;
 pub use rlp;
 
 pub mod eth_hd_wallet;
+pub(crate) mod eth_swap_v2;
 pub mod fee_estimation;
 mod web3_transport;
 use crate::DerivationMethod;
-use crate::{DexFee, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput, WatcherOps};
+use crate::{
+    DexFee, FindPaymentSpendError, FundingTxSpend, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs,
+    ParseCoinAssocTypes, RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs,
+    RefundTakerPaymentArgs, SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs,
+    SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TransactionErr, TransactionFut, TxPreimageWithSig,
+    ValidateFeeArgs, ValidateMakerPaymentArgs, ValidatePaymentInput, ValidateSwapV2TxError, ValidateSwapV2TxResult,
+    ValidateTakerFundingArgs, WatcherOps,
+};
 use common::mm_number::MmNumber;
 use eth_hd_wallet::EthHDWallet;
 use ethkey::{sign, verify_address};
@@ -118,9 +127,15 @@ const GAS_PRICE_APPROXIMATION_PERCENT_ON_ORDER_ISSUE: u64 = 5;
 /// - it may increase by 3% during the swap.
 const GAS_PRICE_APPROXIMATION_PERCENT_ON_TRADE_PREIMAGE: u64 = 7;
 
+// V2 swap contract ABIs (from https://github.com/KomodoPlatform/etomic-swap)
+const MAKER_SWAP_V2_ABI: &str = include_str!("eth/maker_swap_v2_abi.json");
+const TAKER_SWAP_V2_ABI: &str = include_str!("eth/taker_swap_v2_abi.json");
+
 lazy_static! {
     pub static ref SWAP_CONTRACT: Contract = Contract::load(SWAP_CONTRACT_ABI.as_bytes()).unwrap();
     pub static ref ERC20_CONTRACT: Contract = Contract::load(ERC20_ABI.as_bytes()).unwrap();
+    pub(crate) static ref MAKER_SWAP_V2: Contract = Contract::load(MAKER_SWAP_V2_ABI.as_bytes()).unwrap();
+    pub(crate) static ref TAKER_SWAP_V2: Contract = Contract::load(TAKER_SWAP_V2_ABI.as_bytes()).unwrap();
 }
 
 pub type Web3RpcFut<T> = Box<dyn Future<Item = T, Error = MmError<Web3RpcError>> + Send>;
@@ -328,6 +343,221 @@ pub struct EthCoinImpl {
     logs_block_range: u64,
     /// HD wallet derivation method. Iguana when using a single key pair, HDWallet for BIP44 HD.
     pub derivation_method: DerivationMethod<Address, EthHDWallet>,
+    /// V2 swap contract addresses (maker, taker). None if V2 not configured.
+    swap_v2_contracts: Option<SwapV2Contracts>,
+    /// Gas limits for V2 swap operations.
+    gas_limit_v2: EthGasLimitV2,
+}
+
+// ─── V2 swap types ──────────────────────────────────────────────────────────
+
+/// Addresses of the EtomicSwap V2 smart contracts.
+#[derive(Debug, Copy, Clone, Deserialize)]
+pub struct SwapV2Contracts {
+    pub maker_swap_v2_contract: Address,
+    pub taker_swap_v2_contract: Address,
+}
+
+/// On-chain payment states for the EtomicSwapMakerV2 contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum MakerPaymentStateV2 {
+    Uninitialized = 0,
+    PaymentSent = 1,
+    TakerSpent = 2,
+    MakerRefunded = 3,
+}
+
+/// On-chain payment states for the EtomicSwapTakerV2 contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum TakerPaymentStateV2 {
+    Uninitialized = 0,
+    PaymentSent = 1,
+    TakerApproved = 2,
+    MakerSpent = 3,
+    TakerRefunded = 4,
+}
+
+/// Gas limits for V2 swap contract calls.
+#[derive(Debug, Clone)]
+pub struct EthGasLimitV2 {
+    pub maker: MakerGasLimitV2,
+    pub taker: TakerGasLimitV2,
+}
+
+#[derive(Debug, Clone)]
+pub struct MakerGasLimitV2 {
+    pub eth_payment: u64,
+    pub erc20_payment: u64,
+    pub eth_taker_spend: u64,
+    pub erc20_taker_spend: u64,
+    pub eth_maker_refund_timelock: u64,
+    pub erc20_maker_refund_timelock: u64,
+    pub eth_maker_refund_secret: u64,
+    pub erc20_maker_refund_secret: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TakerGasLimitV2 {
+    pub eth_payment: u64,
+    pub erc20_payment: u64,
+    pub eth_maker_spend: u64,
+    pub erc20_maker_spend: u64,
+    pub eth_taker_refund_timelock: u64,
+    pub erc20_taker_refund_timelock: u64,
+    pub eth_taker_refund_secret: u64,
+    pub erc20_taker_refund_secret: u64,
+    pub approve_payment: u64,
+}
+
+impl Default for EthGasLimitV2 {
+    fn default() -> Self {
+        EthGasLimitV2 {
+            maker: MakerGasLimitV2 {
+                eth_payment: 150_000,
+                erc20_payment: 250_000,
+                eth_taker_spend: 150_000,
+                erc20_taker_spend: 150_000,
+                eth_maker_refund_timelock: 150_000,
+                erc20_maker_refund_timelock: 150_000,
+                eth_maker_refund_secret: 150_000,
+                erc20_maker_refund_secret: 150_000,
+            },
+            taker: TakerGasLimitV2 {
+                eth_payment: 150_000,
+                erc20_payment: 250_000,
+                eth_maker_spend: 150_000,
+                erc20_maker_spend: 150_000,
+                eth_taker_refund_timelock: 150_000,
+                erc20_taker_refund_timelock: 150_000,
+                eth_taker_refund_secret: 150_000,
+                erc20_taker_refund_secret: 150_000,
+                approve_payment: 150_000,
+            },
+        }
+    }
+}
+
+impl EthGasLimitV2 {
+    /// Returns the appropriate gas limit for a (coin_type, payment_type, method) triple.
+    pub fn gas_limit(
+        &self,
+        coin_type: &EthCoinType,
+        payment_type: eth_swap_v2::EthPaymentType,
+        method: eth_swap_v2::PaymentMethod,
+    ) -> Result<u64, String> {
+        use eth_swap_v2::{EthPaymentType, PaymentMethod};
+        match (coin_type, payment_type, method) {
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Send) => Ok(self.maker.eth_payment),
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Send) => {
+                Ok(self.maker.erc20_payment)
+            },
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Spend) => {
+                Ok(self.maker.eth_taker_spend)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Spend) => {
+                Ok(self.maker.erc20_taker_spend)
+            },
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.maker.eth_maker_refund_timelock)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.maker.erc20_maker_refund_timelock)
+            },
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.maker.eth_maker_refund_secret)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.maker.erc20_maker_refund_secret)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Send) => Ok(self.taker.eth_payment),
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Send) => {
+                Ok(self.taker.erc20_payment)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Spend) => {
+                Ok(self.taker.eth_maker_spend)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Spend) => {
+                Ok(self.taker.erc20_maker_spend)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.taker.eth_taker_refund_timelock)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.taker.erc20_taker_refund_timelock)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.taker.eth_taker_refund_secret)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.taker.erc20_taker_refund_secret)
+            },
+        }
+    }
+}
+
+/// Error type for EthCoin associated type parsing.
+#[derive(Debug, Display)]
+pub enum EthAssocTypesError {
+    #[display(fmt = "Invalid hex string: {}", _0)]
+    InvalidHexString(String),
+    #[display(fmt = "Tx parse error: {}", _0)]
+    TxParseError(String),
+    #[display(fmt = "Parse signature error: {}", _0)]
+    ParseSignatureError(String),
+}
+
+/// Type alias for validation results using ValidatePaymentError (V1 style).
+pub type ValidatePaymentError = ValidateSwapV2TxError;
+pub type ValidatePaymentResult<T> = MmResult<T, ValidatePaymentError>;
+
+impl From<ethabi::Error> for FindPaymentSpendError {
+    fn from(e: ethabi::Error) -> Self { FindPaymentSpendError::ABIError(e.to_string()) }
+}
+
+impl From<ethabi::Error> for ValidateSwapV2TxError {
+    fn from(e: ethabi::Error) -> Self { ValidateSwapV2TxError::ABIError(e.to_string()) }
+}
+
+impl From<std::array::TryFromSliceError> for ValidateSwapV2TxError {
+    fn from(e: std::array::TryFromSliceError) -> Self { ValidateSwapV2TxError::InternalError(e.to_string()) }
+}
+
+impl From<std::array::TryFromSliceError> for FindPaymentSpendError {
+    fn from(e: std::array::TryFromSliceError) -> Self { FindPaymentSpendError::Internal(e.to_string()) }
+}
+
+impl From<NumConversError> for ValidateSwapV2TxError {
+    fn from(e: NumConversError) -> Self { ValidateSwapV2TxError::InternalError(e.to_string()) }
+}
+
+impl From<eth_swap_v2::ValidatePaymentV2Err> for ValidateSwapV2TxError {
+    fn from(err: eth_swap_v2::ValidatePaymentV2Err) -> Self {
+        match err {
+            eth_swap_v2::ValidatePaymentV2Err::WrongPaymentTx(e) => ValidateSwapV2TxError::WrongPaymentTx(e),
+        }
+    }
+}
+
+impl From<eth_swap_v2::PrepareTxDataError> for ValidateSwapV2TxError {
+    fn from(err: eth_swap_v2::PrepareTxDataError) -> Self {
+        match err {
+            eth_swap_v2::PrepareTxDataError::ABIError(e) | eth_swap_v2::PrepareTxDataError::Internal(e) => {
+                ValidateSwapV2TxError::InternalError(e)
+            },
+            eth_swap_v2::PrepareTxDataError::InvalidData(e) => ValidateSwapV2TxError::WrongPaymentTx(e),
+        }
+    }
+}
+
+impl fmt::Display for EthCoinType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EthCoinType::Eth => write!(f, "ETH"),
+            EthCoinType::Erc20 { platform, .. } => write!(f, "ERC20({})", platform),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -507,6 +737,24 @@ impl EthCoinImpl {
         input.extend_from_slice(&time_lock.to_le_bytes());
         input.extend_from_slice(secret_hash);
         sha256(&input).to_vec()
+    }
+
+    /// The id used to differentiate payments on Etomic swap V2 smart contracts.
+    /// Uses u64 timelock (vs u32 for V1).
+    pub(crate) fn etomic_swap_id_v2(&self, time_lock: u64, secret_hash: &[u8]) -> Vec<u8> {
+        let mut input = Vec::with_capacity(8 + secret_hash.len());
+        input.extend_from_slice(&time_lock.to_le_bytes());
+        input.extend_from_slice(secret_hash);
+        sha256(&input).to_vec()
+    }
+
+    /// Returns the token address for contract calls.
+    /// ETH → zero address, ERC20 → token contract address.
+    pub(crate) fn get_token_address(&self) -> Result<Address, String> {
+        match &self.coin_type {
+            EthCoinType::Eth => Ok(Address::default()),
+            EthCoinType::Erc20 { token_addr, .. } => Ok(*token_addr),
+        }
     }
 
     fn estimate_gas(&self, req: CallRequest) -> Box<dyn Future<Item = U256, Error = web3::Error> + Send> {
@@ -2719,6 +2967,69 @@ impl EthCoin {
         Box::new(self.web3.eth().logs(filter).map_err(|e| ERRL!("{}", e)))
     }
 
+    /// Returns events from `from_block` to `to_block` (or latest if None) for a given contract and event.
+    pub(crate) async fn events_from_block(
+        &self,
+        swap_contract_address: Address,
+        event_name: &str,
+        from_block: u64,
+        to_block: Option<u64>,
+        swap_contract: &Contract,
+    ) -> MmResult<Vec<Log>, FindPaymentSpendError> {
+        let contract_event = swap_contract.event(event_name)?;
+        let mut filter_builder = FilterBuilder::default()
+            .topics(Some(vec![contract_event.signature()]), None, None, None)
+            .from_block(BlockNumber::Number(from_block))
+            .address(vec![swap_contract_address]);
+        if let Some(block) = to_block {
+            filter_builder = filter_builder.to_block(BlockNumber::Number(block));
+        }
+        let filter = filter_builder.build();
+        let events_logs = self
+            .web3
+            .eth()
+            .logs(filter)
+            .compat()
+            .await
+            .map_err(|e| FindPaymentSpendError::Transport(e.to_string()))?;
+        Ok(events_logs)
+    }
+
+    /// Waits until the allowance for `spender` reaches `required_allowance` or `wait_until` expires.
+    fn wait_for_required_allowance(
+        &self,
+        spender: Address,
+        required_allowance: U256,
+        wait_until: u64,
+    ) -> Web3RpcFut<()> {
+        const CHECK_ALLOWANCE_EVERY: f64 = 5.;
+
+        let selfi = self.clone();
+        let fut = async move {
+            loop {
+                if now_ms() / 1000 > wait_until {
+                    return MmError::err(Web3RpcError::Internal(ERRL!(
+                        "Waited too long until {} for allowance to be updated to at least {}",
+                        wait_until,
+                        required_allowance
+                    )));
+                }
+
+                match selfi.allowance(spender).compat().await {
+                    Ok(allowed) if allowed >= required_allowance => return Ok(()),
+                    Ok(_allowed) => (),
+                    Err(e) => match e.get_inner() {
+                        Web3RpcError::Transport(e) => error!("Error {} on trying to get the allowed amount!", e),
+                        _ => return Err(e),
+                    },
+                }
+
+                Timer::sleep(CHECK_ALLOWANCE_EVERY).await;
+            }
+        };
+        Box::new(fut.boxed().compat())
+    }
+
     fn validate_payment(
         &self,
         payment_tx: &[u8],
@@ -3673,6 +3984,8 @@ pub async fn eth_coin_from_conf_and_request(
         chain_id: conf["chain_id"].as_u64(),
         logs_block_range: conf["logs_block_range"].as_u64().unwrap_or(DEFAULT_LOGS_BLOCK_RANGE),
         derivation_method: DerivationMethod::Iguana(my_address),
+        swap_v2_contracts: None,
+        gas_limit_v2: EthGasLimitV2::default(),
     };
     Ok(EthCoin(Arc::new(coin)))
 }
@@ -3790,5 +4103,251 @@ fn increase_gas_price_by_stage(gas_price: U256, level: &FeeApproxStage) -> U256 
         FeeApproxStage::TradePreimage => {
             increase_by_percent_one_gwei(gas_price, GAS_PRICE_APPROXIMATION_PERCENT_ON_TRADE_PREIMAGE)
         },
+    }
+}
+
+// ─── V2 helper functions ────────────────────────────────────────────────────
+
+/// Decodes the input data of a contract function call.
+pub(crate) fn decode_contract_call(
+    func: &ethabi::Function,
+    data: &[u8],
+) -> Result<Vec<Token>, ethabi::Error> {
+    // The first 4 bytes are the function selector
+    if data.len() < 4 {
+        return Err(ethabi::ErrorKind::InvalidData.into());
+    }
+    func.decode_input(&data[4..])
+}
+
+/// Extracts a single token from decoded contract call data by index,
+/// validating the function ABI parameter name at that position.
+pub(crate) fn get_function_input_data(
+    decoded: &[Token],
+    func: &ethabi::Function,
+    index: usize,
+) -> Result<Token, String> {
+    decoded
+        .get(index)
+        .cloned()
+        .ok_or_else(|| format!("Missing token at index {index} for function {}", func.name))
+}
+
+/// Converts a `BigDecimal` amount to `U256` wei using the given decimals.
+pub(crate) fn u256_from_big_decimal(amount: &BigDecimal, decimals: u8) -> NumConversResult<U256> {
+    wei_from_big_decimal(amount, decimals)
+}
+
+// ─── ParseCoinAssocTypes for EthCoin ────────────────────────────────────────
+
+#[async_trait]
+impl ParseCoinAssocTypes for EthCoin {
+    type Address = Address;
+    type AddressParseError = MmError<EthAssocTypesError>;
+    type Pubkey = Public;
+    type PubkeyParseError = MmError<EthAssocTypesError>;
+    type Tx = SignedEthTx;
+    type TxParseError = MmError<EthAssocTypesError>;
+    type Preimage = Vec<u8>;
+    type PreimageParseError = MmError<EthAssocTypesError>;
+    type Sig = Vec<u8>;
+    type SigParseError = MmError<EthAssocTypesError>;
+
+    async fn my_addr(&self) -> Self::Address { self.my_address }
+
+    fn parse_address(&self, address: &str) -> Result<Self::Address, Self::AddressParseError> {
+        Address::from_str(address).map_to_mm(|e| EthAssocTypesError::InvalidHexString(e.to_string()))
+    }
+
+    fn parse_pubkey(&self, pubkey: &[u8]) -> Result<Self::Pubkey, Self::PubkeyParseError> {
+        if pubkey.len() != 64 {
+            return MmError::err(EthAssocTypesError::InvalidHexString(format!(
+                "Expected 64-byte public key, got {} bytes",
+                pubkey.len()
+            )));
+        }
+        Ok(Public::from_slice(pubkey))
+    }
+
+    fn parse_tx(&self, tx: &[u8]) -> Result<Self::Tx, Self::TxParseError> {
+        signed_eth_tx_from_bytes(tx).map_to_mm(EthAssocTypesError::TxParseError)
+    }
+
+    fn parse_preimage(&self, preimage: &[u8]) -> Result<Self::Preimage, Self::PreimageParseError> {
+        Ok(preimage.to_vec())
+    }
+
+    fn parse_signature(&self, sig: &[u8]) -> Result<Self::Sig, Self::SigParseError> {
+        Ok(sig.to_vec())
+    }
+}
+
+// ─── CommonSwapOpsV2 for EthCoin ────────────────────────────────────────────
+
+use crate::{CommonSwapOpsV2, GenPreimageResult, MakerCoinSwapOpsV2, TakerCoinSwapOpsV2, ToBytes,
+            ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult};
+
+#[async_trait]
+impl CommonSwapOpsV2 for EthCoin {
+    fn derive_htlc_pubkey_v2(&self, _swap_unique_data: &[u8]) -> Public {
+        self.key_pair.public().clone()
+    }
+
+    fn derive_htlc_pubkey_v2_bytes(&self, swap_unique_data: &[u8]) -> Vec<u8> {
+        self.derive_htlc_pubkey_v2(swap_unique_data).to_vec()
+    }
+}
+
+// ─── MakerCoinSwapOpsV2 for EthCoin ────────────────────────────────────────
+
+#[async_trait]
+impl MakerCoinSwapOpsV2 for EthCoin {
+    async fn send_maker_payment_v2(&self, args: SendMakerPaymentArgs<'_, Self>) -> Result<SignedEthTx, TransactionErr> {
+        self.send_maker_payment_v2_impl(args).await
+    }
+
+    async fn validate_maker_payment_v2(&self, args: ValidateMakerPaymentArgs<'_, Self>) -> ValidateSwapV2TxResult {
+        self.validate_maker_payment_v2_impl(args).await
+    }
+
+    async fn refund_maker_payment_v2_timelock(
+        &self,
+        args: RefundMakerPaymentTimelockArgs<'_>,
+    ) -> Result<SignedEthTx, TransactionErr> {
+        self.refund_maker_payment_v2_timelock_impl(args).await
+    }
+
+    async fn refund_maker_payment_v2_secret(
+        &self,
+        args: RefundMakerPaymentSecretArgs<'_, Self>,
+    ) -> Result<SignedEthTx, TransactionErr> {
+        self.refund_maker_payment_v2_secret_impl(args).await
+    }
+
+    async fn spend_maker_payment_v2(&self, args: SpendMakerPaymentArgs<'_, Self>) -> Result<SignedEthTx, TransactionErr> {
+        self.spend_maker_payment_v2_impl(args).await
+    }
+}
+
+// ─── TakerCoinSwapOpsV2 for EthCoin ────────────────────────────────────────
+
+#[async_trait]
+impl TakerCoinSwapOpsV2 for EthCoin {
+    async fn send_taker_funding(&self, args: SendTakerFundingArgs<'_>) -> Result<SignedEthTx, TransactionErr> {
+        self.send_taker_funding_impl(args).await
+    }
+
+    async fn validate_taker_funding(&self, args: ValidateTakerFundingArgs<'_, Self>) -> ValidateSwapV2TxResult {
+        self.validate_taker_funding_impl(args).await
+    }
+
+    async fn refund_taker_funding_timelock(
+        &self,
+        args: RefundTakerPaymentArgs<'_>,
+    ) -> Result<SignedEthTx, TransactionErr> {
+        self.refund_taker_payment_with_timelock_impl(args).await
+    }
+
+    async fn refund_taker_funding_secret(
+        &self,
+        args: RefundFundingSecretArgs<'_, Self>,
+    ) -> Result<SignedEthTx, TransactionErr> {
+        self.refund_taker_funding_secret_impl(args).await
+    }
+
+    async fn search_for_taker_funding_spend(
+        &self,
+        tx: &SignedEthTx,
+        _from_block: u64,
+        _secret_hash: &[u8],
+    ) -> Result<Option<FundingTxSpend<Self>>, SearchForFundingSpendErr> {
+        self.search_for_taker_funding_spend_impl(tx).await
+    }
+
+    async fn gen_taker_funding_spend_preimage(
+        &self,
+        args: &GenTakerFundingSpendArgs<'_, Self>,
+        _swap_unique_data: &[u8],
+    ) -> GenPreimageResult<Self> {
+        // EVM coins don't need a real preimage — the approve flow replaces it.
+        // Return the funding tx bytes as "preimage" and a dummy signature.
+        Ok(TxPreimageWithSig {
+            preimage: rlp::encode(args.funding_tx).to_vec(),
+            signature: vec![],
+        })
+    }
+
+    async fn validate_taker_funding_spend_preimage(
+        &self,
+        _gen_args: &GenTakerFundingSpendArgs<'_, Self>,
+        _preimage: &TxPreimageWithSig<Self>,
+    ) -> ValidateTakerFundingSpendPreimageResult {
+        // EVM: always valid (approve-based flow, no preimage exchange).
+        Ok(())
+    }
+
+    async fn sign_and_send_taker_funding_spend(
+        &self,
+        _preimage: &TxPreimageWithSig<Self>,
+        args: &GenTakerFundingSpendArgs<'_, Self>,
+        _swap_unique_data: &[u8],
+    ) -> Result<SignedEthTx, TransactionErr> {
+        // For EVM, this sends takerPaymentApprove (not a traditional funding spend).
+        self.taker_payment_approve(args).await
+    }
+
+    async fn refund_combined_taker_payment(
+        &self,
+        args: RefundTakerPaymentArgs<'_>,
+    ) -> Result<SignedEthTx, TransactionErr> {
+        // In EVM, combined taker payment refund uses the same timelock path.
+        self.refund_taker_payment_with_timelock_impl(args).await
+    }
+
+    fn skip_taker_payment_spend_preimage(&self) -> bool { true }
+
+    async fn gen_taker_payment_spend_preimage(
+        &self,
+        _args: &GenTakerPaymentSpendArgs<'_, Self>,
+        _swap_unique_data: &[u8],
+    ) -> GenPreimageResult<Self> {
+        Err(MmError::new(crate::TxGenError::Other(
+            "EVM coins skip taker payment spend preimage".into(),
+        )))
+    }
+
+    async fn validate_taker_payment_spend_preimage(
+        &self,
+        _gen_args: &GenTakerPaymentSpendArgs<'_, Self>,
+        _preimage: &TxPreimageWithSig<Self>,
+    ) -> ValidateTakerPaymentSpendPreimageResult {
+        Err(MmError::new(crate::ValidateTakerPaymentSpendPreimageError::InternalError(
+            "EVM coins skip taker payment spend preimage".into(),
+        )))
+    }
+
+    async fn sign_and_broadcast_taker_payment_spend(
+        &self,
+        _preimage: Option<&TxPreimageWithSig<Self>>,
+        gen_args: &GenTakerPaymentSpendArgs<'_, Self>,
+        secret: &[u8],
+        _swap_unique_data: &[u8],
+    ) -> Result<SignedEthTx, TransactionErr> {
+        self.sign_and_broadcast_taker_payment_spend_impl(gen_args, secret)
+            .await
+    }
+
+    async fn find_taker_payment_spend_tx(
+        &self,
+        taker_payment: &SignedEthTx,
+        from_block: u64,
+        wait_until: u64,
+    ) -> MmResult<SignedEthTx, FindPaymentSpendError> {
+        self.find_taker_payment_spend_tx_impl(taker_payment, from_block, wait_until, 10.0)
+            .await
+    }
+
+    async fn extract_secret_v2(&self, _secret_hash: &[u8], spend_tx: &SignedEthTx) -> Result<[u8; 32], String> {
+        self.extract_secret_v2_impl(spend_tx).await
     }
 }
