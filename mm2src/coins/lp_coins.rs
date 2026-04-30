@@ -225,6 +225,9 @@ pub mod coin_balance;
 #[doc(hidden)]
 #[cfg(test)]
 pub mod coins_tests;
+#[doc(hidden)]
+#[cfg(test)]
+mod rpc_response_tests;
 pub mod eth;
 pub mod hd_pubkey;
 pub mod hd_wallet;
