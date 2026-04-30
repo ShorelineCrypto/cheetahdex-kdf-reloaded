@@ -561,4 +561,120 @@ mod tests {
                                              "0400e02019d733c1fd76a1fa5950de7bee9d80f107276b93a67204000000000000000000a0d1dee718f5f732c041800e9aa2c25e92be3f6de28278545388db8a6ae27df64c37166278100a170a970c19".into()];
         validate_headers(headers, true, true).unwrap()
     }
+
+    // ── TP4: SPV Proof Validation Fixtures ───────────────────────────────
+
+    #[test]
+    fn test_merkle_prove_wrong_txid() {
+        // Use the RICK blockchain proof from test_merkle_prove_inclusion but with a wrong txid.
+        let wrong_txid: H256 =
+            H256::from_reversed_str("0000000000000000000000000000000000000000000000000000000000000001");
+        let merkle_root: H256 =
+            H256::from_reversed_str("41f138275d13690e3c5d735e2f88eb6f1aaade1207eb09fa27a65b40711f3ae0");
+        let merkle_nodes: Vec<H256> = vec![
+            H256::from_reversed_str("73dfb53e6f49854b09d98500d4899d5c4e703c4fa3a2ddadc2cd7f12b72d4182"),
+            H256::from_reversed_str("4274d707b2308d39a04f2940024d382fa80d994152a50d4258f5a7feead2a563"),
+        ];
+        assert_eq!(
+            merkle_prove(wrong_txid, merkle_root, merkle_nodes, 1),
+            Err(SPVError::BadMerkleProof)
+        );
+    }
+
+    #[test]
+    fn test_merkle_prove_wrong_root() {
+        // Correct txid and nodes, but wrong merkle root.
+        let tx_id: H256 =
+            H256::from_reversed_str("7e9797a05abafbc1542449766ef9a41838ebbf6d24cd3223d361aa07c51981df");
+        let wrong_root: H256 =
+            H256::from_reversed_str("0000000000000000000000000000000000000000000000000000000000000001");
+        let merkle_nodes: Vec<H256> = vec![
+            H256::from_reversed_str("73dfb53e6f49854b09d98500d4899d5c4e703c4fa3a2ddadc2cd7f12b72d4182"),
+            H256::from_reversed_str("4274d707b2308d39a04f2940024d382fa80d994152a50d4258f5a7feead2a563"),
+        ];
+        assert_eq!(
+            merkle_prove(tx_id, wrong_root, merkle_nodes, 1),
+            Err(SPVError::BadMerkleProof)
+        );
+    }
+
+    #[test]
+    fn test_merkle_prove_wrong_index() {
+        // Correct proof but wrong tree position.
+        let tx_id: H256 =
+            H256::from_reversed_str("7e9797a05abafbc1542449766ef9a41838ebbf6d24cd3223d361aa07c51981df");
+        let merkle_root: H256 =
+            H256::from_reversed_str("41f138275d13690e3c5d735e2f88eb6f1aaade1207eb09fa27a65b40711f3ae0");
+        let merkle_nodes: Vec<H256> = vec![
+            H256::from_reversed_str("73dfb53e6f49854b09d98500d4899d5c4e703c4fa3a2ddadc2cd7f12b72d4182"),
+            H256::from_reversed_str("4274d707b2308d39a04f2940024d382fa80d994152a50d4258f5a7feead2a563"),
+        ];
+        // Index 0 instead of correct 1
+        assert_eq!(
+            merkle_prove(tx_id, merkle_root, merkle_nodes, 0),
+            Err(SPVError::BadMerkleProof)
+        );
+    }
+
+    #[test]
+    fn test_merkle_prove_single_tx_block() {
+        // In a single-tx block, the txid IS the merkle root. No intermediate nodes needed.
+        let txid = H256::from_reversed_str("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b");
+        let result = merkle_prove(txid, txid, vec![], 0);
+        result.unwrap();
+    }
+
+    #[test]
+    fn test_merkle_prove_empty_nodes_txid_ne_root() {
+        // Empty intermediate nodes but txid != root — should fail.
+        let txid = H256::from_reversed_str("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b");
+        let other = H256::from_reversed_str("0000000000000000000000000000000000000000000000000000000000000001");
+        assert_eq!(
+            merkle_prove(txid, other, vec![], 0),
+            Err(SPVError::BadMerkleProof)
+        );
+    }
+
+    #[test]
+    fn test_validate_headers_wrong_prev_hash() {
+        // Use two non-consecutive BTC headers. h1's prev_hash won't match h0's hash.
+        // BTC 724609
+        let h0: BlockHeader = "00200020eab6fa183da8f9e4c761b31a67a76fa6a7658eb84c760200000000000000000063cd9585d434ec0db25894ec4b1f03735f10e31709c4395ea67c50c8378f134b972f166278100a17bfd87203".into();
+        // BTC 724611 (skipping 724610, so prev_hash points to 724610 not 724609)
+        let h2: BlockHeader = "0400e02019d733c1fd76a1fa5950de7bee9d80f107276b93a67204000000000000000000a0d1dee718f5f732c041800e9aa2c25e92be3f6de28278545388db8a6ae27df64c37166278100a170a970c19".into();
+        assert_eq!(
+            validate_headers(vec![h0, h2], false, false),
+            Err(SPVError::InvalidChain)
+        );
+    }
+
+    #[test]
+    fn test_validate_headers_single_header_passes() {
+        // A single header should always pass (no prev-hash to check).
+        let h: BlockHeader = "00200020eab6fa183da8f9e4c761b31a67a76fa6a7658eb84c760200000000000000000063cd9585d434ec0db25894ec4b1f03735f10e31709c4395ea67c50c8378f134b972f166278100a17bfd87203".into();
+        validate_headers(vec![h], false, false).unwrap();
+    }
+
+    #[test]
+    fn test_validate_headers_difficulty_check_wrong_work() {
+        // Take a valid BTC header, enable difficulty check, but the header's nBits are too low
+        // for the actual hash to satisfy. We craft a header with an absurdly low target.
+        // Use the Morty headers (which have EquiHash solutions and won't satisfy BTC PoW).
+        let morty_header: BlockHeader = "04000000bb496ba8d09f8f98b15cdaf5798163bdd70676eb1c8b538f53ab4f83da4a27000db352177c6b5ad2499a906cec33b843fb17fc1ec298cd06c7e7ceb7b62e144232d719d14c15e565c05e84ead95a2f101a1b658ee2f36eb7ca65206e27cfca473de614625be6071f09006c286bc5ec73dd27a09bf687700c06fb04d0b9a063c0aa0746c9db170000fd40050053b27dad1f5a858b78f3154039759e985ed57db10ecb772810d7f158c55083a14b9f2ba26ae9fcb82012186e2528f67c45b7b216a69fe26232ad2d179a141b1b10e4d5f108c7b920b49348f6eef2d70b7f02cb01d8d9992f8f2d7b6608806b10ff329846b188de200aa37c73ac03f6c9b79cf5613c71b7969b4abafdbc1165ad955a049269584c83b36f36a3e9becf2fe81f3b1917475eb13ecfed3813ecc32206078d8c1e2797013dfc6f6a55e06f1c06a07959ef94d53ca0fc81d03cb6f614761156ed4ff1a8e5c9f0b96f3c8c3eeb9a0720cf4ed10397330f49b83439c5083eea1d1785a10d86ca2866d0da4ca746c49118b780c55aa6cd5b4c0491cefa258ecf129307d15e001415b203e89c008f4444b236aa556dbf4f6d05e0c57642cfa142df2f8546f1d37a6b2feaf98496892b41caefbe7dc7bcbb2755752df3dbf00ac1fc558896f14541aea4cc78ec5d00bbe5398fac4a658b1ae3399777f15117c0f3de3c63bc5b3edf6543d172cfc66907f9cf8706e97b14281daeb427801dfb0910743873265ae6bae71dbf22353c321f726e68f747965858f488dd507b7e6adee42509e5720373dce5b111b420c906b0f2cb391cfb9d581e2509da3829d6718469f383e07043694db87db0ce1196449a6c9cd941a8bde507e553c0ca534238dcc93633631926102c87cd0f83720ccff60de8b05b103e086a2c2cb7943f21033a5658235fc52708907e1ea722e726808db0270bf898c51e9dd0745614857783dc11a6dcd7760d4a07ddbd83a2e02b23fa789b79eed22dc411b9b48f71c54f12387065e3ff0638701e0f6a0dd56d0ce395d150b237b60c166352e69b92173b884446d7660f5857458b97c6d4ee54f8a1f60113aff30e54c1f7c572b85dcb7a2419d2f736a9b0a6d99ea549bd74e546251c0b8be7975e9a6d96aa3467b1dc6b024745fdef43b37cf21a657a3247d9adf8c252ef210d9a4e9c7191f698ccc9b10103b8bb811cdcf1a62903786476db8195ffb3cd004c57ad07a7a3c41eee391f66a7697e69409d7a78558720f6a1b9804d72de820b7b6165b8e14a2b1316576022423f22bb82fab16127be7173ddcd43fa7ea5c4474f79321a8c4b792caf12320c3047d026b7d63216a022e83655c2d811d2bd2a559970e9155b979953f9801ce918f690f43f5e3f07f7ce27a6837bf33b2490d9add8549f1e603a750c114bb92740cc3987cb9f948a6229f175a7b577b0b60d885a0a7ef05debe921376a7acdb25eaa8bb72e120e529cd775175012efb454cf41d240a946bf140af20d9a5dbed2e196d91a7ff33c2769f140fa0bb968111e1602221deae8d162e7a471354c2051acb43ec31015aaefa0b08bf1bddbb282e86a1caf45f3b63e4c6427ba9e99aed28ef79711794511511c52daf13b735e02b9833d3467bfd16886606d5555b7cc95ff2fea3b03c82cfe60e8602d9f70a3870f5b755573b955bb300bd3733b5ddf9a61fd3cd281af39520d6dfd8b7e2b165ec91749614a3b5241e2ea12470f91b58cf6163e02dfe79392db70cd17db9497cf59c89ac8377dbd02042f6ed270c8c2bc717623b203b74676890f5f4cd905b25772a25292d76b6f42a094c27eed13793d189e395ed3f28c5731976a7b45184acee45b3cf05a9c62045644dfe39f79cd331e282edae99cea652eb82819415ac2a5c21539cdd636fb835063ace3b6befffaf50bf6866e9b1a2b35037a330faeb18ca1696693dafd26b5f5da8dcd3e50ff09249bdda695f576d25024560b643d873d07293a80fe71998ef6ccd88c0cf9f69326b463c26fe4906faaf454ae68accd7ef3edffefdd2ede23a822a2267332f0791f1c4e6d5ab4661f279f5039b36a4476e56fd5b0461e585ff30a7c661b93f1".into();
+        // difficulty_check=true should fail because the Morty EquiHash PoW doesn't match BTC-style target check
+        assert_eq!(
+            validate_headers(vec![morty_header], true, true),
+            Err(SPVError::InsufficientWork)
+        );
+    }
+
+    #[test]
+    fn test_validate_vin_empty() {
+        assert!(!validate_vin(&[]));
+    }
+
+    #[test]
+    fn test_validate_vout_empty() {
+        assert!(!validate_vout(&[]));
+    }
 }
