@@ -116,7 +116,8 @@ mod docker_tests {
     use coins::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
     use coins::utxo::{dhash160, GetUtxoListOps, UtxoActivationParams, UtxoCommonOps};
     use coins::{
-        CoinProtocol, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, Transaction, TransactionEnum, WithdrawRequest,
+        CoinProtocol, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, Transaction, TransactionEnum,
+        ValidatePaymentInput, WithdrawRequest,
     };
     use common::mm_number::{BigDecimal, MmNumber};
     use common::{block_on, now_ms};
@@ -3829,5 +3830,282 @@ mod docker_tests {
 
         block_on(mm_bob.stop()).unwrap();
         block_on(mm_alice.stop()).unwrap();
+    }
+
+    // TP2: Additional regtest docker test scenarios
+    // Tests HTLC maker payment creation + validate_maker_payment round-trip
+    #[test]
+    fn test_send_and_validate_maker_payment_native() {
+        let timeout = (now_ms() / 1000) + 120;
+        let (_ctx, coin, _privkey) = generate_utxo_coin_with_random_privkey("MYCOIN", 1000u64.into());
+        let my_pubkey = coin.my_public_key().unwrap();
+        let secret_hash = &[1u8; 20];
+        let amount: BigDecimal = 10u64.into();
+
+        let time_lock = (now_ms() / 1000) as u32 - 3600;
+        let tx = coin
+            .send_maker_payment(time_lock, my_pubkey, my_pubkey, secret_hash, amount.clone(), &None)
+            .wait()
+            .unwrap();
+
+        coin.wait_for_confirmations(&tx.tx_hex(), 1, false, timeout, 1)
+            .wait()
+            .unwrap();
+
+        let validate_input = ValidatePaymentInput {
+            payment_tx: tx.tx_hex(),
+            time_lock,
+            taker_pub: my_pubkey.to_vec(),
+            maker_pub: my_pubkey.to_vec(),
+            secret_hash: secret_hash.to_vec(),
+            amount,
+            swap_contract_address: None,
+            try_spv_proof_until: 0,
+            confirmations: 1,
+        };
+        coin.validate_maker_payment(validate_input).wait().unwrap();
+    }
+
+    // Tests HTLC taker payment creation + validate_taker_payment round-trip
+    #[test]
+    fn test_send_and_validate_taker_payment_native() {
+        let timeout = (now_ms() / 1000) + 120;
+        let (_ctx, coin, _privkey) = generate_utxo_coin_with_random_privkey("MYCOIN", 1000u64.into());
+        let my_pubkey = coin.my_public_key().unwrap();
+        let secret_hash = &[2u8; 20];
+        let amount: BigDecimal = 5u64.into();
+
+        let time_lock = (now_ms() / 1000) as u32 - 3600;
+        let tx = coin
+            .send_taker_payment(time_lock, my_pubkey, my_pubkey, secret_hash, amount.clone(), &None)
+            .wait()
+            .unwrap();
+
+        coin.wait_for_confirmations(&tx.tx_hex(), 1, false, timeout, 1)
+            .wait()
+            .unwrap();
+
+        let validate_input = ValidatePaymentInput {
+            payment_tx: tx.tx_hex(),
+            time_lock,
+            taker_pub: my_pubkey.to_vec(),
+            maker_pub: my_pubkey.to_vec(),
+            secret_hash: secret_hash.to_vec(),
+            amount,
+            swap_contract_address: None,
+            try_spv_proof_until: 0,
+            confirmations: 1,
+        };
+        coin.validate_taker_payment(validate_input).wait().unwrap();
+    }
+
+    // Tests validate_maker_payment rejects wrong amount
+    #[test]
+    fn test_validate_maker_payment_wrong_amount() {
+        let timeout = (now_ms() / 1000) + 120;
+        let (_ctx, coin, _privkey) = generate_utxo_coin_with_random_privkey("MYCOIN", 1000u64.into());
+        let my_pubkey = coin.my_public_key().unwrap();
+        let secret_hash = &[3u8; 20];
+        let amount: BigDecimal = 10u64.into();
+
+        let time_lock = (now_ms() / 1000) as u32 - 3600;
+        let tx = coin
+            .send_maker_payment(time_lock, my_pubkey, my_pubkey, secret_hash, amount, &None)
+            .wait()
+            .unwrap();
+
+        coin.wait_for_confirmations(&tx.tx_hex(), 1, false, timeout, 1)
+            .wait()
+            .unwrap();
+
+        // Validate with wrong (higher) amount — should fail
+        let validate_input = ValidatePaymentInput {
+            payment_tx: tx.tx_hex(),
+            time_lock,
+            taker_pub: my_pubkey.to_vec(),
+            maker_pub: my_pubkey.to_vec(),
+            secret_hash: secret_hash.to_vec(),
+            amount: 20u64.into(),
+            swap_contract_address: None,
+            try_spv_proof_until: 0,
+            confirmations: 1,
+        };
+        let err = coin.validate_maker_payment(validate_input).wait().unwrap_err();
+        assert!(
+            err.contains("amount"),
+            "Expected amount mismatch error, got: {}",
+            err
+        );
+    }
+
+    // Tests RPC-level withdraw of specific amount and balance verification
+    #[test]
+    fn test_withdraw_specific_amount_and_verify_balance() {
+        let (_ctx, _, priv_key) = generate_utxo_coin_with_random_privkey("MYCOIN", 1000.into());
+        let coins = json! ([
+            {"coin":"MYCOIN","asset":"MYCOIN","txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
+        ]);
+        let mm = MarketMakerIt::start(
+            json! ({
+                "gui": "nogui",
+                "netid": 9000,
+                "dht": "on",
+                "passphrase": format!("0x{}", hex::encode(priv_key)),
+                "coins": coins,
+                "rpc_password": "pass",
+                "i_am_seed": true,
+            }),
+            "pass".to_string(),
+            None,
+        )
+        .unwrap();
+        let (_dump_log, _dump_dashboard) = mm_dump(&mm.log_path);
+
+        log!([block_on(enable_native(&mm, "MYCOIN", &[]))]);
+
+        let before = get_balance(&mm, "MYCOIN");
+        log!("Balance before: "(json::to_string(&before).unwrap()));
+        assert!(
+            before.balance > BigDecimal::from(999),
+            "Initial balance should be ~1000"
+        );
+
+        // Withdraw exactly 100 MYCOIN
+        let rc = block_on(mm.rpc(&json! ({
+            "userpass": mm.userpass,
+            "method": "withdraw",
+            "coin": "MYCOIN",
+            "to": "R9imXLs1hEcU9KbFDQq2hJEEJ1P5UoekaF",
+            "amount": 100,
+        })))
+        .unwrap();
+        assert!(rc.0.is_success(), "!withdraw: {}", rc.1);
+
+        let withdraw: Json = json::from_str(&rc.1).unwrap();
+        let rc = block_on(mm.rpc(&json! ({
+            "userpass": mm.userpass,
+            "method": "send_raw_transaction",
+            "coin": "MYCOIN",
+            "tx_hex": withdraw["tx_hex"],
+        })))
+        .unwrap();
+        assert!(rc.0.is_success(), "!send_raw: {}", rc.1);
+
+        // Wait for confirmation
+        thread::sleep(Duration::from_secs(2));
+
+        let after = get_balance(&mm, "MYCOIN");
+        log!("Balance after: "(json::to_string(&after).unwrap()));
+        // Balance should have decreased by ~100 + fee
+        let expected_max = BigDecimal::from(900);
+        assert!(
+            after.balance < expected_max,
+            "Balance should be less than 900 after withdrawing 100, got: {}",
+            after.balance
+        );
+        assert!(
+            after.balance > BigDecimal::from(899),
+            "Balance should be around 899.99, got: {}",
+            after.balance
+        );
+
+        block_on(mm.stop()).unwrap();
+    }
+
+    // Tests sequential withdrawals maintain correct balances
+    #[test]
+    fn test_multiple_sequential_withdrawals() {
+        let (_ctx, _, priv_key) = generate_utxo_coin_with_random_privkey("MYCOIN", 1000.into());
+        let coins = json! ([
+            {"coin":"MYCOIN","asset":"MYCOIN","txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
+        ]);
+        let mm = MarketMakerIt::start(
+            json! ({
+                "gui": "nogui",
+                "netid": 9000,
+                "dht": "on",
+                "passphrase": format!("0x{}", hex::encode(priv_key)),
+                "coins": coins,
+                "rpc_password": "pass",
+                "i_am_seed": true,
+            }),
+            "pass".to_string(),
+            None,
+        )
+        .unwrap();
+        let (_dump_log, _dump_dashboard) = mm_dump(&mm.log_path);
+
+        log!([block_on(enable_native(&mm, "MYCOIN", &[]))]);
+
+        // Do 3 sequential withdrawals of 100 each
+        for i in 0..3 {
+            let rc = block_on(mm.rpc(&json! ({
+                "userpass": mm.userpass,
+                "method": "withdraw",
+                "coin": "MYCOIN",
+                "to": "R9imXLs1hEcU9KbFDQq2hJEEJ1P5UoekaF",
+                "amount": 100,
+            })))
+            .unwrap();
+            assert!(rc.0.is_success(), "!withdraw #{}: {}", i, rc.1);
+
+            let withdraw: Json = json::from_str(&rc.1).unwrap();
+            let rc = block_on(mm.rpc(&json! ({
+                "userpass": mm.userpass,
+                "method": "send_raw_transaction",
+                "coin": "MYCOIN",
+                "tx_hex": withdraw["tx_hex"],
+            })))
+            .unwrap();
+            assert!(rc.0.is_success(), "!send_raw #{}: {}", i, rc.1);
+
+            thread::sleep(Duration::from_secs(2));
+        }
+
+        let after = get_balance(&mm, "MYCOIN");
+        log!("Balance after 3 withdrawals: "(json::to_string(&after).unwrap()));
+        // Withdrew 300 total + fees, balance should be ~699.99
+        assert!(
+            after.balance < BigDecimal::from(700),
+            "Balance should be < 700, got: {}",
+            after.balance
+        );
+        assert!(
+            after.balance > BigDecimal::from(699),
+            "Balance should be > 699, got: {}",
+            after.balance
+        );
+
+        block_on(mm.stop()).unwrap();
+    }
+
+    // Tests that UTXO list_unspent returns expected count after multiple fills
+    #[test]
+    fn test_list_unspent_after_multiple_fills() {
+        let timeout = 30;
+        let (_ctx, coin, _privkey) = generate_utxo_coin_with_random_privkey("MYCOIN", 100.into());
+
+        // Fill address 4 more times (5 total UTXOs including initial fill)
+        for _ in 0..4 {
+            fill_address(&coin, &coin.my_address().unwrap(), 10.into(), timeout);
+        }
+
+        let (unspents, _) =
+            block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
+        assert_eq!(
+            unspents.len(),
+            5,
+            "Expected 5 unspent outputs, got: {}",
+            unspents.len()
+        );
+
+        // Verify total value: 100 + 4*10 = 140
+        let total: u64 = unspents.iter().map(|u| u.value).sum();
+        // Value in satoshis: 140 * 100_000_000 = 14_000_000_000
+        assert!(
+            total >= 14_000_000_000,
+            "Total unspent value should be at least 140 MYCOIN in satoshis, got: {}",
+            total
+        );
     }
 }
