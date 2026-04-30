@@ -1,0 +1,16 @@
+[package]
+name = "mm2_git"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait.workspace = true
+common = { path = "../common" }
+http.workspace = true
+mm2_err_handle = { path = "../mm2_err_handle" }
+mm2_net = { path = "../mm2_net" }
+serde.workspace = true
+serde_json.workspace = true
