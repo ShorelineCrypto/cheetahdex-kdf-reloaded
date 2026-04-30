@@ -1601,11 +1601,12 @@ pub async fn swap_kick_starts(ctx: MmArc) -> Result<HashSet<String>, String> {
             coins.insert(repr.maker_coin.clone());
             coins.insert(repr.taker_coin.clone());
             let ctx2 = ctx.clone();
+            let maker_storage2 = maker_storage.clone();
             std::thread::spawn(move || {
-                common::block_on(v2_kickstart_handler(
+                common::block_on(swap_v2_common::swap_kickstart_handler_for_maker(
                     ctx2,
-                    repr.maker_coin.clone(),
-                    repr.taker_coin.clone(),
+                    repr,
+                    maker_storage2,
                     uuid,
                 ))
             });
@@ -1632,11 +1633,12 @@ pub async fn swap_kick_starts(ctx: MmArc) -> Result<HashSet<String>, String> {
             coins.insert(repr.maker_coin.clone());
             coins.insert(repr.taker_coin.clone());
             let ctx2 = ctx.clone();
+            let taker_storage2 = taker_storage.clone();
             std::thread::spawn(move || {
-                common::block_on(v2_kickstart_handler(
+                common::block_on(swap_v2_common::swap_kickstart_handler_for_taker(
                     ctx2,
-                    repr.taker_coin.clone(),
-                    repr.maker_coin.clone(),
+                    repr,
+                    taker_storage2,
                     uuid,
                 ))
             });
@@ -1706,55 +1708,6 @@ async fn kickstart_thread_handler(ctx: MmArc, swap: SavedSwap, maker_coin_ticker
             .await;
         },
     }
-}
-
-/// V2 swap kickstart handler. Waits for both coins to activate then logs that
-/// full V2 kickstart recovery will be available once coins implement the V2
-/// swap operation traits.
-#[cfg(not(target_arch = "wasm32"))]
-async fn v2_kickstart_handler(ctx: MmArc, my_coin_ticker: String, other_coin_ticker: String, uuid: Uuid) {
-    // Wait for both coins to activate.
-    let _my_coin = loop {
-        match lp_coinfind(&ctx, &my_coin_ticker).await {
-            Ok(Some(c)) => break c,
-            Ok(None) => {
-                info!(
-                    "Can't kickstart V2 swap {} until the coin {} is activated",
-                    uuid, my_coin_ticker,
-                );
-                Timer::sleep(5.).await;
-            },
-            Err(e) => {
-                error!("Error {} on {} find attempt for V2 swap {}", e, my_coin_ticker, uuid);
-                return;
-            },
-        };
-    };
-
-    let _other_coin = loop {
-        match lp_coinfind(&ctx, &other_coin_ticker).await {
-            Ok(Some(c)) => break c,
-            Ok(None) => {
-                info!(
-                    "Can't kickstart V2 swap {} until the coin {} is activated",
-                    uuid, other_coin_ticker,
-                );
-                Timer::sleep(5.).await;
-            },
-            Err(e) => {
-                error!("Error {} on {} find attempt for V2 swap {}", e, other_coin_ticker, uuid);
-                return;
-            },
-        };
-    };
-
-    // TODO: Once coins implement MakerCoinSwapOpsV2/TakerCoinSwapOpsV2, dispatch
-    // to the appropriate `swap_kickstart_handler` based on coin type, similar to
-    // how GLEEC does coin-variant matching. For now we log a warning.
-    warn!(
-        "V2 swap {} ({}/{}) found unfinished but V2 kickstart recovery requires coin-level V2 ops support",
-        uuid, my_coin_ticker, other_coin_ticker,
-    );
 }
 
 pub async fn coins_needed_for_kick_start(ctx: MmArc) -> Result<Response<Vec<u8>>, String> {

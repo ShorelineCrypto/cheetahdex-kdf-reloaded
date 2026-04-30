@@ -20,19 +20,21 @@
 //! [`SWAP_TX_VISIBILITY_POLL_SECS`] seconds, giving up after
 //! [`SWAP_TX_VISIBILITY_GRACE_SECS`].
 
+use coins::lp_coinfind;
+use coins::{MakerCoinSwapOpsV2, MmCoin, MmCoinEnum, TakerCoinSwapOpsV2};
 use common::executor::{spawn, Timer};
-use common::log::info;
+use common::log::{error, info, warn};
 use derive_more::Display;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
-use mm2_state_machine::storable_state_machine::{StateMachineDbRepr, StateMachineStorage};
+use mm2_state_machine::storable_state_machine::{StateMachineDbRepr, StateMachineStorage, StorableStateMachine};
 use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::swap_lock::{SwapLock, SwapLockOps};
-use super::{maker_swap_v2::MakerSwapDbRepr, maker_swap_v2::MakerSwapEvent};
-use super::{taker_swap_v2::TakerSwapDbRepr, taker_swap_v2::TakerSwapEvent};
+use super::{maker_swap_v2::MakerSwapDbRepr, maker_swap_v2::MakerSwapEvent, maker_swap_v2::MakerSwapStateMachine};
+use super::{taker_swap_v2::TakerSwapDbRepr, taker_swap_v2::TakerSwapEvent, taker_swap_v2::TakerSwapStateMachine};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -273,6 +275,7 @@ cfg_native! {
     }
 
     /// SQLite-backed storage for V2 maker swaps.
+    #[derive(Clone)]
     pub struct MakerSwapStorage {
         ctx: MmArc,
     }
@@ -320,6 +323,7 @@ cfg_native! {
     }
 
     /// SQLite-backed storage for V2 taker swaps.
+    #[derive(Clone)]
     pub struct TakerSwapStorage {
         ctx: MmArc,
     }
@@ -791,6 +795,153 @@ cfg_wasm32! {
 
         async fn mark_finished(&mut self, _id: Self::MachineId) -> Result<(), Self::Error> {
             Ok(())
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// V2 Swap Kickstart / Recovery
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Trait for extracting coin tickers from a swap DB repr so the kickstart
+/// logic can wait for the required coins to activate.
+pub(super) trait GetSwapCoins {
+    fn maker_coin(&self) -> &str;
+    fn taker_coin(&self) -> &str;
+}
+
+impl GetSwapCoins for MakerSwapDbRepr {
+    fn maker_coin(&self) -> &str { &self.maker_coin }
+    fn taker_coin(&self) -> &str { &self.taker_coin }
+}
+
+impl GetSwapCoins for TakerSwapDbRepr {
+    fn maker_coin(&self) -> &str { &self.maker_coin }
+    fn taker_coin(&self) -> &str { &self.taker_coin }
+}
+
+/// Waits until both maker and taker coins are activated, then returns them.
+/// Returns `None` if an unrecoverable error occurs on coin lookup.
+pub(super) async fn swap_kickstart_coins<T: GetSwapCoins>(
+    ctx: &MmArc,
+    swap_repr: &T,
+    uuid: &Uuid,
+) -> Option<(MmCoinEnum, MmCoinEnum)> {
+    let taker_coin_ticker = swap_repr.taker_coin();
+    let taker_coin = loop {
+        match lp_coinfind(ctx, taker_coin_ticker).await {
+            Ok(Some(c)) => break c,
+            Ok(None) => {
+                info!(
+                    "Can't kickstart the swap {} until the coin {} is activated",
+                    uuid, taker_coin_ticker,
+                );
+                Timer::sleep(5.).await;
+            },
+            Err(e) => {
+                error!("Error {} on {} find attempt for swap {}", e, taker_coin_ticker, uuid);
+                return None;
+            },
+        };
+    };
+
+    let maker_coin_ticker = swap_repr.maker_coin();
+    let maker_coin = loop {
+        match lp_coinfind(ctx, maker_coin_ticker).await {
+            Ok(Some(c)) => break c,
+            Ok(None) => {
+                info!(
+                    "Can't kickstart the swap {} until the coin {} is activated",
+                    uuid, maker_coin_ticker,
+                );
+                Timer::sleep(5.).await;
+            },
+            Err(e) => {
+                error!("Error {} on {} find attempt for swap {}", e, maker_coin_ticker, uuid);
+                return None;
+            },
+        };
+    };
+
+    Some((maker_coin, taker_coin))
+}
+
+/// Generic V2 swap kickstart: recreates the state machine from stored events
+/// and resumes execution from the last persisted state.
+pub(super) async fn swap_kickstart_handler<
+    T: StorableStateMachine<RecreateCtx = SwapRecreateCtx<MakerCoin, TakerCoin>>,
+    MakerCoin: MmCoin + MakerCoinSwapOpsV2,
+    TakerCoin: MmCoin + TakerCoinSwapOpsV2,
+>(
+    swap_repr: <T::Storage as StateMachineStorage>::DbRepr,
+    storage: T::Storage,
+    uuid: <T::Storage as StateMachineStorage>::MachineId,
+    maker_coin: MakerCoin,
+    taker_coin: TakerCoin,
+) where
+    <T::Storage as StateMachineStorage>::MachineId: Copy + std::fmt::Display,
+    T::Error: std::fmt::Display,
+    T::RecreateError: std::fmt::Display,
+{
+    let recreate_context = SwapRecreateCtx { maker_coin, taker_coin };
+
+    let (mut state_machine, state) = match T::recreate_machine(uuid, storage, swap_repr, recreate_context).await {
+        Ok((machine, from_state)) => (machine, from_state),
+        Err(e) => {
+            error!("Error {} on trying to recreate the swap {}", e, uuid);
+            return;
+        },
+    };
+
+    if let Err(e) = state_machine.kickstart(state).await {
+        error!("Error {} on trying to run the swap {}", e, uuid);
+    }
+}
+
+/// Kickstart a V2 maker swap: wait for coins, match variants, recreate + resume.
+pub(super) async fn swap_kickstart_handler_for_maker(
+    ctx: MmArc,
+    swap_repr: MakerSwapDbRepr,
+    storage: MakerSwapStorage,
+    uuid: Uuid,
+) {
+    if let Some((maker_coin, taker_coin)) = swap_kickstart_coins(&ctx, &swap_repr, &uuid).await {
+        match (maker_coin, taker_coin) {
+            (MmCoinEnum::EthCoin(m), MmCoinEnum::EthCoin(t)) => {
+                swap_kickstart_handler::<MakerSwapStateMachine<_, _>, _, _>(swap_repr, storage, uuid, m, t).await
+            },
+            _ => {
+                warn!(
+                    "V2 kickstart for maker swap {} not supported for this coin pair ({}/{})",
+                    uuid,
+                    swap_repr.maker_coin,
+                    swap_repr.taker_coin,
+                );
+            },
+        }
+    }
+}
+
+/// Kickstart a V2 taker swap: wait for coins, match variants, recreate + resume.
+pub(super) async fn swap_kickstart_handler_for_taker(
+    ctx: MmArc,
+    swap_repr: TakerSwapDbRepr,
+    storage: TakerSwapStorage,
+    uuid: Uuid,
+) {
+    if let Some((maker_coin, taker_coin)) = swap_kickstart_coins(&ctx, &swap_repr, &uuid).await {
+        match (maker_coin, taker_coin) {
+            (MmCoinEnum::EthCoin(m), MmCoinEnum::EthCoin(t)) => {
+                swap_kickstart_handler::<TakerSwapStateMachine<_, _>, _, _>(swap_repr, storage, uuid, m, t).await
+            },
+            _ => {
+                warn!(
+                    "V2 kickstart for taker swap {} not supported for this coin pair ({}/{})",
+                    uuid,
+                    swap_repr.maker_coin,
+                    swap_repr.taker_coin,
+                );
+            },
         }
     }
 }
