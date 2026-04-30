@@ -263,7 +263,8 @@ mod native_rpc_responses {
 
     #[test]
     fn test_list_since_block_empty_transactions() {
-        let json_str = r#"{"lastblock": "0000000000000000000000000000000000000000000000000000000000000000", "transactions": []}"#;
+        let json_str =
+            r#"{"lastblock": "0000000000000000000000000000000000000000000000000000000000000000", "transactions": []}"#;
         let _res: ListSinceBlockRes = json::from_str(json_str).unwrap();
     }
 }
@@ -275,8 +276,8 @@ mod native_rpc_responses {
 mod electrum_responses {
     use super::*;
     use crate::utxo::rpc_clients::{
-        ElectrumBalance, ElectrumBlockHeader, ElectrumBlockHeaderV12, ElectrumBlockHeaderV14,
-        ElectrumBlockHeadersRes, ElectrumTxHistoryItem, ElectrumUnspent, TxMerkleBranch,
+        ElectrumBalance, ElectrumBlockHeader, ElectrumBlockHeaderV12, ElectrumBlockHeaderV14, ElectrumBlockHeadersRes,
+        ElectrumTxHistoryItem, ElectrumUnspent, TxMerkleBranch,
     };
 
     #[test]

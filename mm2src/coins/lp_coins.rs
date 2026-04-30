@@ -225,9 +225,6 @@ pub mod coin_balance;
 #[doc(hidden)]
 #[cfg(test)]
 pub mod coins_tests;
-#[doc(hidden)]
-#[cfg(test)]
-mod rpc_response_tests;
 pub mod eth;
 pub mod hd_pubkey;
 pub mod hd_wallet;
@@ -238,6 +235,9 @@ pub mod lightning;
 pub mod my_tx_history_v2;
 pub mod qrc20;
 pub mod rpc_command;
+#[doc(hidden)]
+#[cfg(test)]
+mod rpc_response_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sql_tx_history_storage;
 #[doc(hidden)]
@@ -2825,7 +2825,7 @@ impl CoinsContext {
 
     #[cfg(target_arch = "wasm32")]
     async fn tx_history_db(&self) -> TxHistoryResult<TxHistoryDbLocked<'_>> {
-        Ok(self.tx_history_db.get_or_initialize().await?)
+        Ok(self.tx_history_db.get_or_initialize().await.map_mm_err()?)
     }
 }
 

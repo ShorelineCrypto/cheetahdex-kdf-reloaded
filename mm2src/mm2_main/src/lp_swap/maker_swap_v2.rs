@@ -38,8 +38,8 @@ use uuid::Uuid;
 
 use super::swap_lock::SwapLock;
 use super::swap_v2_common::*;
-use super::SwapConfirmationsSettings;
 use super::swap_v2_pb::*;
+use super::SwapConfirmationsSettings;
 
 /// Maximum allowed difference between maker and taker `started_at` timestamps (seconds).
 const MAX_STARTED_AT_DIFF: u64 = 60;

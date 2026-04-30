@@ -114,9 +114,7 @@ impl EthCoin {
         let maker_swap_v2_contract = self
             .swap_v2_contracts
             .ok_or_else(|| {
-                ValidatePaymentError::InternalError(
-                    "Expected swap_v2_contracts to be Some, but found None".to_string(),
-                )
+                ValidatePaymentError::InternalError("Expected swap_v2_contracts to be Some, but found None".to_string())
             })?
             .maker_swap_v2_contract;
 

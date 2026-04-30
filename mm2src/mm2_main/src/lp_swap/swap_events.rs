@@ -4,7 +4,7 @@
 //! changes (both V1 and V2) to all subscribed SSE clients.
 
 use async_trait::async_trait;
-use mm2_event_stream::{Broadcaster, Event, EventStreamer, StreamerId};
+use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -37,9 +37,9 @@ impl EventStreamer for SwapStatusStreamer {
     async fn handle(
         self,
         broadcaster: Broadcaster,
-        ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
-        _shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-        mut data_rx: tokio::sync::mpsc::UnboundedReceiver<Self::DataInType>,
+        ready_tx: oneshot::Sender<Result<(), String>>,
+        _shutdown_rx: oneshot::Receiver<()>,
+        mut data_rx: mpsc::UnboundedReceiver<Self::DataInType>,
     ) {
         let _ = ready_tx.send(Ok(()));
 

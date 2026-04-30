@@ -181,18 +181,23 @@ impl HDWalletStorageInternalOps for HDWalletIndexedDbStorage {
         let shared_db = self.get_shared_db()?;
         let locked_db = Self::lock_db(&shared_db).await?;
 
-        let transaction = locked_db.inner.transaction().await?;
-        let table = transaction.table::<HDAccountTable>().await?;
+        let transaction = locked_db.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<HDAccountTable>().await.map_mm_err()?;
 
         // Use the cursor to find items with by the specified `wallet_id`.
         let accounts = table
             .open_cursor("wallet_id")
-            .await?
-            .only("coin", wallet_id.coin)?
-            .only("mm2_rmd160", wallet_id.mm2_rmd160)?
-            .only("hd_wallet_rmd160", wallet_id.hd_wallet_rmd160)?
+            .await
+            .map_mm_err()?
+            .only("coin", wallet_id.coin)
+            .map_mm_err()?
+            .only("mm2_rmd160", wallet_id.mm2_rmd160)
+            .map_mm_err()?
+            .only("hd_wallet_rmd160", wallet_id.hd_wallet_rmd160)
+            .map_mm_err()?
             .collect()
-            .await?
+            .await
+            .map_mm_err()?
             .into_iter()
             .map(|(_item_id, item)| HDAccountStorageItem::from(item))
             .collect();
@@ -207,8 +212,8 @@ impl HDWalletStorageInternalOps for HDWalletIndexedDbStorage {
         let shared_db = self.get_shared_db()?;
         let locked_db = Self::lock_db(&shared_db).await?;
 
-        let transaction = locked_db.inner.transaction().await?;
-        let table = transaction.table::<HDAccountTable>().await?;
+        let transaction = locked_db.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<HDAccountTable>().await.map_mm_err()?;
 
         let maybe_account = Self::find_account(&table, wallet_id, account_id).await?;
         match maybe_account {
@@ -249,8 +254,8 @@ impl HDWalletStorageInternalOps for HDWalletIndexedDbStorage {
         let shared_db = self.get_shared_db()?;
         let locked_db = Self::lock_db(&shared_db).await?;
 
-        let transaction = locked_db.inner.transaction().await?;
-        let table = transaction.table::<HDAccountTable>().await?;
+        let transaction = locked_db.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<HDAccountTable>().await.map_mm_err()?;
 
         let new_account = HDAccountTable::new(wallet_id, account);
         table
@@ -264,24 +269,29 @@ impl HDWalletStorageInternalOps for HDWalletIndexedDbStorage {
         let shared_db = self.get_shared_db()?;
         let locked_db = Self::lock_db(&shared_db).await?;
 
-        let transaction = locked_db.inner.transaction().await?;
-        let table = transaction.table::<HDAccountTable>().await?;
+        let transaction = locked_db.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<HDAccountTable>().await.map_mm_err()?;
 
         // Use the cursor to find item ids with by the specified `wallet_id`.
         let item_ids = table
             .open_cursor("wallet_id")
-            .await?
-            .only("coin", wallet_id.coin)?
-            .only("mm2_rmd160", wallet_id.mm2_rmd160)?
-            .only("hd_wallet_rmd160", wallet_id.hd_wallet_rmd160)?
+            .await
+            .map_mm_err()?
+            .only("coin", wallet_id.coin)
+            .map_mm_err()?
+            .only("mm2_rmd160", wallet_id.mm2_rmd160)
+            .map_mm_err()?
+            .only("hd_wallet_rmd160", wallet_id.hd_wallet_rmd160)
+            .map_mm_err()?
             .collect()
-            .await?
+            .await
+            .map_mm_err()?
             .into_iter()
             .map(|(item_id, _item)| item_id);
 
         // Delete accounts by `item_ids`.
         for account_item_id in item_ids {
-            table.delete_item(account_item_id).await?;
+            table.delete_item(account_item_id).await.map_mm_err()?;
         }
 
         Ok(())
@@ -307,13 +317,19 @@ impl HDWalletIndexedDbStorage {
         // Use the cursor to find an item with the specified `wallet_id` and `account_id`.
         let accounts = table
             .open_cursor("wallet_account_id")
-            .await?
-            .only("coin", wallet_id.coin)?
-            .only("mm2_rmd160", wallet_id.mm2_rmd160)?
-            .only("hd_wallet_rmd160", wallet_id.hd_wallet_rmd160)?
-            .only("account_id", account_id)?
+            .await
+            .map_mm_err()?
+            .only("coin", wallet_id.coin)
+            .map_mm_err()?
+            .only("mm2_rmd160", wallet_id.mm2_rmd160)
+            .map_mm_err()?
+            .only("hd_wallet_rmd160", wallet_id.hd_wallet_rmd160)
+            .map_mm_err()?
+            .only("account_id", account_id)
+            .map_mm_err()?
             .collect()
-            .await?;
+            .await
+            .map_mm_err()?;
 
         if accounts.len() > 1 {
             let error = DbTransactionError::MultipleItemsByUniqueIndex {
@@ -332,8 +348,8 @@ impl HDWalletIndexedDbStorage {
         let shared_db = self.get_shared_db()?;
         let locked_db = Self::lock_db(&shared_db).await?;
 
-        let transaction = locked_db.inner.transaction().await?;
-        let table = transaction.table::<HDAccountTable>().await?;
+        let transaction = locked_db.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<HDAccountTable>().await.map_mm_err()?;
 
         let (account_item_id, mut account) = Self::find_account(&table, wallet_id.clone(), account_id)
             .await?

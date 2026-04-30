@@ -6,7 +6,9 @@
 /// - Client connection keep-alive
 /// - Monitoring server liveness
 use async_trait::async_trait;
-use mm2_event_stream::{Broadcaster, Event, EventStreamer, StreamerId};
+use common::executor::Timer;
+use futures::future::{select, Either};
+use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -50,19 +52,21 @@ impl EventStreamer for HeartbeatStreamer {
     async fn handle(
         self,
         broadcaster: Broadcaster,
-        ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
-        shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-        _data_rx: tokio::sync::mpsc::UnboundedReceiver<mm2_event_stream::NoDataIn>,
+        ready_tx: oneshot::Sender<Result<(), String>>,
+        shutdown_rx: oneshot::Receiver<()>,
+        _data_rx: mpsc::UnboundedReceiver<mm2_event_stream::NoDataIn>,
     ) {
         // Signal readiness immediately.
         let _ = ready_tx.send(Ok(()));
 
-        let interval = std::time::Duration::from_secs(self.interval_secs);
-        let mut shutdown = shutdown_rx;
+        let interval_secs = self.interval_secs as f64;
+        let mut shutdown = core::pin::pin!(shutdown_rx);
 
         loop {
-            tokio::select! {
-                _ = tokio::time::sleep(interval) => {
+            let sleep = Timer::sleep(interval_secs);
+            let sleep = core::pin::pin!(sleep);
+            match select(sleep, &mut shutdown).await {
+                Either::Left(_) => {
                     let now_ms = common::now_ms();
                     let event = Event::new(
                         StreamerId::Heartbeat,
@@ -72,10 +76,10 @@ impl EventStreamer for HeartbeatStreamer {
                         }),
                     );
                     broadcaster.broadcast(event);
-                }
-                _ = &mut shutdown => {
+                },
+                Either::Right(_) => {
                     break;
-                }
+                },
             }
         }
     }

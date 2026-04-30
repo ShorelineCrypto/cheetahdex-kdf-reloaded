@@ -7,9 +7,8 @@ use super::{orderbook_topic_from_base_rel, subscribe_to_orderbook_topic, Orderbo
 use async_trait::async_trait;
 use coins::{is_wallet_only_ticker, lp_coinfind};
 use mm2_core::mm_ctx::MmArc;
-use mm2_event_stream::{Broadcaster, Event, EventStreamer, StreamerId};
+use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
 use serde::Serialize;
-use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 /// Per-pair orderbook streamer.

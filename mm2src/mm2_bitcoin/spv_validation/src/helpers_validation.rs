@@ -584,8 +584,7 @@ mod tests {
     #[test]
     fn test_merkle_prove_wrong_root() {
         // Correct txid and nodes, but wrong merkle root.
-        let tx_id: H256 =
-            H256::from_reversed_str("7e9797a05abafbc1542449766ef9a41838ebbf6d24cd3223d361aa07c51981df");
+        let tx_id: H256 = H256::from_reversed_str("7e9797a05abafbc1542449766ef9a41838ebbf6d24cd3223d361aa07c51981df");
         let wrong_root: H256 =
             H256::from_reversed_str("0000000000000000000000000000000000000000000000000000000000000001");
         let merkle_nodes: Vec<H256> = vec![
@@ -601,8 +600,7 @@ mod tests {
     #[test]
     fn test_merkle_prove_wrong_index() {
         // Correct proof but wrong tree position.
-        let tx_id: H256 =
-            H256::from_reversed_str("7e9797a05abafbc1542449766ef9a41838ebbf6d24cd3223d361aa07c51981df");
+        let tx_id: H256 = H256::from_reversed_str("7e9797a05abafbc1542449766ef9a41838ebbf6d24cd3223d361aa07c51981df");
         let merkle_root: H256 =
             H256::from_reversed_str("41f138275d13690e3c5d735e2f88eb6f1aaade1207eb09fa27a65b40711f3ae0");
         let merkle_nodes: Vec<H256> = vec![
@@ -629,10 +627,7 @@ mod tests {
         // Empty intermediate nodes but txid != root — should fail.
         let txid = H256::from_reversed_str("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b");
         let other = H256::from_reversed_str("0000000000000000000000000000000000000000000000000000000000000001");
-        assert_eq!(
-            merkle_prove(txid, other, vec![], 0),
-            Err(SPVError::BadMerkleProof)
-        );
+        assert_eq!(merkle_prove(txid, other, vec![], 0), Err(SPVError::BadMerkleProof));
     }
 
     #[test]

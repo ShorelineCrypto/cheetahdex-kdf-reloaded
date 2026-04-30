@@ -57,8 +57,6 @@ pub struct IdbTransactionImpl {
     complete_rx: oneshot::Receiver<Result<JsValue, JsValue>>,
 }
 
-impl !Send for IdbTransactionImpl {}
-
 impl IdbTransactionImpl {
     pub fn aborted(&self) -> bool {
         self.aborted.load(Ordering::Relaxed)

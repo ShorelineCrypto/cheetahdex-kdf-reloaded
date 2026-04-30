@@ -134,27 +134,27 @@ mod wasm_lock {
     impl SwapLockOps for SwapLock {
         async fn lock(ctx: &MmArc, uuid: Uuid, ttl_sec: f64) -> SwapLockResult<Option<Self>> {
             let swaps_ctx = SwapsContext::from_ctx(ctx).map_to_mm(SwapLockError::InternalError)?;
-            let db = swaps_ctx.swap_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<SwapLockTable>().await?;
+            let db = swaps_ctx.swap_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<SwapLockTable>().await.map_mm_err()?;
 
             if let Some((item_id, SwapLockTable { timestamp, .. })) =
-                table.get_item_by_unique_index("uuid", uuid).await?
+                table.get_item_by_unique_index("uuid", uuid).await.map_mm_err()?
             {
                 let time_passed = now_float() - timestamp as f64;
                 if time_passed <= ttl_sec {
                     return Ok(None);
                 }
                 // delete the timestamp from the table before the new timestamp is written
-                table.delete_item(item_id).await?;
+                table.delete_item(item_id).await.map_mm_err()?;
             }
 
             let item = SwapLockTable {
                 uuid,
                 timestamp: now_ms() / 1000,
             };
-            let record_id = table.add_item(&item).await?;
-            transaction.wait_for_complete().await?;
+            let record_id = table.add_item(&item).await.map_mm_err()?;
+            transaction.wait_for_complete().await.map_mm_err()?;
 
             Ok(Some(SwapLock {
                 ctx: ctx.clone(),
@@ -165,18 +165,18 @@ mod wasm_lock {
 
         async fn touch(&self) -> SwapLockResult<()> {
             let swaps_ctx = SwapsContext::from_ctx(&self.ctx).map_to_mm(SwapLockError::InternalError)?;
-            let db = swaps_ctx.swap_db().await?;
+            let db = swaps_ctx.swap_db().await.map_mm_err()?;
 
             let item = SwapLockTable {
                 uuid: self.swap_uuid,
                 timestamp: now_ms() / 1000,
             };
 
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<SwapLockTable>().await?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<SwapLockTable>().await.map_mm_err()?;
 
-            let replaced_record_id = table.replace_item(self.record_id, &item).await?;
-            transaction.wait_for_complete().await?;
+            let replaced_record_id = table.replace_item(self.record_id, &item).await.map_mm_err()?;
+            transaction.wait_for_complete().await.map_mm_err()?;
 
             if self.record_id != replaced_record_id {
                 let error = format!("Expected {} record id, found {}", self.record_id, replaced_record_id);
@@ -189,11 +189,11 @@ mod wasm_lock {
     impl SwapLock {
         async fn release(ctx: MmArc, record_id: ItemId) -> SwapLockResult<()> {
             let swaps_ctx = SwapsContext::from_ctx(&ctx).map_to_mm(SwapLockError::InternalError)?;
-            let db = swaps_ctx.swap_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<SwapLockTable>().await?;
-            table.delete_item(record_id).await?;
-            transaction.wait_for_complete().await?;
+            let db = swaps_ctx.swap_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<SwapLockTable>().await.map_mm_err()?;
+            table.delete_item(record_id).await.map_mm_err()?;
+            transaction.wait_for_complete().await.map_mm_err()?;
             Ok(())
         }
     }

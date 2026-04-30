@@ -5,9 +5,8 @@
 
 use super::{MakerMatch, TakerMatch};
 use async_trait::async_trait;
-use mm2_event_stream::{Broadcaster, Event, EventStreamer, StreamerId};
+use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
 use serde::Serialize;
-use tokio::sync::{mpsc, oneshot};
 
 /// Streamer that relays order status events to SSE clients.
 pub struct OrderStatusStreamer;

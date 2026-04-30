@@ -1,5 +1,6 @@
 use crate::eth::{decode_contract_call, signed_tx_from_web3_tx, EthCoin, EthCoinType, Transaction, TransactionErr};
 use crate::{FindPaymentSpendError, MarketCoinOps};
+use bigdecimal::BigDecimal;
 use common::executor::Timer;
 use common::log::{error, info};
 use common::now_ms;
@@ -9,7 +10,6 @@ use ethcore_transaction::{Action, SignedTransaction as SignedEthTx};
 use ethereum_types::{Address, H256, U256};
 use futures::compat::Future01CompatExt;
 use mm2_err_handle::prelude::{MmError, MmResult};
-use bigdecimal::BigDecimal;
 use num_traits::Signed;
 use web3::types::TransactionId;
 
@@ -56,7 +56,9 @@ pub(crate) enum PrepareTxDataError {
 }
 
 impl From<ethabi::Error> for PrepareTxDataError {
-    fn from(e: ethabi::Error) -> Self { PrepareTxDataError::ABIError(e.to_string()) }
+    fn from(e: ethabi::Error) -> Self {
+        PrepareTxDataError::ABIError(e.to_string())
+    }
 }
 
 pub(crate) struct SpendTxSearchParams<'a> {

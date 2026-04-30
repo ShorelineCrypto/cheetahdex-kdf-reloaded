@@ -3931,11 +3931,7 @@ mod docker_tests {
             confirmations: 1,
         };
         let err = coin.validate_maker_payment(validate_input).wait().unwrap_err();
-        assert!(
-            err.contains("amount"),
-            "Expected amount mismatch error, got: {}",
-            err
-        );
+        assert!(err.contains("amount"), "Expected amount mismatch error, got: {}", err);
     }
 
     // Tests RPC-level withdraw of specific amount and balance verification
@@ -4092,12 +4088,7 @@ mod docker_tests {
 
         let (unspents, _) =
             block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
-        assert_eq!(
-            unspents.len(),
-            5,
-            "Expected 5 unspent outputs, got: {}",
-            unspents.len()
-        );
+        assert_eq!(unspents.len(), 5, "Expected 5 unspent outputs, got: {}", unspents.len());
 
         // Verify total value: 100 + 4*10 = 140
         let total: u64 = unspents.iter().map(|u| u.value).sum();

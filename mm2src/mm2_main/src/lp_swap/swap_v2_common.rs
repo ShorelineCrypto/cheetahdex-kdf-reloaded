@@ -811,13 +811,21 @@ pub(super) trait GetSwapCoins {
 }
 
 impl GetSwapCoins for MakerSwapDbRepr {
-    fn maker_coin(&self) -> &str { &self.maker_coin }
-    fn taker_coin(&self) -> &str { &self.taker_coin }
+    fn maker_coin(&self) -> &str {
+        &self.maker_coin
+    }
+    fn taker_coin(&self) -> &str {
+        &self.taker_coin
+    }
 }
 
 impl GetSwapCoins for TakerSwapDbRepr {
-    fn maker_coin(&self) -> &str { &self.maker_coin }
-    fn taker_coin(&self) -> &str { &self.taker_coin }
+    fn maker_coin(&self) -> &str {
+        &self.maker_coin
+    }
+    fn taker_coin(&self) -> &str {
+        &self.taker_coin
+    }
 }
 
 /// Waits until both maker and taker coins are activated, then returns them.
@@ -913,9 +921,7 @@ pub(super) async fn swap_kickstart_handler_for_maker(
             _ => {
                 warn!(
                     "V2 kickstart for maker swap {} not supported for this coin pair ({}/{})",
-                    uuid,
-                    swap_repr.maker_coin,
-                    swap_repr.taker_coin,
+                    uuid, swap_repr.maker_coin, swap_repr.taker_coin,
                 );
             },
         }
@@ -937,9 +943,7 @@ pub(super) async fn swap_kickstart_handler_for_taker(
             _ => {
                 warn!(
                     "V2 kickstart for taker swap {} not supported for this coin pair ({}/{})",
-                    uuid,
-                    swap_repr.maker_coin,
-                    swap_repr.taker_coin,
+                    uuid, swap_repr.maker_coin, swap_repr.taker_coin,
                 );
             },
         }
@@ -948,8 +952,8 @@ pub(super) async fn swap_kickstart_handler_for_taker(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::swap_v2_pb::*;
+    use super::*;
 
     #[test]
     fn test_swap_v2_protobuf_roundtrip() {
@@ -1195,9 +1199,8 @@ mod tests {
 
         // secp256k1 requires a valid public key; use an uncompressed generator point
         let pubkey = secp256k1::PublicKey::from_slice(&[
-            2, 0xc6, 0x04, 0x7f, 0x94, 0x41, 0xed, 0x7d, 0x6d, 0x30, 0x45, 0x40, 0x6e, 0x95,
-            0xc0, 0x7c, 0xd8, 0x5c, 0x77, 0x8e, 0x4b, 0x8c, 0xef, 0x3c, 0xa7, 0xab, 0xac, 0x09,
-            0xb9, 0x5c, 0x70, 0x9e, 0xe5,
+            2, 0xc6, 0x04, 0x7f, 0x94, 0x41, 0xed, 0x7d, 0x6d, 0x30, 0x45, 0x40, 0x6e, 0x95, 0xc0, 0x7c, 0xd8, 0x5c,
+            0x77, 0x8e, 0x4b, 0x8c, 0xef, 0x3c, 0xa7, 0xab, 0xac, 0x09, 0xb9, 0x5c, 0x70, 0x9e, 0xe5,
         ])
         .unwrap();
 

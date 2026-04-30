@@ -4,6 +4,7 @@ use mm2_db::indexed_db::{
     DbIdentifier, DbInstance, DbTransactionError, DbUpgrader, IndexedDb, IndexedDbBuilder, InitDbError, InitDbResult,
     OnUpgradeResult, TableSignature,
 };
+use mm2_err_handle::prelude::*;
 
 const DB_NAME: &str = "tx_history";
 const DB_VERSION: u32 = 1;
@@ -68,12 +69,13 @@ impl TxHistoryDb {
     pub async fn load_history(&self, ticker: &str, wallet_address: &str) -> TxHistoryResult<Vec<TransactionDetails>> {
         let history_id = HistoryId::new(ticker, wallet_address);
 
-        let transaction = self.inner.transaction().await?;
-        let table = transaction.table::<TxHistoryTable>().await?;
+        let transaction = self.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<TxHistoryTable>().await.map_mm_err()?;
 
         let item_opt = table
             .get_item_by_unique_index("history_id", history_id.as_str())
-            .await?;
+            .await
+            .map_mm_err()?;
         match item_opt {
             Some((_item_id, TxHistoryTable { txs, .. })) => Ok(txs),
             None => Ok(Vec::new()),
@@ -90,26 +92,28 @@ impl TxHistoryDb {
         let history_id_value = history_id.to_string();
         let tx_history_item = TxHistoryTable { history_id, txs };
 
-        let transaction = self.inner.transaction().await?;
-        let table = transaction.table::<TxHistoryTable>().await?;
+        let transaction = self.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<TxHistoryTable>().await.map_mm_err()?;
 
         table
             .replace_item_by_unique_index("history_id", &history_id_value, &tx_history_item)
-            .await?;
-        transaction.wait_for_complete().await?;
+            .await
+            .map_mm_err()?;
+        transaction.wait_for_complete().await.map_mm_err()?;
         Ok(())
     }
 
     pub async fn clear(&self, ticker: &str, wallet_address: &str) -> TxHistoryResult<()> {
         let history_id = HistoryId::new(ticker, wallet_address);
 
-        let transaction = self.inner.transaction().await?;
-        let table = transaction.table::<TxHistoryTable>().await?;
+        let transaction = self.inner.transaction().await.map_mm_err()?;
+        let table = transaction.table::<TxHistoryTable>().await.map_mm_err()?;
 
         table
             .delete_item_by_unique_index("history_id", history_id.as_str())
-            .await?;
-        transaction.wait_for_complete().await?;
+            .await
+            .map_mm_err()?;
+        transaction.wait_for_complete().await.map_mm_err()?;
         Ok(())
     }
 }

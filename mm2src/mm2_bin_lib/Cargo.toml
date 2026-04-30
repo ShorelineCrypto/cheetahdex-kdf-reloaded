@@ -11,6 +11,7 @@ path = "src/main.rs"
 [lib]
 name = "mm2_bin_lib"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 common.workspace = true

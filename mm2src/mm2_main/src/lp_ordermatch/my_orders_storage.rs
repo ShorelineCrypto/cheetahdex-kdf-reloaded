@@ -414,10 +414,10 @@ mod wasm_impl {
     #[async_trait]
     impl MyActiveOrders for MyOrdersStorage {
         async fn load_active_maker_orders(&self) -> MyOrdersResult<Vec<MakerOrder>> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveMakerOrdersTable>().await?;
-            let maker_orders = table.get_all_items().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveMakerOrdersTable>().await.map_mm_err()?;
+            let maker_orders = table.get_all_items().await.map_mm_err()?;
             Ok(maker_orders
                 .into_iter()
                 .map(|(_item_id, MyActiveMakerOrdersTable { order_payload, .. })| order_payload)
@@ -425,22 +425,23 @@ mod wasm_impl {
         }
 
         async fn load_active_maker_order(&self, uuid: Uuid) -> MyOrdersResult<MakerOrder> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveMakerOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveMakerOrdersTable>().await.map_mm_err()?;
 
             table
                 .get_item_by_unique_index("uuid", uuid)
-                .await?
+                .await
+                .map_mm_err()?
                 .map(|(_item_id, MyActiveMakerOrdersTable { order_payload, .. })| order_payload)
                 .or_mm_err(|| MyOrdersError::NoSuchOrder { uuid })
         }
 
         async fn load_active_taker_orders(&self) -> MyOrdersResult<Vec<TakerOrder>> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveTakerOrdersTable>().await?;
-            let maker_orders = table.get_all_items().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveTakerOrdersTable>().await.map_mm_err()?;
+            let maker_orders = table.get_all_items().await.map_mm_err()?;
             Ok(maker_orders
                 .into_iter()
                 .map(|(_item_id, MyActiveTakerOrdersTable { order_payload, .. })| order_payload)
@@ -448,62 +449,65 @@ mod wasm_impl {
         }
 
         async fn save_new_active_maker_order(&self, order: &MakerOrder) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveMakerOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveMakerOrdersTable>().await.map_mm_err()?;
 
             let item = MyActiveMakerOrdersTable {
                 uuid: order.uuid,
                 order_payload: order.clone(),
             };
-            table.add_item(&item).await?;
+            table.add_item(&item).await.map_mm_err()?;
             Ok(())
         }
 
         async fn save_new_active_taker_order(&self, order: &TakerOrder) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveTakerOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveTakerOrdersTable>().await.map_mm_err()?;
 
             let item = MyActiveTakerOrdersTable {
                 uuid: order.request.uuid,
                 order_payload: order.clone(),
             };
-            table.add_item(&item).await?;
+            table.add_item(&item).await.map_mm_err()?;
             Ok(())
         }
 
         async fn delete_active_maker_order(&self, uuid: Uuid) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveMakerOrdersTable>().await?;
-            Ok(table.delete_item_by_unique_index("uuid", uuid).await?)
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveMakerOrdersTable>().await.map_mm_err()?;
+            Ok(table.delete_item_by_unique_index("uuid", uuid).await.map_mm_err()?)
         }
 
         async fn delete_active_taker_order(&self, uuid: Uuid) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveTakerOrdersTable>().await?;
-            Ok(table.delete_item_by_unique_index("uuid", uuid).await?)
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveTakerOrdersTable>().await.map_mm_err()?;
+            Ok(table.delete_item_by_unique_index("uuid", uuid).await.map_mm_err()?)
         }
 
         async fn update_active_maker_order(&self, order: &MakerOrder) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveMakerOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveMakerOrdersTable>().await.map_mm_err()?;
 
             let item = MyActiveMakerOrdersTable {
                 uuid: order.uuid,
                 order_payload: order.clone(),
             };
-            table.replace_item_by_unique_index("uuid", order.uuid, &item).await?;
+            table
+                .replace_item_by_unique_index("uuid", order.uuid, &item)
+                .await
+                .map_mm_err()?;
             Ok(())
         }
 
         async fn update_active_taker_order(&self, order: &TakerOrder) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyActiveTakerOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyActiveTakerOrdersTable>().await.map_mm_err()?;
 
             let item = MyActiveTakerOrdersTable {
                 uuid: order.request.uuid,
@@ -511,7 +515,8 @@ mod wasm_impl {
             };
             table
                 .replace_item_by_unique_index("uuid", order.request.uuid, &item)
-                .await?;
+                .await
+                .map_mm_err()?;
             Ok(())
         }
     }
@@ -519,26 +524,27 @@ mod wasm_impl {
     #[async_trait]
     impl MyOrdersHistory for MyOrdersStorage {
         async fn save_order_in_history(&self, order: &Order) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyHistoryOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyHistoryOrdersTable>().await.map_mm_err()?;
 
             let item = MyHistoryOrdersTable {
                 uuid: order.uuid(),
                 order_payload: order.clone(),
             };
-            table.add_item(&item).await?;
+            table.add_item(&item).await.map_mm_err()?;
             Ok(())
         }
 
         async fn load_order_from_history(&self, uuid: Uuid) -> MyOrdersResult<Order> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyHistoryOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<MyHistoryOrdersTable>().await.map_mm_err()?;
 
             table
                 .get_item_by_unique_index("uuid", uuid)
-                .await?
+                .await
+                .map_mm_err()?
                 .map(|(_item_id, MyHistoryOrdersTable { order_payload, .. })| order_payload)
                 .or_mm_err(|| MyOrdersError::NoSuchOrder { uuid })
         }
@@ -558,13 +564,17 @@ mod wasm_impl {
         }
 
         async fn select_order_status(&self, uuid: Uuid) -> MyOrdersResult<String> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyFilteringHistoryOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction
+                .table::<MyFilteringHistoryOrdersTable>()
+                .await
+                .map_mm_err()?;
 
             table
                 .get_item_by_unique_index("uuid", uuid)
-                .await?
+                .await
+                .map_mm_err()?
                 .map(|(_item_id, MyFilteringHistoryOrdersTable { status, .. })| status)
                 .or_mm_err(|| MyOrdersError::NoSuchOrder { uuid })
         }
@@ -572,65 +582,83 @@ mod wasm_impl {
         async fn save_maker_order_in_filtering_history(&self, order: &MakerOrder) -> MyOrdersResult<()> {
             let item = maker_order_to_filtering_history_item(order, "Created".to_owned(), false)?;
 
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyFilteringHistoryOrdersTable>().await?;
-            table.add_item(&item).await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction
+                .table::<MyFilteringHistoryOrdersTable>()
+                .await
+                .map_mm_err()?;
+            table.add_item(&item).await.map_mm_err()?;
             Ok(())
         }
 
         async fn save_taker_order_in_filtering_history(&self, order: &TakerOrder) -> MyOrdersResult<()> {
             let item = taker_order_to_filtering_history_item(order, "Created".to_owned())?;
 
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyFilteringHistoryOrdersTable>().await?;
-            table.add_item(&item).await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction
+                .table::<MyFilteringHistoryOrdersTable>()
+                .await
+                .map_mm_err()?;
+            table.add_item(&item).await.map_mm_err()?;
             Ok(())
         }
 
         async fn update_maker_order_in_filtering_history(&self, order: &MakerOrder) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyFilteringHistoryOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction
+                .table::<MyFilteringHistoryOrdersTable>()
+                .await
+                .map_mm_err()?;
             // get the previous item to see if the order was taker
             let (item_id, prev_item) = table
                 .get_item_by_unique_index("uuid", order.uuid)
-                .await?
+                .await
+                .map_mm_err()?
                 .or_mm_err(|| MyOrdersError::NoSuchOrder { uuid: order.uuid })?;
 
             let item = maker_order_to_filtering_history_item(order, "Updated".to_owned(), prev_item.was_taker)?;
-            table.replace_item(item_id, &item).await?;
+            table.replace_item(item_id, &item).await.map_mm_err()?;
             Ok(())
         }
 
         async fn update_order_status_in_filtering_history(&self, uuid: Uuid, status: String) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyFilteringHistoryOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction
+                .table::<MyFilteringHistoryOrdersTable>()
+                .await
+                .map_mm_err()?;
 
             let (item_id, mut item) = table
                 .get_item_by_unique_index("uuid", uuid)
-                .await?
+                .await
+                .map_mm_err()?
                 .or_mm_err(|| MyOrdersError::NoSuchOrder { uuid })?;
 
             item.status = status;
-            table.replace_item(item_id, &item).await?;
+            table.replace_item(item_id, &item).await.map_mm_err()?;
             Ok(())
         }
 
         async fn update_was_taker_in_filtering_history(&self, uuid: Uuid) -> MyOrdersResult<()> {
-            let db = self.ctx.ordermatch_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<MyFilteringHistoryOrdersTable>().await?;
+            let db = self.ctx.ordermatch_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction
+                .table::<MyFilteringHistoryOrdersTable>()
+                .await
+                .map_mm_err()?;
 
             let (item_id, mut item) = table
                 .get_item_by_unique_index("uuid", uuid)
-                .await?
+                .await
+                .map_mm_err()?
                 .or_mm_err(|| MyOrdersError::NoSuchOrder { uuid })?;
 
             item.was_taker = true;
-            table.replace_item(item_id, &item).await?;
+            table.replace_item(item_id, &item).await.map_mm_err()?;
             Ok(())
         }
     }
@@ -705,6 +733,7 @@ mod tests {
     use super::*;
     use crate::mm2::lp_ordermatch::ordermatch_wasm_db::{ItemId, MyFilteringHistoryOrdersTable};
     use crate::mm2::lp_ordermatch::{MatchBy, OrderType, OrdermatchContext, TakerAction, TakerRequest};
+    use crate::mm2::lp_swap::swap_versioning::SwapVersion;
     use common::{new_uuid, now_ms};
     use futures::compat::Future01CompatExt;
     use itertools::Itertools;
@@ -733,6 +762,8 @@ mod tests {
             base_orderbook_ticker: None,
             rel_orderbook_ticker: None,
             p2p_privkey: None,
+            swap_version: SwapVersion::default(),
+            timeout_in_minutes: None,
         }
     }
 
@@ -751,6 +782,7 @@ mod tests {
                 conf_settings: None,
                 base_protocol_info: None,
                 rel_protocol_info: None,
+                swap_version: SwapVersion::default(),
             },
             matches: HashMap::new(),
             created_at: now_ms(),

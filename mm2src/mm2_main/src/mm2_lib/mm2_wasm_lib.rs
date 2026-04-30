@@ -36,12 +36,6 @@ pub enum Mm2MainErr {
     NoCoinsInConf = 3,
 }
 
-impl From<Mm2MainErr> for JsValue {
-    fn from(e: Mm2MainErr) -> Self {
-        JsValue::from(e as i32)
-    }
-}
-
 #[derive(Deserialize)]
 struct MainParams {
     conf: Json,
@@ -164,12 +158,6 @@ pub enum Mm2RpcErr {
     NotRunning = 1,
     InvalidPayload = 2,
     InternalError = 3,
-}
-
-impl From<Mm2RpcErr> for JsValue {
-    fn from(e: Mm2RpcErr) -> Self {
-        JsValue::from(e as i32)
-    }
 }
 
 /// Invoke an RPC request.

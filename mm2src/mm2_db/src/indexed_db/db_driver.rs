@@ -61,8 +61,6 @@ pub struct IdbDatabaseImpl {
     tables: HashSet<String>,
 }
 
-impl !Send for IdbDatabaseImpl {}
-
 impl fmt::Debug for IdbDatabaseImpl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

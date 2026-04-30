@@ -290,11 +290,11 @@ mod wasm_impl {
     impl SavedSwapIo for SavedSwap {
         async fn load_my_swap_from_db(ctx: &MmArc, uuid: Uuid) -> SavedSwapResult<Option<SavedSwap>> {
             let swaps_ctx = SwapsContext::from_ctx(ctx).map_to_mm(SavedSwapError::InternalError)?;
-            let db = swaps_ctx.swap_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<SavedSwapTable>().await?;
+            let db = swaps_ctx.swap_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<SavedSwapTable>().await.map_mm_err()?;
 
-            let saved_swap_json = match table.get_item_by_unique_index("uuid", uuid).await? {
+            let saved_swap_json = match table.get_item_by_unique_index("uuid", uuid).await.map_mm_err()? {
                 Some((_item_id, SavedSwapTable { saved_swap, .. })) => saved_swap,
                 None => return Ok(None),
             };
@@ -304,11 +304,11 @@ mod wasm_impl {
 
         async fn load_all_my_swaps_from_db(ctx: &MmArc) -> SavedSwapResult<Vec<SavedSwap>> {
             let swaps_ctx = SwapsContext::from_ctx(ctx).map_to_mm(SavedSwapError::InternalError)?;
-            let db = swaps_ctx.swap_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<SavedSwapTable>().await?;
+            let db = swaps_ctx.swap_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<SavedSwapTable>().await.map_mm_err()?;
 
-            let swaps = table.get_all_items().await?;
+            let swaps = table.get_all_items().await.map_mm_err()?;
             swaps
                 .into_iter()
                 .map(|(_item_id, SavedSwapTable { saved_swap, .. })| saved_swap)
@@ -325,14 +325,15 @@ mod wasm_impl {
             };
 
             let swaps_ctx = SwapsContext::from_ctx(ctx).map_to_mm(SavedSwapError::InternalError)?;
-            let db = swaps_ctx.swap_db().await?;
-            let transaction = db.transaction().await?;
-            let table = transaction.table::<SavedSwapTable>().await?;
+            let db = swaps_ctx.swap_db().await.map_mm_err()?;
+            let transaction = db.transaction().await.map_mm_err()?;
+            let table = transaction.table::<SavedSwapTable>().await.map_mm_err()?;
 
             table
                 .replace_item_by_unique_index("uuid", *self.uuid(), &saved_swap_item)
-                .await?;
-            transaction.wait_for_complete().await?;
+                .await
+                .map_mm_err()?;
+            transaction.wait_for_complete().await.map_mm_err()?;
             Ok(())
         }
     }

@@ -57,6 +57,7 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
+use bitcrypto::sha256;
 use coins::{
     lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee,
     TransactionEnum,
@@ -69,7 +70,6 @@ use common::{
     mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
     now_ms, var, HttpStatusCode, PagingOptions,
 };
-use bitcrypto::sha256;
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
 use http::{Response, StatusCode};
@@ -384,9 +384,7 @@ pub fn broadcast_swap_v2_message<T: prost::Message>(
     let signature = SECP_SIGN.sign(&secp_message, &secp_secret);
 
     let signed_message = SignedMessage {
-        from: PublicKey::from_secret_key(&*SECP_SIGN, &secp_secret)
-            .serialize()
-            .into(),
+        from: PublicKey::from_secret_key(&*SECP_SIGN, &secp_secret).serialize().into(),
         signature: signature.serialize_compact().into(),
         payload: encoded_msg,
     };
@@ -429,14 +427,14 @@ pub fn process_swap_v2_msg(ctx: MmArc, topic: &str, msg: &[u8]) -> Result<(), St
         let signed_message =
             SignedMessage::decode(msg).map_err(|e| format!("Failed to decode SignedMessage: {}", e))?;
 
-        let pubkey = PublicKey::from_slice(&signed_message.from)
-            .map_err(|e| format!("Invalid sender pubkey: {}", e))?;
+        let pubkey =
+            PublicKey::from_slice(&signed_message.from).map_err(|e| format!("Invalid sender pubkey: {}", e))?;
         if pubkey != msg_store.accept_only_from {
             return Err(format!("Unexpected sender: {}", pubkey));
         }
 
-        let signature = Signature::from_compact(&signed_message.signature)
-            .map_err(|e| format!("Invalid signature: {}", e))?;
+        let signature =
+            Signature::from_compact(&signed_message.signature).map_err(|e| format!("Invalid signature: {}", e))?;
         let secp_message = secp256k1::Message::from_slice(sha256(&signed_message.payload).as_slice())
             .expect("sha256 is 32 bytes hash");
 
@@ -447,8 +445,8 @@ pub fn process_swap_v2_msg(ctx: MmArc, topic: &str, msg: &[u8]) -> Result<(), St
         let swap_message = SwapMessage::decode(signed_message.payload.as_slice())
             .map_err(|e| format!("Failed to decode SwapMessage: {}", e))?;
 
-        let uuid_from_message = Uuid::from_slice(&swap_message.swap_uuid)
-            .map_err(|e| format!("Invalid swap_uuid in message: {}", e))?;
+        let uuid_from_message =
+            Uuid::from_slice(&swap_message.swap_uuid).map_err(|e| format!("Invalid swap_uuid in message: {}", e))?;
 
         if uuid_from_message != uuid {
             return Err(format!(

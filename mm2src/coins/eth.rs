@@ -453,9 +453,7 @@ impl EthGasLimitV2 {
             (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Send) => {
                 Ok(self.maker.erc20_payment)
             },
-            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Spend) => {
-                Ok(self.maker.eth_taker_spend)
-            },
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Spend) => Ok(self.maker.eth_taker_spend),
             (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Spend) => {
                 Ok(self.maker.erc20_taker_spend)
             },
@@ -475,9 +473,7 @@ impl EthGasLimitV2 {
             (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Send) => {
                 Ok(self.taker.erc20_payment)
             },
-            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Spend) => {
-                Ok(self.taker.eth_maker_spend)
-            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Spend) => Ok(self.taker.eth_maker_spend),
             (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Spend) => {
                 Ok(self.taker.erc20_maker_spend)
             },
@@ -513,23 +509,33 @@ pub type ValidatePaymentError = ValidateSwapV2TxError;
 pub type ValidatePaymentResult<T> = MmResult<T, ValidatePaymentError>;
 
 impl From<ethabi::Error> for FindPaymentSpendError {
-    fn from(e: ethabi::Error) -> Self { FindPaymentSpendError::ABIError(e.to_string()) }
+    fn from(e: ethabi::Error) -> Self {
+        FindPaymentSpendError::ABIError(e.to_string())
+    }
 }
 
 impl From<ethabi::Error> for ValidateSwapV2TxError {
-    fn from(e: ethabi::Error) -> Self { ValidateSwapV2TxError::ABIError(e.to_string()) }
+    fn from(e: ethabi::Error) -> Self {
+        ValidateSwapV2TxError::ABIError(e.to_string())
+    }
 }
 
 impl From<std::array::TryFromSliceError> for ValidateSwapV2TxError {
-    fn from(e: std::array::TryFromSliceError) -> Self { ValidateSwapV2TxError::InternalError(e.to_string()) }
+    fn from(e: std::array::TryFromSliceError) -> Self {
+        ValidateSwapV2TxError::InternalError(e.to_string())
+    }
 }
 
 impl From<std::array::TryFromSliceError> for FindPaymentSpendError {
-    fn from(e: std::array::TryFromSliceError) -> Self { FindPaymentSpendError::Internal(e.to_string()) }
+    fn from(e: std::array::TryFromSliceError) -> Self {
+        FindPaymentSpendError::Internal(e.to_string())
+    }
 }
 
 impl From<NumConversError> for ValidateSwapV2TxError {
-    fn from(e: NumConversError) -> Self { ValidateSwapV2TxError::InternalError(e.to_string()) }
+    fn from(e: NumConversError) -> Self {
+        ValidateSwapV2TxError::InternalError(e.to_string())
+    }
 }
 
 impl From<eth_swap_v2::ValidatePaymentV2Err> for ValidateSwapV2TxError {
@@ -4109,10 +4115,7 @@ fn increase_gas_price_by_stage(gas_price: U256, level: &FeeApproxStage) -> U256 
 // ─── V2 helper functions ────────────────────────────────────────────────────
 
 /// Decodes the input data of a contract function call.
-pub(crate) fn decode_contract_call(
-    func: &ethabi::Function,
-    data: &[u8],
-) -> Result<Vec<Token>, ethabi::Error> {
+pub(crate) fn decode_contract_call(func: &ethabi::Function, data: &[u8]) -> Result<Vec<Token>, ethabi::Error> {
     // The first 4 bytes are the function selector
     if data.len() < 4 {
         return Err(ethabi::ErrorKind::InvalidData.into());
@@ -4153,7 +4156,9 @@ impl ParseCoinAssocTypes for EthCoin {
     type Sig = Vec<u8>;
     type SigParseError = MmError<EthAssocTypesError>;
 
-    async fn my_addr(&self) -> Self::Address { self.my_address }
+    async fn my_addr(&self) -> Self::Address {
+        self.my_address
+    }
 
     fn parse_address(&self, address: &str) -> Result<Self::Address, Self::AddressParseError> {
         Address::from_str(address).map_to_mm(|e| EthAssocTypesError::InvalidHexString(e.to_string()))
@@ -4184,8 +4189,10 @@ impl ParseCoinAssocTypes for EthCoin {
 
 // ─── CommonSwapOpsV2 for EthCoin ────────────────────────────────────────────
 
-use crate::{CommonSwapOpsV2, GenPreimageResult, MakerCoinSwapOpsV2, TakerCoinSwapOpsV2, ToBytes,
-            ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult};
+use crate::{
+    CommonSwapOpsV2, GenPreimageResult, MakerCoinSwapOpsV2, TakerCoinSwapOpsV2, ToBytes,
+    ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult,
+};
 
 #[async_trait]
 impl CommonSwapOpsV2 for EthCoin {
@@ -4224,7 +4231,10 @@ impl MakerCoinSwapOpsV2 for EthCoin {
         self.refund_maker_payment_v2_secret_impl(args).await
     }
 
-    async fn spend_maker_payment_v2(&self, args: SpendMakerPaymentArgs<'_, Self>) -> Result<SignedEthTx, TransactionErr> {
+    async fn spend_maker_payment_v2(
+        &self,
+        args: SpendMakerPaymentArgs<'_, Self>,
+    ) -> Result<SignedEthTx, TransactionErr> {
         self.spend_maker_payment_v2_impl(args).await
     }
 }
@@ -4304,7 +4314,9 @@ impl TakerCoinSwapOpsV2 for EthCoin {
         self.refund_taker_payment_with_timelock_impl(args).await
     }
 
-    fn skip_taker_payment_spend_preimage(&self) -> bool { true }
+    fn skip_taker_payment_spend_preimage(&self) -> bool {
+        true
+    }
 
     async fn gen_taker_payment_spend_preimage(
         &self,
@@ -4321,9 +4333,11 @@ impl TakerCoinSwapOpsV2 for EthCoin {
         _gen_args: &GenTakerPaymentSpendArgs<'_, Self>,
         _preimage: &TxPreimageWithSig<Self>,
     ) -> ValidateTakerPaymentSpendPreimageResult {
-        Err(MmError::new(crate::ValidateTakerPaymentSpendPreimageError::InternalError(
-            "EVM coins skip taker payment spend preimage".into(),
-        )))
+        Err(MmError::new(
+            crate::ValidateTakerPaymentSpendPreimageError::InternalError(
+                "EVM coins skip taker payment spend preimage".into(),
+            ),
+        ))
     }
 
     async fn sign_and_broadcast_taker_payment_spend(
@@ -4333,8 +4347,7 @@ impl TakerCoinSwapOpsV2 for EthCoin {
         secret: &[u8],
         _swap_unique_data: &[u8],
     ) -> Result<SignedEthTx, TransactionErr> {
-        self.sign_and_broadcast_taker_payment_spend_impl(gen_args, secret)
-            .await
+        self.sign_and_broadcast_taker_payment_spend_impl(gen_args, secret).await
     }
 
     async fn find_taker_payment_spend_tx(

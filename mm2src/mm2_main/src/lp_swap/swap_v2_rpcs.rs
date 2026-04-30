@@ -37,7 +37,7 @@ cfg_wasm32!(
     use super::SwapsContext;
     use super::maker_swap_v2::MakerSwapDbRepr;
     use super::taker_swap_v2::TakerSwapDbRepr;
-    use crate::lp_swap::swap_wasm_db::{MySwapsFiltersTable, SavedSwapTable};
+    use crate::mm2::lp_swap::swap_wasm_db::{MySwapsFiltersTable, SavedSwapTable};
     use mm2_db::indexed_db::{DbTransactionError, DbTransactionResult, InitDbError};
 );
 

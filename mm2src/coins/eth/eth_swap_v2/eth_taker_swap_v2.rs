@@ -503,8 +503,7 @@ impl EthCoin {
         let function = TAKER_SWAP_V2.function(TAKER_PAYMENT_APPROVE)?;
         let data = match self.coin_type {
             EthCoinType::Eth => {
-                let (dex_fee, amount) =
-                    get_dex_fee_and_amount_from_eth_payment_data(&decoded, args.funding_tx.value)?;
+                let (dex_fee, amount) = get_dex_fee_and_amount_from_eth_payment_data(&decoded, args.funding_tx.value)?;
                 function.encode_input(&[
                     decoded[0].clone(),   // id from ethTakerPayment
                     Token::Uint(amount),  // calculated payment amount (tx value - dexFee)
@@ -543,8 +542,7 @@ impl EthCoin {
         let taker_address = public_to_address(args.taker_pub);
         match self.coin_type {
             EthCoinType::Eth => {
-                let (dex_fee, amount) =
-                    get_dex_fee_and_amount_from_eth_payment_data(&decoded, args.taker_tx.value)?;
+                let (dex_fee, amount) = get_dex_fee_and_amount_from_eth_payment_data(&decoded, args.taker_tx.value)?;
                 let data = function.encode_input(&[
                     decoded[0].clone(),                 // id from ethTakerPayment
                     Token::Uint(amount),                // calculated payment amount (tx value - dexFee)
@@ -682,7 +680,9 @@ enum PaymentStatusErr {
 }
 
 impl From<ethabi::Error> for PaymentStatusErr {
-    fn from(e: ethabi::Error) -> Self { PaymentStatusErr::ABIError(e.to_string()) }
+    fn from(e: ethabi::Error) -> Self {
+        PaymentStatusErr::ABIError(e.to_string())
+    }
 }
 
 /// Validation function for ETH taker payment data

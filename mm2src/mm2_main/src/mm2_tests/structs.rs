@@ -563,7 +563,7 @@ pub struct TransactionDetails {
     pub transaction_type: TransactionType,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MyBalanceResponse {
     pub address: String,

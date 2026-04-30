@@ -16,8 +16,6 @@ pub struct IdbObjectStoreImpl {
     pub(crate) aborted: Arc<AtomicBool>,
 }
 
-impl !Send for IdbObjectStoreImpl {}
-
 impl IdbObjectStoreImpl {
     pub fn aborted(&self) -> bool {
         self.aborted.load(Ordering::Relaxed)

@@ -6,6 +6,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::event::Event;
 use crate::streamer::{Broadcaster, EventStreamer, StreamerId};
+use common::executor::spawn;
 
 /// Per-streamer bookkeeping.
 struct StreamerInfo {
@@ -131,7 +132,7 @@ impl StreamingManager {
         // Spawn the streamer task.
         let manager_inner = self.inner.clone();
         let sid_clone = sid.clone();
-        tokio::spawn(async move {
+        spawn(async move {
             streamer.handle(broadcaster, ready_tx, shutdown_rx, data_rx).await;
             // Cleanup when the streamer exits (for any reason).
             let mut inner = manager_inner.write();

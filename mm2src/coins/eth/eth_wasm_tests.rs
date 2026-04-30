@@ -28,9 +28,12 @@ async fn test_send() {
         coin_type: EthCoinType::Eth,
         my_address: key_pair.address(),
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
-        key_pair,
+        key_pair: key_pair.clone(),
         swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
         fallback_swap_contract: None,
+        swap_v2_contracts: None,
+        gas_limit_v2: EthGasLimitV2::default(),
+        derivation_method: DerivationMethod::Iguana(key_pair.address()),
         web3_instances: vec![Web3Instance {
             web3: web3.clone(),
             is_parity: true,
