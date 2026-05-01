@@ -145,6 +145,7 @@ pub mod seri;
 #[path = "patterns/state_machine.rs"]
 pub mod state_machine;
 pub mod time_cache;
+pub mod write_safe;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "executor/native_executor.rs"]

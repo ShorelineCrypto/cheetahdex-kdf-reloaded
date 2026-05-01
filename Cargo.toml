@@ -51,6 +51,7 @@ resolver = "2"
 # ── External crates (alphabetical) ──
 async-trait = "0.1"
 chrono = "0.4"
+crossbeam-channel = "0.5.1"
 derive_more = "0.99"
 fomat-macros = "0.2"
 futures = { version = "0.3", package = "futures", features = ["compat", "async-await"] }
@@ -61,6 +62,7 @@ itertools = "0.10"
 lazy_static = "1.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order", "raw_value"] }
+tokio = { version = "1.47", default-features = false }
 
 # ── Internal crates (alphabetical) ──
 common = { path = "mm2src/common" }
