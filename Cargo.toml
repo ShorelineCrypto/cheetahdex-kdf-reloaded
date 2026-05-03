@@ -41,6 +41,7 @@ members = [
     "mm2src/mm2_io",
     "mm2src/mm2_rpc",
     "mm2src/rpc_task",
+    "mm2src/trading_api",
     "mm2src/trezor",
 ]
 
@@ -53,6 +54,7 @@ async-trait = "0.1"
 chrono = "0.4"
 crossbeam-channel = "0.5.1"
 derive_more = "0.99"
+ethereum-types = { version = "0.13", default-features = false, features = ["std", "serialize"] }
 fomat-macros = "0.2"
 futures = { version = "0.3", package = "futures", features = ["compat", "async-await"] }
 gstuff = "0.7"
@@ -60,9 +62,12 @@ hex = "0.4.2"
 http = "0.2"
 itertools = "0.10"
 lazy_static = "1.4"
+mocktopus = "0.8.0"
 serde = { version = "1", features = ["derive"] }
+serde_derive = { version = "1", default-features = false }
 serde_json = { version = "1.0", features = ["preserve_order", "raw_value"] }
 tokio = { version = "1.47", default-features = false }
+url = { version = "2.2.2", features = ["serde"] }
 
 # ── Internal crates (alphabetical) ──
 common = { path = "mm2src/common" }

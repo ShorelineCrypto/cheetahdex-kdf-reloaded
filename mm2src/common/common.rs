@@ -166,6 +166,7 @@ pub use wasm::*;
 
 use backtrace::SymbolName;
 pub use futures::compat::Future01CompatExt;
+pub use paste::paste;
 use futures::future::FutureExt;
 use futures::task::Waker;
 use futures01::{future, task::Task, Future};
@@ -1361,4 +1362,27 @@ impl<Id> Default for PagingOptionsEnum<Id> {
 #[inline(always)]
 pub fn os_rng(dest: &mut [u8]) -> Result<(), rand::Error> {
     rand::rngs::OsRng.try_fill_bytes(dest)
+}
+
+/// If value is 'some' push key and value (as string) into an array containing (key, value) elements
+#[macro_export]
+macro_rules! push_if_some {
+    ($arr: expr, $k: expr, $v: expr) => {
+        if let Some(v) = $v {
+            $arr.push(($k, v.to_string()))
+        }
+    };
+}
+
+/// Define 'with_...' method to set a parameter with an optional value in a builder
+#[macro_export]
+macro_rules! def_with_opt_param {
+    ($var: ident, $var_type: ty) => {
+        $crate::paste! {
+            pub fn [<with_ $var>](&mut self, $var: Option<$var_type>) -> &mut Self {
+                self.$var = $var;
+                self
+            }
+        }
+    };
 }
