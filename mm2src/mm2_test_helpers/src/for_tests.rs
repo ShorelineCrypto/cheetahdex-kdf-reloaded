@@ -1352,3 +1352,20 @@ pub async fn verify_message(mm: &MarketMakerIt, coin: &str, signature: &str, add
     assert_eq!(request.0, StatusCode::OK, "'verify_message' failed: {}", request.1);
     json::from_str(&request.1).unwrap()
 }
+
+/// Creates an `MmArc` with an in-memory SQLite database for testing.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn mm_ctx_with_custom_db() -> MmArc {
+    use db_common::sqlite::rusqlite::Connection;
+    use mm2_core::mm_ctx::MmCtxBuilder;
+    use std::sync::Arc;
+
+    let ctx = MmCtxBuilder::new().into_mm_arc();
+
+    let connection = Connection::open_in_memory().unwrap();
+    let _ = ctx
+        .sqlite_connection
+        .pin(Arc::new(Mutex::new(connection)));
+
+    ctx
+}

@@ -79,6 +79,19 @@ macro_rules! drop_mutability {
     };
 }
 
+/// Reads inner value of `Option<T>`, returns `Ok(None)` otherwise.
+#[macro_export]
+macro_rules! some_or_return_ok_none {
+    ($val:expr) => {
+        match $val {
+            Some(t) => t,
+            None => {
+                return Ok(None);
+            },
+        }
+    };
+}
+
 /// Returns a JSON error HyRes on a failure.
 #[macro_export]
 macro_rules! try_h {
