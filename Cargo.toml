@@ -53,6 +53,7 @@ resolver = "2"
 # ── External crates (alphabetical) ──
 async-trait = "0.1"
 chrono = "0.4"
+cosmrs = { version = "0.16", default-features = false }
 crossbeam-channel = "0.5.1"
 derive_more = "0.99"
 ethereum-types = { version = "0.13", default-features = false, features = ["std", "serialize"] }
@@ -78,7 +79,10 @@ mm2_err_handle = { path = "mm2src/mm2_err_handle" }
 mm2_main = { path = "mm2src/mm2_main" }
 mm2_metrics = { path = "mm2src/mm2_metrics" }
 mm2_number = { path = "mm2src/mm2_number" }
+prost = "0.12"
 sia-rust = { git = "https://github.com/KomodoPlatform/sia-rust", branch = "refactor/rc-cleanup" }
+# using the same version as cosmrs
+tendermint-rpc = { version = "0.35", default-features = false }
 thiserror = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 

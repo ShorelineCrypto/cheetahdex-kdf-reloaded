@@ -255,6 +255,7 @@ pub use solana::spl::SplToken;
 pub use solana::{solana_coin_from_conf_and_params, SolanaActivationParams, SolanaCoin, SolanaFeeDetails};
 
 pub mod siacoin;
+pub mod tendermint;
 #[cfg(target_arch = "wasm32")]
 pub mod tx_history_db;
 pub mod utxo;
@@ -465,6 +466,7 @@ pub enum TransactionEnum {
     #[cfg(not(target_arch = "wasm32"))]
     ZTransaction(ZTransaction),
     SiaTransaction(siacoin::SiaTransaction),
+    CosmosTransaction(tendermint::CosmosTransaction),
 }
 ifrom!(TransactionEnum, UtxoTx);
 ifrom!(TransactionEnum, SignedEthTx);
@@ -474,6 +476,12 @@ ifrom!(TransactionEnum, ZTransaction);
 impl From<siacoin::SiaTransaction> for TransactionEnum {
     fn from(t: siacoin::SiaTransaction) -> TransactionEnum {
         TransactionEnum::SiaTransaction(t)
+    }
+}
+
+impl From<tendermint::CosmosTransaction> for TransactionEnum {
+    fn from(t: tendermint::CosmosTransaction) -> TransactionEnum {
+        TransactionEnum::CosmosTransaction(t)
     }
 }
 
@@ -487,6 +495,7 @@ impl Deref for TransactionEnum {
             #[cfg(not(target_arch = "wasm32"))]
             TransactionEnum::ZTransaction(ref t) => t,
             TransactionEnum::SiaTransaction(ref t) => t,
+            TransactionEnum::CosmosTransaction(ref t) => t,
         }
     }
 }
@@ -1141,6 +1150,7 @@ pub enum TxFeeDetails {
     #[cfg(not(target_arch = "wasm32"))]
     Solana(SolanaFeeDetails),
     Sia(siacoin::SiaFeeDetails),
+    Tendermint(tendermint::TendermintFeeDetails),
 }
 
 /// Deserialize the TxFeeDetails as an untagged enum.
@@ -1172,6 +1182,12 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
 impl From<siacoin::SiaFeeDetails> for TxFeeDetails {
     fn from(d: siacoin::SiaFeeDetails) -> Self {
         TxFeeDetails::Sia(d)
+    }
+}
+
+impl From<tendermint::TendermintFeeDetails> for TxFeeDetails {
+    fn from(d: tendermint::TendermintFeeDetails) -> Self {
+        TxFeeDetails::Tendermint(d)
     }
 }
 
@@ -2646,6 +2662,8 @@ pub enum MmCoinEnum {
     #[cfg(not(target_arch = "wasm32"))]
     LightningCoin(LightningCoin),
     SiaCoin(siacoin::SiaCoin),
+    TendermintCoin(tendermint::TendermintCoin),
+    TendermintToken(tendermint::TendermintToken),
     Test(TestCoin),
 }
 
@@ -2725,6 +2743,18 @@ impl From<siacoin::SiaCoin> for MmCoinEnum {
     }
 }
 
+impl From<tendermint::TendermintCoin> for MmCoinEnum {
+    fn from(c: tendermint::TendermintCoin) -> MmCoinEnum {
+        MmCoinEnum::TendermintCoin(c)
+    }
+}
+
+impl From<tendermint::TendermintToken> for MmCoinEnum {
+    fn from(c: tendermint::TendermintToken) -> MmCoinEnum {
+        MmCoinEnum::TendermintToken(c)
+    }
+}
+
 // NB: When stable and groked by IDEs, `enum_dispatch` can be used instead of `Deref` to speed things up.
 impl Deref for MmCoinEnum {
     type Target = dyn MmCoin;
@@ -2746,6 +2776,8 @@ impl Deref for MmCoinEnum {
             #[cfg(not(target_arch = "wasm32"))]
             MmCoinEnum::SplToken(ref c) => c,
             MmCoinEnum::SiaCoin(ref c) => c,
+            MmCoinEnum::TendermintCoin(ref c) => c,
+            MmCoinEnum::TendermintToken(ref c) => c,
         }
     }
 }
@@ -3030,6 +3062,15 @@ pub enum CoinProtocol {
     #[cfg(not(target_arch = "wasm32"))]
     ZHTLC,
     SIA,
+    TENDERMINT {
+        account_prefix: String,
+        chain_id: String,
+    },
+    TENDERMINTTOKEN {
+        platform: String,
+        denom: String,
+        decimals: u8,
+    },
 }
 
 pub type RpcTransportEventHandlerShared = Arc<dyn RpcTransportEventHandler + Send + Sync + 'static>;
@@ -3295,6 +3336,16 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
         },
         CoinProtocol::SIA => {
             return ERR!("SIA protocol is not supported by lp_coininit - use task::enable_sia::init instead")
+        },
+        CoinProtocol::TENDERMINT { .. } => {
+            return ERR!(
+                "TENDERMINT protocol is not supported by lp_coininit - use enable_tendermint_with_assets instead"
+            )
+        },
+        CoinProtocol::TENDERMINTTOKEN { .. } => {
+            return ERR!(
+                "TENDERMINTTOKEN protocol is not supported by lp_coininit - use enable_tendermint_token instead"
+            )
         },
     };
 
@@ -3889,6 +3940,9 @@ pub fn address_by_coin_conf_and_pubkey_str(
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC => ERR!("address_by_coin_conf_and_pubkey_str is not supported for ZHTLC protocol!"),
         CoinProtocol::SIA => ERR!("address_by_coin_conf_and_pubkey_str is not supported for SIA protocol!"),
+        CoinProtocol::TENDERMINT { .. } | CoinProtocol::TENDERMINTTOKEN { .. } => {
+            ERR!("address_by_coin_conf_and_pubkey_str is not supported for Tendermint protocol!")
+        },
     }
 }
 

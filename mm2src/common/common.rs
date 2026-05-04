@@ -179,7 +179,6 @@ pub use wasm::*;
 
 use backtrace::SymbolName;
 pub use futures::compat::Future01CompatExt;
-pub use paste::paste;
 use futures::future::FutureExt;
 use futures::task::Waker;
 use futures01::{future, task::Task, Future};
@@ -187,6 +186,7 @@ use gstuff::binprint;
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::Response;
 use parking_lot::{Mutex as PaMutex, MutexGuard as PaMutexGuard};
+pub use paste::paste;
 use rand::RngCore;
 use rand::{rngs::SmallRng, SeedableRng};
 use serde::{de, ser};

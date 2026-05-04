@@ -1363,9 +1363,7 @@ pub fn mm_ctx_with_custom_db() -> MmArc {
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
     let connection = Connection::open_in_memory().unwrap();
-    let _ = ctx
-        .sqlite_connection
-        .pin(Arc::new(Mutex::new(connection)));
+    let _ = ctx.sqlite_connection.pin(Arc::new(Mutex::new(connection)));
 
     ctx
 }

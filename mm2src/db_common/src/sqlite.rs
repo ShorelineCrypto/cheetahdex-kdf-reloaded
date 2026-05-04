@@ -321,7 +321,9 @@ where
 /// be safe to use, while giving great speed boost.
 /// With these, Mac and Linux have comparable SQLite performance.
 pub fn run_optimization_pragmas(conn: &Connection) -> Result<(), SqlError> {
-    conn.query_row("pragma journal_mode = WAL;", rusqlite::NO_PARAMS, |row| row.get::<_, String>(0))?;
+    conn.query_row("pragma journal_mode = WAL;", rusqlite::NO_PARAMS, |row| {
+        row.get::<_, String>(0)
+    })?;
     conn.execute("pragma synchronous = normal;", rusqlite::NO_PARAMS)?;
     conn.execute("pragma temp_store = memory;", rusqlite::NO_PARAMS)?;
     conn.execute("pragma foreign_keys = ON;", rusqlite::NO_PARAMS)?;

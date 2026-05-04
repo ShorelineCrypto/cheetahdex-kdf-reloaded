@@ -118,7 +118,10 @@ async fn close_call_unwrap_test() {
 
     assert!(conn.close().await.is_ok());
 
-    conn2.call_unwrap(|conn| conn.execute("SELECT 1;", rusqlite::NO_PARAMS)).await.unwrap();
+    conn2
+        .call_unwrap(|conn| conn.execute("SELECT 1;", rusqlite::NO_PARAMS))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
