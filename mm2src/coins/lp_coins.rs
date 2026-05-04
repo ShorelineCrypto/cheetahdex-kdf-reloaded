@@ -254,6 +254,7 @@ pub use solana::spl::SplToken;
 #[cfg(not(target_arch = "wasm32"))]
 pub use solana::{solana_coin_from_conf_and_params, SolanaActivationParams, SolanaCoin, SolanaFeeDetails};
 
+pub mod siacoin;
 #[cfg(target_arch = "wasm32")]
 pub mod tx_history_db;
 pub mod utxo;
@@ -463,11 +464,18 @@ pub enum TransactionEnum {
     SignedEthTx(SignedEthTx),
     #[cfg(not(target_arch = "wasm32"))]
     ZTransaction(ZTransaction),
+    SiaTransaction(siacoin::SiaTransaction),
 }
 ifrom!(TransactionEnum, UtxoTx);
 ifrom!(TransactionEnum, SignedEthTx);
 #[cfg(not(target_arch = "wasm32"))]
 ifrom!(TransactionEnum, ZTransaction);
+
+impl From<siacoin::SiaTransaction> for TransactionEnum {
+    fn from(t: siacoin::SiaTransaction) -> TransactionEnum {
+        TransactionEnum::SiaTransaction(t)
+    }
+}
 
 // NB: When stable and groked by IDEs, `enum_dispatch` can be used instead of `Deref` to speed things up.
 impl Deref for TransactionEnum {
@@ -478,6 +486,7 @@ impl Deref for TransactionEnum {
             TransactionEnum::SignedEthTx(ref t) => t,
             #[cfg(not(target_arch = "wasm32"))]
             TransactionEnum::ZTransaction(ref t) => t,
+            TransactionEnum::SiaTransaction(ref t) => t,
         }
     }
 }
@@ -1131,6 +1140,7 @@ pub enum TxFeeDetails {
     Slp(SlpFeeDetails),
     #[cfg(not(target_arch = "wasm32"))]
     Solana(SolanaFeeDetails),
+    Sia(siacoin::SiaFeeDetails),
 }
 
 /// Deserialize the TxFeeDetails as an untagged enum.
@@ -1156,6 +1166,12 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
             #[cfg(not(target_arch = "wasm32"))]
             TxFeeDetailsUnTagged::Solana(f) => Ok(TxFeeDetails::Solana(f)),
         }
+    }
+}
+
+impl From<siacoin::SiaFeeDetails> for TxFeeDetails {
+    fn from(d: siacoin::SiaFeeDetails) -> Self {
+        TxFeeDetails::Sia(d)
     }
 }
 
@@ -2629,6 +2645,7 @@ pub enum MmCoinEnum {
     SplToken(SplToken),
     #[cfg(not(target_arch = "wasm32"))]
     LightningCoin(LightningCoin),
+    SiaCoin(siacoin::SiaCoin),
     Test(TestCoin),
 }
 
@@ -2702,6 +2719,12 @@ impl From<ZCoin> for MmCoinEnum {
     }
 }
 
+impl From<siacoin::SiaCoin> for MmCoinEnum {
+    fn from(c: siacoin::SiaCoin) -> MmCoinEnum {
+        MmCoinEnum::SiaCoin(c)
+    }
+}
+
 // NB: When stable and groked by IDEs, `enum_dispatch` can be used instead of `Deref` to speed things up.
 impl Deref for MmCoinEnum {
     type Target = dyn MmCoin;
@@ -2722,6 +2745,7 @@ impl Deref for MmCoinEnum {
             MmCoinEnum::SolanaCoin(ref c) => c,
             #[cfg(not(target_arch = "wasm32"))]
             MmCoinEnum::SplToken(ref c) => c,
+            MmCoinEnum::SiaCoin(ref c) => c,
         }
     }
 }
@@ -3005,6 +3029,7 @@ pub enum CoinProtocol {
     },
     #[cfg(not(target_arch = "wasm32"))]
     ZHTLC,
+    SIA,
 }
 
 pub type RpcTransportEventHandlerShared = Arc<dyn RpcTransportEventHandler + Send + Sync + 'static>;
@@ -3267,6 +3292,9 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::SPLTOKEN { .. } => {
             return ERR!("SplToken protocol is not supported by lp_coininit - use enable_spl instead")
+        },
+        CoinProtocol::SIA => {
+            return ERR!("SIA protocol is not supported by lp_coininit - use task::enable_sia::init instead")
         },
     };
 
@@ -3860,6 +3888,7 @@ pub fn address_by_coin_conf_and_pubkey_str(
         },
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC => ERR!("address_by_coin_conf_and_pubkey_str is not supported for ZHTLC protocol!"),
+        CoinProtocol::SIA => ERR!("address_by_coin_conf_and_pubkey_str is not supported for SIA protocol!"),
     }
 }
 

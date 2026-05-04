@@ -232,6 +232,10 @@ pub const SATOSHIS: u64 = 100_000_000;
 /// exists only for backward compatibility in coin crate internals (e.g. gas
 /// estimation) and test code.
 pub const DEX_FEE_ADDR_PUBKEY: &str = "03bc2c7ba671bae4a6fc835244c9762b41647b9827d4780a89a949b984a8ddcc06";
+
+/// Ed25519 public key used as the DEX fee address for Siacoin (ed25519-based chains).
+pub const DEX_FEE_PUBKEY_ED25519: &str = "77b0936728f63257b074c7b3fb2c4fad98df345f57de1ec418fc42619e4e29f8";
+
 lazy_static! {
     /// DEPRECATED: Use `mm2_net_config::NetConfig::dex_fee_addr_raw_pubkey()`.
     /// Kept for coin crate backward compatibility.

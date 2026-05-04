@@ -78,6 +78,9 @@ mm2_err_handle = { path = "mm2src/mm2_err_handle" }
 mm2_main = { path = "mm2src/mm2_main" }
 mm2_metrics = { path = "mm2src/mm2_metrics" }
 mm2_number = { path = "mm2src/mm2_number" }
+sia-rust = { git = "https://github.com/KomodoPlatform/sia-rust", branch = "refactor/rc-cleanup" }
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.release]
 # Due to the "package" section only affects out-of-workspace crates, as intended.
@@ -87,3 +90,6 @@ debug-assertions = false
 [profile.release.package."*"]
 # Turns debugging symbols off for the out-of-workspace dependencies.
 debug = false
+
+[patch."https://github.com/KomodoPlatform/sia-rust"]
+sia-rust = { path = "sia-rust-patched" }
