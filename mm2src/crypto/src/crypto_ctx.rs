@@ -1,6 +1,8 @@
 use crate::global_hd_ctx::{GlobalHDAccountArc, GlobalHDAccountCtx};
 use crate::hw_client::{HwError, HwProcessingError, TrezorConnectProcessor};
 use crate::hw_ctx::{HardwareWalletArc, HardwareWalletCtx};
+#[cfg(target_arch = "wasm32")]
+use crate::metamask_ctx::{MetamaskArc, MetamaskCtx, MetamaskError};
 use crate::privkey::{key_pair_from_seed, PrivKeyError};
 use arrayref::array_ref;
 use common::bits256;
@@ -63,6 +65,20 @@ impl<ProcessorError> From<HwProcessingError<ProcessorError>> for HwCtxInitError<
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+pub enum MetamaskCtxInitError {
+    InitializingAlready,
+    MetamaskError(MetamaskError),
+}
+
+#[cfg(target_arch = "wasm32")]
+impl From<MetamaskError> for MetamaskCtxInitError {
+    fn from(e: MetamaskError) -> Self {
+        MetamaskCtxInitError::MetamaskError(e)
+    }
+}
+
 /// Determines whether the user initialized with a legacy Iguana passphrase
 /// or a BIP39 mnemonic (HD wallet mode).
 #[derive(Clone)]
@@ -82,6 +98,9 @@ pub struct CryptoCtx {
     key_pair_policy: KeyPairPolicy,
     /// Can be initialized on [`CryptoCtx::init_hw_ctx_with_trezor`].
     hw_ctx: RwLock<HardwareWalletCtxState>,
+    /// MetaMask browser-wallet context (WASM only).
+    #[cfg(target_arch = "wasm32")]
+    metamask_ctx: RwLock<MetamaskCtxState>,
 }
 
 impl CryptoCtx {
@@ -208,6 +227,35 @@ impl CryptoCtx {
         *self.hw_ctx.write() = HardwareWalletCtxState::NotInitialized;
     }
 
+    /// Returns the MetaMask context if initialized (WASM only).
+    #[cfg(target_arch = "wasm32")]
+    pub fn metamask_ctx(&self) -> Option<MetamaskArc> {
+        self.metamask_ctx.read().to_option().cloned()
+    }
+
+    /// Initializes MetaMask: detects provider, requests account, signs
+    /// login challenge and recovers the public key.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn init_metamask_ctx(&self, project_name: String) -> MmResult<MetamaskArc, MetamaskCtxInitError> {
+        {
+            let mut state = self.metamask_ctx.write();
+            if let MetamaskCtxState::Initializing = state.deref() {
+                return MmError::err(MetamaskCtxInitError::InitializingAlready);
+            }
+            *state = MetamaskCtxState::Initializing;
+        }
+        let ctx = MetamaskCtx::init(project_name).await.map_mm_err()?;
+        let arc = MetamaskArc::new(ctx);
+        *self.metamask_ctx.write() = MetamaskCtxState::Ready(arc.clone());
+        Ok(arc)
+    }
+
+    /// Resets the MetaMask context to uninitialized state (WASM only).
+    #[cfg(target_arch = "wasm32")]
+    pub fn reset_metamask_ctx(&self) {
+        *self.metamask_ctx.write() = MetamaskCtxState::NotInitialized;
+    }
+
     /// Internal: builds the CryptoCtx using the chosen key pair policy.
     fn init_crypto_ctx_with_policy_builder(
         ctx: MmArc,
@@ -237,6 +285,8 @@ impl CryptoCtx {
             secp256k1_key_pair,
             key_pair_policy,
             hw_ctx: RwLock::new(HardwareWalletCtxState::NotInitialized),
+            #[cfg(target_arch = "wasm32")]
+            metamask_ctx: RwLock::new(MetamaskCtxState::NotInitialized),
         };
         let result = Arc::new(crypto_ctx);
         *ctx_field = Some(result.clone());
@@ -288,6 +338,23 @@ impl HardwareWalletCtxState {
     fn to_option(&self) -> Option<&HardwareWalletArc> {
         match self {
             HardwareWalletCtxState::Ready(hw_ctx) => Some(hw_ctx),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+enum MetamaskCtxState {
+    NotInitialized,
+    Initializing,
+    Ready(MetamaskArc),
+}
+
+#[cfg(target_arch = "wasm32")]
+impl MetamaskCtxState {
+    fn to_option(&self) -> Option<&MetamaskArc> {
+        match self {
+            MetamaskCtxState::Ready(ctx) => Some(ctx),
             _ => None,
         }
     }

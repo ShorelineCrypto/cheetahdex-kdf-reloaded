@@ -1,11 +1,30 @@
 use crate::now_float;
+use futures::future::{abortable, AbortHandle};
 use futures::task::{Context, Poll};
+use futures::FutureExt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
+
+/// An [`AbortHandle`] wrapper that automatically aborts its associated future
+/// when dropped, preventing resource leaks in fire-and-forget spawn patterns.
+pub struct AbortOnDropHandle(AbortHandle);
+
+impl From<AbortHandle> for AbortOnDropHandle {
+    fn from(handle: AbortHandle) -> Self {
+        AbortOnDropHandle(handle)
+    }
+}
+
+impl Drop for AbortOnDropHandle {
+    #[inline(always)]
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 
 #[wasm_bindgen]
 extern "C" {
@@ -26,6 +45,14 @@ pub fn spawn_boxed(future: Box<dyn Future<Output = ()> + Send + Unpin + 'static>
 
 pub fn spawn_local(future: impl Future<Output = ()> + 'static) {
     wasm_bindgen_futures::spawn_local(future)
+}
+
+/// Spawns a local (non-`Send`) future that is automatically aborted when the
+/// returned [`AbortOnDropHandle`] is dropped.
+pub fn spawn_local_abortable(future: impl Future<Output = ()> + 'static) -> AbortOnDropHandle {
+    let (abortable_fut, handle) = abortable(future);
+    spawn_local(abortable_fut.then(|_| futures::future::ready(())));
+    AbortOnDropHandle::from(handle)
 }
 
 /// The timer uses [`setTimeout`] and [`clearTimeout`] for scheduling.

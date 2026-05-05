@@ -1,6 +1,6 @@
 //! Ethereum key operations: address derivation and signature recovery.
 
-use ethereum_types::{H256, H520};
+pub use ethereum_types::{H256, H520};
 use mm2_err_handle::prelude::*;
 
 pub use ethkey::{Address, Error as EthKeyError, Signature};

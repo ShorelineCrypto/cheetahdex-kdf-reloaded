@@ -45,6 +45,7 @@ members = [
     "mm2src/trading_api",
     "mm2src/trezor",
     "mm2src/kdf_walletconnect",
+    "mm2src/mm2_metamask",
 ]
 
 # https://doc.rust-lang.org/beta/cargo/reference/features.html#feature-resolver-version-2

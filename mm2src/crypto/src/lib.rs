@@ -19,6 +19,11 @@ mod slip21;
 mod standard_hd_path;
 mod xpub;
 
+#[cfg(target_arch = "wasm32")]
+mod metamask_ctx;
+#[cfg(target_arch = "wasm32")]
+mod metamask_login;
+
 // Re-exports from bip32_child
 pub use bip32_child::{Bip32Child, Bip32DerPathError, Bip32DerPathOps, Bip44Tail};
 
@@ -32,7 +37,15 @@ pub use bip44::{
 };
 
 // Re-exports from crypto_ctx
+#[cfg(target_arch = "wasm32")]
+pub use crypto_ctx::MetamaskCtxInitError;
 pub use crypto_ctx::{CryptoCtx, CryptoCtxError, CryptoInitError, CryptoInitResult, HwCtxInitError, KeyPairPolicy};
+
+// Re-exports from metamask_ctx (WASM only)
+#[cfg(target_arch = "wasm32")]
+pub use metamask_ctx::{MetamaskArc, MetamaskError, MetamaskResult, MetamaskWeak};
+#[cfg(target_arch = "wasm32")]
+pub use mm2_metamask as metamask;
 
 // Re-exports from global_hd_ctx
 pub use global_hd_ctx::{derive_secp256k1_secret, GlobalHDAccountArc};
