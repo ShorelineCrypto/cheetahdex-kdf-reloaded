@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 cfg_wasm32! {
     use mm2_rpc::wasm_rpc::WasmRpcSender;
@@ -30,8 +30,10 @@ cfg_wasm32! {
 }
 
 cfg_native! {
-    use mm2_metrics::prometheus;
+    use db_common::async_sql_conn::AsyncConnection;
     use db_common::sqlite::rusqlite::Connection;
+    use futures::lock::Mutex as AsyncMutex;
+    use mm2_metrics::prometheus;
     use std::net::{IpAddr, SocketAddr};
     use std::sync::MutexGuard;
 }
@@ -118,6 +120,9 @@ pub struct MmCtx {
     /// Name of the currently active wallet (set once during init).
     /// `None` if running without wallet persistence (e.g. hw-only or legacy mode).
     pub wallet_name: Constructible<Option<String>>,
+    pub wallet_connect: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async_sqlite_connection: OnceLock<Arc<AsyncMutex<AsyncConnection>>>,
     pub mm_init_ctx: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
     pub abort_handlers: Mutex<Vec<AbortHandle>>,
     #[cfg(target_arch = "wasm32")]
@@ -158,6 +163,9 @@ impl MmCtx {
             sqlite_connection: Constructible::default(),
             mm_version: "".into(),
             wallet_name: Constructible::default(),
+            wallet_connect: Mutex::new(None),
+            #[cfg(not(target_arch = "wasm32"))]
+            async_sqlite_connection: OnceLock::default(),
             mm_init_ctx: Mutex::new(None),
             abort_handlers: Mutex::new(Vec::new()),
             #[cfg(target_arch = "wasm32")]
@@ -321,6 +329,21 @@ impl MmCtx {
             .or(&|| panic!("sqlite_connection is not initialized"))
             .lock()
             .unwrap()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn init_async_sqlite_connection(&self) -> Result<(), String> {
+        let sqlite_file_path = self.dbdir().join("KOMODEFI.db");
+        log::debug!(
+            "Trying to open async SQLite database file {}",
+            sqlite_file_path.display()
+        );
+        let async_conn = try_s!(AsyncConnection::open(sqlite_file_path).await);
+        try_s!(self
+            .async_sqlite_connection
+            .set(Arc::new(AsyncMutex::new(async_conn)))
+            .map_err(|_| "Already initialized".to_string()));
+        Ok(())
     }
 }
 
