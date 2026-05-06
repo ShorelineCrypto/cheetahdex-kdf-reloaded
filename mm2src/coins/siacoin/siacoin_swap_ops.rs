@@ -1,0 +1,728 @@
+// siacoin_swap_ops — SwapOps trait implementation and internal swap helper methods.
+
+use super::*;
+
+// ── Properly-typed swap methods (called by trait impls) ──────────────
+
+impl SiaCoin {
+    async fn new_send_taker_fee(
+        &self,
+        dex_fee: &DexFee,
+        uuid: &[u8],
+        _fee_addr: &[u8],
+    ) -> Result<TransactionEnum, SendTakerFeeError> {
+        let uuid_type_check = Uuid::from_slice(uuid)?;
+
+        match uuid_type_check.get_version_num() {
+            4 => (),
+            version => return Err(SendTakerFeeError::UuidVersion(version)),
+        }
+
+        let trade_fee_amount = match dex_fee {
+            DexFee::Standard(mm_num) => siacoin_to_hastings(BigDecimal::from(mm_num.clone()))?,
+            other => return Err(SendTakerFeeError::DexFeeVariant(other.to_string())),
+        };
+
+        let my_keypair = self.my_keypair()?;
+
+        let tx = V2TransactionBuilder::new()
+            .miner_fee(Currency::DEFAULT_FEE)
+            .add_siacoin_output((FEE_ADDR.clone(), trade_fee_amount).into())
+            .fund_tx_single_source(&self.client, &my_keypair.public())
+            .await?
+            .arbitrary_data(uuid.to_vec().into())
+            .add_change_output(&my_keypair.public().address())
+            .sign_simple(vec![my_keypair])
+            .build();
+
+        self.client.broadcast_transaction(&tx).await?;
+
+        Ok(TransactionEnum::SiaTransaction(tx.into()))
+    }
+
+    async fn new_send_maker_payment(
+        &self,
+        time_lock: u32,
+        _maker_pub: &[u8],
+        taker_pub: &[u8],
+        secret_hash: &[u8],
+        amount: BigDecimal,
+    ) -> Result<TransactionEnum, SendMakerPaymentError> {
+        let my_keypair = self.my_keypair()?;
+        let maker_public_key = my_keypair.public();
+
+        if taker_pub.len() != 33 {
+            return Err(SendMakerPaymentError::InvalidTakerPublicKeyLength(taker_pub.to_vec()));
+        }
+        let taker_public_key = PublicKey::from_bytes(&taker_pub[..32])?;
+
+        let secret_hash = Hash256::try_from(secret_hash)?;
+
+        let htlc_spend_policy =
+            SpendPolicy::atomic_swap(&taker_public_key, &maker_public_key, time_lock as u64, &secret_hash);
+
+        let trade_amount = siacoin_to_hastings(amount)?;
+
+        let tx = V2TransactionBuilder::new()
+            .miner_fee(Currency::DEFAULT_FEE)
+            .add_siacoin_output((htlc_spend_policy.address(), trade_amount).into())
+            .fund_tx_single_source(&self.client, &my_keypair.public())
+            .await?
+            .add_change_output(&my_keypair.public().address())
+            .sign_simple(vec![my_keypair])
+            .build();
+
+        self.client.broadcast_transaction(&tx).await?;
+
+        Ok(TransactionEnum::SiaTransaction(tx.into()))
+    }
+
+    async fn new_send_taker_payment(
+        &self,
+        time_lock: u32,
+        _taker_pub: &[u8],
+        maker_pub: &[u8],
+        secret_hash: &[u8],
+        amount: BigDecimal,
+    ) -> Result<TransactionEnum, SendTakerPaymentError> {
+        let my_keypair = self.my_keypair()?;
+        let taker_public_key = my_keypair.public();
+
+        if maker_pub.len() != 33 {
+            return Err(SendTakerPaymentError::InvalidMakerPublicKeyLength(maker_pub.to_vec()));
+        }
+        let maker_public_key = PublicKey::from_bytes(&maker_pub[..32])?;
+
+        let secret_hash = Hash256::try_from(secret_hash)?;
+
+        let htlc_spend_policy =
+            SpendPolicy::atomic_swap(&maker_public_key, &taker_public_key, time_lock as u64, &secret_hash);
+
+        let trade_amount = siacoin_to_hastings(amount)?;
+
+        let tx = V2TransactionBuilder::new()
+            .miner_fee(Currency::DEFAULT_FEE)
+            .add_siacoin_output((htlc_spend_policy.address(), trade_amount).into())
+            .fund_tx_single_source(&self.client, &my_keypair.public())
+            .await?
+            .add_change_output(&my_keypair.public().address())
+            .sign_simple(vec![my_keypair])
+            .build();
+
+        self.client.broadcast_transaction(&tx).await?;
+
+        Ok(TransactionEnum::SiaTransaction(tx.into()))
+    }
+
+    async fn new_send_maker_spends_taker_payment(
+        &self,
+        taker_payment_tx: &[u8],
+        time_lock: u32,
+        taker_pub: &[u8],
+        secret: &[u8],
+        secret_hash: &[u8],
+    ) -> Result<TransactionEnum, MakerSpendsTakerPaymentError> {
+        let my_keypair = self.my_keypair()?;
+        let maker_public_key = my_keypair.public();
+
+        if taker_pub.len() != 33 {
+            return Err(MakerSpendsTakerPaymentError::InvalidTakerPublicKeyLength(
+                taker_pub.to_vec(),
+            ));
+        }
+        let taker_public_key = PublicKey::from_bytes(&taker_pub[..32])?;
+
+        let _taker_payment_tx = SiaTransaction::try_from(taker_payment_tx.to_vec())?;
+        let taker_payment_txid = _taker_payment_tx.txid();
+
+        let secret = Preimage::try_from(secret)?;
+        let secret_hash = Hash256::try_from(secret_hash)?;
+
+        let input_spend_policy =
+            SpendPolicy::atomic_swap_success(&maker_public_key, &taker_public_key, time_lock as u64, &secret_hash);
+
+        let htlc_utxo = self
+            .client
+            .utxo_from_txid(&taker_payment_txid, 0)
+            .await
+            .map_err(Box::new)?;
+
+        let miner_fee = Currency::DEFAULT_FEE;
+        let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
+
+        let tx = V2TransactionBuilder::new()
+            .miner_fee(miner_fee)
+            .add_siacoin_output((maker_public_key.address(), htlc_utxo_amount - miner_fee).into())
+            .add_siacoin_input(htlc_utxo.output, input_spend_policy)
+            .satisfy_atomic_swap_success(my_keypair, secret, 0u32)?
+            .build();
+
+        self.client.broadcast_transaction(&tx).await?;
+
+        Ok(TransactionEnum::SiaTransaction(tx.into()))
+    }
+
+    async fn new_send_taker_spends_maker_payment(
+        &self,
+        maker_payment_tx: &[u8],
+        time_lock: u32,
+        maker_pub: &[u8],
+        secret: &[u8],
+        secret_hash: &[u8],
+    ) -> Result<TransactionEnum, TakerSpendsMakerPaymentError> {
+        let my_keypair = self.my_keypair()?;
+        let taker_public_key = my_keypair.public();
+
+        if maker_pub.len() != 33 {
+            return Err(TakerSpendsMakerPaymentError::InvalidMakerPublicKeyLength(
+                maker_pub.to_vec(),
+            ));
+        }
+        let maker_public_key = PublicKey::from_bytes(&maker_pub[..32])?;
+
+        let _maker_payment_tx = SiaTransaction::try_from(maker_payment_tx.to_vec())?;
+        let maker_payment_txid = _maker_payment_tx.txid();
+
+        let secret = Preimage::try_from(secret)?;
+        let secret_hash = Hash256::try_from(secret_hash)?;
+
+        let input_spend_policy =
+            SpendPolicy::atomic_swap_success(&taker_public_key, &maker_public_key, time_lock as u64, &secret_hash);
+
+        let htlc_utxo = self
+            .client
+            .utxo_from_txid(&maker_payment_txid, 0)
+            .await
+            .map_err(Box::new)?;
+
+        let miner_fee = Currency::DEFAULT_FEE;
+        let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
+
+        let tx = V2TransactionBuilder::new()
+            .miner_fee(miner_fee)
+            .add_siacoin_output((taker_public_key.address(), htlc_utxo_amount - miner_fee).into())
+            .add_siacoin_input_with_basis(htlc_utxo, input_spend_policy)
+            .satisfy_atomic_swap_success(my_keypair, secret, 0u32)?
+            .build();
+
+        self.client.broadcast_transaction(&tx).await?;
+
+        Ok(TransactionEnum::SiaTransaction(tx.into()))
+    }
+
+    async fn new_validate_fee_impl(&self, args: ValidateFeeArgs<'_>) -> Result<(), ValidateFeeError> {
+        let args = SiaValidateFeeArgs::try_from(args)?;
+
+        let peer_tx = args.fee_tx.0.clone();
+        let fee_txid = peer_tx.txid();
+
+        let found_in_block = self.client.get_event(&fee_txid).await;
+
+        let fee_tx = match found_in_block {
+            Ok(event) => {
+                let tx = match event.data {
+                    EventDataWrapper::V2Transaction(tx) => tx,
+                    _ => return Err(ValidateFeeError::EventVariant(event)),
+                };
+
+                let confirmed_at_height = event.index.height;
+                if confirmed_at_height < args.min_block_number {
+                    return Err(ValidateFeeError::MininumConfirmedHeight {
+                        txid: tx.txid(),
+                        min_block_number: args.min_block_number,
+                    });
+                }
+                tx
+            },
+            Err(e) => {
+                debug!(
+                    "SiaCoin::new_validate_fee: fee_tx not found on chain {}, checking mempool",
+                    e
+                );
+                match self.client.get_unconfirmed_transaction(&fee_txid).await? {
+                    Some(tx) => {
+                        let current_height = self.client.current_height().await?;
+                        if current_height < args.min_block_number {
+                            return Err(ValidateFeeError::MininumMempoolHeight {
+                                txid: tx.txid(),
+                                min_block_number: args.min_block_number,
+                            });
+                        }
+                        tx
+                    },
+                    None => return Err(ValidateFeeError::TxNotFound(fee_txid.clone())),
+                }
+            },
+        };
+
+        if !fee_tx
+            .siacoin_inputs
+            .into_iter()
+            .all(|input| input.satisfied_policy.policy.address() == args.taker_public_key.address())
+        {
+            return Err(ValidateFeeError::InputsOrigin(fee_txid.clone()));
+        }
+
+        match fee_tx.siacoin_outputs.len() {
+            1 | 2 => (),
+            outputs_length => {
+                return Err(ValidateFeeError::VoutLength {
+                    txid: fee_txid.clone(),
+                    outputs_length,
+                })
+            },
+        }
+
+        if fee_tx.siacoin_outputs[0].address != *FEE_ADDR {
+            return Err(ValidateFeeError::InvalidFeeAddress {
+                txid: fee_txid.clone(),
+                address: fee_tx.siacoin_outputs[0].address.clone(),
+            });
+        }
+
+        if fee_tx.siacoin_outputs[0].value != args.dex_fee_amount {
+            return Err(ValidateFeeError::InvalidFeeAmount {
+                txid: fee_txid.clone(),
+                expected: args.dex_fee_amount,
+                actual: fee_tx.siacoin_outputs[0].value,
+            });
+        }
+
+        let fee_tx_uuid = Uuid::from_slice(&fee_tx.arbitrary_data.0)?;
+        if fee_tx_uuid != args.uuid {
+            return Err(ValidateFeeError::InvalidUuid {
+                txid: fee_txid.clone(),
+                expected: args.uuid,
+                actual: fee_tx_uuid,
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn send_refund_htlc(
+        &self,
+        payment_tx: &[u8],
+        time_lock: u32,
+        other_pubkey: &[u8],
+        secret_hash: &[u8],
+    ) -> Result<TransactionEnum, SendRefundHltcError> {
+        let my_keypair = self.my_keypair()?;
+        let refund_public_key = my_keypair.public();
+
+        let sia_args = SiaRefundPaymentArgs::try_from_positional(payment_tx, time_lock, other_pubkey, secret_hash)?;
+
+        let input_spend_policy = SpendPolicy::atomic_swap_refund(
+            &sia_args.success_public_key,
+            &refund_public_key,
+            sia_args.time_lock,
+            &sia_args.secret_hash,
+        );
+
+        let htlc_utxo = self
+            .client
+            .utxo_from_txid(&sia_args.payment_tx.txid(), 0)
+            .await
+            .map_err(Box::new)?;
+
+        let miner_fee = Currency::DEFAULT_FEE;
+        let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
+
+        let tx = V2TransactionBuilder::new()
+            .miner_fee(miner_fee)
+            .add_siacoin_output((my_keypair.public().address(), htlc_utxo_amount - miner_fee).into())
+            .add_siacoin_input_with_basis(htlc_utxo, input_spend_policy)
+            .satisfy_atomic_swap_refund(my_keypair, 0u32)?
+            .build();
+
+        self.client.broadcast_transaction(&tx).await?;
+
+        Ok(TransactionEnum::SiaTransaction(tx.into()))
+    }
+
+    async fn new_check_if_my_payment_sent(
+        &self,
+        time_lock: u32,
+        _my_pub: &[u8],
+        other_pub: &[u8],
+        secret_hash: &[u8],
+        _search_from_block: u64,
+        amount: BigDecimal,
+    ) -> Result<Option<TransactionEnum>, SiaCheckIfMyPaymentSentError> {
+        let sia_args = SiaCheckIfMyPaymentSentArgs::try_from_positional(time_lock, other_pub, secret_hash, amount)?;
+
+        let my_keypair = self.my_keypair()?;
+        let refund_public_key = my_keypair.public();
+
+        let spend_policy = SpendPolicy::atomic_swap(
+            &sia_args.success_public_key,
+            &refund_public_key,
+            sia_args.time_lock,
+            &sia_args.secret_hash,
+        );
+        let htlc_address = spend_policy.address();
+
+        let events_result = self.client.get_address_events(htlc_address).await;
+        let events = match events_result {
+            Ok(events) => events,
+            Err(_) => return Ok(None),
+        };
+
+        let event = match events.len() {
+            0 => return Ok(None),
+            _ => events[0].clone(),
+        };
+
+        let tx = match event.data {
+            EventDataWrapper::V2Transaction(tx) => tx,
+            wrong_variant => return Err(SiaCheckIfMyPaymentSentError::EventVariant(wrong_variant)),
+        };
+
+        Ok(Some(SiaTransaction(tx).into()))
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn sia_extract_secret(
+        &self,
+        expected_hash_slice: &[u8],
+        spend_tx: &[u8],
+    ) -> Result<Vec<u8>, SiaCoinSiaExtractSecretError> {
+        let tx = SiaTransaction::try_from(spend_tx)?;
+        let expected_hash = Hash256::try_from(expected_hash_slice)?;
+
+        let found_secret =
+            tx.0.siacoin_inputs
+                .iter()
+                .flat_map(|input| input.satisfied_policy.preimages.iter())
+                .find(|extracted_secret| {
+                    let check_secret_hash = Hash256(sha256(&extracted_secret.0).take());
+                    check_secret_hash == expected_hash
+                });
+
+        found_secret
+            .map(|secret| secret.0.to_vec())
+            .ok_or(SiaCoinSiaExtractSecretError::FailedToExtract { tx, expected_hash })
+    }
+
+    async fn sia_can_refund_htlc(&self, locktime: u64) -> Result<CanRefundHtlc, SiaCoinSiaCanRefundHtlcError> {
+        let median_timestamp = self.client.get_median_timestamp().await?;
+
+        if locktime < median_timestamp {
+            return Ok(CanRefundHtlc::CanRefundNow);
+        }
+        Ok(CanRefundHtlc::HaveToWait(locktime - median_timestamp))
+    }
+
+    async fn validate_htlc_payment(&self, input: ValidatePaymentInput) -> Result<(), SiaValidateHtlcPaymentError> {
+        let sia_args = SiaValidatePaymentInputArgs::try_from(input)?;
+
+        let my_keypair = self.my_keypair()?;
+        let success_public_key = my_keypair.public();
+        let refund_public_key = sia_args.other_pub;
+
+        let htlc_address = SpendPolicy::atomic_swap(
+            &success_public_key,
+            &refund_public_key,
+            sia_args.time_lock,
+            &sia_args.secret_hash,
+        )
+        .address();
+
+        let expected_htlc_output = SiacoinOutput {
+            value: sia_args.amount,
+            address: htlc_address,
+        };
+
+        let htlc_output = match sia_args.payment_tx.0.siacoin_outputs.get(HTLC_VOUT_INDEX as usize) {
+            Some(output) => output,
+            None => {
+                return Err(SiaValidateHtlcPaymentError::InvalidOutputLength {
+                    expected: HTLC_VOUT_INDEX + 1,
+                    actual: sia_args.payment_tx.0.siacoin_outputs.len() as u32,
+                    txid: sia_args.payment_tx.0.txid(),
+                })
+            },
+        };
+
+        if *htlc_output != expected_htlc_output {
+            return Err(SiaValidateHtlcPaymentError::InvalidOutput {
+                expected: expected_htlc_output,
+                actual: htlc_output.clone(),
+                txid: sia_args.payment_tx.0.txid(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+// ── SwapOps trait impl ───────────────────────────────────────────────
+
+#[async_trait]
+impl SwapOps for SiaCoin {
+    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], uuid: &[u8]) -> super::TransactionFut {
+        let coin = self.clone();
+        let dex_fee = dex_fee.clone();
+        let fee_addr = fee_addr.to_vec();
+        let uuid = uuid.to_vec();
+        let fut = async move {
+            coin.new_send_taker_fee(&dex_fee, &uuid, &fee_addr)
+                .await
+                .map_err(|e| TransactionErr::Plain(e.to_string()))
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn send_maker_payment(
+        &self,
+        time_lock: u32,
+        maker_pub: &[u8],
+        taker_pub: &[u8],
+        secret_hash: &[u8],
+        amount: BigDecimal,
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> super::TransactionFut {
+        let coin = self.clone();
+        let maker_pub = maker_pub.to_vec();
+        let taker_pub = taker_pub.to_vec();
+        let secret_hash = secret_hash.to_vec();
+        let fut = async move {
+            coin.new_send_maker_payment(time_lock, &maker_pub, &taker_pub, &secret_hash, amount)
+                .await
+                .map_err(|e| TransactionErr::Plain(e.to_string()))
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn send_taker_payment(
+        &self,
+        time_lock: u32,
+        taker_pub: &[u8],
+        maker_pub: &[u8],
+        secret_hash: &[u8],
+        amount: BigDecimal,
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> super::TransactionFut {
+        let coin = self.clone();
+        let taker_pub = taker_pub.to_vec();
+        let maker_pub = maker_pub.to_vec();
+        let secret_hash = secret_hash.to_vec();
+        let fut = async move {
+            coin.new_send_taker_payment(time_lock, &taker_pub, &maker_pub, &secret_hash, amount)
+                .await
+                .map_err(|e| TransactionErr::Plain(e.to_string()))
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn send_maker_spends_taker_payment(
+        &self,
+        taker_payment_tx: &[u8],
+        time_lock: u32,
+        taker_pub: &[u8],
+        secret: &[u8],
+        _htlc_privkey: &[u8],
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> super::TransactionFut {
+        let coin = self.clone();
+        let taker_payment_tx = taker_payment_tx.to_vec();
+        let taker_pub = taker_pub.to_vec();
+        let secret = secret.to_vec();
+        // Use secret to derive secret_hash for the HTLC
+        let secret_hash_bytes: Vec<u8> = sha256(&secret).take().to_vec();
+        let fut = async move {
+            coin.new_send_maker_spends_taker_payment(
+                &taker_payment_tx,
+                time_lock,
+                &taker_pub,
+                &secret,
+                &secret_hash_bytes,
+            )
+            .await
+            .map_err(|e| TransactionErr::Plain(e.to_string()))
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn send_taker_spends_maker_payment(
+        &self,
+        maker_payment_tx: &[u8],
+        time_lock: u32,
+        maker_pub: &[u8],
+        secret: &[u8],
+        _htlc_privkey: &[u8],
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> super::TransactionFut {
+        let coin = self.clone();
+        let maker_payment_tx = maker_payment_tx.to_vec();
+        let maker_pub = maker_pub.to_vec();
+        let secret = secret.to_vec();
+        let secret_hash_bytes: Vec<u8> = sha256(&secret).take().to_vec();
+        let fut = async move {
+            coin.new_send_taker_spends_maker_payment(
+                &maker_payment_tx,
+                time_lock,
+                &maker_pub,
+                &secret,
+                &secret_hash_bytes,
+            )
+            .await
+            .map_err(|e| TransactionErr::Plain(e.to_string()))
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn send_taker_refunds_payment(
+        &self,
+        taker_payment_tx: &[u8],
+        time_lock: u32,
+        maker_pub: &[u8],
+        secret_hash: &[u8],
+        _htlc_privkey: &[u8],
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> super::TransactionFut {
+        let coin = self.clone();
+        let taker_payment_tx = taker_payment_tx.to_vec();
+        let maker_pub = maker_pub.to_vec();
+        let secret_hash = secret_hash.to_vec();
+        let fut = async move {
+            coin.send_refund_htlc(&taker_payment_tx, time_lock, &maker_pub, &secret_hash)
+                .await
+                .map_err(|e| TransactionErr::Plain(format!("taker refund: {}", e)))
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn send_maker_refunds_payment(
+        &self,
+        maker_payment_tx: &[u8],
+        time_lock: u32,
+        taker_pub: &[u8],
+        secret_hash: &[u8],
+        _htlc_privkey: &[u8],
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> super::TransactionFut {
+        let coin = self.clone();
+        let maker_payment_tx = maker_payment_tx.to_vec();
+        let taker_pub = taker_pub.to_vec();
+        let secret_hash = secret_hash.to_vec();
+        let fut = async move {
+            coin.send_refund_htlc(&maker_payment_tx, time_lock, &taker_pub, &secret_hash)
+                .await
+                .map_err(|e| TransactionErr::Plain(format!("maker refund: {}", e)))
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let coin = self.clone();
+        // Extract everything we need from the borrowed args before moving into the future
+        let fee_tx_bytes = args.fee_tx.tx_hex();
+        let expected_sender = args.expected_sender.to_vec();
+        let fee_addr = args.fee_addr.to_vec();
+        let dex_fee = args.dex_fee.clone();
+        let min_block_number = args.min_block_number;
+        let uuid = args.uuid.to_vec();
+
+        let fut = async move {
+            // Re-parse the tx from bytes to reconstruct ValidateFeeArgs with proper lifetimes
+            let tx_enum = coin
+                .tx_enum_from_bytes(&fee_tx_bytes)
+                .map_err(|e| format!("Failed to parse fee tx: {}", e))?;
+            let validate_args = ValidateFeeArgs {
+                fee_tx: &tx_enum,
+                expected_sender: &expected_sender,
+                fee_addr: &fee_addr,
+                dex_fee: &dex_fee,
+                min_block_number,
+                uuid: &uuid,
+            };
+            coin.new_validate_fee_impl(validate_args)
+                .await
+                .map_err(|e| e.to_string())
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn validate_maker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let coin = self.clone();
+        let fut = async move { coin.validate_htlc_payment(input).await.map_err(|e| e.to_string()) };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn validate_taker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        let coin = self.clone();
+        let fut = async move { coin.validate_htlc_payment(input).await.map_err(|e| e.to_string()) };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn check_if_my_payment_sent(
+        &self,
+        time_lock: u32,
+        my_pub: &[u8],
+        other_pub: &[u8],
+        secret_hash: &[u8],
+        search_from_block: u64,
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> Box<dyn Future<Item = Option<TransactionEnum>, Error = String> + Send> {
+        let coin = self.clone();
+        let my_pub = my_pub.to_vec();
+        let other_pub = other_pub.to_vec();
+        let secret_hash = secret_hash.to_vec();
+        let amount = BigDecimal::from(0); // amount not used in payment sent check
+        let fut = async move {
+            coin.new_check_if_my_payment_sent(time_lock, &my_pub, &other_pub, &secret_hash, search_from_block, amount)
+                .await
+                .map_err(|e| e.to_string())
+        };
+        Box::new(fut.boxed().compat())
+    }
+
+    async fn search_for_swap_tx_spend_my(
+        &self,
+        _time_lock: u32,
+        _other_pub: &[u8],
+        _secret_hash: &[u8],
+        _tx: &[u8],
+        _search_from_block: u64,
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> Result<Option<FoundSwapTxSpend>, String> {
+        // Not yet implemented for Sia
+        Ok(None)
+    }
+
+    async fn search_for_swap_tx_spend_other(
+        &self,
+        _time_lock: u32,
+        _other_pub: &[u8],
+        _secret_hash: &[u8],
+        _tx: &[u8],
+        _search_from_block: u64,
+        _swap_contract_address: &Option<BytesJson>,
+    ) -> Result<Option<FoundSwapTxSpend>, String> {
+        // Not yet implemented for Sia
+        Ok(None)
+    }
+
+    fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
+        self.sia_extract_secret(secret_hash, spend_tx)
+            .map_err(|e| e.to_string())
+    }
+
+    fn can_refund_htlc(&self, locktime: u64) -> Box<dyn Future<Item = CanRefundHtlc, Error = String> + Send + '_> {
+        let fut = async move { self.sia_can_refund_htlc(locktime).await.map_err(|e| e.to_string()) };
+        Box::new(fut.boxed().compat())
+    }
+
+    fn negotiate_swap_contract_addr(
+        &self,
+        _other_side_address: Option<&[u8]>,
+    ) -> Result<Option<BytesJson>, MmError<NegotiateSwapContractAddrErr>> {
+        Ok(None)
+    }
+
+    fn get_htlc_key_pair(&self) -> Option<KeyPair> {
+        // Sia uses ed25519 keys, not secp256k1 KeyPair. Return None.
+        None
+    }
+}
