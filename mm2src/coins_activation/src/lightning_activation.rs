@@ -1,4 +1,8 @@
-use crate::l2::{EnableL2Error, L2ActivationOps, L2ProtocolParams};
+use crate::context::CoinsActivationContext;
+use crate::l2::{
+    EnableL2Error, InitL2ActivationOps, L2ActivationError, L2ActivationOps, L2InitialStatus, L2ProtocolParams,
+    L2TaskManagerShared,
+};
 use crate::prelude::*;
 use async_trait::async_trait;
 use coins::lightning::ln_conf::{LightningCoinConf, LightningProtocolConf};
@@ -6,11 +10,13 @@ use coins::lightning::ln_errors::EnableLightningError;
 use coins::lightning::{start_lightning, LightningCoin, LightningParams};
 use coins::utxo::utxo_standard::UtxoStandardCoin;
 use coins::utxo::UtxoCommonOps;
-use coins::{BalanceError, CoinBalance, CoinProtocol, MarketCoinOps, MmCoinEnum};
+use coins::{BalanceError, CoinBalance, CoinProtocol, MarketCoinOps, MmCoinEnum, RegisterCoinError};
+use common::{HttpStatusCode, StatusCode};
 use derive_more::Display;
 use futures::compat::Future01CompatExt;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+use rpc_task::RpcTaskHandle;
 use ser_error_derive::SerializeErrorType;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{self as json, Value as Json};
@@ -82,7 +88,7 @@ pub enum LightningValidationErr {
     InvalidAddress(String),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct LightningInitResult {
     platform_coin: String,
     address: String,
@@ -96,6 +102,95 @@ pub enum LightningInitError {
     LightningValidationErr(LightningValidationErr),
     MyBalanceError(BalanceError),
     MyAddressError(String),
+}
+
+/// Task-compatible error that stringifies transient errors for Clone/Serialize/Display.
+#[derive(Clone, Debug, Display, Serialize, SerializeErrorType)]
+#[serde(tag = "error_type", content = "error_data")]
+pub enum LightningTaskError {
+    #[display(fmt = "Invalid configuration: {}", _0)]
+    InvalidConfiguration(String),
+    #[display(fmt = "Lightning init failed: {}", _0)]
+    EnableFailed(String),
+    #[display(fmt = "Validation error: {}", _0)]
+    Validation(String),
+    #[display(fmt = "Balance retrieval failed: {}", _0)]
+    BalanceError(String),
+    #[display(fmt = "Address error: {}", _0)]
+    AddressError(String),
+    #[display(fmt = "Registration error: {}", _0)]
+    RegistrationError(String),
+    #[display(fmt = "Internal: {}", _0)]
+    Internal(String),
+}
+
+impl From<RegisterCoinError> for LightningTaskError {
+    fn from(e: RegisterCoinError) -> Self {
+        LightningTaskError::RegistrationError(e.to_string())
+    }
+}
+
+impl From<LightningInitError> for LightningTaskError {
+    fn from(e: LightningInitError) -> Self {
+        match e {
+            LightningInitError::InvalidConfiguration(s) => LightningTaskError::InvalidConfiguration(s),
+            LightningInitError::EnableLightningError(e) => LightningTaskError::EnableFailed(e.to_string()),
+            LightningInitError::LightningValidationErr(e) => LightningTaskError::Validation(e.to_string()),
+            LightningInitError::MyBalanceError(e) => LightningTaskError::BalanceError(e.to_string()),
+            LightningInitError::MyAddressError(e) => LightningTaskError::AddressError(e),
+        }
+    }
+}
+
+impl From<LightningTaskError> for L2ActivationError {
+    fn from(e: LightningTaskError) -> Self {
+        match e {
+            LightningTaskError::InvalidConfiguration(s) => L2ActivationError::ConfigParseError(s),
+            LightningTaskError::EnableFailed(s) => L2ActivationError::Internal(s),
+            LightningTaskError::Validation(s) => L2ActivationError::Internal(s),
+            LightningTaskError::BalanceError(s) => L2ActivationError::Transport(s),
+            LightningTaskError::AddressError(s) => L2ActivationError::Internal(s),
+            LightningTaskError::RegistrationError(s) => L2ActivationError::Internal(s),
+            LightningTaskError::Internal(s) => L2ActivationError::Internal(s),
+        }
+    }
+}
+
+impl HttpStatusCode for LightningTaskError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            LightningTaskError::InvalidConfiguration(_) | LightningTaskError::Validation(_) => StatusCode::BAD_REQUEST,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+/// Progress indicator for task-based Lightning activation.
+#[derive(Clone, Debug, Serialize)]
+pub enum LightningActivationProgress {
+    Initializing,
+    ConnectingToPeers,
+    SyncingChannels,
+    FetchingBalance,
+    ActivationComplete,
+}
+
+impl L2InitialStatus for LightningActivationProgress {
+    fn initial_status() -> Self {
+        LightningActivationProgress::Initializing
+    }
+}
+
+/// Placeholder awaiting-action status (e.g. future hardware wallet confirmation).
+#[derive(Clone, Debug, Serialize)]
+pub struct LightningAwaitingAction {
+    pub reason: String,
+}
+
+/// Placeholder user action type.
+#[derive(Debug, Deserialize)]
+pub enum LightningUserAction {
+    ConfirmActivation,
 }
 
 impl From<LightningInitError> for EnableL2Error {
@@ -212,5 +307,107 @@ impl L2ActivationOps for LightningCoin {
             balance,
         };
         Ok((lightning_coin, init_result))
+    }
+}
+
+/// Helper: run core Lightning init logic, returning the coin and result.
+/// Shared between the simple enable_l2 path and the task-based init_l2 path.
+async fn lightning_init_core(
+    ctx: &MmArc,
+    platform_coin: UtxoStandardCoin,
+    validated_params: LightningParams,
+    protocol_conf: LightningProtocolConf,
+    coin_conf: LightningCoinConf,
+) -> Result<(LightningCoin, LightningInitResult), MmError<LightningTaskError>> {
+    let lightning_coin = start_lightning(ctx, platform_coin.clone(), protocol_conf, coin_conf, validated_params)
+        .await
+        .map_err(|e| MmError::new(LightningTaskError::EnableFailed(e.to_string())))?;
+    let address = lightning_coin
+        .my_address()
+        .map_to_mm(LightningTaskError::AddressError)?;
+    let balance = lightning_coin
+        .my_balance()
+        .compat()
+        .await
+        .map_err(|e| MmError::new(LightningTaskError::BalanceError(e.to_string())))?;
+    let init_result = LightningInitResult {
+        platform_coin: platform_coin.ticker().into(),
+        address,
+        balance,
+    };
+    Ok((lightning_coin, init_result))
+}
+
+#[async_trait]
+impl InitL2ActivationOps for LightningCoin {
+    type PlatformCoin = UtxoStandardCoin;
+    type ActivationParams = LightningActivationParams;
+    type ProtocolInfo = LightningProtocolConf;
+    type ValidatedParams = LightningParams;
+    type CoinConf = LightningCoinConf;
+    type ActivationResult = LightningInitResult;
+    type ActivationError = LightningTaskError;
+    type InProgressStatus = LightningActivationProgress;
+    type AwaitingStatus = LightningAwaitingAction;
+    type UserAction = LightningUserAction;
+
+    fn rpc_task_manager(activation_ctx: &CoinsActivationContext) -> &L2TaskManagerShared<Self> {
+        &activation_ctx.init_lightning_task_manager
+    }
+
+    fn coin_conf_from_json(json: Json) -> Result<Self::CoinConf, MmError<Self::ActivationError>> {
+        json::from_value::<LightningCoinConf>(json)
+            .map_to_mm(|e| LightningTaskError::InvalidConfiguration(e.to_string()))
+    }
+
+    fn validate_platform_configuration(
+        platform_coin: &Self::PlatformCoin,
+    ) -> Result<(), MmError<Self::ActivationError>> {
+        if !platform_coin.addr_format().is_segwit() {
+            return MmError::err(LightningTaskError::Validation(
+                "Lightning network requires segwit address format".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_activation_params(
+        activation_params: Self::ActivationParams,
+    ) -> Result<Self::ValidatedParams, MmError<Self::ActivationError>> {
+        if activation_params.name.len() > 32 {
+            return MmError::err(LightningTaskError::Validation(
+                "Node name length can't be more than 32 characters".into(),
+            ));
+        }
+        let mut node_name = [b' '; 32];
+        node_name[0..activation_params.name.len()].copy_from_slice(activation_params.name.as_bytes());
+
+        let mut node_color = [0u8; 3];
+        hex::decode_to_slice(
+            activation_params.color.unwrap_or_else(|| "000000".into()),
+            &mut node_color as &mut [u8],
+        )
+        .map_to_mm(|_| LightningTaskError::Validation("Invalid Hex Color".into()))?;
+
+        let listening_port = activation_params.listening_port.unwrap_or(DEFAULT_LISTENING_PORT);
+
+        Ok(LightningParams {
+            listening_port,
+            node_name,
+            node_color,
+            payment_retries: activation_params.payment_retries,
+            backup_path: activation_params.backup_path,
+        })
+    }
+
+    async fn init_l2(
+        ctx: &MmArc,
+        platform_coin: Self::PlatformCoin,
+        validated_params: Self::ValidatedParams,
+        protocol_conf: Self::ProtocolInfo,
+        coin_conf: Self::CoinConf,
+        _task_handle: &RpcTaskHandle<crate::l2::L2ActivationTask<Self>>,
+    ) -> Result<(Self, Self::ActivationResult), MmError<Self::ActivationError>> {
+        lightning_init_core(ctx, platform_coin, validated_params, protocol_conf, coin_conf).await
     }
 }

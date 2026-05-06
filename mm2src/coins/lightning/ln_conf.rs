@@ -14,7 +14,7 @@ pub struct PlatformCoinConfirmations {
     pub high_priority: DefaultFeesAndConfirmations,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LightningProtocolConf {
     pub platform_coin_ticker: String,
     pub network: BlockchainNetwork,

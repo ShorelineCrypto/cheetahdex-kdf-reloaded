@@ -19,6 +19,7 @@ mod utxo_activation;
 mod z_coin_activation;
 
 pub use l2::enable_l2;
+pub use l2::{cancel_l2_activation, init_l2, init_l2_status, init_l2_user_action};
 pub use platform_coin_with_tokens::enable_platform_coin_with_tokens;
 pub use standalone_coin::{init_standalone_coin, init_standalone_coin_status, init_standalone_coin_user_action};
 pub use token::enable_token;

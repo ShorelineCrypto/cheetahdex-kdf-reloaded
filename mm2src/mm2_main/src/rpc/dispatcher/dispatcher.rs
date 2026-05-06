@@ -43,8 +43,8 @@ use coins::{
     withdraw,
 };
 use coins_activation::{
-    enable_l2, enable_platform_coin_with_tokens, enable_token, init_standalone_coin, init_standalone_coin_status,
-    init_standalone_coin_user_action,
+    cancel_l2_activation, enable_l2, enable_platform_coin_with_tokens, enable_token, init_l2, init_l2_status,
+    init_l2_user_action, init_standalone_coin, init_standalone_coin_status, init_standalone_coin_user_action,
 };
 use common::log::{error, warn};
 use common::HttpStatusCode;
@@ -226,6 +226,10 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             "get_claimable_balances" => handle_mmrpc(ctx, request, get_claimable_balances).await,
             "get_payment_details" => handle_mmrpc(ctx, request, get_payment_details).await,
             "get_wallet_names" => handle_mmrpc(ctx, request, get_wallet_names_rpc).await,
+            "init_lightning" => handle_mmrpc(ctx, request, init_l2::<LightningCoin>).await,
+            "init_lightning_status" => handle_mmrpc(ctx, request, init_l2_status::<LightningCoin>).await,
+            "init_lightning_user_action" => handle_mmrpc(ctx, request, init_l2_user_action::<LightningCoin>).await,
+            "cancel_init_lightning" => handle_mmrpc(ctx, request, cancel_l2_activation::<LightningCoin>).await,
             "init_z_coin" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
             "init_z_coin_status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
             "init_z_coin_user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,

@@ -1,5 +1,5 @@
-/// Contains L2 activation traits and their implementations for various coins
-///
+/// Simple one-shot L2 activation. For lightweight L2 protocols that
+/// activate quickly and do not need progress tracking.
 use crate::prelude::*;
 use async_trait::async_trait;
 use coins::{lp_coinfind, lp_coinfind_or_err, CoinProtocol, CoinsContext, MmCoinEnum};
