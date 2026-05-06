@@ -1,0 +1,492 @@
+//! Ethereum coin types, constants, contract ABIs, and error conversions.
+
+use super::*;
+
+/// https://github.com/artemii235/etomic-swap/blob/master/contracts/EtomicSwap.sol
+/// Dev chain (195.201.0.6:8565) contract address: 0xa09ad3cd7e96586ebd05a2607ee56b56fb2db8fd
+/// Ropsten: https://ropsten.etherscan.io/address/0x7bc1bbdd6a0a722fc9bffc49c921b685ecb84b94
+/// ETH mainnet: https://etherscan.io/address/0x8500AFc0bc5214728082163326C2FF0C73f4a871
+pub(crate) const SWAP_CONTRACT_ABI: &str = r#"[{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_amount","type":"uint256"},{"name":"_secret","type":"bytes32"},{"name":"_tokenAddress","type":"address"},{"name":"_sender","type":"address"}],"name":"receiverSpend","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"","type":"bytes32"}],"name":"payments","outputs":[{"name":"paymentHash","type":"bytes20"},{"name":"lockTime","type":"uint64"},{"name":"state","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_receiver","type":"address"},{"name":"_secretHash","type":"bytes20"},{"name":"_lockTime","type":"uint64"}],"name":"ethPayment","outputs":[],"payable":true,"stateMutability":"payable","type":"function"},{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_amount","type":"uint256"},{"name":"_paymentHash","type":"bytes20"},{"name":"_tokenAddress","type":"address"},{"name":"_receiver","type":"address"}],"name":"senderRefund","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_amount","type":"uint256"},{"name":"_tokenAddress","type":"address"},{"name":"_receiver","type":"address"},{"name":"_secretHash","type":"bytes20"},{"name":"_lockTime","type":"uint64"}],"name":"erc20Payment","outputs":[],"payable":true,"stateMutability":"payable","type":"function"},{"inputs":[],"payable":false,"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":false,"name":"id","type":"bytes32"}],"name":"PaymentSent","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"id","type":"bytes32"},{"indexed":false,"name":"secret","type":"bytes32"}],"name":"ReceiverSpent","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"id","type":"bytes32"}],"name":"SenderRefunded","type":"event"}]"#;
+/// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-20.md
+pub(crate) const ERC20_ABI: &str = r#"[{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_from","type":"address"},{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transferFrom","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_subtractedValue","type":"uint256"}],"name":"decreaseApproval","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transfer","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_addedValue","type":"uint256"}],"name":"increaseApproval","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"inputs":[],"payable":false,"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":true,"name":"owner","type":"address"},{"indexed":true,"name":"spender","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"from","type":"address"},{"indexed":true,"name":"to","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Transfer","type":"event"}]"#;
+
+/// Payment states from etomic swap smart contract: https://github.com/artemii235/etomic-swap/blob/master/contracts/EtomicSwap.sol#L5
+pub const PAYMENT_STATE_UNINITIALIZED: u8 = 0;
+pub const PAYMENT_STATE_SENT: u8 = 1;
+pub(crate) const _PAYMENT_STATE_SPENT: u8 = 2;
+pub(crate) const _PAYMENT_STATE_REFUNDED: u8 = 3;
+// Ethgasstation API returns response in 10^8 wei units. So 10 from their API mean 1 gwei
+pub(crate) const ETH_GAS_STATION_DECIMALS: u8 = 8;
+pub(crate) const GAS_PRICE_PERCENT: u64 = 10;
+/// It can change 12.5% max each block according to https://www.blocknative.com/blog/eip-1559-fees
+pub(crate) const BASE_BLOCK_FEE_DIFF_PCT: u64 = 13;
+pub(crate) const DEFAULT_LOGS_BLOCK_RANGE: u64 = 1000;
+
+/// Take into account that the dynamic fee may increase by 3% during the swap.
+pub(crate) const GAS_PRICE_APPROXIMATION_PERCENT_ON_START_SWAP: u64 = 3;
+/// Take into account that the dynamic fee may increase at each of the following stages:
+/// - it may increase by 2% until a swap is started;
+/// - it may increase by 3% during the swap.
+pub(crate) const GAS_PRICE_APPROXIMATION_PERCENT_ON_ORDER_ISSUE: u64 = 5;
+/// Take into account that the dynamic fee may increase at each of the following stages:
+/// - it may increase by 2% until an order is issued;
+/// - it may increase by 2% until a swap is started;
+/// - it may increase by 3% during the swap.
+pub(crate) const GAS_PRICE_APPROXIMATION_PERCENT_ON_TRADE_PREIMAGE: u64 = 7;
+
+// V2 swap contract ABIs (from https://github.com/KomodoPlatform/etomic-swap)
+pub(crate) const MAKER_SWAP_V2_ABI: &str = include_str!("maker_swap_v2_abi.json");
+pub(crate) const TAKER_SWAP_V2_ABI: &str = include_str!("taker_swap_v2_abi.json");
+
+lazy_static! {
+    pub static ref SWAP_CONTRACT: Contract = Contract::load(SWAP_CONTRACT_ABI.as_bytes()).unwrap();
+    pub static ref ERC20_CONTRACT: Contract = Contract::load(ERC20_ABI.as_bytes()).unwrap();
+    pub(crate) static ref MAKER_SWAP_V2: Contract = Contract::load(MAKER_SWAP_V2_ABI.as_bytes()).unwrap();
+    pub(crate) static ref TAKER_SWAP_V2: Contract = Contract::load(TAKER_SWAP_V2_ABI.as_bytes()).unwrap();
+}
+
+pub type Web3RpcFut<T> = Box<dyn Future<Item = T, Error = MmError<Web3RpcError>> + Send>;
+pub type Web3RpcResult<T> = Result<T, MmError<Web3RpcError>>;
+pub type GasStationResult = Result<GasStationData, MmError<GasStationReqErr>>;
+
+#[derive(Debug, Display)]
+pub enum GasStationReqErr {
+    #[display(fmt = "Transport '{}' error: {}", uri, error)]
+    Transport {
+        uri: String,
+        error: String,
+    },
+    #[display(fmt = "Invalid response: {}", _0)]
+    InvalidResponse(String),
+    Internal(String),
+}
+
+impl From<serde_json::Error> for GasStationReqErr {
+    fn from(e: serde_json::Error) -> Self {
+        GasStationReqErr::InvalidResponse(e.to_string())
+    }
+}
+
+impl From<SlurpError> for GasStationReqErr {
+    fn from(e: SlurpError) -> Self {
+        let error = e.to_string();
+        match e {
+            SlurpError::ErrorDeserializing { .. } => GasStationReqErr::InvalidResponse(error),
+            SlurpError::Transport { uri, .. } | SlurpError::Timeout { uri, .. } => {
+                GasStationReqErr::Transport { uri, error }
+            },
+            SlurpError::Internal(_) | SlurpError::InvalidRequest(_) => GasStationReqErr::Internal(error),
+        }
+    }
+}
+
+#[derive(Debug, Display)]
+pub enum Web3RpcError {
+    #[display(fmt = "Transport: {}", _0)]
+    Transport(String),
+    #[display(fmt = "Invalid response: {}", _0)]
+    InvalidResponse(String),
+    #[display(fmt = "Internal: {}", _0)]
+    Internal(String),
+}
+
+impl From<GasStationReqErr> for Web3RpcError {
+    fn from(err: GasStationReqErr) -> Self {
+        match err {
+            GasStationReqErr::Transport { .. } => Web3RpcError::Transport(err.to_string()),
+            GasStationReqErr::InvalidResponse(err) => Web3RpcError::InvalidResponse(err),
+            GasStationReqErr::Internal(err) => Web3RpcError::Internal(err),
+        }
+    }
+}
+
+impl From<serde_json::Error> for Web3RpcError {
+    fn from(e: serde_json::Error) -> Self {
+        Web3RpcError::InvalidResponse(e.to_string())
+    }
+}
+
+impl From<web3::Error> for Web3RpcError {
+    fn from(e: web3::Error) -> Self {
+        let error_str = e.to_string();
+        match e.kind() {
+            web3::ErrorKind::InvalidResponse(_)
+            | web3::ErrorKind::Decoder(_)
+            | web3::ErrorKind::Msg(_)
+            | web3::ErrorKind::Rpc(_) => Web3RpcError::InvalidResponse(error_str),
+            web3::ErrorKind::Transport(_) | web3::ErrorKind::Io(_) => Web3RpcError::Transport(error_str),
+            _ => Web3RpcError::Internal(error_str),
+        }
+    }
+}
+
+impl From<web3::Error> for RawTransactionError {
+    fn from(e: web3::Error) -> Self {
+        RawTransactionError::Transport(e.to_string())
+    }
+}
+
+impl From<ethabi::Error> for Web3RpcError {
+    fn from(e: ethabi::Error) -> Web3RpcError {
+        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
+        // It's an internal error if there are any issues during working with a smart contract ABI.
+        Web3RpcError::Internal(e.to_string())
+    }
+}
+
+impl From<ethabi::Error> for WithdrawError {
+    fn from(e: ethabi::Error) -> Self {
+        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
+        // It's an internal error if there are any issues during working with a smart contract ABI.
+        WithdrawError::InternalError(e.to_string())
+    }
+}
+
+impl From<web3::Error> for WithdrawError {
+    fn from(e: web3::Error) -> Self {
+        WithdrawError::Transport(e.to_string())
+    }
+}
+
+impl From<Web3RpcError> for WithdrawError {
+    fn from(e: Web3RpcError) -> Self {
+        match e {
+            Web3RpcError::Transport(err) | Web3RpcError::InvalidResponse(err) => WithdrawError::Transport(err),
+            Web3RpcError::Internal(internal) => WithdrawError::InternalError(internal),
+        }
+    }
+}
+
+impl From<web3::Error> for TradePreimageError {
+    fn from(e: web3::Error) -> Self {
+        TradePreimageError::Transport(e.to_string())
+    }
+}
+
+impl From<Web3RpcError> for TradePreimageError {
+    fn from(e: Web3RpcError) -> Self {
+        match e {
+            Web3RpcError::Transport(err) | Web3RpcError::InvalidResponse(err) => TradePreimageError::Transport(err),
+            Web3RpcError::Internal(internal) => TradePreimageError::InternalError(internal),
+        }
+    }
+}
+
+impl From<ethabi::Error> for TradePreimageError {
+    fn from(e: ethabi::Error) -> Self {
+        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
+        // It's an internal error if there are any issues during working with a smart contract ABI.
+        TradePreimageError::InternalError(e.to_string())
+    }
+}
+
+impl From<ethabi::Error> for BalanceError {
+    fn from(e: ethabi::Error) -> Self {
+        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
+        // It's an internal error if there are any issues during working with a smart contract ABI.
+        BalanceError::Internal(e.to_string())
+    }
+}
+
+impl From<web3::Error> for BalanceError {
+    fn from(e: web3::Error) -> Self {
+        BalanceError::Transport(e.to_string())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SavedTraces {
+    /// ETH traces for my_address
+    pub(crate) traces: Vec<Trace>,
+    /// Earliest processed block
+    pub(crate) earliest_block: U256,
+    /// Latest processed block
+    pub(crate) latest_block: U256,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SavedErc20Events {
+    /// ERC20 events for my_address
+    pub(crate) events: Vec<Log>,
+    /// Earliest processed block
+    pub(crate) earliest_block: U256,
+    /// Latest processed block
+    pub(crate) latest_block: U256,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum EthCoinType {
+    /// Ethereum itself or it's forks: ETC/others
+    Eth,
+    /// ERC20 token with smart contract address
+    /// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-20.md
+    Erc20 { platform: String, token_addr: Address },
+}
+
+/// pImpl idiom.
+#[derive(Debug)]
+pub struct EthCoinImpl {
+    pub(crate) ticker: String,
+    pub(crate) coin_type: EthCoinType,
+    pub(crate) key_pair: KeyPair,
+    pub(crate) my_address: Address,
+    pub(crate) sign_message_prefix: Option<String>,
+    pub(crate) swap_contract_address: Address,
+    pub(crate) fallback_swap_contract: Option<Address>,
+    pub(crate) web3: Web3<Web3Transport>,
+    /// The separate web3 instances kept to get nonce, will replace the web3 completely soon
+    pub(crate) web3_instances: Vec<Web3Instance>,
+    pub(crate) decimals: u8,
+    pub(crate) gas_station_url: Option<String>,
+    pub(crate) gas_station_decimals: u8,
+    pub(crate) gas_station_policy: GasStationPricePolicy,
+    pub(crate) history_sync_state: Mutex<HistorySyncState>,
+    pub(crate) required_confirmations: AtomicU64,
+    /// Coin needs access to the context in order to reuse the logging and shutdown facilities.
+    /// Using a weak reference by default in order to avoid circular references and leaks.
+    pub(crate) ctx: MmWeak,
+    pub(crate) chain_id: Option<u64>,
+    /// the block range used for eth_getLogs
+    pub(crate) logs_block_range: u64,
+    /// HD wallet derivation method. Iguana when using a single key pair, HDWallet for BIP44 HD.
+    pub derivation_method: DerivationMethod<Address, EthHDWallet>,
+    /// V2 swap contract addresses (maker, taker). None if V2 not configured.
+    pub(crate) swap_v2_contracts: Option<SwapV2Contracts>,
+    /// Gas limits for V2 swap operations.
+    pub(crate) gas_limit_v2: EthGasLimitV2,
+}
+
+// ─── V2 swap types ──────────────────────────────────────────────────────────
+
+/// Addresses of the EtomicSwap V2 smart contracts.
+#[derive(Debug, Copy, Clone, Deserialize)]
+pub struct SwapV2Contracts {
+    pub maker_swap_v2_contract: Address,
+    pub taker_swap_v2_contract: Address,
+}
+
+/// On-chain payment states for the EtomicSwapMakerV2 contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum MakerPaymentStateV2 {
+    Uninitialized = 0,
+    PaymentSent = 1,
+    TakerSpent = 2,
+    MakerRefunded = 3,
+}
+
+/// On-chain payment states for the EtomicSwapTakerV2 contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum TakerPaymentStateV2 {
+    Uninitialized = 0,
+    PaymentSent = 1,
+    TakerApproved = 2,
+    MakerSpent = 3,
+    TakerRefunded = 4,
+}
+
+/// Gas limits for V2 swap contract calls.
+#[derive(Debug, Clone)]
+pub struct EthGasLimitV2 {
+    pub maker: MakerGasLimitV2,
+    pub taker: TakerGasLimitV2,
+}
+
+#[derive(Debug, Clone)]
+pub struct MakerGasLimitV2 {
+    pub eth_payment: u64,
+    pub erc20_payment: u64,
+    pub eth_taker_spend: u64,
+    pub erc20_taker_spend: u64,
+    pub eth_maker_refund_timelock: u64,
+    pub erc20_maker_refund_timelock: u64,
+    pub eth_maker_refund_secret: u64,
+    pub erc20_maker_refund_secret: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TakerGasLimitV2 {
+    pub eth_payment: u64,
+    pub erc20_payment: u64,
+    pub eth_maker_spend: u64,
+    pub erc20_maker_spend: u64,
+    pub eth_taker_refund_timelock: u64,
+    pub erc20_taker_refund_timelock: u64,
+    pub eth_taker_refund_secret: u64,
+    pub erc20_taker_refund_secret: u64,
+    pub approve_payment: u64,
+}
+
+impl Default for EthGasLimitV2 {
+    fn default() -> Self {
+        EthGasLimitV2 {
+            maker: MakerGasLimitV2 {
+                eth_payment: 150_000,
+                erc20_payment: 250_000,
+                eth_taker_spend: 150_000,
+                erc20_taker_spend: 150_000,
+                eth_maker_refund_timelock: 150_000,
+                erc20_maker_refund_timelock: 150_000,
+                eth_maker_refund_secret: 150_000,
+                erc20_maker_refund_secret: 150_000,
+            },
+            taker: TakerGasLimitV2 {
+                eth_payment: 150_000,
+                erc20_payment: 250_000,
+                eth_maker_spend: 150_000,
+                erc20_maker_spend: 150_000,
+                eth_taker_refund_timelock: 150_000,
+                erc20_taker_refund_timelock: 150_000,
+                eth_taker_refund_secret: 150_000,
+                erc20_taker_refund_secret: 150_000,
+                approve_payment: 150_000,
+            },
+        }
+    }
+}
+
+impl EthGasLimitV2 {
+    /// Returns the appropriate gas limit for a (coin_type, payment_type, method) triple.
+    pub fn gas_limit(
+        &self,
+        coin_type: &EthCoinType,
+        payment_type: eth_swap_v2::EthPaymentType,
+        method: eth_swap_v2::PaymentMethod,
+    ) -> Result<u64, String> {
+        use eth_swap_v2::{EthPaymentType, PaymentMethod};
+        match (coin_type, payment_type, method) {
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Send) => Ok(self.maker.eth_payment),
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Send) => {
+                Ok(self.maker.erc20_payment)
+            },
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Spend) => Ok(self.maker.eth_taker_spend),
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Spend) => {
+                Ok(self.maker.erc20_taker_spend)
+            },
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.maker.eth_maker_refund_timelock)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.maker.erc20_maker_refund_timelock)
+            },
+            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.maker.eth_maker_refund_secret)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.maker.erc20_maker_refund_secret)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Send) => Ok(self.taker.eth_payment),
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Send) => {
+                Ok(self.taker.erc20_payment)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Spend) => Ok(self.taker.eth_maker_spend),
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Spend) => {
+                Ok(self.taker.erc20_maker_spend)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.taker.eth_taker_refund_timelock)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::RefundTimelock) => {
+                Ok(self.taker.erc20_taker_refund_timelock)
+            },
+            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.taker.eth_taker_refund_secret)
+            },
+            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::RefundSecret) => {
+                Ok(self.taker.erc20_taker_refund_secret)
+            },
+        }
+    }
+}
+
+/// Error type for EthCoin associated type parsing.
+#[derive(Debug, Display)]
+pub enum EthAssocTypesError {
+    #[display(fmt = "Invalid hex string: {}", _0)]
+    InvalidHexString(String),
+    #[display(fmt = "Tx parse error: {}", _0)]
+    TxParseError(String),
+    #[display(fmt = "Parse signature error: {}", _0)]
+    ParseSignatureError(String),
+}
+
+/// Type alias for validation results using ValidatePaymentError (V1 style).
+pub type ValidatePaymentError = ValidateSwapV2TxError;
+pub type ValidatePaymentResult<T> = MmResult<T, ValidatePaymentError>;
+
+impl From<ethabi::Error> for FindPaymentSpendError {
+    fn from(e: ethabi::Error) -> Self {
+        FindPaymentSpendError::ABIError(e.to_string())
+    }
+}
+
+impl From<ethabi::Error> for ValidateSwapV2TxError {
+    fn from(e: ethabi::Error) -> Self {
+        ValidateSwapV2TxError::ABIError(e.to_string())
+    }
+}
+
+impl From<std::array::TryFromSliceError> for ValidateSwapV2TxError {
+    fn from(e: std::array::TryFromSliceError) -> Self {
+        ValidateSwapV2TxError::InternalError(e.to_string())
+    }
+}
+
+impl From<std::array::TryFromSliceError> for FindPaymentSpendError {
+    fn from(e: std::array::TryFromSliceError) -> Self {
+        FindPaymentSpendError::Internal(e.to_string())
+    }
+}
+
+impl From<NumConversError> for ValidateSwapV2TxError {
+    fn from(e: NumConversError) -> Self {
+        ValidateSwapV2TxError::InternalError(e.to_string())
+    }
+}
+
+impl From<eth_swap_v2::ValidatePaymentV2Err> for ValidateSwapV2TxError {
+    fn from(err: eth_swap_v2::ValidatePaymentV2Err) -> Self {
+        match err {
+            eth_swap_v2::ValidatePaymentV2Err::WrongPaymentTx(e) => ValidateSwapV2TxError::WrongPaymentTx(e),
+        }
+    }
+}
+
+impl From<eth_swap_v2::PrepareTxDataError> for ValidateSwapV2TxError {
+    fn from(err: eth_swap_v2::PrepareTxDataError) -> Self {
+        match err {
+            eth_swap_v2::PrepareTxDataError::ABIError(e) | eth_swap_v2::PrepareTxDataError::Internal(e) => {
+                ValidateSwapV2TxError::InternalError(e)
+            },
+            eth_swap_v2::PrepareTxDataError::InvalidData(e) => ValidateSwapV2TxError::WrongPaymentTx(e),
+        }
+    }
+}
+
+impl fmt::Display for EthCoinType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EthCoinType::Eth => write!(f, "ETH"),
+            EthCoinType::Erc20 { platform, .. } => write!(f, "ERC20({})", platform),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Web3Instance {
+    pub(crate) web3: Web3<Web3Transport>,
+    pub(crate) is_parity: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "format")]
+pub enum EthAddressFormat {
+    /// Single-case address (lowercase)
+    #[serde(rename = "singlecase")]
+    SingleCase,
+    /// Mixed-case address.
+    /// https://eips.ethereum.org/EIPS/eip-55
+    #[serde(rename = "mixedcase")]
+    MixedCase,
+}

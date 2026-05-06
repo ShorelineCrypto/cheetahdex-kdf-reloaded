@@ -1,591 +1,10 @@
-/******************************************************************************
- * Copyright © 2014-2019 The SuperNET Developers.                             *
- *                                                                            *
- * See the AUTHORS, DEVELOPER-AGREEMENT and LICENSE files at                  *
- * the top-level directory of this distribution for the individual copyright  *
- * holder information and the developer policies on copyright and licensing.  *
- *                                                                            *
- * Unless otherwise agreed in a custom licensing agreement, no part of the    *
- * SuperNET software, including this file may be copied, modified, propagated *
- * or distributed except according to the terms contained in the LICENSE file *
- *                                                                            *
- * Removal or modification of this copyright notice is prohibited.            *
- *                                                                            *
- ******************************************************************************/
-//
-//  eth.rs
-//  marketmaker
-//
-//  Copyright © 2017-2019 SuperNET. All rights reserved.
-//
-use async_trait::async_trait;
-use bigdecimal::BigDecimal;
-use bitcrypto::{keccak256, sha256};
-use common::custom_futures::TimedAsyncMutex;
-use common::executor::Timer;
-use common::log::error;
-use common::{now_ms, small_rng, DEX_FEE_ADDR_RAW_PUBKEY};
-use derive_more::Display;
-use ethabi::{Contract, Token};
-use ethcore_transaction::{Action, Transaction as UnSignedEthTx, UnverifiedTransaction};
-use ethereum_types::{Address, H160, H256, U256};
-use ethkey::{public_to_address, KeyPair, Public, Signature};
-use futures::compat::Future01CompatExt;
-use futures::future::{join_all, select, Either, FutureExt, TryFutureExt};
-use futures01::Future;
-use http::StatusCode;
-use mm2_core::mm_ctx::{MmArc, MmWeak};
-use mm2_err_handle::prelude::*;
-use mm2_net::transport::{slurp_url, SlurpError};
-#[cfg(test)]
-use mocktopus::macros::*;
-use rand::seq::SliceRandom;
-use rpc::v1::types::Bytes as BytesJson;
-use secp256k1::PublicKey;
-use serde_json::{self as json, Value as Json};
-use sha3::{Digest, Keccak256};
-use std::cmp::Ordering;
-use std::collections::HashMap;
-use std::fmt;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex};
-use web3::types::{
-    Action as TraceAction, BlockId, BlockNumber, Bytes, CallRequest, FilterBuilder, Log, Trace, TraceFilterBuilder,
-    Transaction as Web3Transaction, TransactionId,
-};
-use web3::{self, Web3};
+//! Core EthCoin and EthCoinImpl method implementations, transaction helpers,
+//! utility functions, and coin construction.
 
-use super::{
-    BalanceError, BalanceFut, CoinBalance, CoinProtocol, CoinTransportMetrics, CoinsContext, FeeApproxStage,
-    FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin, NegotiateSwapContractAddrErr, NumConversError,
-    NumConversResult, RawTransactionError, RawTransactionFut, RawTransactionRequest, RawTransactionRes,
-    RawTransactionResult, RpcClientType, RpcTransportEventHandler, RpcTransportEventHandlerShared,
-    SignEthTransactionParams, SignRawTransactionEnum, SignRawTransactionRequest, SignatureError, SignatureResult,
-    SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue, Transaction,
-    TransactionDetails, TransactionEnum, UnexpectedDerivationMethod, ValidateAddressResult, VerificationError,
-    VerificationResult, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
-};
-pub use ethcore_transaction::SignedTransaction as SignedEthTx;
-pub use rlp;
-
-pub mod eth_hd_wallet;
-pub(crate) mod eth_swap_v2;
-pub mod fee_estimation;
-mod web3_transport;
-use crate::DerivationMethod;
-use crate::{
-    DexFee, FindPaymentSpendError, FundingTxSpend, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs,
-    ParseCoinAssocTypes, RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs,
-    RefundTakerPaymentArgs, SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs,
-    SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TransactionErr, TransactionFut, TxPreimageWithSig,
-    ValidateFeeArgs, ValidateMakerPaymentArgs, ValidatePaymentInput, ValidateSwapV2TxError, ValidateSwapV2TxResult,
-    ValidateTakerFundingArgs, WatcherOps,
-};
-use common::mm_number::MmNumber;
-use eth_hd_wallet::EthHDWallet;
-use ethkey::{sign, verify_address};
-use serialization::{CompactInteger, Serializable, Stream};
-use web3_transport::{EthFeeHistoryNamespace, Web3Transport};
-
-#[cfg(test)]
-mod eth_tests;
-#[cfg(target_arch = "wasm32")]
-mod eth_wasm_tests;
-
-/// https://github.com/artemii235/etomic-swap/blob/master/contracts/EtomicSwap.sol
-/// Dev chain (195.201.0.6:8565) contract address: 0xa09ad3cd7e96586ebd05a2607ee56b56fb2db8fd
-/// Ropsten: https://ropsten.etherscan.io/address/0x7bc1bbdd6a0a722fc9bffc49c921b685ecb84b94
-/// ETH mainnet: https://etherscan.io/address/0x8500AFc0bc5214728082163326C2FF0C73f4a871
-const SWAP_CONTRACT_ABI: &str = r#"[{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_amount","type":"uint256"},{"name":"_secret","type":"bytes32"},{"name":"_tokenAddress","type":"address"},{"name":"_sender","type":"address"}],"name":"receiverSpend","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"","type":"bytes32"}],"name":"payments","outputs":[{"name":"paymentHash","type":"bytes20"},{"name":"lockTime","type":"uint64"},{"name":"state","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_receiver","type":"address"},{"name":"_secretHash","type":"bytes20"},{"name":"_lockTime","type":"uint64"}],"name":"ethPayment","outputs":[],"payable":true,"stateMutability":"payable","type":"function"},{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_amount","type":"uint256"},{"name":"_paymentHash","type":"bytes20"},{"name":"_tokenAddress","type":"address"},{"name":"_receiver","type":"address"}],"name":"senderRefund","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"_id","type":"bytes32"},{"name":"_amount","type":"uint256"},{"name":"_tokenAddress","type":"address"},{"name":"_receiver","type":"address"},{"name":"_secretHash","type":"bytes20"},{"name":"_lockTime","type":"uint64"}],"name":"erc20Payment","outputs":[],"payable":true,"stateMutability":"payable","type":"function"},{"inputs":[],"payable":false,"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":false,"name":"id","type":"bytes32"}],"name":"PaymentSent","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"id","type":"bytes32"},{"indexed":false,"name":"secret","type":"bytes32"}],"name":"ReceiverSpent","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"name":"id","type":"bytes32"}],"name":"SenderRefunded","type":"event"}]"#;
-/// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-20.md
-const ERC20_ABI: &str = r#"[{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_from","type":"address"},{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transferFrom","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_subtractedValue","type":"uint256"}],"name":"decreaseApproval","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transfer","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_addedValue","type":"uint256"}],"name":"increaseApproval","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":true,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"inputs":[],"payable":false,"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":true,"name":"owner","type":"address"},{"indexed":true,"name":"spender","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"name":"from","type":"address"},{"indexed":true,"name":"to","type":"address"},{"indexed":false,"name":"value","type":"uint256"}],"name":"Transfer","type":"event"}]"#;
-
-/// Payment states from etomic swap smart contract: https://github.com/artemii235/etomic-swap/blob/master/contracts/EtomicSwap.sol#L5
-pub const PAYMENT_STATE_UNINITIALIZED: u8 = 0;
-pub const PAYMENT_STATE_SENT: u8 = 1;
-const _PAYMENT_STATE_SPENT: u8 = 2;
-const _PAYMENT_STATE_REFUNDED: u8 = 3;
-// Ethgasstation API returns response in 10^8 wei units. So 10 from their API mean 1 gwei
-const ETH_GAS_STATION_DECIMALS: u8 = 8;
-const GAS_PRICE_PERCENT: u64 = 10;
-/// It can change 12.5% max each block according to https://www.blocknative.com/blog/eip-1559-fees
-const BASE_BLOCK_FEE_DIFF_PCT: u64 = 13;
-const DEFAULT_LOGS_BLOCK_RANGE: u64 = 1000;
-
-/// Take into account that the dynamic fee may increase by 3% during the swap.
-const GAS_PRICE_APPROXIMATION_PERCENT_ON_START_SWAP: u64 = 3;
-/// Take into account that the dynamic fee may increase at each of the following stages:
-/// - it may increase by 2% until a swap is started;
-/// - it may increase by 3% during the swap.
-const GAS_PRICE_APPROXIMATION_PERCENT_ON_ORDER_ISSUE: u64 = 5;
-/// Take into account that the dynamic fee may increase at each of the following stages:
-/// - it may increase by 2% until an order is issued;
-/// - it may increase by 2% until a swap is started;
-/// - it may increase by 3% during the swap.
-const GAS_PRICE_APPROXIMATION_PERCENT_ON_TRADE_PREIMAGE: u64 = 7;
-
-// V2 swap contract ABIs (from https://github.com/KomodoPlatform/etomic-swap)
-const MAKER_SWAP_V2_ABI: &str = include_str!("eth/maker_swap_v2_abi.json");
-const TAKER_SWAP_V2_ABI: &str = include_str!("eth/taker_swap_v2_abi.json");
-
-lazy_static! {
-    pub static ref SWAP_CONTRACT: Contract = Contract::load(SWAP_CONTRACT_ABI.as_bytes()).unwrap();
-    pub static ref ERC20_CONTRACT: Contract = Contract::load(ERC20_ABI.as_bytes()).unwrap();
-    pub(crate) static ref MAKER_SWAP_V2: Contract = Contract::load(MAKER_SWAP_V2_ABI.as_bytes()).unwrap();
-    pub(crate) static ref TAKER_SWAP_V2: Contract = Contract::load(TAKER_SWAP_V2_ABI.as_bytes()).unwrap();
-}
-
-pub type Web3RpcFut<T> = Box<dyn Future<Item = T, Error = MmError<Web3RpcError>> + Send>;
-pub type Web3RpcResult<T> = Result<T, MmError<Web3RpcError>>;
-pub type GasStationResult = Result<GasStationData, MmError<GasStationReqErr>>;
-
-#[derive(Debug, Display)]
-pub enum GasStationReqErr {
-    #[display(fmt = "Transport '{}' error: {}", uri, error)]
-    Transport {
-        uri: String,
-        error: String,
-    },
-    #[display(fmt = "Invalid response: {}", _0)]
-    InvalidResponse(String),
-    Internal(String),
-}
-
-impl From<serde_json::Error> for GasStationReqErr {
-    fn from(e: serde_json::Error) -> Self {
-        GasStationReqErr::InvalidResponse(e.to_string())
-    }
-}
-
-impl From<SlurpError> for GasStationReqErr {
-    fn from(e: SlurpError) -> Self {
-        let error = e.to_string();
-        match e {
-            SlurpError::ErrorDeserializing { .. } => GasStationReqErr::InvalidResponse(error),
-            SlurpError::Transport { uri, .. } | SlurpError::Timeout { uri, .. } => {
-                GasStationReqErr::Transport { uri, error }
-            },
-            SlurpError::Internal(_) | SlurpError::InvalidRequest(_) => GasStationReqErr::Internal(error),
-        }
-    }
-}
-
-#[derive(Debug, Display)]
-pub enum Web3RpcError {
-    #[display(fmt = "Transport: {}", _0)]
-    Transport(String),
-    #[display(fmt = "Invalid response: {}", _0)]
-    InvalidResponse(String),
-    #[display(fmt = "Internal: {}", _0)]
-    Internal(String),
-}
-
-impl From<GasStationReqErr> for Web3RpcError {
-    fn from(err: GasStationReqErr) -> Self {
-        match err {
-            GasStationReqErr::Transport { .. } => Web3RpcError::Transport(err.to_string()),
-            GasStationReqErr::InvalidResponse(err) => Web3RpcError::InvalidResponse(err),
-            GasStationReqErr::Internal(err) => Web3RpcError::Internal(err),
-        }
-    }
-}
-
-impl From<serde_json::Error> for Web3RpcError {
-    fn from(e: serde_json::Error) -> Self {
-        Web3RpcError::InvalidResponse(e.to_string())
-    }
-}
-
-impl From<web3::Error> for Web3RpcError {
-    fn from(e: web3::Error) -> Self {
-        let error_str = e.to_string();
-        match e.kind() {
-            web3::ErrorKind::InvalidResponse(_)
-            | web3::ErrorKind::Decoder(_)
-            | web3::ErrorKind::Msg(_)
-            | web3::ErrorKind::Rpc(_) => Web3RpcError::InvalidResponse(error_str),
-            web3::ErrorKind::Transport(_) | web3::ErrorKind::Io(_) => Web3RpcError::Transport(error_str),
-            _ => Web3RpcError::Internal(error_str),
-        }
-    }
-}
-
-impl From<web3::Error> for RawTransactionError {
-    fn from(e: web3::Error) -> Self {
-        RawTransactionError::Transport(e.to_string())
-    }
-}
-
-impl From<ethabi::Error> for Web3RpcError {
-    fn from(e: ethabi::Error) -> Web3RpcError {
-        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
-        // It's an internal error if there are any issues during working with a smart contract ABI.
-        Web3RpcError::Internal(e.to_string())
-    }
-}
-
-impl From<ethabi::Error> for WithdrawError {
-    fn from(e: ethabi::Error) -> Self {
-        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
-        // It's an internal error if there are any issues during working with a smart contract ABI.
-        WithdrawError::InternalError(e.to_string())
-    }
-}
-
-impl From<web3::Error> for WithdrawError {
-    fn from(e: web3::Error) -> Self {
-        WithdrawError::Transport(e.to_string())
-    }
-}
-
-impl From<Web3RpcError> for WithdrawError {
-    fn from(e: Web3RpcError) -> Self {
-        match e {
-            Web3RpcError::Transport(err) | Web3RpcError::InvalidResponse(err) => WithdrawError::Transport(err),
-            Web3RpcError::Internal(internal) => WithdrawError::InternalError(internal),
-        }
-    }
-}
-
-impl From<web3::Error> for TradePreimageError {
-    fn from(e: web3::Error) -> Self {
-        TradePreimageError::Transport(e.to_string())
-    }
-}
-
-impl From<Web3RpcError> for TradePreimageError {
-    fn from(e: Web3RpcError) -> Self {
-        match e {
-            Web3RpcError::Transport(err) | Web3RpcError::InvalidResponse(err) => TradePreimageError::Transport(err),
-            Web3RpcError::Internal(internal) => TradePreimageError::InternalError(internal),
-        }
-    }
-}
-
-impl From<ethabi::Error> for TradePreimageError {
-    fn from(e: ethabi::Error) -> Self {
-        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
-        // It's an internal error if there are any issues during working with a smart contract ABI.
-        TradePreimageError::InternalError(e.to_string())
-    }
-}
-
-impl From<ethabi::Error> for BalanceError {
-    fn from(e: ethabi::Error) -> Self {
-        // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
-        // It's an internal error if there are any issues during working with a smart contract ABI.
-        BalanceError::Internal(e.to_string())
-    }
-}
-
-impl From<web3::Error> for BalanceError {
-    fn from(e: web3::Error) -> Self {
-        BalanceError::Transport(e.to_string())
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct SavedTraces {
-    /// ETH traces for my_address
-    traces: Vec<Trace>,
-    /// Earliest processed block
-    earliest_block: U256,
-    /// Latest processed block
-    latest_block: U256,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct SavedErc20Events {
-    /// ERC20 events for my_address
-    events: Vec<Log>,
-    /// Earliest processed block
-    earliest_block: U256,
-    /// Latest processed block
-    latest_block: U256,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum EthCoinType {
-    /// Ethereum itself or it's forks: ETC/others
-    Eth,
-    /// ERC20 token with smart contract address
-    /// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-20.md
-    Erc20 { platform: String, token_addr: Address },
-}
-
-/// pImpl idiom.
-#[derive(Debug)]
-pub struct EthCoinImpl {
-    ticker: String,
-    coin_type: EthCoinType,
-    key_pair: KeyPair,
-    my_address: Address,
-    sign_message_prefix: Option<String>,
-    swap_contract_address: Address,
-    fallback_swap_contract: Option<Address>,
-    web3: Web3<Web3Transport>,
-    /// The separate web3 instances kept to get nonce, will replace the web3 completely soon
-    web3_instances: Vec<Web3Instance>,
-    decimals: u8,
-    gas_station_url: Option<String>,
-    gas_station_decimals: u8,
-    gas_station_policy: GasStationPricePolicy,
-    history_sync_state: Mutex<HistorySyncState>,
-    required_confirmations: AtomicU64,
-    /// Coin needs access to the context in order to reuse the logging and shutdown facilities.
-    /// Using a weak reference by default in order to avoid circular references and leaks.
-    ctx: MmWeak,
-    chain_id: Option<u64>,
-    /// the block range used for eth_getLogs
-    logs_block_range: u64,
-    /// HD wallet derivation method. Iguana when using a single key pair, HDWallet for BIP44 HD.
-    pub derivation_method: DerivationMethod<Address, EthHDWallet>,
-    /// V2 swap contract addresses (maker, taker). None if V2 not configured.
-    swap_v2_contracts: Option<SwapV2Contracts>,
-    /// Gas limits for V2 swap operations.
-    gas_limit_v2: EthGasLimitV2,
-}
-
-// ─── V2 swap types ──────────────────────────────────────────────────────────
-
-/// Addresses of the EtomicSwap V2 smart contracts.
-#[derive(Debug, Copy, Clone, Deserialize)]
-pub struct SwapV2Contracts {
-    pub maker_swap_v2_contract: Address,
-    pub taker_swap_v2_contract: Address,
-}
-
-/// On-chain payment states for the EtomicSwapMakerV2 contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum MakerPaymentStateV2 {
-    Uninitialized = 0,
-    PaymentSent = 1,
-    TakerSpent = 2,
-    MakerRefunded = 3,
-}
-
-/// On-chain payment states for the EtomicSwapTakerV2 contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum TakerPaymentStateV2 {
-    Uninitialized = 0,
-    PaymentSent = 1,
-    TakerApproved = 2,
-    MakerSpent = 3,
-    TakerRefunded = 4,
-}
-
-/// Gas limits for V2 swap contract calls.
-#[derive(Debug, Clone)]
-pub struct EthGasLimitV2 {
-    pub maker: MakerGasLimitV2,
-    pub taker: TakerGasLimitV2,
-}
-
-#[derive(Debug, Clone)]
-pub struct MakerGasLimitV2 {
-    pub eth_payment: u64,
-    pub erc20_payment: u64,
-    pub eth_taker_spend: u64,
-    pub erc20_taker_spend: u64,
-    pub eth_maker_refund_timelock: u64,
-    pub erc20_maker_refund_timelock: u64,
-    pub eth_maker_refund_secret: u64,
-    pub erc20_maker_refund_secret: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct TakerGasLimitV2 {
-    pub eth_payment: u64,
-    pub erc20_payment: u64,
-    pub eth_maker_spend: u64,
-    pub erc20_maker_spend: u64,
-    pub eth_taker_refund_timelock: u64,
-    pub erc20_taker_refund_timelock: u64,
-    pub eth_taker_refund_secret: u64,
-    pub erc20_taker_refund_secret: u64,
-    pub approve_payment: u64,
-}
-
-impl Default for EthGasLimitV2 {
-    fn default() -> Self {
-        EthGasLimitV2 {
-            maker: MakerGasLimitV2 {
-                eth_payment: 150_000,
-                erc20_payment: 250_000,
-                eth_taker_spend: 150_000,
-                erc20_taker_spend: 150_000,
-                eth_maker_refund_timelock: 150_000,
-                erc20_maker_refund_timelock: 150_000,
-                eth_maker_refund_secret: 150_000,
-                erc20_maker_refund_secret: 150_000,
-            },
-            taker: TakerGasLimitV2 {
-                eth_payment: 150_000,
-                erc20_payment: 250_000,
-                eth_maker_spend: 150_000,
-                erc20_maker_spend: 150_000,
-                eth_taker_refund_timelock: 150_000,
-                erc20_taker_refund_timelock: 150_000,
-                eth_taker_refund_secret: 150_000,
-                erc20_taker_refund_secret: 150_000,
-                approve_payment: 150_000,
-            },
-        }
-    }
-}
-
-impl EthGasLimitV2 {
-    /// Returns the appropriate gas limit for a (coin_type, payment_type, method) triple.
-    pub fn gas_limit(
-        &self,
-        coin_type: &EthCoinType,
-        payment_type: eth_swap_v2::EthPaymentType,
-        method: eth_swap_v2::PaymentMethod,
-    ) -> Result<u64, String> {
-        use eth_swap_v2::{EthPaymentType, PaymentMethod};
-        match (coin_type, payment_type, method) {
-            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Send) => Ok(self.maker.eth_payment),
-            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Send) => {
-                Ok(self.maker.erc20_payment)
-            },
-            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::Spend) => Ok(self.maker.eth_taker_spend),
-            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::Spend) => {
-                Ok(self.maker.erc20_taker_spend)
-            },
-            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::RefundTimelock) => {
-                Ok(self.maker.eth_maker_refund_timelock)
-            },
-            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::RefundTimelock) => {
-                Ok(self.maker.erc20_maker_refund_timelock)
-            },
-            (EthCoinType::Eth, EthPaymentType::MakerPayments, PaymentMethod::RefundSecret) => {
-                Ok(self.maker.eth_maker_refund_secret)
-            },
-            (EthCoinType::Erc20 { .. }, EthPaymentType::MakerPayments, PaymentMethod::RefundSecret) => {
-                Ok(self.maker.erc20_maker_refund_secret)
-            },
-            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Send) => Ok(self.taker.eth_payment),
-            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Send) => {
-                Ok(self.taker.erc20_payment)
-            },
-            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::Spend) => Ok(self.taker.eth_maker_spend),
-            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::Spend) => {
-                Ok(self.taker.erc20_maker_spend)
-            },
-            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::RefundTimelock) => {
-                Ok(self.taker.eth_taker_refund_timelock)
-            },
-            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::RefundTimelock) => {
-                Ok(self.taker.erc20_taker_refund_timelock)
-            },
-            (EthCoinType::Eth, EthPaymentType::TakerPayments, PaymentMethod::RefundSecret) => {
-                Ok(self.taker.eth_taker_refund_secret)
-            },
-            (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::RefundSecret) => {
-                Ok(self.taker.erc20_taker_refund_secret)
-            },
-        }
-    }
-}
-
-/// Error type for EthCoin associated type parsing.
-#[derive(Debug, Display)]
-pub enum EthAssocTypesError {
-    #[display(fmt = "Invalid hex string: {}", _0)]
-    InvalidHexString(String),
-    #[display(fmt = "Tx parse error: {}", _0)]
-    TxParseError(String),
-    #[display(fmt = "Parse signature error: {}", _0)]
-    ParseSignatureError(String),
-}
-
-/// Type alias for validation results using ValidatePaymentError (V1 style).
-pub type ValidatePaymentError = ValidateSwapV2TxError;
-pub type ValidatePaymentResult<T> = MmResult<T, ValidatePaymentError>;
-
-impl From<ethabi::Error> for FindPaymentSpendError {
-    fn from(e: ethabi::Error) -> Self {
-        FindPaymentSpendError::ABIError(e.to_string())
-    }
-}
-
-impl From<ethabi::Error> for ValidateSwapV2TxError {
-    fn from(e: ethabi::Error) -> Self {
-        ValidateSwapV2TxError::ABIError(e.to_string())
-    }
-}
-
-impl From<std::array::TryFromSliceError> for ValidateSwapV2TxError {
-    fn from(e: std::array::TryFromSliceError) -> Self {
-        ValidateSwapV2TxError::InternalError(e.to_string())
-    }
-}
-
-impl From<std::array::TryFromSliceError> for FindPaymentSpendError {
-    fn from(e: std::array::TryFromSliceError) -> Self {
-        FindPaymentSpendError::Internal(e.to_string())
-    }
-}
-
-impl From<NumConversError> for ValidateSwapV2TxError {
-    fn from(e: NumConversError) -> Self {
-        ValidateSwapV2TxError::InternalError(e.to_string())
-    }
-}
-
-impl From<eth_swap_v2::ValidatePaymentV2Err> for ValidateSwapV2TxError {
-    fn from(err: eth_swap_v2::ValidatePaymentV2Err) -> Self {
-        match err {
-            eth_swap_v2::ValidatePaymentV2Err::WrongPaymentTx(e) => ValidateSwapV2TxError::WrongPaymentTx(e),
-        }
-    }
-}
-
-impl From<eth_swap_v2::PrepareTxDataError> for ValidateSwapV2TxError {
-    fn from(err: eth_swap_v2::PrepareTxDataError) -> Self {
-        match err {
-            eth_swap_v2::PrepareTxDataError::ABIError(e) | eth_swap_v2::PrepareTxDataError::Internal(e) => {
-                ValidateSwapV2TxError::InternalError(e)
-            },
-            eth_swap_v2::PrepareTxDataError::InvalidData(e) => ValidateSwapV2TxError::WrongPaymentTx(e),
-        }
-    }
-}
-
-impl fmt::Display for EthCoinType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EthCoinType::Eth => write!(f, "ETH"),
-            EthCoinType::Erc20 { platform, .. } => write!(f, "ERC20({})", platform),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Web3Instance {
-    web3: Web3<Web3Transport>,
-    is_parity: bool,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(tag = "format")]
-pub enum EthAddressFormat {
-    /// Single-case address (lowercase)
-    #[serde(rename = "singlecase")]
-    SingleCase,
-    /// Mixed-case address.
-    /// https://eips.ethereum.org/EIPS/eip-55
-    #[serde(rename = "mixedcase")]
-    MixedCase,
-}
+use super::*;
 
 #[cfg_attr(test, mockable)]
-async fn make_gas_station_request(url: &str) -> GasStationResult {
+pub async fn make_gas_station_request(url: &str) -> GasStationResult {
     let resp = slurp_url(url).await.mm_err(Into::into)?;
     if resp.0 != StatusCode::OK {
         let error = format!("Gas price request failed with status code {}", resp.0);
@@ -601,7 +20,7 @@ async fn make_gas_station_request(url: &str) -> GasStationResult {
 #[cfg_attr(test, mockable)]
 impl EthCoinImpl {
     /// Gets Transfer events from ERC20 smart contract `addr` between `from_block` and `to_block`
-    fn erc20_transfer_events(
+    pub(crate) fn erc20_transfer_events(
         &self,
         contract: Address,
         from_addr: Option<Address>,
@@ -628,7 +47,7 @@ impl EthCoinImpl {
     }
 
     /// Gets ETH traces from ETH node between addresses in `from_block` and `to_block`
-    fn eth_traces(
+    pub(crate) fn eth_traces(
         &self,
         from_addr: Vec<Address>,
         to_addr: Vec<Address>,
@@ -650,7 +69,7 @@ impl EthCoinImpl {
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    fn eth_traces_path(&self, ctx: &MmArc) -> PathBuf {
+    pub(crate) fn eth_traces_path(&self, ctx: &MmArc) -> PathBuf {
         ctx.dbdir()
             .join("TRANSACTIONS")
             .join(format!("{}_{:#02x}_trace.json", self.ticker, self.my_address))
@@ -658,7 +77,7 @@ impl EthCoinImpl {
 
     /// Load saved ETH traces from local DB
     #[cfg(not(target_arch = "wasm32"))]
-    fn load_saved_traces(&self, ctx: &MmArc) -> Option<SavedTraces> {
+    pub(crate) fn load_saved_traces(&self, ctx: &MmArc) -> Option<SavedTraces> {
         let content = gstuff::slurp(&self.eth_traces_path(ctx));
         if content.is_empty() {
             None
@@ -672,14 +91,14 @@ impl EthCoinImpl {
 
     /// Load saved ETH traces from local DB
     #[cfg(target_arch = "wasm32")]
-    fn load_saved_traces(&self, _ctx: &MmArc) -> Option<SavedTraces> {
+    pub(crate) fn load_saved_traces(&self, _ctx: &MmArc) -> Option<SavedTraces> {
         common::panic_w("'load_saved_traces' is not implemented in WASM");
         unreachable!()
     }
 
     /// Store ETH traces to local DB
     #[cfg(not(target_arch = "wasm32"))]
-    fn store_eth_traces(&self, ctx: &MmArc, traces: &SavedTraces) {
+    pub(crate) fn store_eth_traces(&self, ctx: &MmArc, traces: &SavedTraces) {
         let content = json::to_vec(traces).unwrap();
         let tmp_file = format!("{}.tmp", self.eth_traces_path(ctx).display());
         std::fs::write(&tmp_file, content).unwrap();
@@ -688,13 +107,13 @@ impl EthCoinImpl {
 
     /// Store ETH traces to local DB
     #[cfg(target_arch = "wasm32")]
-    fn store_eth_traces(&self, _ctx: &MmArc, _traces: &SavedTraces) {
+    pub(crate) fn store_eth_traces(&self, _ctx: &MmArc, _traces: &SavedTraces) {
         common::panic_w("'store_eth_traces' is not implemented in WASM");
         unreachable!()
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    fn erc20_events_path(&self, ctx: &MmArc) -> PathBuf {
+    pub(crate) fn erc20_events_path(&self, ctx: &MmArc) -> PathBuf {
         ctx.dbdir()
             .join("TRANSACTIONS")
             .join(format!("{}_{:#02x}_events.json", self.ticker, self.my_address))
@@ -702,7 +121,7 @@ impl EthCoinImpl {
 
     /// Store ERC20 events to local DB
     #[cfg(not(target_arch = "wasm32"))]
-    fn store_erc20_events(&self, ctx: &MmArc, events: &SavedErc20Events) {
+    pub(crate) fn store_erc20_events(&self, ctx: &MmArc, events: &SavedErc20Events) {
         let content = json::to_vec(events).unwrap();
         let tmp_file = format!("{}.tmp", self.erc20_events_path(ctx).display());
         std::fs::write(&tmp_file, content).unwrap();
@@ -711,14 +130,14 @@ impl EthCoinImpl {
 
     /// Store ERC20 events to local DB
     #[cfg(target_arch = "wasm32")]
-    fn store_erc20_events(&self, _ctx: &MmArc, _events: &SavedErc20Events) {
+    pub(crate) fn store_erc20_events(&self, _ctx: &MmArc, _events: &SavedErc20Events) {
         common::panic_w("'store_erc20_events' is not implemented in WASM");
         unreachable!()
     }
 
     /// Load saved ERC20 events from local DB
     #[cfg(not(target_arch = "wasm32"))]
-    fn load_saved_erc20_events(&self, ctx: &MmArc) -> Option<SavedErc20Events> {
+    pub(crate) fn load_saved_erc20_events(&self, ctx: &MmArc) -> Option<SavedErc20Events> {
         let content = gstuff::slurp(&self.erc20_events_path(ctx));
         if content.is_empty() {
             None
@@ -732,13 +151,13 @@ impl EthCoinImpl {
 
     /// Load saved ERC20 events from local DB
     #[cfg(target_arch = "wasm32")]
-    fn load_saved_erc20_events(&self, _ctx: &MmArc) -> Option<SavedErc20Events> {
+    pub(crate) fn load_saved_erc20_events(&self, _ctx: &MmArc) -> Option<SavedErc20Events> {
         common::panic_w("'load_saved_erc20_events' is not implemented in WASM");
         unreachable!()
     }
 
     /// The id used to differentiate payments on Etomic swap smart contract
-    fn etomic_swap_id(&self, time_lock: u32, secret_hash: &[u8]) -> Vec<u8> {
+    pub(crate) fn etomic_swap_id(&self, time_lock: u32, secret_hash: &[u8]) -> Vec<u8> {
         let mut input = vec![];
         input.extend_from_slice(&time_lock.to_le_bytes());
         input.extend_from_slice(secret_hash);
@@ -763,13 +182,13 @@ impl EthCoinImpl {
         }
     }
 
-    fn estimate_gas(&self, req: CallRequest) -> Box<dyn Future<Item = U256, Error = web3::Error> + Send> {
+    pub(crate) fn estimate_gas(&self, req: CallRequest) -> Box<dyn Future<Item = U256, Error = web3::Error> + Send> {
         // always using None block number as old Geth version accept only single argument in this RPC
         Box::new(self.web3.eth().estimate_gas(req, None))
     }
 
     /// Gets `ReceiverSpent` events from etomic swap smart contract since `from_block`
-    fn spend_events(
+    pub(crate) fn spend_events(
         &self,
         swap_contract_address: Address,
         from_block: u64,
@@ -787,7 +206,7 @@ impl EthCoinImpl {
     }
 
     /// Gets `SenderRefunded` events from etomic swap smart contract since `from_block`
-    fn refund_events(
+    pub(crate) fn refund_events(
         &self,
         swap_contract_address: Address,
         from_block: u64,
@@ -810,7 +229,7 @@ impl EthCoinImpl {
     }
 }
 
-async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest) -> RawTransactionResult {
+pub async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest) -> RawTransactionResult {
     let tx = match req.tx_hash.strip_prefix("0x") {
         Some(tx) => tx,
         None => &req.tx_hash,
@@ -824,7 +243,7 @@ async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest) -> 
     })
 }
 
-async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> WithdrawResult {
+pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> WithdrawResult {
     let to_addr = coin
         .address_from_str(&req.to)
         .map_to_mm(WithdrawError::InvalidAddress)?;
@@ -956,720 +375,7 @@ async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> Withd
     })
 }
 
-#[derive(Clone, Debug)]
-pub struct EthCoin(Arc<EthCoinImpl>);
-impl Deref for EthCoin {
-    type Target = EthCoinImpl;
-    fn deref(&self) -> &EthCoinImpl {
-        &*self.0
-    }
-}
-
-#[async_trait]
-impl SwapOps for EthCoin {
-    fn send_taker_fee(&self, dex_fee: &DexFee, fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
-        let address = try_tx_fus!(addr_from_raw_pubkey(fee_addr));
-        // For EVM coins, only the fee portion is sent on-chain; the burn
-        // portion (if any) is implicit — not sent as a separate transfer.
-        let amount = dex_fee.fee_amount();
-
-        Box::new(
-            self.send_to_address(
-                address,
-                try_tx_fus!(wei_from_big_decimal(&amount.to_decimal(), self.decimals)),
-            )
-            .map(TransactionEnum::from),
-        )
-    }
-
-    fn send_maker_payment(
-        &self,
-        time_lock: u32,
-        _maker_pub: &[u8],
-        taker_pub: &[u8],
-        secret_hash: &[u8],
-        amount: BigDecimal,
-        swap_contract_address: &Option<BytesJson>,
-    ) -> TransactionFut {
-        let taker_addr = try_tx_fus!(addr_from_raw_pubkey(taker_pub));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
-
-        Box::new(
-            self.send_hash_time_locked_payment(
-                self.etomic_swap_id(time_lock, secret_hash),
-                try_tx_fus!(wei_from_big_decimal(&amount, self.decimals)),
-                time_lock,
-                secret_hash,
-                taker_addr,
-                swap_contract_address,
-            )
-            .map(TransactionEnum::from),
-        )
-    }
-
-    fn send_taker_payment(
-        &self,
-        time_lock: u32,
-        _taker_pub: &[u8],
-        maker_pub: &[u8],
-        secret_hash: &[u8],
-        amount: BigDecimal,
-        swap_contract_address: &Option<BytesJson>,
-    ) -> TransactionFut {
-        let maker_addr = try_tx_fus!(addr_from_raw_pubkey(maker_pub));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
-
-        Box::new(
-            self.send_hash_time_locked_payment(
-                self.etomic_swap_id(time_lock, secret_hash),
-                try_tx_fus!(wei_from_big_decimal(&amount, self.decimals)),
-                time_lock,
-                secret_hash,
-                maker_addr,
-                swap_contract_address,
-            )
-            .map(TransactionEnum::from),
-        )
-    }
-
-    fn send_maker_spends_taker_payment(
-        &self,
-        taker_payment_tx: &[u8],
-        _time_lock: u32,
-        _taker_pub: &[u8],
-        secret: &[u8],
-        _htlc_privkey: &[u8],
-        swap_contract_address: &Option<BytesJson>,
-    ) -> TransactionFut {
-        let tx: UnverifiedTransaction = try_tx_fus!(rlp::decode(taker_payment_tx));
-        let signed = try_tx_fus!(SignedEthTx::new(tx));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address(), signed);
-
-        Box::new(
-            self.spend_hash_time_locked_payment(signed, swap_contract_address, secret)
-                .map(TransactionEnum::from),
-        )
-    }
-
-    fn send_taker_spends_maker_payment(
-        &self,
-        maker_payment_tx: &[u8],
-        _time_lock: u32,
-        _maker_pub: &[u8],
-        secret: &[u8],
-        _htlc_privkey: &[u8],
-        swap_contract_address: &Option<BytesJson>,
-    ) -> TransactionFut {
-        let tx: UnverifiedTransaction = try_tx_fus!(rlp::decode(maker_payment_tx));
-        let signed = try_tx_fus!(SignedEthTx::new(tx));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
-        Box::new(
-            self.spend_hash_time_locked_payment(signed, swap_contract_address, secret)
-                .map(TransactionEnum::from),
-        )
-    }
-
-    fn send_taker_refunds_payment(
-        &self,
-        taker_payment_tx: &[u8],
-        _time_lock: u32,
-        _maker_pub: &[u8],
-        _secret_hash: &[u8],
-        _htlc_privkey: &[u8],
-        swap_contract_address: &Option<BytesJson>,
-    ) -> TransactionFut {
-        let tx: UnverifiedTransaction = try_tx_fus!(rlp::decode(taker_payment_tx));
-        let signed = try_tx_fus!(SignedEthTx::new(tx));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
-
-        Box::new(
-            self.refund_hash_time_locked_payment(swap_contract_address, signed)
-                .map(TransactionEnum::from),
-        )
-    }
-
-    fn send_maker_refunds_payment(
-        &self,
-        maker_payment_tx: &[u8],
-        _time_lock: u32,
-        _taker_pub: &[u8],
-        _secret_hash: &[u8],
-        _htlc_privkey: &[u8],
-        swap_contract_address: &Option<BytesJson>,
-    ) -> TransactionFut {
-        let tx: UnverifiedTransaction = try_tx_fus!(rlp::decode(maker_payment_tx));
-        let signed = try_tx_fus!(SignedEthTx::new(tx));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
-
-        Box::new(
-            self.refund_hash_time_locked_payment(swap_contract_address, signed)
-                .map(TransactionEnum::from),
-        )
-    }
-
-    fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let selfi = self.clone();
-        let tx = match args.fee_tx {
-            TransactionEnum::SignedEthTx(t) => t.clone(),
-            _ => panic!(),
-        };
-        let sender_addr = try_fus!(addr_from_raw_pubkey(args.expected_sender));
-        let fee_addr = try_fus!(addr_from_raw_pubkey(args.fee_addr));
-        // For EVM, only fee_amount is sent on-chain (burn portion is implicit)
-        let amount = args.dex_fee.fee_amount().to_decimal();
-        let min_block_number = args.min_block_number;
-
-        let fut = async move {
-            let expected_value = try_s!(wei_from_big_decimal(&amount, selfi.decimals));
-            let tx_from_rpc = try_s!(
-                selfi
-                    .web3
-                    .eth()
-                    .transaction(TransactionId::Hash(tx.hash))
-                    .compat()
-                    .await
-            );
-            let tx_from_rpc = match tx_from_rpc {
-                Some(t) => t,
-                None => return ERR!("Didn't find provided tx {:?} on ETH node", tx),
-            };
-
-            if tx_from_rpc.from != sender_addr {
-                return ERR!(
-                    "Fee tx {:?} was sent from wrong address, expected {:?}",
-                    tx_from_rpc,
-                    sender_addr
-                );
-            }
-
-            if let Some(block_number) = tx_from_rpc.block_number {
-                if block_number <= min_block_number.into() {
-                    return ERR!(
-                        "Fee tx {:?} confirmed before min_block {}",
-                        tx_from_rpc,
-                        min_block_number,
-                    );
-                }
-            }
-            match &selfi.coin_type {
-                EthCoinType::Eth => {
-                    if tx_from_rpc.to != Some(fee_addr) {
-                        return ERR!(
-                            "Fee tx {:?} was sent to wrong address, expected {:?}",
-                            tx_from_rpc,
-                            fee_addr
-                        );
-                    }
-
-                    if tx_from_rpc.value < expected_value {
-                        return ERR!(
-                            "Fee tx {:?} value is less than expected {:?}",
-                            tx_from_rpc,
-                            expected_value
-                        );
-                    }
-                },
-                EthCoinType::Erc20 {
-                    platform: _,
-                    token_addr,
-                } => {
-                    if tx_from_rpc.to != Some(*token_addr) {
-                        return ERR!(
-                            "ERC20 Fee tx {:?} called wrong smart contract, expected {:?}",
-                            tx_from_rpc,
-                            token_addr
-                        );
-                    }
-
-                    let function = try_s!(ERC20_CONTRACT.function("transfer"));
-                    let decoded_input = try_s!(function.decode_input(&tx_from_rpc.input.0));
-
-                    if decoded_input[0] != Token::Address(fee_addr) {
-                        return ERR!(
-                            "ERC20 Fee tx was sent to wrong address {:?}, expected {:?}",
-                            decoded_input[0],
-                            fee_addr
-                        );
-                    }
-
-                    match decoded_input[1] {
-                        Token::Uint(value) => {
-                            if value < expected_value {
-                                return ERR!("ERC20 Fee tx value {} is less than expected {}", value, expected_value);
-                            }
-                        },
-                        _ => return ERR!("Should have got uint token but got {:?}", decoded_input[1]),
-                    }
-                },
-            }
-
-            Ok(())
-        };
-        Box::new(fut.boxed().compat())
-    }
-
-    fn validate_maker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let swap_contract_address = try_fus!(input.swap_contract_address.try_to_address());
-        self.validate_payment(
-            &input.payment_tx,
-            input.time_lock,
-            &input.maker_pub,
-            &input.secret_hash,
-            input.amount,
-            swap_contract_address,
-        )
-    }
-
-    fn validate_taker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let swap_contract_address = try_fus!(input.swap_contract_address.try_to_address());
-        self.validate_payment(
-            &input.payment_tx,
-            input.time_lock,
-            &input.taker_pub,
-            &input.secret_hash,
-            input.amount,
-            swap_contract_address,
-        )
-    }
-
-    fn check_if_my_payment_sent(
-        &self,
-        time_lock: u32,
-        _my_pub: &[u8],
-        _other_pub: &[u8],
-        secret_hash: &[u8],
-        from_block: u64,
-        swap_contract_address: &Option<BytesJson>,
-    ) -> Box<dyn Future<Item = Option<TransactionEnum>, Error = String> + Send> {
-        let id = self.etomic_swap_id(time_lock, secret_hash);
-        let swap_contract_address = try_fus!(swap_contract_address.try_to_address());
-        let selfi = self.clone();
-        let fut = async move {
-            let status = try_s!(
-                selfi
-                    .payment_status(swap_contract_address, Token::FixedBytes(id.clone()))
-                    .compat()
-                    .await
-            );
-
-            if status == PAYMENT_STATE_UNINITIALIZED.into() {
-                return Ok(None);
-            };
-
-            let mut current_block = try_s!(selfi.current_block().compat().await);
-            if current_block < from_block {
-                current_block = from_block;
-            }
-
-            let mut from_block = from_block;
-
-            loop {
-                let to_block = current_block.min(from_block + selfi.logs_block_range);
-
-                let events = try_s!(
-                    selfi
-                        .payment_sent_events(swap_contract_address, from_block, to_block)
-                        .compat()
-                        .await
-                );
-
-                let found = events.iter().find(|event| &event.data.0[..32] == id.as_slice());
-
-                match found {
-                    Some(event) => {
-                        let transaction = try_s!(
-                            selfi
-                                .web3
-                                .eth()
-                                .transaction(TransactionId::Hash(event.transaction_hash.unwrap()))
-                                .compat()
-                                .await
-                        );
-                        match transaction {
-                            Some(t) => break Ok(Some(try_s!(signed_tx_from_web3_tx(t)).into())),
-                            None => break Ok(None),
-                        }
-                    },
-                    None => {
-                        if to_block >= current_block {
-                            break Ok(None);
-                        }
-                        from_block = to_block;
-                    },
-                }
-            }
-        };
-        Box::new(fut.boxed().compat())
-    }
-
-    async fn search_for_swap_tx_spend_my(
-        &self,
-        _time_lock: u32,
-        _other_pub: &[u8],
-        _secret_hash: &[u8],
-        tx: &[u8],
-        search_from_block: u64,
-        swap_contract_address: &Option<BytesJson>,
-    ) -> Result<Option<FoundSwapTxSpend>, String> {
-        let swap_contract_address = try_s!(swap_contract_address.try_to_address());
-        self.search_for_swap_tx_spend(tx, swap_contract_address, search_from_block)
-    }
-
-    async fn search_for_swap_tx_spend_other(
-        &self,
-        _time_lock: u32,
-        _other_pub: &[u8],
-        _secret_hash: &[u8],
-        tx: &[u8],
-        search_from_block: u64,
-        swap_contract_address: &Option<BytesJson>,
-    ) -> Result<Option<FoundSwapTxSpend>, String> {
-        let swap_contract_address = try_s!(swap_contract_address.try_to_address());
-        self.search_for_swap_tx_spend(tx, swap_contract_address, search_from_block)
-    }
-
-    fn extract_secret(&self, _secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
-        let unverified: UnverifiedTransaction = try_s!(rlp::decode(spend_tx));
-        let function = try_s!(SWAP_CONTRACT.function("receiverSpend"));
-        let tokens = try_s!(function.decode_input(&unverified.data));
-        if tokens.len() < 3 {
-            return ERR!("Invalid arguments in 'receiverSpend' call: {:?}", tokens);
-        }
-        match &tokens[2] {
-            Token::FixedBytes(secret) => Ok(secret.to_vec()),
-            _ => ERR!(
-                "Expected secret to be fixed bytes, decoded function data is {:?}",
-                tokens
-            ),
-        }
-    }
-
-    fn negotiate_swap_contract_addr(
-        &self,
-        other_side_address: Option<&[u8]>,
-    ) -> Result<Option<BytesJson>, MmError<NegotiateSwapContractAddrErr>> {
-        match other_side_address {
-            Some(bytes) => {
-                if bytes.len() != 20 {
-                    return MmError::err(NegotiateSwapContractAddrErr::InvalidOtherAddrLen(bytes.into()));
-                }
-                let other_addr = Address::from(bytes);
-                if other_addr == self.swap_contract_address {
-                    return Ok(Some(self.swap_contract_address.to_vec().into()));
-                }
-
-                if Some(other_addr) == self.fallback_swap_contract {
-                    return Ok(self.fallback_swap_contract.map(|addr| addr.to_vec().into()));
-                }
-                MmError::err(NegotiateSwapContractAddrErr::UnexpectedOtherAddr(bytes.into()))
-            },
-            None => self
-                .fallback_swap_contract
-                .map(|addr| Some(addr.to_vec().into()))
-                .ok_or_else(|| MmError::new(NegotiateSwapContractAddrErr::NoOtherAddrAndNoFallback)),
-        }
-    }
-
-    fn get_htlc_key_pair(&self) -> Option<keys::KeyPair> {
-        None
-    }
-}
-
-#[async_trait]
-impl WatcherOps for EthCoin {}
-
-#[cfg_attr(test, mockable)]
-impl MarketCoinOps for EthCoin {
-    fn ticker(&self) -> &str {
-        &self.ticker[..]
-    }
-
-    fn my_address(&self) -> Result<String, String> {
-        Ok(checksum_address(&format!("{:#02x}", self.my_address)))
-    }
-
-    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
-        unimplemented!()
-    }
-
-    /// Hash message for signature using Ethereum's message signing format.
-    /// keccak256(PREFIX_LENGTH + PREFIX + MESSAGE_LENGTH + MESSAGE)
-    fn sign_message_hash(&self, message: &str) -> Option<[u8; 32]> {
-        let message_prefix = self.sign_message_prefix.as_ref()?;
-        let mut stream = Stream::new();
-        let prefix_len = CompactInteger::from(message_prefix.len());
-        prefix_len.serialize(&mut stream);
-        stream.append_slice(message_prefix.as_bytes());
-        stream.append_slice(message.len().to_string().as_bytes());
-        stream.append_slice(message.as_bytes());
-        Some(keccak256(&stream.out()).take())
-    }
-
-    fn sign_message(&self, message: &str) -> SignatureResult<String> {
-        let message_hash = self.sign_message_hash(message).ok_or(SignatureError::PrefixNotFound)?;
-        let privkey = &self.key_pair.secret();
-        let signature = sign(privkey, &H256::from(message_hash))?;
-        Ok(format!("0x{}", signature))
-    }
-
-    fn verify_message(&self, signature: &str, message: &str, address: &str) -> VerificationResult<bool> {
-        let message_hash = self
-            .sign_message_hash(message)
-            .ok_or(VerificationError::PrefixNotFound)?;
-        let address = self
-            .address_from_str(address)
-            .map_err(VerificationError::AddressDecodingError)?;
-        let signature = Signature::from_str(signature.strip_prefix("0x").unwrap_or(signature))?;
-        let is_verified = verify_address(&address, &signature, &H256::from(message_hash))?;
-        Ok(is_verified)
-    }
-
-    fn my_balance(&self) -> BalanceFut<CoinBalance> {
-        let decimals = self.decimals;
-        let fut = self
-            .my_balance()
-            .and_then(move |result| Ok(u256_to_big_decimal(result, decimals).mm_err(Into::into)?))
-            .map(|spendable| CoinBalance {
-                spendable,
-                unspendable: BigDecimal::from(0),
-            });
-        Box::new(fut)
-    }
-
-    fn base_coin_balance(&self) -> BalanceFut<BigDecimal> {
-        Box::new(
-            self.eth_balance()
-                .and_then(move |result| Ok(u256_to_big_decimal(result, 18).mm_err(Into::into)?)),
-        )
-    }
-
-    fn platform_ticker(&self) -> &str {
-        match &self.coin_type {
-            EthCoinType::Eth => self.ticker(),
-            EthCoinType::Erc20 { platform, .. } => platform,
-        }
-    }
-
-    fn send_raw_tx(&self, mut tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
-        if tx.starts_with("0x") {
-            tx = &tx[2..];
-        }
-        let bytes = try_fus!(hex::decode(tx));
-        Box::new(
-            self.web3
-                .eth()
-                .send_raw_transaction(bytes.into())
-                .map(|res| format!("{:02x}", res))
-                .map_err(|e| ERRL!("{}", e)),
-        )
-    }
-
-    fn send_raw_tx_bytes(&self, tx: &[u8]) -> Box<dyn Future<Item = String, Error = String> + Send> {
-        Box::new(
-            self.web3
-                .eth()
-                .send_raw_transaction(tx.into())
-                .map(|res| format!("{:02x}", res))
-                .map_err(|e| ERRL!("{}", e)),
-        )
-    }
-
-    fn wait_for_confirmations(
-        &self,
-        tx: &[u8],
-        confirmations: u64,
-        _requires_nota: bool,
-        wait_until: u64,
-        check_every: u64,
-    ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        let ctx = try_fus!(MmArc::from_weak(&self.ctx).ok_or("No context"));
-        let mut status = ctx.log.status_handle();
-        status.status(&[&self.ticker], "Waiting for confirmations…");
-        status.deadline(wait_until * 1000);
-
-        let unsigned: UnverifiedTransaction = try_fus!(rlp::decode(tx));
-        let tx = try_fus!(SignedEthTx::new(unsigned));
-
-        let required_confirms = U256::from(confirmations);
-        let selfi = self.clone();
-        let fut = async move {
-            loop {
-                if status.ms2deadline().unwrap() < 0 {
-                    status.append(" Timed out.");
-                    return ERR!(
-                        "Waited too long until {} for transaction {:?} confirmation ",
-                        wait_until,
-                        tx
-                    );
-                }
-
-                let web3_receipt = match selfi.web3.eth().transaction_receipt(tx.hash()).compat().await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        log!("Error " [e] " getting the " (selfi.ticker()) " transaction " [tx.tx_hash()] ", retrying in 15 seconds");
-                        Timer::sleep(check_every as f64).await;
-                        continue;
-                    },
-                };
-                if let Some(receipt) = web3_receipt {
-                    if receipt.status != Some(1.into()) {
-                        status.append(" Failed.");
-                        return ERR!(
-                            "Tx receipt {:?} status of {} tx {:?} is failed",
-                            receipt,
-                            selfi.ticker(),
-                            tx.tx_hash()
-                        );
-                    }
-
-                    if let Some(confirmed_at) = receipt.block_number {
-                        let current_block = match selfi.web3.eth().block_number().compat().await {
-                            Ok(b) => b,
-                            Err(e) => {
-                                log!("Error " [e] " getting the " (selfi.ticker()) " block number retrying in 15 seconds");
-                                Timer::sleep(check_every as f64).await;
-                                continue;
-                            },
-                        };
-                        // checking if the current block is above the confirmed_at block prediction for pos chain to prevent overflow
-                        if current_block >= confirmed_at && current_block - confirmed_at + 1 >= required_confirms {
-                            status.append(" Confirmed.");
-                            return Ok(());
-                        }
-                    }
-                }
-                Timer::sleep(check_every as f64).await;
-            }
-        };
-        Box::new(fut.boxed().compat())
-    }
-
-    fn wait_for_tx_spend(
-        &self,
-        tx_bytes: &[u8],
-        wait_until: u64,
-        from_block: u64,
-        swap_contract_address: &Option<BytesJson>,
-    ) -> TransactionFut {
-        let unverified: UnverifiedTransaction = try_tx_fus!(rlp::decode(tx_bytes));
-        let tx = try_tx_fus!(SignedEthTx::new(unverified));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
-
-        let func_name = match self.coin_type {
-            EthCoinType::Eth => "ethPayment",
-            EthCoinType::Erc20 { .. } => "erc20Payment",
-        };
-
-        let payment_func = try_tx_fus!(SWAP_CONTRACT.function(func_name));
-        let decoded = try_tx_fus!(payment_func.decode_input(&tx.data));
-        let id = match &decoded[0] {
-            Token::FixedBytes(bytes) => bytes.clone(),
-            _ => panic!(),
-        };
-        let selfi = self.clone();
-
-        let fut = async move {
-            loop {
-                let current_block = match selfi.current_block().compat().await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        log!("Error " (e) " getting block number");
-                        Timer::sleep(5.).await;
-                        continue;
-                    },
-                };
-
-                let events = match selfi
-                    .spend_events(swap_contract_address, from_block, current_block)
-                    .compat()
-                    .await
-                {
-                    Ok(ev) => ev,
-                    Err(e) => {
-                        log!("Error " (e) " getting spend events");
-                        Timer::sleep(5.).await;
-                        continue;
-                    },
-                };
-
-                let found = events.iter().find(|event| &event.data.0[..32] == id.as_slice());
-
-                if let Some(event) = found {
-                    if let Some(tx_hash) = event.transaction_hash {
-                        let transaction = match selfi
-                            .web3
-                            .eth()
-                            .transaction(TransactionId::Hash(tx_hash))
-                            .compat()
-                            .await
-                        {
-                            Ok(Some(t)) => t,
-                            Ok(None) => {
-                                log!("Tx " (tx_hash) " not found yet");
-                                Timer::sleep(5.).await;
-                                continue;
-                            },
-                            Err(e) => {
-                                log!("Get tx " (tx_hash) " error " (e));
-                                Timer::sleep(5.).await;
-                                continue;
-                            },
-                        };
-
-                        return Ok(TransactionEnum::from(try_tx_s!(signed_tx_from_web3_tx(transaction))));
-                    }
-                }
-
-                if now_ms() / 1000 > wait_until {
-                    return TX_PLAIN_ERR!(
-                        "Waited too long until {} for transaction {:?} to be spent ",
-                        wait_until,
-                        tx,
-                    );
-                }
-                Timer::sleep(5.).await;
-                continue;
-            }
-        };
-        Box::new(fut.boxed().compat())
-    }
-
-    fn tx_enum_from_bytes(&self, bytes: &[u8]) -> Result<TransactionEnum, String> {
-        Ok(try_s!(signed_eth_tx_from_bytes(bytes)).into())
-    }
-
-    fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> {
-        Box::new(
-            self.web3
-                .eth()
-                .block_number()
-                .map(|res| res.into())
-                .map_err(|e| ERRL!("{}", e)),
-        )
-    }
-
-    fn display_priv_key(&self) -> Result<String, String> {
-        Ok(format!("{:#02x}", self.key_pair.secret()))
-    }
-
-    fn min_tx_amount(&self) -> BigDecimal {
-        BigDecimal::from(0)
-    }
-
-    fn min_trading_vol(&self) -> MmNumber {
-        let pow = self.decimals / 3;
-        MmNumber::from(1) / MmNumber::from(10u64.pow(pow as u32))
-    }
-
-    fn sign_raw_tx(&self, args: &SignRawTransactionRequest) -> RawTransactionFut {
-        let coin = self.clone();
-        let args = args.clone();
-        Box::new(sign_raw_eth_tx_impl(coin, args).boxed().compat())
-    }
-}
-
-/// Signs a raw ETH transaction with the coin's keypair.
-async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest) -> RawTransactionResult {
+pub async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest) -> RawTransactionResult {
     let eth_args = match &args.tx {
         SignRawTransactionEnum::ETH(params) => params,
         _ => return MmError::err(RawTransactionError::InvalidParam("ETH type expected".to_string())),
@@ -1733,9 +439,9 @@ lazy_static! {
     static ref NONCE_LOCK: TimedAsyncMutex<()> = TimedAsyncMutex::new(());
 }
 
-type EthTxFut = Box<dyn Future<Item = SignedEthTx, Error = TransactionErr> + Send + 'static>;
+pub type EthTxFut = Box<dyn Future<Item = SignedEthTx, Error = TransactionErr> + Send + 'static>;
 
-async fn sign_and_send_transaction_impl(
+pub async fn sign_and_send_transaction_impl(
     ctx: MmArc,
     coin: EthCoin,
     value: U256,
@@ -1821,7 +527,7 @@ impl EthCoin {
     /// in node config. Other ETH clients (Geth, etc.) are `not` supported (yet).
     #[allow(clippy::cognitive_complexity)]
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    async fn process_eth_history(&self, ctx: &MmArc) {
+    pub(crate) async fn process_eth_history(&self, ctx: &MmArc) {
         // Artem Pikulin: by playing a bit with Parity mainnet node I've discovered that trace_filter API responds after reasonable time for 1000 blocks.
         // I've tried to increase the amount to 10000, but request times out somewhere near 2500000 block.
         // Also the Parity RPC server seem to get stuck while request in running (other requests performance is also lowered).
@@ -2190,7 +896,7 @@ impl EthCoin {
     /// Downloads and saves ERC20 transaction history of my_address
     #[allow(clippy::cognitive_complexity)]
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    async fn process_erc20_history(&self, token_addr: H160, ctx: &MmArc) {
+    pub(crate) async fn process_erc20_history(&self, token_addr: H160, ctx: &MmArc) {
         let delta = U256::from(10000);
 
         let mut success_iteration = 0i32;
@@ -2564,7 +1270,7 @@ impl EthCoin {
 
 #[cfg_attr(test, mockable)]
 impl EthCoin {
-    fn sign_and_send_transaction(&self, value: U256, action: Action, data: Vec<u8>, gas: U256) -> EthTxFut {
+    pub(crate) fn sign_and_send_transaction(&self, value: U256, action: Action, data: Vec<u8>, gas: U256) -> EthTxFut {
         let ctx = try_tx_fus!(MmArc::from_weak(&self.ctx).ok_or("!ctx"));
         let fut = Box::pin(sign_and_send_transaction_impl(
             ctx,
@@ -2592,7 +1298,7 @@ impl EthCoin {
         }
     }
 
-    fn send_hash_time_locked_payment(
+    pub(crate) fn send_hash_time_locked_payment(
         &self,
         id: Vec<u8>,
         value: U256,
@@ -2657,7 +1363,7 @@ impl EthCoin {
         }
     }
 
-    fn spend_hash_time_locked_payment(
+    pub(crate) fn spend_hash_time_locked_payment(
         &self,
         payment: SignedEthTx,
         swap_contract_address: Address,
@@ -2742,7 +1448,11 @@ impl EthCoin {
         }
     }
 
-    fn refund_hash_time_locked_payment(&self, swap_contract_address: Address, payment: SignedEthTx) -> EthTxFut {
+    pub(crate) fn refund_hash_time_locked_payment(
+        &self,
+        swap_contract_address: Address,
+        payment: SignedEthTx,
+    ) -> EthTxFut {
         let refund_func = try_tx_fus!(SWAP_CONTRACT.function("senderRefund"));
         let clone = self.clone();
 
@@ -2821,7 +1531,7 @@ impl EthCoin {
         }
     }
 
-    fn my_balance(&self) -> BalanceFut<U256> {
+    pub(crate) fn my_balance(&self) -> BalanceFut<U256> {
         let coin = self.clone();
         let fut = async move {
             match coin.coin_type {
@@ -2860,7 +1570,7 @@ impl EthCoin {
     ///
     /// Also, note that the contract call has to be initiated by my wallet address,
     /// because [`CallRequest::from`] is set to [`EthCoinImpl::my_address`].
-    fn estimate_gas_for_contract_call(&self, contract_addr: Address, call_data: Bytes) -> Web3RpcFut<U256> {
+    pub(crate) fn estimate_gas_for_contract_call(&self, contract_addr: Address, call_data: Bytes) -> Web3RpcFut<U256> {
         let coin = self.clone();
         Box::new(coin.get_gas_price().and_then(move |gas_price| {
             let eth_value = U256::zero();
@@ -2878,7 +1588,7 @@ impl EthCoin {
         }))
     }
 
-    fn eth_balance(&self) -> BalanceFut<U256> {
+    pub(crate) fn eth_balance(&self) -> BalanceFut<U256> {
         Box::new(
             self.web3
                 .eth()
@@ -2887,7 +1597,7 @@ impl EthCoin {
         )
     }
 
-    fn call_request(
+    pub(crate) fn call_request(
         &self,
         to: Address,
         value: Option<U256>,
@@ -2905,7 +1615,7 @@ impl EthCoin {
         self.web3.eth().call(request, Some(BlockNumber::Latest))
     }
 
-    fn allowance(&self, spender: Address) -> Web3RpcFut<U256> {
+    pub(crate) fn allowance(&self, spender: Address) -> Web3RpcFut<U256> {
         let coin = self.clone();
         let fut = async move {
             match coin.coin_type {
@@ -2932,7 +1642,7 @@ impl EthCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn approve(&self, spender: Address, amount: U256) -> EthTxFut {
+    pub(crate) fn approve(&self, spender: Address, amount: U256) -> EthTxFut {
         let coin = self.clone();
         let fut = async move {
             let token_addr = match coin.coin_type {
@@ -2956,7 +1666,7 @@ impl EthCoin {
     }
 
     /// Gets `PaymentSent` events from etomic swap smart contract since `from_block`
-    fn payment_sent_events(
+    pub(crate) fn payment_sent_events(
         &self,
         swap_contract_address: Address,
         from_block: u64,
@@ -3002,7 +1712,7 @@ impl EthCoin {
     }
 
     /// Waits until the allowance for `spender` reaches `required_allowance` or `wait_until` expires.
-    fn wait_for_required_allowance(
+    pub(crate) fn wait_for_required_allowance(
         &self,
         spender: Address,
         required_allowance: U256,
@@ -3036,7 +1746,7 @@ impl EthCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn validate_payment(
+    pub(crate) fn validate_payment(
         &self,
         payment_tx: &[u8],
         time_lock: u32,
@@ -3197,7 +1907,7 @@ impl EthCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn payment_status(
+    pub(crate) fn payment_status(
         &self,
         swap_contract_address: H160,
         token: Token,
@@ -3219,7 +1929,7 @@ impl EthCoin {
         )
     }
 
-    fn search_for_swap_tx_spend(
+    pub(crate) fn search_for_swap_tx_spend(
         &self,
         tx: &[u8],
         swap_contract_address: Address,
@@ -3304,7 +2014,7 @@ impl EthCoin {
     }
 
     /// Get gas price
-    fn get_gas_price(&self) -> Web3RpcFut<U256> {
+    pub(crate) fn get_gas_price(&self) -> Web3RpcFut<U256> {
         let coin = self.clone();
         let fut = async move {
             // TODO refactor to error_log_passthrough once simple maker bot is merged
@@ -3405,272 +2115,6 @@ impl EthCoin {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct EthTxFeeDetails {
-    coin: String,
-    gas: u64,
-    /// WEI units per 1 gas
-    gas_price: BigDecimal,
-    total_fee: BigDecimal,
-}
-
-impl EthTxFeeDetails {
-    fn new(gas: U256, gas_price: U256, coin: &str) -> NumConversResult<EthTxFeeDetails> {
-        let total_fee = gas * gas_price;
-        // Fees are always paid in ETH, can use 18 decimals by default
-        let total_fee = u256_to_big_decimal(total_fee, 18)?;
-        let gas_price = u256_to_big_decimal(gas_price, 18)?;
-
-        Ok(EthTxFeeDetails {
-            coin: coin.to_owned(),
-            gas: gas.into(),
-            gas_price,
-            total_fee,
-        })
-    }
-}
-
-#[async_trait]
-impl MmCoin for EthCoin {
-    fn is_asset_chain(&self) -> bool {
-        false
-    }
-
-    fn get_raw_transaction(&self, req: RawTransactionRequest) -> RawTransactionFut {
-        Box::new(get_raw_transaction_impl(self.clone(), req).boxed().compat())
-    }
-
-    fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
-        let ctx = try_f!(MmArc::from_weak(&self.ctx).or_mm_err(|| WithdrawError::InternalError("!ctx".to_owned())));
-        Box::new(Box::pin(withdraw_impl(ctx, self.clone(), req)).compat())
-    }
-
-    fn decimals(&self) -> u8 {
-        self.decimals
-    }
-
-    fn convert_to_address(&self, from: &str, to_address_format: Json) -> Result<String, String> {
-        let to_address_format: EthAddressFormat =
-            json::from_value(to_address_format).map_err(|e| ERRL!("Error on parse ETH address format {:?}", e))?;
-        match to_address_format {
-            EthAddressFormat::SingleCase => ERR!("conversion is available only to mixed-case"),
-            EthAddressFormat::MixedCase => {
-                let _addr = try_s!(addr_from_str(from));
-                Ok(checksum_address(from))
-            },
-        }
-    }
-
-    fn validate_address(&self, address: &str) -> ValidateAddressResult {
-        let result = self.address_from_str(address);
-        ValidateAddressResult {
-            is_valid: result.is_ok(),
-            reason: result.err(),
-        }
-    }
-
-    fn process_history_loop(&self, ctx: MmArc) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-        cfg_wasm32! {
-            ctx.log.log(
-                "🤔",
-                &[&"tx_history", &self.ticker],
-                &ERRL!("Transaction history is not supported for ETH/ERC20 coins"),
-            );
-            return Box::new(futures01::future::ok(()));
-        }
-        cfg_native! {
-            let coin = self.clone();
-            let fut = async move {
-                match coin.coin_type {
-                    EthCoinType::Eth => coin.process_eth_history(&ctx).await,
-                    EthCoinType::Erc20 { ref token_addr, .. } => coin.process_erc20_history(*token_addr, &ctx).await,
-                }
-                Ok(())
-            };
-            Box::new(fut.boxed().compat())
-        }
-    }
-
-    fn history_sync_status(&self) -> HistorySyncState {
-        self.history_sync_state.lock().unwrap().clone()
-    }
-
-    fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
-        let coin = self.clone();
-        Box::new(
-            self.get_gas_price()
-                .map_err(|e| e.to_string())
-                .and_then(move |gas_price| {
-                    let fee = gas_price * U256::from(150_000);
-                    let fee_coin = match &coin.coin_type {
-                        EthCoinType::Eth => &coin.ticker,
-                        EthCoinType::Erc20 { platform, .. } => platform,
-                    };
-                    Ok(TradeFee {
-                        coin: fee_coin.into(),
-                        amount: try_s!(u256_to_big_decimal(fee, 18)).into(),
-                        paid_from_trading_vol: false,
-                    })
-                }),
-        )
-    }
-
-    async fn get_sender_trade_fee(
-        &self,
-        value: TradePreimageValue,
-        stage: FeeApproxStage,
-    ) -> TradePreimageResult<TradeFee> {
-        let gas_price = self.get_gas_price().compat().await.mm_err(Into::into)?;
-        let gas_price = increase_gas_price_by_stage(gas_price, &stage);
-        let gas_limit = match self.coin_type {
-            EthCoinType::Eth => {
-                // this gas_limit includes gas for `ethPayment` and `senderRefund` contract calls
-                U256::from(300_000)
-            },
-            EthCoinType::Erc20 { token_addr, .. } => {
-                let value = match value {
-                    TradePreimageValue::Exact(value) | TradePreimageValue::UpperBound(value) => {
-                        wei_from_big_decimal(&value, self.decimals).mm_err(Into::into)?
-                    },
-                };
-                let allowed = self
-                    .allowance(self.swap_contract_address)
-                    .compat()
-                    .await
-                    .mm_err(Into::into)?;
-                if allowed < value {
-                    // estimate gas for the `approve` contract call
-
-                    // Pass a dummy spender. Let's use `my_address`.
-                    let spender = self.my_address;
-                    let approve_function = ERC20_CONTRACT.function("approve")?;
-                    let approve_data = approve_function.encode_input(&[Token::Address(spender), Token::Uint(value)])?;
-                    let approve_gas_limit = self
-                        .estimate_gas_for_contract_call(token_addr, Bytes::from(approve_data))
-                        .compat()
-                        .await
-                        .mm_err(Into::into)?;
-
-                    // this gas_limit includes gas for `approve`, `erc20Payment` and `senderRefund` contract calls
-                    U256::from(300_000) + approve_gas_limit
-                } else {
-                    // this gas_limit includes gas for `erc20Payment` and `senderRefund` contract calls
-                    U256::from(300_000)
-                }
-            },
-        };
-
-        let total_fee = gas_limit * gas_price;
-        let amount = u256_to_big_decimal(total_fee, 18).mm_err(Into::into)?;
-        let fee_coin = match &self.coin_type {
-            EthCoinType::Eth => &self.ticker,
-            EthCoinType::Erc20 { platform, .. } => platform,
-        };
-        Ok(TradeFee {
-            coin: fee_coin.into(),
-            amount: amount.into(),
-            paid_from_trading_vol: false,
-        })
-    }
-
-    fn get_receiver_trade_fee(&self, stage: FeeApproxStage) -> TradePreimageFut<TradeFee> {
-        let coin = self.clone();
-        let fut = async move {
-            let gas_price = coin.get_gas_price().compat().await.mm_err(Into::into)?;
-            let gas_price = increase_gas_price_by_stage(gas_price, &stage);
-            let total_fee = gas_price * U256::from(150_000);
-            let amount = u256_to_big_decimal(total_fee, 18).mm_err(Into::into)?;
-            let fee_coin = match &coin.coin_type {
-                EthCoinType::Eth => &coin.ticker,
-                EthCoinType::Erc20 { platform, .. } => platform,
-            };
-            Ok(TradeFee {
-                coin: fee_coin.into(),
-                amount: amount.into(),
-                paid_from_trading_vol: false,
-            })
-        };
-        Box::new(fut.boxed().compat())
-    }
-
-    async fn get_fee_to_send_taker_fee(
-        &self,
-        dex_fee_amount: BigDecimal,
-        stage: FeeApproxStage,
-    ) -> TradePreimageResult<TradeFee> {
-        let dex_fee_amount = wei_from_big_decimal(&dex_fee_amount, self.decimals).mm_err(Into::into)?;
-
-        // pass the dummy params
-        let to_addr = addr_from_raw_pubkey(&DEX_FEE_ADDR_RAW_PUBKEY)
-            .expect("addr_from_raw_pubkey should never fail with DEX_FEE_ADDR_RAW_PUBKEY");
-        let (eth_value, data, call_addr, fee_coin) = match &self.coin_type {
-            EthCoinType::Eth => (dex_fee_amount, Vec::new(), &to_addr, &self.ticker),
-            EthCoinType::Erc20 { platform, token_addr } => {
-                let function = ERC20_CONTRACT.function("transfer")?;
-                let data = function.encode_input(&[Token::Address(to_addr), Token::Uint(dex_fee_amount)])?;
-                (0.into(), data, token_addr, platform)
-            },
-        };
-
-        let gas_price = self.get_gas_price().compat().await.mm_err(Into::into)?;
-        let gas_price = increase_gas_price_by_stage(gas_price, &stage);
-        let estimate_gas_req = CallRequest {
-            value: Some(eth_value),
-            data: Some(data.clone().into()),
-            from: Some(self.my_address),
-            to: *call_addr,
-            gas: None,
-            // gas price must be supplied because some smart contracts base their
-            // logic on gas price, e.g. TUSD: https://github.com/KomodoPlatform/atomicDEX-API/issues/643
-            gas_price: Some(gas_price),
-        };
-
-        // Please note if the wallet's balance is insufficient to withdraw, then `estimate_gas` may fail with the `Exception` error.
-        // Ideally we should determine the case when we have the insufficient balance and return `TradePreimageError::NotSufficientBalance` error.
-        let gas_limit = self.estimate_gas(estimate_gas_req).compat().await?;
-        let total_fee = gas_limit * gas_price;
-        let amount = u256_to_big_decimal(total_fee, 18).mm_err(Into::into)?;
-        Ok(TradeFee {
-            coin: fee_coin.into(),
-            amount: amount.into(),
-            paid_from_trading_vol: false,
-        })
-    }
-
-    fn required_confirmations(&self) -> u64 {
-        self.required_confirmations.load(AtomicOrdering::Relaxed)
-    }
-
-    fn requires_notarization(&self) -> bool {
-        false
-    }
-
-    fn set_required_confirmations(&self, confirmations: u64) {
-        self.required_confirmations
-            .store(confirmations, AtomicOrdering::Relaxed);
-    }
-
-    fn set_requires_notarization(&self, _requires_nota: bool) {
-        log!("Warning: set_requires_notarization doesn't take any effect on ETH/ERC20 coins");
-    }
-
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        Some(BytesJson::from(self.swap_contract_address.0.as_ref()))
-    }
-
-    fn mature_confirmations(&self) -> Option<u32> {
-        None
-    }
-
-    fn coin_protocol_info(&self) -> Vec<u8> {
-        Vec::new()
-    }
-
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
-        true
-    }
-}
-
 pub trait TryToAddress {
     fn try_to_address(&self) -> Result<Address, String>;
 }
@@ -3702,7 +2146,7 @@ pub fn addr_from_pubkey_str(pubkey: &str) -> Result<String, String> {
     Ok(format!("{:#02x}", addr))
 }
 
-fn display_u256_with_decimal_point(number: U256, decimals: u8) -> String {
+pub fn display_u256_with_decimal_point(number: U256, decimals: u8) -> String {
     let mut string = number.to_string();
     let decimals = decimals as usize;
     if string.len() <= decimals {
@@ -3759,7 +2203,7 @@ impl Transaction for SignedEthTx {
     }
 }
 
-fn signed_tx_from_web3_tx(transaction: Web3Transaction) -> Result<SignedEthTx, String> {
+pub fn signed_tx_from_web3_tx(transaction: Web3Transaction) -> Result<SignedEthTx, String> {
     let unverified = UnverifiedTransaction {
         r: transaction.r,
         s: transaction.s,
@@ -3785,14 +2229,14 @@ fn signed_tx_from_web3_tx(transaction: Web3Transaction) -> Result<SignedEthTx, S
 pub struct GasStationData {
     // matic gas station average fees is named standard, using alias to support both format.
     #[serde(alias = "average", alias = "standard")]
-    average: MmNumber,
-    fast: MmNumber,
+    pub(crate) average: MmNumber,
+    pub(crate) fast: MmNumber,
 }
 
 /// Using tagged representation to allow adding variants with coefficients, percentage, etc in the future.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(tag = "policy", content = "additional_data")]
-enum GasStationPricePolicy {
+pub enum GasStationPricePolicy {
     /// Use mean between average and fast values, default and recommended to use on ETH mainnet due to
     /// gas price big spikes.
     MeanAverageFast,
@@ -3807,7 +2251,7 @@ impl Default for GasStationPricePolicy {
 }
 
 impl GasStationData {
-    fn average_gwei(&self, decimals: u8, gas_price_policy: GasStationPricePolicy) -> NumConversResult<U256> {
+    pub(crate) fn average_gwei(&self, decimals: u8, gas_price_policy: GasStationPricePolicy) -> NumConversResult<U256> {
         let gas_price = match gas_price_policy {
             GasStationPricePolicy::MeanAverageFast => ((&self.average + &self.fast) / MmNumber::from(2)).into(),
             GasStationPricePolicy::Average => self.average.to_decimal(),
@@ -3815,7 +2259,7 @@ impl GasStationData {
         wei_from_big_decimal(&gas_price, decimals)
     }
 
-    fn get_gas_price(uri: &str, decimals: u8, gas_price_policy: GasStationPricePolicy) -> Web3RpcFut<U256> {
+    pub(crate) fn get_gas_price(uri: &str, decimals: u8, gas_price_policy: GasStationPricePolicy) -> Web3RpcFut<U256> {
         let uri = uri.to_owned();
         let fut = async move {
             make_gas_station_request(&uri)
@@ -3828,7 +2272,7 @@ impl GasStationData {
     }
 }
 
-async fn get_token_decimals(web3: &Web3<Web3Transport>, token_addr: Address) -> Result<u8, String> {
+pub async fn get_token_decimals(web3: &Web3<Web3Transport>, token_addr: Address) -> Result<u8, String> {
     let function = try_s!(ERC20_CONTRACT.function("decimals"));
     let data = try_s!(function.encode_input(&[]));
     let request = CallRequest {
@@ -3853,7 +2297,7 @@ async fn get_token_decimals(web3: &Web3<Web3Transport>, token_addr: Address) -> 
     Ok(decimals as u8)
 }
 
-fn valid_addr_from_str(addr_str: &str) -> Result<Address, String> {
+pub fn valid_addr_from_str(addr_str: &str) -> Result<Address, String> {
     let addr = try_s!(addr_from_str(addr_str));
     if !is_valid_checksum_addr(addr_str) {
         return ERR!("Invalid address checksum");
@@ -3869,7 +2313,7 @@ pub fn addr_from_str(addr_str: &str) -> Result<Address, String> {
     Ok(try_s!(Address::from_str(&addr_str[2..])))
 }
 
-fn rpc_event_handlers_for_eth_transport(ctx: &MmArc, ticker: String) -> Vec<RpcTransportEventHandlerShared> {
+pub fn rpc_event_handlers_for_eth_transport(ctx: &MmArc, ticker: String) -> Vec<RpcTransportEventHandlerShared> {
     let metrics = ctx.metrics.weak();
     vec![CoinTransportMetrics::new(metrics, ticker, RpcClientType::Ethereum).into_shared()]
 }
@@ -3998,7 +2442,7 @@ pub async fn eth_coin_from_conf_and_request(
 
 /// Displays the address in mixed-case checksum form
 /// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-55.md
-fn checksum_address(addr: &str) -> String {
+pub fn checksum_address(addr: &str) -> String {
     let mut addr = addr.to_lowercase();
     if addr.starts_with("0x") {
         addr.replace_range(..2, "");
@@ -4029,7 +2473,7 @@ fn checksum_address(addr: &str) -> String {
 
 /// Checks that input is valid mixed-case checksum form address
 /// The input must be 0x prefixed hex string
-fn is_valid_checksum_addr(addr: &str) -> bool {
+pub fn is_valid_checksum_addr(addr: &str) -> bool {
     addr == checksum_address(addr)
 }
 
@@ -4037,7 +2481,7 @@ fn is_valid_checksum_addr(addr: &str) -> bool {
 /// Nodes might need some time to sync and there can be other coins that use same nodes in different order.
 /// We need to be sure that nonce is updated on all of them before and after transaction is sent.
 #[cfg_attr(test, mockable)]
-fn get_addr_nonce(addr: Address, web3s: Vec<Web3Instance>) -> Box<dyn Future<Item = U256, Error = String> + Send> {
+pub fn get_addr_nonce(addr: Address, web3s: Vec<Web3Instance>) -> Box<dyn Future<Item = U256, Error = String> + Send> {
     let fut = async move {
         let mut errors: u32 = 0;
         loop {
@@ -4087,7 +2531,7 @@ fn get_addr_nonce(addr: Address, web3s: Vec<Web3Instance>) -> Box<dyn Future<Ite
     Box::new(Box::pin(fut).compat())
 }
 
-fn increase_by_percent_one_gwei(num: U256, percent: u64) -> U256 {
+pub fn increase_by_percent_one_gwei(num: U256, percent: u64) -> U256 {
     let one_gwei = U256::from(10u64.pow(9));
     let percent = (num / U256::from(100)) * U256::from(percent);
     if percent < one_gwei {
@@ -4097,7 +2541,7 @@ fn increase_by_percent_one_gwei(num: U256, percent: u64) -> U256 {
     }
 }
 
-fn increase_gas_price_by_stage(gas_price: U256, level: &FeeApproxStage) -> U256 {
+pub fn increase_gas_price_by_stage(gas_price: U256, level: &FeeApproxStage) -> U256 {
     match level {
         FeeApproxStage::WithoutApprox => gas_price,
         FeeApproxStage::StartSwap => {
@@ -4142,225 +2586,3 @@ pub(crate) fn u256_from_big_decimal(amount: &BigDecimal, decimals: u8) -> NumCon
 }
 
 // ─── ParseCoinAssocTypes for EthCoin ────────────────────────────────────────
-
-#[async_trait]
-impl ParseCoinAssocTypes for EthCoin {
-    type Address = Address;
-    type AddressParseError = MmError<EthAssocTypesError>;
-    type Pubkey = Public;
-    type PubkeyParseError = MmError<EthAssocTypesError>;
-    type Tx = SignedEthTx;
-    type TxParseError = MmError<EthAssocTypesError>;
-    type Preimage = Vec<u8>;
-    type PreimageParseError = MmError<EthAssocTypesError>;
-    type Sig = Vec<u8>;
-    type SigParseError = MmError<EthAssocTypesError>;
-
-    async fn my_addr(&self) -> Self::Address {
-        self.my_address
-    }
-
-    fn parse_address(&self, address: &str) -> Result<Self::Address, Self::AddressParseError> {
-        Address::from_str(address).map_to_mm(|e| EthAssocTypesError::InvalidHexString(e.to_string()))
-    }
-
-    fn parse_pubkey(&self, pubkey: &[u8]) -> Result<Self::Pubkey, Self::PubkeyParseError> {
-        if pubkey.len() != 64 {
-            return MmError::err(EthAssocTypesError::InvalidHexString(format!(
-                "Expected 64-byte public key, got {} bytes",
-                pubkey.len()
-            )));
-        }
-        Ok(Public::from_slice(pubkey))
-    }
-
-    fn parse_tx(&self, tx: &[u8]) -> Result<Self::Tx, Self::TxParseError> {
-        signed_eth_tx_from_bytes(tx).map_to_mm(EthAssocTypesError::TxParseError)
-    }
-
-    fn parse_preimage(&self, preimage: &[u8]) -> Result<Self::Preimage, Self::PreimageParseError> {
-        Ok(preimage.to_vec())
-    }
-
-    fn parse_signature(&self, sig: &[u8]) -> Result<Self::Sig, Self::SigParseError> {
-        Ok(sig.to_vec())
-    }
-}
-
-// ─── CommonSwapOpsV2 for EthCoin ────────────────────────────────────────────
-
-use crate::{
-    CommonSwapOpsV2, GenPreimageResult, MakerCoinSwapOpsV2, TakerCoinSwapOpsV2, ToBytes,
-    ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult,
-};
-
-#[async_trait]
-impl CommonSwapOpsV2 for EthCoin {
-    fn derive_htlc_pubkey_v2(&self, _swap_unique_data: &[u8]) -> Public {
-        self.key_pair.public().clone()
-    }
-
-    fn derive_htlc_pubkey_v2_bytes(&self, swap_unique_data: &[u8]) -> Vec<u8> {
-        self.derive_htlc_pubkey_v2(swap_unique_data).to_vec()
-    }
-}
-
-// ─── MakerCoinSwapOpsV2 for EthCoin ────────────────────────────────────────
-
-#[async_trait]
-impl MakerCoinSwapOpsV2 for EthCoin {
-    async fn send_maker_payment_v2(&self, args: SendMakerPaymentArgs<'_, Self>) -> Result<SignedEthTx, TransactionErr> {
-        self.send_maker_payment_v2_impl(args).await
-    }
-
-    async fn validate_maker_payment_v2(&self, args: ValidateMakerPaymentArgs<'_, Self>) -> ValidateSwapV2TxResult {
-        self.validate_maker_payment_v2_impl(args).await
-    }
-
-    async fn refund_maker_payment_v2_timelock(
-        &self,
-        args: RefundMakerPaymentTimelockArgs<'_>,
-    ) -> Result<SignedEthTx, TransactionErr> {
-        self.refund_maker_payment_v2_timelock_impl(args).await
-    }
-
-    async fn refund_maker_payment_v2_secret(
-        &self,
-        args: RefundMakerPaymentSecretArgs<'_, Self>,
-    ) -> Result<SignedEthTx, TransactionErr> {
-        self.refund_maker_payment_v2_secret_impl(args).await
-    }
-
-    async fn spend_maker_payment_v2(
-        &self,
-        args: SpendMakerPaymentArgs<'_, Self>,
-    ) -> Result<SignedEthTx, TransactionErr> {
-        self.spend_maker_payment_v2_impl(args).await
-    }
-}
-
-// ─── TakerCoinSwapOpsV2 for EthCoin ────────────────────────────────────────
-
-#[async_trait]
-impl TakerCoinSwapOpsV2 for EthCoin {
-    async fn send_taker_funding(&self, args: SendTakerFundingArgs<'_>) -> Result<SignedEthTx, TransactionErr> {
-        self.send_taker_funding_impl(args).await
-    }
-
-    async fn validate_taker_funding(&self, args: ValidateTakerFundingArgs<'_, Self>) -> ValidateSwapV2TxResult {
-        self.validate_taker_funding_impl(args).await
-    }
-
-    async fn refund_taker_funding_timelock(
-        &self,
-        args: RefundTakerPaymentArgs<'_>,
-    ) -> Result<SignedEthTx, TransactionErr> {
-        self.refund_taker_payment_with_timelock_impl(args).await
-    }
-
-    async fn refund_taker_funding_secret(
-        &self,
-        args: RefundFundingSecretArgs<'_, Self>,
-    ) -> Result<SignedEthTx, TransactionErr> {
-        self.refund_taker_funding_secret_impl(args).await
-    }
-
-    async fn search_for_taker_funding_spend(
-        &self,
-        tx: &SignedEthTx,
-        _from_block: u64,
-        _secret_hash: &[u8],
-    ) -> Result<Option<FundingTxSpend<Self>>, SearchForFundingSpendErr> {
-        self.search_for_taker_funding_spend_impl(tx).await
-    }
-
-    async fn gen_taker_funding_spend_preimage(
-        &self,
-        args: &GenTakerFundingSpendArgs<'_, Self>,
-        _swap_unique_data: &[u8],
-    ) -> GenPreimageResult<Self> {
-        // EVM coins don't need a real preimage — the approve flow replaces it.
-        // Return the funding tx bytes as "preimage" and a dummy signature.
-        Ok(TxPreimageWithSig {
-            preimage: rlp::encode(args.funding_tx).to_vec(),
-            signature: vec![],
-        })
-    }
-
-    async fn validate_taker_funding_spend_preimage(
-        &self,
-        _gen_args: &GenTakerFundingSpendArgs<'_, Self>,
-        _preimage: &TxPreimageWithSig<Self>,
-    ) -> ValidateTakerFundingSpendPreimageResult {
-        // EVM: always valid (approve-based flow, no preimage exchange).
-        Ok(())
-    }
-
-    async fn sign_and_send_taker_funding_spend(
-        &self,
-        _preimage: &TxPreimageWithSig<Self>,
-        args: &GenTakerFundingSpendArgs<'_, Self>,
-        _swap_unique_data: &[u8],
-    ) -> Result<SignedEthTx, TransactionErr> {
-        // For EVM, this sends takerPaymentApprove (not a traditional funding spend).
-        self.taker_payment_approve(args).await
-    }
-
-    async fn refund_combined_taker_payment(
-        &self,
-        args: RefundTakerPaymentArgs<'_>,
-    ) -> Result<SignedEthTx, TransactionErr> {
-        // In EVM, combined taker payment refund uses the same timelock path.
-        self.refund_taker_payment_with_timelock_impl(args).await
-    }
-
-    fn skip_taker_payment_spend_preimage(&self) -> bool {
-        true
-    }
-
-    async fn gen_taker_payment_spend_preimage(
-        &self,
-        _args: &GenTakerPaymentSpendArgs<'_, Self>,
-        _swap_unique_data: &[u8],
-    ) -> GenPreimageResult<Self> {
-        Err(MmError::new(crate::TxGenError::Other(
-            "EVM coins skip taker payment spend preimage".into(),
-        )))
-    }
-
-    async fn validate_taker_payment_spend_preimage(
-        &self,
-        _gen_args: &GenTakerPaymentSpendArgs<'_, Self>,
-        _preimage: &TxPreimageWithSig<Self>,
-    ) -> ValidateTakerPaymentSpendPreimageResult {
-        Err(MmError::new(
-            crate::ValidateTakerPaymentSpendPreimageError::InternalError(
-                "EVM coins skip taker payment spend preimage".into(),
-            ),
-        ))
-    }
-
-    async fn sign_and_broadcast_taker_payment_spend(
-        &self,
-        _preimage: Option<&TxPreimageWithSig<Self>>,
-        gen_args: &GenTakerPaymentSpendArgs<'_, Self>,
-        secret: &[u8],
-        _swap_unique_data: &[u8],
-    ) -> Result<SignedEthTx, TransactionErr> {
-        self.sign_and_broadcast_taker_payment_spend_impl(gen_args, secret).await
-    }
-
-    async fn find_taker_payment_spend_tx(
-        &self,
-        taker_payment: &SignedEthTx,
-        from_block: u64,
-        wait_until: u64,
-    ) -> MmResult<SignedEthTx, FindPaymentSpendError> {
-        self.find_taker_payment_spend_tx_impl(taker_payment, from_block, wait_until, 10.0)
-            .await
-    }
-
-    async fn extract_secret_v2(&self, _secret_hash: &[u8], spend_tx: &SignedEthTx) -> Result<[u8; 32], String> {
-        self.extract_secret_v2_impl(spend_tx).await
-    }
-}
