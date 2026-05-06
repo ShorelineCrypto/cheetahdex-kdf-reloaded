@@ -8,6 +8,7 @@ mod tendermint_coin;
 mod tendermint_helpers;
 mod tendermint_market_ops;
 mod tendermint_mm_coin;
+mod tendermint_staking;
 mod tendermint_swap_ops;
 mod tendermint_token;
 mod tendermint_types;

@@ -38,8 +38,9 @@ use coins::utxo::qtum::QtumCoin;
 use coins::utxo::slp::SlpToken;
 use coins::utxo::utxo_standard::UtxoStandardCoin;
 use coins::{
-    add_delegation, get_raw_transaction, get_staking_infos, remove_delegation, sign_message, sign_raw_transaction,
-    verify_message, withdraw,
+    add_delegation, claim_staking_rewards, delegations_info, get_raw_transaction, get_staking_infos,
+    ongoing_undelegations_info, remove_delegation, sign_message, sign_raw_transaction, validators_info, verify_message,
+    withdraw,
 };
 use coins_activation::{
     enable_l2, enable_platform_coin_with_tokens, enable_token, init_standalone_coin, init_standalone_coin_status,
@@ -148,6 +149,12 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         return rpc_streaming_dispatcher(request, ctx, &streaming_method).await;
     }
 
+    // Route experimental::staking:: namespace methods to the staking dispatcher.
+    if let Some(staking_method) = request.method.strip_prefix("experimental::staking::") {
+        let staking_method = staking_method.to_owned();
+        return staking_dispatcher(request, ctx, &staking_method).await;
+    }
+
     match request.method.as_str() {
         "account_balance" => handle_mmrpc(ctx, request, account_balance).await,
         "active_swaps" => handle_mmrpc(ctx, request, active_swaps_rpc_v2).await,
@@ -250,6 +257,23 @@ async fn rpc_streaming_dispatcher(
         "order_status::enable" => handle_mmrpc(ctx, request, streaming_activations::orders::enable_order_status).await,
         "orderbook::enable" => handle_mmrpc(ctx, request, streaming_activations::orderbook::enable_orderbook).await,
         "swap_status::enable" => handle_mmrpc(ctx, request, streaming_activations::swaps::enable_swap_status).await,
+        _ => MmError::err(DispatcherError::NoSuchMethod),
+    }
+}
+
+/// Routes `experimental::staking::*` RPC methods to the Cosmos staking handlers.
+async fn staking_dispatcher(
+    request: MmRpcRequest,
+    ctx: MmArc,
+    staking_method: &str,
+) -> DispatcherResult<Response<Vec<u8>>> {
+    match staking_method {
+        "delegate" => handle_mmrpc(ctx, request, add_delegation).await,
+        "undelegate" => handle_mmrpc(ctx, request, remove_delegation).await,
+        "claim_rewards" => handle_mmrpc(ctx, request, claim_staking_rewards).await,
+        "query::delegations" => handle_mmrpc(ctx, request, delegations_info).await,
+        "query::ongoing_undelegations" => handle_mmrpc(ctx, request, ongoing_undelegations_info).await,
+        "query::validators" => handle_mmrpc(ctx, request, validators_info).await,
         _ => MmError::err(DispatcherError::NoSuchMethod),
     }
 }

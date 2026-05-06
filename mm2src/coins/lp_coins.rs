@@ -1046,6 +1046,7 @@ pub struct WithdrawRequest {
 #[serde(tag = "type")]
 pub enum StakingDetails {
     Qtum(QtumDelegationRequest),
+    Cosmos(Box<rpc_command::tendermint::staking::DelegationPayload>),
 }
 
 #[allow(dead_code)]
@@ -1059,6 +1060,7 @@ pub struct AddDelegateRequest {
 #[derive(Deserialize)]
 pub struct RemoveDelegateRequest {
     pub coin: String,
+    pub staking_details: Option<StakingDetails>,
 }
 
 #[derive(Deserialize)]
@@ -1235,6 +1237,7 @@ impl KmdRewardsDetails {
 pub enum TransactionType {
     StakingDelegation,
     RemoveDelegation,
+    ClaimDelegationRewards,
     StandardTransfer,
     TokenTransfer(BytesJson),
 }
@@ -1562,6 +1565,8 @@ pub enum StakingInfosError {
     Transport(String),
     #[display(fmt = "Internal error: {}", _0)]
     Internal(String),
+    #[display(fmt = "Invalid payload: {}", reason)]
+    InvalidPayload { reason: String },
 }
 
 impl From<UtxoRpcError> for StakingInfosError {
@@ -1598,7 +1603,8 @@ impl HttpStatusCode for StakingInfosError {
         match self {
             StakingInfosError::NoSuchCoin { .. }
             | StakingInfosError::CoinDoesntSupportStakingInfos { .. }
-            | StakingInfosError::UnexpectedDerivationMethod(_) => StatusCode::BAD_REQUEST,
+            | StakingInfosError::UnexpectedDerivationMethod(_)
+            | StakingInfosError::InvalidPayload { .. } => StatusCode::BAD_REQUEST,
             StakingInfosError::Transport(_) | StakingInfosError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -1640,6 +1646,22 @@ pub enum DelegationError {
     AlreadyDelegating(String),
     #[display(fmt = "Delegation is not supported, reason: {}", reason)]
     DelegationOpsNotSupported { reason: String },
+    #[display(fmt = "Cannot undelegate {} from {}", delegator_addr, validator_addr)]
+    CanNotUndelegate {
+        delegator_addr: String,
+        validator_addr: String,
+    },
+    #[display(fmt = "Requested {} to undelegate but only {} is available", requested, available)]
+    TooMuchToUndelegate {
+        available: BigDecimal,
+        requested: BigDecimal,
+    },
+    #[display(fmt = "Reward {} is less than the claiming fee {}", reward, fee)]
+    UnprofitableReward { reward: BigDecimal, fee: BigDecimal },
+    #[display(fmt = "Nothing to claim for {}", coin)]
+    NothingToClaim { coin: String },
+    #[display(fmt = "Invalid payload: {}", reason)]
+    InvalidPayload { reason: String },
     #[display(fmt = "Transport error: {}", _0)]
     Transport(String),
     #[display(fmt = "Internal error: {}", _0)]
@@ -1670,6 +1692,7 @@ impl From<StakingInfosError> for DelegationError {
                 DelegationError::DelegationOpsNotSupported { reason }
             },
             StakingInfosError::Internal(e) => DelegationError::InternalError(e),
+            StakingInfosError::InvalidPayload { reason } => DelegationError::InvalidPayload { reason },
         }
     }
 }
@@ -1768,6 +1791,24 @@ impl DelegationError {
             },
             GenerateTxError::Transport(e) => DelegationError::Transport(e),
             GenerateTxError::Internal(e) => DelegationError::InternalError(e),
+        }
+    }
+}
+
+impl From<tendermint::TendermintCoinRpcError> for DelegationError {
+    fn from(e: tendermint::TendermintCoinRpcError) -> Self {
+        match e {
+            tendermint::TendermintCoinRpcError::InvalidResponse(msg)
+            | tendermint::TendermintCoinRpcError::RpcClientError(msg) => DelegationError::Transport(msg),
+            tendermint::TendermintCoinRpcError::Prost(msg) | tendermint::TendermintCoinRpcError::InternalError(msg) => {
+                DelegationError::InternalError(msg)
+            },
+            tendermint::TendermintCoinRpcError::UnexpectedAccountType { prefix } => {
+                DelegationError::InternalError(format!("unexpected account type: {prefix}"))
+            },
+            tendermint::TendermintCoinRpcError::PerformanceFeeIsTooLow => {
+                DelegationError::InternalError("performance fee is too low".into())
+            },
         }
     }
 }
@@ -3549,13 +3590,26 @@ pub async fn verify_message(ctx: MmArc, req: VerificationRequest) -> Verificatio
 
 pub async fn remove_delegation(ctx: MmArc, req: RemoveDelegateRequest) -> DelegationResult {
     let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
-    match coin {
+    match &coin {
         MmCoinEnum::QtumCoin(qtum) => qtum.remove_delegation().compat().await,
-        _ => {
-            return MmError::err(DelegationError::CoinDoesntSupportDelegation {
-                coin: coin.ticker().to_string(),
-            })
+        MmCoinEnum::TendermintCoin(_) | MmCoinEnum::TendermintToken(_) => {
+            let payload = match req.staking_details {
+                Some(StakingDetails::Cosmos(p)) => *p,
+                _ => {
+                    return MmError::err(DelegationError::InvalidPayload {
+                        reason: "Cosmos undelegation requires staking_details with type Cosmos".into(),
+                    })
+                },
+            };
+            match coin {
+                MmCoinEnum::TendermintCoin(c) => c.undelegate(payload).await,
+                MmCoinEnum::TendermintToken(t) => t.platform_coin.undelegate(payload).await,
+                _ => unreachable!(),
+            }
         },
+        _ => MmError::err(DelegationError::CoinDoesntSupportDelegation {
+            coin: coin.ticker().to_string(),
+        }),
     }
 }
 
@@ -3573,18 +3627,105 @@ pub async fn get_staking_infos(ctx: MmArc, req: GetStakingInfosRequest) -> Staki
 
 pub async fn add_delegation(ctx: MmArc, req: AddDelegateRequest) -> DelegationResult {
     let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
-    // Need to find a way to do a proper dispatch
-    let coin_concrete = match coin {
-        MmCoinEnum::QtumCoin(qtum) => qtum,
-        _ => {
-            return MmError::err(DelegationError::CoinDoesntSupportDelegation {
-                coin: coin.ticker().to_string(),
-            })
-        },
-    };
     match req.staking_details {
-        StakingDetails::Qtum(qtum_staking) => coin_concrete.add_delegation(qtum_staking).compat().await,
+        StakingDetails::Qtum(qtum_staking) => match coin {
+            MmCoinEnum::QtumCoin(qtum) => qtum.add_delegation(qtum_staking).compat().await,
+            _ => MmError::err(DelegationError::CoinDoesntSupportDelegation {
+                coin: coin.ticker().to_string(),
+            }),
+        },
+        StakingDetails::Cosmos(payload) => match coin {
+            MmCoinEnum::TendermintCoin(c) => c.delegate(*payload).await,
+            MmCoinEnum::TendermintToken(t) => t.platform_coin.delegate(*payload).await,
+            _ => MmError::err(DelegationError::CoinDoesntSupportDelegation {
+                coin: coin.ticker().to_string(),
+            }),
+        },
     }
+}
+
+// ---------------------------------------------------------------------------
+// New staking query / claim types
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct ClaimStakingRewardsRequest {
+    pub coin: String,
+    #[serde(flatten)]
+    pub payload: rpc_command::tendermint::staking::ClaimRewardsPayload,
+}
+
+#[derive(Deserialize)]
+pub struct DelegationsInfoRequest {
+    pub coin: String,
+    #[serde(flatten)]
+    pub paging: common::PagingOptions,
+}
+
+#[derive(Deserialize)]
+pub struct UndelegationsInfoRequest {
+    pub coin: String,
+    #[serde(flatten)]
+    pub paging: common::PagingOptions,
+}
+
+#[derive(Deserialize)]
+pub struct ValidatorsInfoRequest {
+    pub coin: String,
+    #[serde(flatten)]
+    pub inner: rpc_command::tendermint::staking::ValidatorsQuery,
+}
+
+// ---------------------------------------------------------------------------
+// New staking handlers
+// ---------------------------------------------------------------------------
+
+pub async fn claim_staking_rewards(ctx: MmArc, req: ClaimStakingRewardsRequest) -> DelegationResult {
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    match coin {
+        MmCoinEnum::TendermintCoin(c) => c.claim_staking_rewards(req.payload).await,
+        MmCoinEnum::TendermintToken(t) => t.platform_coin.claim_staking_rewards(req.payload).await,
+        _ => MmError::err(DelegationError::CoinDoesntSupportDelegation { coin: req.coin }),
+    }
+}
+
+pub async fn delegations_info(
+    ctx: MmArc,
+    req: DelegationsInfoRequest,
+) -> Result<rpc_command::tendermint::staking::DelegationsQueryResponse, MmError<StakingInfosError>> {
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    match coin {
+        MmCoinEnum::TendermintCoin(c) => c.delegations_list(req.paging).await.map_mm_err(),
+        MmCoinEnum::TendermintToken(t) => t.platform_coin.delegations_list(req.paging).await.map_mm_err(),
+        _ => MmError::err(StakingInfosError::CoinDoesntSupportStakingInfos { coin: req.coin }),
+    }
+}
+
+pub async fn ongoing_undelegations_info(
+    ctx: MmArc,
+    req: UndelegationsInfoRequest,
+) -> Result<rpc_command::tendermint::staking::UndelegationsQueryResponse, MmError<StakingInfosError>> {
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    match coin {
+        MmCoinEnum::TendermintCoin(c) => c.ongoing_undelegations_list(req.paging).await.map_mm_err(),
+        MmCoinEnum::TendermintToken(t) => t
+            .platform_coin
+            .ongoing_undelegations_list(req.paging)
+            .await
+            .map_mm_err(),
+        _ => MmError::err(StakingInfosError::CoinDoesntSupportStakingInfos { coin: req.coin }),
+    }
+}
+
+pub async fn validators_info(
+    ctx: MmArc,
+    req: ValidatorsInfoRequest,
+) -> Result<rpc_command::tendermint::staking::ValidatorsQueryResponse, MmError<StakingInfosError>> {
+    rpc_command::tendermint::staking::validators_rpc(
+        lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?,
+        req.inner,
+    )
+    .await
 }
 
 pub async fn send_raw_transaction(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, String> {

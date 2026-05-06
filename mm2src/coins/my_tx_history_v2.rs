@@ -204,6 +204,7 @@ impl<'a, Addr: Clone + DisplayAddress + Eq + std::hash::Hash, Tx: Transaction> T
             },
             TransactionType::StakingDelegation
             | TransactionType::RemoveDelegation
+            | TransactionType::ClaimDelegationRewards
             | TransactionType::StandardTransfer => tx_hash.clone(),
         };
 
