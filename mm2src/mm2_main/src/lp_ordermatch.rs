@@ -6155,5 +6155,6 @@ fn orderbook_address(
         CoinProtocol::LIGHTNING { .. } => MmError::err(OrderbookAddrErr::CoinIsNotSupported(coin.to_owned())),
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC => Ok(OrderbookAddress::Shielded),
+        CoinProtocol::SIA | CoinProtocol::TENDERMINT { .. } | CoinProtocol::TENDERMINTTOKEN { .. } => todo!(),
     }
 }
