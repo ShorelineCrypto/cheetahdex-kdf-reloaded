@@ -1827,7 +1827,7 @@ fn test_process_get_orderbook_request() {
         let mut actual: Vec<OrderbookItem> = item
             .orders
             .iter()
-            .map(|(_uuid, order)| {
+            .map(|(_uuid, order): &(Uuid, OrderbookP2PItem)| {
                 OrderbookItem::from_p2p_and_info(
                     order.clone(),
                     BaseRelProtocolInfo::default(),
