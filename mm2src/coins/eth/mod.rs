@@ -111,7 +111,7 @@ pub(crate) use common::mm_number::MmNumber;
 pub(crate) use eth_hd_wallet::EthHDWallet;
 pub(crate) use ethkey::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
-pub(crate) use web3_transport::{EthFeeHistoryNamespace, Web3Transport};
+pub(crate) use web3_transport::{EthFeeHistoryNamespace, FeeHistoryResult, Web3Transport};
 
 #[cfg(test)]
 mod eth_tests;

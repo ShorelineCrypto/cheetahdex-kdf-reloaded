@@ -627,4 +627,36 @@ mod eth_responses {
         let json_str = r#"{"average": 25, "fast": 40}"#;
         let _data: GasStationData = json::from_str(json_str).unwrap();
     }
+
+    #[test]
+    fn test_fee_history_result_full() {
+        use crate::eth::FeeHistoryResult;
+        // Real eth_feeHistory response with all fields
+        let json_str = r#"{
+            "oldestBlock": "0xb0c8d2",
+            "baseFeePerGas": ["0x12a05f200", "0x1234abcde", "0x1111111111"],
+            "gasUsedRatio": [0.5, 0.75, 0.9],
+            "reward": [["0x3b9aca00", "0x77359400"], ["0x4a817c800", "0x8bb2c97000"]]
+        }"#;
+        let res: FeeHistoryResult = json::from_str(json_str).unwrap();
+        assert_eq!(res.base_fee_per_gas.len(), 3);
+        assert!(res.gas_used_ratio.is_some());
+        assert_eq!(res.gas_used_ratio.as_ref().unwrap().len(), 3);
+        assert!(res.priority_rewards.is_some());
+        assert_eq!(res.priority_rewards.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_fee_history_result_minimal() {
+        use crate::eth::FeeHistoryResult;
+        // Minimal response with no optional fields
+        let json_str = r#"{
+            "oldestBlock": "0x1",
+            "baseFeePerGas": ["0x0"]
+        }"#;
+        let res: FeeHistoryResult = json::from_str(json_str).unwrap();
+        assert_eq!(res.base_fee_per_gas.len(), 1);
+        assert!(res.gas_used_ratio.is_none());
+        assert!(res.priority_rewards.is_none());
+    }
 }
