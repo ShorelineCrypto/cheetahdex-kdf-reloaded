@@ -10,6 +10,7 @@ pub mod fee;
 pub mod proto;
 pub mod sign;
 pub mod tx_builder;
+pub mod withdraw;
 
 pub use address::TronAddress;
 

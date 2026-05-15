@@ -247,6 +247,13 @@ pub async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest)
 }
 
 pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> WithdrawResult {
+    // TRON uses a dedicated pipeline: its transaction format, address
+    // encoding, signing digest and fee model all differ from the EVM flow.
+    if matches!(coin.coin_type, EthCoinType::Tron | EthCoinType::Trc20 { .. }) {
+        let _ = ctx;
+        return crate::eth::tron::withdraw::withdraw_tron(coin, req).await;
+    }
+
     let to_addr = coin
         .address_from_str(&req.to)
         .map_to_mm(WithdrawError::InvalidAddress)?;
@@ -273,10 +280,12 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             let data = function.encode_input(&[Token::Address(to_addr), Token::Uint(wei_amount)])?;
             (0.into(), data, *token_addr, platform.as_str())
         },
-        // ETH-style withdraw doesn't apply to TRON; the activation gate
-        // prevents this code path. Real TRON withdraw lands in P10.2.5.
+        // TRON is diverted to the dedicated pipeline at the top of this function;
+        // this arm is unreachable but kept for exhaustiveness.
         EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
-            unimplemented!("TRON withdraw not wired in ETH-style withdraw path (pending P10.2.5)")
+            return MmError::err(WithdrawError::InternalError(
+                "TRON withdraw must route through tron::withdraw::withdraw_tron".to_owned(),
+            ))
         },
     };
     let eth_value_dec = u256_to_big_decimal(eth_value, coin.decimals).mm_err(Into::into)?;

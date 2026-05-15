@@ -443,6 +443,8 @@ pub enum TxFeeDetails {
     Solana(SolanaFeeDetails),
     Sia(siacoin::SiaFeeDetails),
     Tendermint(tendermint::TendermintFeeDetails),
+    /// TRON fee breakdown: bandwidth + energy + optional activation.
+    Tron(crate::eth::tron::fee::TronTxFeeDetails),
 }
 /// Deserialize the TxFeeDetails as an untagged enum.
 impl<'de> Deserialize<'de> for TxFeeDetails {
@@ -458,6 +460,7 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
             Qrc20(Qrc20FeeDetails),
             #[cfg(not(target_arch = "wasm32"))]
             Solana(SolanaFeeDetails),
+            Tron(crate::eth::tron::fee::TronTxFeeDetails),
         }
 
         match Deserialize::deserialize(deserializer)? {
@@ -466,6 +469,7 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
             TxFeeDetailsUnTagged::Qrc20(f) => Ok(TxFeeDetails::Qrc20(f)),
             #[cfg(not(target_arch = "wasm32"))]
             TxFeeDetailsUnTagged::Solana(f) => Ok(TxFeeDetails::Solana(f)),
+            TxFeeDetailsUnTagged::Tron(f) => Ok(TxFeeDetails::Tron(f)),
         }
     }
 }
@@ -482,6 +486,11 @@ impl From<tendermint::TendermintFeeDetails> for TxFeeDetails {
 impl From<EthTxFeeDetails> for TxFeeDetails {
     fn from(eth_details: EthTxFeeDetails) -> Self {
         TxFeeDetails::Eth(eth_details)
+    }
+}
+impl From<crate::eth::tron::fee::TronTxFeeDetails> for TxFeeDetails {
+    fn from(tron_details: crate::eth::tron::fee::TronTxFeeDetails) -> Self {
+        TxFeeDetails::Tron(tron_details)
     }
 }
 impl From<UtxoFeeDetails> for TxFeeDetails {

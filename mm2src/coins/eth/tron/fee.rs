@@ -94,7 +94,7 @@ impl TronAccountResources {
 // ---------------------------------------------------------------------------
 
 /// TRON transaction fee breakdown for display.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TronTxFeeDetails {
     /// Total fee in SUN.
     pub total_fee_sun: i64,
