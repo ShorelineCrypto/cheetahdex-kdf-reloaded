@@ -196,6 +196,13 @@ pub struct TronApiClient {
     nodes: Arc<async_std::sync::Mutex<Vec<String>>>,
 }
 
+impl std::fmt::Debug for TronApiClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // We can't lock the mutex synchronously here; just record the type.
+        write!(f, "TronApiClient {{ <nodes hidden> }}")
+    }
+}
+
 impl TronApiClient {
     /// Create a new client from a list of node base URLs.
     pub fn new(node_urls: Vec<String>) -> Self {
@@ -212,8 +219,7 @@ impl TronApiClient {
         Req: Serialize,
         Resp: serde::de::DeserializeOwned + Send + 'static,
     {
-        let json_body =
-            serde_json::to_string(request).map_err(|e| TronApiError::InvalidResponse(e.to_string()))?;
+        let json_body = serde_json::to_string(request).map_err(|e| TronApiError::InvalidResponse(e.to_string()))?;
 
         let mut nodes = self.nodes.lock().await;
         let mut last_err = TronApiError::AllNodesFailed("no nodes configured".to_string());
@@ -298,10 +304,7 @@ impl TronApiClient {
     }
 
     /// Get transaction receipt/execution info by hash.
-    pub async fn get_transaction_info_by_id(
-        &self,
-        tx_hash: &str,
-    ) -> Result<TransactionInfoResponse, TronApiError> {
+    pub async fn get_transaction_info_by_id(&self, tx_hash: &str) -> Result<TransactionInfoResponse, TronApiError> {
         let req = TxByIdRequest {
             value: tx_hash.to_string(),
         };
@@ -316,10 +319,7 @@ impl TronApiClient {
     }
 
     /// Get account resource quotas (bandwidth, energy).
-    pub async fn get_account_resource(
-        &self,
-        address: &TronAddress,
-    ) -> Result<serde_json::Value, TronApiError> {
+    pub async fn get_account_resource(&self, address: &TronAddress) -> Result<serde_json::Value, TronApiError> {
         let req = GetAccountResourceRequest {
             address: address.to_base58(),
             visible: true,
@@ -387,7 +387,8 @@ mod tests {
 
     #[test]
     fn test_chain_parameters_deserialize() {
-        let json = r#"{"chainParameter":[{"key":"getTransactionFee","value":1000},{"key":"getEnergyFee","value":420}]}"#;
+        let json =
+            r#"{"chainParameter":[{"key":"getTransactionFee","value":1000},{"key":"getEnergyFee","value":420}]}"#;
         let resp: GetChainParametersResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.chain_parameter.len(), 2);
         assert_eq!(resp.chain_parameter[0].key, "getTransactionFee");

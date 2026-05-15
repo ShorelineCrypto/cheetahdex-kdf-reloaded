@@ -380,6 +380,20 @@ pub enum CoinProtocol {
         denom: String,
         decimals: u8,
     },
+    /// Native TRON coin (TRX). Carries the network identity so the
+    /// activation layer can pick the right set of full-node URLs and
+    /// chain parameters.
+    TRX {
+        #[serde(default)]
+        network: crate::eth::tron::Network,
+    },
+    /// TRC20 token deployed on TRON. `platform` is the parent TRX coin
+    /// ticker; `contract_address` is the on-chain TRC20 contract in
+    /// hex (with `0x41` prefix) or Base58Check.
+    TRC20 {
+        platform: String,
+        contract_address: String,
+    },
 }
 pub enum RpcClientType {
     Native,

@@ -42,7 +42,9 @@ pub struct TronAddress(EthAddress);
 
 impl TronAddress {
     /// Create a TronAddress from a 20-byte EVM address.
-    pub fn from_evm_address(addr: EthAddress) -> Self { TronAddress(addr) }
+    pub fn from_evm_address(addr: EthAddress) -> Self {
+        TronAddress(addr)
+    }
 
     /// Create from raw 21-byte TRON address (0x41 prefix + 20 bytes).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, TronAddressError> {
@@ -60,7 +62,9 @@ impl TronAddress {
 
     /// Decode from a Base58Check-encoded string (starts with 'T').
     pub fn from_base58(s: &str) -> Result<Self, TronAddressError> {
-        let decoded = s.from_base58().map_err(|_| TronAddressError::InvalidBase58(s.to_string()))?;
+        let decoded = s
+            .from_base58()
+            .map_err(|_| TronAddressError::InvalidBase58(s.to_string()))?;
 
         // Base58Check: payload + 4-byte checksum
         if decoded.len() != TRON_ADDRESS_LEN + 4 {
@@ -87,7 +91,9 @@ impl TronAddress {
     }
 
     /// Return the 20-byte EVM address.
-    pub fn to_evm_address(&self) -> EthAddress { self.0 }
+    pub fn to_evm_address(&self) -> EthAddress {
+        self.0
+    }
 
     /// Return the 21-byte TRON address (0x41 prefix + 20 bytes).
     pub fn to_bytes(&self) -> [u8; TRON_ADDRESS_LEN] {
@@ -108,15 +114,21 @@ impl TronAddress {
     }
 
     /// Encode as hex string (with 0x41 prefix, no "0x").
-    pub fn to_hex(&self) -> String { hex::encode(self.to_bytes()) }
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.to_bytes())
+    }
 }
 
 impl fmt::Debug for TronAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "TronAddress({})", self.to_base58()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "TronAddress({})", self.to_base58())
+    }
 }
 
 impl fmt::Display for TronAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.to_base58()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_base58())
+    }
 }
 
 impl Serialize for TronAddress {

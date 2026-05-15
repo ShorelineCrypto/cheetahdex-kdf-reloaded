@@ -128,6 +128,11 @@ impl EthCoin {
                 .compat()
                 .await
             },
+            // TRON HTLC payments use the dedicated TRON pipeline.
+            // Activation gating prevents this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => Err(TransactionErr::Plain(ERRL!(
+                "TRON taker funding v2 not yet wired (pending P10.2.5)"
+            ))),
         }
     }
 
@@ -178,6 +183,13 @@ impl EthCoin {
                 let decoded = decode_contract_call(function, &tx.data)?;
                 validate_erc20_taker_payment_data(&decoded, &validation_args, function, token_addr)?;
             },
+            // TRON validation uses the dedicated TRON pipeline.
+            // Activation gating prevents this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                return MmError::err(ValidateSwapV2TxError::InternalError(
+                    "TRON taker funding validation not yet wired (pending P10.2.5)".to_owned(),
+                ));
+            },
         }
         Ok(())
     }
@@ -189,6 +201,12 @@ impl EthCoin {
     ) -> Result<SignedEthTx, TransactionErr> {
         let gas_limit = match self.coin_type {
             EthCoinType::Eth | EthCoinType::Erc20 { .. } => U256::from(self.gas_limit_v2.taker.approve_payment),
+            // TRON approve flow lives in the TRON pipeline. Gated. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                return Err(TransactionErr::Plain(ERRL!(
+                    "TRON taker payment approve not yet wired (pending P10.2.5)"
+                )));
+            },
         };
         let (taker_swap_v2_contract, send_func, token_address) = self
             .taker_swap_v2_details(ETH_TAKER_PAYMENT, ERC20_TAKER_PAYMENT)
@@ -526,6 +544,12 @@ impl EthCoin {
                     Token::Address(token_address), // erc20 token address from EthCoinType::Erc20
                 ])?
             },
+            // TRON HTLC payments use the dedicated TRON pipeline. Gated. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                return Err(PrepareTxDataError::Internal(
+                    "TRON taker payment approve data not yet wired (pending P10.2.5)".to_owned(),
+                ));
+            },
         };
         Ok(data)
     }
@@ -567,6 +591,10 @@ impl EthCoin {
                 ])?;
                 Ok(data)
             },
+            // TRON HTLC spends use the dedicated TRON pipeline. Gated. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => Err(PrepareTxDataError::Internal(
+                "TRON spend taker payment data not yet wired (pending P10.2.5)".to_owned(),
+            )),
         }
     }
 
@@ -579,6 +607,13 @@ impl EthCoin {
         let (func, token_address) = match self.coin_type {
             EthCoinType::Eth => (try_tx_s!(TAKER_SWAP_V2.function(eth_func_name)), Address::default()),
             EthCoinType::Erc20 { token_addr, .. } => (try_tx_s!(TAKER_SWAP_V2.function(erc20_func_name)), token_addr),
+            // TRON HTLC contracts are addressed via the dedicated TRON pipeline.
+            // Activation gating prevents this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                return Err(TransactionErr::Plain(ERRL!(
+                    "TRON swap v2 contract details not yet wired (pending P10.2.5)"
+                )));
+            },
         };
         let taker_swap_v2_contract = self
             .swap_v2_contracts
@@ -596,6 +631,12 @@ impl EthCoin {
             let func = match self.coin_type {
                 EthCoinType::Eth => TAKER_SWAP_V2.function(ETH_TAKER_PAYMENT)?,
                 EthCoinType::Erc20 { .. } => TAKER_SWAP_V2.function(ERC20_TAKER_PAYMENT)?,
+                // TRON HTLC funding tx decoding lives in the TRON pipeline. Gated. P10.2.5.
+                EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                    return Err(PrepareTxDataError::Internal(
+                        "TRON funding decoding not yet wired (pending P10.2.5)".to_owned(),
+                    ));
+                },
             };
             decode_contract_call(func, &tx.data)?
         };

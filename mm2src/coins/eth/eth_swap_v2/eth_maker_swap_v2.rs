@@ -104,6 +104,11 @@ impl EthCoin {
                 .compat()
                 .await
             },
+            // TRON HTLC payments use the dedicated TRON pipeline.
+            // Activation gating prevents this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => Err(TransactionErr::Plain(ERRL!(
+                "TRON maker payment v2 not yet wired (pending P10.2.5)"
+            ))),
         }
     }
 
@@ -149,6 +154,13 @@ impl EthCoin {
                 let function = MAKER_SWAP_V2.function(ERC20_MAKER_PAYMENT)?;
                 let decoded = decode_contract_call(function, &tx.data)?;
                 validate_erc20_maker_payment_data(&decoded, &validation_args, function, token_addr)?;
+            },
+            // TRON HTLC validation uses the dedicated TRON pipeline.
+            // Activation gating prevents this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                return MmError::err(ValidatePaymentError::InternalError(
+                    "TRON maker payment validation not yet wired (pending P10.2.5)".to_owned(),
+                ));
             },
         }
 

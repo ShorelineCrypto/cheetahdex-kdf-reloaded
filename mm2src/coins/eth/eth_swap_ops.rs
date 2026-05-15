@@ -238,6 +238,11 @@ impl SwapOps for EthCoin {
                         _ => return ERR!("Should have got uint token but got {:?}", decoded_input[1]),
                     }
                 },
+                // V1 ETH/ERC20 fee validation; TRON uses a separate fee validator.
+                // Activation gating prevents this branch. P10.2.5.
+                EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                    return ERR!("TRON dex-fee validation not yet wired (pending P10.2.5)");
+                },
             }
 
             Ok(())

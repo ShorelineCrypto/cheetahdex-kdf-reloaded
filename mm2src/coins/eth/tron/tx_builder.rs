@@ -7,9 +7,10 @@
 use ethabi::Token;
 
 use super::address::TronAddress;
-use super::proto::{ContractType, TransactionContract, TransactionRaw, TransferContract, TriggerSmartContract,
-                   TaposBlockData, DEFAULT_EXPIRATION_SEC, TRANSFER_CONTRACT_TYPE_URL,
-                   TRIGGER_SMART_CONTRACT_TYPE_URL};
+use super::proto::{
+    ContractType, TaposBlockData, TransactionContract, TransactionRaw, TransferContract, TriggerSmartContract,
+    DEFAULT_EXPIRATION_SEC, TRANSFER_CONTRACT_TYPE_URL, TRIGGER_SMART_CONTRACT_TYPE_URL,
+};
 
 use prost::Message;
 
@@ -20,10 +21,7 @@ pub fn abi_encode_trc20_transfer(to: &TronAddress, amount_sun: u64) -> Vec<u8> {
     // TRC20 uses the same ABI as ERC20: transfer(address,uint256)
     // Selector: 0xa9059cbb
     let selector: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
-    let tokens = ethabi::encode(&[
-        Token::Address(to.to_evm_address()),
-        Token::Uint(amount_sun.into()),
-    ]);
+    let tokens = ethabi::encode(&[Token::Address(to.to_evm_address()), Token::Uint(amount_sun.into())]);
     let mut data = Vec::with_capacity(4 + tokens.len());
     data.extend_from_slice(&selector);
     data.extend_from_slice(&tokens);
@@ -145,16 +143,17 @@ mod tests {
     fn test_tapos_from_block() {
         let block_num: u64 = 0x0102_0304_0506_0708;
         let block_id: [u8; 32] = [
-            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-            0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
-            0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
-            0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21,
+            0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
         ];
         let tapos = tapos_from_block(block_num, &block_id);
         // ref_block_bytes = last 2 bytes of block_num big-endian
         assert_eq!(tapos.ref_block_bytes, vec![0x07, 0x08]);
         // ref_block_hash = block_id[8..16]
-        assert_eq!(tapos.ref_block_hash, vec![0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F]);
+        assert_eq!(
+            tapos.ref_block_hash,
+            vec![0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F]
+        );
     }
 
     #[test]

@@ -81,6 +81,11 @@ impl MmCoin for EthCoin {
                 match coin.coin_type {
                     EthCoinType::Eth => coin.process_eth_history(&ctx).await,
                     EthCoinType::Erc20 { ref token_addr, .. } => coin.process_erc20_history(*token_addr, &ctx).await,
+                    // TRON tx history is fetched from a different API entirely
+                    // (TronGrid /v1/accounts/{address}/transactions). Wired in P10.2.5.
+                    EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                        log!("TRON tx history not yet wired (pending P10.2.5)");
+                    },
                 }
                 Ok(())
             };
@@ -102,6 +107,9 @@ impl MmCoin for EthCoin {
                     let fee_coin = match &coin.coin_type {
                         EthCoinType::Eth => &coin.ticker,
                         EthCoinType::Erc20 { platform, .. } => platform,
+                        // For TRON the fee is paid in TRX. TRC20 references its parent.
+                        EthCoinType::Tron => &coin.ticker,
+                        EthCoinType::Trc20 { platform, .. } => platform,
                     };
                     Ok(TradeFee {
                         coin: fee_coin.into(),
@@ -155,6 +163,11 @@ impl MmCoin for EthCoin {
                     U256::from(300_000)
                 }
             },
+            // Trade-fee preimage for V1 ETH-style HTLC swaps; TRON uses a
+            // bandwidth/energy fee model handled separately. Wired in P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                unimplemented!("TRON V1 sender trade fee not wired (pending P10.2.5)")
+            },
         };
 
         let total_fee = gas_limit * gas_price;
@@ -162,6 +175,8 @@ impl MmCoin for EthCoin {
         let fee_coin = match &self.coin_type {
             EthCoinType::Eth => &self.ticker,
             EthCoinType::Erc20 { platform, .. } => platform,
+            EthCoinType::Tron => &self.ticker,
+            EthCoinType::Trc20 { platform, .. } => platform,
         };
         Ok(TradeFee {
             coin: fee_coin.into(),
@@ -180,6 +195,8 @@ impl MmCoin for EthCoin {
             let fee_coin = match &coin.coin_type {
                 EthCoinType::Eth => &coin.ticker,
                 EthCoinType::Erc20 { platform, .. } => platform,
+                EthCoinType::Tron => &coin.ticker,
+                EthCoinType::Trc20 { platform, .. } => platform,
             };
             Ok(TradeFee {
                 coin: fee_coin.into(),
@@ -206,6 +223,13 @@ impl MmCoin for EthCoin {
                 let function = ERC20_CONTRACT.function("transfer")?;
                 let data = function.encode_input(&[Token::Address(to_addr), Token::Uint(dex_fee_amount)])?;
                 (0.into(), data, token_addr, platform)
+            },
+            // ETH-style fee preimage; TRON dex-fee preimage flows through the
+            // dedicated TRON estimator. Activation gating prevents this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                return MmError::err(TradePreimageError::InternalError(
+                    "TRON dex-fee preimage not yet wired (pending P10.2.5)".to_owned(),
+                ));
             },
         };
 

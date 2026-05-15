@@ -36,8 +36,7 @@ pub fn hash_transaction_raw(raw: &TransactionRaw) -> H256 {
 ///
 /// Returns a 65-byte signature: R(32) || S(32) || V(1), V ∈ {0, 1}.
 pub fn sign_tron_hash(secret: &Secret, tx_hash: &H256) -> Result<Vec<u8>, TronSignError> {
-    let sig: EthSignature =
-        sign(secret, tx_hash).map_err(|e| TronSignError::SigningFailed(e.to_string()))?;
+    let sig: EthSignature = sign(secret, tx_hash).map_err(|e| TronSignError::SigningFailed(e.to_string()))?;
     // ethkey::Signature stores [r(32) | s(32) | v(1)] with v ∈ {0, 1},
     // which matches TRON's expected format.
     let mut bytes = vec![0u8; 65];
@@ -48,10 +47,7 @@ pub fn sign_tron_hash(secret: &Secret, tx_hash: &H256) -> Result<Vec<u8>, TronSi
 }
 
 /// Convenience: hash a `TransactionRaw` and sign it in one step.
-pub fn sign_transaction_raw(
-    secret: &Secret,
-    raw: &TransactionRaw,
-) -> Result<(H256, Vec<u8>), TronSignError> {
+pub fn sign_transaction_raw(secret: &Secret, raw: &TransactionRaw) -> Result<(H256, Vec<u8>), TronSignError> {
     let tx_hash = hash_transaction_raw(raw);
     let sig = sign_tron_hash(secret, &tx_hash)?;
     Ok((tx_hash, sig))
@@ -65,8 +61,8 @@ mod tests {
 
     fn test_keypair() -> KeyPair {
         // Well-known test private key (DO NOT use in production).
-        let secret = Secret::from_str("0000000000000000000000000000000000000000000000000000000000000001")
-            .expect("valid secret");
+        let secret =
+            Secret::from_str("0000000000000000000000000000000000000000000000000000000000000001").expect("valid secret");
         KeyPair::from_secret(secret).expect("valid keypair")
     }
 
@@ -136,10 +132,8 @@ mod tests {
     fn test_different_keys_produce_different_signatures() {
         let hash = H256::from_slice(&[0x42; 32]);
 
-        let s1 = Secret::from_str("0000000000000000000000000000000000000000000000000000000000000001")
-            .expect("valid");
-        let s2 = Secret::from_str("0000000000000000000000000000000000000000000000000000000000000002")
-            .expect("valid");
+        let s1 = Secret::from_str("0000000000000000000000000000000000000000000000000000000000000001").expect("valid");
+        let s2 = Secret::from_str("0000000000000000000000000000000000000000000000000000000000000002").expect("valid");
 
         let sig1 = sign_tron_hash(&s1, &hash).unwrap();
         let sig2 = sign_tron_hash(&s2, &hash).unwrap();

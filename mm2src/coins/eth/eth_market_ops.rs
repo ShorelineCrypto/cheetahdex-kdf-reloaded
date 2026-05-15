@@ -71,6 +71,9 @@ impl MarketCoinOps for EthCoin {
         match &self.coin_type {
             EthCoinType::Eth => self.ticker(),
             EthCoinType::Erc20 { platform, .. } => platform,
+            // TRX is its own platform; TRC20 references its parent TRX coin.
+            EthCoinType::Tron => self.ticker(),
+            EthCoinType::Trc20 { platform, .. } => platform,
         }
     }
 
@@ -182,6 +185,12 @@ impl MarketCoinOps for EthCoin {
         let func_name = match self.coin_type {
             EthCoinType::Eth => "ethPayment",
             EthCoinType::Erc20 { .. } => "erc20Payment",
+            // V1 ETH-style HTLC swaps don't apply to TRON; activation gating
+            // prevents this code path from being reached. Real TRON swap
+            // wiring lands in P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                unimplemented!("TRON V1 swap watchers not wired (pending P10.2.5)")
+            },
         };
 
         let payment_func = try_tx_fus!(SWAP_CONTRACT.function(func_name));

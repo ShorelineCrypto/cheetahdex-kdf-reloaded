@@ -35,9 +35,7 @@ impl TronChainPrices {
             match p.key.as_str() {
                 "getTransactionFee" => prices.bandwidth_price_sun = p.value.unwrap_or(0),
                 "getEnergyFee" => prices.energy_price_sun = p.value.unwrap_or(0),
-                "getCreateNewAccountFeeInSystemContract" => {
-                    prices.create_new_account_fee_sun = p.value.unwrap_or(0)
-                },
+                "getCreateNewAccountFeeInSystemContract" => prices.create_new_account_fee_sun = p.value.unwrap_or(0),
                 "getCreateAccountFee" => prices.create_account_fee_sun = p.value.unwrap_or(0),
                 _ => {},
             }
@@ -76,13 +74,19 @@ pub struct TronAccountResources {
 
 impl TronAccountResources {
     /// Remaining free bandwidth.
-    pub fn free_bandwidth_remaining(&self) -> i64 { (self.free_net_limit - self.free_net_used).max(0) }
+    pub fn free_bandwidth_remaining(&self) -> i64 {
+        (self.free_net_limit - self.free_net_used).max(0)
+    }
 
     /// Remaining staked bandwidth.
-    pub fn staked_bandwidth_remaining(&self) -> i64 { (self.net_limit - self.net_used).max(0) }
+    pub fn staked_bandwidth_remaining(&self) -> i64 {
+        (self.net_limit - self.net_used).max(0)
+    }
 
     /// Remaining energy.
-    pub fn energy_remaining(&self) -> i64 { (self.energy_limit - self.energy_used).max(0) }
+    pub fn energy_remaining(&self) -> i64 {
+        (self.energy_limit - self.energy_used).max(0)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +122,11 @@ pub fn estimate_trx_transfer_fee(
     // Typical TRX transfer size is ~270 bytes of bandwidth.
     const TRX_TRANSFER_BANDWIDTH: i64 = 270;
 
-    let activation_fee = if recipient_exists { 0 } else { prices.create_new_account_fee_sun };
+    let activation_fee = if recipient_exists {
+        0
+    } else {
+        prices.create_new_account_fee_sun
+    };
 
     let free_bw = resources.free_bandwidth_remaining();
     let staked_bw = resources.staked_bandwidth_remaining();
@@ -151,7 +159,11 @@ pub fn estimate_trc20_transfer_fee(
 ) -> TronTxFeeDetails {
     const TRC20_TRANSFER_BANDWIDTH: i64 = 350;
 
-    let activation_fee = if recipient_exists { 0 } else { prices.create_new_account_fee_sun };
+    let activation_fee = if recipient_exists {
+        0
+    } else {
+        prices.create_new_account_fee_sun
+    };
 
     let free_bw = resources.free_bandwidth_remaining();
     let staked_bw = resources.staked_bandwidth_remaining();
@@ -259,11 +271,26 @@ mod tests {
     fn test_chain_prices_from_parameters() {
         let resp = GetChainParametersResponse {
             chain_parameter: vec![
-                ChainParameter { key: "getTransactionFee".to_string(), value: Some(1000) },
-                ChainParameter { key: "getEnergyFee".to_string(), value: Some(420) },
-                ChainParameter { key: "getCreateNewAccountFeeInSystemContract".to_string(), value: Some(1_000_000) },
-                ChainParameter { key: "getCreateAccountFee".to_string(), value: Some(100_000) },
-                ChainParameter { key: "unrelated_key".to_string(), value: Some(999) },
+                ChainParameter {
+                    key: "getTransactionFee".to_string(),
+                    value: Some(1000),
+                },
+                ChainParameter {
+                    key: "getEnergyFee".to_string(),
+                    value: Some(420),
+                },
+                ChainParameter {
+                    key: "getCreateNewAccountFeeInSystemContract".to_string(),
+                    value: Some(1_000_000),
+                },
+                ChainParameter {
+                    key: "getCreateAccountFee".to_string(),
+                    value: Some(100_000),
+                },
+                ChainParameter {
+                    key: "unrelated_key".to_string(),
+                    value: Some(999),
+                },
             ],
         };
         let prices = TronChainPrices::from_chain_parameters(&resp);

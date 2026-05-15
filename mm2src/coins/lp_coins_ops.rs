@@ -133,6 +133,10 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
                 "TENDERMINTTOKEN protocol is not supported by lp_coininit - use enable_tendermint_token instead"
             )
         },
+        // TRON activation is V2-only and pending P10.2.5 wiring.
+        CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => {
+            return ERR!("TRON protocol activation is not yet wired (pending P10.2.5)")
+        },
     };
 
     let register_params = RegisterCoinParams {
@@ -760,6 +764,9 @@ pub fn address_by_coin_conf_and_pubkey_str(
         CoinProtocol::SIA => ERR!("address_by_coin_conf_and_pubkey_str is not supported for SIA protocol!"),
         CoinProtocol::TENDERMINT { .. } | CoinProtocol::TENDERMINTTOKEN { .. } => {
             ERR!("address_by_coin_conf_and_pubkey_str is not supported for Tendermint protocol!")
+        },
+        CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => {
+            ERR!("address_by_coin_conf_and_pubkey_str is not supported for TRON protocol!")
         },
     }
 }

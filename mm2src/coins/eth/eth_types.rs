@@ -221,6 +221,14 @@ pub enum EthCoinType {
     /// ERC20 token with smart contract address
     /// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-20.md
     Erc20 { platform: String, token_addr: Address },
+    /// Native TRON (TRX). Like `Eth` but the host blockchain uses
+    /// SHA-256 hashing, protobuf transactions, Base58Check addresses
+    /// and a bandwidth/energy fee model. Decimals are fixed at 6 (SUN).
+    Tron,
+    /// TRC20 token deployed as a smart contract on TRON. Holds the
+    /// platform name (the TRX coin ticker the token rides on) and the
+    /// 20-byte EVM-shaped contract address.
+    Trc20 { platform: String, token_addr: Address },
 }
 
 /// pImpl idiom.
@@ -254,6 +262,10 @@ pub struct EthCoinImpl {
     pub(crate) swap_v2_contracts: Option<SwapV2Contracts>,
     /// Gas limits for V2 swap operations.
     pub(crate) gas_limit_v2: EthGasLimitV2,
+    /// HTTP API client for TRON full nodes. Populated only when
+    /// `coin_type` is [`EthCoinType::Tron`] or [`EthCoinType::Trc20`].
+    /// `None` for ETH/ERC20 coins.
+    pub(crate) tron_api: Option<crate::eth::tron::api::TronApiClient>,
 }
 
 // ─── V2 swap types ──────────────────────────────────────────────────────────
@@ -396,6 +408,11 @@ impl EthGasLimitV2 {
             (EthCoinType::Erc20 { .. }, EthPaymentType::TakerPayments, PaymentMethod::RefundSecret) => {
                 Ok(self.taker.erc20_taker_refund_secret)
             },
+            // P10.2.5: TRON gas estimates not modelled here. Activation rejects
+            // TRON coins until swap V2 wiring lands, so this branch is unreachable.
+            (EthCoinType::Tron, _, _) | (EthCoinType::Trc20 { .. }, _, _) => {
+                Err("TRON swap V2 gas limits not yet defined (P10.2.5)".to_string())
+            },
         }
     }
 }
@@ -469,6 +486,8 @@ impl fmt::Display for EthCoinType {
         match self {
             EthCoinType::Eth => write!(f, "ETH"),
             EthCoinType::Erc20 { platform, .. } => write!(f, "ERC20({})", platform),
+            EthCoinType::Tron => write!(f, "TRX"),
+            EthCoinType::Trc20 { platform, .. } => write!(f, "TRC20({})", platform),
         }
     }
 }

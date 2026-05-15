@@ -179,6 +179,9 @@ impl EthCoinImpl {
         match &self.coin_type {
             EthCoinType::Eth => Ok(Address::default()),
             EthCoinType::Erc20 { token_addr, .. } => Ok(*token_addr),
+            // Native TRX has no token contract; return zero like ETH.
+            EthCoinType::Tron => Ok(Address::default()),
+            EthCoinType::Trc20 { token_addr, .. } => Ok(*token_addr),
         }
     }
 
@@ -269,6 +272,11 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             let function = ERC20_CONTRACT.function("transfer")?;
             let data = function.encode_input(&[Token::Address(to_addr), Token::Uint(wei_amount)])?;
             (0.into(), data, *token_addr, platform.as_str())
+        },
+        // ETH-style withdraw doesn't apply to TRON; the activation gate
+        // prevents this code path. Real TRON withdraw lands in P10.2.5.
+        EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+            unimplemented!("TRON withdraw not wired in ETH-style withdraw path (pending P10.2.5)")
         },
     };
     let eth_value_dec = u256_to_big_decimal(eth_value, coin.decimals).mm_err(Into::into)?;
@@ -788,6 +796,8 @@ impl EthCoin {
                 let fee_coin = match &self.coin_type {
                     EthCoinType::Eth => self.ticker(),
                     EthCoinType::Erc20 { platform, .. } => platform.as_str(),
+                    EthCoinType::Tron => self.ticker(),
+                    EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details: Option<EthTxFeeDetails> = match receipt {
                     Some(r) => Some(
@@ -1176,6 +1186,8 @@ impl EthCoin {
                 let fee_coin = match &self.coin_type {
                     EthCoinType::Eth => self.ticker(),
                     EthCoinType::Erc20 { platform, .. } => platform.as_str(),
+                    EthCoinType::Tron => self.ticker(),
+                    EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details = match receipt {
                     Some(r) => Some(
@@ -1295,6 +1307,12 @@ impl EthCoin {
                 let data = try_tx_fus!(function.encode_input(&[Token::Address(address), Token::Uint(value)]));
                 self.sign_and_send_transaction(0.into(), Action::Call(*token_addr), data, U256::from(210_000))
             },
+            // TRON has its own transfer pipeline (build TransactionRaw,
+            // sign with SHA-256+secp256k1, broadcast via TronApiClient).
+            // Activation gating prevents this from being reached. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => Box::new(futures01::future::err(TransactionErr::Plain(
+                ERRL!("TRON send_to_address not yet wired (pending P10.2.5)"),
+            ))),
         }
     }
 
@@ -1360,6 +1378,11 @@ impl EthCoin {
                     }
                 }))
             },
+            // V1 Ethereum HTLC swaps; TRON uses a separate atomic-swap flow.
+            // Activation gating prevents this code path. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => Box::new(futures01::future::err(TransactionErr::Plain(
+                ERRL!("TRON HTLC payment not yet wired (pending P10.2.5)"),
+            ))),
         }
     }
 
@@ -1445,6 +1468,10 @@ impl EthCoin {
                         }),
                 )
             },
+            // V1 Ethereum HTLC swaps; TRON path is gated. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => Box::new(futures01::future::err(TransactionErr::Plain(
+                ERRL!("TRON HTLC spend not yet wired (pending P10.2.5)"),
+            ))),
         }
     }
 
@@ -1528,6 +1555,11 @@ impl EthCoin {
                         }),
                 )
             },
+            // V1 Ethereum HTLC refund; TRON refund is a separate flow,
+            // and activation gating prevents reaching this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => Box::new(futures01::future::err(TransactionErr::Plain(
+                ERRL!("TRON HTLC refund not yet wired (pending P10.2.5)"),
+            ))),
         }
     }
 
@@ -1555,6 +1587,11 @@ impl EthCoin {
                         },
                     }
                 },
+                // TRON balance is fetched via the dedicated TRON HTTP API,
+                // not via web3. Activation gating prevents this branch. P10.2.5.
+                EthCoinType::Tron | EthCoinType::Trc20 { .. } => MmError::err(BalanceError::Internal(
+                    "TRON balance lookup not yet wired (pending P10.2.5)".to_owned(),
+                )),
             }
         };
         Box::new(fut.boxed().compat())
@@ -1637,6 +1674,11 @@ impl EthCoin {
                         },
                     }
                 },
+                // TRC20 allowance would use the dedicated TRON read-only call;
+                // ETH allowance() pipeline is not used. Gated until P10.2.5.
+                EthCoinType::Tron | EthCoinType::Trc20 { .. } => MmError::err(Web3RpcError::Internal(
+                    "TRON allowance not yet wired (pending P10.2.5)".to_owned(),
+                )),
             }
         };
         Box::new(fut.boxed().compat())
@@ -1648,6 +1690,11 @@ impl EthCoin {
             let token_addr = match coin.coin_type {
                 EthCoinType::Eth => return TX_PLAIN_ERR!("'approve' is expected to be call for ERC20 coins only"),
                 EthCoinType::Erc20 { token_addr, .. } => token_addr,
+                // ERC20 approve() is not used for TRON/TRC20 (the TRON contract
+                // surface is invoked via the TRON HTTP API). Gated until P10.2.5.
+                EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                    return TX_PLAIN_ERR!("TRON approve not yet wired (pending P10.2.5)")
+                },
             };
             let function = try_tx_s!(ERC20_CONTRACT.function("approve"));
             let data = try_tx_s!(function.encode_input(&[Token::Address(spender), Token::Uint(amount)]));
@@ -1900,6 +1947,11 @@ impl EthCoin {
                         );
                     }
                 },
+                // V1 ETH/ERC20 payment validation; TRON HTLC payments use a
+                // separate validator. Activation gating prevents this branch. P10.2.5.
+                EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                    return ERR!("TRON HTLC payment validation not yet wired (pending P10.2.5)");
+                },
             }
 
             Ok(())
@@ -1941,6 +1993,11 @@ impl EthCoin {
         let func_name = match self.coin_type {
             EthCoinType::Eth => "ethPayment",
             EthCoinType::Erc20 { .. } => "erc20Payment",
+            // V1 ETH/ERC20 search; TRON spend search uses TRON HTTP API.
+            // Activation gating prevents this branch. P10.2.5.
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
+                return ERR!("TRON spend search not yet wired (pending P10.2.5)");
+            },
         };
 
         let payment_func = try_s!(SWAP_CONTRACT.function(func_name));
@@ -2326,6 +2383,12 @@ pub async fn eth_coin_from_conf_and_request(
     priv_key: &[u8],
     protocol: CoinProtocol,
 ) -> Result<EthCoin, String> {
+    // Defensive: TRON activates through a dedicated V2 path; reject any
+    // attempt to route TRX/TRC20 through the EVM legacy activator. P10.2.5.
+    if matches!(protocol, CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. }) {
+        return ERR!("TRON protocol activation is not yet wired (pending P10.2.5)");
+    }
+
     let mut urls: Vec<String> = try_s!(json::from_value(req["urls"].clone()));
     if urls.is_empty() {
         return ERR!("Enable request for ETH coin must have at least 1 node URL");
@@ -2436,6 +2499,9 @@ pub async fn eth_coin_from_conf_and_request(
         derivation_method: DerivationMethod::Iguana(my_address),
         swap_v2_contracts: None,
         gas_limit_v2: EthGasLimitV2::default(),
+        // ETH/ERC20 coins never use the TRON HTTP API; populated only by the
+        // dedicated TRON activation path.
+        tron_api: None,
     };
     Ok(EthCoin(Arc::new(coin)))
 }

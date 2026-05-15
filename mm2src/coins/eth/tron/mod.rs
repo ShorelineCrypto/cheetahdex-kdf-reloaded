@@ -33,5 +33,7 @@ pub enum Network {
 }
 
 impl Default for Network {
-    fn default() -> Self { Network::Mainnet }
+    fn default() -> Self {
+        Network::Mainnet
+    }
 }
