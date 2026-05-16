@@ -233,6 +233,7 @@ pub mod hd_wallet_storage;
 pub mod lightning;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
 pub mod my_tx_history_v2;
+pub mod nft;
 pub mod qrc20;
 pub mod rpc_command;
 #[doc(hidden)]
