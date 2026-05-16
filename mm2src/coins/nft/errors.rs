@@ -59,15 +59,21 @@ pub enum GetNftInfoError {
 }
 
 impl From<NumConversError> for GetNftInfoError {
-    fn from(e: NumConversError) -> Self { GetNftInfoError::Num(e.to_string()) }
+    fn from(e: NumConversError) -> Self {
+        GetNftInfoError::Num(e.to_string())
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for GetNftInfoError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { GetNftInfoError::Internal(e.to_string()) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        GetNftInfoError::Internal(e.to_string())
+    }
 }
 
 impl From<SpamFilterError> for GetNftInfoError {
-    fn from(e: SpamFilterError) -> Self { GetNftInfoError::SpamFilter(e.to_string()) }
+    fn from(e: SpamFilterError) -> Self {
+        GetNftInfoError::SpamFilter(e.to_string())
+    }
 }
 
 impl From<TransferConfirmationsError> for GetNftInfoError {
@@ -77,22 +83,22 @@ impl From<TransferConfirmationsError> for GetNftInfoError {
 }
 
 impl From<LockDbError> for GetNftInfoError {
-    fn from(e: LockDbError) -> Self { GetNftInfoError::Storage(e.to_string()) }
+    fn from(e: LockDbError) -> Self {
+        GetNftInfoError::Storage(e.to_string())
+    }
 }
 
 impl From<GetNftInfoError> for WithdrawError {
-    fn from(e: GetNftInfoError) -> Self { WithdrawError::InternalError(e.to_string()) }
+    fn from(e: GetNftInfoError) -> Self {
+        WithdrawError::InternalError(e.to_string())
+    }
 }
 
 impl HttpStatusCode for GetNftInfoError {
     fn status_code(&self) -> StatusCode {
         match self {
-            GetNftInfoError::InvalidRequest(_) | GetNftInfoError::Confirmations(_) => {
-                StatusCode::BAD_REQUEST
-            },
-            GetNftInfoError::InvalidResponse(_) | GetNftInfoError::InvalidTimestamp(_) => {
-                StatusCode::FAILED_DEPENDENCY
-            },
+            GetNftInfoError::InvalidRequest(_) | GetNftInfoError::Confirmations(_) => StatusCode::BAD_REQUEST,
+            GetNftInfoError::InvalidResponse(_) | GetNftInfoError::InvalidTimestamp(_) => StatusCode::FAILED_DEPENDENCY,
             GetNftInfoError::ContractTypeIsNull => StatusCode::NOT_FOUND,
             GetNftInfoError::Transport(_)
             | GetNftInfoError::Internal(_)
@@ -188,32 +194,40 @@ pub enum UpdateNftError {
 }
 
 impl From<GetNftInfoError> for UpdateNftError {
-    fn from(e: GetNftInfoError) -> Self { UpdateNftError::GetNftInfoError(e) }
+    fn from(e: GetNftInfoError) -> Self {
+        UpdateNftError::GetNftInfoError(e)
+    }
 }
 
 impl From<UpdateSpamPhishingError> for UpdateNftError {
-    fn from(e: UpdateSpamPhishingError) -> Self { UpdateNftError::UpdateSpamPhishingError(e) }
+    fn from(e: UpdateSpamPhishingError) -> Self {
+        UpdateNftError::UpdateSpamPhishingError(e)
+    }
 }
 
 impl From<SpamFilterError> for UpdateNftError {
-    fn from(e: SpamFilterError) -> Self { UpdateNftError::SpamFilterError(e) }
+    fn from(e: SpamFilterError) -> Self {
+        UpdateNftError::SpamFilterError(e)
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for UpdateNftError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { UpdateNftError::UnexpectedDerivationMethod(e.to_string()) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        UpdateNftError::UnexpectedDerivationMethod(e.to_string())
+    }
 }
 
 impl From<LockDbError> for UpdateNftError {
-    fn from(e: LockDbError) -> Self { UpdateNftError::Storage(e.to_string()) }
+    fn from(e: LockDbError) -> Self {
+        UpdateNftError::Storage(e.to_string())
+    }
 }
 
 impl HttpStatusCode for UpdateNftError {
     fn status_code(&self) -> StatusCode {
         match self {
             UpdateNftError::TokenNotFoundInWallet { .. } => StatusCode::NOT_FOUND,
-            UpdateNftError::NoSuchCoin { .. } | UpdateNftError::CoinDoesntSupportNft { .. } => {
-                StatusCode::BAD_REQUEST
-            },
+            UpdateNftError::NoSuchCoin { .. } | UpdateNftError::CoinDoesntSupportNft { .. } => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -335,16 +349,16 @@ pub enum ClearNftDbError {
 }
 
 impl From<LockDbError> for ClearNftDbError {
-    fn from(e: LockDbError) -> Self { ClearNftDbError::Storage(e.to_string()) }
+    fn from(e: LockDbError) -> Self {
+        ClearNftDbError::Storage(e.to_string())
+    }
 }
 
 impl HttpStatusCode for ClearNftDbError {
     fn status_code(&self) -> StatusCode {
         match self {
             ClearNftDbError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
-            ClearNftDbError::Storage(_) | ClearNftDbError::Internal(_) => {
-                StatusCode::INTERNAL_SERVER_ERROR
-            },
+            ClearNftDbError::Storage(_) | ClearNftDbError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -363,10 +377,7 @@ mod tests {
             GetNftInfoError::Transport("x".into()).status_code(),
             StatusCode::INTERNAL_SERVER_ERROR,
         );
-        assert_eq!(
-            GetNftInfoError::ContractTypeIsNull.status_code(),
-            StatusCode::NOT_FOUND,
-        );
+        assert_eq!(GetNftInfoError::ContractTypeIsNull.status_code(), StatusCode::NOT_FOUND,);
         assert_eq!(
             GetNftInfoError::InvalidResponse("x".into()).status_code(),
             StatusCode::FAILED_DEPENDENCY,

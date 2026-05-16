@@ -38,12 +38,8 @@ pub trait NftListStore {
 
     /// Insert or upsert a batch of NFT records and update the
     /// last-scanned-block bookmark.
-    async fn register_owned(
-        &self,
-        chain: Chain,
-        items: Vec<Nft>,
-        last_scanned_block: u64,
-    ) -> MmResult<(), Self::Error>;
+    async fn register_owned(&self, chain: Chain, items: Vec<Nft>, last_scanned_block: u64)
+        -> MmResult<(), Self::Error>;
 
     /// Look up a single token by `(chain, contract address, token id)`.
     async fn fetch_token(
@@ -82,24 +78,14 @@ pub trait NftListStore {
     async fn latest_scanned_block(&self, chain: &Chain) -> MmResult<Option<u64>, Self::Error>;
 
     /// Update the cached `amount` for a single token.
-    async fn set_token_amount(
-        &self,
-        chain: &Chain,
-        nft: Nft,
-        scanned_block: u64,
-    ) -> MmResult<(), Self::Error>;
+    async fn set_token_amount(&self, chain: &Chain, nft: Nft, scanned_block: u64) -> MmResult<(), Self::Error>;
 
     /// Update the cached `amount` and `block_number` for a single token in
     /// one go (used when a transfer changes both fields).
-    async fn set_token_amount_and_block(&self, chain: &Chain, nft: Nft)
-        -> MmResult<(), Self::Error>;
+    async fn set_token_amount_and_block(&self, chain: &Chain, nft: Nft) -> MmResult<(), Self::Error>;
 
     /// All cached records that share a contract address.
-    async fn tokens_for_contract(
-        &self,
-        chain: Chain,
-        token_address: String,
-    ) -> MmResult<Vec<Nft>, Self::Error>;
+    async fn tokens_for_contract(&self, chain: Chain, token_address: String) -> MmResult<Vec<Nft>, Self::Error>;
 
     /// Flip the spam flag for every record sharing a contract address.
     async fn mark_contract_spam(
@@ -110,10 +96,7 @@ pub trait NftListStore {
     ) -> MmResult<(), Self::Error>;
 
     /// All unique animation/external domains observed on a chain.
-    async fn list_external_domains(
-        &self,
-        chain: &Chain,
-    ) -> MmResult<HashSet<String>, Self::Error>;
+    async fn list_external_domains(&self, chain: &Chain) -> MmResult<HashSet<String>, Self::Error>;
 
     /// Flip the phishing flag for every record sharing a metadata domain.
     async fn mark_domain_phishing(

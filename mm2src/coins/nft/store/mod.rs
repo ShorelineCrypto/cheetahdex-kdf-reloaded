@@ -10,6 +10,9 @@ pub mod errors;
 pub mod history;
 pub mod list;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sqlite;
+
 pub use errors::{NftStoreError, RemoveOutcome};
 pub use history::NftHistoryStore;
 pub use list::NftListStore;
@@ -25,12 +28,7 @@ use std::num::NonZeroUsize;
 /// * When `page` is `Some`, the window starts at `(page - 1) * page_size`
 ///   and is capped to `page_size` entries.
 /// * Otherwise the window starts at zero and is capped to `page_size`.
-pub fn paginate(
-    take_all: bool,
-    page_size: usize,
-    page: Option<NonZeroUsize>,
-    total: usize,
-) -> (usize, usize) {
+pub fn paginate(take_all: bool, page_size: usize, page: Option<NonZeroUsize>, total: usize) -> (usize, usize) {
     if take_all {
         return (0, total);
     }

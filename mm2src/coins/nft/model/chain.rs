@@ -30,13 +30,7 @@ pub enum Chain {
 
 impl Chain {
     /// All variants of [`Chain`] in declaration order.
-    pub const ALL: [Chain; 5] = [
-        Chain::Avalanche,
-        Chain::Bsc,
-        Chain::Eth,
-        Chain::Fantom,
-        Chain::Polygon,
-    ];
+    pub const ALL: [Chain; 5] = [Chain::Avalanche, Chain::Bsc, Chain::Eth, Chain::Fantom, Chain::Polygon];
 }
 
 /// Conversions between a [`Chain`] and the various string identifiers used

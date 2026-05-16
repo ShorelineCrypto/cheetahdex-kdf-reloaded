@@ -32,9 +32,7 @@ where
 ///
 /// Used for ERC-1155 amounts where the field is optional and defaults to `1`
 /// when omitted.
-pub(crate) fn optional_token_amount<'de, D>(
-    deserializer: D,
-) -> Result<Option<BigUint>, D::Error>
+pub(crate) fn optional_token_amount<'de, D>(deserializer: D) -> Result<Option<BigUint>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -47,7 +45,9 @@ where
 
 /// Default page size used by the NFT list and transfer history requests
 /// when no explicit `limit` is provided in the JSON payload.
-pub(crate) const fn default_page_size() -> usize { 10 }
+pub(crate) const fn default_page_size() -> usize {
+    10
+}
 
 #[cfg(test)]
 mod tests {
@@ -92,5 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn default_limit_is_ten() { assert_eq!(default_page_size(), 10); }
+    fn default_limit_is_ten() {
+        assert_eq!(default_page_size(), 10);
+    }
 }

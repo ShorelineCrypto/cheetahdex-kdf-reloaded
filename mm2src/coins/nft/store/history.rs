@@ -4,9 +4,7 @@
 //! the wallet can render the user's transaction history without re-fetching
 //! the full archive on every poll.
 
-use crate::nft::model::{
-    Chain, NftTokenIdent, NftTransfer, NftTransferList, NftTransfersFilters, TransferMeta,
-};
+use crate::nft::model::{Chain, NftTokenIdent, NftTransfer, NftTransferList, NftTransfersFilters, TransferMeta};
 use crate::nft::store::errors::NftStoreError;
 use async_trait::async_trait;
 use ethereum_types::Address;
@@ -39,21 +37,13 @@ pub trait NftHistoryStore {
     ) -> MmResult<NftTransferList, Self::Error>;
 
     /// Insert or upsert a batch of transfer records for a chain.
-    async fn append_transfers(
-        &self,
-        chain: Chain,
-        transfers: Vec<NftTransfer>,
-    ) -> MmResult<(), Self::Error>;
+    async fn append_transfers(&self, chain: Chain, transfers: Vec<NftTransfer>) -> MmResult<(), Self::Error>;
 
     /// Latest block number recorded in the transfer history.
     async fn latest_transfer_block(&self, chain: &Chain) -> MmResult<Option<u64>, Self::Error>;
 
     /// All transfers at or after `from_block`, ordered by block ascending.
-    async fn transfers_since(
-        &self,
-        chain: Chain,
-        from_block: u64,
-    ) -> MmResult<Vec<NftTransfer>, Self::Error>;
+    async fn transfers_since(&self, chain: Chain, from_block: u64) -> MmResult<Vec<NftTransfer>, Self::Error>;
 
     /// All transfers that touched a specific `(contract address, token id)`.
     async fn transfers_for_token(
@@ -82,10 +72,7 @@ pub trait NftHistoryStore {
     ) -> MmResult<(), Self::Error>;
 
     /// Identifiers of every transfer that still lacks metadata back-fills.
-    async fn transfers_missing_metadata(
-        &self,
-        chain: Chain,
-    ) -> MmResult<Vec<NftTokenIdent>, Self::Error>;
+    async fn transfers_missing_metadata(&self, chain: Chain) -> MmResult<Vec<NftTokenIdent>, Self::Error>;
 
     /// All transfers that touched a specific contract address.
     async fn transfers_for_contract(
