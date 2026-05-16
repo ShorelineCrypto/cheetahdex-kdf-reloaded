@@ -19,6 +19,7 @@
 pub mod errors;
 pub mod model;
 pub mod serde_helpers;
+pub mod store;
 
 pub use errors::{
     ClearNftDbError, GetNftInfoError, LockDbError, MetadataFetchError, ParseChainError,
@@ -31,3 +32,4 @@ pub use model::{
     NftTransferList, NftTransfersFilters, NftTransfersReq, RefreshMetadataReq, TransferMeta,
     TransferStatus, UpdateNftReq, UriMeta, WithdrawErc1155, WithdrawErc721, WithdrawNftReq,
 };
+pub use store::{NftHistoryStore, NftListStore, NftStoreError, RemoveOutcome};
