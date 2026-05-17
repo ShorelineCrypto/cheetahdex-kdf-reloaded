@@ -1150,6 +1150,7 @@ dependencies = [
  "prost-build 0.12.6",
  "prost-types 0.12.6",
  "rand 0.7.3",
+ "regex",
  "rlp 0.3.0",
  "rmp-serde",
  "rpc",

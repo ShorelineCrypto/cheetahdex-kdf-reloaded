@@ -6,18 +6,22 @@
 //! well-typed surface that the dispatcher and storage backends can build
 //! on top of, while keeping the network and persistence layers swappable.
 //!
-//! Sub-modules introduced in P10.3.1:
+//! Sub-modules:
 //! * [`model`] — public request/response/data types and the small
 //!   enums (chain, contract type, transfer status, …) that they share.
 //! * [`errors`] — error hierarchies returned by the upcoming RPC handlers.
 //! * [`serde_helpers`] — ser/de helpers for fields that travel as JSON
 //!   strings (token IDs, optional `BigUint` amounts).
+//! * [`store`] — storage trait layer plus a SQLite backend (native).
+//! * [`providers`] — URL/spam helpers and a thin HTTP client wrapper
+//!   used to talk to external NFT metadata services.
 //!
-//! Storage traits, SQLite/IndexedDB backends, providers and RPC handlers
-//! are added in subsequent P10.3.x phases.
+//! The IndexedDB backend and RPC handlers are added in subsequent
+//! P10.3.x phases.
 
 pub mod errors;
 pub mod model;
+pub mod providers;
 pub mod serde_helpers;
 pub mod store;
 
@@ -30,5 +34,9 @@ pub use model::{
     NftMetadataReq, NftTokenIdent, NftTransfer, NftTransferCommon, NftTransferList, NftTransfersFilters,
     NftTransfersReq, RefreshMetadataReq, TransferMeta, TransferStatus, UpdateNftReq, UriMeta, WithdrawErc1155,
     WithdrawErc721, WithdrawNftReq,
+};
+pub use providers::{
+    apply_spam_protection_to_nft, apply_spam_protection_to_transfer, decamouflage_legacy_ipfs_url, domain_of,
+    fetch_json as fetch_provider_json, normalise_metadata_urls, FetchError as ProviderFetchError, SpamScanError,
 };
 pub use store::{NftHistoryStore, NftListStore, NftStoreError, RemoveOutcome};
