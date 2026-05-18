@@ -124,6 +124,9 @@ pub struct MmCtx {
     #[cfg(not(target_arch = "wasm32"))]
     pub async_sqlite_connection: OnceLock<Arc<AsyncMutex<AsyncConnection>>>,
     pub mm_init_ctx: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
+    /// Cache for the NFT subsystem context. Populated lazily on first
+    /// access via `coins::nft::context::NftCtx::from_mm_ctx`.
+    pub nft_ctx: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
     pub abort_handlers: Mutex<Vec<AbortHandle>>,
     #[cfg(target_arch = "wasm32")]
     pub db_namespace: DbNamespaceId,
@@ -167,6 +170,7 @@ impl MmCtx {
             #[cfg(not(target_arch = "wasm32"))]
             async_sqlite_connection: OnceLock::default(),
             mm_init_ctx: Mutex::new(None),
+            nft_ctx: Mutex::new(None),
             abort_handlers: Mutex::new(Vec::new()),
             #[cfg(target_arch = "wasm32")]
             db_namespace: DbNamespaceId::Main,

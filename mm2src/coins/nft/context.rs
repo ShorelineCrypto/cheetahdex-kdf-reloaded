@@ -1,0 +1,66 @@
+//! Lazy-initialised NFT subsystem context attached to [`MmArc`].
+//!
+//! The context wraps the storage backend so RPC handlers don't have to
+//! plumb the underlying SQLite/IndexedDB connection through every call
+//! site. The wrapper is registered into [`MmCtx::nft_ctx`] on first
+//! access and reused thereafter.
+//!
+//! Only the native (SQLite) backend is wired in this revision; the WASM
+//! backend will be added together with P10.3.4 once the workspace
+//! `wasm32-unknown-unknown` build is repaired.
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::nft::store::sqlite::SqliteNftStore;
+use mm2_core::mm_ctx::{from_ctx, MmArc};
+use std::sync::Arc;
+
+/// Central NFT context held by the application. One instance per
+/// [`MmArc`] is created lazily on first access.
+pub struct NftCtx {
+    /// SQLite-backed storage handle. Cloned by [`Self::store`].
+    #[cfg(not(target_arch = "wasm32"))]
+    store: SqliteNftStore,
+}
+
+impl NftCtx {
+    /// Look up (or lazily create) the [`NftCtx`] attached to `ctx`.
+    ///
+    /// On native targets the underlying async SQLite connection must
+    /// already be initialised (`MmCtx::async_sqlite_connection`); this is
+    /// done by the standard MM init path before any RPC handler runs.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_mm_ctx(ctx: &MmArc) -> Result<Arc<NftCtx>, String> {
+        from_ctx(&ctx.nft_ctx, move || {
+            let conn_handle = ctx
+                .async_sqlite_connection
+                .get()
+                .ok_or_else(|| "async_sqlite_connection is not initialized".to_owned())?
+                .clone();
+            // `AsyncConnection` is internally a clonable handle to a
+            // background worker thread; the surrounding `AsyncMutex` is
+            // historical and not required here. We block briefly to clone
+            // the underlying handle so the store can issue calls without
+            // contending on the unrelated mutex used by other subsystems.
+            let conn = futures::executor::block_on(conn_handle.lock()).clone();
+            Ok(NftCtx {
+                store: SqliteNftStore::new(Arc::new(conn)),
+            })
+        })
+    }
+
+    /// Stub `from_mm_ctx` for `wasm32` builds. The real WASM context will
+    /// land alongside the IndexedDB backend in P10.3.4; until then any
+    /// caller compiled for `wasm32` receives an explanatory error so the
+    /// failure mode is obvious.
+    #[cfg(target_arch = "wasm32")]
+    pub fn from_mm_ctx(_ctx: &MmArc) -> Result<Arc<NftCtx>, String> {
+        Err("NFT support is not yet wired for the wasm32 target".to_owned())
+    }
+
+    /// Borrow the SQLite-backed store. The store itself is `Clone` so
+    /// callers can move a handle into spawned futures when needed.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn store(&self) -> &SqliteNftStore {
+        &self.store
+    }
+}

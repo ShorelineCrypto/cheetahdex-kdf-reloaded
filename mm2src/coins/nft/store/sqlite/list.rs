@@ -519,7 +519,15 @@ impl NftListStore for SqliteNftStore {
                 for name in table_names {
                     tx.execute(&format!("DROP TABLE IF EXISTS {}", name), params![])?;
                 }
-                tx.execute(&format!("DELETE FROM {}", SCAN_PROGRESS_TABLE), params![])?;
+                // The bookmark table may not exist yet on a freshly
+                // opened database; only purge it if it was created.
+                let progress_exists = {
+                    let mut stmt = tx.prepare(TABLE_EXISTS_SQL)?;
+                    stmt.exists(params![SCAN_PROGRESS_TABLE])?
+                };
+                if progress_exists {
+                    tx.execute(&format!("DELETE FROM {}", SCAN_PROGRESS_TABLE), params![])?;
+                }
                 tx.commit()?;
                 Ok(())
             })

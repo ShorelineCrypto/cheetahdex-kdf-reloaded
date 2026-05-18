@@ -19,6 +19,9 @@ use crate::{
 use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
+use coins::nft::rpc::{
+    clear_nft_db, get_nft_list, get_nft_metadata, get_nft_transfers, refresh_nft_metadata, update_nft, withdraw_nft,
+};
 use coins::rpc_command::account_balance::account_balance;
 use coins::rpc_command::consolidate_utxos::consolidate_utxos_rpc;
 use coins::rpc_command::fetch_utxos::fetch_utxos_rpc;
@@ -214,6 +217,13 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "withdraw" => handle_mmrpc(ctx, request, withdraw).await,
         "withdraw_status" => handle_mmrpc(ctx, request, withdraw_status).await,
         "withdraw_user_action" => handle_mmrpc(ctx, request, withdraw_user_action).await,
+        "clear_nft_db" => handle_mmrpc(ctx, request, clear_nft_db).await,
+        "get_nft_list" => handle_mmrpc(ctx, request, get_nft_list).await,
+        "get_nft_metadata" => handle_mmrpc(ctx, request, get_nft_metadata).await,
+        "get_nft_transfers" => handle_mmrpc(ctx, request, get_nft_transfers).await,
+        "refresh_nft_metadata" => handle_mmrpc(ctx, request, refresh_nft_metadata).await,
+        "update_nft" => handle_mmrpc(ctx, request, update_nft).await,
+        "withdraw_nft" => handle_mmrpc(ctx, request, withdraw_nft).await,
         #[cfg(not(target_arch = "wasm32"))]
         native_only_methods => match native_only_methods {
             "close_channel" => handle_mmrpc(ctx, request, close_channel).await,

@@ -19,11 +19,15 @@
 //! The IndexedDB backend and RPC handlers are added in subsequent
 //! P10.3.x phases.
 
+pub mod context;
 pub mod errors;
 pub mod model;
 pub mod providers;
+pub mod rpc;
 pub mod serde_helpers;
 pub mod store;
+
+pub use context::NftCtx;
 
 pub use errors::{
     ClearNftDbError, GetNftInfoError, LockDbError, MetadataFetchError, ParseChainError, ParseContractTypeError,
