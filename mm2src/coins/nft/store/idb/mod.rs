@@ -20,13 +20,14 @@ mod schema;
 #[cfg(test)]
 mod tests;
 
+use crate::nft::model::Chain;
 use crate::nft::store::errors::NftStoreError;
 use derive_more::Display;
 use mm2_db::indexed_db::{
-    DbIdentifier, DbInstance, DbTransactionError, IndexedDb, IndexedDbBuilder, InitDbError, InitDbResult, SharedDb,
-    WeakDb,
+    DbIdentifier, DbInstance, DbLocked, DbTransactionError, IndexedDb, IndexedDbBuilder, InitDbError, InitDbResult,
+    SharedDb, WeakDb,
 };
-use mm2_err_handle::prelude::{MmError, NotMmError};
+use mm2_err_handle::prelude::*;
 
 pub(crate) use schema::{InventoryRow, ScanProgressRow, TransferRow};
 
@@ -49,11 +50,23 @@ impl IndexedDbNftStore {
         Self { db }
     }
 
-    /// Returns a weak handle that the trait impls use to keep their
-    /// borrows short-lived.
+    /// Returns a weak handle that the trait impls can stash for
+    /// asynchronous spawn-style use.
+    #[allow(dead_code)]
     pub(crate) fn weak(&self) -> WeakDb<NftIndexedDb> {
         SharedDb::downgrade(&self.db)
     }
+
+    /// Lock the shared DB, lazily constructing it on first call.
+    pub(crate) async fn lock_db(&self) -> MmResult<DbLocked<'_, NftIndexedDb>, IndexedDbStoreError> {
+        self.db.get_or_initialize().await.map_mm_err()
+    }
+}
+
+/// Map [`Chain`] to its UPPERCASE serde label (the same encoding used
+/// by the SQLite backend and the wire model).
+pub(crate) fn chain_label(chain: &Chain) -> String {
+    format!("{}", chain)
 }
 
 /// Concrete `DbInstance` registered with `mm2_db::indexed_db`.
@@ -80,8 +93,8 @@ impl DbInstance for NftIndexedDb {
 }
 
 /// Error type for the IndexedDB backend. Wraps the lower-level driver
-/// errors plus a few backend-specific cases (chain not initialised,
-/// payload serialisation, pagination overflow).
+/// errors plus a few backend-specific cases (payload (de)serialisation,
+/// pagination overflow).
 #[derive(Debug, Display)]
 pub enum IndexedDbStoreError {
     /// The shared database handle has been dropped.
@@ -122,8 +135,15 @@ impl From<InitDbError> for IndexedDbStoreError {
     }
 }
 
+impl From<serde_json::Error> for IndexedDbStoreError {
+    fn from(e: serde_json::Error) -> Self {
+        IndexedDbStoreError::Payload(e.to_string())
+    }
+}
+
 /// Marker helper used by the trait impls when a method is intentionally
 /// not yet implemented in this revision.
+#[allow(dead_code)]
 pub(crate) fn unimplemented<T>(name: &'static str) -> Result<T, MmError<IndexedDbStoreError>> {
     Err(MmError::new(IndexedDbStoreError::Unimplemented(name)))
 }
