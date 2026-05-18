@@ -1,13 +1,10 @@
-use common::{APPLICATION_JSON, PROXY_REQUEST_EXPIRATION_SEC, X_AUTH_PAYLOAD};
 use cosmrs::tendermint::block::Height;
 use derive_more::Display;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use http::uri::InvalidUri;
 use http::{StatusCode, Uri};
 use mm2_net::transport::SlurpError;
-use mm2_net::wasm::http::FetchRequest;
-use mm2_p2p::Keypair;
-use proxy_signature::RawMessage;
+use mm2_net::wasm_http::FetchRequest;
 use std::str::FromStr;
 use tendermint_rpc::endpoint::{abci_info, broadcast};
 pub use tendermint_rpc::endpoint::{
@@ -20,10 +17,12 @@ use tendermint_rpc::request::SimpleRequest;
 pub use tendermint_rpc::Order;
 use tendermint_rpc::Response;
 
+/// `Content-Type`/`Accept` value used for all Tendermint JSON-RPC calls.
+const APPLICATION_JSON: &str = "application/json";
+
 #[derive(Debug, Clone)]
 pub struct HttpClient {
     uri: String,
-    proxy_sign_keypair: Option<Keypair>,
 }
 
 #[derive(Debug, Display)]
@@ -62,12 +61,9 @@ impl From<TendermintRpcError> for PerformError {
 }
 
 impl HttpClient {
-    pub(crate) fn new(url: &str, proxy_sign_keypair: Option<Keypair>) -> Result<Self, HttpClientInitError> {
+    pub(crate) fn new(url: &str) -> Result<Self, HttpClientInitError> {
         Uri::from_str(url)?;
-        Ok(HttpClient {
-            uri: url.to_owned(),
-            proxy_sign_keypair,
-        })
+        Ok(HttpClient { uri: url.to_owned() })
     }
 
     #[inline]
@@ -75,31 +71,17 @@ impl HttpClient {
         Uri::from_str(&self.uri).expect("This should never happen.")
     }
 
-    #[inline]
-    pub fn proxy_sign_keypair(&self) -> &Option<Keypair> {
-        &self.proxy_sign_keypair
-    }
-
     pub(crate) async fn perform<R>(&self, request: R) -> Result<R::Output, PerformError>
     where
         R: SimpleRequest,
     {
         let body_bytes = request.into_json().into_bytes();
-        let body_size = body_bytes.len();
 
-        let mut req = FetchRequest::post(&self.uri).cors().body_bytes(body_bytes);
-        req = req.header(ACCEPT.as_str(), APPLICATION_JSON);
-        req = req.header(CONTENT_TYPE.as_str(), APPLICATION_JSON);
-
-        if let Some(proxy_sign_keypair) = &self.proxy_sign_keypair {
-            let proxy_sign = RawMessage::sign(proxy_sign_keypair, &self.uri(), body_size, PROXY_REQUEST_EXPIRATION_SEC)
-                .map_err(|e| PerformError::Internal(e.to_string()))?;
-
-            let proxy_sign_serialized =
-                serde_json::to_string(&proxy_sign).map_err(|e| PerformError::Internal(e.to_string()))?;
-
-            req = req.header(X_AUTH_PAYLOAD, &proxy_sign_serialized);
-        }
+        let req = FetchRequest::post(&self.uri)
+            .cors()
+            .body_bytes(body_bytes)
+            .header(ACCEPT.as_str(), APPLICATION_JSON)
+            .header(CONTENT_TYPE.as_str(), APPLICATION_JSON);
 
         let (status_code, response_str) = req.request_str().await.map_err(|e| e.into_inner())?;
 

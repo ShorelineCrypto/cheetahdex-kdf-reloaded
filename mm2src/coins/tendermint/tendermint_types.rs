@@ -336,6 +336,13 @@ impl From<tendermint_rpc::Error> for TendermintCoinRpcError {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+impl From<crate::tendermint::rpc::PerformError> for TendermintCoinRpcError {
+    fn from(e: crate::tendermint::rpc::PerformError) -> Self {
+        TendermintCoinRpcError::RpcClientError(e.to_string())
+    }
+}
+
 impl From<TendermintCoinRpcError> for crate::WithdrawError {
     fn from(e: TendermintCoinRpcError) -> Self {
         crate::WithdrawError::Transport(e.to_string())

@@ -210,7 +210,7 @@ impl CoinsContext {
     }
 
     #[cfg(target_arch = "wasm32")]
-    async fn tx_history_db(&self) -> TxHistoryResult<TxHistoryDbLocked<'_>> {
+    pub(crate) async fn tx_history_db(&self) -> TxHistoryResult<TxHistoryDbLocked<'_>> {
         Ok(self.tx_history_db.get_or_initialize().await.map_mm_err()?)
     }
 }
