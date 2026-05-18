@@ -2171,5 +2171,8 @@ pub(crate) fn orderbook_address(
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC => Ok(OrderbookAddress::Shielded),
         CoinProtocol::SIA | CoinProtocol::TENDERMINT { .. } | CoinProtocol::TENDERMINTTOKEN { .. } => todo!(),
+        CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => coins::eth::tron::addr_from_pubkey_str(pubkey)
+            .map(OrderbookAddress::Transparent)
+            .map_to_mm(OrderbookAddrErr::AddrFromPubkeyError),
     }
 }

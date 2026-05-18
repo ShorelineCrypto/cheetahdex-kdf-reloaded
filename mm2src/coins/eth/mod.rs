@@ -84,7 +84,7 @@ pub use rlp;
 pub mod eth_hd_wallet;
 pub(crate) mod eth_swap_v2;
 pub mod fee_estimation;
-pub(crate) mod tron;
+pub mod tron;
 mod web3_transport;
 
 mod eth_impl;
