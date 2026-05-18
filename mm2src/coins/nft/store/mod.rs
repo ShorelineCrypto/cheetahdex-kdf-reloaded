@@ -10,6 +10,9 @@ pub mod errors;
 pub mod history;
 pub mod list;
 
+#[cfg(target_arch = "wasm32")]
+pub mod idb;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sqlite;
 

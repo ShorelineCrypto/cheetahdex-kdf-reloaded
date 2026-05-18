@@ -9,9 +9,13 @@
 //! backend will be added together with P10.3.4 once the workspace
 //! `wasm32-unknown-unknown` build is repaired.
 
+#[cfg(target_arch = "wasm32")]
+use crate::nft::store::idb::{IndexedDbNftStore, NftIndexedDb};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::nft::store::sqlite::SqliteNftStore;
 use mm2_core::mm_ctx::{from_ctx, MmArc};
+#[cfg(target_arch = "wasm32")]
+use mm2_db::indexed_db::ConstructibleDb;
 use std::sync::Arc;
 
 /// Central NFT context held by the application. One instance per
@@ -20,6 +24,9 @@ pub struct NftCtx {
     /// SQLite-backed storage handle. Cloned by [`Self::store`].
     #[cfg(not(target_arch = "wasm32"))]
     store: SqliteNftStore,
+    /// IndexedDB-backed storage handle (WASM target).
+    #[cfg(target_arch = "wasm32")]
+    store: IndexedDbNftStore,
 }
 
 impl NftCtx {
@@ -48,19 +55,30 @@ impl NftCtx {
         })
     }
 
-    /// Stub `from_mm_ctx` for `wasm32` builds. The real WASM context will
-    /// land alongside the IndexedDB backend in P10.3.4; until then any
-    /// caller compiled for `wasm32` receives an explanatory error so the
-    /// failure mode is obvious.
+    /// Look up (or lazily create) the [`NftCtx`] attached to `ctx` on
+    /// `wasm32`. The IndexedDB instance is itself constructed lazily;
+    /// the [`SharedDb`] wrapper held here only holds a `None` slot until
+    /// the first storage call triggers `get_or_initialize`.
     #[cfg(target_arch = "wasm32")]
-    pub fn from_mm_ctx(_ctx: &MmArc) -> Result<Arc<NftCtx>, String> {
-        Err("NFT support is not yet wired for the wasm32 target".to_owned())
+    pub fn from_mm_ctx(ctx: &MmArc) -> Result<Arc<NftCtx>, String> {
+        from_ctx(&ctx.nft_ctx, move || {
+            let shared = ConstructibleDb::<NftIndexedDb>::new_shared(ctx);
+            Ok(NftCtx {
+                store: IndexedDbNftStore::new(shared),
+            })
+        })
     }
 
     /// Borrow the SQLite-backed store. The store itself is `Clone` so
     /// callers can move a handle into spawned futures when needed.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn store(&self) -> &SqliteNftStore {
+        &self.store
+    }
+
+    /// Borrow the IndexedDB-backed store on `wasm32`.
+    #[cfg(target_arch = "wasm32")]
+    pub fn store(&self) -> &IndexedDbNftStore {
         &self.store
     }
 }
