@@ -104,6 +104,9 @@ zbase32 = "0.1.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { version = "0.3.27" }
+# uuid v1 needs an explicit RNG source on `wasm32-unknown-unknown`; the
+# `js` feature wires it through `getrandom`'s JS backend.
+uuid = { version = "1", features = ["v4", "serde", "js"] }
 wasm-bindgen = { version = "0.2.50" }
 wasm-bindgen-futures = { version = "0.4.1" }
 wasm-bindgen-test = { version = "0.3.2" }

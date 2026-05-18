@@ -71,6 +71,11 @@ pub trait WithMetamaskRpcError {
     fn metamask_rpc_error(err: MetamaskRpcError) -> Self;
 }
 
+/// Marker trait for RPC error types that have an "internal error" variant.
+pub trait WithInternal {
+    fn internal(err: String) -> Self;
+}
+
 /// Converts a [`MetamaskError`] into any RPC error type that implements
 /// both [`WithMetamaskRpcError`] and [`WithInternal`].
 pub fn from_metamask_error<T>(err: MetamaskError) -> T

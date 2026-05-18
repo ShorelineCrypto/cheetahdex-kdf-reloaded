@@ -23,6 +23,7 @@ pub mod context;
 pub mod errors;
 pub mod model;
 pub mod providers;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod rpc;
 pub mod serde_helpers;
 pub mod store;
