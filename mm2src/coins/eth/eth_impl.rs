@@ -453,7 +453,7 @@ pub fn signed_eth_tx_from_bytes(bytes: &[u8]) -> Result<SignedEthTx, String> {
 // For ETH it makes even more sense because different ERC20 tokens can be running on same ETH blockchain.
 // So we would need to handle shared locks anyway.
 lazy_static! {
-    static ref NONCE_LOCK: TimedAsyncMutex<()> = TimedAsyncMutex::new(());
+    pub(crate) static ref NONCE_LOCK: TimedAsyncMutex<()> = TimedAsyncMutex::new(());
 }
 
 pub type EthTxFut = Box<dyn Future<Item = SignedEthTx, Error = TransactionErr> + Send + 'static>;

@@ -27,6 +27,8 @@ pub mod providers;
 pub mod rpc;
 pub mod serde_helpers;
 pub mod store;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod withdraw;
 
 pub use context::NftCtx;
 

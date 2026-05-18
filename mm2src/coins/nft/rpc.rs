@@ -179,14 +179,17 @@ pub async fn refresh_nft_metadata(_ctx: MmArc, _req: RefreshMetadataReq) -> MmRe
     ))
 }
 
-/// Stub handler for `withdraw_nft`. The actual transaction-building
-/// path requires a live `EthCoin` and lives behind the EVM-side NFT
-/// integration. We surface a structured `GetNftInfoError::Internal`
-/// here so the dispatcher can return a JSON-RPC error.
-pub async fn withdraw_nft(_ctx: MmArc, _req: WithdrawNftReq) -> MmResult<serde_json::Value, GetNftInfoError> {
-    MmError::err(GetNftInfoError::Internal(
-        "withdraw_nft is not yet implemented in this revision".to_owned(),
-    ))
+/// Handler for the JSON-RPC `withdraw_nft` method.
+///
+/// Builds and signs (without broadcasting) an ERC-721 `transferFrom`
+/// or ERC-1155 `safeTransferFrom` transaction against the EVM coin
+/// that backs the requested chain. The signed transaction is returned
+/// as a `TransactionDetails` payload (serialised as JSON) so the GUI
+/// can confirm and push it through `send_raw_transaction`.
+pub async fn withdraw_nft(ctx: MmArc, req: WithdrawNftReq) -> MmResult<serde_json::Value, GetNftInfoError> {
+    let details = crate::nft::withdraw::withdraw_nft(ctx, req).await?;
+    serde_json::to_value(details)
+        .map_to_mm(|err| GetNftInfoError::Internal(format!("serialise TransactionDetails: {err}")))
 }
 
 #[cfg(test)]
