@@ -1,22 +1,19 @@
 //! `NftListStore` trait impl for [`IndexedDbNftStore`].
 //!
-//! This revision implements the read-side and chain-lifecycle subset of
-//! the trait directly against the IndexedDB schema declared in
-//! [`super::schema`]. The remaining mutating helpers
-//! (`drop_token`, `merge_metadata`, `set_token_amount*`,
-//! `tokens_for_contract`, `mark_*`, `list_external_domains`) are still
-//! stubbed and surface the [`IndexedDbStoreError::Unimplemented`]
-//! marker so the next slice has a clear surface to fill in.
+//! This revision is the full IndexedDB implementation: lifecycle,
+//! reads, and the mutating helpers that mark inventory rows as spam /
+//! phishing or refresh their cached metadata.
 
 use crate::nft::model::{Chain, Nft, NftList, NftListFilters};
 use crate::nft::store::errors::RemoveOutcome;
 use crate::nft::store::idb::schema::{InventoryRow, ScanProgressRow, TransferRow};
-use crate::nft::store::idb::{chain_label, unimplemented, IndexedDbNftStore, IndexedDbStoreError};
+use crate::nft::store::idb::{chain_label, IndexedDbNftStore, IndexedDbStoreError};
 use crate::nft::store::list::NftListStore;
 use crate::nft::store::paginate;
 use async_trait::async_trait;
 use mm2_err_handle::prelude::*;
 use mm2_number::BigUint;
+use serde_json::Value as Json;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 
@@ -198,12 +195,34 @@ impl NftListStore for IndexedDbNftStore {
 
     async fn drop_token(
         &self,
-        _chain: &Chain,
-        _token_address: String,
-        _token_id: BigUint,
-        _scanned_block: u64,
+        chain: &Chain,
+        token_address: String,
+        token_id: BigUint,
+        scanned_block: u64,
     ) -> MmResult<RemoveOutcome, Self::Error> {
-        unimplemented("NftListStore::drop_token")
+        let chain_str = chain_label(chain);
+        let key = vec![chain_str.clone(), token_address, token_id.to_string()];
+        let locked = self.lock_db().await.map_mm_err()?;
+        let txn = locked.inner.transaction().await.map_mm_err()?;
+        let inv_table = txn.table::<InventoryRow>().await.map_mm_err()?;
+        let removed_ids = inv_table
+            .delete_items_by_index("chain_contract_token", key)
+            .await
+            .map_mm_err()?;
+        let scan_table = txn.table::<ScanProgressRow>().await.map_mm_err()?;
+        let new_row = ScanProgressRow {
+            chain: chain_str.clone(),
+            last_scanned_block: scanned_block,
+        };
+        scan_table
+            .replace_item_by_unique_index("chain", chain_str, &new_row)
+            .await
+            .map_mm_err()?;
+        Ok(if removed_ids.is_empty() {
+            RemoveOutcome::Absent
+        } else {
+            RemoveOutcome::Removed
+        })
     }
 
     async fn token_balance(
@@ -216,8 +235,12 @@ impl NftListStore for IndexedDbNftStore {
         Ok(nft.map(|n| n.common.amount.to_string()))
     }
 
-    async fn merge_metadata(&self, _chain: &Chain, _nft: Nft) -> MmResult<(), Self::Error> {
-        unimplemented("NftListStore::merge_metadata")
+    async fn merge_metadata(&self, chain: &Chain, nft: Nft) -> MmResult<(), Self::Error> {
+        // Mirrors the SQLite backend: the providers layer is responsible
+        // for merging the metadata into the `Nft` value before calling us;
+        // we simply replace the existing record.
+        let block = nft.block_number;
+        self.register_owned(*chain, vec![nft], block).await
     }
 
     async fn latest_block_in_cache(&self, chain: &Chain) -> MmResult<Option<u64>, Self::Error> {
@@ -239,38 +262,117 @@ impl NftListStore for IndexedDbNftStore {
         Ok(row.map(|(_id, r)| r.last_scanned_block))
     }
 
-    async fn set_token_amount(&self, _chain: &Chain, _nft: Nft, _scanned_block: u64) -> MmResult<(), Self::Error> {
-        unimplemented("NftListStore::set_token_amount")
+    async fn set_token_amount(&self, chain: &Chain, nft: Nft, scanned_block: u64) -> MmResult<(), Self::Error> {
+        self.register_owned(*chain, vec![nft], scanned_block).await
     }
 
-    async fn set_token_amount_and_block(&self, _chain: &Chain, _nft: Nft) -> MmResult<(), Self::Error> {
-        unimplemented("NftListStore::set_token_amount_and_block")
+    async fn set_token_amount_and_block(&self, chain: &Chain, nft: Nft) -> MmResult<(), Self::Error> {
+        let block = nft.block_number;
+        self.register_owned(*chain, vec![nft], block).await
     }
 
-    async fn tokens_for_contract(&self, _chain: Chain, _token_address: String) -> MmResult<Vec<Nft>, Self::Error> {
-        unimplemented("NftListStore::tokens_for_contract")
+    async fn tokens_for_contract(&self, chain: Chain, token_address: String) -> MmResult<Vec<Nft>, Self::Error> {
+        let key = vec![chain_label(&chain), token_address];
+        let locked = self.lock_db().await.map_mm_err()?;
+        let txn = locked.inner.transaction().await.map_mm_err()?;
+        let table = txn.table::<InventoryRow>().await.map_mm_err()?;
+        let mut rows = table
+            .get_items("chain_contract", key)
+            .await
+            .map_mm_err()?
+            .into_iter()
+            .map(|(_id, r)| r)
+            .collect::<Vec<_>>();
+        rows.sort_by(|a, b| b.block_number.cmp(&a.block_number));
+        let mut out = Vec::with_capacity(rows.len());
+        for row in &rows {
+            out.push(payload_to_nft(row)?);
+        }
+        Ok(out)
     }
 
     async fn mark_contract_spam(
         &self,
-        _chain: &Chain,
-        _token_address: String,
-        _possible_spam: bool,
+        chain: &Chain,
+        token_address: String,
+        possible_spam: bool,
     ) -> MmResult<(), Self::Error> {
-        unimplemented("NftListStore::mark_contract_spam")
+        let chain_str = chain_label(chain);
+        let key = vec![chain_str.clone(), token_address];
+        let locked = self.lock_db().await.map_mm_err()?;
+        let txn = locked.inner.transaction().await.map_mm_err()?;
+        let table = txn.table::<InventoryRow>().await.map_mm_err()?;
+        let rows = table.get_items("chain_contract", key).await.map_mm_err()?;
+        for (_id, row) in rows {
+            let updated = update_inventory_payload_spam(&row, possible_spam)?;
+            table
+                .replace_item_by_unique_index(
+                    "chain_contract_token",
+                    vec![
+                        updated.chain.clone(),
+                        updated.token_address.clone(),
+                        updated.token_id_str.clone(),
+                    ],
+                    &updated,
+                )
+                .await
+                .map_mm_err()?;
+        }
+        Ok(())
     }
 
-    async fn list_external_domains(&self, _chain: &Chain) -> MmResult<HashSet<String>, Self::Error> {
-        unimplemented("NftListStore::list_external_domains")
+    async fn list_external_domains(&self, chain: &Chain) -> MmResult<HashSet<String>, Self::Error> {
+        let locked = self.lock_db().await.map_mm_err()?;
+        let txn = locked.inner.transaction().await.map_mm_err()?;
+        let table = txn.table::<InventoryRow>().await.map_mm_err()?;
+        let rows = table.get_items("chain", chain_label(chain)).await.map_mm_err()?;
+        let mut out = HashSet::new();
+        for (_id, row) in rows {
+            if let Some(d) = row.image_domain {
+                out.insert(d);
+            }
+            if let Some(d) = row.animation_domain {
+                out.insert(d);
+            }
+            if let Some(d) = row.external_domain {
+                out.insert(d);
+            }
+        }
+        Ok(out)
     }
 
     async fn mark_domain_phishing(
         &self,
-        _chain: &Chain,
-        _domain: String,
-        _possible_phishing: bool,
+        chain: &Chain,
+        domain: String,
+        possible_phishing: bool,
     ) -> MmResult<(), Self::Error> {
-        unimplemented("NftListStore::mark_domain_phishing")
+        let locked = self.lock_db().await.map_mm_err()?;
+        let txn = locked.inner.transaction().await.map_mm_err()?;
+        let table = txn.table::<InventoryRow>().await.map_mm_err()?;
+        let rows = table.get_items("chain", chain_label(chain)).await.map_mm_err()?;
+        for (_id, row) in rows {
+            let matches_domain = row.image_domain.as_deref() == Some(domain.as_str())
+                || row.animation_domain.as_deref() == Some(domain.as_str())
+                || row.external_domain.as_deref() == Some(domain.as_str());
+            if !matches_domain {
+                continue;
+            }
+            let updated = update_inventory_payload_phishing(&row, possible_phishing)?;
+            table
+                .replace_item_by_unique_index(
+                    "chain_contract_token",
+                    vec![
+                        updated.chain.clone(),
+                        updated.token_address.clone(),
+                        updated.token_id_str.clone(),
+                    ],
+                    &updated,
+                )
+                .await
+                .map_mm_err()?;
+        }
+        Ok(())
     }
 
     async fn purge_chain(&self, chain: &Chain) -> MmResult<(), Self::Error> {
@@ -321,4 +423,47 @@ impl NftListStore for IndexedDbNftStore {
             .map_mm_err()?;
         Ok(())
     }
+}
+
+/// Flip the spam flag on an inventory row in-place and re-serialise the
+/// JSON payload so the row column and the embedded `Nft` value stay
+/// consistent. Mirrors the SQLite backend, which mutates both the
+/// `possible_spam` column and the embedded `common.possible_spam` /
+/// top-level `possible_spam` JSON fields.
+fn update_inventory_payload_spam(
+    row: &InventoryRow,
+    possible_spam: bool,
+) -> Result<InventoryRow, MmError<IndexedDbStoreError>> {
+    let mut payload: Json =
+        serde_json::from_str(&row.payload).map_err(|e| MmError::new(IndexedDbStoreError::from(e)))?;
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(common) = obj.get_mut("common").and_then(|c| c.as_object_mut()) {
+            common.insert("possible_spam".to_string(), Json::Bool(possible_spam));
+        }
+        obj.insert("possible_spam".to_string(), Json::Bool(possible_spam));
+    }
+    let serialized = serde_json::to_string(&payload).map_err(|e| MmError::new(IndexedDbStoreError::from(e)))?;
+    let mut updated = row.clone();
+    updated.possible_spam = u32::from(possible_spam);
+    updated.payload = serialized;
+    Ok(updated)
+}
+
+/// Flip the phishing flag on an inventory row in-place. Mirrors
+/// [`update_inventory_payload_spam`] but updates the
+/// `possible_phishing` column / JSON field instead.
+fn update_inventory_payload_phishing(
+    row: &InventoryRow,
+    possible_phishing: bool,
+) -> Result<InventoryRow, MmError<IndexedDbStoreError>> {
+    let mut payload: Json =
+        serde_json::from_str(&row.payload).map_err(|e| MmError::new(IndexedDbStoreError::from(e)))?;
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("possible_phishing".to_string(), Json::Bool(possible_phishing));
+    }
+    let serialized = serde_json::to_string(&payload).map_err(|e| MmError::new(IndexedDbStoreError::from(e)))?;
+    let mut updated = row.clone();
+    updated.possible_phishing = u32::from(possible_phishing);
+    updated.payload = serialized;
+    Ok(updated)
 }

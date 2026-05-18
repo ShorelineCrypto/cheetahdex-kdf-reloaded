@@ -1,13 +1,14 @@
 //! `wasm-bindgen-test` smoke tests for the IndexedDB NFT backend.
 //!
 //! Covers the chain-lifecycle and read/write round-trips for the
-//! methods implemented in P10.3.4.b. Methods still backed by the
-//! `Unimplemented` marker (e.g. `drop_token`,
-//! `attach_metadata_to_transfers`) are out of scope for this revision
-//! and are exercised by their respective slices when implemented.
+//! methods implemented in P10.3.4.b and the mutating helpers added in
+//! P10.3.4.c (drop_token, mark_contract_spam, mark_domain_phishing,
+//! attach_metadata_to_transfers, transfers_missing_metadata,
+//! contract_addresses).
 
-use crate::nft::model::{Chain, ContractType, Nft, NftCommon, NftListFilters};
+use crate::nft::model::{Chain, ContractType, Nft, NftCommon, NftListFilters, TransferMeta};
 use crate::nft::model::{NftTransfer, NftTransferCommon, TransferStatus};
+use crate::nft::store::errors::RemoveOutcome;
 use crate::nft::store::history::NftHistoryStore;
 use crate::nft::store::idb::{IndexedDbNftStore, NftIndexedDb};
 use crate::nft::store::list::NftListStore;
@@ -15,6 +16,7 @@ use ethereum_types::Address;
 use mm2_core::mm_ctx::MmCtxBuilder;
 use mm2_db::indexed_db::ConstructibleDb;
 use mm2_number::{BigDecimal, BigUint};
+use std::str::FromStr;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
@@ -196,4 +198,120 @@ async fn purge_chain_clears_both_stores_and_bookmark() {
         .await
         .unwrap();
     assert_eq!(history.total, 0);
+}
+
+#[wasm_bindgen_test::wasm_bindgen_test]
+async fn drop_token_removes_inventory_row_and_advances_bookmark() {
+    let store = fresh_store();
+    NftListStore::ensure_chain(&store, &Chain::Eth).await.unwrap();
+    let nft = sample_nft(7, 200, false);
+    store.register_owned(Chain::Eth, vec![nft.clone()], 200).await.unwrap();
+    let outcome = store
+        .drop_token(
+            &Chain::Eth,
+            format!("{:?}", nft.common.token_address),
+            BigUint::from(7u32),
+            250,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, RemoveOutcome::Removed);
+    let again = store
+        .drop_token(
+            &Chain::Eth,
+            format!("{:?}", nft.common.token_address),
+            BigUint::from(7u32),
+            260,
+        )
+        .await
+        .unwrap();
+    assert_eq!(again, RemoveOutcome::Absent);
+    assert_eq!(
+        NftListStore::latest_scanned_block(&store, &Chain::Eth).await.unwrap(),
+        Some(260)
+    );
+}
+
+#[wasm_bindgen_test::wasm_bindgen_test]
+async fn mark_contract_spam_flips_inventory_rows_and_payload() {
+    let store = fresh_store();
+    NftListStore::ensure_chain(&store, &Chain::Eth).await.unwrap();
+    let n1 = sample_nft(1, 100, false);
+    let n2 = sample_nft(2, 110, false);
+    let token_address = format!("{:?}", n1.common.token_address);
+    store.register_owned(Chain::Eth, vec![n1, n2], 110).await.unwrap();
+    NftListStore::mark_contract_spam(&store, &Chain::Eth, token_address.clone(), true)
+        .await
+        .unwrap();
+    let tokens = store
+        .tokens_for_contract(Chain::Eth, token_address.clone())
+        .await
+        .unwrap();
+    assert_eq!(tokens.len(), 2);
+    assert!(tokens.iter().all(|n| n.common.possible_spam));
+    // The exclude_spam filter should now drop both tokens.
+    let filters = Some(NftListFilters {
+        exclude_spam: true,
+        exclude_phishing: false,
+    });
+    let list = store
+        .list_owned(vec![Chain::Eth], true, 0, None, filters)
+        .await
+        .unwrap();
+    assert_eq!(list.total, 0);
+    assert_eq!(list.skipped, 2);
+}
+
+#[wasm_bindgen_test::wasm_bindgen_test]
+async fn attach_metadata_to_transfers_backfills_payload_and_columns() {
+    let store = fresh_store();
+    NftHistoryStore::ensure_chain(&store, &Chain::Eth).await.unwrap();
+    let mut t1 = sample_transfer(42, 100, 1_000, TransferStatus::Receive);
+    let mut t2 = sample_transfer(42, 110, 1_100, TransferStatus::Send);
+    t2.common.log_index = 1;
+    t2.common.transaction_hash = format!("0x{:064x}", 999u64);
+    let token_address = format!("{:?}", t1.common.token_address);
+    // Make sure the second transfer ends up under a different log key.
+    t1.common.log_index = 0;
+    store
+        .append_transfers(Chain::Eth, vec![t1.clone(), t2.clone()])
+        .await
+        .unwrap();
+    let missing = store.transfers_missing_metadata(Chain::Eth).await.unwrap();
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].token_address, token_address);
+    assert_eq!(missing[0].token_id, BigUint::from(42u32));
+
+    let meta = TransferMeta {
+        token_address: token_address.clone(),
+        token_id: BigUint::from(42u32),
+        token_uri: Some("ipfs://uri".to_owned()),
+        token_domain: Some("ipfs.io".to_owned()),
+        collection_name: Some("Test Collection".to_owned()),
+        image_url: Some("https://img.example/42.png".to_owned()),
+        image_domain: Some("img.example".to_owned()),
+        token_name: Some("Token #42".to_owned()),
+    };
+    store
+        .attach_metadata_to_transfers(&Chain::Eth, meta, true)
+        .await
+        .unwrap();
+    let after = store.transfers_missing_metadata(Chain::Eth).await.unwrap();
+    assert!(after.is_empty(), "metadata back-fill should clear the missing list");
+
+    let listed = store
+        .list_transfers(vec![Chain::Eth], true, 0, None, None)
+        .await
+        .unwrap();
+    assert_eq!(listed.transfer_history.len(), 2);
+    for tr in &listed.transfer_history {
+        assert_eq!(tr.collection_name.as_deref(), Some("Test Collection"));
+        assert_eq!(tr.token_name.as_deref(), Some("Token #42"));
+        assert_eq!(tr.token_domain.as_deref(), Some("ipfs.io"));
+        assert!(tr.common.possible_spam);
+    }
+    // The contract address index round-trips through `Address::from_str`.
+    let addrs = store.contract_addresses(Chain::Eth).await.unwrap();
+    let parsed = Address::from_str(token_address.trim_start_matches("0x")).unwrap();
+    assert!(addrs.contains(&parsed));
 }
