@@ -9,21 +9,29 @@
 //! * `get_nft_transfers`
 //! * `clear_nft_db`
 //! * `refresh_nft_metadata`
+//! * `update_nft`
+//! * `withdraw_nft`
 //!
-//! The remaining mutating endpoint (`update_nft`) is intentionally not
-//! yet implemented in this revision -- it requires the multi-chain
-//! crawler that lands separately. Each unimplemented endpoint is still
-//! exposed as a stub that returns a clear `Internal` error so a caller
-//! can distinguish "not supported yet" from "endpoint missing".
+//! `update_nft` runs the multi-chain incremental crawler over every
+//! requested chain. Each chain requires a corresponding EVM coin to be
+//! activated (so the wallet's owner address is known); chains whose
+//! coin is not enabled are reported as `NoSuchCoin` errors but the
+//! remaining chains continue to crawl.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::lp_coinfind;
 use crate::nft::context::NftCtx;
 use crate::nft::errors::{ClearNftDbError, GetNftInfoError, UpdateNftError};
 use crate::nft::model::{
     Chain, ClearNftDbReq, Nft, NftList, NftListReq, NftMetadataReq, NftTransferList, NftTransfersReq,
     RefreshMetadataReq, UpdateNftReq, WithdrawNftReq,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::nft::providers::HttpCrawlProvider;
 use crate::nft::providers::{apply_spam_protection_to_nft, apply_spam_protection_to_transfer, HttpMetadataProvider};
 use crate::nft::store::{ensure_initialised, NftHistoryStore, NftListStore};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::MmCoinEnum;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 
@@ -158,11 +166,59 @@ where
     Ok(())
 }
 
-/// Stub handler for `update_nft`. Returns an `Internal` error explaining
-/// that the metadata-refresh pipeline is not yet wired in this revision.
+/// Handler for the JSON-RPC `update_nft` method.
+///
+/// Runs the incremental multi-chain crawler against every chain in the
+/// request. Per-chain failures are surfaced as a single aggregated
+/// `Storage` error so the caller can retry the failed chains; chains
+/// that succeed have their inventory and transfer log persisted before
+/// the error is raised.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn update_nft(ctx: MmArc, req: UpdateNftReq) -> MmResult<(), UpdateNftError> {
+    use crate::nft::model::ChainTicker;
+    if req.chains.is_empty() {
+        return MmError::err(UpdateNftError::Internal(
+            "`chains` must contain at least one entry".to_owned(),
+        ));
+    }
+    let nft_ctx = NftCtx::from_mm_ctx(&ctx).map_to_mm(UpdateNftError::Internal)?;
+    let store = nft_ctx.store();
+    let provider = HttpCrawlProvider::new(req.url, req.komodo_proxy);
+    let mut errors: Vec<String> = Vec::new();
+    for chain in &req.chains {
+        ensure_initialised(store, store, chain)
+            .await
+            .mm_err(|err| UpdateNftError::Storage(format!("{err:?}")))?;
+        let ticker = chain.coin_ticker();
+        let coin = match lp_coinfind(&ctx, ticker).await.map_err(UpdateNftError::Internal)? {
+            Some(MmCoinEnum::EthCoin(eth)) => eth,
+            Some(_) => {
+                errors.push(format!("{ticker}: not an EVM coin"));
+                continue;
+            },
+            None => {
+                errors.push(format!("{ticker}: not activated"));
+                continue;
+            },
+        };
+        let owner = coin.my_address;
+        if let Err(err) = crate::nft::providers::update_chain(store, &provider, *chain, owner).await {
+            errors.push(format!("{}: {:?}", ticker, err.into_inner()));
+        }
+    }
+    if !errors.is_empty() {
+        return MmError::err(UpdateNftError::Storage(format!("{errors:?}")));
+    }
+    Ok(())
+}
+
+/// WASM stub for `update_nft`. The crawler depends on `lp_coinfind`,
+/// which currently only resolves EVM coins on native targets; the WASM
+/// build path will be wired in once browser-side EVM activation lands.
+#[cfg(target_arch = "wasm32")]
 pub async fn update_nft(_ctx: MmArc, _req: UpdateNftReq) -> MmResult<(), UpdateNftError> {
     MmError::err(UpdateNftError::Internal(
-        "update_nft is not yet implemented in this revision".to_owned(),
+        "update_nft is not yet supported on the WASM target".to_owned(),
     ))
 }
 

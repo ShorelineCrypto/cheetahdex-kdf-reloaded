@@ -15,11 +15,13 @@
 //! handlers) lives outside this module so that the building blocks here
 //! remain reusable and free of cross-coin dependencies.
 
+pub mod crawler;
 pub mod http;
 pub mod refresh;
 pub mod spam;
 pub mod url_helpers;
 
+pub use crawler::{update_chain, ChainCrawlReport, HttpCrawlProvider, NftCrawlProvider};
 pub use http::{fetch_json, FetchError};
 pub use refresh::{refresh_nft_metadata, HttpMetadataProvider, MetadataProvider, RefreshedMetadata};
 pub use spam::{
