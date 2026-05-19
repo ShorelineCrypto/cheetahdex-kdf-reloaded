@@ -699,4 +699,40 @@ mod tests {
             other => panic!("expected selector mismatch, got {other:?}"),
         }
     }
+
+    // P10.3.7.b — gas limit dispatch tests
+    use crate::eth::eth_swap_v2::PaymentMethod;
+    use crate::eth::eth_types::EthGasLimitV2;
+
+    #[test]
+    fn nft_gas_limit_dispatches_per_kind_and_method() {
+        let g = EthGasLimitV2::default();
+        // Defaults defined in EthGasLimitV2::default(): 200k for ERC-721,
+        // 220k for ERC-1155, across all four maker-side methods.
+        for method in [
+            PaymentMethod::Send,
+            PaymentMethod::Spend,
+            PaymentMethod::RefundTimelock,
+            PaymentMethod::RefundSecret,
+        ] {
+            assert_eq!(g.nft_gas_limit(NftKind::Erc721, method), 200_000);
+            assert_eq!(g.nft_gas_limit(NftKind::Erc1155, method), 220_000);
+        }
+    }
+
+    #[test]
+    fn nft_gas_limit_methods_are_distinct_fields() {
+        // Mutating one method's slot must not affect others.
+        let mut g = EthGasLimitV2::default();
+        g.maker.nft_erc721_payment = 1;
+        g.maker.nft_erc721_taker_spend = 2;
+        g.maker.nft_erc721_maker_refund_timelock = 3;
+        g.maker.nft_erc721_maker_refund_secret = 4;
+        assert_eq!(g.nft_gas_limit(NftKind::Erc721, PaymentMethod::Send), 1);
+        assert_eq!(g.nft_gas_limit(NftKind::Erc721, PaymentMethod::Spend), 2);
+        assert_eq!(g.nft_gas_limit(NftKind::Erc721, PaymentMethod::RefundTimelock), 3);
+        assert_eq!(g.nft_gas_limit(NftKind::Erc721, PaymentMethod::RefundSecret), 4);
+        // ERC-1155 row untouched.
+        assert_eq!(g.nft_gas_limit(NftKind::Erc1155, PaymentMethod::Send), 220_000);
+    }
 }

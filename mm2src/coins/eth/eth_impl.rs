@@ -2512,6 +2512,7 @@ pub async fn eth_coin_from_conf_and_request(
         // ETH/ERC20 coins never use the TRON HTTP API; populated only by the
         // dedicated TRON activation path.
         tron_api: None,
+        nft_swap_v2_contract: None,
     };
     Ok(EthCoin(Arc::new(coin)))
 }

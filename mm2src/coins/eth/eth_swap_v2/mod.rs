@@ -34,6 +34,7 @@ impl EthPaymentType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaymentMethod {
     Send,
     Spend,

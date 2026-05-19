@@ -49,6 +49,7 @@ async fn test_send() {
         chain_id: None,
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
         tron_api: None,
+        nft_swap_v2_contract: None,
     }));
     let tx = coin
         .send_maker_payment(

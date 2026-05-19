@@ -164,6 +164,7 @@ pub async fn tron_coin_from_conf_and_request(
         swap_v2_contracts: None,
         gas_limit_v2: EthGasLimitV2::default(),
         tron_api: Some(tron_api),
+        nft_swap_v2_contract: None,
     };
     Ok(EthCoin(Arc::new(coin)))
 }

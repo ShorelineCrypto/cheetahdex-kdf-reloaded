@@ -266,6 +266,11 @@ pub struct EthCoinImpl {
     /// `coin_type` is [`EthCoinType::Tron`] or [`EthCoinType::Trc20`].
     /// `None` for ETH/ERC20 coins.
     pub(crate) tron_api: Option<crate::eth::tron::api::TronApiClient>,
+    /// Optional address of the maker-side NFT swap V2 contract
+    /// (`EtomicSwapMakerV2-NFT`). Populated from coin activation when
+    /// the chain has an NFT HTLC contract deployed; `None` disables
+    /// NFT swap paths for this coin (P10.3.7.b).
+    pub(crate) nft_swap_v2_contract: Option<Address>,
 }
 
 // ─── V2 swap types ──────────────────────────────────────────────────────────
@@ -315,6 +320,17 @@ pub struct MakerGasLimitV2 {
     pub erc20_maker_refund_timelock: u64,
     pub eth_maker_refund_secret: u64,
     pub erc20_maker_refund_secret: u64,
+    // P10.3.7.b — NFT HTLC entrypoints. ERC-721 and ERC-1155 are budgeted
+    // separately because ERC-1155 carries an extra `amount` argument plus
+    // balance bookkeeping inside the token contract.
+    pub nft_erc721_payment: u64,
+    pub nft_erc1155_payment: u64,
+    pub nft_erc721_taker_spend: u64,
+    pub nft_erc1155_taker_spend: u64,
+    pub nft_erc721_maker_refund_timelock: u64,
+    pub nft_erc1155_maker_refund_timelock: u64,
+    pub nft_erc721_maker_refund_secret: u64,
+    pub nft_erc1155_maker_refund_secret: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -342,6 +358,16 @@ impl Default for EthGasLimitV2 {
                 erc20_maker_refund_timelock: 150_000,
                 eth_maker_refund_secret: 150_000,
                 erc20_maker_refund_secret: 150_000,
+                // NFT defaults sit above ERC-20 because the HTLC contract
+                // additionally invokes `safeTransferFrom` on the token contract.
+                nft_erc721_payment: 200_000,
+                nft_erc1155_payment: 220_000,
+                nft_erc721_taker_spend: 200_000,
+                nft_erc1155_taker_spend: 220_000,
+                nft_erc721_maker_refund_timelock: 200_000,
+                nft_erc1155_maker_refund_timelock: 220_000,
+                nft_erc721_maker_refund_secret: 200_000,
+                nft_erc1155_maker_refund_secret: 220_000,
             },
             taker: TakerGasLimitV2 {
                 eth_payment: 150_000,
@@ -413,6 +439,27 @@ impl EthGasLimitV2 {
             (EthCoinType::Tron, _, _) | (EthCoinType::Trc20 { .. }, _, _) => {
                 Err("TRON swap V2 gas limits not yet defined (P10.2.5)".to_string())
             },
+        }
+    }
+
+    /// Returns the appropriate gas limit for a maker-side NFT HTLC operation
+    /// (P10.3.7.b). Only [`eth_swap_v2::PaymentMethod::Send`],
+    /// [`eth_swap_v2::PaymentMethod::Spend`],
+    /// [`eth_swap_v2::PaymentMethod::RefundTimelock`] and
+    /// [`eth_swap_v2::PaymentMethod::RefundSecret`] are valid; all of them
+    /// are always defined for both NFT kinds (no `Result`).
+    pub fn nft_gas_limit(&self, kind: eth_swap_v2::nft_swap_v2::NftKind, method: eth_swap_v2::PaymentMethod) -> u64 {
+        use eth_swap_v2::nft_swap_v2::NftKind;
+        use eth_swap_v2::PaymentMethod;
+        match (kind, method) {
+            (NftKind::Erc721, PaymentMethod::Send) => self.maker.nft_erc721_payment,
+            (NftKind::Erc1155, PaymentMethod::Send) => self.maker.nft_erc1155_payment,
+            (NftKind::Erc721, PaymentMethod::Spend) => self.maker.nft_erc721_taker_spend,
+            (NftKind::Erc1155, PaymentMethod::Spend) => self.maker.nft_erc1155_taker_spend,
+            (NftKind::Erc721, PaymentMethod::RefundTimelock) => self.maker.nft_erc721_maker_refund_timelock,
+            (NftKind::Erc1155, PaymentMethod::RefundTimelock) => self.maker.nft_erc1155_maker_refund_timelock,
+            (NftKind::Erc721, PaymentMethod::RefundSecret) => self.maker.nft_erc721_maker_refund_secret,
+            (NftKind::Erc1155, PaymentMethod::RefundSecret) => self.maker.nft_erc1155_maker_refund_secret,
         }
     }
 }
