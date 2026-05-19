@@ -8,11 +8,11 @@
 //! * `get_nft_metadata`
 //! * `get_nft_transfers`
 //! * `clear_nft_db`
+//! * `refresh_nft_metadata`
 //!
-//! The mutating endpoints that require a live `EthCoin` (`update_nft`,
-//! `refresh_nft_metadata`, `withdraw_nft`) are intentionally not yet
-//! implemented in this revision — they will land alongside the EVM NFT
-//! integration tracked separately. Each unimplemented endpoint is still
+//! The remaining mutating endpoint (`update_nft`) is intentionally not
+//! yet implemented in this revision -- it requires the multi-chain
+//! crawler that lands separately. Each unimplemented endpoint is still
 //! exposed as a stub that returns a clear `Internal` error so a caller
 //! can distinguish "not supported yet" from "endpoint missing".
 
@@ -22,7 +22,7 @@ use crate::nft::model::{
     Chain, ClearNftDbReq, Nft, NftList, NftListReq, NftMetadataReq, NftTransferList, NftTransfersReq,
     RefreshMetadataReq, UpdateNftReq, WithdrawNftReq,
 };
-use crate::nft::providers::{apply_spam_protection_to_nft, apply_spam_protection_to_transfer};
+use crate::nft::providers::{apply_spam_protection_to_nft, apply_spam_protection_to_transfer, HttpMetadataProvider};
 use crate::nft::store::{ensure_initialised, NftHistoryStore, NftListStore};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -50,8 +50,7 @@ pub async fn get_nft_list(ctx: MmArc, req: NftListReq) -> MmResult<NftList, GetN
         .mm_err(|err| GetNftInfoError::Storage(format!("{err:?}")))?;
     if req.protect_from_spam {
         for nft in &mut list.nfts {
-            apply_spam_protection_to_nft(nft, true)
-                .map_to_mm(|err| GetNftInfoError::SpamFilter(err.to_string()))?;
+            apply_spam_protection_to_nft(nft, true).map_to_mm(|err| GetNftInfoError::SpamFilter(err.to_string()))?;
         }
     }
     Ok(list)
@@ -76,8 +75,7 @@ pub async fn get_nft_metadata(ctx: MmArc, req: NftMetadataReq) -> MmResult<Nft, 
             token_id: req.token_id.to_string(),
         })?;
     if req.protect_from_spam {
-        apply_spam_protection_to_nft(&mut nft, true)
-            .map_to_mm(|err| GetNftInfoError::SpamFilter(err.to_string()))?;
+        apply_spam_protection_to_nft(&mut nft, true).map_to_mm(|err| GetNftInfoError::SpamFilter(err.to_string()))?;
     }
     Ok(nft)
 }
@@ -89,10 +87,7 @@ pub async fn get_nft_metadata(ctx: MmArc, req: NftMetadataReq) -> MmResult<Nft, 
 /// not yet annotate records with on-chain confirmations: that requires
 /// a live `EthCoin` and will be added together with the activation
 /// integration.
-pub async fn get_nft_transfers(
-    ctx: MmArc,
-    req: NftTransfersReq,
-) -> MmResult<NftTransferList, GetNftInfoError> {
+pub async fn get_nft_transfers(ctx: MmArc, req: NftTransfersReq) -> MmResult<NftTransferList, GetNftInfoError> {
     if req.chains.is_empty() {
         return MmError::err(GetNftInfoError::InvalidRequest(
             "`chains` must contain at least one entry".to_owned(),
@@ -171,12 +166,21 @@ pub async fn update_nft(_ctx: MmArc, _req: UpdateNftReq) -> MmResult<(), UpdateN
     ))
 }
 
-/// Stub handler for `refresh_nft_metadata`. Same status as
-/// [`update_nft`].
-pub async fn refresh_nft_metadata(_ctx: MmArc, _req: RefreshMetadataReq) -> MmResult<(), UpdateNftError> {
-    MmError::err(UpdateNftError::Internal(
-        "refresh_nft_metadata is not yet implemented in this revision".to_owned(),
-    ))
+/// Handler for the JSON-RPC `refresh_nft_metadata` method.
+///
+/// Re-fetches the metadata of a single cached token through the
+/// configured HTTP provider, merges the fresh fields into the inventory
+/// entry, and propagates them into the historical transfer log so the
+/// `get_nft_transfers` endpoint surfaces the same values as
+/// `get_nft_metadata`.
+pub async fn refresh_nft_metadata(ctx: MmArc, req: RefreshMetadataReq) -> MmResult<(), UpdateNftError> {
+    let nft_ctx = NftCtx::from_mm_ctx(&ctx).map_to_mm(UpdateNftError::Internal)?;
+    let store = nft_ctx.store();
+    ensure_initialised(store, store, &req.chain)
+        .await
+        .mm_err(|err| UpdateNftError::Storage(format!("{err:?}")))?;
+    let provider = HttpMetadataProvider::new(req.url, req.komodo_proxy);
+    crate::nft::providers::refresh_nft_metadata(store, &provider, req.chain, req.token_address, req.token_id).await
 }
 
 /// Handler for the JSON-RPC `withdraw_nft` method.
@@ -274,7 +278,9 @@ mod tests {
             "chain": "ETH"
         }))
         .unwrap();
-        let err = get_nft_metadata(ctx, req).await.expect_err("expected TokenNotFoundInWallet");
+        let err = get_nft_metadata(ctx, req)
+            .await
+            .expect_err("expected TokenNotFoundInWallet");
         match err.into_inner() {
             GetNftInfoError::TokenNotFoundInWallet { token_id, .. } => assert_eq!(token_id, "1"),
             other => panic!("unexpected error: {other:?}"),

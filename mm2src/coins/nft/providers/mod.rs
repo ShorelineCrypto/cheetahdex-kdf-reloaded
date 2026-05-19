@@ -16,10 +16,12 @@
 //! remain reusable and free of cross-coin dependencies.
 
 pub mod http;
+pub mod refresh;
 pub mod spam;
 pub mod url_helpers;
 
 pub use http::{fetch_json, FetchError};
+pub use refresh::{refresh_nft_metadata, HttpMetadataProvider, MetadataProvider, RefreshedMetadata};
 pub use spam::{
     apply_spam_protection_to_nft, apply_spam_protection_to_transfer, contains_url, is_token_uri_suspicious,
     redact_text_if_spam, SpamScanError,
