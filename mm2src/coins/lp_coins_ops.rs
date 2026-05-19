@@ -133,10 +133,12 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
                 "TENDERMINTTOKEN protocol is not supported by lp_coininit - use enable_tendermint_token instead"
             )
         },
-        // TRON activation is V2-only and pending P10.2.5 wiring.
-        CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => {
-            return ERR!("TRON protocol activation is not yet wired (pending P10.2.5)")
-        },
+        // TRON activation routes through a dedicated builder that populates
+        // `EthCoin.tron_api`. P10.2 wiring.
+        CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => try_s!(
+            crate::eth::tron::tron_coin_from_conf_and_request(ctx, ticker, &coins_en, req, &secret, protocol).await
+        )
+        .into(),
     };
 
     let register_params = RegisterCoinParams {

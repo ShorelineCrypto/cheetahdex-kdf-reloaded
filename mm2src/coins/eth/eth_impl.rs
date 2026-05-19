@@ -2392,10 +2392,11 @@ pub async fn eth_coin_from_conf_and_request(
     priv_key: &[u8],
     protocol: CoinProtocol,
 ) -> Result<EthCoin, String> {
-    // Defensive: TRON activates through a dedicated V2 path; reject any
-    // attempt to route TRX/TRC20 through the EVM legacy activator. P10.2.5.
+    // Defensive: TRON activates through a dedicated builder
+    // (`tron::tron_coin_from_conf_and_request`); reject any attempt to route
+    // TRX/TRC20 through the EVM legacy activator.
     if matches!(protocol, CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. }) {
-        return ERR!("TRON protocol activation is not yet wired (pending P10.2.5)");
+        return ERR!("TRON protocol must activate through tron_coin_from_conf_and_request, not the EVM activator");
     }
 
     let mut urls: Vec<String> = try_s!(json::from_value(req["urls"].clone()));

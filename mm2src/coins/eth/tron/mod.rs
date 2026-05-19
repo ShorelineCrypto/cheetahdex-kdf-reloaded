@@ -4,6 +4,7 @@
 //! with 0x41 prefix), protobuf-based transaction serialization, and a dual
 //! bandwidth+energy fee model. TRC20 tokens reuse ERC20 ABI encoding.
 
+pub mod activation;
 pub mod address;
 pub mod api;
 pub mod fee;
@@ -12,6 +13,7 @@ pub mod sign;
 pub mod tx_builder;
 pub mod withdraw;
 
+pub use activation::tron_coin_from_conf_and_request;
 pub use address::TronAddress;
 
 use serde::{Deserialize, Serialize};
