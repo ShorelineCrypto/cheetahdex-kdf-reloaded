@@ -15,6 +15,7 @@ use web3::types::TransactionId;
 
 pub(crate) mod eth_maker_swap_v2;
 pub(crate) mod eth_taker_swap_v2;
+pub(crate) mod nft_swap_v2;
 
 /// ZERO_VALUE is used to represent a 0 amount in transactions where the value is encoded in the transaction input data.
 pub(crate) const ZERO_VALUE: u32 = 0;
