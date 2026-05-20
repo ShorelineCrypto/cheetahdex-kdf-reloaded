@@ -402,6 +402,170 @@ pub fn maker_payment_selector(kind: NftKind) -> [u8; 4] {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+//  EVM transaction-call builders (P10.3.7.c)
+// ──────────────────────────────────────────────────────────────────────
+
+/// Fully-resolved EVM call ready to be handed to
+/// [`crate::eth::EthCoin::sign_and_send_transaction`]: contract address,
+/// calldata, gas limit and ETH value (always zero for NFT HTLCs — the
+/// NFT itself is the value).
+#[derive(Debug, Clone)]
+pub struct NftCall {
+    pub contract: Address,
+    pub calldata: Vec<u8>,
+    pub gas_limit: u64,
+    pub value: U256,
+}
+
+/// Build the EVM call for `erc{721,1155}MakerPayment` (P10.3.7.c).
+pub fn build_maker_payment_call(
+    contract: Address,
+    gas_limits: &crate::eth::eth_types::EthGasLimitV2,
+    args: &NftMakerPaymentArgs,
+) -> Result<NftCall, NftSwapV2Error> {
+    Ok(NftCall {
+        contract,
+        calldata: encode_maker_payment(args)?,
+        gas_limit: gas_limits.nft_gas_limit(args.kind, super::PaymentMethod::Send),
+        value: U256::zero(),
+    })
+}
+
+/// Build the EVM call for `spendErc{721,1155}MakerPayment`.
+pub fn build_spend_maker_payment_call(
+    contract: Address,
+    gas_limits: &crate::eth::eth_types::EthGasLimitV2,
+    args: &NftSpendMakerPaymentArgs,
+) -> Result<NftCall, NftSwapV2Error> {
+    Ok(NftCall {
+        contract,
+        calldata: encode_spend_maker_payment(args)?,
+        gas_limit: gas_limits.nft_gas_limit(args.kind, super::PaymentMethod::Spend),
+        value: U256::zero(),
+    })
+}
+
+/// Build the EVM call for `refundErc{721,1155}MakerPaymentTimelock`.
+pub fn build_refund_timelock_call(
+    contract: Address,
+    gas_limits: &crate::eth::eth_types::EthGasLimitV2,
+    args: &NftRefundTimelockArgs,
+) -> Result<NftCall, NftSwapV2Error> {
+    Ok(NftCall {
+        contract,
+        calldata: encode_refund_timelock(args)?,
+        gas_limit: gas_limits.nft_gas_limit(args.kind, super::PaymentMethod::RefundTimelock),
+        value: U256::zero(),
+    })
+}
+
+/// Build the EVM call for `refundErc{721,1155}MakerPaymentSecret`.
+pub fn build_refund_secret_call(
+    contract: Address,
+    gas_limits: &crate::eth::eth_types::EthGasLimitV2,
+    args: &NftRefundSecretArgs,
+) -> Result<NftCall, NftSwapV2Error> {
+    Ok(NftCall {
+        contract,
+        calldata: encode_refund_secret(args)?,
+        gas_limit: gas_limits.nft_gas_limit(args.kind, super::PaymentMethod::RefundSecret),
+        value: U256::zero(),
+    })
+}
+
+// ──────────────────────────────────────────────────────────────────────
+//  EthCoin maker-side NFT swap entrypoints (P10.3.7.c)
+// ──────────────────────────────────────────────────────────────────────
+
+use crate::eth::EthCoin;
+
+/// Errors raised by the EthCoin NFT swap entrypoints when the coin has
+/// no NFT swap V2 contract configured for this chain.
+#[derive(Debug)]
+pub enum EthCoinNftError {
+    Build(NftSwapV2Error),
+    NoNftContract,
+}
+
+impl std::fmt::Display for EthCoinNftError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EthCoinNftError::Build(e) => write!(f, "{e}"),
+            EthCoinNftError::NoNftContract => {
+                write!(f, "EthCoin has no NFT swap V2 contract configured for this chain")
+            },
+        }
+    }
+}
+
+impl std::error::Error for EthCoinNftError {}
+
+impl From<NftSwapV2Error> for EthCoinNftError {
+    fn from(e: NftSwapV2Error) -> Self {
+        EthCoinNftError::Build(e)
+    }
+}
+
+impl EthCoin {
+    /// Look up the configured NFT swap V2 contract or return
+    /// [`EthCoinNftError::NoNftContract`].
+    pub fn nft_swap_v2_contract_addr(&self) -> Result<Address, EthCoinNftError> {
+        self.nft_swap_v2_contract.ok_or(EthCoinNftError::NoNftContract)
+    }
+
+    /// Build the EVM call for an NFT maker-payment send (does not broadcast).
+    pub fn build_send_nft_maker_payment(&self, args: &NftMakerPaymentArgs) -> Result<NftCall, EthCoinNftError> {
+        let contract = self.nft_swap_v2_contract_addr()?;
+        Ok(build_maker_payment_call(contract, &self.gas_limit_v2, args)?)
+    }
+
+    /// Build the EVM call for the taker spending an NFT maker payment.
+    pub fn build_spend_nft_maker_payment(&self, args: &NftSpendMakerPaymentArgs) -> Result<NftCall, EthCoinNftError> {
+        let contract = self.nft_swap_v2_contract_addr()?;
+        Ok(build_spend_maker_payment_call(contract, &self.gas_limit_v2, args)?)
+    }
+
+    /// Build the EVM call for the maker timelock-refunding an NFT maker payment.
+    pub fn build_refund_nft_maker_payment_timelock(
+        &self,
+        args: &NftRefundTimelockArgs,
+    ) -> Result<NftCall, EthCoinNftError> {
+        let contract = self.nft_swap_v2_contract_addr()?;
+        Ok(build_refund_timelock_call(contract, &self.gas_limit_v2, args)?)
+    }
+
+    /// Build the EVM call for the cooperative-secret refund of an NFT maker payment.
+    pub fn build_refund_nft_maker_payment_secret(
+        &self,
+        args: &NftRefundSecretArgs,
+    ) -> Result<NftCall, EthCoinNftError> {
+        let contract = self.nft_swap_v2_contract_addr()?;
+        Ok(build_refund_secret_call(contract, &self.gas_limit_v2, args)?)
+    }
+
+    /// Decode the calldata of an on-chain `erc{721,1155}MakerPayment` tx and
+    /// validate it matches `expected`. The transaction must call our
+    /// configured NFT swap V2 contract.
+    pub fn validate_nft_maker_payment_tx(
+        &self,
+        tx_to_address: Address,
+        tx_calldata: &[u8],
+        expected: &NftMakerPaymentArgs,
+    ) -> Result<(), EthCoinNftError> {
+        let contract = self.nft_swap_v2_contract_addr()?;
+        if tx_to_address != contract {
+            return Err(EthCoinNftError::Build(NftSwapV2Error::Mismatch {
+                field: "to_address",
+                detail: format!("expected {contract:?}, got {tx_to_address:?}"),
+            }));
+        }
+        let decoded = decode_maker_payment(expected.kind, tx_calldata)?;
+        validate_maker_payment(&decoded, expected)?;
+        Ok(())
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────
 //  Decoded-token helpers
 // ──────────────────────────────────────────────────────────────────────
 
@@ -734,5 +898,87 @@ mod tests {
         assert_eq!(g.nft_gas_limit(NftKind::Erc721, PaymentMethod::RefundSecret), 4);
         // ERC-1155 row untouched.
         assert_eq!(g.nft_gas_limit(NftKind::Erc1155, PaymentMethod::Send), 220_000);
+    }
+
+    // P10.3.7.c — call builder tests
+    fn contract() -> Address {
+        Address::from([0xC0; 20])
+    }
+
+    #[test]
+    fn build_maker_payment_call_carries_contract_value_and_gas() {
+        let g = EthGasLimitV2::default();
+        let args = sample_erc1155_args();
+        let call = build_maker_payment_call(contract(), &g, &args).expect("build");
+        assert_eq!(call.contract, contract());
+        assert_eq!(call.value, U256::zero());
+        assert_eq!(call.gas_limit, g.maker.nft_erc1155_payment);
+        // Selector must match ERC-1155 maker payment.
+        assert_eq!(call.calldata[..4], maker_payment_selector(NftKind::Erc1155));
+        // And the full body decodes back to our args.
+        let decoded = decode_maker_payment(NftKind::Erc1155, &call.calldata).expect("decode");
+        validate_maker_payment(&decoded, &args).expect("validate");
+    }
+
+    #[test]
+    fn build_spend_call_uses_spend_gas_limit() {
+        let g = EthGasLimitV2::default();
+        let args = NftSpendMakerPaymentArgs {
+            kind: NftKind::Erc721,
+            swap_id: hash32(0x10),
+            amount: None,
+            maker: addr(0x11),
+            taker_secret_hash: hash32(0x20),
+            maker_secret: hash32(0x30),
+            token_address: addr(0x22),
+            token_id: U256::from(7u64),
+        };
+        let call = build_spend_maker_payment_call(contract(), &g, &args).expect("build");
+        assert_eq!(call.gas_limit, g.maker.nft_erc721_taker_spend);
+    }
+
+    #[test]
+    fn build_refund_timelock_call_uses_refund_timelock_gas_limit() {
+        let g = EthGasLimitV2::default();
+        let args = NftRefundTimelockArgs {
+            kind: NftKind::Erc1155,
+            swap_id: hash32(0x40),
+            amount: Some(U256::from(2u64)),
+            taker: addr(0xAA),
+            taker_secret_hash: hash32(0x50),
+            maker_secret_hash: hash32(0x60),
+            token_address: addr(0xBB),
+            token_id: U256::from(3u64),
+            payment_time_lock: 1_700_000_000,
+        };
+        let call = build_refund_timelock_call(contract(), &g, &args).expect("build");
+        assert_eq!(call.gas_limit, g.maker.nft_erc1155_maker_refund_timelock);
+    }
+
+    #[test]
+    fn build_refund_secret_call_uses_refund_secret_gas_limit() {
+        let g = EthGasLimitV2::default();
+        let args = NftRefundSecretArgs {
+            kind: NftKind::Erc721,
+            swap_id: hash32(0x70),
+            amount: None,
+            taker: addr(0xCC),
+            taker_secret: hash32(0x80),
+            maker_secret_hash: hash32(0x90),
+            token_address: addr(0xDD),
+            token_id: U256::from(8u64),
+            payment_time_lock: 1_800_000_000,
+        };
+        let call = build_refund_secret_call(contract(), &g, &args).expect("build");
+        assert_eq!(call.gas_limit, g.maker.nft_erc721_maker_refund_secret);
+    }
+
+    #[test]
+    fn build_call_propagates_amount_required_error() {
+        let g = EthGasLimitV2::default();
+        let mut bad = sample_erc1155_args();
+        bad.amount = None;
+        let err = build_maker_payment_call(contract(), &g, &bad).unwrap_err();
+        assert!(matches!(err, NftSwapV2Error::AmountRequiredForErc1155));
     }
 }
