@@ -154,7 +154,7 @@ pub fn short_log_time(ms: u64) -> DelayedFormat<StrftimeItems<'static>> {
     // NB: Given that the debugging logs are targeted at the developers and not the users
     // I think it's better to output the time in GMT here
     // in order for the developers to more easily match the events between the various parts of the peer-to-peer system.
-    let time = Utc.timestamp_millis(ms as i64);
+    let time = Utc.timestamp_millis_opt(ms as i64).single().unwrap_or_default();
     time.format("%d %H:%M:%S")
 }
 
@@ -478,7 +478,10 @@ impl Default for LogEntry {
 
 impl LogEntry {
     pub fn format(&self, buf: &mut String) -> Result<(), fmt::Error> {
-        let time = Local.timestamp_millis(self.time as i64);
+        let time = Local
+            .timestamp_millis_opt(self.time as i64)
+            .single()
+            .unwrap_or_default();
 
         wite! (buf,
             if self.emotion.is_empty() {'·'} else {(self.emotion)}
