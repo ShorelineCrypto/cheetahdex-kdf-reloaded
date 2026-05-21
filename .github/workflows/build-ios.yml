@@ -1,0 +1,67 @@
+name: Build iOS
+
+# P7.4 — iOS aarch64 static library build.
+#
+# `mm2_bin_lib` is `crate-type = ["cdylib", "rlib"]`. For iOS we build the
+# static library (`libmm2_bin_lib.a`) which the host Swift/Obj-C app links
+# against. Requires a macOS runner and the iOS target toolchain.
+#
+# Manually dispatched until a runner is provisioned.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+  workflow_call:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+        type: string
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-ios
+          # Simulator target is intentionally left out; add on demand:
+          # - aarch64-apple-ios-sim
+          # - x86_64-apple-ios
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain for ${{ matrix.target }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ios-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mm2_bin_lib staticlib (${{ matrix.target }})
+        run: |
+          cargo build -p mm2_bin_lib \
+            --target ${{ matrix.target }} \
+            --profile ${{ inputs.profile }}
+
+      - name: Upload staticlib
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmm2-${{ matrix.target }}
+          path: target/${{ matrix.target }}/${{ inputs.profile }}/libmm2_bin_lib.a

@@ -1,0 +1,54 @@
+name: Build Windows
+
+# P7.3 — Windows x86_64 build.
+#
+# Manually dispatched until a Windows runner is verified. Once green,
+# flip the `on:` block to include `push` / `pull_request` triggers.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+  workflow_call:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add x86_64-pc-windows-msvc
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mm2
+        shell: pwsh
+        run: cargo build --bin mm2 --target x86_64-pc-windows-msvc --profile ${{ inputs.profile }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm2-x86_64-pc-windows-msvc
+          path: target/x86_64-pc-windows-msvc/${{ inputs.profile }}/mm2.exe

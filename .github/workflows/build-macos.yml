@@ -1,0 +1,92 @@
+name: Build macOS
+
+# P7.2 — macOS builds (x86_64, ARM64, Universal binary).
+#
+# Manually dispatched until a macOS runner is provisioned. Once wired up,
+# flip the `on:` block to include `push` / `pull_request` triggers and
+# optionally add signing secrets (APPLE_CERTIFICATE_BASE64, APPLE_ID,
+# APPLE_APP_PASSWORD, APPLE_TEAM_ID) for notarization.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+  workflow_call:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+        type: string
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain for ${{ matrix.target }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mm2 (${{ matrix.target }})
+        run: cargo build --bin mm2 --target ${{ matrix.target }} --profile ${{ inputs.profile }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm2-${{ matrix.target }}
+          path: target/${{ matrix.target }}/${{ inputs.profile }}/mm2
+
+  universal:
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mm2-x86_64-apple-darwin
+          path: artifacts/x86_64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mm2-aarch64-apple-darwin
+          path: artifacts/aarch64
+
+      - name: Build universal binary via lipo
+        run: |
+          chmod +x artifacts/x86_64/mm2 artifacts/aarch64/mm2
+          mkdir -p dist
+          lipo -create -output dist/mm2-universal \
+            artifacts/x86_64/mm2 \
+            artifacts/aarch64/mm2
+          lipo -info dist/mm2-universal
+
+      - name: Upload universal binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm2-universal-apple-darwin
+          path: dist/mm2-universal

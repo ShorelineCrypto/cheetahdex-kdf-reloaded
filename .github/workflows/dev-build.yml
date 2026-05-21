@@ -1,0 +1,33 @@
+name: Dev Build (all platforms)
+
+# P7.6 — Umbrella workflow that triggers the per-platform builds in
+# parallel. Runs on manual dispatch so we can snapshot a dev binary set
+# from `reloaded-gplv2-base` without waiting for release tagging.
+#
+# Each platform job delegates to its dedicated workflow file via
+# `workflow_call`. If a downstream job fails (missing runner, missing
+# toolchain, etc.) the others still complete and upload their artifacts.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      profile: release
+
+  windows:
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      profile: release
+
+  ios:
+    uses: ./.github/workflows/build-ios.yml
+    with:
+      profile: release
+
+  android:
+    uses: ./.github/workflows/build-android.yml
+    with:
+      profile: release
