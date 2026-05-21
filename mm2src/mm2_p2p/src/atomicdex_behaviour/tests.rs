@@ -27,7 +27,20 @@ impl Node {
     where
         F: Fn(mpsc::Sender<AdexBehaviourCmd>, AdexBehaviourEvent) + Send + 'static,
     {
-        let node_type = NodeType::RelayInMemory { port };
+        Node::spawn_with_type(NodeType::RelayInMemory { port }, seednodes, on_event).await
+    }
+
+    async fn spawn_light<F>(seednodes: Vec<u64>, on_event: F) -> Node
+    where
+        F: Fn(mpsc::Sender<AdexBehaviourCmd>, AdexBehaviourEvent) + Send + 'static,
+    {
+        Node::spawn_with_type(NodeType::LightInMemory, seednodes, on_event).await
+    }
+
+    async fn spawn_with_type<F>(node_type: NodeType, seednodes: Vec<u64>, on_event: F) -> Node
+    where
+        F: Fn(mpsc::Sender<AdexBehaviourCmd>, AdexBehaviourEvent) + Send + 'static,
+    {
         let seednodes = seednodes.into_iter().map(RelayAddress::Memory).collect();
         let (cmd_tx, mut event_rx, peer_id, _) = spawn_gossipsub(None, spawn_boxed, seednodes, node_type, |_| {})
             .await
@@ -370,4 +383,204 @@ async fn test_request_peers_ok_three_peers() {
     let mut responses = response_rx.await.unwrap();
     responses.sort_by(|x, y| x.0.cmp(&y.0));
     assert_eq!(responses, expected);
+}
+
+// ── TP3: P2P / Gossipsub Smoke Tests ────────────────────────────────────
+//
+// These tests exercise the full publish/subscribe path of the
+// `AtomicDexBehaviour` over the in-memory libp2p transport. They are
+// pure-Rust replacements for the multi-process smoke tests originally
+// scoped under TP3, covering the same propagation invariants without
+// spawning external KDF binaries.
+//
+// In this fork relay nodes (`i_am_relay = true`) treat themselves as
+// implicitly subscribed to every topic and the local `subscribe()` call
+// becomes a no-op. To exercise real SUBSCRIBE / publish propagation we
+// therefore use light clients (`NodeType::LightInMemory`) seeded to a
+// relay backbone.
+
+/// A light client subscribing to a topic must surface as a `Subscribed`
+/// event on the connected relay (the relay is the one that receives the
+/// remote SUBSCRIBE control message).
+#[tokio::test]
+async fn test_subscribe_propagates_to_remote_peer() {
+    let _ = env_logger::try_init();
+
+    let topic = "tp3-smoke-subscribe".to_owned();
+
+    let relay_subs: Arc<Mutex<Vec<crate::gossipsub::TopicHash>>> = Arc::new(Mutex::new(Vec::new()));
+    let relay_subs_cpy = relay_subs.clone();
+
+    let relay_port = next_port();
+    let mut relay = Node::spawn(relay_port, vec![], move |_cmd_tx, event| {
+        if let AdexBehaviourEvent::Subscribed { topic, .. } = event {
+            relay_subs_cpy.lock().unwrap().push(topic);
+        }
+    })
+    .await;
+
+    let mut subscriber = Node::spawn_light(vec![relay_port], |_, _| ()).await;
+    subscriber.wait_peers(1).await;
+
+    subscriber
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+
+    let mut got = false;
+    for _ in 0..30 {
+        if relay_subs.lock().unwrap().iter().any(|t| t.as_str() == topic) {
+            got = true;
+            break;
+        }
+        async_std::task::sleep(Duration::from_millis(500)).await;
+    }
+    let observed = relay_subs.lock().unwrap().clone();
+    assert!(got, "relay never observed Subscribed event for {topic}: {observed:?}",);
+
+    let _ = &mut relay;
+}
+
+/// Light publisher → relay → light subscriber. The subscriber must
+/// receive a `Message` event for the payload broadcast by the publisher
+/// after both lights have joined the topic mesh through the relay.
+#[tokio::test]
+async fn test_publish_reaches_direct_subscriber() {
+    let _ = env_logger::try_init();
+
+    let topic = "tp3-smoke-publish-direct".to_owned();
+    let payload = b"hello from publisher".to_vec();
+
+    let received: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let received_cpy = received.clone();
+
+    let relay_port = next_port();
+    let mut _relay = Node::spawn(relay_port, vec![], |mut cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(peer_id, message_id, _) = event {
+            let _ = cmd_tx.try_send(AdexBehaviourCmd::PropagateMessage {
+                message_id,
+                propagation_source: peer_id,
+            });
+        }
+    })
+    .await;
+
+    let mut publisher = Node::spawn_light(vec![relay_port], |_, _| ()).await;
+    let mut subscriber = Node::spawn_light(vec![relay_port], move |_cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(_, _, msg) = event {
+            received_cpy.lock().unwrap().push(msg.data);
+        }
+    })
+    .await;
+
+    publisher.wait_peers(1).await;
+    subscriber.wait_peers(1).await;
+
+    publisher
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+    subscriber
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+
+    // Allow gossipsub heartbeats (initial delay 5 s, interval 1 s) to
+    // exchange SUBSCRIBE control messages and form the relay mesh that
+    // carries published payloads from the light publisher to the relay.
+    async_std::task::sleep(Duration::from_secs(15)).await;
+
+    publisher
+        .send_cmd(AdexBehaviourCmd::PublishMsg {
+            topics: vec![topic.clone()],
+            msg: payload.clone(),
+        })
+        .await;
+
+    for _ in 0..30 {
+        if !received.lock().unwrap().is_empty() {
+            break;
+        }
+        async_std::task::sleep(Duration::from_millis(500)).await;
+    }
+
+    let observed = received.lock().unwrap().clone();
+    assert!(
+        observed.contains(&payload),
+        "subscriber never received published payload: {observed:?}",
+    );
+}
+
+/// Light publisher → relay1 → relay2 → light subscriber. The subscriber
+/// is two hops away from the publisher, so the message must traverse the
+/// relay-to-relay mesh to reach it.
+#[tokio::test]
+async fn test_publish_reaches_subscriber_via_relay() {
+    let _ = env_logger::try_init();
+
+    let topic = "tp3-smoke-publish-relay".to_owned();
+    let payload = b"hello from publisher via relay".to_vec();
+
+    let received: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let received_cpy = received.clone();
+
+    let relay1_port = next_port();
+    let mut _relay1 = Node::spawn(relay1_port, vec![], |mut cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(peer_id, message_id, _) = event {
+            let _ = cmd_tx.try_send(AdexBehaviourCmd::PropagateMessage {
+                message_id,
+                propagation_source: peer_id,
+            });
+        }
+    })
+    .await;
+
+    let relay2_port = next_port();
+    let mut relay2 = Node::spawn(relay2_port, vec![relay1_port], |mut cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(peer_id, message_id, _) = event {
+            let _ = cmd_tx.try_send(AdexBehaviourCmd::PropagateMessage {
+                message_id,
+                propagation_source: peer_id,
+            });
+        }
+    })
+    .await;
+    relay2.wait_peers(1).await;
+
+    let mut publisher = Node::spawn_light(vec![relay1_port], |_, _| ()).await;
+    let mut subscriber = Node::spawn_light(vec![relay2_port], move |_cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(_, _, msg) = event {
+            received_cpy.lock().unwrap().push(msg.data);
+        }
+    })
+    .await;
+
+    publisher.wait_peers(1).await;
+    subscriber.wait_peers(1).await;
+
+    publisher
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+    subscriber
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+
+    async_std::task::sleep(Duration::from_secs(20)).await;
+
+    publisher
+        .send_cmd(AdexBehaviourCmd::PublishMsg {
+            topics: vec![topic.clone()],
+            msg: payload.clone(),
+        })
+        .await;
+
+    for _ in 0..40 {
+        if !received.lock().unwrap().is_empty() {
+            break;
+        }
+        async_std::task::sleep(Duration::from_millis(500)).await;
+    }
+
+    let observed = received.lock().unwrap().clone();
+    assert!(
+        observed.contains(&payload),
+        "relayed subscriber never received payload: {observed:?}",
+    );
 }
