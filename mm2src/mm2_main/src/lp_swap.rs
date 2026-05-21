@@ -117,6 +117,8 @@ mod swap_lock;
 #[path = "lp_swap/komodefi.swap_v2.pb.rs"]
 #[rustfmt::skip]
 mod swap_v2_pb;
+#[path = "lp_swap/nft_maker_swap_v2.rs"]
+pub mod nft_maker_swap_v2;
 #[path = "lp_swap/swap_v2_common.rs"]
 pub mod swap_v2_common;
 #[path = "lp_swap/swap_v2_rpcs.rs"]

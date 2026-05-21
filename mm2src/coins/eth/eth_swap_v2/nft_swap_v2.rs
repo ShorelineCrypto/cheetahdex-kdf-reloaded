@@ -477,10 +477,9 @@ pub fn build_refund_secret_call(
 //  EthCoin maker-side NFT swap entrypoints (P10.3.7.c)
 // ──────────────────────────────────────────────────────────────────────
 
-use crate::eth::EthCoin;
+use crate::eth::{EthCoin, EthTxFut};
+use ethcore_transaction::Action;
 
-/// Errors raised by the EthCoin NFT swap entrypoints when the coin has
-/// no NFT swap V2 contract configured for this chain.
 #[derive(Debug)]
 pub enum EthCoinNftError {
     Build(NftSwapV2Error),
@@ -562,6 +561,18 @@ impl EthCoin {
         let decoded = decode_maker_payment(expected.kind, tx_calldata)?;
         validate_maker_payment(&decoded, expected)?;
         Ok(())
+    }
+
+    /// Sign and broadcast a fully-resolved [`NftCall`]. Public companion
+    /// to the `build_*_nft_maker_payment` helpers, used by the
+    /// mm2_main NFT maker swap V2 driver (P10.3.7.d).
+    pub fn send_nft_call(&self, call: NftCall) -> EthTxFut {
+        self.sign_and_send_transaction(
+            call.value,
+            Action::Call(call.contract),
+            call.calldata,
+            U256::from(call.gas_limit),
+        )
     }
 }
 

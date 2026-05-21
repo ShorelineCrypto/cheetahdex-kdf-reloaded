@@ -87,6 +87,13 @@ pub mod fee_estimation;
 pub mod tron;
 mod web3_transport;
 
+/// Public re-export of the NFT swap V2 surface so mm2_main's swap
+/// state-machine driver can construct calls and inspect errors
+/// (P10.3.7.d).
+pub mod nft_swap_v2 {
+    pub use crate::eth::eth_swap_v2::nft_swap_v2::*;
+}
+
 mod eth_impl;
 mod eth_market_ops;
 mod eth_mm_coin;
