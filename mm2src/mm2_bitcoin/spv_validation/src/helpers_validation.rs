@@ -669,7 +669,64 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_vin_multi_input_passes() {
+        // Two minimal inputs: count=2, each input is
+        // 32 prev_hash + 4 prev_index + 1 script_len + 0 script + 4 sequence = 41 bytes.
+        let mut vin = vec![0x02];
+        for _ in 0..2 {
+            vin.extend_from_slice(&[0u8; 32]); // prev_hash
+            vin.extend_from_slice(&[0xff; 4]); // prev_index
+            vin.push(0x00); // script_len = 0
+            vin.extend_from_slice(&[0xff; 4]); // sequence
+        }
+        assert!(validate_vin(&vin));
+    }
+
+    #[test]
+    fn test_validate_vin_truncated_rejects() {
+        // count=2 but only one input worth of bytes.
+        let mut vin = vec![0x02];
+        vin.extend_from_slice(&[0u8; 32]);
+        vin.extend_from_slice(&[0xff; 4]);
+        vin.push(0x00);
+        vin.extend_from_slice(&[0xff; 4]);
+        assert!(!validate_vin(&vin));
+    }
+
+    #[test]
+    fn test_validate_vin_trailing_bytes_rejects() {
+        // Single valid input followed by junk.
+        let mut vin = vec![0x01];
+        vin.extend_from_slice(&[0u8; 32]);
+        vin.extend_from_slice(&[0xff; 4]);
+        vin.push(0x00);
+        vin.extend_from_slice(&[0xff; 4]);
+        vin.extend_from_slice(&[0xaa, 0xbb]); // trailing garbage
+        assert!(!validate_vin(&vin));
+    }
+
+    #[test]
     fn test_validate_vout_empty() {
         assert!(!validate_vout(&[]));
+    }
+
+    #[test]
+    fn test_validate_vout_multi_output_passes() {
+        // Two minimal outputs: count=2, each output is 8 value + 1 script_len + 0 script = 9 bytes.
+        let mut vout = vec![0x02];
+        for _ in 0..2 {
+            vout.extend_from_slice(&[0u8; 8]); // value
+            vout.push(0x00); // script_pubkey_len = 0
+        }
+        assert!(validate_vout(&vout));
+    }
+
+    #[test]
+    fn test_validate_vout_truncated_rejects() {
+        // count=2 but only one output worth of bytes.
+        let mut vout = vec![0x02];
+        vout.extend_from_slice(&[0u8; 8]);
+        vout.push(0x00);
+        assert!(!validate_vout(&vout));
     }
 }

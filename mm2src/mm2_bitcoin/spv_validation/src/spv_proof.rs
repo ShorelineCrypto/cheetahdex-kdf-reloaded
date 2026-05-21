@@ -151,4 +151,73 @@ mod spv_proof_tests {
             Err(SPVError::WrongDigest) // hash mismatch fires first since we changed a header field
         );
     }
+
+    /// Build a minimal valid vin (1 input, empty scriptSig).
+    fn minimal_vin() -> Vec<u8> {
+        let mut vin = vec![0x01];
+        vin.extend_from_slice(&[0u8; 32]); // prev_hash
+        vin.extend_from_slice(&[0xff; 4]); // prev_index
+        vin.push(0x00); // script_len = 0
+        vin.extend_from_slice(&[0xff; 4]); // sequence
+        vin
+    }
+
+    /// Build a minimal valid vout (1 output, zero value, empty script).
+    fn minimal_vout() -> Vec<u8> {
+        let mut vout = vec![0x01];
+        vout.extend_from_slice(&[0u8; 8]); // value
+        vout.push(0x00); // script_pubkey_len = 0
+        vout
+    }
+
+    /// Full positive `SPVProof::validate()` happy path. We use the existing
+    /// Komodo header but pretend the confirmed transaction *is* the only
+    /// transaction in the block, i.e. its `tx_id` equals the header's
+    /// merkle root and `intermediate_nodes` is empty. This exercises the
+    /// `validate_vin → validate_vout → validate_block_header → merkle_prove`
+    /// pipeline end-to-end without depending on a third-party explorer.
+    #[test]
+    fn test_spv_proof_validate_single_tx_block_happy_path() {
+        let mut proof = komodo_header_proof();
+        proof.tx_id = proof.confirming_header.merkle_root_hash;
+        proof.vin = minimal_vin();
+        proof.vout = minimal_vout();
+        proof.index = 0;
+        proof.intermediate_nodes = vec![];
+        proof.validate().unwrap();
+    }
+
+    /// `SPVProof::validate()` must reject when the leaf does not connect
+    /// to the header's merkle root through the provided intermediate nodes.
+    #[test]
+    fn test_spv_proof_validate_bad_merkle_proof() {
+        let mut proof = komodo_header_proof();
+        // tx_id ≠ merkle_root and we provide two nodes that don't
+        // produce the merkle root, so verify_hash256_merkle fails.
+        // (Single-node proofs short-circuit to Ok in verify_hash256_merkle,
+        // so we deliberately use ≥2 intermediate nodes here.)
+        proof.tx_id = primitives::hash::H256::from([0x11u8; 32]);
+        proof.vin = minimal_vin();
+        proof.vout = minimal_vout();
+        proof.index = 0;
+        proof.intermediate_nodes = vec![
+            primitives::hash::H256::from([0x22u8; 32]),
+            primitives::hash::H256::from([0x33u8; 32]),
+        ];
+        assert_eq!(proof.validate(), Err(SPVError::BadMerkleProof));
+    }
+
+    /// `SPVProof::validate()` must surface block-header errors before
+    /// attempting the merkle inclusion check.
+    #[test]
+    fn test_spv_proof_validate_propagates_header_error() {
+        let mut proof = komodo_header_proof();
+        proof.vin = minimal_vin();
+        proof.vout = minimal_vout();
+        // Tamper the header so `validate_block_header` fires WrongDigest.
+        proof.confirming_header.time += 1;
+        proof.tx_id = proof.confirming_header.merkle_root_hash;
+        proof.intermediate_nodes = vec![];
+        assert_eq!(proof.validate(), Err(SPVError::WrongDigest));
+    }
 }
