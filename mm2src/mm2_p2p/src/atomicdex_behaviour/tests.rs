@@ -1,6 +1,7 @@
 use super::{spawn_gossipsub, AdexBehaviourCmd, AdexBehaviourEvent, AdexResponse, NodeType, RelayAddress};
 use async_std::task::spawn;
 use futures::channel::{mpsc, oneshot};
+use futures::future::AbortHandle;
 use futures::{Future, SinkExt, StreamExt};
 use libp2p::PeerId;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,6 +21,7 @@ fn spawn_boxed(fut: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) {
 struct Node {
     peer_id: PeerId,
     cmd_tx: mpsc::Sender<AdexBehaviourCmd>,
+    abort_handle: AbortHandle,
 }
 
 impl Node {
@@ -42,9 +44,10 @@ impl Node {
         F: Fn(mpsc::Sender<AdexBehaviourCmd>, AdexBehaviourEvent) + Send + 'static,
     {
         let seednodes = seednodes.into_iter().map(RelayAddress::Memory).collect();
-        let (cmd_tx, mut event_rx, peer_id, _) = spawn_gossipsub(None, spawn_boxed, seednodes, node_type, |_| {})
-            .await
-            .expect("Error spawning AdexBehaviour");
+        let (cmd_tx, mut event_rx, peer_id, abort_handle) =
+            spawn_gossipsub(None, spawn_boxed, seednodes, node_type, |_| {})
+                .await
+                .expect("Error spawning AdexBehaviour");
 
         // spawn a response future
         let cmd_tx_fut = cmd_tx.clone();
@@ -61,11 +64,39 @@ impl Node {
             }
         });
 
-        Node { peer_id, cmd_tx }
+        Node {
+            peer_id,
+            cmd_tx,
+            abort_handle,
+        }
     }
 
     async fn send_cmd(&mut self, cmd: AdexBehaviourCmd) {
         self.cmd_tx.send(cmd).await.unwrap();
+    }
+
+    /// Stops the underlying libp2p swarm driver. The in-memory transport
+    /// observes the aborted future as a disconnect on the peer side.
+    fn abort(&self) {
+        self.abort_handle.abort();
+    }
+
+    /// Poll `GetPeersInfo` until the connected peer count reaches exactly
+    /// `number`. Panics after `attempts` 500 ms retries.
+    async fn wait_peers_exact(&mut self, number: usize, attempts: usize) {
+        for _ in 0..attempts {
+            let (tx, rx) = oneshot::channel();
+            self.cmd_tx
+                .send(AdexBehaviourCmd::GetPeersInfo { result_tx: tx })
+                .await
+                .unwrap();
+            let map = rx.await.unwrap();
+            if map.len() == number {
+                return;
+            }
+            async_std::task::sleep(Duration::from_millis(500)).await;
+        }
+        panic!("wait_peers_exact({number}) attempts exceeded");
     }
 
     async fn wait_peers(&mut self, number: usize) {
@@ -583,4 +614,29 @@ async fn test_publish_reaches_subscriber_via_relay() {
         observed.contains(&payload),
         "relayed subscriber never received payload: {observed:?}",
     );
+}
+
+/// Disconnection edge case: when a relay's swarm driver is aborted the
+/// light clients connected to it must observe the peer drop. Exercises
+/// the libp2p-level teardown path (in-memory channel close propagating
+/// to `inject_disconnected` on the remote side).
+#[tokio::test]
+async fn test_light_client_observes_relay_disconnect() {
+    let _ = env_logger::try_init();
+
+    let relay_port = next_port();
+    let relay = Node::spawn(relay_port, vec![], |_, _| ()).await;
+
+    let mut light_a = Node::spawn_light(vec![relay_port], |_, _| ()).await;
+    let mut light_b = Node::spawn_light(vec![relay_port], |_, _| ()).await;
+
+    light_a.wait_peers(1).await;
+    light_b.wait_peers(1).await;
+
+    // Tear down the relay swarm. Both light clients should drop their
+    // only peer within a few poll iterations.
+    relay.abort();
+
+    light_a.wait_peers_exact(0, 30).await;
+    light_b.wait_peers_exact(0, 30).await;
 }
