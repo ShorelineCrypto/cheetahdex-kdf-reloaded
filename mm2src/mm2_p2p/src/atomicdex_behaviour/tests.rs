@@ -640,3 +640,102 @@ async fn test_light_client_observes_relay_disconnect() {
     light_a.wait_peers_exact(0, 30).await;
     light_b.wait_peers_exact(0, 30).await;
 }
+
+/// Watcher-node smoke test: a third light client passively subscribed to
+/// the same topic as the swap participants must receive every published
+/// message. Models the real-world watcher node that monitors
+/// counterparty swap traffic without participating in the swap itself.
+///
+/// Topology: publisher (light) → relay → { participant (light), watcher (light) }
+/// Both subscribers must observe the same payloads in order.
+#[tokio::test]
+async fn test_watcher_node_observes_swap_traffic() {
+    let _ = env_logger::try_init();
+
+    let topic = "tp3-smoke-watcher".to_owned();
+    let payload_a = b"swap-msg-1".to_vec();
+    let payload_b = b"swap-msg-2".to_vec();
+
+    let participant_rx: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let participant_rx_cpy = participant_rx.clone();
+
+    let watcher_rx: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let watcher_rx_cpy = watcher_rx.clone();
+
+    let relay_port = next_port();
+    let mut relay = Node::spawn(relay_port, vec![], |mut cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(peer_id, message_id, _) = event {
+            let _ = cmd_tx.try_send(AdexBehaviourCmd::PropagateMessage {
+                message_id,
+                propagation_source: peer_id,
+            });
+        }
+    })
+    .await;
+
+    let mut publisher = Node::spawn_light(vec![relay_port], |_, _| ()).await;
+    let mut participant = Node::spawn_light(vec![relay_port], move |_cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(_, _, msg) = event {
+            participant_rx_cpy.lock().unwrap().push(msg.data);
+        }
+    })
+    .await;
+    let mut watcher = Node::spawn_light(vec![relay_port], move |_cmd_tx, event| {
+        if let AdexBehaviourEvent::Message(_, _, msg) = event {
+            watcher_rx_cpy.lock().unwrap().push(msg.data);
+        }
+    })
+    .await;
+
+    relay.wait_peers(3).await;
+    publisher.wait_peers(1).await;
+    participant.wait_peers(1).await;
+    watcher.wait_peers(1).await;
+
+    publisher
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+    participant
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+    watcher
+        .send_cmd(AdexBehaviourCmd::Subscribe { topic: topic.clone() })
+        .await;
+
+    // Allow the gossipsub mesh to converge across all three subscribers.
+    async_std::task::sleep(Duration::from_secs(20)).await;
+
+    publisher
+        .send_cmd(AdexBehaviourCmd::PublishMsg {
+            topics: vec![topic.clone()],
+            msg: payload_a.clone(),
+        })
+        .await;
+    publisher
+        .send_cmd(AdexBehaviourCmd::PublishMsg {
+            topics: vec![topic.clone()],
+            msg: payload_b.clone(),
+        })
+        .await;
+
+    for _ in 0..40 {
+        let p_done = participant_rx.lock().unwrap().len() >= 2;
+        let w_done = watcher_rx.lock().unwrap().len() >= 2;
+        if p_done && w_done {
+            break;
+        }
+        async_std::task::sleep(Duration::from_millis(500)).await;
+    }
+
+    let p_observed = participant_rx.lock().unwrap().clone();
+    let w_observed = watcher_rx.lock().unwrap().clone();
+
+    assert!(
+        p_observed.contains(&payload_a) && p_observed.contains(&payload_b),
+        "swap participant missed payloads: {p_observed:?}",
+    );
+    assert!(
+        w_observed.contains(&payload_a) && w_observed.contains(&payload_b),
+        "watcher node missed payloads: {w_observed:?}",
+    );
+}
