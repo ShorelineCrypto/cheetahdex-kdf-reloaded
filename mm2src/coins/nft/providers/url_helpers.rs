@@ -24,9 +24,7 @@ const FALLBACK_IPFS_BASE: &str = "https://ipfs.io/ipfs/";
 pub fn decamouflage_legacy_ipfs_url(token_uri: Option<&str>) -> Option<String> {
     token_uri.map(|raw| match Url::parse(raw) {
         Ok(parsed) => {
-            if parsed.host_str() == Some(LEGACY_IPFS_HOST)
-                && parsed.path().starts_with(LEGACY_IPFS_PATH_PREFIX)
-            {
+            if parsed.host_str() == Some(LEGACY_IPFS_HOST) && parsed.path().starts_with(LEGACY_IPFS_PATH_PREFIX) {
                 if let Some((_, cid_and_rest)) = parsed.path().split_once("/ipfs/") {
                     return format!("{}{}", FALLBACK_IPFS_BASE, cid_and_rest);
                 }
@@ -63,10 +61,7 @@ mod tests {
 
     #[test]
     fn legacy_bafy_paths_get_redirected() {
-        let rewritten = decamouflage_legacy_ipfs_url(Some(
-            "https://ipfs.moralis.io/ipfs/bafyabc/0.json",
-        ))
-        .unwrap();
+        let rewritten = decamouflage_legacy_ipfs_url(Some("https://ipfs.moralis.io/ipfs/bafyabc/0.json")).unwrap();
         assert_eq!(rewritten, "https://ipfs.io/ipfs/bafyabc/0.json");
     }
 

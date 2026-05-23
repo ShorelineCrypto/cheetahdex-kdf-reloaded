@@ -28,11 +28,15 @@ pub enum SpamScanError {
 }
 
 impl From<regex::Error> for SpamScanError {
-    fn from(err: regex::Error) -> Self { SpamScanError::InvalidRegex(err.to_string()) }
+    fn from(err: regex::Error) -> Self {
+        SpamScanError::InvalidRegex(err.to_string())
+    }
 }
 
 impl From<serde_json::Error> for SpamScanError {
-    fn from(err: serde_json::Error) -> Self { SpamScanError::Serialize(err.to_string()) }
+    fn from(err: serde_json::Error) -> Self {
+        SpamScanError::Serialize(err.to_string())
+    }
 }
 
 /// Permissive URL detector. Matches anything that *looks* like a link
@@ -92,10 +96,7 @@ pub fn apply_spam_protection_to_nft(nft: &mut Nft, redact: bool) -> Result<(), S
 /// Run spam detection over every user-controlled string field on
 /// `transfer`. As with [`apply_spam_protection_to_nft`], a hit toggles
 /// `transfer.common.possible_spam`.
-pub fn apply_spam_protection_to_transfer(
-    transfer: &mut NftTransfer,
-    redact: bool,
-) -> Result<(), SpamScanError> {
+pub fn apply_spam_protection_to_transfer(transfer: &mut NftTransfer, redact: bool) -> Result<(), SpamScanError> {
     let collection_hit = redact_text_if_spam(&mut transfer.collection_name, redact)?;
     let token_name_hit = redact_text_if_spam(&mut transfer.token_name, redact)?;
 

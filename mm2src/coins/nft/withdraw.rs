@@ -14,8 +14,8 @@
 
 use crate::eth::{
     checksum_address, get_addr_nonce, u256_to_big_decimal, wei_from_big_decimal, Action, Address, BytesJson,
-    CallRequest, Contract, EthCoin, EthCoinType, EthTxFeeDetails, Token, TransactionDetails, UnSignedEthTx, U256,
-    NONCE_LOCK,
+    CallRequest, Contract, EthCoin, EthCoinType, EthTxFeeDetails, Token, TransactionDetails, UnSignedEthTx, NONCE_LOCK,
+    U256,
 };
 use crate::nft::errors::GetNftInfoError;
 use crate::nft::model::chain::ChainTicker;
