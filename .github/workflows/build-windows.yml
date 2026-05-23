@@ -28,11 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        shell: powershell
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup target add x86_64-pc-windows-msvc
+      # Rust toolchain (stable + x86_64-pc-windows-msvc) is pre-installed on
+      # the self-hosted runner; see docs/CI_RUNNERS.md § Windows runner.
 
       - name: Cache cargo registry
         uses: actions/cache@v4

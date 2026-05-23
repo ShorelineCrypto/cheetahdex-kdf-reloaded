@@ -51,9 +51,15 @@ already targets `[self-hosted, Windows, X64]`.
    - Visual Studio 2022 Build Tools with the **C++ build tools** workload
      (provides MSVC + Windows SDK — required by the `x86_64-pc-windows-msvc`
      Rust target).
-   - `rustup` from <https://rustup.rs/>; it auto-installs the
-     `stable-x86_64-pc-windows-msvc` toolchain. The workflow installs the
-     pinned toolchain itself, so a vanilla `rustup` is enough.
+   - `rustup` from <https://rustup.rs/>; install the stable toolchain
+     and the MSVC target up front:
+     ```powershell
+     rustup toolchain install stable --profile minimal
+     rustup target add x86_64-pc-windows-msvc
+     ```
+     The workflow assumes both are already present and does **not**
+     re-run `rustup` on every build (avoids per-job network round-trips
+     and surfaces missing-toolchain mistakes as a clear failure).
 3. Install the runner using the same flow as the Linux box:
    - GitHub repo → Settings → Actions → Runners → "New self-hosted runner",
      pick the Windows tab. Run the PowerShell snippet in an admin shell.
