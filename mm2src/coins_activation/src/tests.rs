@@ -626,7 +626,6 @@ fn test_standalone_error_from_rpc_task_error() {
 // InitStandaloneCoinReq — serde
 // ---------------------------------------------------------------------------
 
-#[test]
 // NOTE: InitStandaloneCoinReq is not publicly re-exported from standalone_coin,
 // so we cannot test its serde from outside the module. The following tests are
 // omitted: standalone_coin_req_deser, standalone_coin_req_missing_ticker.
