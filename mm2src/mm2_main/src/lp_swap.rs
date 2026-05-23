@@ -114,7 +114,7 @@ mod saved_swap;
 pub(crate) mod swap_events;
 #[path = "lp_swap/swap_lock.rs"]
 mod swap_lock;
-#[path = "lp_swap/komodefi.swap_v2.pb.rs"]
+#[path = "lp_swap/mm2_swap_v2.pb.rs"]
 #[rustfmt::skip]
 mod swap_v2_pb;
 #[path = "lp_swap/nft_maker_swap_v2.rs"]

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package komodefi.swap_v2.pb;
+package mm2_swap_v2.pb;
 
 message SignedMessage {
   bytes from = 1;

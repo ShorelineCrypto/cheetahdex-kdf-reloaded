@@ -626,7 +626,7 @@ mod lp_swap_tests {
 
     use super::*;
 
-    /// Tests use netid 8762 (AtomicDEX) parameters.
+    /// Tests use the legacy mainnet netid 8762 fee parameters.
     fn test_net_cfg() -> &'static dyn NetConfig {
         mm2_net_config::net_config_or_panic(8762)
     }
