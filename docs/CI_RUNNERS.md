@@ -39,7 +39,15 @@ already targets `[self-hosted, Windows, X64]`.
    - 4 vCPU, 8 GB RAM, 60 GB disk is plenty for incremental Rust builds.
    - VirtIO disk + network drivers from the Fedora `virtio-win` ISO.
 2. Inside the VM install:
-   - Git for Windows (includes `bash` for the workflow's shell steps if any).
+   - **Git for Windows** — *required on the system PATH (not just the user PATH)*.
+     `actions/checkout@v4` falls back to a REST-API tarball download when
+     `git --version` is not callable, and the PowerShell `Expand-Archive`
+     fallback is broken on dot-prefixed directories like `.cargo/` (it
+     errors with `Cannot find path '...\\.cargo\\' because it does not exist`).
+     Install with `winget install --id Git.Git -e` or the official
+     installer, then either reboot the runner service or restart it so
+     the new system PATH is picked up: `Restart-Service actions.runner.*`.
+     Verify with `git --version` from a fresh PowerShell window.
    - Visual Studio 2022 Build Tools with the **C++ build tools** workload
      (provides MSVC + Windows SDK — required by the `x86_64-pc-windows-msvc`
      Rust target).
@@ -59,6 +67,10 @@ already targets `[self-hosted, Windows, X64]`.
 
 ### Caveats
 
+- **Git on PATH is mandatory.** Without it, `actions/checkout@v4` uses a
+  REST tarball + PowerShell `Expand-Archive`, which crashes on `.cargo/`.
+  Symptom: `Remove-Item : Cannot find path '...\.cargo\' because it does
+  not exist` during the Checkout step. See install note above.
 - Long Rust paths can hit Windows' `MAX_PATH` limit. Either enable long
   paths via `git config --system core.longpaths true` and the registry
   `LongPathsEnabled = 1`, or build under a short path like `C:\w\`.
@@ -180,6 +192,7 @@ acceleration required.
    - Guest OS: Ubuntu 22.04 LTS or 24.04 LTS.
    - 4 vCPU, 8 GB RAM, 40 GB disk. Disk needs to fit the NDK
      (~3 GB) plus Cargo's target dir.
+
 2. Inside the VM:
    ```bash
    sudo apt update
