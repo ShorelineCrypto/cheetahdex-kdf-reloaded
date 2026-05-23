@@ -71,6 +71,12 @@ already targets `[self-hosted, Windows, X64]`.
   REST tarball + PowerShell `Expand-Archive`, which crashes on `.cargo/`.
   Symptom: `Remove-Item : Cannot find path '...\.cargo\' because it does
   not exist` during the Checkout step. See install note above.
+- **Shell is `powershell` (Windows PowerShell 5.1), not `pwsh`.** PowerShell
+  Core (`pwsh`) is not installed on a stock Windows VM. The workflow uses
+  `shell: powershell` to use the built-in interpreter. If you prefer
+  `pwsh` for cross-platform parity, install it once via
+  `winget install --id Microsoft.PowerShell -e` and switch the workflow
+  back to `shell: pwsh`.
 - Long Rust paths can hit Windows' `MAX_PATH` limit. Either enable long
   paths via `git config --system core.longpaths true` and the registry
   `LongPathsEnabled = 1`, or build under a short path like `C:\w\`.
