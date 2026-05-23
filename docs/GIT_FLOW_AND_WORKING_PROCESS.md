@@ -1,35 +1,60 @@
-# Git flow
+# Git flow and branch strategy
 
-1. There are two permanent branches: mm2.1 (master/release) and dev.
-2. The goal is to have both mm2.1 and dev ready to be released at any point in time - all auto-tests pass, no incompatibilities introduced, etc.
-3. The dev is merged to mm2.1 when a new release is planned.
-4. The feature branch lifetime should be <= 1-2 weeks.
-5. Big task should be decomposed to the several feature branches. Each of which is merged periodically with a code review process. The new feature branch should be started from dev afterward.
-6. In certain cases, the dev might not be in a "releasable" state. In this case, if the feature branch has no dependencies updates, it might be merged directly to mm2.1 if required (hotfix, very useful feature, blocker). Dev is synced with mm2.1 afterward.
-7. For convenience, we can consider making several minor features/fixes in the single feature branch.
+KDF-Reloaded uses a three-tier permanent branch model plus short-lived
+feature branches.
 
-Pros:
-1. Small intermediate PRs will be easier and faster to review.
-2. Cross-merging all the ongoing work frequently will allow us to catch possible git conflicts sooner than later. Will be also easier to solve them.
-3. Easier to track everyone's progress and provide help if required.
+## Permanent branches
 
-Cons:
-1. Decomposing to multiple feature branches and constantly keeping backward compatibility might be a bit hard.
+| Branch | Purpose | Stability |
+|---|---|---|
+| `main` | Tagged releases only | Always shippable |
+| `staging` | Pre-release integration | Green CI, QA-tested |
+| `reloaded-gplv2-base` | Active development (dev) | Green CI, may have unreleased features |
 
-# Issues handling process. Development/QA/Documentation workflow.
+Hierarchy: `main` ← `staging` ← `reloaded-gplv2-base` ← feature branches.
 
-1. It's desired to have a separate issue for any bug report or feature request.
-2. Once the issue is created, add it to the MM2.0 Github project. Select an appropriate column.
-3. Decide whether you should base your feature branch on mm2.1 or dev. For hotfixes or minor useful features that don't include any dependencies updates choose mm2.1. In other cases choose dev.
-5. PR titles must have a prefix that displays the current status of PR. Such as `[wip] X feat integration`, `[r2r] X feat integration`, where `[wip]` prefix stands for "Work in Progress", and `[r2r]` for Ready to Review.
-4. PRs to dev can be merged right after approval. Request the tests in the dev branch from Tony by assigning the issue to him and moving it to the `Testing` column. Provide a detailed explanation of what changed and what should be tested. Indicate the critical points.
-5. PRs to mm2.1 must be tested by QA *before* merging.
-6. If documentation update is required, prepare examples and notify smk762. Assign issue to him. Move the issue to the documentation column. Smk will then prepare PR in [developer-docs](https://github.com/KomodoPlatform/developer-docs) repo.
-7. Review the docs PR. Smk will request it from the feature implementor.
+Promotion is one-way and explicit:
+1. Feature branch → `reloaded-gplv2-base` after PR review + green CI.
+2. `reloaded-gplv2-base` → `staging` when a release candidate is ready.
+3. `staging` → `main` after QA sign-off, then tag `reloaded-X.Y.Z`.
 
-# By this signature, I confirm that I read and understood this document  
-[@artemii235](https://github.com/artemii235)
-[@sergeyboyko0791](https://github.com/sergeyboyko0791)
-[@shamardy](https://github.com/shamardy)
-[@ozkanonur](https://github.com/ozkanonur)
+When comparing against an ancestor, use:
 
+```bash
+git merge-base HEAD origin/reloaded-gplv2-base origin/staging origin/main
+```
+
+The deprecated upstream `mm2.1` branch is not used in Reloaded.
+
+## Feature branches
+
+- Lifetime ≤ 1–2 weeks. Decompose larger work into multiple feature branches.
+- Branch from `reloaded-gplv2-base`. Never branch from `main` or `staging`.
+- Hotfixes for `main` are exceptional and must be back-merged into
+  `staging` and `reloaded-gplv2-base` immediately after.
+
+## Commits
+
+- Small, self-contained commits. Each commit must leave the tree compiling
+  and tests passing.
+- Run `cargo fmt` before committing. CI fails on unformatted code.
+- Run `cargo clippy -p <crate> --all-targets -- -D warnings` on touched
+  crates. For WASM-only code add `--target wasm32-unknown-unknown`.
+- For larger refactors, follow the phased plan files at the repo root
+  (`RELOADED-PLAN.md`, `RELOADED-REFACTOR.md`, `RELOADED-UNIT-TESTS.md`).
+  Mark items `[x]` with the commit SHA as you ship them.
+
+## PRs
+
+- PR title prefix indicates state: `[wip]`, `[r2r]` (ready to review).
+- Reference the relevant phase / plan item in the PR description.
+- See [PR_REVIEW_CHECKLIST.md](./PR_REVIEW_CHECKLIST.md) for review criteria.
+
+## CI
+
+- Self-hosted Linux runner runs `test.yml` on push.
+- Platform builds (Windows, macOS, iOS, Android, WASM) live under
+  `.github/workflows/build-*.yml` and are dispatched manually until each
+  runner is verified — see [CI_RUNNERS.md](./CI_RUNNERS.md).
+- The umbrella `dev-build.yml` fans out to every platform-build child via
+  `workflow_call` once the runners are available.

@@ -1,14 +1,18 @@
-# Contributing to AtomicDEX-API
+# Contributing to KDF-Reloaded
 
-We welcome contribution from everyone in the form of suggestions, bug reports, pull requests, and feedback.
+We welcome contributions in the form of suggestions, bug reports, pull requests, and feedback.
 Please note we have a code of conduct, please follow it in all your interactions with the project.
+
+See also: [docs/PR_REVIEW_CHECKLIST.md](./docs/PR_REVIEW_CHECKLIST.md),
+[docs/GIT_FLOW_AND_WORKING_PROCESS.md](./docs/GIT_FLOW_AND_WORKING_PROCESS.md),
+[docs/UNIT_TESTS.md](./docs/UNIT_TESTS.md).
 
 ## Submitting feature requests
 
 Before uploading any changes, please make sure that the test suite passes locally before submitting a pull request with your changes.
 
 ```
-cargo test --all
+cargo test --bins --lib
 ```
 
 We also use [Clippy](https://github.com/rust-lang/rust-clippy) to avoid common mistakes

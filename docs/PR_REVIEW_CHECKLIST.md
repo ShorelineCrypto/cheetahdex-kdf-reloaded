@@ -1,4 +1,4 @@
-# PR review checklist for AtomicDEX-API
+# PR review checklist for KDF-Reloaded
 
 - [ ] Check that all CI build stages passed successfully. It's acceptable to have unstable tests failing. If you are unsure whether
 the test is unstable, please clarify it with the team.
@@ -12,4 +12,5 @@ the test is unstable, please clarify it with the team.
 - [ ] Indicate code that is worth moving to a separate module or crate.
 - [ ] Check if the code can be improved/simplified: it might be overly abstracted or require the additional abstraction layer instead for a better design.
 - [ ] Follow SOLID if applicable.
-- [ ] For PRs targeting release (mm2.1) branch check that QA tested and approved it.
+- [ ] For PRs targeting the release branch (`main`) check that QA tested and approved it.
+      Branch hierarchy: `main` ← `staging` ← `reloaded-gplv2-base` (dev) ← feature branches.

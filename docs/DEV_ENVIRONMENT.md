@@ -1,4 +1,8 @@
-# Setting up the dev environment for AtomicDEX-API to run full tests suite
+# Setting up the dev environment for KDF-Reloaded to run the full tests suite
+
+For the curated set of fully-offline unit tests added in Reloaded, see
+[UNIT_TESTS.md](./UNIT_TESTS.md). The instructions below cover the full
+integration / docker / WASM suite inherited from upstream.
 
 ## Running native tests
 
@@ -14,6 +18,11 @@
 6. Create `.env.seed` file with the following content
    ```
    PASSPHRASE=also shoot benefit prefer juice shell elder veteran woman mimic image kidney
+   ```
+   For docker / integration tests, also export them as environment variables:
+   ```shell
+   export BOB_PASSPHRASE="also shoot benefit prefer juice shell elder veteran woman mimic image kidney"
+   export ALICE_PASSPHRASE="spice describe gravity federal blast come thank unfair canal monkey style afraid"
    ```
 7. MacOS specific: run script (required after each reboot)
    ```shell
@@ -36,7 +45,7 @@
        ```
        sudo ln -s $(which podman) /usr/bin/docker
        ```
-9. Try `cargo test --features native --all -- --test-threads=16`.
+9. Try `cargo test --bins --lib` for unit tests, or `cargo test --features native --all -- --test-threads=16` for the full suite.
 
 ## Running WASM tests
 

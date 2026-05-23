@@ -31,9 +31,6 @@
         <img src="https://img.shields.io/github/issues-pr-closed/komodoplatform/atomicdex-api" alt="pulls closed">
     </a>
     <br/>
-    <a href="https://dev.azure.com/ortgma/Marketmaker/_build?definitionId=2">
-        <img src="https://img.shields.io/azure-devops/build/ortgma/marketmaker/2/mm2.1" alt="build status">
-    </a>
     <a href="https://github.com/KomodoPlatform/atomicdex-api/releases">
         <img src="https://img.shields.io/github/v/release/komodoplatform/atomicdex-api" alt="release version">
     </a>
@@ -45,6 +42,18 @@
     </a>
 </p>
 
+
+## About this fork — KDF-Reloaded
+
+**KDF-Reloaded** is a hard fork of the Komodo DeFi Framework (formerly
+AtomicDEX-API) maintained on the `reloaded-gplv2-base` branch. It targets
+reproducible self-hosted CI, multi-network support (netid 8762 AtomicDEX,
+netid 6133 GLEEC), and a leaner module layout. See [RELOADED-PLAN.md](./RELOADED-PLAN.md)
+for active phases and [docs/NETWORK_CONFIG.md](./docs/NETWORK_CONFIG.md) for
+supported networks.
+
+The rest of this README describes the underlying AtomicDEX-API technology,
+which is unchanged in this fork.
 
 ## What is the AtomicDEX-API?
 
@@ -170,8 +179,13 @@ Refer to the [Komodo Developer Docs](https://developers.komodoplatform.com/basic
 
 - [Contribution guide](./CONTRIBUTING.md)
 - [Setting up the environment to run the full tests suite](./docs/DEV_ENVIRONMENT.md)
-- [Git flow and general workflow](./docs/GIT_FLOW_AND_WORKING_PROCESS.md)
-- [Komodo Developer Docs](https://developers.komodoplatform.com/basic-docs/atomicdex/introduction-to-atomicdex.html)
+- [Unit tests added in Reloaded](./docs/UNIT_TESTS.md)
+- [PR review checklist](./docs/PR_REVIEW_CHECKLIST.md)
+- [Git flow and branch strategy](./docs/GIT_FLOW_AND_WORKING_PROCESS.md)
+- [Network configuration (netid 8762 / 6133)](./docs/NETWORK_CONFIG.md)
+- [Self-hosted CI runners](./docs/CI_RUNNERS.md)
+- [WASM build guide](./docs/WASM_BUILD.md)
+- [Komodo Developer Docs (upstream)](https://developers.komodoplatform.com/basic-docs/atomicdex/introduction-to-atomicdex.html)
 
 
 ## Disclaimer
