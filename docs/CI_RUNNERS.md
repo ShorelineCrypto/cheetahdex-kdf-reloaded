@@ -25,11 +25,14 @@ virtualization must be enabled on the host (`kvm-amd nested=1` or via
 
 ---
 
-## 1. Windows runner (P7.3) — fully supported
+## 1. Windows runner (P7.3) — provisioned
 
-Identical model to the existing Linux `kdf-runner`.
+Identical model to the existing Linux `kdf-runner`. Status as of
+`build-windows.yml` commit: VM up, runner registered with the default
+GitHub-assigned labels (`self-hosted`, `Windows`, `X64`). The workflow
+already targets `[self-hosted, Windows, X64]`.
 
-### Provisioning
+### Provisioning (reference / for rebuilds)
 
 1. Create a Proxmox VM:
    - Guest OS: Windows 10 22H2 or Windows 11 (either works for `windows-latest` parity).
@@ -46,10 +49,13 @@ Identical model to the existing Linux `kdf-runner`.
 3. Install the runner using the same flow as the Linux box:
    - GitHub repo → Settings → Actions → Runners → "New self-hosted runner",
      pick the Windows tab. Run the PowerShell snippet in an admin shell.
-   - Register the runner with a **label** like `self-hosted-windows`.
+   - Accept the default labels (`self-hosted`, `Windows`, `X64`) — the
+     workflow keys off those. If you set a custom label, update
+     `build-windows.yml` `runs-on:` to match.
    - Install it as a Windows service (`./svc install` then `./svc start`).
-4. Switch `build-windows.yml`'s `runs-on:` from `windows-latest` to
-   `[self-hosted, windows, x64]` (or whatever label set you chose).
+4. `build-windows.yml` is already wired to `[self-hosted, Windows, X64]`.
+   Trigger it manually (Actions → Build Windows → Run workflow) for the
+   first verification run; once green, add `push`/`pull_request` triggers.
 
 ### Caveats
 
@@ -63,8 +69,8 @@ Identical model to the existing Linux `kdf-runner`.
 
 ## 2. macOS runner (P7.2) and iOS runner (P7.4)
 
-**There is no fully legal way to run macOS in a Proxmox VM on EPYC
-hardware.** Apple's macOS Software License Agreement permits installation
+**There is no fully legal way to run macOS in a Proxmox VM on x86 hardware.** 
+Apple's macOS Software License Agreement permits installation
 only on "Apple-branded computer". Running macOS in a non-Apple VM
 violates that license, regardless of how technically feasible it is.
 
