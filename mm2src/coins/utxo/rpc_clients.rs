@@ -77,6 +77,10 @@ pub type UnspentMap = HashMap<Address, Vec<UnspentInfo>>;
 pub(crate) mod native_rpc_client;
 pub use native_rpc_client::*;
 
+#[path = "rpc_clients/electrum_types.rs"]
+pub(crate) mod electrum_types;
+pub use electrum_types::*;
+
 #[path = "rpc_clients/electrum_rpc_client.rs"]
 pub(crate) mod electrum_rpc_client;
 pub use electrum_rpc_client::*;
