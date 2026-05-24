@@ -1,29 +1,47 @@
-//! Swap status SSE streamer.
+//! # Purpose
+//! Fan-out of in-memory swap state changes to all subscribed SSE clients.
 //!
-//! Provides a single global `SwapStatusStreamer` that broadcasts swap state
-//! changes (both V1 and V2) to all subscribed SSE clients.
+//! # Public exports
+//! - [`SwapStatusStreamer`] — the streamer instance registered on the
+//!   `stream::swap_status::enable` RPC.
+//! - [`SwapStatusEvent`] — the wire envelope emitted on each state change.
+//!
+//! # Invariants
+//! - The JSON envelope shape `{ "swap_type": "<MakerV1|TakerV1|MakerV2|TakerV2>",
+//!   "swap_data": { "uuid": ..., "event": ... } }` is wire-compatible with
+//!   GUI clients; variant names and field names must not change.
+//! - The streamer id [`StreamerId::SwapStatus`] is the channel name used by
+//!   the SSE subscription RPC.
 
 use async_trait::async_trait;
 use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::maker_swap::MakerSwapEvent as MakerV1Event;
-use super::maker_swap_v2::MakerSwapEvent as MakerV2Event;
-use super::taker_swap::TakerSwapEvent as TakerV1Event;
-use super::taker_swap_v2::TakerSwapEvent as TakerV2Event;
+// Local aliases keep the per-variant type names short and decouple the
+// event-envelope module from the concrete state-machine event type names
+// declared in the V1 and V2 swap modules.
+use super::maker_swap::MakerSwapEvent as MakerLegacyEvent;
+use super::maker_swap_v2::MakerSwapEvent as MakerV2StateEvent;
+use super::taker_swap::TakerSwapEvent as TakerLegacyEvent;
+use super::taker_swap_v2::TakerSwapEvent as TakerV2StateEvent;
 
-/// A single swap-status event, tagged by swap type.
+/// A single swap-status update emitted to SSE subscribers.
+///
+/// The `swap_type` discriminant tells GUI clients which event schema to
+/// expect inside `swap_data.event`.
 #[derive(Serialize)]
 #[serde(tag = "swap_type", content = "swap_data")]
 pub enum SwapStatusEvent {
-    MakerV1 { uuid: Uuid, event: MakerV1Event },
-    TakerV1 { uuid: Uuid, event: TakerV1Event },
-    MakerV2 { uuid: Uuid, event: MakerV2Event },
-    TakerV2 { uuid: Uuid, event: TakerV2Event },
+    MakerV1 { uuid: Uuid, event: MakerLegacyEvent },
+    TakerV1 { uuid: Uuid, event: TakerLegacyEvent },
+    MakerV2 { uuid: Uuid, event: MakerV2StateEvent },
+    TakerV2 { uuid: Uuid, event: TakerV2StateEvent },
 }
 
-/// Global streamer that relays swap-status events to SSE clients.
+/// Global streamer that relays swap-status events to SSE subscribers.
+///
+/// One instance is registered per node and shared by every running swap.
 pub struct SwapStatusStreamer;
 
 #[async_trait]
@@ -41,10 +59,14 @@ impl EventStreamer for SwapStatusStreamer {
         _shutdown_rx: oneshot::Receiver<()>,
         mut data_rx: mpsc::UnboundedReceiver<Self::DataInType>,
     ) {
+        // Receiver-dropped here means the supervisor is already tearing the
+        // streamer down; swallow the error rather than panic during shutdown.
         let _ = ready_tx.send(Ok(()));
 
         while let Some(swap_data) = data_rx.recv().await {
-            let event_data = serde_json::to_value(&swap_data).expect("SwapStatusEvent serialization shouldn't fail");
+            // Serialization of `SwapStatusEvent` cannot fail: every variant
+            // serialises a `Uuid` and a `#[derive(Serialize)]` event enum.
+            let event_data = serde_json::to_value(&swap_data).expect("SwapStatusEvent serialization is infallible");
             broadcaster.broadcast(Event::new(self.streamer_id(), event_data));
         }
     }
