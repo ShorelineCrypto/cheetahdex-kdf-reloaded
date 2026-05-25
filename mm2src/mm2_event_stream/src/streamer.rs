@@ -1,3 +1,22 @@
+//! # Purpose
+//! Defines the [`EventStreamer`] trait, the wire-stable [`StreamerId`]
+//! enum, and the [`Broadcaster`] handle a running streamer uses to fan
+//! events out to subscribers.
+//!
+//! # Public exports
+//! - [`StreamerId`] — origin identifier; its `Display` form is on-the-wire.
+//! - [`Broadcaster`] — cheap-to-clone handle that pushes events into the
+//!   manager's per-client channels.
+//! - [`NoDataIn`] — uninhabited marker for streamers with no external
+//!   input.
+//! - [`EventStreamer`] — async trait every streamer implements.
+//!
+//! # Invariants
+//! - [`StreamerId::Display`] strings (`HEARTBEAT`, `BALANCE:<COIN>`, …)
+//!   are part of the SSE wire surface — do not rename.
+//! - Per-client send channels are bounded; broadcasts use `try_send` so a
+//!   slow client never blocks the broadcaster.
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt;

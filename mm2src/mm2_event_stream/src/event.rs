@@ -1,3 +1,17 @@
+//! # Purpose
+//! Defines the [`Event`] payload broadcast from streamers to subscribed
+//! clients.
+//!
+//! # Public exports
+//! - [`Event`] — JSON payload tagged with origin [`StreamerId`] and an
+//!   error flag.
+//!
+//! # Invariants
+//! - Events are wrapped in `Arc` so cloning is cheap during fan-out.
+//! - The textual form returned by [`Event::origin`] matches the
+//!   [`StreamerId`] `Display` implementation and is part of the SSE
+//!   wire contract.
+
 use serde_json::Value as Json;
 use std::fmt;
 use std::sync::Arc;
@@ -34,16 +48,17 @@ impl Event {
         })
     }
 
+    /// Returns true if this event was constructed via [`Event::err`].
     pub fn is_error(&self) -> bool {
         self.error
     }
 
-    /// Returns the origin streamer identifier as a string.
+    /// Returns the origin streamer identifier in its wire-string form.
     pub fn origin(&self) -> String {
         self.streamer_id.to_string()
     }
 
-    /// Returns (origin_string, &payload).
+    /// Returns the origin string paired with a borrow of the JSON payload.
     pub fn get(&self) -> (String, &Json) {
         (self.origin(), &self.message)
     }

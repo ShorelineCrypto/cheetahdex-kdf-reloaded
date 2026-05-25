@@ -1,3 +1,21 @@
+//! # Purpose
+//! Houses [`StreamingManager`], the registry that spawns event streamers,
+//! tracks SSE clients, and routes broadcast events.
+//!
+//! # Public exports
+//! - [`StreamingManager`] — clone-cheap registry held by `MmCtx`.
+//! - [`ClientHandle`] — per-client receiver returned by
+//!   [`StreamingManager::new_client`].
+//!
+//! # Invariants
+//! - One streamer instance per [`StreamerId`]; the first subscribe spawns
+//!   it, the last unsubscribe shuts it down.
+//! - Per-client receive buffers are bounded (256 events); overflow drops
+//!   only the slow client's events, never blocks the broadcaster.
+//! - [`StreamingManager::send`] dispatches type-erased data to the
+//!   matching streamer; mismatched payload types return `Err` rather than
+//!   panic.
+
 use parking_lot::RwLock;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -292,7 +310,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_receives_event() {
+    async fn should_deliver_event_when_client_subscribes() {
         let mgr = StreamingManager::default();
         let mut handle = mgr.new_client(1);
         mgr.add(1, TestStreamer).await.unwrap();
@@ -307,7 +325,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_client_shuts_down_streamer() {
+    async fn should_shut_down_streamer_when_last_client_removed() {
         let mgr = StreamingManager::default();
         let _handle = mgr.new_client(1);
         mgr.add(1, TestStreamer).await.unwrap();
@@ -320,7 +338,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multiple_clients_share_streamer() {
+    async fn should_share_streamer_when_multiple_clients_subscribe() {
         let mgr = StreamingManager::default();
         let _h1 = mgr.new_client(1);
         let _h2 = mgr.new_client(2);
