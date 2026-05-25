@@ -1,24 +1,35 @@
-//! Common types and helpers shared between Maker V2 and Taker V2 swap state machines.
+//! # Purpose
+//! Cross-cutting types, constants, and persistence helpers shared by
+//! the Maker V2 and Taker V2 atomic-swap state machines.
 //!
-//! ## Confirmation / Visibility Policy (V2 Protocol)
+//! # Public exports
+//! - [`AbortReason`] — tagged union of every reason a V2 swap can abort
+//! - [`SwapStateMachineError`], [`SwapRecreateError`] — infrastructure errors
+//! - [`SwapV2Type`], [`ActiveSwapV2Info`] — active-swap registry types
+//! - [`StoredTxPreimage`], [`StoredMakerNegotiationData`],
+//!   [`StoredTakerNegotiationData`] — DB-persisted negotiation artefacts
+//! - [`SwapRecreateCtx`] — context plumbed through state-machine recreate
+//! - `MakerSwapStorage`, `TakerSwapStorage` — `StateMachineStorage`
+//!   impls (SQLite native / no-op WASM)
+//! - [`acquire_reentrancy_lock_impl`], [`spawn_reentrancy_lock_renew`]
+//! - On native: `read_swap_v2_events`, `get_swap_type` for RPC dispatch
+//! - On `pub(super)`: `swap_kickstart_handler_for_{maker,taker}` and
+//!   the [`GetSwapCoins`] trait used by recovery
 //!
-//! The V2 protocol introduces a "funding" step before the actual payment.  The
-//! maker validates taker funding in mempool (0-conf by default), then sends the
-//! maker payment.  Both sides have configurable confirmation gates:
-//!
-//! * `require_taker_funding_confirm_before_maker_payment` (maker side, default: false)
-//! * `require_maker_payment_confirm_before_funding_spend`  (taker side, default: true)
-//! * `require_taker_payment_spend_confirm`                 (maker side, default: true)
-//! * `require_maker_payment_spend_confirm`                 (taker side, default: true)
-//!
-//! When a confirmation gate is enabled we wait for `min(configured_confs, 1)` block
-//! confirmations before proceeding.  If disabled, mempool visibility suffices.
-//!
-//! ### Visibility grace
-//!
-//! On chains with delayed mempool propagation we poll every
-//! [`SWAP_TX_VISIBILITY_POLL_SECS`] seconds, giving up after
-//! [`SWAP_TX_VISIBILITY_GRACE_SECS`].
+//! # Invariants
+//! - DB schema (`my_swaps` columns) is shared with V1; do not change
+//!   column names without a migration.
+//! - `SwapV2Type` discriminant integers (1 = maker, 2 = taker) are
+//!   persisted on disk: never reorder.
+//! - `serde` tag/content names of [`AbortReason`] and the
+//!   `Stored*NegotiationData` structs are part of the stored events
+//!   format consumed by `swap_v2_rpcs`.
+//! - The V2 protocol introduces a "funding" step before the actual
+//!   payment. Confirmation gates (`require_*_confirm_before_*`) wait
+//!   for `min(configured_confs, 1)` block confirmations; when disabled
+//!   mempool visibility suffices, polled every
+//!   [`SWAP_TX_VISIBILITY_POLL_SECS`] up to
+//!   [`SWAP_TX_VISIBILITY_GRACE_SECS`].
 
 use coins::lp_coinfind;
 use coins::{MakerCoinSwapOpsV2, MmCoin, MmCoinEnum, TakerCoinSwapOpsV2};
@@ -36,9 +47,7 @@ use super::swap_lock::{SwapLock, SwapLockOps};
 use super::{maker_swap_v2::MakerSwapDbRepr, maker_swap_v2::MakerSwapEvent, maker_swap_v2::MakerSwapStateMachine};
 use super::{taker_swap_v2::TakerSwapDbRepr, taker_swap_v2::TakerSwapEvent, taker_swap_v2::TakerSwapStateMachine};
 
-// ────────────────────────────────────────────────────────────────────────────
-// Constants
-// ────────────────────────────────────────────────────────────────────────────
+// Constants ------------------------------------------------------------------
 
 /// Maximum time (seconds) to wait for a transaction to appear in the mempool
 /// before considering it missing.
@@ -54,9 +63,7 @@ pub const NEGOTIATION_TIMEOUT_SEC: u64 = 90;
 /// The topic prefix used for V2 swap P2P messages (canonical definition in lp_swap.rs).
 pub const SWAP_V2_PREFIX: &str = "swapv2";
 
-// ────────────────────────────────────────────────────────────────────────────
-// Error / abort types
-// ────────────────────────────────────────────────────────────────────────────
+// Error / abort types --------------------------------------------------------
 
 /// Reason a V2 swap was aborted.
 #[derive(Clone, Debug, Deserialize, Display, Serialize)]
@@ -79,7 +86,7 @@ pub enum AbortReason {
     MakerAborted(String),
     #[display(fmt = "Internal error: {}", _0)]
     InternalError(String),
-    // ── Taker-side abort reasons ──
+    // Taker-side abort reasons ----------------------------------------------
     #[display(fmt = "Failed to send payment: {}", _0)]
     FailedToSendPayment(String),
     #[display(fmt = "Did not receive maker payment: {}", _0)]
@@ -142,9 +149,7 @@ pub struct SwapRecreateCtx<MakerCoin, TakerCoin> {
     pub taker_coin: TakerCoin,
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Active swap tracking
-// ────────────────────────────────────────────────────────────────────────────
+// Active swap tracking -------------------------------------------------------
 
 /// Metadata about a running V2 swap, stored in `SwapsContext` for UI queries.
 #[derive(Clone, Debug)]
@@ -162,9 +167,7 @@ pub enum SwapV2Type {
     TakerV2 = 2,
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Serializable preimage (for DB persistence)
-// ────────────────────────────────────────────────────────────────────────────
+// Serializable preimage (for DB persistence) ---------------------------------
 
 /// A preimage + signature pair stored as raw bytes in the DB.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -173,9 +176,7 @@ pub struct StoredTxPreimage {
     pub signature: BytesJson,
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Negotiation data (what gets stored in events for reconstruction)
-// ────────────────────────────────────────────────────────────────────────────
+// Negotiation data (what gets stored in events for reconstruction) -----------
 
 /// Stored negotiation data from the maker side (used in maker events).
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -201,9 +202,7 @@ pub struct StoredTakerNegotiationData {
     pub taker_coin_address: String,
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Reentrancy lock helpers
-// ────────────────────────────────────────────────────────────────────────────
+// Reentrancy lock helpers ----------------------------------------------------
 
 /// Acquire a reentrancy lock for the given swap UUID.
 pub async fn acquire_reentrancy_lock_impl(
@@ -235,9 +234,7 @@ pub fn spawn_reentrancy_lock_renew(lock: SwapLock, interval_sec: f64) {
     });
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// StateMachineDbRepr impls
-// ────────────────────────────────────────────────────────────────────────────
+// StateMachineDbRepr impls ---------------------------------------------------
 
 impl StateMachineDbRepr for MakerSwapDbRepr {
     type Event = MakerSwapEvent;
@@ -255,9 +252,7 @@ impl StateMachineDbRepr for TakerSwapDbRepr {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// V2 Swap Storage — Native (SQLite)
-// ────────────────────────────────────────────────────────────────────────────
+// V2 Swap Storage — Native (SQLite) ------------------------------------------
 
 cfg_native! {
     use async_trait::async_trait;
@@ -370,7 +365,7 @@ cfg_native! {
         }
     }
 
-    // ── SQL helper functions ────────────────────────────────────────────
+    // SQL helper functions --------------------------------------------------
 
     /// Insert a new V2 swap record into the my_swaps table.
     /// For maker swaps: my_coin = maker_coin, other_coin = taker_coin.
@@ -706,9 +701,7 @@ cfg_native! {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// V2 Swap Storage — WASM (IndexedDB)
-// ────────────────────────────────────────────────────────────────────────────
+// V2 Swap Storage — WASM (IndexedDB) -----------------------------------------
 
 cfg_wasm32! {
     use async_trait::async_trait;
@@ -799,9 +792,7 @@ cfg_wasm32! {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// V2 Swap Kickstart / Recovery
-// ────────────────────────────────────────────────────────────────────────────
+// V2 Swap Kickstart / Recovery -----------------------------------------------
 
 /// Trait for extracting coin tickers from a swap DB repr so the kickstart
 /// logic can wait for the required coins to activate.
@@ -956,7 +947,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_swap_v2_protobuf_roundtrip() {
+    fn should_roundtrip_when_encoding_swap_v2_protobuf() {
         use prost::Message;
 
         let maker_neg = MakerNegotiation {
@@ -986,7 +977,7 @@ mod tests {
     }
 
     #[test]
-    fn test_taker_negotiation_abort_protobuf() {
+    fn should_preserve_reason_when_serializing_taker_abort() {
         use prost::Message;
 
         let taker_neg = TakerNegotiation {
@@ -1012,7 +1003,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stored_tx_preimage_serde() {
+    fn should_roundtrip_when_serializing_stored_tx_preimage() {
         let stored = StoredTxPreimage {
             preimage: BytesJson::from(vec![0xAA, 0xBB]),
             signature: BytesJson::from(vec![0xCC, 0xDD]),
@@ -1024,7 +1015,7 @@ mod tests {
     }
 
     #[test]
-    fn test_abort_reason_display() {
+    fn should_format_message_when_displaying_abort_reason() {
         let reason = AbortReason::NegotiationTimeout;
         assert_eq!(format!("{}", reason), "Negotiation timed out");
 
@@ -1033,7 +1024,7 @@ mod tests {
     }
 
     #[test]
-    fn test_abort_reason_display_all_variants() {
+    fn should_format_message_when_displaying_abort_reason_all_variants() {
         let cases: Vec<(AbortReason, &str)> = vec![
             (AbortReason::NegotiationTimeout, "Negotiation timed out"),
             (AbortReason::NegotiationFailed("bad".into()), "bad"),
@@ -1072,7 +1063,7 @@ mod tests {
     }
 
     #[test]
-    fn test_swap_v2_protobuf_all_variants() {
+    fn should_roundtrip_when_encoding_each_swap_message_variant() {
         use prost::Message;
 
         let test_uuid = vec![1u8; 16];
@@ -1194,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    fn test_swap_v2_msg_store_population() {
+    fn should_track_messages_when_populating_swap_v2_msg_store() {
         use super::super::SwapV2MsgStore;
 
         // secp256k1 requires a valid public key; use an uncompressed generator point
@@ -1272,7 +1263,7 @@ mod tests {
     }
 
     #[test]
-    fn test_maker_swap_event_all_variants_serde() {
+    fn should_roundtrip_when_serializing_each_maker_swap_event() {
         use super::super::maker_swap_v2::MakerSwapEvent;
         use common::mm_number::MmNumber;
 
@@ -1367,7 +1358,7 @@ mod tests {
     }
 
     #[test]
-    fn test_taker_swap_event_all_variants_serde() {
+    fn should_roundtrip_when_serializing_each_taker_swap_event() {
         use super::super::taker_swap_v2::TakerSwapEvent;
         use common::mm_number::MmNumber;
 
@@ -1487,7 +1478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_maker_swap_db_repr_serde_roundtrip() {
+    fn should_roundtrip_when_serializing_maker_swap_db_repr() {
         use super::super::maker_swap_v2::{MakerSwapDbRepr, MakerSwapEvent, SerializableKeypairBytes};
         use super::super::SwapConfirmationsSettings;
         use common::mm_number::MmNumber;
@@ -1540,7 +1531,7 @@ mod tests {
     }
 
     #[test]
-    fn test_taker_swap_db_repr_serde_roundtrip() {
+    fn should_roundtrip_when_serializing_taker_swap_db_repr() {
         use super::super::taker_swap_v2::{TakerSwapDbRepr, TakerSwapEvent};
         use super::super::SwapConfirmationsSettings;
         use common::mm_number::MmNumber;
@@ -1593,13 +1584,13 @@ mod tests {
     }
 
     #[test]
-    fn test_swap_v2_type_values() {
+    fn should_use_stable_discriminants_when_encoding_swap_v2_type() {
         assert_eq!(SwapV2Type::MakerV2 as u8, 1);
         assert_eq!(SwapV2Type::TakerV2 as u8, 2);
     }
 
     #[test]
-    fn test_active_swap_v2_info() {
+    fn should_carry_fields_when_constructing_active_swap_info() {
         let uuid = Uuid::new_v4();
         let info = ActiveSwapV2Info {
             uuid,
@@ -1614,7 +1605,7 @@ mod tests {
     }
 
     #[test]
-    fn test_state_machine_db_repr_add_event() {
+    fn should_append_when_calling_add_event_on_db_repr() {
         use super::super::maker_swap_v2::{MakerSwapDbRepr, MakerSwapEvent};
         use super::super::SwapConfirmationsSettings;
         use common::mm_number::MmNumber;
@@ -1661,7 +1652,7 @@ mod tests {
         assert_eq!(repr.events.len(), 2);
     }
 
-    // ── Native-only DB integration tests ────────────────────────────────
+    // Native-only DB integration tests --------------------------------------
 
     #[cfg(not(target_arch = "wasm32"))]
     mod db_tests {
@@ -1745,7 +1736,7 @@ mod tests {
         }
 
         #[test]
-        fn test_maker_swap_storage_full_lifecycle() {
+        fn should_handle_full_lifecycle_when_using_maker_swap_storage() {
             let ctx = setup_test_ctx();
             let uuid = Uuid::new_v4();
             let repr = sample_maker_repr(uuid);
@@ -1818,7 +1809,7 @@ mod tests {
         }
 
         #[test]
-        fn test_taker_swap_storage_full_lifecycle() {
+        fn should_handle_full_lifecycle_when_using_taker_swap_storage() {
             let ctx = setup_test_ctx();
             let uuid = Uuid::new_v4();
             let repr = sample_taker_repr(uuid);
@@ -1862,7 +1853,7 @@ mod tests {
         }
 
         #[test]
-        fn test_multiple_swaps_unfinished_tracking() {
+        fn should_track_per_role_when_querying_unfinished_swaps() {
             let ctx = setup_test_ctx();
             let mut maker_storage = MakerSwapStorage::new(ctx.clone());
             let mut taker_storage = TakerSwapStorage::new(ctx.clone());
@@ -1898,7 +1889,7 @@ mod tests {
         }
 
         #[test]
-        fn test_get_swap_type_dispatch() {
+        fn should_return_role_when_dispatching_via_get_swap_type() {
             let ctx = setup_test_ctx();
             let maker_uuid = Uuid::new_v4();
             let taker_uuid = Uuid::new_v4();
@@ -1918,7 +1909,7 @@ mod tests {
         }
 
         #[test]
-        fn test_append_multiple_events_preserves_order() {
+        fn should_preserve_order_when_appending_multiple_events() {
             let ctx = setup_test_ctx();
             let uuid = Uuid::new_v4();
             let mut storage = MakerSwapStorage::new(ctx.clone());
@@ -1977,7 +1968,7 @@ mod tests {
         }
 
         #[test]
-        fn test_maker_repr_db_roundtrip_with_events() {
+        fn should_include_events_when_loading_maker_repr_from_db() {
             let ctx = setup_test_ctx();
             let uuid = Uuid::new_v4();
             let mut storage = MakerSwapStorage::new(ctx.clone());
@@ -2015,7 +2006,7 @@ mod tests {
         }
 
         #[test]
-        fn test_taker_repr_db_roundtrip_with_events() {
+        fn should_include_events_when_loading_taker_repr_from_db() {
             let ctx = setup_test_ctx();
             let uuid = Uuid::new_v4();
             let mut storage = TakerSwapStorage::new(ctx.clone());
@@ -2046,7 +2037,7 @@ mod tests {
         }
 
         #[test]
-        fn test_swap_v2_conf_settings_db_roundtrip() {
+        fn should_roundtrip_conf_settings_when_persisting_via_db() {
             let ctx = setup_test_ctx();
             let uuid = Uuid::new_v4();
             let mut storage = MakerSwapStorage::new(ctx.clone());
@@ -2068,7 +2059,7 @@ mod tests {
         }
 
         #[test]
-        fn test_has_record_false_for_wrong_uuid() {
+        fn should_return_false_when_checking_record_for_wrong_uuid() {
             let ctx = setup_test_ctx();
             let uuid = Uuid::new_v4();
             let wrong_uuid = Uuid::new_v4();
