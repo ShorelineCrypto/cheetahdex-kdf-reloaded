@@ -1,21 +1,30 @@
-//! Taker-side Swap V2 state machine.
+//! # Purpose
+//! Drives the taker side of an atomic-swap V2 trade as a persistent
+//! state machine. The taker accepts the maker's negotiation, posts
+//! funding, observes the maker payment plus the funding-spend
+//! preimage, converts funding into the taker payment, and finally
+//! spends the maker payment using the maker's revealed secret.
 //!
-//! The taker receives the maker's negotiation, sends funding, receives the
-//! maker payment + funding-spend preimage, converts funding to taker payment,
-//! and finally spends the maker payment after the maker reveals the secret.
+//! # Public exports
+//! - [`TakerSwapEvent`] — the persisted event variants
+//! - [`TakerSwapDbRepr`] — DB row + replayable event log
+//! - [`TakerSwapStateMachine`] — the state-machine driver
+//! - [`taker_swap_v2_kickstart`] (via `swap_v2_common`) — entry point
+//!   used by the recovery loop
 //!
-//! ## State Graph (happy path)
-//!
-//! ```text
-//! Initialize → Initialized → Negotiated → TakerFundingSent
-//!   → MakerPaymentAndFundingSpendPreimgReceived → MakerPaymentConfirmed
-//!   → TakerPaymentSent → TakerPaymentSpent → MakerPaymentSpent → Completed
-//! ```
-//!
-//! Error branches:
-//! - `TakerFundingRefundRequired → TakerFundingRefunded`
-//! - `TakerPaymentRefundRequired → TakerPaymentRefunded`
-//! - Any early state → `Aborted`
+//! # Invariants
+//! - Persisted state-machine variant names (the `TakerSwapEvent`
+//!   discriminants and the `Stored*NegotiationData` field names) are
+//!   serde-stable; never rename without a migration path.
+//! - Happy-path order:
+//!   `Initialize → Initialized → Negotiated → TakerFundingSent →
+//!    MakerPaymentAndFundingSpendPreimgReceived →
+//!    MakerPaymentConfirmed → TakerPaymentSent → TakerPaymentSpent →
+//!    MakerPaymentSpent → Completed`.
+//! - Error paths:
+//!   `TakerFundingRefundRequired → TakerFundingRefunded`,
+//!   `TakerPaymentRefundRequired → TakerPaymentRefunded`.
+//! - Abort path: any pre-funding state → `Aborted`.
 
 use coins::{
     CanRefundHtlc, DexFee, FeeApproxStage, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2,
@@ -43,9 +52,7 @@ use super::swap_v2_common::*;
 use super::swap_v2_pb::*;
 use super::SwapConfirmationsSettings;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Events
-// ────────────────────────────────────────────────────────────────────────────
+// Events ---------------------------------------------------------------------
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum TakerSwapEvent {
@@ -139,9 +146,7 @@ pub enum TakerSwapEvent {
     Completed,
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Database representation
-// ────────────────────────────────────────────────────────────────────────────
+// Database representation ----------------------------------------------------
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TakerSwapDbRepr {
@@ -165,9 +170,7 @@ pub struct TakerSwapDbRepr {
     pub swap_version: u8,
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// State machine
-// ────────────────────────────────────────────────────────────────────────────
+// State machine --------------------------------------------------------------
 
 pub struct TakerSwapStateMachine<MakerCoin: MmCoin + MakerCoinSwapOpsV2, TakerCoin: MmCoin + TakerCoinSwapOpsV2> {
     pub ctx: MmArc,
@@ -213,9 +216,7 @@ where
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// States (PhantomData-bound to the generic state machine)
-// ────────────────────────────────────────────────────────────────────────────
+// States (PhantomData-bound to the generic state machine) --------------------
 
 pub struct Initialize<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>(PhantomData<(M, T)>);
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Default for Initialize<M, T> {
@@ -522,9 +523,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Aborted<M, 
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Transition declarations (state → state)
-// ────────────────────────────────────────────────────────────────────────────
+// Transition declarations (state → state) ------------------------------------
 
 // Initialize →
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionFrom<Initialize<M, T>>
@@ -662,9 +661,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TransitionF
 {
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// StorableStateMachine
-// ────────────────────────────────────────────────────────────────────────────
+// StorableStateMachine -------------------------------------------------------
 
 const TAKER_SWAP_LOCK_TTL: f64 = 120.0;
 const TAKER_SWAP_LOCK_RENEW_INTERVAL: f64 = 30.0;
@@ -1058,9 +1055,7 @@ where
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// InitialState / StorableState
-// ────────────────────────────────────────────────────────────────────────────
+// InitialState / StorableState -----------------------------------------------
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> InitialState for Initialize<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
@@ -1252,13 +1247,12 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableSta
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// State / LastState implementations
-// ────────────────────────────────────────────────────────────────────────────
+// State / LastState implementations ------------------------------------------
 
 const MAX_STARTED_AT_DIFF: u64 = 60;
 
-// ── Initialize → Initialized ────────────────────────────────────────────────
+// Initialize → Initialized ----------------------------------------------
+
 // Fetch start blocks, estimate fees, check balance.
 
 #[async_trait::async_trait]
@@ -1332,7 +1326,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
     }
 }
 
-// ── Initialized → Negotiated ────────────────────────────────────────────────
+// Initialized → Negotiated ----------------------------------------------
+
 // Receive maker's negotiation, validate, respond with taker negotiation.
 
 #[async_trait::async_trait]
@@ -1480,7 +1475,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
     }
 }
 
-// ── Negotiated → TakerFundingSent ───────────────────────────────────────────
+// Negotiated → TakerFundingSent -----------------------------------------
+
 // Send taker funding transaction.
 
 #[async_trait::async_trait]
@@ -1541,7 +1537,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for N
     }
 }
 
-// ── TakerFundingSent → MakerPaymentAndFundingSpendPreimgReceived ────────────
+// TakerFundingSent → MakerPaymentAndFundingSpendPreimgReceived ----------
+
 // Wait for maker's payment + funding-spend preimage.
 
 #[async_trait::async_trait]
@@ -1640,7 +1637,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
     }
 }
 
-// ── MakerPaymentAndFundingSpendPreimgReceived → (various) ───────────────────
+// MakerPaymentAndFundingSpendPreimgReceived → (various) -----------------
+
 // Validate maker payment, validate funding spend preimage, optionally confirm,
 // then spend funding to create taker payment.
 
@@ -1925,7 +1923,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
     }
 }
 
-// ── MakerPaymentConfirmed → TakerPaymentSent (deferred funding spend) ──────
+// MakerPaymentConfirmed → TakerPaymentSent (deferred funding spend) -----
+
 // Maker payment already confirmed in prior state; now spend funding.
 
 #[async_trait::async_trait]
@@ -2092,7 +2091,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
     }
 }
 
-// ── TakerPaymentSent → TakerPaymentSpent ────────────────────────────────────
+// TakerPaymentSent → TakerPaymentSpent ----------------------------------
+
 // Generate and broadcast taker payment spend preimage, then wait for maker
 // to spend taker payment (revealing the maker secret).
 
@@ -2222,7 +2222,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
     }
 }
 
-// ── TakerPaymentSentPreimageSendingSkipped → TakerPaymentSpent ──────────────
+// TakerPaymentSentPreimageSendingSkipped → TakerPaymentSpent ------------
+
 // EVM/contract coins: skip preimage, just poll for maker spend.
 
 #[async_trait::async_trait]
@@ -2286,7 +2287,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
     }
 }
 
-// ── TakerPaymentSpent → MakerPaymentSpent ───────────────────────────────────
+// TakerPaymentSpent → MakerPaymentSpent ---------------------------------
+
 // Extract maker secret from taker payment spend tx, then spend maker payment.
 
 #[async_trait::async_trait]
@@ -2371,7 +2373,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
     }
 }
 
-// ── MakerPaymentSpent → Completed ───────────────────────────────────────────
+// MakerPaymentSpent → Completed -----------------------------------------
+
 // Optionally wait for maker payment spend confirmation.
 
 #[async_trait::async_trait]
@@ -2410,7 +2413,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
     }
 }
 
-// ── TakerFundingRefundRequired → TakerFundingRefunded ───────────────────────
+// TakerFundingRefundRequired → TakerFundingRefunded ---------------------
+
 // Refund taker funding using taker's secret (no timelock needed).
 
 #[async_trait::async_trait]
@@ -2469,7 +2473,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
     }
 }
 
-// ── TakerPaymentRefundRequired → TakerPaymentRefunded ───────────────────────
+// TakerPaymentRefundRequired → TakerPaymentRefunded ---------------------
+
 // Wait for timelock, then refund taker payment.
 
 #[async_trait::async_trait]
@@ -2540,7 +2545,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
     }
 }
 
-// ── Terminal states ─────────────────────────────────────────────────────────
+// Terminal states -------------------------------------------------------
 
 #[async_trait::async_trait]
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> LastState for TakerFundingRefunded<M, T> {
