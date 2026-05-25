@@ -21,3 +21,5 @@ serde_derive = "1.0"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web3 = { git = "https://github.com/GLEECBTC/rust-web3", tag = "v0.20.0", default-features = false, features = ["eip-1193"] }
+# Modern Rust Ethereum stack — replacing `web3` (LP-17, parallel migration).
+alloy = { workspace = true }

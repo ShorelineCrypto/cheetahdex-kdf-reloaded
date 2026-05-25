@@ -53,6 +53,17 @@ resolver = "2"
 
 [workspace.dependencies]
 # ── External crates (alphabetical) ──
+alloy = { version = "2.0", default-features = false, features = [
+    "consensus",
+    "contract",
+    "network",
+    "provider-http",
+    "rpc-types",
+    "serde",
+    "signers",
+    "sol-types",
+    "std",
+] }
 anyhow = "1"
 async-trait = "0.1"
 base64 = "0.21.2"
