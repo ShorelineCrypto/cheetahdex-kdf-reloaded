@@ -1,7 +1,28 @@
-//! Unified V1 + V2 swap RPC handlers.
+//! # Purpose
+//! Unified RPC surface that returns swap data regardless of whether a swap
+//! ran the legacy V1 protocol or the V2 (Trading Protocol Upgrade)
+//! state machine.
 //!
-//! Provides `my_swap_status`, `my_recent_swaps`, and `active_swaps` endpoints
-//! that return data for both legacy (V1) and V2 swaps.
+//! # Public exports
+//! - [`my_swap_status_rpc`] — handles `my_swap_status` (single swap by UUID).
+//! - [`my_recent_swaps_rpc`] — handles `my_recent_swaps` (paged list).
+//! - [`active_swaps_rpc`] — handles `active_swaps` (currently running swaps).
+//! - [`SwapRpcData`] — wire envelope tagged by swap type.
+//! - [`MySwapForRpc`] — JSON projection of a V2 swap row.
+//!
+//! # Invariants
+//! - Method strings `my_swap_status`, `my_recent_swaps`, `active_swaps`
+//!   are wire-stable; do not rename the public handlers.
+//! - The [`SwapRpcData`] discriminant strings (`MakerV1`, `TakerV1`,
+//!   `MakerV2`, `TakerV2`) and the `swap_type` / `swap_data` tag/content
+//!   keys are part of the JSON contract with GUI clients.
+//! - The [`MySwapForRpc`] field names (`my_coin`, `other_coin`, `uuid`,
+//!   `started_at`, `is_finished`, `events`, `maker_volume`, `taker_volume`,
+//!   `premium`, `dex_fee`, `lock_duration`, `*_coin_confs`, `*_coin_nota`,
+//!   `swap_version`) are wire-stable.
+//! - Error enum variant names (`NoSwapWithUuid`, `UnsupportedSwapType`,
+//!   `DbError`, `FromUuidSwapNotFound`, `InvalidTimeStampRange`, `Internal`)
+//!   surface in the `error_type` JSON field and must not change.
 
 use super::maker_swap::MakerSavedSwap;
 use super::maker_swap_v2::MakerSwapEvent;
@@ -41,16 +62,20 @@ cfg_wasm32!(
     use mm2_db::indexed_db::{DbTransactionError, DbTransactionResult, InitDbError};
 );
 
-// ────────────────────────────────────────────────────────────────────────────
-// get_swap_type — look up swap_type for a UUID
-// ────────────────────────────────────────────────────────────────────────────
+// Swap-type lookup ----------------------------------------------------------
 
+/// Native lookup of the `swap_type` column for a swap UUID.
+///
+/// Returns `Ok(None)` when the UUID is unknown — this lets callers
+/// translate "missing" into a 400-level RPC error rather than a 500.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) async fn get_swap_type(ctx: &MmArc, uuid: &Uuid) -> MmResult<Option<u8>, SqlError> {
     let ctx = ctx.clone();
     let uuid = uuid.to_string();
 
     async_blocking(move || {
+        // Positional `?1` binding is preferred over named binding for a
+        // single-parameter query: it avoids the named-parameter map lookup.
         const SELECT_SWAP_TYPE_BY_UUID: &str = "SELECT swap_type FROM my_swaps WHERE uuid = ?1;";
         let maybe_swap_type = query_single_row(
             &ctx.sqlite_connection(),
@@ -63,6 +88,24 @@ pub(super) async fn get_swap_type(ctx: &MmArc, uuid: &Uuid) -> MmResult<Option<u
     .await
 }
 
+/// WASM lookup of the `swap_type` column for a swap UUID.
+#[cfg(target_arch = "wasm32")]
+pub(super) async fn get_swap_type(ctx: &MmArc, uuid: &Uuid) -> MmResult<Option<u8>, SwapV2DbError> {
+    let swaps_ctx = SwapsContext::from_ctx(ctx).unwrap();
+    let db = swaps_ctx.swap_db().await.mm_err(Into::into)?;
+    let transaction = db.transaction().await.mm_err(Into::into)?;
+    let table = transaction.table::<MySwapsFiltersTable>().await.mm_err(Into::into)?;
+    let row = table.get_item_by_unique_index("uuid", uuid).await.mm_err(Into::into)?;
+    Ok(row.map(|(_id, item)| item.swap_type))
+}
+
+// WASM-only DB error taxonomy ----------------------------------------------
+
+/// Errors raised by the WASM IndexedDB-backed swap reads.
+///
+/// Native builds use `SqlError` directly; this enum lifts the WASM-side
+/// error variants into a single shape the surrounding handlers can map
+/// into the wire-facing RPC errors.
 #[cfg(target_arch = "wasm32")]
 #[derive(Display)]
 pub enum SwapV2DbError {
@@ -72,45 +115,37 @@ pub enum SwapV2DbError {
     UnsupportedSwapType(u8),
 }
 
+// One trivial conversion per WASM-side error source. Kept as
+// hand-written impls so that adding a variant remains a one-block
+// change reviewable in isolation.
 #[cfg(target_arch = "wasm32")]
 impl From<DbTransactionError> for SwapV2DbError {
-    fn from(e: DbTransactionError) -> Self {
-        SwapV2DbError::DbTransaction(e)
+    fn from(err: DbTransactionError) -> Self {
+        SwapV2DbError::DbTransaction(err)
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<InitDbError> for SwapV2DbError {
-    fn from(e: InitDbError) -> Self {
-        SwapV2DbError::InitDb(e)
+    fn from(err: InitDbError) -> Self {
+        SwapV2DbError::InitDb(err)
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<serde_json::Error> for SwapV2DbError {
-    fn from(e: serde_json::Error) -> Self {
-        SwapV2DbError::Serde(e)
+    fn from(err: serde_json::Error) -> Self {
+        SwapV2DbError::Serde(err)
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(super) async fn get_swap_type(ctx: &MmArc, uuid: &Uuid) -> MmResult<Option<u8>, SwapV2DbError> {
-    let swaps_ctx = SwapsContext::from_ctx(ctx).unwrap();
-    let db = swaps_ctx.swap_db().await.mm_err(Into::into)?;
-    let transaction = db.transaction().await.mm_err(Into::into)?;
-    let table = transaction.table::<MySwapsFiltersTable>().await.mm_err(Into::into)?;
-    let item = match table.get_item_by_unique_index("uuid", uuid).await.mm_err(Into::into)? {
-        Some((_item_id, item)) => item,
-        None => return Ok(None),
-    };
-    Ok(Some(item.swap_type))
-}
+// V2 swap projection -------------------------------------------------------
 
-// ────────────────────────────────────────────────────────────────────────────
-// MySwapForRpc — V2 swap data formatted for RPC output
-// ────────────────────────────────────────────────────────────────────────────
-
-/// Represents data of the swap used for RPC, omits fields that should be kept in secret.
+/// JSON projection of a V2 swap row.
+///
+/// The on-disk row carries seller-side secrets (HTLC preimages,
+/// signing material) that are stripped here; only the fields safe to
+/// expose to a RPC consumer are kept.
 #[derive(Debug, Serialize)]
 pub(crate) struct MySwapForRpc<T> {
     my_coin: String,
@@ -131,9 +166,21 @@ pub(crate) struct MySwapForRpc<T> {
     swap_version: u8,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<T: DeserializeOwned> MySwapForRpc<T> {
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Decodes one row of the joined `my_swaps` × `my_swaps_v2` view.
+    ///
+    /// SQLite stores volumes as fraction strings (e.g. `"3/2"`) for
+    /// exactness; this routine widens each one back into the multi-repr
+    /// numeric form GUI clients expect.
     fn from_row(row: &Row) -> SqlResult<Self> {
+        let read_decimal_column = |idx: usize| -> SqlResult<MmNumberMultiRepr> {
+            let raw: String = row.get(idx)?;
+            let decimal = BigDecimal::from_str(&raw)
+                .map_err(|e| SqlError::FromSqlConversionFailure(idx, SqlType::Text, Box::new(e)))?;
+            Ok(MmNumberMultiRepr::from(MmNumber::from(decimal)))
+        };
+
         Ok(Self {
             my_coin: row.get(0)?,
             other_coin: row.get(1)?,
@@ -145,22 +192,10 @@ impl<T: DeserializeOwned> MySwapForRpc<T> {
             is_finished: row.get(4)?,
             events: serde_json::from_str(&row.get::<_, String>(5)?)
                 .map_err(|e| SqlError::FromSqlConversionFailure(5, SqlType::Text, Box::new(e)))?,
-            maker_volume: MmNumberMultiRepr::from(MmNumber::from(
-                BigDecimal::from_str(&row.get::<_, String>(6)?)
-                    .map_err(|e| SqlError::FromSqlConversionFailure(6, SqlType::Text, Box::new(e)))?,
-            )),
-            taker_volume: MmNumberMultiRepr::from(MmNumber::from(
-                BigDecimal::from_str(&row.get::<_, String>(7)?)
-                    .map_err(|e| SqlError::FromSqlConversionFailure(7, SqlType::Text, Box::new(e)))?,
-            )),
-            premium: MmNumberMultiRepr::from(MmNumber::from(
-                BigDecimal::from_str(&row.get::<_, String>(8)?)
-                    .map_err(|e| SqlError::FromSqlConversionFailure(8, SqlType::Text, Box::new(e)))?,
-            )),
-            dex_fee: MmNumberMultiRepr::from(MmNumber::from(
-                BigDecimal::from_str(&row.get::<_, String>(9)?)
-                    .map_err(|e| SqlError::FromSqlConversionFailure(9, SqlType::Text, Box::new(e)))?,
-            )),
+            maker_volume: read_decimal_column(6)?,
+            taker_volume: read_decimal_column(7)?,
+            premium: read_decimal_column(8)?,
+            dex_fee: read_decimal_column(9)?,
             lock_duration: row.get(10)?,
             maker_coin_confs: row.get(11)?,
             maker_coin_nota: row.get(12)?,
@@ -171,16 +206,14 @@ impl<T: DeserializeOwned> MySwapForRpc<T> {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Native V2 swap data retrieval
-// ────────────────────────────────────────────────────────────────────────────
+// Native V2 swap row reads -------------------------------------------------
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) async fn get_maker_swap_data_for_rpc(
     ctx: &MmArc,
     uuid: &Uuid,
 ) -> MmResult<Option<MySwapForRpc<MakerSwapEvent>>, SqlError> {
-    get_swap_data_for_rpc_impl(ctx, uuid).await
+    query_v2_swap_row(ctx, uuid).await
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -188,75 +221,58 @@ pub(super) async fn get_taker_swap_data_for_rpc(
     ctx: &MmArc,
     uuid: &Uuid,
 ) -> MmResult<Option<MySwapForRpc<TakerSwapEvent>>, SqlError> {
-    get_swap_data_for_rpc_impl(ctx, uuid).await
+    query_v2_swap_row(ctx, uuid).await
 }
 
+/// Generic native row read — both maker and taker rows live in the
+/// same joined view and only differ by the `T` event type they decode.
 #[cfg(not(target_arch = "wasm32"))]
-async fn get_swap_data_for_rpc_impl<T: DeserializeOwned + Send + 'static>(
+async fn query_v2_swap_row<T: DeserializeOwned + Send + 'static>(
     ctx: &MmArc,
     uuid: &Uuid,
 ) -> MmResult<Option<MySwapForRpc<T>>, SqlError> {
     let ctx = ctx.clone();
-    let uuid = uuid.to_string();
+    let uuid_str = uuid.to_string();
 
     async_blocking(move || {
-        let swap_data = query_single_row(
+        let row = query_single_row(
             &ctx.sqlite_connection(),
             SELECT_MY_SWAP_V2_FOR_RPC_BY_UUID,
-            &[uuid.as_str()],
+            &[uuid_str.as_str()],
             MySwapForRpc::from_row,
         )?;
-        Ok(swap_data)
+        Ok(row)
     })
     .await
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// WASM V2 swap data retrieval
-// ────────────────────────────────────────────────────────────────────────────
+// WASM V2 swap row reads ---------------------------------------------------
 
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn get_maker_swap_data_for_rpc(
     ctx: &MmArc,
     uuid: &Uuid,
 ) -> MmResult<Option<MySwapForRpc<MakerSwapEvent>>, SwapV2DbError> {
-    let swaps_ctx = SwapsContext::from_ctx(ctx).unwrap();
-    let db = swaps_ctx.swap_db().await.mm_err(Into::into)?;
-    let transaction = db.transaction().await.mm_err(Into::into)?;
-    let table = transaction.table::<SavedSwapTable>().await.mm_err(Into::into)?;
-    let item = match table.get_item_by_unique_index("uuid", uuid).await.mm_err(Into::into)? {
-        Some((_item_id, item)) => item,
-        None => return Ok(None),
+    let Some((repr, filter)) = load_v2_swap_repr::<MakerSwapDbRepr>(ctx, uuid).await? else {
+        return Ok(None);
     };
-
-    let filters_table = transaction.table::<MySwapsFiltersTable>().await.mm_err(Into::into)?;
-    let filter_item = match filters_table
-        .get_item_by_unique_index("uuid", uuid)
-        .await
-        .mm_err(Into::into)?
-    {
-        Some((_item_id, item)) => item,
-        None => return Ok(None),
-    };
-
-    let json_repr: MakerSwapDbRepr = serde_json::from_value(item.saved_swap)?;
     Ok(Some(MySwapForRpc {
-        my_coin: json_repr.maker_coin,
-        other_coin: json_repr.taker_coin,
-        uuid: json_repr.uuid,
-        started_at: json_repr.started_at as i64,
-        is_finished: filter_item.is_finished.as_bool(),
-        events: json_repr.events,
-        maker_volume: json_repr.maker_volume.into(),
-        taker_volume: json_repr.taker_volume.into(),
-        premium: json_repr.taker_premium.into(),
-        dex_fee: (json_repr.dex_fee_amount + json_repr.dex_fee_burn).into(),
-        lock_duration: json_repr.lock_duration as i64,
-        maker_coin_confs: json_repr.conf_settings.maker_coin_confs as i64,
-        maker_coin_nota: json_repr.conf_settings.maker_coin_nota,
-        taker_coin_confs: json_repr.conf_settings.taker_coin_confs as i64,
-        taker_coin_nota: json_repr.conf_settings.taker_coin_nota,
-        swap_version: json_repr.swap_version,
+        my_coin: repr.maker_coin,
+        other_coin: repr.taker_coin,
+        uuid: repr.uuid,
+        started_at: repr.started_at as i64,
+        is_finished: filter.is_finished.as_bool(),
+        events: repr.events,
+        maker_volume: repr.maker_volume.into(),
+        taker_volume: repr.taker_volume.into(),
+        premium: repr.taker_premium.into(),
+        dex_fee: (repr.dex_fee_amount + repr.dex_fee_burn).into(),
+        lock_duration: repr.lock_duration as i64,
+        maker_coin_confs: repr.conf_settings.maker_coin_confs as i64,
+        maker_coin_nota: repr.conf_settings.maker_coin_nota,
+        taker_coin_confs: repr.conf_settings.taker_coin_confs as i64,
+        taker_coin_nota: repr.conf_settings.taker_coin_nota,
+        swap_version: repr.swap_version,
     }))
 }
 
@@ -265,50 +281,73 @@ pub(super) async fn get_taker_swap_data_for_rpc(
     ctx: &MmArc,
     uuid: &Uuid,
 ) -> MmResult<Option<MySwapForRpc<TakerSwapEvent>>, SwapV2DbError> {
+    let Some((repr, filter)) = load_v2_swap_repr::<TakerSwapDbRepr>(ctx, uuid).await? else {
+        return Ok(None);
+    };
+    // The taker view flips maker_coin/other_coin compared to the maker view;
+    // every other field has the same on-disk semantics.
+    Ok(Some(MySwapForRpc {
+        my_coin: repr.taker_coin,
+        other_coin: repr.maker_coin,
+        uuid: repr.uuid,
+        started_at: repr.started_at as i64,
+        is_finished: filter.is_finished.as_bool(),
+        events: repr.events,
+        maker_volume: repr.maker_volume.into(),
+        taker_volume: repr.taker_volume.into(),
+        premium: repr.taker_premium.into(),
+        dex_fee: (repr.dex_fee_amount + repr.dex_fee_burn).into(),
+        lock_duration: repr.lock_duration as i64,
+        maker_coin_confs: repr.conf_settings.maker_coin_confs as i64,
+        maker_coin_nota: repr.conf_settings.maker_coin_nota,
+        taker_coin_confs: repr.conf_settings.taker_coin_confs as i64,
+        taker_coin_nota: repr.conf_settings.taker_coin_nota,
+        swap_version: repr.swap_version,
+    }))
+}
+
+/// Pulls the `(repr, filter)` row pair from IndexedDB.
+///
+/// The two reads happen against the same transaction so that a swap
+/// being concurrently finalised cannot present a torn view (saved-swap
+/// updated but filter row still flagged as in-flight).
+#[cfg(target_arch = "wasm32")]
+async fn load_v2_swap_repr<R: DeserializeOwned>(
+    ctx: &MmArc,
+    uuid: &Uuid,
+) -> MmResult<Option<(R, super::swap_wasm_db::MySwapsFiltersTable)>, SwapV2DbError> {
     let swaps_ctx = SwapsContext::from_ctx(ctx).unwrap();
     let db = swaps_ctx.swap_db().await.mm_err(Into::into)?;
     let transaction = db.transaction().await.mm_err(Into::into)?;
-    let table = transaction.table::<SavedSwapTable>().await.mm_err(Into::into)?;
-    let item = match table.get_item_by_unique_index("uuid", uuid).await.mm_err(Into::into)? {
-        Some((_item_id, item)) => item,
-        None => return Ok(None),
-    };
 
-    let filters_table = transaction.table::<MySwapsFiltersTable>().await.mm_err(Into::into)?;
-    let filter_item = match filters_table
+    let saved_swaps = transaction.table::<SavedSwapTable>().await.mm_err(Into::into)?;
+    let saved_row = match saved_swaps
         .get_item_by_unique_index("uuid", uuid)
         .await
         .mm_err(Into::into)?
     {
-        Some((_item_id, item)) => item,
+        Some((_, item)) => item,
         None => return Ok(None),
     };
 
-    let json_repr: TakerSwapDbRepr = serde_json::from_value(item.saved_swap)?;
-    Ok(Some(MySwapForRpc {
-        my_coin: json_repr.taker_coin,
-        other_coin: json_repr.maker_coin,
-        uuid: json_repr.uuid,
-        started_at: json_repr.started_at as i64,
-        is_finished: filter_item.is_finished.as_bool(),
-        events: json_repr.events,
-        maker_volume: json_repr.maker_volume.into(),
-        taker_volume: json_repr.taker_volume.into(),
-        premium: json_repr.taker_premium.into(),
-        dex_fee: (json_repr.dex_fee_amount + json_repr.dex_fee_burn).into(),
-        lock_duration: json_repr.lock_duration as i64,
-        maker_coin_confs: json_repr.conf_settings.maker_coin_confs as i64,
-        maker_coin_nota: json_repr.conf_settings.maker_coin_nota,
-        taker_coin_confs: json_repr.conf_settings.taker_coin_confs as i64,
-        taker_coin_nota: json_repr.conf_settings.taker_coin_nota,
-        swap_version: json_repr.swap_version,
-    }))
+    let filters = transaction.table::<MySwapsFiltersTable>().await.mm_err(Into::into)?;
+    let filter_row = match filters
+        .get_item_by_unique_index("uuid", uuid)
+        .await
+        .mm_err(Into::into)?
+    {
+        Some((_, item)) => item,
+        None => return Ok(None),
+    };
+
+    let repr: R = serde_json::from_value(saved_row.saved_swap)?;
+    Ok(Some((repr, filter_row)))
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// SwapRpcData — unified V1 + V2 response envelope
-// ────────────────────────────────────────────────────────────────────────────
+// Wire envelope ------------------------------------------------------------
 
+/// Single-swap response variant — tagged on the wire as
+/// `{"swap_type":"<MakerV1|TakerV1|MakerV2|TakerV2>","swap_data":{...}}`.
 #[derive(Serialize)]
 #[serde(tag = "swap_type", content = "swap_data")]
 pub(crate) enum SwapRpcData {
@@ -318,66 +357,68 @@ pub(crate) enum SwapRpcData {
     TakerV2(MySwapForRpc<TakerSwapEvent>),
 }
 
+/// Internal collector for "fetch one swap by uuid" failure modes.
+///
+/// Not serialized to the wire — each public RPC error converts these
+/// into its own variant set.
 #[derive(Display)]
-enum GetSwapDataErr {
+enum FetchSwapErr {
     UnsupportedSwapType(u8),
     DbError(String),
 }
 
-impl From<SavedSwapError> for GetSwapDataErr {
+impl From<SavedSwapError> for FetchSwapErr {
     fn from(e: SavedSwapError) -> Self {
-        GetSwapDataErr::DbError(e.to_string())
+        FetchSwapErr::DbError(e.to_string())
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl From<SqlError> for GetSwapDataErr {
+impl From<SqlError> for FetchSwapErr {
     fn from(e: SqlError) -> Self {
-        GetSwapDataErr::DbError(e.to_string())
+        FetchSwapErr::DbError(e.to_string())
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-impl From<SwapV2DbError> for GetSwapDataErr {
+impl From<SwapV2DbError> for FetchSwapErr {
     fn from(e: SwapV2DbError) -> Self {
-        GetSwapDataErr::DbError(e.to_string())
+        FetchSwapErr::DbError(e.to_string())
     }
 }
 
-async fn get_swap_data_by_uuid_and_type(
-    ctx: &MmArc,
-    uuid: Uuid,
-    swap_type: u8,
-) -> MmResult<Option<SwapRpcData>, GetSwapDataErr> {
+/// Dispatches to the right backing store based on the persisted
+/// `swap_type` discriminant, then projects the row into a
+/// [`SwapRpcData`] variant.
+async fn fetch_swap_data(ctx: &MmArc, uuid: Uuid, swap_type: u8) -> MmResult<Option<SwapRpcData>, FetchSwapErr> {
     match swap_type {
         LEGACY_SWAP_TYPE => {
-            let saved_swap = SavedSwap::load_my_swap_from_db(ctx, uuid).await.mm_err(Into::into)?;
-            Ok(saved_swap.map(|swap| match swap {
+            let saved = SavedSwap::load_my_swap_from_db(ctx, uuid).await.mm_err(Into::into)?;
+            Ok(saved.map(|swap| match swap {
                 SavedSwap::Maker(m) => SwapRpcData::MakerV1(m),
                 SavedSwap::Taker(t) => SwapRpcData::TakerV1(t),
             }))
         },
         MAKER_SWAP_V2_TYPE => {
-            let data = get_maker_swap_data_for_rpc(ctx, &uuid).await.mm_err(Into::into)?;
-            Ok(data.map(SwapRpcData::MakerV2))
+            let row = get_maker_swap_data_for_rpc(ctx, &uuid).await.mm_err(Into::into)?;
+            Ok(row.map(SwapRpcData::MakerV2))
         },
         TAKER_SWAP_V2_TYPE => {
-            let data = get_taker_swap_data_for_rpc(ctx, &uuid).await.mm_err(Into::into)?;
-            Ok(data.map(SwapRpcData::TakerV2))
+            let row = get_taker_swap_data_for_rpc(ctx, &uuid).await.mm_err(Into::into)?;
+            Ok(row.map(SwapRpcData::TakerV2))
         },
-        unsupported => MmError::err(GetSwapDataErr::UnsupportedSwapType(unsupported)),
+        unknown => MmError::err(FetchSwapErr::UnsupportedSwapType(unknown)),
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// my_swap_status RPC
-// ────────────────────────────────────────────────────────────────────────────
+// `my_swap_status` RPC -----------------------------------------------------
 
 #[derive(Deserialize)]
 pub(crate) struct MySwapStatusRequest {
     uuid: Uuid,
 }
 
+/// Public error for `my_swap_status`. Variant names are wire-stable.
 #[derive(Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub(crate) enum MySwapStatusError {
@@ -400,11 +441,11 @@ impl From<SwapV2DbError> for MySwapStatusError {
     }
 }
 
-impl From<GetSwapDataErr> for MySwapStatusError {
-    fn from(e: GetSwapDataErr) -> Self {
+impl From<FetchSwapErr> for MySwapStatusError {
+    fn from(e: FetchSwapErr) -> Self {
         match e {
-            GetSwapDataErr::UnsupportedSwapType(swap_type) => MySwapStatusError::UnsupportedSwapType(swap_type),
-            GetSwapDataErr::DbError(err) => MySwapStatusError::DbError(err),
+            FetchSwapErr::UnsupportedSwapType(t) => MySwapStatusError::UnsupportedSwapType(t),
+            FetchSwapErr::DbError(m) => MySwapStatusError::DbError(m),
         }
     }
 }
@@ -420,6 +461,7 @@ impl HttpStatusCode for MySwapStatusError {
     }
 }
 
+/// Returns the full saved/in-flight state of one swap by UUID.
 pub(crate) async fn my_swap_status_rpc(
     ctx: MmArc,
     req: MySwapStatusRequest,
@@ -428,15 +470,14 @@ pub(crate) async fn my_swap_status_rpc(
         .await
         .mm_err(Into::into)?
         .or_mm_err(|| MySwapStatusError::NoSwapWithUuid(req.uuid))?;
-    get_swap_data_by_uuid_and_type(&ctx, req.uuid, swap_type)
+
+    fetch_swap_data(&ctx, req.uuid, swap_type)
         .await
         .mm_err(Into::into)?
         .or_mm_err(|| MySwapStatusError::NoSwapWithUuid(req.uuid))
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// my_recent_swaps RPC
-// ────────────────────────────────────────────────────────────────────────────
+// `my_recent_swaps` RPC ----------------------------------------------------
 
 #[derive(Deserialize)]
 pub(crate) struct MyRecentSwapsRequest {
@@ -458,6 +499,7 @@ pub(crate) struct MyRecentSwapsResponse {
     found_records: usize,
 }
 
+/// Public error for `my_recent_swaps`. Variant names are wire-stable.
 #[derive(Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub(crate) enum MyRecentSwapsErr {
@@ -487,6 +529,8 @@ impl HttpStatusCode for MyRecentSwapsErr {
     }
 }
 
+/// Returns a paged window of recent swaps, optionally narrowed by
+/// the [`MySwapsFilter`] criteria carried inside the request.
 pub(crate) async fn my_recent_swaps_rpc(
     ctx: MmArc,
     req: MyRecentSwapsRequest,
@@ -495,13 +539,16 @@ pub(crate) async fn my_recent_swaps_rpc(
         .my_recent_swaps_with_filters(&req.filter, Some(&req.paging_options))
         .await
         .mm_err(Into::into)?;
+
+    // Walk the page row-by-row; one missing detail row should not
+    // collapse the whole page, so failures are logged and dropped.
     let mut swaps = Vec::with_capacity(db_result.uuids_and_types.len());
     for (uuid, swap_type) in db_result.uuids_and_types.iter() {
-        match get_swap_data_by_uuid_and_type(&ctx, *uuid, *swap_type).await {
+        match fetch_swap_data(&ctx, *uuid, *swap_type).await {
             Ok(Some(data)) => swaps.push(data),
             Ok(None) => warn!("Swap {} data doesn't exist in DB", uuid),
             Err(e) => error!("Error {} while trying to get swap {} data", e, uuid),
-        };
+        }
     }
 
     Ok(MyRecentSwapsResponse {
@@ -516,9 +563,7 @@ pub(crate) async fn my_recent_swaps_rpc(
     })
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// active_swaps RPC
-// ────────────────────────────────────────────────────────────────────────────
+// `active_swaps` RPC -------------------------------------------------------
 
 #[derive(Deserialize)]
 pub(crate) struct ActiveSwapsRequest {
@@ -526,6 +571,13 @@ pub(crate) struct ActiveSwapsRequest {
     include_status: bool,
 }
 
+#[derive(Serialize)]
+pub(crate) struct ActiveSwapsResponse {
+    uuids: Vec<Uuid>,
+    statuses: HashMap<Uuid, SwapRpcData>,
+}
+
+/// Public error for `active_swaps`. Variant names are wire-stable.
 #[derive(Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub(crate) enum ActiveSwapsErr {
@@ -540,37 +592,32 @@ impl HttpStatusCode for ActiveSwapsErr {
     }
 }
 
-#[derive(Serialize)]
-pub(crate) struct ActiveSwapsResponse {
-    uuids: Vec<Uuid>,
-    statuses: HashMap<Uuid, SwapRpcData>,
-}
-
+/// Returns the UUIDs of in-flight swaps and, when `include_status` is
+/// set, the same per-swap status payload as [`my_swap_status_rpc`].
 pub(crate) async fn active_swaps_rpc(
     ctx: MmArc,
     req: ActiveSwapsRequest,
 ) -> MmResult<ActiveSwapsResponse, ActiveSwapsErr> {
     let uuids_with_types = active_swaps(&ctx).map_to_mm(ActiveSwapsErr::Internal)?;
+
     let statuses = if req.include_status {
-        let mut statuses = HashMap::with_capacity(uuids_with_types.len());
+        let mut acc = HashMap::with_capacity(uuids_with_types.len());
         for (uuid, swap_type) in uuids_with_types.iter() {
-            match get_swap_data_by_uuid_and_type(&ctx, *uuid, *swap_type).await {
+            match fetch_swap_data(&ctx, *uuid, *swap_type).await {
                 Ok(Some(data)) => {
-                    statuses.insert(*uuid, data);
+                    acc.insert(*uuid, data);
                 },
                 Ok(None) => warn!("Swap {} data doesn't exist in DB", uuid),
                 Err(e) => error!("Error {} while trying to get swap {} data", e, uuid),
             }
         }
-        statuses
+        acc
     } else {
         HashMap::new()
     };
+
     Ok(ActiveSwapsResponse {
-        uuids: uuids_with_types
-            .into_iter()
-            .map(|uuid_with_type| uuid_with_type.0)
-            .collect(),
+        uuids: uuids_with_types.into_iter().map(|(uuid, _)| uuid).collect(),
         statuses,
     })
 }
