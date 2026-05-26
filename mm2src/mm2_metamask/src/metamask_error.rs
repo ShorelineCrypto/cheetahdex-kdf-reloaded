@@ -1,15 +1,69 @@
+//! # Purpose
+//!
+//! Errors raised by the MetaMask integration: from the EIP-1193
+//! transport layer (browser-side `window.ethereum.request` failures
+//! and JSON-RPC error objects) all the way to the `MetamaskSession`
+//! API (account-selection mismatches, internal failures).
+//!
+//! # Public exports
+//!
+//! - [`Eip1193Error`] — low-level transport / RPC error returned by
+//!   the [`crate::Eip1193Provider`].
+//! - [`MetamaskError`] / [`MetamaskResult`] — high-level error wrapper
+//!   for the public MetaMask API surface.
+//! - [`MetamaskRpcError`] — fieldless enum exposed to RPC callers so
+//!   the GUI can handle MetaMask cases specifically.
+//! - [`from_metamask_error`] / [`WithMetamaskRpcError`] /
+//!   [`WithInternal`] — generic conversion glue used by RPC handlers.
+//!
+//! # Invariants
+//!
+//! - **MetaMask user-rejection code stays at `4001`.** This is part of
+//!   the EIP-1193 spec; do not change.
+//! - **Variant set is wire-stable.** `MetamaskRpcError` is serialised
+//!   into RPC responses and is consumed by GUI clients; renaming or
+//!   removing variants is a breaking change.
+//! - **No legacy `web3::Error`.** Post LP-17 step 2 the crate compiles
+//!   without any `rust-web3` fork; the `From<web3::Error>` impl that
+//!   used to live here is replaced by [`From<Eip1193Error> for
+//!   MetamaskError`] which classifies the same five categories
+//!   (Decoder, InvalidResponse, Transport, Rpc, Io) one-to-one.
+
 use derive_more::Display;
 use jsonrpc_core::{Error as RpcError, ErrorCode as RpcErrorCode};
 use mm2_err_handle::prelude::*;
 use serde_derive::{Deserialize, Serialize};
-use web3::Error as Web3Error;
 
 /// MetaMask uses JSON-RPC error code 4001 for user-rejected requests.
 const USER_REJECTED_CODE: RpcErrorCode = RpcErrorCode::ServerError(4001);
 
 pub type MetamaskResult<T> = MmResult<T, MetamaskError>;
 
-/// Errors originating from MetaMask / EIP-1193 interactions.
+/// Low-level error from the EIP-1193 wasm-bindgen transport.
+///
+/// Mirrors the variant set the previous `web3::Error` matching was
+/// written against so the `From<Eip1193Error> for MetamaskError`
+/// classification below preserves behaviour exactly.
+#[derive(Debug, Display)]
+pub enum Eip1193Error {
+    /// The browser provider returned a malformed JSON-RPC response that
+    /// could not be deserialised into the expected shape.
+    #[display(fmt = "EIP-1193 invalid response: {_0}")]
+    InvalidResponse(String),
+    /// The transport itself failed (provider missing, JS error, channel
+    /// shut down, etc.).
+    #[display(fmt = "EIP-1193 transport error: {_0}")]
+    Transport(String),
+    /// The provider returned a JSON-RPC error object (e.g. user
+    /// rejection 4001, chain not added 4902, ...).
+    #[display(fmt = "EIP-1193 RPC error: {_0:?}")]
+    Rpc(RpcError),
+    /// Unrecoverable internal error inside the transport plumbing.
+    #[display(fmt = "EIP-1193 internal error")]
+    Internal,
+}
+
+/// Errors originating from MetaMask interactions.
 #[derive(Debug, Display)]
 pub enum MetamaskError {
     #[display(fmt = "ETH provider not found")]
@@ -32,22 +86,19 @@ pub enum MetamaskError {
     Internal(String),
 }
 
-impl From<Web3Error> for MetamaskError {
-    fn from(e: Web3Error) -> Self {
+impl From<Eip1193Error> for MetamaskError {
+    fn from(e: Eip1193Error) -> Self {
         match e {
-            Web3Error::Decoder(msg) | Web3Error::InvalidResponse(msg) => {
-                MetamaskError::ErrorDeserializingMethodResult(msg)
-            },
-            Web3Error::Transport(tr) => MetamaskError::Transport(tr.to_string()),
-            Web3Error::Rpc(rpc) => {
+            Eip1193Error::InvalidResponse(msg) => MetamaskError::ErrorDeserializingMethodResult(msg),
+            Eip1193Error::Transport(msg) => MetamaskError::Transport(msg),
+            Eip1193Error::Rpc(rpc) => {
                 if rpc.code == USER_REJECTED_CODE {
                     MetamaskError::UserCancelled
                 } else {
                     MetamaskError::Rpc(rpc)
                 }
             },
-            Web3Error::Io(io) => MetamaskError::Transport(io.to_string()),
-            other => MetamaskError::Internal(other.to_string()),
+            Eip1193Error::Internal => MetamaskError::Internal("EIP-1193 transport internal error".to_owned()),
         }
     }
 }

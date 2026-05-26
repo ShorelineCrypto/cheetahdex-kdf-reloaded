@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-async-trait = "0.1"
 common = { path = "../common" }
 derive_more = "0.99"
 futures = "0.3"
@@ -14,12 +13,12 @@ jsonrpc-core = "18"
 lazy_static = "1.4"
 mm2_err_handle = { path = "../mm2_err_handle" }
 mm2_eth = { path = "../mm2_eth" }
-parking_lot = { version = "0.12.0" }
 serde = "1.0"
 serde_json = { version = "1.0", features = ["preserve_order", "raw_value"] }
 serde_derive = "1.0"
+# LP-17: replaces the GLEECBTC fork of rust-web3 (v0.20.0 + eip-1193).
+# Used to convert serde-encoded params to JsValue and parse the JS-side
+# RPC error shape returned by `window.ethereum.request`.
+serde-wasm-bindgen = "0.4.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web3 = { git = "https://github.com/GLEECBTC/rust-web3", tag = "v0.20.0", default-features = false, features = ["eip-1193"] }
-# Modern Rust Ethereum stack — replacing `web3` (LP-17, parallel migration).
-alloy = { workspace = true }

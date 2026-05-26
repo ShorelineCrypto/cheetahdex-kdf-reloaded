@@ -1998,7 +1998,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek 1.0.1",
  "ed25519-dalek-bip32 0.2.0",
- "ethabi 6.1.0",
+ "ethabi",
  "ethcore-transaction",
  "ethereum-types 0.4.2",
  "ethkey",
@@ -2078,7 +2078,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
- "web3 0.6.0",
+ "web3",
  "webpki-roots",
  "winapi",
  "zbase32",
@@ -3389,23 +3389,6 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tiny-keccak 1.4.4",
-]
-
-[[package]]
-name = "ethabi"
-version = "17.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4966fba78396ff92db3b817ee71143eccd98acf0f876b8d600e585a670c5d1b"
-dependencies = [
- "ethereum-types 0.13.1",
- "hex 0.4.3",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "sha3 0.10.9",
- "thiserror 1.0.69",
- "uint 0.9.1",
 ]
 
 [[package]]
@@ -5912,7 +5895,7 @@ dependencies = [
 name = "mm2_eth"
 version = "0.1.0"
 dependencies = [
- "ethabi 6.1.0",
+ "ethabi",
  "ethereum-types 0.4.2",
  "ethkey",
  "hex 0.4.3",
@@ -6086,8 +6069,6 @@ dependencies = [
 name = "mm2_metamask"
 version = "0.1.0"
 dependencies = [
- "alloy",
- "async-trait",
  "common",
  "derive_more 0.99.11",
  "futures 0.3.15",
@@ -6097,13 +6078,12 @@ dependencies = [
  "lazy_static",
  "mm2_err_handle",
  "mm2_eth",
- "parking_lot 0.12.5",
  "serde",
+ "serde-wasm-bindgen",
  "serde_derive",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "web3 0.19.0",
 ]
 
 [[package]]
@@ -11702,7 +11682,7 @@ dependencies = [
  "arrayvec 0.4.12",
  "base64 0.10.1",
  "error-chain",
- "ethabi 6.1.0",
+ "ethabi",
  "ethereum-types 0.4.2",
  "futures 0.1.29",
  "jsonrpc-core 8.0.1",
@@ -11714,35 +11694,6 @@ dependencies = [
  "serde_json",
  "tokio-timer",
  "url 1.7.2",
-]
-
-[[package]]
-name = "web3"
-version = "0.19.0"
-source = "git+https://github.com/GLEECBTC/rust-web3?tag=v0.20.0#01de1d732e61c920cfb2fb1533db7d7110c8a457"
-dependencies = [
- "arrayvec 0.7.6",
- "derive_more 0.99.11",
- "ethabi 17.2.0",
- "ethereum-types 0.13.1",
- "futures 0.3.15",
- "futures-timer",
- "getrandom 0.2.17",
- "hex 0.4.3",
- "idna 0.2.3",
- "js-sys",
- "jsonrpc-core 18.0.0",
- "log 0.4.29",
- "parking_lot 0.12.5",
- "pin-project 1.1.11",
- "rand 0.8.4",
- "rlp 0.5.0",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "tiny-keccak 2.0.2",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]

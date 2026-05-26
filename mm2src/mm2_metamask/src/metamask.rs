@@ -1,3 +1,32 @@
+//! # Purpose
+//!
+//! Public MetaMask session API. Provides the three operations the
+//! desktop wallet actually uses against MetaMask: requesting the
+//! active account, switching the EVM chain, and producing an
+//! EIP-712 signature.
+//!
+//! # Public exports
+//!
+//! - [`detect_metamask_provider`] — try to grab the browser-injected
+//!   provider, returning [`crate::MetamaskError::EthProviderNotFound`]
+//!   when no extension is present.
+//! - [`MetamaskSession`] — RAII guard around a global mutex so chain
+//!   switching and signing cannot interleave across concurrent tasks.
+//!
+//! # Invariants
+//!
+//! - **JSON-RPC method names are wire-stable.** `eth_requestAccounts`,
+//!   `wallet_switchEthereumChain`, and `eth_signTypedData_v4` are the
+//!   exact names MetaMask expects; do not rename.
+//! - **Single in-flight session.** `SESSION_GUARD` enforces strict
+//!   serialisation across the whole process; only one `MetamaskSession`
+//!   may be live at any given moment.
+//! - **Account match check is the caller's responsibility.** This
+//!   module just signs whatever address it is handed; mismatches
+//!   between the requested address and the currently active MetaMask
+//!   account are detected at a layer above (see
+//!   `MetamaskError::UnexpectedAccountSelected`).
+
 use crate::eip_1193_provider::Eip1193Provider;
 use crate::metamask_error::{MetamaskError, MetamaskResult};
 use futures::lock::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
@@ -7,8 +36,6 @@ use mm2_err_handle::prelude::*;
 use mm2_eth::typed_data::{Eip712, H256};
 use serde::Serialize;
 use serde_json::{json, Value as Json};
-use web3::helpers::CallFuture;
-use web3::Transport;
 
 lazy_static! {
     /// Serialises MetaMask requests: only one in-flight at a time so the
@@ -43,7 +70,11 @@ impl<'a> MetamaskSession<'a> {
     ///
     /// Expects exactly one account; returns an error otherwise.
     pub async fn eth_request_account(&self) -> MetamaskResult<String> {
-        let accounts: Vec<String> = CallFuture::new(self.transport.execute("eth_requestAccounts", vec![])).await?;
+        let accounts: Vec<String> = self
+            .transport
+            .call_method("eth_requestAccounts", vec![])
+            .await
+            .map_to_mm(MetamaskError::from)?;
         accounts
             .into_iter()
             .exactly_one()
@@ -51,11 +82,19 @@ impl<'a> MetamaskSession<'a> {
     }
 
     /// Asks MetaMask to switch to the given EVM chain.
-    pub async fn wallet_switch_ethereum_chain(&self, chain_id: u64) -> Result<(), web3::Error> {
+    ///
+    /// On success the wallet returns `null`; we accept any payload
+    /// (the result is unused) and only surface errors.
+    pub async fn wallet_switch_ethereum_chain(&self, chain_id: u64) -> MetamaskResult<()> {
         let req = json!({
             "chainId": format!("0x{chain_id:x}"),
         });
-        CallFuture::new(self.transport.execute("wallet_switchEthereumChain", vec![req])).await
+        let _: Json = self
+            .transport
+            .call_method("wallet_switchEthereumChain", vec![req])
+            .await
+            .map_to_mm(MetamaskError::from)?;
+        Ok(())
     }
 
     /// Signs EIP-712 typed data via `eth_signTypedData_v4` and returns the
@@ -78,11 +117,11 @@ impl<'a> MetamaskSession<'a> {
         let hash = mm2_eth::typed_data::hash_typed_data(request)
             .map_err(|e| MetamaskError::Internal(format!("EIP-712 hashing error: {e}")))?;
 
-        let signature: String = CallFuture::new(
-            self.transport
-                .execute("eth_signTypedData_v4", vec![addr_json, Json::String(request_json)]),
-        )
-        .await?;
+        let signature: String = self
+            .transport
+            .call_method("eth_signTypedData_v4", vec![addr_json, Json::String(request_json)])
+            .await
+            .map_to_mm(MetamaskError::from)?;
 
         Ok((hash, signature))
     }
