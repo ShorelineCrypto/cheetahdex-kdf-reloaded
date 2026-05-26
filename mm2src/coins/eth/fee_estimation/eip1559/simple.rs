@@ -1,15 +1,34 @@
 use super::{EstimationSource, FeePerGasEstimated, FeePerGasLevel, PriorityLevelId, FEE_PRIORITY_LEVEL_N};
-use crate::eth::web3_transport::FeeHistoryResult;
 use crate::eth::{wei_from_gwei_decimal, wei_to_gwei_decimal, EthCoin, Web3RpcError, Web3RpcResult};
 use mm2_err_handle::mm_error::MmError;
 use mm2_err_handle::or_mm_error::OrMmError;
 use mm2_err_handle::prelude::MapMmError;
 
+// LP-17: alloy replaces the custom `EthFeeHistoryNamespace` over
+// `web3::Web3`. Wire-level `eth_feeHistory` parameters and the
+// returned JSON shape are identical; only the in-memory numeric
+// type differs (alloy uses `u128` for wei amounts where the legacy
+// `FeeHistoryResult` used `U256`).
+use crate::eth::alloy_compat::assert_send_future;
+use alloy::providers::Provider;
+use alloy::rpc::types::eth::{BlockNumberOrTag, FeeHistory};
 use bigdecimal::BigDecimal;
 use ethereum_types::U256;
-use futures::compat::Future01CompatExt;
 use num_traits::FromPrimitive;
-use web3::types::BlockNumber;
+
+/// `ethereum_types::U256` (LP-13 legacy) does not implement
+/// `From<u128>`; alloy emits `u128` for fee values. Splits the
+/// 128-bit value into two 64-bit limbs to bridge cleanly without
+/// pulling in an extra conversion crate.
+#[inline]
+fn u128_to_u256(v: u128) -> U256 {
+    let lo = v as u64;
+    let hi = (v >> 64) as u64;
+    let mut bytes = [0u8; 32];
+    bytes[16..24].copy_from_slice(&hi.to_be_bytes());
+    bytes[24..32].copy_from_slice(&lo.to_be_bytes());
+    U256::from_big_endian(&bytes)
+}
 
 /// Simple priority fee per gas estimator based on fee history.
 /// Used as fallback when no external gas api provider is available.
@@ -42,15 +61,13 @@ impl FeePerGasSimpleEstimator {
 
     /// Estimate gas priority fees using eth_feeHistory
     pub async fn estimate_fee_by_history(coin: &EthCoin) -> Web3RpcResult<FeePerGasEstimated> {
-        let fee_history_namespace: crate::eth::web3_transport::EthFeeHistoryNamespace<_> = coin.web3.api();
-        let res = fee_history_namespace
-            .eth_fee_history(
-                U256::from(Self::history_depth()),
-                BlockNumber::Latest,
-                Self::history_percentiles(),
-            )
-            .compat()
-            .await;
+        let provider = coin.alloy_provider();
+        let res = assert_send_future(provider.get_fee_history(
+            Self::history_depth(),
+            BlockNumberOrTag::Latest,
+            Self::history_percentiles(),
+        ))
+        .await;
 
         match res {
             Ok(fee_history) => Ok(Self::calculate_with_history(&fee_history)?),
@@ -65,15 +82,15 @@ impl FeePerGasSimpleEstimator {
     fn priority_fee_for_level(
         level: PriorityLevelId,
         base_fee_gwei: BigDecimal,
-        fee_history: &FeeHistoryResult,
+        fee_history: &FeeHistory,
     ) -> Web3RpcResult<FeePerGasLevel> {
         let level_index = level as usize;
         let level_rewards = fee_history
-            .priority_rewards
+            .reward
             .as_ref()
             .or_mm_err(|| Web3RpcError::Internal("expected reward in eth_feeHistory".into()))?
             .iter()
-            .map(|rewards| rewards.get(level_index).copied().unwrap_or_else(|| U256::from(0)))
+            .map(|rewards| u128_to_u256(rewards.get(level_index).copied().unwrap_or(0u128)))
             .collect::<Vec<_>>();
 
         let max_priority_fee_per_gas = Self::percentile_of(&level_rewards, Self::PRIORITY_FEE_PERCENTILES[level_index]);
@@ -96,15 +113,14 @@ impl FeePerGasSimpleEstimator {
         })
     }
 
-    fn calculate_with_history(fee_history: &FeeHistoryResult) -> Web3RpcResult<FeePerGasEstimated> {
-        let latest_base_fee = fee_history
-            .base_fee_per_gas
-            .first()
-            .copied()
-            .unwrap_or_else(|| U256::from(0));
+    fn calculate_with_history(fee_history: &FeeHistory) -> Web3RpcResult<FeePerGasEstimated> {
+        // Convert alloy's `u128` base-fee samples into the legacy
+        // `U256` shape that the percentile / multiplier helpers expect.
+        let base_fees: Vec<U256> = fee_history.base_fee_per_gas.iter().copied().map(u128_to_u256).collect();
+        let latest_base_fee = base_fees.first().copied().unwrap_or_else(|| U256::from(0));
         let latest_base_fee_gwei = wei_to_gwei_decimal(latest_base_fee).unwrap_or_else(|_| BigDecimal::from(0));
 
-        let predicted_base_fee = Self::predict_base_fee(&fee_history.base_fee_per_gas);
+        let predicted_base_fee = Self::predict_base_fee(&base_fees);
         Ok(FeePerGasEstimated {
             base_fee: predicted_base_fee,
             low: Self::priority_fee_for_level(PriorityLevelId::Low, latest_base_fee_gwei.clone(), fee_history)?,
