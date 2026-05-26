@@ -81,6 +81,7 @@ pub use rlp;
 
 // ─── Sub-modules ────────────────────────────────────────────────────────────
 
+pub(crate) mod alloy_compat;
 pub mod eth_hd_wallet;
 pub(crate) mod eth_swap_v2;
 pub mod fee_estimation;
