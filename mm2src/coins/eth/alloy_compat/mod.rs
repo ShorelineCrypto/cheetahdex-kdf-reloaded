@@ -38,9 +38,11 @@
 
 pub mod error;
 pub mod provider;
+pub mod send_shim;
 pub mod transport;
 pub mod types;
 
 pub use error::EvmError;
 pub use provider::{build_provider, KdfProvider};
+pub use send_shim::assert_send_future;
 pub use transport::AlloyTransport;

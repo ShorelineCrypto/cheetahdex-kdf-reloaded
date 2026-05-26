@@ -110,6 +110,20 @@ impl Web3Transport {
             event_handlers,
         })
     }
+
+    /// LP-17: borrow the configured RPC URIs so callers can build a
+    /// parallel alloy [`super::alloy_compat::KdfProvider`] over the
+    /// same multi-URL fail-over set without re-parsing strings.
+    pub fn uris(&self) -> &[http::Uri] {
+        &self.uris
+    }
+
+    /// LP-17: borrow the metric/event handlers so the alloy transport
+    /// can fan out the same `on_outgoing_request` /
+    /// `on_incoming_response` notifications.
+    pub fn event_handlers(&self) -> &[RpcTransportEventHandlerShared] {
+        &self.event_handlers
+    }
 }
 
 struct SendFuture<T>(T);

@@ -21,7 +21,10 @@ use ethereum_types::Address;
 use ethkey::{public_to_address, Public};
 use mm2_err_handle::prelude::*;
 use std::str::FromStr;
-use web3::Web3;
+// LP-17: alloy provider replaces `web3::Web3` for nonce/balance lookups.
+use super::alloy_compat::{assert_send_future, types::Address as AlloyAddress, KdfProvider};
+use alloy::providers::Provider;
+use std::future::IntoFuture;
 
 use super::EthCoin;
 
@@ -364,8 +367,12 @@ impl CoinWithDerivationMethod for EthCoin {
 // HDAddressBalanceScanner for ETH — checks nonce/balance
 // -------------------------------------------------------------------
 
+/// LP-17: scanner now drives an alloy [`KdfProvider`] instead of
+/// `web3::Web3<Web3Transport>`. Wire-level RPC methods
+/// (`eth_getTransactionCount`, `eth_getBalance`) and the implicit
+/// `latest` block tag are unchanged.
 pub struct EthAddressScanner {
-    web3: Web3<super::web3_transport::Web3Transport>,
+    provider: KdfProvider,
 }
 
 #[async_trait]
@@ -373,23 +380,15 @@ impl HDAddressBalanceScanner for EthAddressScanner {
     type Address = Address;
 
     async fn is_address_used(&self, address: &Address) -> BalanceResult<bool> {
-        use futures::compat::Future01CompatExt;
         // An address is considered "used" if its nonce > 0 or balance > 0.
-        let nonce = self
-            .web3
-            .eth()
-            .transaction_count(*address, Some(web3::types::BlockNumber::Latest))
-            .compat()
+        let alloy_addr = AlloyAddress::from(address.0);
+        let nonce = assert_send_future(self.provider.get_transaction_count(alloy_addr).into_future())
             .await
             .map_err(|e| BalanceError::Transport(format!("{}", e)))?;
-        if !nonce.is_zero() {
+        if nonce != 0 {
             return Ok(true);
         }
-        let balance = self
-            .web3
-            .eth()
-            .balance(*address, Some(web3::types::BlockNumber::Latest))
-            .compat()
+        let balance = assert_send_future(self.provider.get_balance(alloy_addr).into_future())
             .await
             .map_err(|e| BalanceError::Transport(format!("{}", e)))?;
         Ok(!balance.is_zero())
@@ -408,7 +407,7 @@ impl HDWalletBalanceOps for EthCoin {
 
     async fn produce_hd_address_scanner(&self) -> BalanceResult<Self::HDAddressScanner> {
         Ok(EthAddressScanner {
-            web3: self.web3.clone(),
+            provider: self.alloy_provider(),
         })
     }
 
@@ -450,15 +449,17 @@ impl HDWalletBalanceOps for EthCoin {
     }
 
     async fn known_address_balance(&self, address: &Self::Address) -> BalanceResult<CoinBalance> {
-        let balance = self
-            .web3
-            .eth()
-            .balance(*address, Some(web3::types::BlockNumber::Latest))
-            .compat()
+        let provider = self.alloy_provider();
+        let alloy_addr = AlloyAddress::from(address.0);
+        let balance = assert_send_future(provider.get_balance(alloy_addr).into_future())
             .await
             .map_err(|e| BalanceError::Transport(format!("{}", e)))?;
+        // alloy returns its own `U256`; round-trip through bytes to feed the
+        // existing `u256_to_big_decimal` helper that takes the legacy
+        // `ethereum_types::U256`.
+        let balance_legacy = ethereum_types::U256::from_big_endian(&balance.to_be_bytes::<32>());
 
-        let balance_decimal = u256_to_big_decimal(balance, self.decimals)?;
+        let balance_decimal = u256_to_big_decimal(balance_legacy, self.decimals)?;
         Ok(CoinBalance {
             spendable: balance_decimal,
             unspendable: BigDecimal::from(0),

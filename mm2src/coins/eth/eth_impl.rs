@@ -19,6 +19,20 @@ pub async fn make_gas_station_request(url: &str) -> GasStationResult {
 
 #[cfg_attr(test, mockable)]
 impl EthCoinImpl {
+    /// LP-17: builds a fresh alloy [`super::alloy_compat::KdfProvider`]
+    /// over the same RPC URLs and event handlers that the legacy
+    /// `web3` field uses. Provider construction is cheap (it wraps an
+    /// `Arc`-shared transport) so we build on demand during the
+    /// migration phase. Once every `coins/eth` file moves off the
+    /// `web3` crate the provider will be promoted to a cached field
+    /// on `EthCoinImpl` and the legacy `web3` field will be dropped.
+    pub(crate) fn alloy_provider(&self) -> super::alloy_compat::KdfProvider {
+        let urls: Vec<String> = self.web3.transport().uris().iter().map(|u| u.to_string()).collect();
+        let handlers = self.web3.transport().event_handlers().to_vec();
+        super::alloy_compat::build_provider(urls, handlers)
+            .expect("EthCoinImpl::alloy_provider: transport URIs already validated at construction")
+    }
+
     /// Gets Transfer events from ERC20 smart contract `addr` between `from_block` and `to_block`
     pub(crate) fn erc20_transfer_events(
         &self,
