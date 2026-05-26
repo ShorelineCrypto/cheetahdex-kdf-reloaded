@@ -9,19 +9,44 @@
 //! 2. Assemble them into an [`Eip712`] struct.
 //! 3. Call [`hash_typed_data`] to produce the 32-byte digest ready for signing.
 
-// web3::Error is large due to error-chain; nothing we can do about it.
-#![allow(clippy::result_large_err)]
-
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::error::Error as StdError;
 use std::fmt;
 use std::str::FromStr;
 use tiny_keccak::{Hasher, Keccak};
-use web3::error::ErrorKind as Web3ErrorKind;
 
 /// 32-byte hash output.
 pub type H256 = [u8; 32];
+
+/// Errors raised by the EIP-712 encoder/hasher.
+///
+/// All variants currently map to the legacy `TypedDataError::Decoder`
+/// classification so callers (notably `mm2_metamask::MetamaskError`)
+/// see no behavioural change after the LP-17 web3 → alloy migration.
+#[derive(Debug)]
+pub struct TypedDataError(String);
+
+impl TypedDataError {
+    /// Build a new error from any displayable message.
+    pub fn new<M: fmt::Display>(message: M) -> Self {
+        Self(message.to_string())
+    }
+
+    /// Borrow the underlying message.
+    pub fn message(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for TypedDataError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "EIP-712 decode error: {}", self.0)
+    }
+}
+
+impl StdError for TypedDataError {}
 
 /// Name of the mandatory domain separator type.
 const DOMAIN_TYPE_NAME: &str = "EIP712Domain";
@@ -144,7 +169,7 @@ pub struct Eip712<D, M> {
 ///
 /// Implements `keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message))`
 /// per the specification.
-pub fn hash_typed_data<D, M>(data: Eip712<D, M>) -> Result<H256, web3::Error>
+pub fn hash_typed_data<D, M>(data: Eip712<D, M>) -> Result<H256, TypedDataError>
 where
     D: Serialize,
     M: Serialize,
@@ -173,7 +198,7 @@ where
 
 type TypeRegistry = IndexMap<String, Vec<TypedField>>;
 
-fn hash_struct(types: &TypeRegistry, type_name: &str, data: &serde_json::Value) -> Result<[u8; 32], web3::Error> {
+fn hash_struct(types: &TypeRegistry, type_name: &str, data: &serde_json::Value) -> Result<[u8; 32], TypedDataError> {
     let mut encoded = type_hash(types, type_name)?;
 
     let fields = types
@@ -189,7 +214,7 @@ fn hash_struct(types: &TypeRegistry, type_name: &str, data: &serde_json::Value) 
     Ok(keccak256(&encoded))
 }
 
-fn type_hash(types: &TypeRegistry, type_name: &str) -> Result<Vec<u8>, web3::Error> {
+fn type_hash(types: &TypeRegistry, type_name: &str) -> Result<Vec<u8>, TypedDataError> {
     let encoded_type = encode_type_string(types, type_name)?;
     Ok(keccak256(encoded_type.as_bytes()).to_vec())
 }
@@ -197,7 +222,7 @@ fn type_hash(types: &TypeRegistry, type_name: &str) -> Result<Vec<u8>, web3::Err
 /// Builds the canonical type encoding string, including sorted dependencies.
 ///
 /// E.g. `Mail(Person from,Person to,string contents)Person(string name,address wallet)`
-fn encode_type_string(types: &TypeRegistry, primary: &str) -> Result<String, web3::Error> {
+fn encode_type_string(types: &TypeRegistry, primary: &str) -> Result<String, TypedDataError> {
     let mut deps = collect_dependencies(types, primary);
     // Remove the primary from deps and sort the rest alphabetically.
     deps.remove(primary);
@@ -211,7 +236,7 @@ fn encode_type_string(types: &TypeRegistry, primary: &str) -> Result<String, web
     Ok(result)
 }
 
-fn format_single_type(types: &TypeRegistry, name: &str) -> Result<String, web3::Error> {
+fn format_single_type(types: &TypeRegistry, name: &str) -> Result<String, TypedDataError> {
     let fields = types
         .get(name)
         .ok_or_else(|| encode_err(format!("unknown type '{}'", name)))?;
@@ -246,7 +271,7 @@ fn encode_field(
     field_type: &str,
     value: &serde_json::Value,
     field_name: Option<&str>,
-) -> Result<Vec<u8>, web3::Error> {
+) -> Result<Vec<u8>, TypedDataError> {
     // If the field type is a known custom struct, hash it recursively.
     if types.contains_key(field_type) {
         let hash = hash_struct(types, field_type, value)?;
@@ -267,7 +292,7 @@ fn encode_field(
     }
 }
 
-fn encode_bool(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, web3::Error> {
+fn encode_bool(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, TypedDataError> {
     let b = val.as_bool().ok_or_else(|| type_error("bool", val, ctx))?;
     let mut out = [0u8; 32];
     if b {
@@ -276,12 +301,12 @@ fn encode_bool(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, we
     Ok(out.to_vec())
 }
 
-fn encode_string(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, web3::Error> {
+fn encode_string(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, TypedDataError> {
     let s = val.as_str().ok_or_else(|| type_error("string", val, ctx))?;
     Ok(keccak256(s.as_bytes()).to_vec())
 }
 
-fn encode_uint256(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, web3::Error> {
+fn encode_uint256(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, TypedDataError> {
     let num_str = match val {
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::String(s) => s.clone(),
@@ -298,7 +323,7 @@ fn encode_uint256(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>,
     Ok(out.to_vec())
 }
 
-fn encode_address(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, web3::Error> {
+fn encode_address(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, TypedDataError> {
     let s = val.as_str().ok_or_else(|| type_error("address", val, ctx))?;
     let s = s.strip_prefix("0x").unwrap_or(s);
     validate_hex(s, ctx)?;
@@ -315,7 +340,7 @@ fn encode_address(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>,
     Ok(out.to_vec())
 }
 
-fn encode_bytes32(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, web3::Error> {
+fn encode_bytes32(val: &serde_json::Value, ctx: Option<&str>) -> Result<Vec<u8>, TypedDataError> {
     let s = val.as_str().ok_or_else(|| type_error("bytes32", val, ctx))?;
     let s = s.strip_prefix("0x").unwrap_or(s);
     validate_hex(s, ctx)?;
@@ -342,14 +367,14 @@ fn keccak256(data: &[u8]) -> [u8; 32] {
     out
 }
 
-fn validate_hex(s: &str, ctx: Option<&str>) -> Result<(), web3::Error> {
+fn validate_hex(s: &str, ctx: Option<&str>) -> Result<(), TypedDataError> {
     if !s.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(encode_err(format!("invalid hex characters (field {:?})", ctx)));
     }
     Ok(())
 }
 
-fn type_error(expected: &str, found: &serde_json::Value, ctx: Option<&str>) -> web3::Error {
+fn type_error(expected: &str, found: &serde_json::Value, ctx: Option<&str>) -> TypedDataError {
     encode_err(format!(
         "expected {} but found {:?} (field {:?})",
         expected,
@@ -358,8 +383,8 @@ fn type_error(expected: &str, found: &serde_json::Value, ctx: Option<&str>) -> w
     ))
 }
 
-fn encode_err<E: fmt::Display>(e: E) -> web3::Error {
-    Web3ErrorKind::Decoder(e.to_string()).into()
+fn encode_err<E: fmt::Display>(e: E) -> TypedDataError {
+    TypedDataError::new(e)
 }
 
 // ---------------------------------------------------------------------------

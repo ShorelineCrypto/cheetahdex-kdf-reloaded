@@ -17,6 +17,6 @@ secp256k1 = { version = "0.20", features = ["recovery"] }
 serde.workspace = true
 serde_json.workspace = true
 tiny-keccak = { version = "2.0", features = ["keccak"] }
-web3 = { git = "https://github.com/artemii235/rust-web3", default-features = false }
-# Modern Rust Ethereum stack — replacing `web3` (LP-17, parallel migration).
-alloy = { workspace = true }
+# LP-17: web3 dropped (typed_data.rs uses local TypedDataError now).
+# alloy is no longer required by this crate either; reintroduce later
+# if/when keys.rs or new modules need alloy types.
