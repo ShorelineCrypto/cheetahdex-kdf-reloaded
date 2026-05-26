@@ -101,6 +101,7 @@ uuid = { workspace = true }
 web3 = { git = "https://github.com/artemii235/rust-web3", default-features = false }
 # Modern Rust Ethereum stack — replacing `web3` (LP-17, parallel migration).
 alloy = { workspace = true }
+tower = { workspace = true }
 winapi = "0.3"
 zbase32 = "0.1.2"
 

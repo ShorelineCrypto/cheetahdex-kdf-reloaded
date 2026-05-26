@@ -56,6 +56,7 @@ resolver = "2"
 alloy = { version = "2.0", default-features = false, features = [
     "consensus",
     "contract",
+    "json-rpc",
     "network",
     "provider-http",
     "rpc-types",
@@ -114,6 +115,7 @@ sia-rust = { git = "https://github.com/KomodoPlatform/sia-rust", branch = "refac
 # using the same version as cosmrs
 tendermint-rpc = { version = "0.35", default-features = false }
 thiserror = "1"
+tower = "0.5"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.release]
