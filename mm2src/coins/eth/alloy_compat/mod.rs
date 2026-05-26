@@ -37,8 +37,10 @@
 //!   and therefore GPLv2-compatible (per LP-17 prompt §0).
 
 pub mod error;
+pub mod provider;
 pub mod transport;
 pub mod types;
 
 pub use error::EvmError;
+pub use provider::{build_provider, KdfProvider};
 pub use transport::AlloyTransport;
