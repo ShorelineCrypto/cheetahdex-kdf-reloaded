@@ -145,6 +145,17 @@ impl SwapOps for EthCoin {
     }
 
     fn validate_fee(&self, args: ValidateFeeArgs<'_>) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        // LP-17: replaces `selfi.web3.eth().transaction(TransactionId::Hash(tx.hash))` with
+        // alloy's native `Provider::get_transaction_by_hash`. Wire-level
+        // RPC method (`eth_getTransactionByHash`) is unchanged. The
+        // alloy `Transaction` carries the typed-envelope inner; field
+        // accesses are routed through the `alloy::consensus::Transaction`
+        // trait (gas_price/value/input/to/etc.) plus the wrapper's own
+        // `block_number` / `inner.signer()`.
+        use crate::eth::alloy_compat::assert_send_future;
+        use alloy::consensus::Transaction as _;
+        use alloy::providers::Provider;
+
         let selfi = self.clone();
         let tx = match args.fee_tx {
             TransactionEnum::SignedEthTx(t) => t.clone(),
@@ -158,20 +169,19 @@ impl SwapOps for EthCoin {
 
         let fut = async move {
             let expected_value = try_s!(wei_from_big_decimal(&amount, selfi.decimals));
-            let tx_from_rpc = try_s!(
-                selfi
-                    .web3
-                    .eth()
-                    .transaction(TransactionId::Hash(tx.hash))
-                    .compat()
-                    .await
-            );
+            let provider = selfi.alloy_provider();
+            let tx_hash_alloy = alloy::primitives::B256::from_slice(&tx.hash.0);
+            let tx_from_rpc = try_s!(assert_send_future(provider.get_transaction_by_hash(tx_hash_alloy)).await);
             let tx_from_rpc = match tx_from_rpc {
                 Some(t) => t,
                 None => return ERR!("Didn't find provided tx {:?} on ETH node", tx),
             };
 
-            if tx_from_rpc.from != sender_addr {
+            // Re-derive the legacy `ethereum_types::Address` shape that the
+            // rest of this function still uses. alloy's `Address` is
+            // bit-for-bit identical (20-byte H160).
+            let from_addr = Address::from_slice(tx_from_rpc.inner.signer().as_slice());
+            if from_addr != sender_addr {
                 return ERR!(
                     "Fee tx {:?} was sent from wrong address, expected {:?}",
                     tx_from_rpc,
@@ -180,7 +190,7 @@ impl SwapOps for EthCoin {
             }
 
             if let Some(block_number) = tx_from_rpc.block_number {
-                if block_number <= min_block_number.into() {
+                if block_number <= min_block_number {
                     return ERR!(
                         "Fee tx {:?} confirmed before min_block {}",
                         tx_from_rpc,
@@ -188,9 +198,18 @@ impl SwapOps for EthCoin {
                     );
                 }
             }
+
+            let envelope = tx_from_rpc.inner.inner();
+            let to_addr = envelope.to().map(|a| Address::from_slice(a.as_slice()));
+            let tx_value = {
+                let bytes: [u8; 32] = envelope.value().to_be_bytes();
+                U256::from_big_endian(&bytes)
+            };
+            let tx_input: Vec<u8> = envelope.input().to_vec();
+
             match &selfi.coin_type {
                 EthCoinType::Eth => {
-                    if tx_from_rpc.to != Some(fee_addr) {
+                    if to_addr != Some(fee_addr) {
                         return ERR!(
                             "Fee tx {:?} was sent to wrong address, expected {:?}",
                             tx_from_rpc,
@@ -198,7 +217,7 @@ impl SwapOps for EthCoin {
                         );
                     }
 
-                    if tx_from_rpc.value < expected_value {
+                    if tx_value < expected_value {
                         return ERR!(
                             "Fee tx {:?} value is less than expected {:?}",
                             tx_from_rpc,
@@ -210,7 +229,7 @@ impl SwapOps for EthCoin {
                     platform: _,
                     token_addr,
                 } => {
-                    if tx_from_rpc.to != Some(*token_addr) {
+                    if to_addr != Some(*token_addr) {
                         return ERR!(
                             "ERC20 Fee tx {:?} called wrong smart contract, expected {:?}",
                             tx_from_rpc,
@@ -219,7 +238,7 @@ impl SwapOps for EthCoin {
                     }
 
                     let function = try_s!(ERC20_CONTRACT.function("transfer"));
-                    let decoded_input = try_s!(function.decode_input(&tx_from_rpc.input.0));
+                    let decoded_input = try_s!(function.decode_input(&tx_input));
 
                     if decoded_input[0] != Token::Address(fee_addr) {
                         return ERR!(
@@ -319,16 +338,20 @@ impl SwapOps for EthCoin {
 
                 match found {
                     Some(event) => {
-                        let transaction = try_s!(
-                            selfi
-                                .web3
-                                .eth()
-                                .transaction(TransactionId::Hash(event.transaction_hash.unwrap()))
-                                .compat()
-                                .await
-                        );
+                        // LP-17: alloy `Provider::get_transaction_by_hash` replaces
+                        // `web3.eth().transaction(...)`. The fetched alloy
+                        // `Transaction` is round-tripped through
+                        // `signed_tx_from_alloy_tx` which reconstructs the
+                        // legacy `UnverifiedTransaction` (artemii235 fork).
+                        use crate::eth::alloy_compat::assert_send_future;
+                        use alloy::providers::Provider;
+
+                        let provider = selfi.alloy_provider();
+                        let event_hash = alloy::primitives::B256::from_slice(&event.transaction_hash.unwrap().0);
+                        let transaction =
+                            try_s!(assert_send_future(provider.get_transaction_by_hash(event_hash)).await);
                         match transaction {
-                            Some(t) => break Ok(Some(try_s!(signed_tx_from_web3_tx(t)).into())),
+                            Some(t) => break Ok(Some(try_s!(signed_tx_from_alloy_tx(t)).into())),
                             None => break Ok(None),
                         }
                     },

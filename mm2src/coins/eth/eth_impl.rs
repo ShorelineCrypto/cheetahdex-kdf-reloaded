@@ -2305,6 +2305,85 @@ pub fn signed_tx_from_web3_tx(transaction: Web3Transaction) -> Result<SignedEthT
     Ok(try_s!(SignedEthTx::new(unverified)))
 }
 
+/// LP-17: alloy-flavoured replacement for [`signed_tx_from_web3_tx`].
+///
+/// Re-builds a legacy `UnverifiedTransaction` (artemii235's parity-ethereum
+/// fork — only legacy 9-RLP txs supported here) from an
+/// [`alloy::rpc::types::eth::Transaction`] returned by
+/// `eth_getTransactionByHash`. This is the chokepoint that lets the
+/// HTLC-validation paths (`SwapOps::check_if_my_payment_sent`,
+/// `MarketCoinOps::wait_for_tx_spend`, `EthCoinImpl::search_for_swap_tx_spend`)
+/// keep producing a `SignedEthTx` whose embedded signature passes the
+/// public-key recovery check inside `SignedEthTx::new`.
+///
+/// Wire / cryptographic invariants:
+///
+/// - `r`, `s`: alloy returns `U256` (its own); we reflect to
+///   `ethereum_types::U256` via the canonical 32-byte big-endian repr.
+/// - `v`: alloy stores y_parity as a `bool`; the legacy struct stores
+///   the EIP-155-encoded `u64`. Re-encode as `27 + parity` for
+///   pre-EIP-155 chains and `35 + 2*chain_id + parity` otherwise. This
+///   mirrors what the legacy `web3` JSON-RPC layer used to return for
+///   the `v` field.
+/// - `hash`: alloy `B256` is bit-for-bit `H256`; copied via
+///   `H256::from_slice(...)`.
+/// - `gas_price`: alloy returns `Option<u128>` (None for type-2 / 1559
+///   txs). The legacy struct expects `U256`; we coerce via
+///   `unwrap_or(0)`. Type-2 txs would not survive RLP-decoding through
+///   this struct anyway — the existing code path is legacy-only.
+/// - `gas`, `nonce`: alloy `u64` → `U256`.
+/// - `value`, `data`, `to`: direct mapping.
+pub fn signed_tx_from_alloy_tx(transaction: alloy::rpc::types::eth::Transaction) -> Result<SignedEthTx, String> {
+    use alloy::consensus::Transaction as _;
+
+    let envelope = transaction.into_inner();
+    let signature = envelope.signature();
+    let alloy_hash = *envelope.tx_hash();
+
+    let r_bytes: [u8; 32] = signature.r().to_be_bytes();
+    let s_bytes: [u8; 32] = signature.s().to_be_bytes();
+    let value_bytes: [u8; 32] = envelope.value().to_be_bytes();
+
+    let r_legacy = U256::from_big_endian(&r_bytes);
+    let s_legacy = U256::from_big_endian(&s_bytes);
+    let value_legacy = U256::from_big_endian(&value_bytes);
+
+    let parity = u64::from(signature.v());
+    let v_legacy = match envelope.chain_id() {
+        Some(cid) => 35 + 2 * cid + parity,
+        None => 27 + parity,
+    };
+
+    let action = match envelope.to() {
+        Some(addr) => Action::Call(Address::from_slice(addr.as_slice())),
+        None => Action::Create,
+    };
+
+    let gas_price_u128 = envelope.gas_price().unwrap_or(0);
+    let gas_price_bytes = {
+        let mut b = [0u8; 32];
+        b[16..32].copy_from_slice(&gas_price_u128.to_be_bytes());
+        b
+    };
+
+    let unverified = UnverifiedTransaction {
+        r: r_legacy,
+        s: s_legacy,
+        v: v_legacy,
+        hash: H256::from_slice(alloy_hash.as_slice()),
+        unsigned: UnSignedEthTx {
+            data: envelope.input().to_vec(),
+            gas_price: U256::from_big_endian(&gas_price_bytes),
+            gas: U256::from(envelope.gas_limit()),
+            value: value_legacy,
+            nonce: U256::from(envelope.nonce()),
+            action,
+        },
+    };
+
+    Ok(try_s!(SignedEthTx::new(unverified)))
+}
+
 #[derive(Deserialize, Debug, Serialize)]
 pub struct GasStationData {
     // matic gas station average fees is named standard, using alias to support both format.

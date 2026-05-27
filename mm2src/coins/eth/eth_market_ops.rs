@@ -78,27 +78,42 @@ impl MarketCoinOps for EthCoin {
     }
 
     fn send_raw_tx(&self, mut tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
+        // LP-17: alloy `Provider::send_raw_transaction` replaces
+        // `web3.eth().send_raw_transaction(...)`. Both ultimately drive
+        // `eth_sendRawTransaction`; the wire-level RPC method is
+        // unchanged. Output format `format!("{:02x}", h)` (no `0x`
+        // prefix) is preserved bit-for-bit so existing callers /
+        // persisted swap state are not affected.
+        use crate::eth::alloy_compat::assert_send_future;
+        use alloy::providers::Provider;
+
         if tx.starts_with("0x") {
             tx = &tx[2..];
         }
         let bytes = try_fus!(hex::decode(tx));
-        Box::new(
-            self.web3
-                .eth()
-                .send_raw_transaction(bytes.into())
-                .map(|res| format!("{:02x}", res))
-                .map_err(|e| ERRL!("{}", e)),
-        )
+        let selfi = self.clone();
+        let fut = async move {
+            let provider = selfi.alloy_provider();
+            let pending = try_s!(assert_send_future(provider.send_raw_transaction(&bytes)).await);
+            let hash = *pending.tx_hash();
+            Ok(format!("{:02x}", hash))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     fn send_raw_tx_bytes(&self, tx: &[u8]) -> Box<dyn Future<Item = String, Error = String> + Send> {
-        Box::new(
-            self.web3
-                .eth()
-                .send_raw_transaction(tx.into())
-                .map(|res| format!("{:02x}", res))
-                .map_err(|e| ERRL!("{}", e)),
-        )
+        use crate::eth::alloy_compat::assert_send_future;
+        use alloy::providers::Provider;
+
+        let bytes = tx.to_vec();
+        let selfi = self.clone();
+        let fut = async move {
+            let provider = selfi.alloy_provider();
+            let pending = try_s!(assert_send_future(provider.send_raw_transaction(&bytes)).await);
+            let hash = *pending.tx_hash();
+            Ok(format!("{:02x}", hash))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     fn wait_for_confirmations(
@@ -120,6 +135,17 @@ impl MarketCoinOps for EthCoin {
         let required_confirms = U256::from(confirmations);
         let selfi = self.clone();
         let fut = async move {
+            // LP-17: alloy `Provider::get_transaction_receipt` /
+            // `get_block_number` replace `web3.eth().transaction_receipt`
+            // / `web3.eth().block_number`. Wire-level RPC methods
+            // (`eth_getTransactionReceipt`, `eth_blockNumber`) are
+            // unchanged. alloy's `ReceiptEnvelope::status()` returns
+            // `bool` (true == 1) which directly replaces the legacy
+            // `Some(1.into())` comparison.
+            use crate::eth::alloy_compat::assert_send_future;
+            use alloy::providers::Provider;
+
+            let provider = selfi.alloy_provider();
             loop {
                 if status.ms2deadline().unwrap() < 0 {
                     status.append(" Timed out.");
@@ -130,7 +156,11 @@ impl MarketCoinOps for EthCoin {
                     );
                 }
 
-                let web3_receipt = match selfi.web3.eth().transaction_receipt(tx.hash()).compat().await {
+                let web3_receipt = match assert_send_future(
+                    provider.get_transaction_receipt(alloy::primitives::B256::from_slice(&tx.hash().0)),
+                )
+                .await
+                {
                     Ok(r) => r,
                     Err(e) => {
                         log!("Error " [e] " getting the " (selfi.ticker()) " transaction " [tx.tx_hash()] ", retrying in 15 seconds");
@@ -139,7 +169,7 @@ impl MarketCoinOps for EthCoin {
                     },
                 };
                 if let Some(receipt) = web3_receipt {
-                    if receipt.status != Some(1.into()) {
+                    if !receipt.inner.status() {
                         status.append(" Failed.");
                         return ERR!(
                             "Tx receipt {:?} status of {} tx {:?} is failed",
@@ -150,8 +180,9 @@ impl MarketCoinOps for EthCoin {
                     }
 
                     if let Some(confirmed_at) = receipt.block_number {
-                        let current_block = match selfi.web3.eth().block_number().compat().await {
-                            Ok(b) => b,
+                        let confirmed_at = U256::from(confirmed_at);
+                        let current_block = match assert_send_future(provider.get_block_number()).await {
+                            Ok(b) => U256::from(b),
                             Err(e) => {
                                 log!("Error " [e] " getting the " (selfi.ticker()) " block number retrying in 15 seconds");
                                 Timer::sleep(check_every as f64).await;
@@ -229,13 +260,16 @@ impl MarketCoinOps for EthCoin {
 
                 if let Some(event) = found {
                     if let Some(tx_hash) = event.transaction_hash {
-                        let transaction = match selfi
-                            .web3
-                            .eth()
-                            .transaction(TransactionId::Hash(tx_hash))
-                            .compat()
-                            .await
-                        {
+                        // LP-17: alloy `Provider::get_transaction_by_hash`
+                        // + `signed_tx_from_alloy_tx` round-trip replaces
+                        // the web3 `transaction(...)` + `signed_tx_from_web3_tx`
+                        // pair. Same wire RPC method (`eth_getTransactionByHash`).
+                        use crate::eth::alloy_compat::assert_send_future;
+                        use alloy::providers::Provider;
+
+                        let provider = selfi.alloy_provider();
+                        let alloy_hash = alloy::primitives::B256::from_slice(&tx_hash.0);
+                        let transaction = match assert_send_future(provider.get_transaction_by_hash(alloy_hash)).await {
                             Ok(Some(t)) => t,
                             Ok(None) => {
                                 log!("Tx " (tx_hash) " not found yet");
@@ -249,7 +283,7 @@ impl MarketCoinOps for EthCoin {
                             },
                         };
 
-                        return Ok(TransactionEnum::from(try_tx_s!(signed_tx_from_web3_tx(transaction))));
+                        return Ok(TransactionEnum::from(try_tx_s!(signed_tx_from_alloy_tx(transaction))));
                     }
                 }
 
@@ -272,13 +306,20 @@ impl MarketCoinOps for EthCoin {
     }
 
     fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> {
-        Box::new(
-            self.web3
-                .eth()
-                .block_number()
-                .map(|res| res.into())
-                .map_err(|e| ERRL!("{}", e)),
-        )
+        // LP-17: alloy `Provider::get_block_number` returns `u64`
+        // directly (no `U256 -> u64` conversion needed). Underlying
+        // wire RPC method `eth_blockNumber` is unchanged.
+        use crate::eth::alloy_compat::assert_send_future;
+        use alloy::providers::Provider;
+
+        let selfi = self.clone();
+        let fut = async move {
+            let provider = selfi.alloy_provider();
+            assert_send_future(provider.get_block_number())
+                .await
+                .map_err(|e| ERRL!("{}", e))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     fn display_priv_key(&self) -> Result<String, String> {
