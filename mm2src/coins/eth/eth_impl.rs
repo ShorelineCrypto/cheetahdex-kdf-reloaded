@@ -2,6 +2,10 @@
 //! utility functions, and coin construction.
 
 use super::*;
+// LP-17: bring alloy `Provider` trait into scope so `RootProvider`'s
+// inherent + trait methods (`client()`, `get_block_number()`, etc.) are
+// callable from the helpers below.
+use alloy::providers::Provider as _;
 
 #[cfg_attr(test, mockable)]
 pub async fn make_gas_station_request(url: &str) -> GasStationResult {
@@ -57,7 +61,19 @@ impl EthCoinImpl {
             filter = filter.limit(l);
         }
 
-        Box::new(self.web3.eth().logs(filter.build()).map_err(|e| ERRL!("{}", e)))
+        // LP-17: route the eth_getLogs request through alloy's
+        // `RpcClient` while still deserializing into
+        // `web3::types::Log`, so call sites and downstream parsing
+        // stay bit-for-bit identical. Wire-level method unchanged.
+        let provider = self.alloy_provider();
+        let filter = filter.build();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(provider.client().request::<_, Vec<Log>>("eth_getLogs", (filter,)))
+                .await
+                .map_err(|e| ERRL!("{}", e))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     /// Gets ETH traces from ETH node between addresses in `from_block` and `to_block`
@@ -79,7 +95,18 @@ impl EthCoinImpl {
             filter = filter.count(l);
         }
 
-        Box::new(self.web3.trace().filter(filter.build()).map_err(|e| ERRL!("{}", e)))
+        // LP-17: parity-style trace_filter routed through the alloy
+        // `RpcClient`. The wire-level method (`trace_filter`) and the
+        // returned `Vec<web3::types::Trace>` shape are unchanged.
+        let provider = self.alloy_provider();
+        let filter = filter.build();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(provider.client().request::<_, Vec<Trace>>("trace_filter", (filter,)))
+                .await
+                .map_err(|e| ERRL!("{}", e))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -200,8 +227,20 @@ impl EthCoinImpl {
     }
 
     pub(crate) fn estimate_gas(&self, req: CallRequest) -> Box<dyn Future<Item = U256, Error = web3::Error> + Send> {
-        // always using None block number as old Geth version accept only single argument in this RPC
-        Box::new(self.web3.eth().estimate_gas(req, None))
+        // LP-17: alloy raw RPC replaces `web3.eth().estimate_gas`.
+        // Always pass a single argument as old Geth versions reject
+        // the optional block tag. Errors are mapped back to
+        // `web3::Error::Transport(_)` so the existing
+        // `From<web3::Error>` conversions on `Web3RpcError`/etc. still
+        // apply and the public function signature is unchanged.
+        let provider = self.alloy_provider();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(provider.client().request::<_, U256>("eth_estimateGas", (req,)))
+                .await
+                .map_err(|e| web3::Error::from(web3::ErrorKind::Transport(e.to_string())))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     /// Gets `ReceiverSpent` events from etomic swap smart contract since `from_block`
@@ -219,7 +258,16 @@ impl EthCoinImpl {
             .address(vec![swap_contract_address])
             .build();
 
-        Box::new(self.web3.eth().logs(filter).map_err(|e| ERRL!("{}", e)))
+        // LP-17: route eth_getLogs through alloy's RpcClient while
+        // keeping the returned `Vec<web3::types::Log>` shape.
+        let provider = self.alloy_provider();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(provider.client().request::<_, Vec<Log>>("eth_getLogs", (filter,)))
+                .await
+                .map_err(|e| ERRL!("{}", e))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     /// Gets `SenderRefunded` events from etomic swap smart contract since `from_block`
@@ -237,7 +285,16 @@ impl EthCoinImpl {
             .address(vec![swap_contract_address])
             .build();
 
-        Box::new(self.web3.eth().logs(filter).map_err(|e| ERRL!("{}", e)))
+        // LP-17: route eth_getLogs through alloy's RpcClient while
+        // keeping the returned `Vec<web3::types::Log>` shape.
+        let provider = self.alloy_provider();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(provider.client().request::<_, Vec<Log>>("eth_getLogs", (filter,)))
+                .await
+                .map_err(|e| ERRL!("{}", e))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     /// Try to parse address from string.
@@ -1798,7 +1855,16 @@ impl EthCoin {
             .address(vec![swap_contract_address])
             .build();
 
-        Box::new(self.web3.eth().logs(filter).map_err(|e| ERRL!("{}", e)))
+        // LP-17: route eth_getLogs through alloy's RpcClient while
+        // keeping the returned `Vec<web3::types::Log>` shape.
+        let provider = self.alloy_provider();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(provider.client().request::<_, Vec<Log>>("eth_getLogs", (filter,)))
+                .await
+                .map_err(|e| ERRL!("{}", e))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     /// Returns events from `from_block` to `to_block` (or latest if None) for a given contract and event.
@@ -1819,11 +1885,10 @@ impl EthCoin {
             filter_builder = filter_builder.to_block(BlockNumber::Number(block));
         }
         let filter = filter_builder.build();
-        let events_logs = self
-            .web3
-            .eth()
-            .logs(filter)
-            .compat()
+        // LP-17: alloy raw RPC for eth_getLogs; web3 Log shape kept.
+        use crate::eth::alloy_compat::assert_send_future;
+        let provider = self.alloy_provider();
+        let events_logs = assert_send_future(provider.client().request::<_, Vec<Log>>("eth_getLogs", (filter,)))
             .await
             .map_err(|e| FindPaymentSpendError::Transport(e.to_string()))?;
         Ok(events_logs)
