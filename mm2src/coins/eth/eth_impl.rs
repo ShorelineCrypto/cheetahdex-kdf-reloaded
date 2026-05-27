@@ -591,8 +591,12 @@ pub async fn sign_and_send_transaction_impl(
     {
         use crate::eth::alloy_compat::assert_send_future;
         let provider = coin.alloy_provider();
+        // Discard the returned `PendingTransactionBuilder`: the
+        // legacy `web3.eth().send_raw_transaction` call only
+        // confirmed broadcast acceptance; inclusion polling happens
+        // separately in the `get_addr_nonce` loop below.
         try_tx_s!(
-            assert_send_future(async move { provider.send_raw_transaction(&bytes).await })
+            assert_send_future(async move { provider.send_raw_transaction(&bytes).await.map(|_pending| ()) })
                 .await
                 .map_err(|e| ERRL!("{}", e)),
             signed

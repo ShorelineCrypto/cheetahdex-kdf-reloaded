@@ -22,7 +22,8 @@ use ethkey::{public_to_address, Public};
 use mm2_err_handle::prelude::*;
 use std::str::FromStr;
 // LP-17: alloy provider replaces `web3::Web3` for nonce/balance lookups.
-use super::alloy_compat::{assert_send_future, types::Address as AlloyAddress, KdfProvider};
+use super::alloy_compat::{assert_send_future, KdfProvider};
+use alloy::primitives::Address as AlloyAddress;
 use alloy::providers::Provider;
 use std::future::IntoFuture;
 
