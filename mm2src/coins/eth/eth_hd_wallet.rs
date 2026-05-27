@@ -18,7 +18,7 @@ use crypto::{
     RpcDerivationPath, Secp256k1ExtendedPublicKey,
 };
 use ethereum_types::Address;
-use ethkey::{public_to_address, Public};
+use mm2_eth::keys::{public_to_address, Public};
 use mm2_err_handle::prelude::*;
 use std::str::FromStr;
 // LP-17: alloy provider replaces `web3::Web3` for nonce/balance lookups.

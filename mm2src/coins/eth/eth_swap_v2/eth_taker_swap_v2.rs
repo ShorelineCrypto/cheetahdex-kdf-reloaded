@@ -39,9 +39,9 @@ use crate::{
 };
 use derive_more::Display;
 use ethabi::{Contract, Function, Token};
-use ethcore_transaction::Action;
+use crate::eth::legacy_tx::Action;
 use ethereum_types::{Address, Public, U256};
-use ethkey::public_to_address;
+use mm2_eth::keys::public_to_address;
 use futures::compat::Future01CompatExt;
 use mm2_err_handle::prelude::{MapToMmResult, MmError, MmResult, MmResultExt};
 use std::convert::TryInto;

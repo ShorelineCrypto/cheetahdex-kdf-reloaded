@@ -34,9 +34,9 @@ pub(crate) use common::log::error;
 pub(crate) use common::{now_ms, small_rng, DEX_FEE_ADDR_RAW_PUBKEY};
 pub(crate) use derive_more::Display;
 pub(crate) use ethabi::{Contract, Token};
-pub(crate) use ethcore_transaction::{Action, Transaction as UnSignedEthTx, UnverifiedTransaction};
 pub(crate) use ethereum_types::{Address, H160, H256, U256};
-pub(crate) use ethkey::{public_to_address, KeyPair, Public, Signature};
+pub(crate) use legacy_tx::{Action, Transaction as UnSignedEthTx, UnverifiedTransaction};
+pub(crate) use mm2_eth::keys::{public_to_address, KeyPair, Public, Signature};
 pub(crate) use futures::compat::Future01CompatExt;
 pub(crate) use futures::future::{join_all, select, Either, FutureExt, TryFutureExt};
 pub(crate) use futures01::Future;
@@ -74,15 +74,16 @@ pub(crate) use super::{
     VerificationResult, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
 };
 
-pub use ethcore_transaction::SignedTransaction as SignedEthTx;
-pub use rlp;
+pub use legacy_tx::SignedTransaction as SignedEthTx;
+pub use legacy_tx::rlp;
 
-// ─── Sub-modules ────────────────────────────────────────────────────────────
+// ─── Sub-modules ─────────────────────────────────────────────────────────
 
 pub(crate) mod alloy_compat;
 pub mod eth_hd_wallet;
 pub(crate) mod eth_swap_v2;
 pub mod fee_estimation;
+pub mod legacy_tx;
 pub mod tron;
 
 /// Public re-export of the NFT swap V2 surface so mm2_main's swap
@@ -116,7 +117,7 @@ pub(crate) use crate::{
 };
 pub(crate) use common::mm_number::MmNumber;
 pub(crate) use eth_hd_wallet::EthHDWallet;
-pub(crate) use ethkey::{sign, verify_address};
+pub(crate) use mm2_eth::keys::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
 
 #[cfg(test)]

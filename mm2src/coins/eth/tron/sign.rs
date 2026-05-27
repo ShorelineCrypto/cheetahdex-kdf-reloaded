@@ -6,7 +6,7 @@
 
 use derive_more::Display;
 use ethereum_types::H256;
-use ethkey::{sign, Secret, Signature as EthSignature};
+use mm2_eth::keys::{sign, Secret, Signature as EthSignature};
 use prost::Message;
 
 use super::proto::TransactionRaw;
@@ -56,7 +56,7 @@ pub fn sign_transaction_raw(secret: &Secret, raw: &TransactionRaw) -> Result<(H2
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethkey::KeyPair;
+    use mm2_eth::keys::KeyPair;
     use std::str::FromStr;
 
     fn test_keypair() -> KeyPair {

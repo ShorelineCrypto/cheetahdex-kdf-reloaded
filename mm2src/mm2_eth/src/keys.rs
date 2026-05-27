@@ -76,6 +76,16 @@ impl FromStr for Signature {
     }
 }
 
+impl fmt::Display for Signature {
+    /// Lower-hex of the 65 raw signature bytes (no `0x` prefix).
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for byte in self.0.iter() {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
 /// Error category preserved from the legacy `ethkey::Error` for downstream
 /// match arms.
 #[derive(Debug)]
@@ -185,6 +195,21 @@ impl FromStr for Secret {
 
 impl fmt::Debug for Secret {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { f.write_str("Secret(***)") }
+}
+
+impl fmt::LowerHex for Secret {
+    /// Lower-hex of the 32 raw secret bytes (no `0x` prefix). The `#`
+    /// alternate flag is honoured to add the `0x` prefix matching the
+    /// behaviour of `ethereum_types::H256`.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            f.write_str("0x")?;
+        }
+        for byte in self.0.iter() {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for Secret {

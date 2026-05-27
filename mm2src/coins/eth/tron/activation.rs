@@ -22,7 +22,7 @@ use crate::{CoinProtocol, DerivationMethod, HistorySyncState};
 
 use common::log::warn;
 use ethereum_types::Address;
-use ethkey::KeyPair;
+use mm2_eth::keys::KeyPair;
 use mm2_core::mm_ctx::MmArc;
 use serde_json::{self as json, Value as Json};
 use std::str::FromStr;

@@ -59,6 +59,7 @@ alloy = { version = "2.0", default-features = false, features = [
     "json-rpc",
     "network",
     "provider-http",
+    "rlp",
     "rpc-types",
     "serde",
     "signers",

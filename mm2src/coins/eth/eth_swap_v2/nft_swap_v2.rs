@@ -477,8 +477,8 @@ pub fn build_refund_secret_call(
 //  EthCoin maker-side NFT swap entrypoints (P10.3.7.c)
 // ──────────────────────────────────────────────────────────────────────
 
+use crate::eth::legacy_tx::Action;
 use crate::eth::{EthCoin, EthTxFut};
-use ethcore_transaction::Action;
 
 #[derive(Debug)]
 pub enum EthCoinNftError {

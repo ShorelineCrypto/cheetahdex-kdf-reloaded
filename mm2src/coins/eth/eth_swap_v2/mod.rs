@@ -28,7 +28,7 @@ use common::log::{error, info};
 use common::now_ms;
 use derive_more::Display;
 use ethabi::{Contract, Token};
-use ethcore_transaction::{Action, SignedTransaction as SignedEthTx};
+use crate::eth::legacy_tx::{Action, SignedTransaction as SignedEthTx};
 use ethereum_types::{Address, H256, U256};
 use futures::compat::Future01CompatExt;
 use mm2_err_handle::prelude::{MmError, MmResult};

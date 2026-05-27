@@ -658,8 +658,8 @@ impl From<keys::Error> for SignatureError {
         SignatureError::InternalError(e.to_string())
     }
 }
-impl From<ethkey::Error> for SignatureError {
-    fn from(e: ethkey::Error) -> Self {
+impl From<mm2_eth::keys::EthKeyError> for SignatureError {
+    fn from(e: mm2_eth::keys::EthKeyError) -> Self {
         SignatureError::InternalError(e.to_string())
     }
 }
@@ -728,8 +728,8 @@ impl From<keys::Error> for VerificationError {
         VerificationError::InternalError(e.to_string())
     }
 }
-impl From<ethkey::Error> for VerificationError {
-    fn from(e: ethkey::Error) -> Self {
+impl From<mm2_eth::keys::EthKeyError> for VerificationError {
+    fn from(e: mm2_eth::keys::EthKeyError) -> Self {
         VerificationError::InternalError(e.to_string())
     }
 }
