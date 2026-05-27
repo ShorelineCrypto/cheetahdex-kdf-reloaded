@@ -5865,7 +5865,6 @@ version = "0.1.0"
 dependencies = [
  "ethabi",
  "ethereum-types 0.4.2",
- "ethkey",
  "hex 0.4.3",
  "indexmap 1.9.3",
  "mm2_err_handle",

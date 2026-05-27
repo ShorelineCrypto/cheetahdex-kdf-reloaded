@@ -8,7 +8,6 @@ doctest = false
 
 [dependencies]
 ethabi = { git = "https://github.com/artemii235/ethabi" }
-ethkey = { git = "https://github.com/artemii235/parity-ethereum.git" }
 ethereum-types = { version = "0.4", default-features = false, features = ["std", "serialize"] }
 hex.workspace = true
 indexmap = { version = "1.7", features = ["serde-1"] }
