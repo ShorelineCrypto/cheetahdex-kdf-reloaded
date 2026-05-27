@@ -300,11 +300,12 @@ async fn withdraw_erc1155(ctx: MmArc, req: WithdrawErc1155) -> Result<Transactio
             gas: None,
             gas_price: None,
         };
-        let raw = coin
+        // LP-17: alloy raw eth_call.
+        use alloy::providers::Provider as _;
+        let raw: web3::types::Bytes = coin
             .web3
-            .eth()
-            .call(call_req, None)
-            .compat()
+            .client()
+            .request::<_, web3::types::Bytes>("eth_call", (call_req, web3::types::BlockNumber::Latest))
             .await
             .map_err(|err| GetNftInfoError::Transport(format!("balanceOf: {err}")))?;
         if raw.0.len() < 32 {

@@ -26,8 +26,7 @@ fn eth_coin_for_test(
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(urls).unwrap();
-    let web3 = Web3::new(transport);
+    let web3 = crate::eth::alloy_compat::build_provider(urls, vec![]).unwrap();
     let conf = json!({
         "coins":[
            {"coin":"ETH","name":"ethereum","protocol":{"type":"ETH"},"rpcport":80,"mm2":1},
@@ -208,8 +207,7 @@ fn send_and_refund_erc20_payment() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
-    let web3 = Web3::new(transport);
+    let web3 = crate::eth::alloy_compat::build_provider(vec!["http://195.201.0.6:8545".into()], vec![]).unwrap();
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
@@ -283,8 +281,7 @@ fn send_and_refund_eth_payment() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
-    let web3 = Web3::new(transport);
+    let web3 = crate::eth::alloy_compat::build_provider(vec!["http://195.201.0.6:8545".into()], vec![]).unwrap();
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
@@ -354,17 +351,15 @@ fn test_nonce_several_urls() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let infura_transport = Web3Transport::new(vec![
-        "https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()
-    ])
+    let web3_infura = crate::eth::alloy_compat::build_provider(
+        vec!["https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
+        vec![],
+    )
     .unwrap();
-    let linkpool_transport = Web3Transport::new(vec!["https://ropsten-rpc.linkpool.io".into()]).unwrap();
-    // get nonce must succeed if some nodes are down at the moment for some reason
-    let failing_transport = Web3Transport::new(vec!["http://195.201.0.6:8989".into()]).unwrap();
-
-    let web3_infura = Web3::new(infura_transport);
-    let web3_linkpool = Web3::new(linkpool_transport);
-    let web3_failing = Web3::new(failing_transport);
+    let web3_linkpool =
+        crate::eth::alloy_compat::build_provider(vec!["https://ropsten-rpc.linkpool.io".into()], vec![]).unwrap();
+    let web3_failing =
+        crate::eth::alloy_compat::build_provider(vec!["http://195.201.0.6:8989".into()], vec![]).unwrap();
 
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let my_addr = key_pair.address();
@@ -427,8 +422,7 @@ fn test_wait_for_payment_spend_timeout() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(vec!["http://195.201.0.6:8555".into()]).unwrap();
-    let web3 = Web3::new(transport);
+    let web3 = crate::eth::alloy_compat::build_provider(vec!["http://195.201.0.6:8555".into()], vec![]).unwrap();
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
     let my_addr = key_pair.address();
@@ -490,11 +484,11 @@ fn test_search_for_swap_tx_spend_was_spent() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(vec![
-        "https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()
-    ])
+    let web3 = crate::eth::alloy_compat::build_provider(
+        vec!["https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
+        vec![],
+    )
     .unwrap();
-    let web3 = Web3::new(transport);
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
     let swap_contract_address = Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94");
@@ -556,8 +550,7 @@ fn test_search_for_swap_tx_spend_was_spent() {
     ];
     let spend_tx = FoundSwapTxSpend::Spent(signed_eth_tx_from_bytes(&spend_tx).unwrap().into());
 
-    let found_tx = coin
-        .search_for_swap_tx_spend(&payment_tx, swap_contract_address, 6051857)
+    let found_tx = block_on(coin.search_for_swap_tx_spend(&payment_tx, swap_contract_address, 6051857))
         .unwrap()
         .unwrap();
     assert_eq!(spend_tx, found_tx);
@@ -602,11 +595,11 @@ fn test_search_for_swap_tx_spend_was_refunded() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(vec![
-        "https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()
-    ])
+    let web3 = crate::eth::alloy_compat::build_provider(
+        vec!["https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
+        vec![],
+    )
     .unwrap();
-    let web3 = Web3::new(transport);
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
     let swap_contract_address = Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94");
@@ -672,8 +665,7 @@ fn test_search_for_swap_tx_spend_was_refunded() {
     ];
     let refund_tx = FoundSwapTxSpend::Refunded(signed_eth_tx_from_bytes(&refund_tx).unwrap().into());
 
-    let found_tx = coin
-        .search_for_swap_tx_spend(&payment_tx, swap_contract_address, 5886908)
+    let found_tx = block_on(coin.search_for_swap_tx_spend(&payment_tx, swap_contract_address, 5886908))
         .unwrap()
         .unwrap();
     assert_eq!(refund_tx, found_tx);
@@ -1028,16 +1020,15 @@ fn validate_dex_fee_invalid_sender_eth() {
     );
     // the real dex fee sent on mainnet
     // https://etherscan.io/tx/0x7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f
-    let tx = coin
-        .web3
-        .eth()
-        .transaction(TransactionId::Hash(
-            "0x7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f".into(),
-        ))
-        .wait()
-        .unwrap()
-        .unwrap();
-    let tx = signed_tx_from_web3_tx(tx).unwrap().into();
+    let tx = {
+        use alloy::providers::Provider as _;
+        let hash = alloy::primitives::B256::from_slice(
+            &hex::decode("7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f").unwrap(),
+        );
+        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
+        signed_tx_from_alloy_tx(alloy_tx).unwrap()
+    };
+    let tx = tx.into();
     let amount: BigDecimal = "0.000526435076465".parse().unwrap();
     let validate_err = coin
         .validate_fee(ValidateFeeArgs {
@@ -1065,16 +1056,15 @@ fn validate_dex_fee_invalid_sender_erc() {
     );
     // the real dex fee sent on mainnet
     // https://etherscan.io/tx/0xd6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600
-    let tx = coin
-        .web3
-        .eth()
-        .transaction(TransactionId::Hash(
-            "0xd6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600".into(),
-        ))
-        .wait()
-        .unwrap()
-        .unwrap();
-    let tx = signed_tx_from_web3_tx(tx).unwrap().into();
+    let tx = {
+        use alloy::providers::Provider as _;
+        let hash = alloy::primitives::B256::from_slice(
+            &hex::decode("d6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600").unwrap(),
+        );
+        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
+        signed_tx_from_alloy_tx(alloy_tx).unwrap()
+    };
+    let tx = tx.into();
     let amount: BigDecimal = "5.548262548262548262".parse().unwrap();
     let validate_err = coin
         .validate_fee(ValidateFeeArgs {
@@ -1108,16 +1098,14 @@ fn validate_dex_fee_eth_confirmed_before_min_block() {
     );
     // the real dex fee sent on mainnet
     // https://etherscan.io/tx/0x7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f
-    let tx = coin
-        .web3
-        .eth()
-        .transaction(TransactionId::Hash(
-            "0x7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f".into(),
-        ))
-        .wait()
-        .unwrap()
-        .unwrap();
-    let tx = signed_tx_from_web3_tx(tx).unwrap();
+    let tx = {
+        use alloy::providers::Provider as _;
+        let hash = alloy::primitives::B256::from_slice(
+            &hex::decode("7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f").unwrap(),
+        );
+        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
+        signed_tx_from_alloy_tx(alloy_tx).unwrap()
+    };
     let compressed_public = sender_compressed_pub(&tx);
     let tx = tx.into();
     let amount: BigDecimal = "0.000526435076465".parse().unwrap();
@@ -1147,17 +1135,15 @@ fn validate_dex_fee_erc_confirmed_before_min_block() {
     );
     // the real dex fee sent on mainnet
     // https://etherscan.io/tx/0xd6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600
-    let tx = coin
-        .web3
-        .eth()
-        .transaction(TransactionId::Hash(
-            "0xd6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600".into(),
-        ))
-        .wait()
-        .unwrap()
-        .unwrap();
+    let tx = {
+        use alloy::providers::Provider as _;
+        let hash = alloy::primitives::B256::from_slice(
+            &hex::decode("d6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600").unwrap(),
+        );
+        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
+        signed_tx_from_alloy_tx(alloy_tx).unwrap()
+    };
 
-    let tx = signed_tx_from_web3_tx(tx).unwrap();
     let compressed_public = sender_compressed_pub(&tx);
     let tx = tx.into();
     let amount: BigDecimal = "5.548262548262548262".parse().unwrap();
@@ -1301,8 +1287,7 @@ fn test_message_hash() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
-    let web3 = Web3::new(transport);
+    let web3 = crate::eth::alloy_compat::build_provider(vec!["http://195.201.0.6:8545".into()], vec![]).unwrap();
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
@@ -1347,8 +1332,7 @@ fn test_sign_verify_message() {
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
-    let transport = Web3Transport::new(vec!["http://195.201.0.6:8545".into()]).unwrap();
-    let web3 = Web3::new(transport);
+    let web3 = crate::eth::alloy_compat::build_provider(vec!["http://195.201.0.6:8545".into()], vec![]).unwrap();
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {

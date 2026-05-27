@@ -3,7 +3,7 @@
 //! Builds an [`EthCoin`] backed by [`EthCoinType::Tron`] (or
 //! [`EthCoinType::Trc20`]) with a populated [`TronApiClient`]. The TRON code
 //! paths (withdraw, fees, balance) bypass the EVM `web3` field entirely, so we
-//! still construct a `Web3<Web3Transport>` over the TRON URLs purely as a
+//! still construct an alloy provider over the TRON URLs purely as a
 //! placeholder — it is never invoked.
 //!
 //! TRON activation deliberately does not parse `swap_contract_address` or
@@ -15,7 +15,6 @@
 use super::api::TronApiClient;
 use super::{Network, TronAddress, TRX_DECIMALS};
 
-use crate::eth::web3_transport::Web3Transport;
 use crate::eth::{
     rpc_event_handlers_for_eth_transport, EthCoin, EthCoinImpl, EthCoinType, EthGasLimitV2, ETH_GAS_STATION_DECIMALS,
 };
@@ -29,7 +28,6 @@ use serde_json::{self as json, Value as Json};
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use web3::Web3;
 
 /// TRC20 contracts are 21 raw bytes (0x41 prefix + 20-byte EVM address) when
 /// expressed in TRON's native hex form. Both Base58Check and hex inputs are
@@ -116,13 +114,12 @@ pub async fn tron_coin_from_conf_and_request(
 
     let tron_api = TronApiClient::new(urls.clone());
 
-    // Placeholder Web3 instance over the TRON URLs. The TRON coin paths never
-    // dispatch RPCs through this transport; it exists only to satisfy the
-    // shared `EthCoinImpl` shape.
+    // Placeholder alloy provider over the TRON URLs. The TRON coin paths
+    // never dispatch RPCs through this provider; it exists only to satisfy
+    // the shared `EthCoinImpl` shape.
     let event_handlers = rpc_event_handlers_for_eth_transport(ctx, ticker.to_string());
-    let transport = Web3Transport::with_event_handlers(urls, event_handlers)
-        .map_err(|e| format!("Failed to build placeholder Web3 transport for TRON: {e}"))?;
-    let web3 = Web3::new(transport);
+    let web3 = crate::eth::alloy_compat::build_provider(urls, event_handlers)
+        .map_err(|e| format!("Failed to build placeholder alloy provider for TRON: {e}"))?;
 
     if req["swap_contract_address"].is_string() {
         warn!("TRON coin '{ticker}': swap_contract_address ignored (TRON swaps not yet wired)");

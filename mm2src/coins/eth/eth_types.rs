@@ -241,8 +241,8 @@ pub struct EthCoinImpl {
     pub(crate) sign_message_prefix: Option<String>,
     pub(crate) swap_contract_address: Address,
     pub(crate) fallback_swap_contract: Option<Address>,
-    pub(crate) web3: Web3<Web3Transport>,
-    /// The separate web3 instances kept to get nonce, will replace the web3 completely soon
+    pub(crate) web3: super::alloy_compat::KdfProvider,
+    /// The separate provider instances kept to get nonce, will replace the web3 completely soon
     pub(crate) web3_instances: Vec<Web3Instance>,
     pub(crate) decimals: u8,
     pub(crate) gas_station_url: Option<String>,
@@ -541,7 +541,7 @@ impl fmt::Display for EthCoinType {
 
 #[derive(Clone, Debug)]
 pub struct Web3Instance {
-    pub(crate) web3: Web3<Web3Transport>,
+    pub(crate) web3: super::alloy_compat::KdfProvider,
     pub(crate) is_parity: bool,
 }
 

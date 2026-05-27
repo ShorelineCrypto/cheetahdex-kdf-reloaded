@@ -23,18 +23,11 @@ pub async fn make_gas_station_request(url: &str) -> GasStationResult {
 
 #[cfg_attr(test, mockable)]
 impl EthCoinImpl {
-    /// LP-17: builds a fresh alloy [`super::alloy_compat::KdfProvider`]
-    /// over the same RPC URLs and event handlers that the legacy
-    /// `web3` field uses. Provider construction is cheap (it wraps an
-    /// `Arc`-shared transport) so we build on demand during the
-    /// migration phase. Once every `coins/eth` file moves off the
-    /// `web3` crate the provider will be promoted to a cached field
-    /// on `EthCoinImpl` and the legacy `web3` field will be dropped.
+    /// LP-17: returns a clone of the cached alloy
+    /// [`super::alloy_compat::KdfProvider`]. The provider wraps an
+    /// `Arc`-shared transport so cloning is cheap.
     pub(crate) fn alloy_provider(&self) -> super::alloy_compat::KdfProvider {
-        let urls: Vec<String> = self.web3.transport().uris().iter().map(|u| u.to_string()).collect();
-        let handlers = self.web3.transport().event_handlers().to_vec();
-        super::alloy_compat::build_provider(urls, handlers)
-            .expect("EthCoinImpl::alloy_provider: transport URIs already validated at construction")
+        self.web3.clone()
     }
 
     /// Gets Transfer events from ERC20 smart contract `addr` between `from_block` and `to_block`
@@ -1699,13 +1692,15 @@ impl EthCoin {
     pub(crate) fn my_balance(&self) -> BalanceFut<U256> {
         let coin = self.clone();
         let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
             match coin.coin_type {
-                EthCoinType::Eth => Ok(coin
-                    .web3
-                    .eth()
-                    .balance(coin.my_address, Some(BlockNumber::Latest))
-                    .compat()
-                    .await?),
+                EthCoinType::Eth => assert_send_future(
+                    coin.web3
+                        .client()
+                        .request::<_, U256>("eth_getBalance", (coin.my_address, BlockNumber::Latest)),
+                )
+                .await
+                .map_err(|e| MmError::new(BalanceError::Transport(e.to_string()))),
                 EthCoinType::Erc20 { ref token_addr, .. } => {
                     let function = ERC20_CONTRACT.function("balanceOf")?;
                     let data = function.encode_input(&[Token::Address(coin.my_address)])?;
@@ -2625,7 +2620,7 @@ impl GasStationData {
     }
 }
 
-pub async fn get_token_decimals(web3: &Web3<Web3Transport>, token_addr: Address) -> Result<u8, String> {
+pub async fn get_token_decimals(web3: &super::alloy_compat::KdfProvider, token_addr: Address) -> Result<u8, String> {
     let function = try_s!(ERC20_CONTRACT.function("decimals"));
     let data = try_s!(function.encode_input(&[]));
     let request = CallRequest {
@@ -2637,11 +2632,12 @@ pub async fn get_token_decimals(web3: &Web3<Web3Transport>, token_addr: Address)
         data: Some(data.into()),
     };
 
-    let f = web3
-        .eth()
-        .call(request, Some(BlockNumber::Latest))
-        .map_err(|e| ERRL!("{}", e));
-    let res = try_s!(f.compat().await);
+    // LP-17: alloy raw RPC for eth_call.
+    let res: Bytes = try_s!(web3
+        .client()
+        .request::<_, Bytes>("eth_call", (request, BlockNumber::Latest))
+        .await
+        .map_err(|e| ERRL!("{}", e)));
     let tokens = try_s!(function.decode_output(&res.0));
     let decimals: u64 = match tokens[0] {
         Token::Uint(dec) => dec.into(),
@@ -2711,12 +2707,15 @@ pub async fn eth_coin_from_conf_and_request(
     let mut web3_instances = vec![];
     let event_handlers = rpc_event_handlers_for_eth_transport(ctx, ticker.to_string());
     for url in urls.iter() {
-        let transport = try_s!(Web3Transport::with_event_handlers(
-            vec![url.clone()],
-            event_handlers.clone()
-        ));
-        let web3 = Web3::new(transport);
-        let version = match web3.web3().client_version().compat().await {
+        // LP-17: alloy provider per URL + alloy raw web3_clientVersion.
+        let provider = match super::alloy_compat::build_provider(vec![url.clone()], event_handlers.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                log!("Failed to build alloy provider for url " (url) ", " (e));
+                continue;
+            },
+        };
+        let version: String = match provider.client().request_noparams("web3_clientVersion").await {
             Ok(v) => v,
             Err(e) => {
                 log!("Couldn't get client version for url " (url) ", " (e));
@@ -2724,7 +2723,7 @@ pub async fn eth_coin_from_conf_and_request(
             },
         };
         web3_instances.push(Web3Instance {
-            web3,
+            web3: provider,
             is_parity: version.contains("Parity") || version.contains("parity"),
         })
     }
@@ -2733,8 +2732,7 @@ pub async fn eth_coin_from_conf_and_request(
         return ERR!("Failed to get client version for all urls");
     }
 
-    let transport = try_s!(Web3Transport::with_event_handlers(urls, event_handlers));
-    let web3 = Web3::new(transport);
+    let web3 = try_s!(super::alloy_compat::build_provider(urls, event_handlers));
 
     let (coin_type, decimals) = match protocol {
         CoinProtocol::ETH => (EthCoinType::Eth, 18),
@@ -2851,15 +2849,26 @@ pub fn get_addr_nonce(addr: Address, web3s: Vec<Web3Instance>) -> Box<dyn Future
         loop {
             let futures: Vec<_> = web3s
                 .iter()
-                .map(|web3| {
-                    if web3.is_parity {
-                        web3.web3.eth().parity_next_nonce(addr).compat()
-                    } else {
-                        web3.web3
-                            .eth()
-                            .transaction_count(addr, Some(BlockNumber::Pending))
-                            .compat()
-                    }
+                .map(|w| {
+                    let provider = w.web3.clone();
+                    let is_parity = w.is_parity;
+                    use crate::eth::alloy_compat::assert_send_future;
+                    assert_send_future(async move {
+                        // LP-17: alloy raw RPC for parity_nextNonce / eth_getTransactionCount.
+                        if is_parity {
+                            provider
+                                .client()
+                                .request::<_, U256>("parity_nextNonce", (addr,))
+                                .await
+                                .map_err(|e| e.to_string())
+                        } else {
+                            provider
+                                .client()
+                                .request::<_, U256>("eth_getTransactionCount", (addr, BlockNumber::Pending))
+                                .await
+                                .map_err(|e| e.to_string())
+                        }
+                    })
                 })
                 .collect();
 
