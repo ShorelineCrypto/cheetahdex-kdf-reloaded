@@ -583,18 +583,23 @@ pub async fn sign_and_send_transaction_impl(
         data,
     };
     let signed = tx.sign(coin.key_pair.secret(), coin.chain_id);
-    let bytes = web3::types::Bytes(rlp::encode(&signed).to_vec());
+    let bytes = rlp::encode(&signed).to_vec();
     status.status(tags!(), "send_raw_transaction…");
 
-    try_tx_s!(
-        coin.web3
-            .eth()
-            .send_raw_transaction(bytes)
-            .map_err(|e| ERRL!("{}", e))
-            .compat()
-            .await,
-        signed
-    );
+    // LP-17: alloy `Provider::send_raw_transaction` replaces
+    // `web3.eth().send_raw_transaction`. Wire-level method
+    // (`eth_sendRawTransaction`) and the broadcast bytes are
+    // identical.
+    {
+        use crate::eth::alloy_compat::assert_send_future;
+        let provider = coin.alloy_provider();
+        try_tx_s!(
+            assert_send_future(async move { provider.send_raw_transaction(&bytes).await })
+                .await
+                .map_err(|e| ERRL!("{}", e)),
+            signed
+        );
+    }
 
     status.status(tags!(), "get_addr_nonce…");
     loop {
@@ -1754,12 +1759,21 @@ impl EthCoin {
     }
 
     pub(crate) fn eth_balance(&self) -> BalanceFut<U256> {
-        Box::new(
-            self.web3
-                .eth()
-                .balance(self.my_address, Some(BlockNumber::Latest))
-                .map_to_mm_fut(BalanceError::from),
-        )
+        // LP-17: alloy raw RPC for eth_getBalance. Returned U256
+        // shape preserved by deserializing into web3's U256 alias.
+        let provider = self.alloy_provider();
+        let addr = self.my_address;
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(
+                provider
+                    .client()
+                    .request::<_, U256>("eth_getBalance", (addr, BlockNumber::Latest)),
+            )
+            .await
+            .map_err(|e| MmError::new(BalanceError::Transport(e.to_string())))
+        };
+        Box::new(fut.boxed().compat())
     }
 
     pub(crate) fn call_request(
@@ -1777,7 +1791,19 @@ impl EthCoin {
             data,
         };
 
-        self.web3.eth().call(request, Some(BlockNumber::Latest))
+        // LP-17: alloy raw RPC for eth_call.
+        let provider = self.alloy_provider();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(
+                provider
+                    .client()
+                    .request::<_, Bytes>("eth_call", (request, BlockNumber::Latest)),
+            )
+            .await
+            .map_err(|e| web3::Error::from(web3::ErrorKind::Transport(e.to_string())))
+        };
+        fut.boxed().compat()
     }
 
     pub(crate) fn allowance(&self, spender: Address) -> Web3RpcFut<U256> {
@@ -2273,28 +2299,37 @@ impl EthCoin {
                 None => None,
             };
 
-            let eth_gas_price = match coin.web3.eth().gas_price().compat().await {
-                Ok(eth_gas) => Some(eth_gas),
-                Err(e) => {
-                    error!("Error {} on eth_gasPrice request", e);
-                    None
-                },
+            // LP-17: alloy raw RPC for eth_gasPrice + eth_feeHistory.
+            let eth_gas_price = {
+                use crate::eth::alloy_compat::assert_send_future;
+                let provider = coin.alloy_provider();
+                match assert_send_future(provider.client().request_noparams::<U256>("eth_gasPrice")).await {
+                    Ok(eth_gas) => Some(eth_gas),
+                    Err(e) => {
+                        error!("Error {} on eth_gasPrice request", e);
+                        None
+                    },
+                }
             };
 
-            let fee_history_namespace: EthFeeHistoryNamespace<_> = coin.web3.api();
-            let eth_fee_history_price = match fee_history_namespace
-                .eth_fee_history(U256::from(1u64), BlockNumber::Latest, &[])
-                .compat()
+            let eth_fee_history_price = {
+                use crate::eth::alloy_compat::assert_send_future;
+                let provider = coin.alloy_provider();
+                match assert_send_future(provider.client().request::<_, FeeHistoryResult>(
+                    "eth_feeHistory",
+                    (U256::from(1u64), BlockNumber::Latest, &[] as &[f64]),
+                ))
                 .await
-            {
-                Ok(res) => res
-                    .base_fee_per_gas
-                    .first()
-                    .map(|val| increase_by_percent_one_gwei(*val, BASE_BLOCK_FEE_DIFF_PCT)),
-                Err(e) => {
-                    error!("Error {} on eth_feeHistory request", e);
-                    None
-                },
+                {
+                    Ok(res) => res
+                        .base_fee_per_gas
+                        .first()
+                        .map(|val| increase_by_percent_one_gwei(*val, BASE_BLOCK_FEE_DIFF_PCT)),
+                    Err(e) => {
+                        error!("Error {} on eth_feeHistory request", e);
+                        None
+                    },
+                }
             };
 
             let all_prices = vec![gas_station_price, eth_gas_price, eth_fee_history_price];
