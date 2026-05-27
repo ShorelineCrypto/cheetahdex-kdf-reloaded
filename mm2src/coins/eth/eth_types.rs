@@ -204,6 +204,26 @@ pub struct SavedTraces {
     pub(crate) latest_block: U256,
 }
 
+/// LP-17: replaces the legacy `web3_transport::FeeHistoryResult`.
+///
+/// Wire-compatible deserialiser for the `eth_feeHistory` JSON-RPC
+/// response. Field names (`oldestBlock`, `baseFeePerGas`,
+/// `gasUsedRatio`, `reward`) and value encodings match the Ethereum
+/// RPC spec; numeric fields decode as `alloy::primitives::U256`,
+/// which accepts the same `0x`-prefixed hex strings that the legacy
+/// `web3::types::U256` did.
+#[derive(Debug, Deserialize)]
+pub struct FeeHistoryResult {
+    #[serde(rename = "oldestBlock")]
+    pub oldest_block: U256,
+    #[serde(rename = "baseFeePerGas")]
+    pub base_fee_per_gas: Vec<U256>,
+    #[serde(rename = "gasUsedRatio")]
+    pub gas_used_ratio: Option<Vec<f64>>,
+    #[serde(rename = "reward")]
+    pub priority_rewards: Option<Vec<Vec<U256>>>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SavedErc20Events {
     /// ERC20 events for my_address

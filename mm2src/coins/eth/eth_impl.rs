@@ -2472,29 +2472,8 @@ impl Transaction for SignedEthTx {
     }
 }
 
-pub fn signed_tx_from_web3_tx(transaction: Web3Transaction) -> Result<SignedEthTx, String> {
-    let unverified = UnverifiedTransaction {
-        r: transaction.r,
-        s: transaction.s,
-        v: transaction.v.as_u64(),
-        hash: transaction.hash,
-        unsigned: UnSignedEthTx {
-            data: transaction.input.0,
-            gas_price: transaction.gas_price,
-            gas: transaction.gas,
-            value: transaction.value,
-            nonce: transaction.nonce,
-            action: match transaction.to {
-                Some(addr) => Action::Call(addr),
-                None => Action::Create,
-            },
-        },
-    };
-
-    Ok(try_s!(SignedEthTx::new(unverified)))
-}
-
-/// LP-17: alloy-flavoured replacement for [`signed_tx_from_web3_tx`].
+/// LP-17: alloy-flavoured replacement for the legacy
+/// `signed_tx_from_web3_tx`.
 ///
 /// Re-builds a legacy `UnverifiedTransaction` (artemii235's parity-ethereum
 /// fork — only legacy 9-RLP txs supported here) from an

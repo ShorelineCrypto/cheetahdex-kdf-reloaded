@@ -61,7 +61,7 @@ pub(crate) use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use web3::types::{
     Action as TraceAction, BlockId, BlockNumber, Bytes, CallRequest, FilterBuilder, Log, Trace, TraceFilterBuilder,
-    Transaction as Web3Transaction, TransactionId,
+    TransactionId,
 };
 pub(crate) use web3::{self, Web3};
 
@@ -86,7 +86,6 @@ pub mod eth_hd_wallet;
 pub(crate) mod eth_swap_v2;
 pub mod fee_estimation;
 pub mod tron;
-mod web3_transport;
 
 /// Public re-export of the NFT swap V2 surface so mm2_main's swap
 /// state-machine driver can construct calls and inspect errors
@@ -120,7 +119,6 @@ pub(crate) use common::mm_number::MmNumber;
 pub(crate) use eth_hd_wallet::EthHDWallet;
 pub(crate) use ethkey::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
-pub(crate) use web3_transport::{EthFeeHistoryNamespace, FeeHistoryResult, Web3Transport};
 
 #[cfg(test)]
 mod eth_tests;
