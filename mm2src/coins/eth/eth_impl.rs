@@ -590,17 +590,26 @@ impl EthCoin {
                 };
             }
 
-            let current_block = match self.web3.eth().block_number().compat().await {
-                Ok(block) => block,
-                Err(e) => {
-                    ctx.log.log(
-                        "",
-                        &[&"tx_history", &self.ticker],
-                        &ERRL!("Error {} on eth_block_number, retrying", e),
-                    );
-                    Timer::sleep(10.).await;
-                    continue;
-                },
+            // LP-17: alloy `Provider::get_block_number` returns `u64`
+            // directly; coerced back to `U256` to keep the existing
+            // `SavedTraces::earliest_block` arithmetic untouched.
+            // Wire-level RPC method (`eth_blockNumber`) is unchanged.
+            let current_block = {
+                use crate::eth::alloy_compat::assert_send_future;
+                use alloy::providers::Provider;
+                let provider = self.alloy_provider();
+                match assert_send_future(provider.get_block_number()).await {
+                    Ok(block) => U256::from(block),
+                    Err(e) => {
+                        ctx.log.log(
+                            "",
+                            &[&"tx_history", &self.ticker],
+                            &ERRL!("Error {} on eth_block_number, retrying", e),
+                        );
+                        Timer::sleep(10.).await;
+                        continue;
+                    },
+                }
             };
 
             let mut saved_traces = match self.load_saved_traces(ctx) {
@@ -859,25 +868,42 @@ impl EthCoin {
                     }
                 }
 
-                // LP-17: continue migration — alloy currently used for
-                // tx fetch; legacy web3.block(...) still pending
-                // P3 step 7d (block-by-number).
-                let block = match self
-                    .web3
-                    .eth()
-                    .block(BlockId::Number(BlockNumber::Number(trace.block_number)))
-                    .compat()
+                // LP-17: alloy `Provider::get_block_by_number` replaces
+                // `web3.eth().block(BlockId::Number(...))`. Wire-level
+                // RPC method (`eth_getBlockByNumber`) is unchanged.
+                // alloy's `Block.header.timestamp` is already `u64`,
+                // matching the legacy `block.timestamp.into()` pattern.
+                let block_ts = {
+                    use crate::eth::alloy_compat::assert_send_future;
+                    use alloy::eips::BlockNumberOrTag;
+                    use alloy::providers::Provider;
+                    use std::future::IntoFuture;
+                    let provider = self.alloy_provider();
+                    match assert_send_future(
+                        provider
+                            .get_block_by_number(BlockNumberOrTag::Number(u64::from(trace.block_number)))
+                            .into_future(),
+                    )
                     .await
-                {
-                    Ok(b) => b.unwrap(),
-                    Err(e) => {
-                        ctx.log.log(
-                            "",
-                            &[&"tx_history", &self.ticker],
-                            &ERRL!("Error {} on getting block {} data", e, trace.block_number),
-                        );
-                        continue;
-                    },
+                    {
+                        Ok(Some(b)) => b.header.timestamp,
+                        Ok(None) => {
+                            ctx.log.log(
+                                "",
+                                &[&"tx_history", &self.ticker],
+                                &ERRL!("Block {} is None", trace.block_number),
+                            );
+                            continue;
+                        },
+                        Err(e) => {
+                            ctx.log.log(
+                                "",
+                                &[&"tx_history", &self.ticker],
+                                &ERRL!("Error {} on getting block {} data", e, trace.block_number),
+                            );
+                            continue;
+                        },
+                    }
                 };
 
                 let details = TransactionDetails {
@@ -893,7 +919,7 @@ impl EthCoin {
                     tx_hash: format!("{:02x}", BytesJson(raw.hash.to_vec())),
                     tx_hex: BytesJson(rlp::encode(&raw)),
                     internal_id,
-                    timestamp: block.timestamp.into(),
+                    timestamp: block_ts,
                     kmd_rewards: None,
                     transaction_type: Default::default(),
                 };
@@ -956,17 +982,25 @@ impl EthCoin {
                 };
             }
 
-            let current_block = match self.web3.eth().block_number().compat().await {
-                Ok(block) => block,
-                Err(e) => {
-                    ctx.log.log(
-                        "",
-                        &[&"tx_history", &self.ticker],
-                        &ERRL!("Error {} on eth_block_number, retrying", e),
-                    );
-                    Timer::sleep(10.).await;
-                    continue;
-                },
+            // LP-17: alloy `Provider::get_block_number` (see step 7d
+            // sibling site in process_eth_history). Coerced back to
+            // `U256` for `SavedErc20Events::earliest_block`.
+            let current_block = {
+                use crate::eth::alloy_compat::assert_send_future;
+                use alloy::providers::Provider;
+                let provider = self.alloy_provider();
+                match assert_send_future(provider.get_block_number()).await {
+                    Ok(block) => U256::from(block),
+                    Err(e) => {
+                        ctx.log.log(
+                            "",
+                            &[&"tx_history", &self.ticker],
+                            &ERRL!("Error {} on eth_block_number, retrying", e),
+                        );
+                        Timer::sleep(10.).await;
+                        continue;
+                    },
+                }
             };
 
             let mut saved_events = match self.load_saved_erc20_events(ctx) {
@@ -1224,30 +1258,41 @@ impl EthCoin {
                     None => None,
                 };
                 let block_number = event.block_number.unwrap();
-                let block = match self
-                    .web3
-                    .eth()
-                    .block(BlockId::Number(BlockNumber::Number(block_number.into())))
-                    .compat()
+                // LP-17: alloy `Provider::get_block_by_number` replaces
+                // `web3.eth().block(...)`. Wire-level RPC method
+                // (`eth_getBlockByNumber`) unchanged; timestamp is
+                // already `u64` on alloy's header.
+                let block_ts = {
+                    use crate::eth::alloy_compat::assert_send_future;
+                    use alloy::eips::BlockNumberOrTag;
+                    use alloy::providers::Provider;
+                    use std::future::IntoFuture;
+                    let provider = self.alloy_provider();
+                    match assert_send_future(
+                        provider
+                            .get_block_by_number(BlockNumberOrTag::Number(block_number.into()))
+                            .into_future(),
+                    )
                     .await
-                {
-                    Ok(Some(b)) => b,
-                    Ok(None) => {
-                        ctx.log.log(
-                            "",
-                            &[&"tx_history", &self.ticker],
-                            &ERRL!("Block {} is None", block_number),
-                        );
-                        continue;
-                    },
-                    Err(e) => {
-                        ctx.log.log(
-                            "",
-                            &[&"tx_history", &self.ticker],
-                            &ERRL!("Error {} on getting block {} data", e, block_number),
-                        );
-                        continue;
-                    },
+                    {
+                        Ok(Some(b)) => b.header.timestamp,
+                        Ok(None) => {
+                            ctx.log.log(
+                                "",
+                                &[&"tx_history", &self.ticker],
+                                &ERRL!("Block {} is None", block_number),
+                            );
+                            continue;
+                        },
+                        Err(e) => {
+                            ctx.log.log(
+                                "",
+                                &[&"tx_history", &self.ticker],
+                                &ERRL!("Error {} on getting block {} data", e, block_number),
+                            );
+                            continue;
+                        },
+                    }
                 };
 
                 let details = TransactionDetails {
@@ -1263,7 +1308,7 @@ impl EthCoin {
                     tx_hash: format!("{:02x}", BytesJson(raw.hash.to_vec())),
                     tx_hex: BytesJson(rlp::encode(&raw)),
                     internal_id: BytesJson(internal_id.to_vec()),
-                    timestamp: block.timestamp.into(),
+                    timestamp: block_ts,
                     kmd_rewards: None,
                     transaction_type: Default::default(),
                 };
