@@ -772,34 +772,42 @@ impl EthCoin {
 
                 mm_counter!(ctx.metrics, "tx.history.request.count", 1, "coin" => self.ticker.clone(), "method" => "tx_detail_by_hash");
 
-                let web3_tx = match self
-                    .web3
-                    .eth()
-                    .transaction(TransactionId::Hash(trace.transaction_hash.unwrap()))
-                    .compat()
-                    .await
-                {
+                // LP-17: alloy `Provider::get_transaction_by_hash` /
+                // `get_transaction_receipt` / `get_block_by_number`
+                // replace the three legacy web3 fetches in this
+                // tx-history sync path. Wire-level RPC methods
+                // (`eth_getTransactionByHash`, `eth_getTransactionReceipt`,
+                // `eth_getBlockByNumber`) are unchanged. The fetched
+                // alloy `Transaction` is round-tripped through
+                // `signed_tx_from_alloy_tx` so the persisted
+                // `TransactionDetails::tx_hex` (RLP of `SignedEthTx`)
+                // and `tx_hash` are bit-for-bit identical to the
+                // pre-migration output.
+                use crate::eth::alloy_compat::assert_send_future;
+                use alloy::providers::Provider;
+
+                let provider = self.alloy_provider();
+                let trace_hash = trace.transaction_hash.unwrap();
+                let alloy_hash = alloy::primitives::B256::from_slice(&trace_hash.0);
+
+                let alloy_tx = match assert_send_future(provider.get_transaction_by_hash(alloy_hash)).await {
                     Ok(tx) => tx,
                     Err(e) => {
                         ctx.log.log(
                             "",
                             &[&"tx_history", &self.ticker],
-                            &ERRL!(
-                                "Error {} on getting transaction {:?}",
-                                e,
-                                trace.transaction_hash.unwrap()
-                            ),
+                            &ERRL!("Error {} on getting transaction {:?}", e, trace_hash),
                         );
                         continue;
                     },
                 };
-                let web3_tx = match web3_tx {
+                let alloy_tx = match alloy_tx {
                     Some(t) => t,
                     None => {
                         ctx.log.log(
                             "",
                             &[&"tx_history", &self.ticker],
-                            &ERRL!("No such transaction {:?}", trace.transaction_hash.unwrap()),
+                            &ERRL!("No such transaction {:?}", trace_hash),
                         );
                         continue;
                     },
@@ -807,27 +815,18 @@ impl EthCoin {
 
                 mm_counter!(ctx.metrics, "tx.history.response.count", 1, "coin" => self.ticker.clone(), "method" => "tx_detail_by_hash");
 
-                let receipt = match self
-                    .web3
-                    .eth()
-                    .transaction_receipt(trace.transaction_hash.unwrap())
-                    .compat()
-                    .await
-                {
+                let receipt = match assert_send_future(provider.get_transaction_receipt(alloy_hash)).await {
                     Ok(r) => r,
                     Err(e) => {
                         ctx.log.log(
                             "",
                             &[&"tx_history", &self.ticker],
-                            &ERRL!(
-                                "Error {} on getting transaction {:?} receipt",
-                                e,
-                                trace.transaction_hash.unwrap()
-                            ),
+                            &ERRL!("Error {} on getting transaction {:?} receipt", e, trace_hash),
                         );
                         continue;
                     },
                 };
+                let raw = signed_tx_from_alloy_tx(alloy_tx).unwrap();
                 let fee_coin = match &self.coin_type {
                     EthCoinType::Eth => self.ticker(),
                     EthCoinType::Erc20 { platform, .. } => platform.as_str(),
@@ -835,10 +834,7 @@ impl EthCoin {
                     EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details: Option<EthTxFeeDetails> = match receipt {
-                    Some(r) => Some(
-                        EthTxFeeDetails::new(r.gas_used.unwrap_or_else(|| 0.into()), web3_tx.gas_price, fee_coin)
-                            .unwrap(),
-                    ),
+                    Some(r) => Some(EthTxFeeDetails::new(U256::from(r.gas_used), raw.gas_price, fee_coin).unwrap()),
                     None => None,
                 };
 
@@ -863,7 +859,9 @@ impl EthCoin {
                     }
                 }
 
-                let raw = signed_tx_from_web3_tx(web3_tx).unwrap();
+                // LP-17: continue migration — alloy currently used for
+                // tx fetch; legacy web3.block(...) still pending
+                // P3 step 7d (block-by-number).
                 let block = match self
                     .web3
                     .eth()
@@ -1160,23 +1158,29 @@ impl EthCoin {
                 mm_counter!(ctx.metrics, "tx.history.request.count", 1,
                     "coin" => self.ticker.clone(), "client" => "ethereum", "method" => "tx_detail_by_hash");
 
-                let web3_tx = match self
-                    .web3
-                    .eth()
-                    .transaction(TransactionId::Hash(event.transaction_hash.unwrap()))
-                    .compat()
-                    .await
-                {
+                // LP-17: alloy `Provider::get_transaction_by_hash` /
+                // `get_transaction_receipt` replace the legacy web3
+                // fetches in this ERC20 tx-history sync path. Wire-
+                // level RPC methods (`eth_getTransactionByHash`,
+                // `eth_getTransactionReceipt`) unchanged. The fetched
+                // alloy `Transaction` is round-tripped through
+                // `signed_tx_from_alloy_tx` so persisted
+                // `TransactionDetails::tx_hex` / `tx_hash` are
+                // bit-for-bit identical.
+                use crate::eth::alloy_compat::assert_send_future;
+                use alloy::providers::Provider;
+
+                let provider = self.alloy_provider();
+                let event_hash = event.transaction_hash.unwrap();
+                let alloy_hash = alloy::primitives::B256::from_slice(&event_hash.0);
+
+                let alloy_tx = match assert_send_future(provider.get_transaction_by_hash(alloy_hash)).await {
                     Ok(tx) => tx,
                     Err(e) => {
                         ctx.log.log(
                             "",
                             &[&"tx_history", &self.ticker],
-                            &ERRL!(
-                                "Error {} on getting transaction {:?}",
-                                e,
-                                event.transaction_hash.unwrap()
-                            ),
+                            &ERRL!("Error {} on getting transaction {:?}", e, event_hash),
                         );
                         continue;
                     },
@@ -1185,39 +1189,30 @@ impl EthCoin {
                 mm_counter!(ctx.metrics, "tx.history.response.count", 1,
                     "coin" => self.ticker.clone(), "client" => "ethereum", "method" => "tx_detail_by_hash");
 
-                let web3_tx = match web3_tx {
+                let alloy_tx = match alloy_tx {
                     Some(t) => t,
                     None => {
                         ctx.log.log(
                             "",
                             &[&"tx_history", &self.ticker],
-                            &ERRL!("No such transaction {:?}", event.transaction_hash.unwrap()),
+                            &ERRL!("No such transaction {:?}", event_hash),
                         );
                         continue;
                     },
                 };
 
-                let receipt = match self
-                    .web3
-                    .eth()
-                    .transaction_receipt(event.transaction_hash.unwrap())
-                    .compat()
-                    .await
-                {
+                let receipt = match assert_send_future(provider.get_transaction_receipt(alloy_hash)).await {
                     Ok(r) => r,
                     Err(e) => {
                         ctx.log.log(
                             "",
                             &[&"tx_history", &self.ticker],
-                            &ERRL!(
-                                "Error {} on getting transaction {:?} receipt",
-                                e,
-                                event.transaction_hash.unwrap()
-                            ),
+                            &ERRL!("Error {} on getting transaction {:?} receipt", e, event_hash),
                         );
                         continue;
                     },
                 };
+                let raw = signed_tx_from_alloy_tx(alloy_tx).unwrap();
                 let fee_coin = match &self.coin_type {
                     EthCoinType::Eth => self.ticker(),
                     EthCoinType::Erc20 { platform, .. } => platform.as_str(),
@@ -1225,10 +1220,7 @@ impl EthCoin {
                     EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details = match receipt {
-                    Some(r) => Some(
-                        EthTxFeeDetails::new(r.gas_used.unwrap_or_else(|| 0.into()), web3_tx.gas_price, fee_coin)
-                            .unwrap(),
-                    ),
+                    Some(r) => Some(EthTxFeeDetails::new(U256::from(r.gas_used), raw.gas_price, fee_coin).unwrap()),
                     None => None,
                 };
                 let block_number = event.block_number.unwrap();
@@ -1258,7 +1250,6 @@ impl EthCoin {
                     },
                 };
 
-                let raw = signed_tx_from_web3_tx(web3_tx).unwrap();
                 let details = TransactionDetails {
                     my_balance_change: &received_by_me - &spent_by_me,
                     spent_by_me,
