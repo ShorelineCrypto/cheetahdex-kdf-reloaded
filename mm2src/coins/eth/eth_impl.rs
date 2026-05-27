@@ -219,19 +219,20 @@ impl EthCoinImpl {
         }
     }
 
-    pub(crate) fn estimate_gas(&self, req: CallRequest) -> Box<dyn Future<Item = U256, Error = web3::Error> + Send> {
+    pub(crate) fn estimate_gas(&self, req: CallRequest) -> Web3RpcFut<U256> {
         // LP-17: alloy raw RPC replaces `web3.eth().estimate_gas`.
         // Always pass a single argument as old Geth versions reject
-        // the optional block tag. Errors are mapped back to
-        // `web3::Error::Transport(_)` so the existing
-        // `From<web3::Error>` conversions on `Web3RpcError`/etc. still
-        // apply and the public function signature is unchanged.
+        // the optional block tag. Errors are mapped to
+        // `Web3RpcError::Transport(_)` (was `web3::Error::Transport`
+        // before LP-17 Phase 4); the existing `From<Web3RpcError>`
+        // conversions on `WithdrawError`/`TradePreimageError` keep
+        // call-site `?` propagation working.
         let provider = self.alloy_provider();
         let fut = async move {
             use crate::eth::alloy_compat::assert_send_future;
             assert_send_future(provider.client().request::<_, U256>("eth_estimateGas", (req,)))
                 .await
-                .map_err(|e| web3::Error::from(web3::ErrorKind::Transport(e.to_string())))
+                .map_to_mm(|e| Web3RpcError::Transport(e.to_string()))
         };
         Box::new(fut.boxed().compat())
     }
@@ -395,7 +396,11 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             };
             // TODO Note if the wallet's balance is insufficient to withdraw, then `estimate_gas` may fail with the `Exception` error.
             // TODO Ideally we should determine the case when we have the insufficient balance and return `WithdrawError::NotSufficientBalance`.
-            let gas_limit = coin.estimate_gas(estimate_gas_req).compat().await?;
+            let gas_limit = coin
+                .estimate_gas(estimate_gas_req)
+                .compat()
+                .await
+                .mm_err(WithdrawError::from)?;
             (gas_limit, gas_price)
         },
     };
@@ -1705,7 +1710,11 @@ impl EthCoin {
                     let function = ERC20_CONTRACT.function("balanceOf")?;
                     let data = function.encode_input(&[Token::Address(coin.my_address)])?;
 
-                    let res = coin.call_request(*token_addr, None, Some(data.into())).compat().await?;
+                    let res = coin
+                        .call_request(*token_addr, None, Some(data.into()))
+                        .compat()
+                        .await
+                        .mm_err(BalanceError::from)?;
                     let decoded = function.decode_output(&res.0)?;
                     match decoded[0] {
                         Token::Uint(number) => Ok(number),
@@ -1749,7 +1758,7 @@ impl EthCoin {
                 // logic on gas price, e.g. TUSD: https://github.com/KomodoPlatform/atomicDEX-API/issues/643
                 gas_price: Some(gas_price),
             };
-            coin.estimate_gas(estimate_gas_req).map_to_mm_fut(Web3RpcError::from)
+            coin.estimate_gas(estimate_gas_req)
         }))
     }
 
@@ -1771,12 +1780,7 @@ impl EthCoin {
         Box::new(fut.boxed().compat())
     }
 
-    pub(crate) fn call_request(
-        &self,
-        to: Address,
-        value: Option<U256>,
-        data: Option<Bytes>,
-    ) -> impl Future<Item = Bytes, Error = web3::Error> {
+    pub(crate) fn call_request(&self, to: Address, value: Option<U256>, data: Option<Bytes>) -> Web3RpcFut<Bytes> {
         let request = CallRequest {
             from: Some(self.my_address),
             to,
@@ -1796,9 +1800,9 @@ impl EthCoin {
                     .request::<_, Bytes>("eth_call", (request, BlockNumber::Latest)),
             )
             .await
-            .map_err(|e| web3::Error::from(web3::ErrorKind::Transport(e.to_string())))
+            .map_to_mm(|e| Web3RpcError::Transport(e.to_string()))
         };
-        fut.boxed().compat()
+        Box::new(fut.boxed().compat())
     }
 
     pub(crate) fn allowance(&self, spender: Address) -> Web3RpcFut<U256> {

@@ -106,26 +106,6 @@ impl From<serde_json::Error> for Web3RpcError {
     }
 }
 
-impl From<web3::Error> for Web3RpcError {
-    fn from(e: web3::Error) -> Self {
-        let error_str = e.to_string();
-        match e.kind() {
-            web3::ErrorKind::InvalidResponse(_)
-            | web3::ErrorKind::Decoder(_)
-            | web3::ErrorKind::Msg(_)
-            | web3::ErrorKind::Rpc(_) => Web3RpcError::InvalidResponse(error_str),
-            web3::ErrorKind::Transport(_) | web3::ErrorKind::Io(_) => Web3RpcError::Transport(error_str),
-            _ => Web3RpcError::Internal(error_str),
-        }
-    }
-}
-
-impl From<web3::Error> for RawTransactionError {
-    fn from(e: web3::Error) -> Self {
-        RawTransactionError::Transport(e.to_string())
-    }
-}
-
 impl From<ethabi::Error> for Web3RpcError {
     fn from(e: ethabi::Error) -> Web3RpcError {
         // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
@@ -142,12 +122,6 @@ impl From<ethabi::Error> for WithdrawError {
     }
 }
 
-impl From<web3::Error> for WithdrawError {
-    fn from(e: web3::Error) -> Self {
-        WithdrawError::Transport(e.to_string())
-    }
-}
-
 impl From<Web3RpcError> for WithdrawError {
     fn from(e: Web3RpcError) -> Self {
         match e {
@@ -157,17 +131,20 @@ impl From<Web3RpcError> for WithdrawError {
     }
 }
 
-impl From<web3::Error> for TradePreimageError {
-    fn from(e: web3::Error) -> Self {
-        TradePreimageError::Transport(e.to_string())
-    }
-}
-
 impl From<Web3RpcError> for TradePreimageError {
     fn from(e: Web3RpcError) -> Self {
         match e {
             Web3RpcError::Transport(err) | Web3RpcError::InvalidResponse(err) => TradePreimageError::Transport(err),
             Web3RpcError::Internal(internal) => TradePreimageError::InternalError(internal),
+        }
+    }
+}
+
+impl From<Web3RpcError> for BalanceError {
+    fn from(e: Web3RpcError) -> Self {
+        match e {
+            Web3RpcError::Transport(err) | Web3RpcError::InvalidResponse(err) => BalanceError::Transport(err),
+            Web3RpcError::Internal(internal) => BalanceError::Internal(internal),
         }
     }
 }
@@ -185,12 +162,6 @@ impl From<ethabi::Error> for BalanceError {
         // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
         // It's an internal error if there are any issues during working with a smart contract ABI.
         BalanceError::Internal(e.to_string())
-    }
-}
-
-impl From<web3::Error> for BalanceError {
-    fn from(e: web3::Error) -> Self {
-        BalanceError::Transport(e.to_string())
     }
 }
 
