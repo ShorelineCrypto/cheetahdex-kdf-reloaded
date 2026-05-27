@@ -690,7 +690,7 @@ dependencies = [
  "tokio",
  "tower 0.5.3",
  "tracing",
- "url 2.5.8",
+ "url",
  "wasmtimer",
 ]
 
@@ -702,7 +702,7 @@ checksum = "2035f3c4d6bee20624da2dcf765d469b292398e48d766ffade61b0fcf8b4d45d"
 dependencies = [
  "alloy-transport",
  "itertools 0.14.0",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -973,15 +973,6 @@ checksum = "a4c527152e37cf757a3f78aae5a06fbeefdb07ccc535c980a3208ee3060dd544"
 
 [[package]]
 name = "arrayvec"
-version = "0.4.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd9fd44efafa8690358b7408d253adf110036b88f55672a933f01d616ad9b1b9"
-dependencies = [
- "nodrop",
-]
-
-[[package]]
-name = "arrayvec"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cff77d8686867eceff3105329d4698d96c2391c176d5d03adc90c7389162b5b8"
@@ -1023,7 +1014,7 @@ dependencies = [
  "once_cell",
  "pin-project-lite 0.1.12",
  "pin-utils",
- "slab 0.4.12",
+ "slab",
  "smol",
  "wasm-bindgen-futures",
 ]
@@ -1140,7 +1131,7 @@ dependencies = [
  "matchit",
  "memchr",
  "mime",
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "pin-project-lite 0.2.17",
  "rustversion",
  "serde",
@@ -2071,14 +2062,13 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tower 0.5.3",
- "url 2.5.8",
+ "url",
  "utxo_signer",
  "uuid 1.20.0",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
- "web3",
  "webpki-roots",
  "winapi",
  "zbase32",
@@ -2422,7 +2412,7 @@ dependencies = [
  "lazy_static",
  "maybe-uninit",
  "memoffset 0.5.4",
- "scopeguard 1.1.0",
+ "scopeguard",
 ]
 
 [[package]]
@@ -2435,7 +2425,7 @@ dependencies = [
  "crossbeam-utils 0.8.8",
  "lazy_static",
  "memoffset 0.6.4",
- "scopeguard 1.1.0",
+ "scopeguard",
 ]
 
 [[package]]
@@ -3373,7 +3363,6 @@ version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d371106cc88ffdfb1eabd7111e432da544f16f3e2d7bf1dfe8bf575f1df045cd"
 dependencies = [
- "backtrace",
  "version_check",
 ]
 
@@ -3719,7 +3708,7 @@ version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
- "percent-encoding 2.3.2",
+ "percent-encoding",
 ]
 
 [[package]]
@@ -3895,7 +3884,7 @@ dependencies = [
  "libc",
  "memchr",
  "pin-project-lite 0.2.17",
- "slab 0.4.12",
+ "slab",
 ]
 
 [[package]]
@@ -4077,7 +4066,7 @@ dependencies = [
  "futures-util",
  "http 0.2.12",
  "indexmap 2.14.0",
- "slab 0.4.12",
+ "slab",
  "tokio",
  "tokio-util",
  "tracing",
@@ -4592,17 +4581,6 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
-name = "idna"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38f09e0f0b1fb55fdee1f17470ad800da77af5186a1a76c026b679358b7e844e"
-dependencies = [
- "matches",
- "unicode-bidi",
- "unicode-normalization",
-]
 
 [[package]]
 name = "idna"
@@ -5306,7 +5284,7 @@ dependencies = [
  "quicksink",
  "rw-stream-sink",
  "soketto",
- "url 2.5.8",
+ "url",
  "webpki-roots",
 ]
 
@@ -5519,21 +5497,11 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "lock_api"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62ebf1391f6acad60e5c8b43706dde4582df75c06698ab44511d15016bc2442c"
-dependencies = [
- "owning_ref",
- "scopeguard 0.3.3",
-]
-
-[[package]]
-name = "lock_api"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4da24a77a3d8a6d4862d95f72e6fdb9c09a643ecdb402d754004a557f2bec75"
 dependencies = [
- "scopeguard 1.1.0",
+ "scopeguard",
 ]
 
 [[package]]
@@ -5542,7 +5510,7 @@ version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
- "scopeguard 1.1.0",
+ "scopeguard",
 ]
 
 [[package]]
@@ -6282,11 +6250,11 @@ dependencies = [
  "byteorder 1.4.3",
  "data-encoding",
  "multihash",
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "serde",
  "static_assertions",
  "unsigned-varint 0.7.1",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -6347,12 +6315,6 @@ dependencies = [
  "libc",
  "memoffset 0.6.4",
 ]
-
-[[package]]
-name = "nodrop"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
 
 [[package]]
 name = "nohash-hasher"
@@ -6636,7 +6598,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "url 2.5.8",
+ "url",
  "wc_common",
 ]
 
@@ -6709,16 +6671,6 @@ checksum = "1bcaa58ee64f8e4a3d02f5d8e6ed0340eae28fed6fdabd984ad1776e3b43848a"
 
 [[package]]
 name = "parking_lot"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab41b4aed082705d1056416ae4468b6ea99d52599ecf3169b00088d43113e337"
-dependencies = [
- "lock_api 0.1.5",
- "parking_lot_core 0.4.0",
-]
-
-[[package]]
-name = "parking_lot"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f842b1982eb6c2fe34036a4fbfb06dd185a3f5c8edfaacdf7d1ea10b07de6252"
@@ -6757,19 +6709,6 @@ checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
 dependencies = [
  "lock_api 0.4.14",
  "parking_lot_core 0.9.12",
-]
-
-[[package]]
-name = "parking_lot_core"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94c8c7923936b28d546dfd14d4472eaf34c99b14e1c973a32b3e6d4eb04298c9"
-dependencies = [
- "libc",
- "rand 0.6.5",
- "rustc_version 0.2.3",
- "smallvec 0.6.14",
- "winapi",
 ]
 
 [[package]]
@@ -6899,12 +6838,6 @@ checksum = "a8835c273a76a90455d7344889b0964598e3316e2a79ede8e36f16bdcf2228b8"
 dependencies = [
  "base64 0.13.0",
 ]
-
-[[package]]
-name = "percent-encoding"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31010dd2e1ac33d5b46a5b413495239882813e0369f8ed8a5e266f173602f831"
 
 [[package]]
 name = "percent-encoding"
@@ -7388,7 +7321,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d464fae65fff2680baf48019211ce37aaec0c78e9264c84a3e484717f965104e"
 dependencies = [
- "percent-encoding 2.3.2",
+ "percent-encoding",
 ]
 
 [[package]]
@@ -7894,7 +7827,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite-wasm",
  "tokio-util",
- "url 2.5.8",
+ "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
@@ -7925,7 +7858,7 @@ dependencies = [
  "sha2 0.10.9",
  "strum 0.26.3",
  "thiserror 1.0.69",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -7958,7 +7891,7 @@ dependencies = [
  "lazy_static",
  "log 0.4.29",
  "mime",
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "pin-project-lite 0.2.17",
  "rustls 0.20.4",
  "rustls-pemfile 0.2.1",
@@ -7967,7 +7900,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-rustls 0.23.2",
- "url 2.5.8",
+ "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -8444,12 +8377,6 @@ checksum = "ea6a9290e3c9cf0f18145ef7ffa62d68ee0bf5fcd651017e586dc7fd5da448c2"
 
 [[package]]
 name = "scopeguard"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94258f53601af11e6a49f722422f6e3425c52b06245a5cf9bc09908b174f5e27"
-
-[[package]]
-name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
@@ -8734,7 +8661,7 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cac3f1e2ca2fe333923a1ae72caca910b98ed0630bb35ef6f8c8517d6e81afa"
 dependencies = [
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -8960,14 +8887,14 @@ dependencies = [
  "js-sys",
  "log 0.4.29",
  "nom",
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "reqwest",
  "rustc-hex 2.1.0",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "thiserror 1.0.69",
- "url 2.5.8",
+ "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -9049,12 +8976,6 @@ dependencies = [
 
 [[package]]
 name = "slab"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17b4fcaed89ab08ef143da37bc52adbcc04d4a69014f4c1208d6b51f0c47bc23"
-
-[[package]]
-name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
@@ -9092,7 +9013,7 @@ dependencies = [
  "libc",
  "once_cell",
  "scoped-tls",
- "slab 0.4.12",
+ "slab",
  "socket2 0.3.19",
  "wepoll-sys-stjepang",
  "winapi",
@@ -9266,7 +9187,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tiny-bip39",
  "uriparse",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -9280,7 +9201,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_yaml",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -9314,7 +9235,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tungstenite",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -9449,7 +9370,7 @@ dependencies = [
  "solana-sdk",
  "solana-version",
  "tokio",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -10420,7 +10341,7 @@ dependencies = [
  "serde_json",
  "tendermint",
  "toml 0.8.23",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -10465,7 +10386,7 @@ dependencies = [
  "tendermint-proto",
  "thiserror 1.0.69",
  "time 0.3.47",
- "url 2.5.8",
+ "url",
  "uuid 1.20.0",
  "walkdir",
 ]
@@ -10807,16 +10728,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-timer"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6131e780037787ff1b3f8aad9da83bca02438b72277850dd6ad0d455e0e20efc"
-dependencies = [
- "futures 0.1.29",
- "slab 0.3.0",
-]
-
-[[package]]
 name = "tokio-tungstenite"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10958,7 +10869,7 @@ dependencies = [
  "http-body 0.4.6",
  "hyper",
  "hyper-timeout",
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "pin-project 1.1.11",
  "prost 0.12.6",
  "rustls-pemfile 2.2.0",
@@ -10997,7 +10908,7 @@ dependencies = [
  "pin-project 1.1.11",
  "pin-project-lite 0.2.17",
  "rand 0.8.4",
- "slab 0.4.12",
+ "slab",
  "tokio",
  "tokio-util",
  "tower-layer",
@@ -11080,7 +10991,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -11159,7 +11070,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tinyvec",
  "tokio",
- "url 2.5.8",
+ "url",
 ]
 
 [[package]]
@@ -11204,7 +11115,7 @@ dependencies = [
  "rustls 0.20.4",
  "sha-1",
  "thiserror 1.0.69",
- "url 2.5.8",
+ "url",
  "utf-8",
  "webpki 0.22.0",
  "webpki-roots",
@@ -11366,24 +11277,13 @@ dependencies = [
 
 [[package]]
 name = "url"
-version = "1.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd4e7c0d531266369519a4aa4f399d748bd37043b00bde1e4ff1f60a120b355a"
-dependencies = [
- "idna 0.1.5",
- "matches",
- "percent-encoding 1.0.1",
-]
-
-[[package]]
-name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
 dependencies = [
  "form_urlencoded",
  "idna 1.1.0",
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "serde",
  "serde_derive",
 ]
@@ -11640,7 +11540,7 @@ dependencies = [
  "js-sys",
  "parking_lot 0.12.5",
  "pin-utils",
- "slab 0.4.12",
+ "slab",
  "wasm-bindgen",
 ]
 
@@ -11672,28 +11572,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "web3"
-version = "0.6.0"
-source = "git+https://github.com/artemii235/rust-web3#9357249d31c258c5a7d47dfc51e9bb7d980056f1"
-dependencies = [
- "arrayvec 0.4.12",
- "base64 0.10.1",
- "error-chain",
- "ethabi",
- "ethereum-types 0.4.2",
- "futures 0.1.29",
- "jsonrpc-core 8.0.1",
- "log 0.4.29",
- "parking_lot 0.7.1",
- "rustc-hex 1.0.0",
- "serde",
- "serde_derive",
- "serde_json",
- "tokio-timer",
- "url 1.7.2",
 ]
 
 [[package]]
@@ -12060,7 +11938,7 @@ dependencies = [
  "hex 0.4.3",
  "jubjub",
  "nom",
- "percent-encoding 2.3.2",
+ "percent-encoding",
  "protobuf",
  "protobuf-codegen-pure",
  "rand_core 0.5.1",

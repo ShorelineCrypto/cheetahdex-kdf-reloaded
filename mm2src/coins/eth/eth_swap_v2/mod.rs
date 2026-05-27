@@ -18,7 +18,9 @@
 //! - [`ZERO_VALUE`] is consumed by the eth_*_swap_v2 modules and by
 //!   the NFT swap_v2 module; renaming requires updating all call sites.
 
-use crate::eth::{decode_contract_call, signed_tx_from_alloy_tx, EthCoin, EthCoinType, Transaction, TransactionErr};
+use crate::eth::{
+    decode_contract_call, signed_tx_from_alloy_tx, EthCoin, EthCoinType, Log, Transaction, TransactionErr,
+};
 use crate::{FindPaymentSpendError, MarketCoinOps};
 use bigdecimal::BigDecimal;
 use common::executor::Timer;
@@ -121,7 +123,7 @@ pub(crate) struct SpendTxSearchParams<'a> {
 /// Predicate matching an event whose first 32 bytes equal the given
 /// `swap_id`. Pulled out so the scanning loop reads as one
 /// declarative check instead of an inline closure.
-fn event_matches_swap_id(event: &web3::types::Log, swap_id: &[u8; 32]) -> bool {
+fn event_matches_swap_id(event: &Log, swap_id: &[u8; 32]) -> bool {
     event.data.0.len() >= 32 && &event.data.0[..32] == swap_id
 }
 

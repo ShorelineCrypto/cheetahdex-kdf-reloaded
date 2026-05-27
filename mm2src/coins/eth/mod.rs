@@ -59,11 +59,9 @@ pub(crate) use std::path::PathBuf;
 pub(crate) use std::str::FromStr;
 pub(crate) use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 pub(crate) use std::sync::{Arc, Mutex};
-pub(crate) use web3::types::{
-    Action as TraceAction, BlockId, BlockNumber, Bytes, CallRequest, FilterBuilder, Log, Trace, TraceFilterBuilder,
-    TransactionId,
+pub(crate) use wire_types::{
+    Action as TraceAction, BlockNumber, Bytes, CallRequest, FilterBuilder, Log, Trace, TraceFilterBuilder,
 };
-pub(crate) use web3::{self, Web3};
 
 pub(crate) use super::{
     BalanceError, BalanceFut, CoinBalance, CoinProtocol, CoinTransportMetrics, CoinsContext, FeeApproxStage,
@@ -99,6 +97,7 @@ mod eth_market_ops;
 mod eth_mm_coin;
 mod eth_swap_ops;
 mod eth_types;
+mod wire_types;
 
 // Re-export split module contents for backward-compatible access paths
 pub use eth_impl::*;
