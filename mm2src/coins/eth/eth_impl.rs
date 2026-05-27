@@ -247,14 +247,26 @@ impl EthCoinImpl {
 }
 
 pub async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest) -> RawTransactionResult {
+    // LP-17: alloy `Provider::get_transaction_by_hash` replaces
+    // `web3.eth().transaction(...)`. The fetched alloy `Transaction`
+    // is round-tripped through `signed_tx_from_alloy_tx` to keep the
+    // legacy `SignedEthTx` shape (and therefore the same RLP
+    // encoding in `tx_hex`) bit-for-bit unchanged.
+    use crate::eth::alloy_compat::assert_send_future;
+    use alloy::providers::Provider;
+
     let tx = match req.tx_hash.strip_prefix("0x") {
         Some(tx) => tx,
         None => &req.tx_hash,
     };
     let hash = H256::from_str(tx).map_to_mm(|e| RawTransactionError::InvalidHashError(e.to_string()))?;
-    let web3_tx = coin.web3.eth().transaction(TransactionId::Hash(hash)).compat().await?;
-    let web3_tx = web3_tx.or_mm_err(|| RawTransactionError::HashNotExist(req.tx_hash))?;
-    let raw = signed_tx_from_web3_tx(web3_tx).map_to_mm(RawTransactionError::InternalError)?;
+    let provider = coin.alloy_provider();
+    let alloy_hash = alloy::primitives::B256::from_slice(&hash.0);
+    let alloy_tx = assert_send_future(provider.get_transaction_by_hash(alloy_hash))
+        .await
+        .map_err(|e| RawTransactionError::Transport(e.to_string()))?;
+    let alloy_tx = alloy_tx.or_mm_err(|| RawTransactionError::HashNotExist(req.tx_hash))?;
+    let raw = signed_tx_from_alloy_tx(alloy_tx).map_to_mm(RawTransactionError::InternalError)?;
     Ok(RawTransactionRes {
         tx_hex: BytesJson(rlp::encode(&raw)),
     })
@@ -1843,20 +1855,27 @@ impl EthCoin {
                 return ERR!("Payment state is not PAYMENT_STATE_SENT, got {}", status);
             }
 
-            let tx_from_rpc = try_s!(
-                selfi
-                    .web3
-                    .eth()
-                    .transaction(TransactionId::Hash(tx.hash))
-                    .compat()
-                    .await
-            );
+            // LP-17: alloy `Provider::get_transaction_by_hash` replaces
+            // `web3.eth().transaction(...)`. The fetched alloy
+            // `Transaction` carries the typed-envelope inner; field
+            // accesses are routed through `alloy::consensus::Transaction`
+            // (gas_price/value/input/to/etc.) plus the wrapper's own
+            // `inner.signer()`. Wire-level RPC method
+            // `eth_getTransactionByHash` is unchanged.
+            use crate::eth::alloy_compat::assert_send_future;
+            use alloy::consensus::Transaction as _;
+            use alloy::providers::Provider;
+
+            let provider = selfi.alloy_provider();
+            let alloy_hash = alloy::primitives::B256::from_slice(&tx.hash.0);
+            let tx_from_rpc = try_s!(assert_send_future(provider.get_transaction_by_hash(alloy_hash)).await);
             let tx_from_rpc = match tx_from_rpc {
                 Some(t) => t,
                 None => return ERR!("Didn't find provided tx {:?} on ETH node", tx),
             };
 
-            if tx_from_rpc.from != sender {
+            let from_addr = Address::from_slice(tx_from_rpc.inner.signer().as_slice());
+            if from_addr != sender {
                 return ERR!(
                     "Payment tx {:?} was sent from wrong address, expected {:?}",
                     tx_from_rpc,
@@ -1864,9 +1883,17 @@ impl EthCoin {
                 );
             }
 
+            let envelope = tx_from_rpc.inner.inner();
+            let to_addr = envelope.to().map(|a| Address::from_slice(a.as_slice()));
+            let tx_value = {
+                let bytes: [u8; 32] = envelope.value().to_be_bytes();
+                U256::from_big_endian(&bytes)
+            };
+            let tx_input: Vec<u8> = envelope.input().to_vec();
+
             match &selfi.coin_type {
                 EthCoinType::Eth => {
-                    if tx_from_rpc.to != Some(expected_swap_contract_address) {
+                    if to_addr != Some(expected_swap_contract_address) {
                         return ERR!(
                             "Payment tx {:?} was sent to wrong address, expected {:?}",
                             tx_from_rpc,
@@ -1874,7 +1901,7 @@ impl EthCoin {
                         );
                     }
 
-                    if tx_from_rpc.value != expected_value {
+                    if tx_value != expected_value {
                         return ERR!(
                             "Payment tx {:?} value is invalid, expected {:?}",
                             tx_from_rpc,
@@ -1883,7 +1910,7 @@ impl EthCoin {
                     }
 
                     let function = try_s!(SWAP_CONTRACT.function("ethPayment"));
-                    let decoded = try_s!(function.decode_input(&tx_from_rpc.input.0));
+                    let decoded = try_s!(function.decode_input(&tx_input));
                     if decoded[0] != Token::FixedBytes(swap_id.clone()) {
                         return ERR!("Invalid 'swap_id' {:?}, expected {:?}", decoded, swap_id);
                     }
@@ -1916,7 +1943,7 @@ impl EthCoin {
                     platform: _,
                     token_addr,
                 } => {
-                    if tx_from_rpc.to != Some(expected_swap_contract_address) {
+                    if to_addr != Some(expected_swap_contract_address) {
                         return ERR!(
                             "Payment tx {:?} was sent to wrong address, expected {:?}",
                             tx_from_rpc,
@@ -1925,7 +1952,7 @@ impl EthCoin {
                     }
 
                     let function = try_s!(SWAP_CONTRACT.function("erc20Payment"));
-                    let decoded = try_s!(function.decode_input(&tx_from_rpc.input.0));
+                    let decoded = try_s!(function.decode_input(&tx_input));
                     if decoded[0] != Token::FixedBytes(swap_id.clone()) {
                         return ERR!("Invalid 'swap_id' {:?}, expected {:?}", decoded, swap_id);
                     }
