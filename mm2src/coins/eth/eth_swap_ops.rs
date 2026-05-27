@@ -378,6 +378,7 @@ impl SwapOps for EthCoin {
     ) -> Result<Option<FoundSwapTxSpend>, String> {
         let swap_contract_address = try_s!(swap_contract_address.try_to_address());
         self.search_for_swap_tx_spend(tx, swap_contract_address, search_from_block)
+            .await
     }
 
     async fn search_for_swap_tx_spend_other(
@@ -391,6 +392,7 @@ impl SwapOps for EthCoin {
     ) -> Result<Option<FoundSwapTxSpend>, String> {
         let swap_contract_address = try_s!(swap_contract_address.try_to_address());
         self.search_for_swap_tx_spend(tx, swap_contract_address, search_from_block)
+            .await
     }
 
     fn extract_secret(&self, _secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {

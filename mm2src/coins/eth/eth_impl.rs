@@ -228,7 +228,7 @@ impl EthCoinImpl {
         swap_contract_address: Address,
         from_block: u64,
         to_block: u64,
-    ) -> Box<dyn Future<Item = Vec<Log>, Error = String>> {
+    ) -> Box<dyn Future<Item = Vec<Log>, Error = String> + Send> {
         let contract_event = try_fus!(SWAP_CONTRACT.event("SenderRefunded"));
         let filter = FilterBuilder::default()
             .topics(Some(vec![contract_event.signature()]), None, None, None)
@@ -2004,7 +2004,7 @@ impl EthCoin {
         )
     }
 
-    pub(crate) fn search_for_swap_tx_spend(
+    pub(crate) async fn search_for_swap_tx_spend(
         &self,
         tx: &[u8],
         swap_contract_address: Address,
@@ -2030,7 +2030,16 @@ impl EthCoin {
             _ => panic!(),
         };
 
-        let mut current_block = try_s!(self.current_block().wait());
+        // Wrap futures with `assert_send_future` so the resulting
+        // future is `Send`. The web3 `Box<dyn Future + Send>` futures
+        // we still call here are themselves Send, but `.compat()`
+        // produces a wrapper that the compiler can't always prove is
+        // Send across `await` points; the assertion is sound on
+        // native and required for WASM single-thread runtime parity.
+        use crate::eth::alloy_compat::assert_send_future;
+        use alloy::providers::Provider;
+
+        let mut current_block = try_s!(assert_send_future(self.current_block().compat()).await);
         if current_block < search_from_block {
             current_block = search_from_block;
         }
@@ -2040,44 +2049,66 @@ impl EthCoin {
         loop {
             let to_block = current_block.min(from_block + self.logs_block_range);
 
-            let spend_events = try_s!(self.spend_events(swap_contract_address, from_block, to_block).wait());
+            let spend_events = try_s!(
+                assert_send_future(self.spend_events(swap_contract_address, from_block, to_block).compat()).await
+            );
             let found = spend_events.iter().find(|event| &event.data.0[..32] == id.as_slice());
 
             if let Some(event) = found {
                 match event.transaction_hash {
                     Some(tx_hash) => {
-                        let transaction = match try_s!(self.web3.eth().transaction(TransactionId::Hash(tx_hash)).wait())
-                        {
-                            Some(t) => t,
-                            None => {
-                                return ERR!("Found ReceiverSpent event, but transaction {:02x} is missing", tx_hash)
-                            },
-                        };
+                        // LP-17: alloy `Provider::get_transaction_by_hash` +
+                        // `signed_tx_from_alloy_tx` round-trip replaces the
+                        // legacy `web3.eth().transaction(...).wait()` +
+                        // `signed_tx_from_web3_tx` pair. Converting this
+                        // function from sync (`.wait()`) to `async` is
+                        // sound because all callers (search_for_swap_tx_spend
+                        // _my/_other in eth_swap_ops.rs and tests) already
+                        // `.await` the returned value.
+                        let provider = self.alloy_provider();
+                        let alloy_hash = alloy::primitives::B256::from_slice(&tx_hash.0);
+                        let transaction =
+                            match try_s!(assert_send_future(provider.get_transaction_by_hash(alloy_hash)).await) {
+                                Some(t) => t,
+                                None => {
+                                    return ERR!(
+                                        "Found ReceiverSpent event, but transaction {:02x} is missing",
+                                        tx_hash
+                                    )
+                                },
+                            };
 
                         return Ok(Some(FoundSwapTxSpend::Spent(TransactionEnum::from(try_s!(
-                            signed_tx_from_web3_tx(transaction)
+                            signed_tx_from_alloy_tx(transaction)
                         )))));
                     },
                     None => return ERR!("Found ReceiverSpent event, but it doesn't have tx_hash"),
                 }
             }
 
-            let refund_events = try_s!(self.refund_events(swap_contract_address, from_block, to_block).wait());
+            let refund_events = try_s!(
+                assert_send_future(self.refund_events(swap_contract_address, from_block, to_block).compat()).await
+            );
             let found = refund_events.iter().find(|event| &event.data.0[..32] == id.as_slice());
 
             if let Some(event) = found {
                 match event.transaction_hash {
                     Some(tx_hash) => {
-                        let transaction = match try_s!(self.web3.eth().transaction(TransactionId::Hash(tx_hash)).wait())
-                        {
-                            Some(t) => t,
-                            None => {
-                                return ERR!("Found SenderRefunded event, but transaction {:02x} is missing", tx_hash)
-                            },
-                        };
+                        let provider = self.alloy_provider();
+                        let alloy_hash = alloy::primitives::B256::from_slice(&tx_hash.0);
+                        let transaction =
+                            match try_s!(assert_send_future(provider.get_transaction_by_hash(alloy_hash)).await) {
+                                Some(t) => t,
+                                None => {
+                                    return ERR!(
+                                        "Found SenderRefunded event, but transaction {:02x} is missing",
+                                        tx_hash
+                                    )
+                                },
+                            };
 
                         return Ok(Some(FoundSwapTxSpend::Refunded(TransactionEnum::from(try_s!(
-                            signed_tx_from_web3_tx(transaction)
+                            signed_tx_from_alloy_tx(transaction)
                         )))));
                     },
                     None => return ERR!("Found SenderRefunded event, but it doesn't have tx_hash"),
