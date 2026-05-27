@@ -18,7 +18,7 @@
 //! - [`ZERO_VALUE`] is consumed by the eth_*_swap_v2 modules and by
 //!   the NFT swap_v2 module; renaming requires updating all call sites.
 
-use crate::eth::{decode_contract_call, signed_tx_from_web3_tx, EthCoin, EthCoinType, Transaction, TransactionErr};
+use crate::eth::{decode_contract_call, signed_tx_from_alloy_tx, EthCoin, EthCoinType, Transaction, TransactionErr};
 use crate::{FindPaymentSpendError, MarketCoinOps};
 use bigdecimal::BigDecimal;
 use common::executor::Timer;
@@ -31,7 +31,6 @@ use ethereum_types::{Address, H256, U256};
 use futures::compat::Future01CompatExt;
 use mm2_err_handle::prelude::{MmError, MmResult};
 use num_traits::Signed;
-use web3::types::TransactionId;
 
 pub(crate) mod eth_maker_swap_v2;
 pub(crate) mod eth_taker_swap_v2;
@@ -217,9 +216,21 @@ impl EthCoin {
                 });
             }
 
-            match self.web3.eth().transaction(TransactionId::Hash(tx_hash)).compat().await {
+            // LP-17: alloy `Provider::get_transaction_by_hash` replaces
+            // `web3.eth().transaction(...)`. Wire-level RPC method
+            // `eth_getTransactionByHash` is unchanged. The fetched
+            // alloy `Transaction` is round-tripped through
+            // `signed_tx_from_alloy_tx` to keep the legacy
+            // `SignedEthTx` shape that downstream V2 swap state
+            // machines persist.
+            use crate::eth::alloy_compat::assert_send_future;
+            use alloy::providers::Provider;
+
+            let provider = self.alloy_provider();
+            let alloy_hash = alloy::primitives::B256::from_slice(&tx_hash.0);
+            match assert_send_future(provider.get_transaction_by_hash(alloy_hash)).await {
                 Ok(Some(raw_tx)) => {
-                    let signed = signed_tx_from_web3_tx(raw_tx).map_err(FindPaymentSpendError::Internal)?;
+                    let signed = signed_tx_from_alloy_tx(raw_tx).map_err(FindPaymentSpendError::Internal)?;
                     return Ok(signed);
                 },
                 Ok(None) => info!("Transaction {} not found yet", tx_hash),
