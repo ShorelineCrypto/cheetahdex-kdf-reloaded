@@ -5871,6 +5871,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tiny-keccak 2.0.2",
+ "zeroize",
 ]
 
 [[package]]
