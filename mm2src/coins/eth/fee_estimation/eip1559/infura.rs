@@ -1,19 +1,47 @@
-use super::{EstimationSource, FeePerGasEstimated, FeePerGasLevel};
-use crate::eth::{wei_from_gwei_decimal, Web3RpcError, Web3RpcResult};
-use crate::NumConversError;
+//! # Infura gas-price client
+//!
+//! Adapter around Infura's `suggestedGasFees` REST endpoint. Unlike Blocknative
+//! the response already comes pre-bucketed into low / medium / high tiers and
+//! includes wait-time predictions, so the projection onto our
+//! [`FeePerGasEstimated`] is a near-flat copy.
+//!
+//! # Public exports
+//! - [`InfuraFeeFetcher`] — single-call entry point invoked by the EIP-1559
+//!   gas-fee dispatcher in `eth_impl::EthCoin::get_eip1559_gas_fee`.
+//!
+//! # Invariants
+//! - Endpoint path (`networks/1/suggestedGasFees`) is wire contract.
+//! - Wait times are reported in **milliseconds** by Infura and forwarded
+//!   verbatim.
+//! - Fee values arrive in **gwei** and are converted to wei via
+//!   [`wei_from_gwei_decimal`] before exposure.
+
+use std::convert::{TryFrom, TryInto};
+
 use bigdecimal::BigDecimal;
 use http::StatusCode;
+use serde::Deserialize;
+
 use mm2_err_handle::mm_error::MmError;
 use mm2_err_handle::prelude::*;
 use mm2_net::transport::slurp_url_with_headers;
-use serde::Deserialize;
-use std::convert::TryFrom;
-use std::convert::TryInto;
+
+use super::{EstimationSource, FeePerGasEstimated, FeePerGasLevel};
+use crate::eth::{wei_from_gwei_decimal, Web3RpcError, Web3RpcResult};
+use crate::NumConversError;
 
 lazy_static! {
-    static ref INFURA_GAS_API_AUTH_TEST: String = std::env::var("INFURA_GAS_API_AUTH_TEST").unwrap_or_default();
+    /// Bearer token for the Infura gas API (env var
+    /// `INFURA_GAS_API_AUTH_TEST`); empty when unset.
+    static ref INFURA_GAS_API_AUTH_TEST: String =
+        std::env::var("INFURA_GAS_API_AUTH_TEST").unwrap_or_default();
 }
 
+// ---------------------------------------------------------------------------
+// Wire types
+// ---------------------------------------------------------------------------
+
+/// One priority tier of the Infura `suggestedGasFees` response.
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct InfuraFeePerGasLevel {
     #[serde(rename = "suggestedMaxPriorityFeePerGas")]
@@ -26,6 +54,19 @@ pub(crate) struct InfuraFeePerGasLevel {
     pub max_wait_time_estimate: u32,
 }
 
+impl InfuraFeePerGasLevel {
+    /// Convert this tier to the engine-internal wei-denominated shape.
+    fn to_internal(&self) -> Result<FeePerGasLevel, MmError<NumConversError>> {
+        Ok(FeePerGasLevel {
+            max_priority_fee_per_gas: wei_from_gwei_decimal(&self.suggested_max_priority_fee_per_gas)?,
+            max_fee_per_gas: wei_from_gwei_decimal(&self.suggested_max_fee_per_gas)?,
+            min_wait_time: Some(self.min_wait_time_estimate),
+            max_wait_time: Some(self.max_wait_time_estimate),
+        })
+    }
+}
+
+/// Top-level Infura `suggestedGasFees` envelope.
 #[derive(Debug, Deserialize)]
 pub(crate) struct InfuraFeePerGas {
     pub low: InfuraFeePerGasLevel,
@@ -42,64 +83,61 @@ pub(crate) struct InfuraFeePerGas {
 impl TryFrom<InfuraFeePerGas> for FeePerGasEstimated {
     type Error = MmError<NumConversError>;
 
-    fn try_from(infura_fees: InfuraFeePerGas) -> Result<Self, Self::Error> {
+    fn try_from(envelope: InfuraFeePerGas) -> Result<Self, Self::Error> {
         Ok(Self {
-            base_fee: wei_from_gwei_decimal(&infura_fees.estimated_base_fee)?,
-            low: FeePerGasLevel {
-                max_fee_per_gas: wei_from_gwei_decimal(&infura_fees.low.suggested_max_fee_per_gas)?,
-                max_priority_fee_per_gas: wei_from_gwei_decimal(&infura_fees.low.suggested_max_priority_fee_per_gas)?,
-                min_wait_time: Some(infura_fees.low.min_wait_time_estimate),
-                max_wait_time: Some(infura_fees.low.max_wait_time_estimate),
-            },
-            medium: FeePerGasLevel {
-                max_fee_per_gas: wei_from_gwei_decimal(&infura_fees.medium.suggested_max_fee_per_gas)?,
-                max_priority_fee_per_gas: wei_from_gwei_decimal(
-                    &infura_fees.medium.suggested_max_priority_fee_per_gas,
-                )?,
-                min_wait_time: Some(infura_fees.medium.min_wait_time_estimate),
-                max_wait_time: Some(infura_fees.medium.max_wait_time_estimate),
-            },
-            high: FeePerGasLevel {
-                max_fee_per_gas: wei_from_gwei_decimal(&infura_fees.high.suggested_max_fee_per_gas)?,
-                max_priority_fee_per_gas: wei_from_gwei_decimal(&infura_fees.high.suggested_max_priority_fee_per_gas)?,
-                min_wait_time: Some(infura_fees.high.min_wait_time_estimate),
-                max_wait_time: Some(infura_fees.high.max_wait_time_estimate),
-            },
+            base_fee: wei_from_gwei_decimal(&envelope.estimated_base_fee)?,
             source: EstimationSource::Infura,
-            base_fee_trend: infura_fees.base_fee_trend,
-            priority_fee_trend: infura_fees.priority_fee_trend,
+            base_fee_trend: envelope.base_fee_trend,
+            priority_fee_trend: envelope.priority_fee_trend,
+            low: envelope.low.to_internal()?,
+            medium: envelope.medium.to_internal()?,
+            high: envelope.high.to_internal()?,
         })
     }
 }
 
-pub(crate) struct InfuraGasApiCaller;
+// ---------------------------------------------------------------------------
+// HTTP client
+// ---------------------------------------------------------------------------
 
-impl InfuraGasApiCaller {
-    const INFURA_GAS_FEES_ENDPOINT: &'static str = "networks/1/suggestedGasFees";
+/// Outbound request descriptor.
+struct InfuraRequest {
+    url: String,
+    headers: Vec<(&'static str, &'static str)>,
+}
 
-    fn get_url_and_headers(base_url: &str) -> (String, Vec<(&'static str, &'static str)>) {
-        let url = format!("{}/{}", base_url.trim_end_matches('/'), Self::INFURA_GAS_FEES_ENDPOINT);
+/// Stateless adapter that fetches an Infura `suggestedGasFees` snapshot and
+/// projects it onto [`FeePerGasEstimated`].
+pub(crate) struct InfuraFeeFetcher;
+
+impl InfuraFeeFetcher {
+    const ENDPOINT: &'static str = "networks/1/suggestedGasFees";
+
+    fn request(base_url: &str) -> InfuraRequest {
+        let url = format!("{}/{}", base_url.trim_end_matches('/'), Self::ENDPOINT);
         let headers = vec![("Authorization", INFURA_GAS_API_AUTH_TEST.as_str())];
-        (url, headers)
+        InfuraRequest { url, headers }
     }
 
-    async fn make_request(
-        url: &str,
-        headers: Vec<(&'static str, &'static str)>,
-    ) -> Result<InfuraFeePerGas, MmError<String>> {
-        let resp = slurp_url_with_headers(url, headers).await.mm_err(|e| e.to_string())?;
+    async fn issue(req: InfuraRequest) -> Result<InfuraFeePerGas, MmError<String>> {
+        let resp = slurp_url_with_headers(&req.url, req.headers)
+            .await
+            .mm_err(|e| e.to_string())?;
         if resp.0 != StatusCode::OK {
-            return MmError::err(format!("{} failed with status code {}", url, resp.0));
+            return MmError::err(format!("{} failed with status code {}", req.url, resp.0));
         }
         serde_json::from_slice(&resp.2).map_to_mm(|e| e.to_string())
     }
 
+    /// Fetch the next-block fee estimate from Infura.
+    ///
+    /// # Errors
+    /// - [`Web3RpcError::Transport`] for transport / non-200 status responses.
+    /// - [`Web3RpcError::Internal`] for numeric conversion failures.
     pub async fn fetch_fee_estimation(base_url: &str) -> Web3RpcResult<FeePerGasEstimated> {
-        let (url, headers) = Self::get_url_and_headers(base_url);
-        let infura_fees = Self::make_request(&url, headers)
-            .await
-            .mm_err(Web3RpcError::Transport)?;
-        infura_fees
+        let request = Self::request(base_url);
+        let envelope = Self::issue(request).await.mm_err(Web3RpcError::Transport)?;
+        envelope
             .try_into()
             .mm_err(|e: NumConversError| Web3RpcError::Internal(e.to_string()))
     }

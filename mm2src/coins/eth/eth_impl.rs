@@ -2352,8 +2352,8 @@ impl EthCoin {
         &self,
         use_simple: bool,
     ) -> Web3RpcResult<fee_estimation::eip1559::FeePerGasEstimated> {
-        use fee_estimation::eip1559::block_native::BlocknativeGasApiCaller;
-        use fee_estimation::eip1559::infura::InfuraGasApiCaller;
+        use fee_estimation::eip1559::block_native::BlocknativeFeeFetcher;
+        use fee_estimation::eip1559::infura::InfuraFeeFetcher;
         use fee_estimation::eip1559::simple::FeePerGasSimpleEstimator;
         use fee_estimation::eip1559::{GasApiConfig, GasApiProvider};
 
@@ -2371,8 +2371,8 @@ impl EthCoin {
             .map_to_mm(|e| Web3RpcError::InvalidResponse(format!("Invalid gas_api config: {}", e)))?;
 
         let provider_result = match gas_api_conf.provider {
-            GasApiProvider::Infura => InfuraGasApiCaller::fetch_fee_estimation(&gas_api_conf.url).await,
-            GasApiProvider::Blocknative => BlocknativeGasApiCaller::fetch_fee_estimation(&gas_api_conf.url).await,
+            GasApiProvider::Infura => InfuraFeeFetcher::fetch_fee_estimation(&gas_api_conf.url).await,
+            GasApiProvider::Blocknative => BlocknativeFeeFetcher::fetch_fee_estimation(&gas_api_conf.url).await,
         };
 
         match provider_result {
