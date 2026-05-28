@@ -63,6 +63,7 @@ impl Function {
 
 #[cfg(test)]
 mod tests {
+	use hex::FromHex;
 	use {Token, Param, Function, ParamType};
 
 	#[test]
@@ -106,7 +107,7 @@ mod tests {
 		let func = Function::from(interface);
 		let mut uint = [0u8; 32];
 		uint[31] = 69;
-		let input = "cdcd77c000000000000000000000000000000000000000000000000000000000000000450000000000000000000000000000000000000000000000000000000000000001".from_hex().unwrap();
+		let input: Vec<u8> = "cdcd77c000000000000000000000000000000000000000000000000000000000000000450000000000000000000000000000000000000000000000000000000000000001".from_hex().unwrap();
 		let decoded = func.decode_input(&input).unwrap();
 		let expected = vec![Token::Uint(uint.into()), Token::Bool(true)];
 		assert_eq!(decoded, expected);

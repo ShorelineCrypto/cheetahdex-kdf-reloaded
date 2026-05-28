@@ -136,7 +136,7 @@ futures-rustls = { version = "0.21.1" }
 
 [dev-dependencies]
 mocktopus = "0.8.0"
-testcontainers = { git = "https://github.com/artemii235/testcontainers-rs.git" }
+testcontainers = { path = "../testcontainers-vendored" }
 winapi = "0.3"
 
 [build-dependencies]

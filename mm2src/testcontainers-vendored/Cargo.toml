@@ -1,0 +1,21 @@
+[package]
+# Vendored from `https://github.com/artemii235/testcontainers-rs.git` (commit `65e7380`),
+# itself a fork of `testcontainers/testcontainers-rs` v0.7.0 (MIT/Apache-2.0).
+# Kept locally so the workspace is free of `artemii235/*` git dependencies. Test-only.
+# Combines `tc_core` + `tc_cli_client` + `tc_generic` into a single flat crate that
+# preserves the `testcontainers::{clients::Cli, images::generic::*, Container, Docker, Image}`
+# public API consumed by `mm2_main/src/docker_tests/`.
+name = "testcontainers"
+version = "0.7.0"
+edition = "2018"
+license = "MIT OR Apache-2.0"
+description = "Vendored testcontainers-rs 0.7 (artemii235 fork) — local copy, test-only."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+log = "0.4"
+serde = "1"
+serde_json = "1"
+serde_derive = "1"
