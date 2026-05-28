@@ -71,6 +71,13 @@ alloy = { version = "2.0", default-features = false, features = [
 anyhow = "1"
 async-trait = "0.1"
 base64 = "0.21.2"
+# rust-bitcoin family (CC0-1.0 / MIT) — Phase B parity-bitcoin replacement.
+# bitcoinconsensus is intentionally NOT pulled in: it is Apache-2.0 which is
+# incompatible with GPL-2.0-only. KDF script consumers are build/sign-only;
+# no interpreter needed.
+bitcoin = { version = "0.32", default-features = false, features = ["std", "secp-recovery"] }
+bitcoin_hashes = { version = "0.14", default-features = false, features = ["std"] }
+bitcoincash-addr = "0.5"
 cfg-if = "1.0"
 chrono = "0.4"
 cosmrs = { version = "0.16", default-features = false }
