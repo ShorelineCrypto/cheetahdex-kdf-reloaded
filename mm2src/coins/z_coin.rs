@@ -21,7 +21,7 @@ use crate::{
 };
 use crate::{Transaction, WithdrawError};
 use async_trait::async_trait;
-use bitcrypto::dhash160;
+use kdf_crypto::dhash160;
 use chain::constants::SEQUENCE_FINAL;
 use chain::{Transaction as UtxoTx, TransactionOutput};
 use common::executor::{spawn, Timer};

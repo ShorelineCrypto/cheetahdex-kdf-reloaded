@@ -18,7 +18,7 @@ base64 = "0.21.2"
 bip32 = { version = "0.2.2", default-features = false, features = ["alloc", "secp256k1-ffi"] }
 # BIP39 mnemonic generation and seed derivation
 bip39 = { version = "2.1.0", features = ["rand_core", "zeroize", "std"], default-features = false }
-bitcrypto = { path = "../mm2_bitcoin/crypto" }
+kdf_crypto = { path = "../kdf_crypto" }
 # Base58 encoding for xpub prefix conversion
 bs58 = "0.4.0"
 # CBC block cipher mode

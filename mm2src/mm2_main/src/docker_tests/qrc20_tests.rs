@@ -1,6 +1,6 @@
 use crate::docker_tests::docker_tests_common::*;
 use crate::mm2::lp_swap::{dex_fee_amount, max_taker_vol_from_available};
-use bitcrypto::dhash160;
+use kdf_crypto::dhash160;
 use coins::qrc20::rpc_clients::for_tests::Qrc20NativeWalletOps;
 use coins::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin};
 use coins::utxo::rpc_clients::UtxoRpcClientEnum;

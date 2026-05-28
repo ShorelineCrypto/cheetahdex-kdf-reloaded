@@ -57,7 +57,7 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use bitcrypto::sha256;
+use kdf_crypto::sha256;
 use coins::{
     lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee,
     TransactionEnum,

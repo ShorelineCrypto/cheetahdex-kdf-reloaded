@@ -1,5 +1,5 @@
 extern crate bitcoin as ext_bitcoin;
-extern crate bitcrypto as crypto;
+extern crate kdf_crypto as crypto;
 extern crate primitives;
 extern crate rustc_hex as hex;
 extern crate serialization as ser;

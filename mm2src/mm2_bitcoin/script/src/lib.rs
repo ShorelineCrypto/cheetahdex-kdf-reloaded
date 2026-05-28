@@ -1,4 +1,4 @@
-extern crate bitcrypto as crypto;
+extern crate kdf_crypto as crypto;
 extern crate blake2b_simd;
 extern crate chain;
 extern crate keys;

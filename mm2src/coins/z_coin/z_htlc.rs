@@ -12,7 +12,7 @@ use crate::utxo::{sat_from_big_decimal, UtxoAddressFormat};
 use crate::z_coin::{ARRRConsensusParams, SendOutputsErr, ZOutput, DEX_FEE_OVK};
 use crate::{NumConversError, PrivKeyNotAllowed, TransactionEnum};
 use bigdecimal::BigDecimal;
-use bitcrypto::dhash160;
+use kdf_crypto::dhash160;
 use chain::Transaction as UtxoTx;
 use derive_more::Display;
 use futures::compat::Future01CompatExt;

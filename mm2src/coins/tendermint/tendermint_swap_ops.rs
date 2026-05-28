@@ -17,7 +17,7 @@ use crate::{
     TransactionEnum, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput,
 };
 use bigdecimal::BigDecimal;
-use bitcrypto::dhash160;
+use kdf_crypto::dhash160;
 use common::{drop_mutability, now_ms};
 use cosmrs::proto::cosmos::bank::v1beta1::{
     Input as InputProto, MsgMultiSend as MsgMultiSendProto, MsgSend as MsgSendProto, Output as OutputProto,
@@ -571,7 +571,7 @@ impl SwapOps for TendermintCoin {
         _htlc_privkey: &[u8],
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        let secret_hash = bitcrypto::sha256(secret);
+        let secret_hash = kdf_crypto::sha256(secret);
         self.spend_htlc(taker_payment_tx, secret, secret_hash.as_slice())
     }
 
@@ -584,7 +584,7 @@ impl SwapOps for TendermintCoin {
         _htlc_privkey: &[u8],
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        let secret_hash = bitcrypto::sha256(secret);
+        let secret_hash = kdf_crypto::sha256(secret);
         self.spend_htlc(maker_payment_tx, secret, secret_hash.as_slice())
     }
 

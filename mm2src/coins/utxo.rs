@@ -38,7 +38,7 @@ pub mod utxo_withdraw;
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use bitcoin::network::constants::Network as BitcoinNetwork;
-pub use bitcrypto::{dhash160, sha256, ChecksumType};
+pub use kdf_crypto::{dhash160, sha256, ChecksumType};
 pub use chain::Transaction as UtxoTx;
 use chain::{OutPoint, TransactionOutput, TxHashAlgo};
 #[cfg(not(target_arch = "wasm32"))]

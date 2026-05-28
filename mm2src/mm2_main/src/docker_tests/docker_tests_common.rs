@@ -9,7 +9,7 @@ pub use secp256k1::{PublicKey, SecretKey};
 pub use std::env;
 pub use std::thread;
 
-use bitcrypto::{dhash160, ChecksumType};
+use kdf_crypto::{dhash160, ChecksumType};
 use coins::qrc20::rpc_clients::for_tests::Qrc20NativeWalletOps;
 use coins::qrc20::{qrc20_coin_from_conf_and_params, Qrc20ActivationParams, Qrc20Coin};
 use coins::utxo::qtum::{qtum_coin_with_priv_key, QtumBasedCoin, QtumCoin};

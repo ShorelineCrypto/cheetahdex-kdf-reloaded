@@ -57,8 +57,8 @@ pub(crate) use crate::{
 };
 
 pub(crate) use bigdecimal::BigDecimal;
-pub(crate) use bitcrypto::dhash256;
-pub use bitcrypto::{dhash160, sha256, ChecksumType};
+pub(crate) use kdf_crypto::dhash256;
+pub use kdf_crypto::{dhash160, sha256, ChecksumType};
 pub(crate) use chain::constants::SEQUENCE_FINAL;
 pub(crate) use chain::{BlockHeader, OutPoint, RawBlockHeader, TransactionOutput};
 pub(crate) use common::executor::Timer;

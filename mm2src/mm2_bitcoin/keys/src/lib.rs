@@ -3,7 +3,7 @@
 
 extern crate base58;
 extern crate bech32;
-extern crate bitcrypto as crypto;
+extern crate kdf_crypto as crypto;
 extern crate derive_more;
 extern crate lazy_static;
 extern crate primitives;

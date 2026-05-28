@@ -1,6 +1,6 @@
 use super::rpc::*;
 use crate::{HistorySyncState, PrivKeyNotAllowed, PrivKeyPolicy, TransactionEnum};
-use bitcrypto::sha256;
+use kdf_crypto::sha256;
 use cosmrs::proto::cosmos::tx::v1beta1::TxRaw;
 use cosmrs::proto::prost::{DecodeError, Message};
 use cosmrs::tendermint::chain::Id as ChainId;

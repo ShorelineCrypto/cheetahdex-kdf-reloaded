@@ -21,7 +21,7 @@ bigdecimal = { version = "0.3", features = ["serde"] }
 bip32 = { version = "0.2.2", default-features = false, features = ["alloc", "secp256k1-ffi"] }
 bitcoin = "0.27.1"
 bitcoin_hashes = "0.10.0"
-bitcrypto = { path = "../mm2_bitcoin/crypto" }
+kdf_crypto = { path = "../kdf_crypto" }
 bincode = "1.3.3"
 byteorder = "1.3"
 bytes = "0.4"

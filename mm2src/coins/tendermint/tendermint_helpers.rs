@@ -8,7 +8,7 @@ use crate::utxo::utxo_common::big_decimal_from_sat;
 use crate::{HistorySyncState, MarketCoinOps, TransactionEnum, TransactionErr, WithdrawFee};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
-use bitcrypto::sha256;
+use kdf_crypto::sha256;
 use common::executor::Timer;
 use common::log::debug;
 use common::now_ms;

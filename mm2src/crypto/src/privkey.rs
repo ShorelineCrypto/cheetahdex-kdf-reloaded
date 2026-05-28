@@ -16,7 +16,7 @@
 use crate::global_hd_ctx::Bip39Seed;
 use bip32::Error as Bip32Error;
 use bip39::Error as Bip39Error;
-use bitcrypto::{sha256, ChecksumType};
+use kdf_crypto::{sha256, ChecksumType};
 use ed25519_dalek_bip32::{DerivationPath as Ed25519DerivationPath, Error as Ed25519Bip32Error};
 use keys::{Error as KeysError, KeyPair, Private, Secret as Secp256k1Secret};
 use mm2_err_handle::prelude::*;

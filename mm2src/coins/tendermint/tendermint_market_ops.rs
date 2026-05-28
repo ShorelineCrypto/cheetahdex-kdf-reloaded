@@ -14,7 +14,7 @@ use crate::{
     VerificationError, VerificationResult,
 };
 use bigdecimal::BigDecimal;
-use bitcrypto::sha256;
+use kdf_crypto::sha256;
 use common::executor::Timer;
 use common::mm_number::MmNumber;
 use common::now_ms;

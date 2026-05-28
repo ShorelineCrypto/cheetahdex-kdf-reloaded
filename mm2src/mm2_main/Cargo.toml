@@ -43,7 +43,7 @@ bench = false
 [dependencies]
 async-std = { version = "1.5", features = ["unstable"] }
 async-trait = "0.1"
-bitcrypto = { path = "../mm2_bitcoin/crypto" }
+kdf_crypto = { path = "../kdf_crypto" }
 blake2 = "0.10"
 bytes = "0.4"
 chain = { path = "../mm2_bitcoin/chain" }

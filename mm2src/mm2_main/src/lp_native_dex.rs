@@ -17,7 +17,7 @@
 //  marketmaker
 //
 
-use bitcrypto::sha256;
+use kdf_crypto::sha256;
 use coins::register_balance_update_handler;
 use common::executor::{spawn, spawn_boxed, Timer};
 use common::log::{error, info, warn};

@@ -2,7 +2,7 @@ use crate::crypto_ctx::{MM2_INTERNAL_DERIVATION_PATH, MM2_INTERNAL_ECDSA_CURVE};
 use crate::hw_client::{HwClient, HwError, HwProcessingError, TrezorConnectProcessor};
 use crate::trezor::TrezorSession;
 use crate::HwWalletType;
-use bitcrypto::dhash160;
+use kdf_crypto::dhash160;
 use common::log::warn;
 use futures::lock::Mutex as AsyncMutex;
 use hw_common::primitives::{DerivationPath, Secp256k1ExtendedPublicKey};

@@ -1,0 +1,22 @@
+[package]
+name = "kdf_crypto"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+description = "Hash and checksum primitives used by KDF UTXO machinery. Clean-room implementations layered on standard public-domain crates (sha2, ripemd, sha1, sha3, groestl, siphasher). KDF-original; replaces mm2_bitcoin/crypto (bitcrypto)."
+
+# Phase B (B.3) — drop-in replacement for bitcrypto.
+#
+# Algorithms exposed are public specs (FIPS-180, RIPEMD, SHA-3, Groestl,
+# SipHash). Wrappers and the ChecksumType taxonomy are KDF's own: they
+# encode KDF's coin-family conventions (DSHA256 for Bitcoin-derived chains,
+# DGROESTL512 for Groestlcoin, KECCAK256 for SmartCash).
+
+[dependencies]
+groestl = "0.10"
+primitives = { path = "../mm2_bitcoin/primitives" }
+ripemd = "0.1"
+sha1 = "0.10"
+sha2 = "0.10"
+sha3 = "0.10"
+siphasher = "1"

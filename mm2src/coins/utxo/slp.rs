@@ -21,7 +21,7 @@ use crate::{
     VerificationError, VerificationResult, WatcherOps, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest,
 };
 use async_trait::async_trait;
-use bitcrypto::dhash160;
+use kdf_crypto::dhash160;
 use chain::constants::SEQUENCE_FINAL;
 use chain::{OutPoint, TransactionOutput};
 use common::log::warn;

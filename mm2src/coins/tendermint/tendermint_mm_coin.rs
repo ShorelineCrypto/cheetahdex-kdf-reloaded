@@ -15,7 +15,7 @@ use crate::{
     WithdrawFee, WithdrawFut, WithdrawRequest,
 };
 use bigdecimal::BigDecimal;
-use bitcrypto::sha256;
+use kdf_crypto::sha256;
 use common::mm_number::MmNumber;
 use common::now_ms;
 use common::DEX_FEE_ADDR_PUBKEY;

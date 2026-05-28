@@ -123,7 +123,7 @@ mod hd_wallet_integration {
             prefix: 188, // KMD WIF prefix
             secret,
             compressed: true,
-            checksum_type: bitcrypto::ChecksumType::DSHA256,
+            checksum_type: kdf_crypto::ChecksumType::DSHA256,
         };
         let key_pair = KeyPair::from_private(private).expect("valid key pair from HD-derived secret");
 

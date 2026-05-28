@@ -18,7 +18,7 @@ use crate::{
     WithdrawRequest,
 };
 use bigdecimal::BigDecimal;
-use bitcrypto::sha256;
+use kdf_crypto::sha256;
 use common::mm_number::MmNumber;
 use common::now_ms;
 use cosmrs::proto::cosmos::bank::v1beta1::MsgSend as MsgSendProto;

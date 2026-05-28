@@ -33,7 +33,7 @@ pub(crate) use crate::{
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use bigdecimal::BigDecimal;
-pub(crate) use bitcrypto::sha256;
+pub(crate) use kdf_crypto::sha256;
 pub(crate) use common::executor::Timer;
 pub(crate) use common::log::{debug, info};
 pub(crate) use common::mm_number::MmNumber;

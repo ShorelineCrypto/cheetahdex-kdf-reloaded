@@ -42,7 +42,7 @@ pub(crate) use crate::{
 };
 pub(crate) use async_trait::async_trait;
 pub(crate) use bigdecimal::BigDecimal;
-pub(crate) use bitcrypto::{dhash160, sha256};
+pub(crate) use kdf_crypto::{dhash160, sha256};
 pub(crate) use chain::TransactionOutput;
 pub(crate) use common::executor::Timer;
 pub(crate) use common::jsonrpc_client::{JsonRpcClient, JsonRpcRequest, RpcRes};

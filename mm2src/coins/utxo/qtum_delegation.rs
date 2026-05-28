@@ -14,7 +14,7 @@ use crate::{
     StakingInfosResult, TransactionDetails, TransactionType,
 };
 use bigdecimal::Zero;
-use bitcrypto::dhash256;
+use kdf_crypto::dhash256;
 use common::mm_number::BigDecimal;
 use common::now_ms;
 use derive_more::Display;

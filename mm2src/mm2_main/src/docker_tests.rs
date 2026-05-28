@@ -105,7 +105,7 @@ mod docker_tests {
 
     use docker_tests_common::*;
 
-    use bitcrypto::ChecksumType;
+    use kdf_crypto::ChecksumType;
     use chain::{OutPoint, TransactionOutput};
     use coins::eth::{eth_coin_from_conf_and_request, EthCoin};
     use coins::utxo::bch::{bch_coin_from_conf_and_params, BchActivationRequest, BchCoin};

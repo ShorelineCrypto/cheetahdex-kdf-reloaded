@@ -4,7 +4,7 @@ use crate::utxo::{
     MATURE_CONFIRMATIONS_DEFAULT,
 };
 use crate::UtxoActivationParams;
-use bitcrypto::ChecksumType;
+use kdf_crypto::ChecksumType;
 use crypto::trezor::utxo::TrezorUtxoCoin;
 use crypto::{Bip32Error, ChildNumber};
 use derive_more::Display;

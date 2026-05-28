@@ -27,7 +27,7 @@
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use bigdecimal::BigDecimal;
-pub(crate) use bitcrypto::{keccak256, sha256};
+pub(crate) use kdf_crypto::{keccak256, sha256};
 pub(crate) use common::custom_futures::TimedAsyncMutex;
 pub(crate) use common::executor::Timer;
 pub(crate) use common::log::error;
