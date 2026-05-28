@@ -1,0 +1,22 @@
+[package]
+name = "mm2_bitcoin_wire_tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "GPL-2.0-only"
+description = "Wire-equivalence regression harness for Phase B (parity-bitcoin → rust-bitcoin replacement). Round-trips real-chain hex fixtures through the active Tx/BlockHeader codec and asserts byte-for-byte equality. KDF-original."
+
+# Phase B sequencing:
+#   B.2 (this crate) — wires fixtures against the *current* parity-derived codec
+#                       (mm2_bitcoin/{chain,serialization}) to lock in the baseline.
+#   B.5 / B.6        — when kdf_codec / kdf_chain land, the imports below switch
+#                       to those crates. The fixtures and assertions stay byte-
+#                       identical. Any deviation = regression that breaks atomic
+#                       swap interop with canonical KDF peers.
+
+[dependencies]
+chain = { path = "../mm2_bitcoin/chain" }
+serialization = { path = "../mm2_bitcoin/serialization" }
+hex = { workspace = true }
+
+[dev-dependencies]

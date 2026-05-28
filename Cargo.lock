@@ -5673,6 +5673,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mm2_bitcoin_wire_tests"
+version = "0.1.0"
+dependencies = [
+ "chain",
+ "hex",
+ "serialization",
+]
+
+[[package]]
 name = "mm2_core"
 version = "0.1.0"
 dependencies = [
