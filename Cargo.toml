@@ -26,6 +26,7 @@ members = [
     "mm2src/mm2_db",
     "mm2src/mm2_err_handle",
     "mm2src/mm2_eth",
+    "mm2src/ethabi-vendored",
     "mm2src/mm2_event_stream",
     "mm2src/mm2_metrics",
     "mm2src/mm2_test_helpers",

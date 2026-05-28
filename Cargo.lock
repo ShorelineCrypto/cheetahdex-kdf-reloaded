@@ -3355,16 +3355,17 @@ version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d371106cc88ffdfb1eabd7111e432da544f16f3e2d7bf1dfe8bf575f1df045cd"
 dependencies = [
+ "backtrace",
  "version_check",
 ]
 
 [[package]]
 name = "ethabi"
 version = "6.1.0"
-source = "git+https://github.com/artemii235/ethabi#d70bfd94e05c49d9b28a5edb4def2ebfaa5e1053"
 dependencies = [
  "error-chain",
  "ethereum-types 0.4.2",
+ "hex-literal",
  "rustc-hex",
  "serde",
  "serde_derive",
@@ -4173,6 +4174,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fda06d18ac606267c40c04e41b9947729bf8b9efe74bd4e82b61a5f26a510b9f"
 dependencies = [
  "arrayvec 0.7.6",
+]
+
+[[package]]
+name = "hex-literal"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddc2928beef125e519d69ae1baa8c37ea2e0d3848545217f6db0179c5eb1d639"
+dependencies = [
+ "hex-literal-impl",
+ "proc-macro-hack 0.4.3",
+]
+
+[[package]]
+name = "hex-literal-impl"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "520870c3213943eb8d7803e80180d12a6c7ceb4ae74602544529d1643dc4ddda"
+dependencies = [
+ "proc-macro-hack 0.4.3",
 ]
 
 [[package]]
@@ -7052,9 +7072,24 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-hack"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7f95648580798cc44ff8efb9bb0d7ee5205ea32e087b31b0732f3e8c2648ee2"
+dependencies = [
+ "proc-macro-hack-impl",
+]
+
+[[package]]
+name = "proc-macro-hack"
 version = "0.5.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbf0c48bc1d91375ae5c3cd81e3722dff1abcf81a30960240640d223f59fe0e5"
+
+[[package]]
+name = "proc-macro-hack-impl"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7be55bf0ae1635f4d7c7ddd6efc05c631e98a82104a73d35550bbc52db960027"
 
 [[package]]
 name = "proc-macro2"
@@ -10475,7 +10510,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "957e9c6e26f12cb6d0dd7fc776bb67a706312e7299aed74c8dd5b17ebb27e2f1"
 dependencies = [
- "proc-macro-hack",
+ "proc-macro-hack 0.5.19",
  "time-macros-impl",
 ]
 
@@ -10495,7 +10530,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3c141a1b43194f3f56a1411225df8646c55781d5f26db825b3d98507eb482f"
 dependencies = [
- "proc-macro-hack",
+ "proc-macro-hack 0.5.19",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "standback",
