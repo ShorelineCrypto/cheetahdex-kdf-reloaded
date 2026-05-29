@@ -1834,18 +1834,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chain"
-version = "0.1.0"
-dependencies = [
- "bitcoin",
- "kdf_codec",
- "kdf_codec_derive",
- "kdf_crypto",
- "kdf_primitives",
- "rustc-hex",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1938,7 +1926,6 @@ dependencies = [
  "byteorder 1.4.3",
  "bytes 0.4.12",
  "cfg-if 1.0.4",
- "chain",
  "common",
  "cosmrs",
  "crypto",
@@ -1960,6 +1947,7 @@ dependencies = [
  "itertools 0.10.3",
  "js-sys",
  "jsonrpc-core 8.0.1",
+ "kdf_chain",
  "kdf_codec",
  "kdf_codec_derive",
  "kdf_crypto",
@@ -4780,6 +4768,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kdf_chain"
+version = "0.1.0"
+dependencies = [
+ "kdf_codec",
+ "kdf_codec_derive",
+ "kdf_crypto",
+ "kdf_primitives",
+ "rustc-hex",
+]
+
+[[package]]
 name = "kdf_codec"
 version = "0.1.0"
 dependencies = [
@@ -5702,8 +5701,8 @@ dependencies = [
 name = "mm2_bitcoin_wire_tests"
 version = "0.1.0"
 dependencies = [
- "chain",
  "hex",
+ "kdf_chain",
  "kdf_codec",
 ]
 
@@ -5862,7 +5861,6 @@ dependencies = [
  "blake2",
  "bytes 0.4.12",
  "cfg-if 1.0.4",
- "chain",
  "chrono",
  "coins",
  "coins_activation",
@@ -5891,6 +5889,7 @@ dependencies = [
  "instant",
  "itertools 0.10.3",
  "js-sys",
+ "kdf_chain",
  "kdf_codec",
  "kdf_codec_derive",
  "kdf_crypto",
@@ -7930,7 +7929,7 @@ dependencies = [
 name = "rpc"
 version = "0.1.0"
 dependencies = [
- "chain",
+ "kdf_chain",
  "kdf_codec",
  "kdf_primitives",
  "keys",
@@ -8278,7 +8277,7 @@ name = "script"
 version = "0.1.0"
 dependencies = [
  "blake2b_simd",
- "chain",
+ "kdf_chain",
  "kdf_codec",
  "kdf_crypto",
  "kdf_primitives",
@@ -9754,7 +9753,7 @@ dependencies = [
 name = "spv_validation"
 version = "0.1.0"
 dependencies = [
- "chain",
+ "kdf_chain",
  "kdf_codec",
  "kdf_primitives",
  "ripemd160",
@@ -11040,11 +11039,11 @@ name = "utxo_signer"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chain",
  "common",
  "crypto",
  "derive_more 0.99.11",
  "hex",
+ "kdf_chain",
  "kdf_codec",
  "kdf_primitives",
  "keys",

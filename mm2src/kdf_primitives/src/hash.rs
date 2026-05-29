@@ -156,6 +156,20 @@ macro_rules! define_hash {
             }
         }
 
+        impl AsRef<[u8]> for $name {
+            #[inline]
+            fn as_ref(&self) -> &[u8] {
+                &self.0
+            }
+        }
+
+        impl AsMut<[u8]> for $name {
+            #[inline]
+            fn as_mut(&mut self) -> &mut [u8] {
+                &mut self.0
+            }
+        }
+
         impl cmp::PartialEq for $name {
             fn eq(&self, other: &Self) -> bool {
                 self.0[..] == other.0[..]

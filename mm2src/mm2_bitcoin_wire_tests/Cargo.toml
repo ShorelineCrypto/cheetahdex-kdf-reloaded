@@ -15,7 +15,7 @@ description = "Wire-equivalence regression harness for Phase B (parity-bitcoin â
 #                       swap interop with canonical KDF peers.
 
 [dependencies]
-chain = { path = "../mm2_bitcoin/chain" }
+chain = { package = "kdf_chain", path = "../kdf_chain" }
 serialization = { package = "kdf_codec", path = "../kdf_codec" }
 hex = { workspace = true }
 

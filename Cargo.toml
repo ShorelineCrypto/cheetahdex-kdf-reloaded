@@ -17,7 +17,7 @@ members = [
     "mm2src/kdf_primitives",
     "mm2src/kdf_codec",
     "mm2src/kdf_codec_derive",
-    "mm2src/mm2_bitcoin/chain",
+    "mm2src/kdf_chain",
     "mm2src/mm2_bitcoin/keys",
     "mm2src/mm2_bitcoin/rpc",
     "mm2src/mm2_bitcoin/script",

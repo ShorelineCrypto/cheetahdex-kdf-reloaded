@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
-chain = { path = "../../mm2_bitcoin/chain" }
+chain = { package = "kdf_chain", path = "../../kdf_chain" }
 common = { path = "../../common" }
 mm2_err_handle = { path = "../../mm2_err_handle" }
 crypto = { path = "../../crypto" }

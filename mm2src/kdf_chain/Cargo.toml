@@ -1,0 +1,21 @@
+[package]
+name = "kdf_chain"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+publish = false
+description = "KDF-original chain primitives (Block / BlockHeader / Transaction with multi-coin extensions). Replaces the parity-bitcoin lineage in mm2_bitcoin/chain. Wire-format compatible with the previous codec — gated by mm2_bitcoin_wire_tests."
+
+# Phase B (B.6) — clean-room rewrite. The wire format (byte layout) of every
+# public type matches the previous parity-derived implementation byte-for-byte,
+# but the code is original and licensed GPL-2.0-only. Multi-coin extensions
+# preserved: Zcash (overwintered v3/v4, Sapling, JoinSplits PHGR/Groth),
+# PoS-with-nTime (ECC/BLK), NavCoin str_d_zeel, Dogecoin/Syscoin AuxPoW,
+# Firo MTP-PoW + ProgPoW, Qtum PoS header fields, Ravencoin KAWPOW, Verus.
+
+[dependencies]
+hex = { version = "2", package = "rustc-hex" }
+crypto = { package = "kdf_crypto", path = "../kdf_crypto" }
+primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
+serialization = { package = "kdf_codec", path = "../kdf_codec" }
+serialization_derive = { package = "kdf_codec_derive", path = "../kdf_codec_derive" }

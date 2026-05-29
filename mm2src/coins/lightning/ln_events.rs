@@ -164,7 +164,7 @@ fn sign_funding_transaction(
     )
     .mm_err(Into::into)?;
 
-    Transaction::try_from(signed).map_to_mm(|e| OpenChannelError::ConvertTxErr(e.to_string()))
+    super::ln_platform::kdf_tx_to_bitcoin(signed).map_to_mm(|e| OpenChannelError::ConvertTxErr(e.to_string()))
 }
 
 async fn save_channel_closing_details(

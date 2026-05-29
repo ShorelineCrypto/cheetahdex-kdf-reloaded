@@ -6,7 +6,7 @@ authors = ["debris <marek.kotewicz@gmail.com>"]
 
 [dependencies]
 kdf_crypto = { path = "../../kdf_crypto" }
-chain = { path = "../chain" }
+chain = { package = "kdf_chain", path = "../../kdf_chain" }
 keys = { path = "../keys" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 serde = "1.0"

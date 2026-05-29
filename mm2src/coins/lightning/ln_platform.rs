@@ -37,6 +37,21 @@ pub fn h256_json_from_txid(txid: Txid) -> H256Json {
     H256Json::from(txid.as_hash().into_inner()).reversed()
 }
 
+/// Re-encodes a KDF (`chain::Transaction`) into a `bitcoin::Transaction`
+/// (the type used by the `lightning` crate). Wire-equivalent across the two
+/// crates because both follow the standard Bitcoin consensus encoding.
+pub(crate) fn kdf_tx_to_bitcoin(
+    tx: chain::Transaction,
+) -> Result<Transaction, bitcoin::consensus::encode::Error> {
+    use serialization::{serialize, serialize_with_flags, SERIALIZE_TRANSACTION_WITNESS};
+    let bytes = if tx.has_witness() {
+        serialize_with_flags(&tx, SERIALIZE_TRANSACTION_WITNESS)
+    } else {
+        serialize(&tx)
+    };
+    deserialize(&bytes.take())
+}
+
 struct TxWithBlockInfo {
     tx: Transaction,
     block_header: BlockHeader,
@@ -78,7 +93,7 @@ async fn find_watched_output_spend_with_header(
     let block_header = get_block_header(electrum_client, height as u64)
         .await
         .map_err(FindWatchedOutputSpendError::GetHeaderError)?;
-    let spending_tx = Transaction::try_from(output_spend.spending_tx)?;
+    let spending_tx = kdf_tx_to_bitcoin(output_spend.spending_tx)?;
 
     Ok(Some(TxWithBlockInfo {
         tx: spending_tx,
@@ -572,7 +587,7 @@ impl Filter for Platform {
         });
 
         if let Some(info) = output_spend_info {
-            match Transaction::try_from(info.spending_tx) {
+            match kdf_tx_to_bitcoin(info.spending_tx) {
                 Ok(tx) => Some((info.input_index, tx)),
                 Err(e) => {
                     error!("Can't convert transaction error: {}", e.to_string());

@@ -14,7 +14,7 @@ serde_derive = "1.0"
 rustc-hex = "2"
 
 serialization = { package = "kdf_codec", path = "../../kdf_codec" }
-chain = { path = "../chain" }
+chain = { package = "kdf_chain", path = "../../kdf_chain" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 keys = { path = "../keys" }
 script = { path = "../script" }
