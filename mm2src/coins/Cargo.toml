@@ -82,8 +82,8 @@ ser_error_derive = { path = "../derives/ser_error_derive" }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = { version = "1.0", features = ["preserve_order", "raw_value"] }
-serialization = { path = "../mm2_bitcoin/serialization" }
-serialization_derive = { path = "../mm2_bitcoin/serialization_derive" }
+serialization = { package = "kdf_codec", path = "../kdf_codec" }
+serialization_derive = { package = "kdf_codec_derive", path = "../kdf_codec_derive" }
 spv_validation = { path = "../mm2_bitcoin/spv_validation" }
 sha2 = "0.9"
 sha3 = "0.9"

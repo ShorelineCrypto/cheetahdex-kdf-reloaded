@@ -9,5 +9,5 @@ rustc-hex = "2"
 bitcoin = "0.27.1"
 kdf_crypto = { path = "../../kdf_crypto" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
-serialization = { path = "../serialization" }
-serialization_derive = { path = "../serialization_derive" }
+serialization = { package = "kdf_codec", path = "../../kdf_codec" }
+serialization_derive = { package = "kdf_codec_derive", path = "../../kdf_codec_derive" }

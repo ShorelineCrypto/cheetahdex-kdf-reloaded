@@ -1,0 +1,14 @@
+[package]
+name = "kdf_codec_derive"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+description = "Procedural #[derive(Serializable)] / #[derive(Deserializable)] macros for the KDF binary codec. KDF-original; replaces mm2_bitcoin/serialization_derive."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }

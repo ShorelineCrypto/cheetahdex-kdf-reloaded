@@ -10,6 +10,6 @@ chain = { path = "../chain" }
 keys = { path = "../keys" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 serde = "1.0"
-serialization = { path = "../serialization" }
+serialization = { package = "kdf_codec", path = "../../kdf_codec" }
 log = "0.4"
 blake2b_simd = "0.5"

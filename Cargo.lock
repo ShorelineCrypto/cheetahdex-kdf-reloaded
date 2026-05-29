@@ -1838,11 +1838,11 @@ name = "chain"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "kdf_codec",
+ "kdf_codec_derive",
  "kdf_crypto",
  "kdf_primitives",
  "rustc-hex",
- "serialization",
- "serialization_derive",
 ]
 
 [[package]]
@@ -1960,6 +1960,8 @@ dependencies = [
  "itertools 0.10.3",
  "js-sys",
  "jsonrpc-core 8.0.1",
+ "kdf_codec",
+ "kdf_codec_derive",
  "kdf_crypto",
  "kdf_primitives",
  "keys",
@@ -2000,8 +2002,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serialization",
- "serialization_derive",
  "sha2 0.9.9",
  "sha3 0.9.1",
  "sia-rust",
@@ -4780,6 +4780,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "kdf_codec"
+version = "0.1.0"
+dependencies = [
+ "byteorder 1.4.3",
+ "derive_more 0.99.11",
+ "kdf_primitives",
+ "test_helpers",
+]
+
+[[package]]
+name = "kdf_codec_derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "kdf_crypto"
 version = "0.1.0"
 dependencies = [
@@ -5685,7 +5704,7 @@ version = "0.1.0"
 dependencies = [
  "chain",
  "hex",
- "serialization",
+ "kdf_codec",
 ]
 
 [[package]]
@@ -5872,6 +5891,8 @@ dependencies = [
  "instant",
  "itertools 0.10.3",
  "js-sys",
+ "kdf_codec",
+ "kdf_codec_derive",
  "kdf_crypto",
  "kdf_primitives",
  "keys",
@@ -5909,8 +5930,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serialization",
- "serialization_derive",
  "sp-runtime-interface",
  "sp-trie",
  "spv_validation",
@@ -7248,12 +7267,6 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "0.3.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a6e920b65c65f10b2ae65c831a81a073a89edd28c7cce89475bff467ab4167a"
-
-[[package]]
-name = "quote"
 version = "0.6.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce23b6b870e8f94f81fb0a363d65d86675884b34a09043c81e5562f11c1f8e1"
@@ -7918,6 +7931,7 @@ name = "rpc"
 version = "0.1.0"
 dependencies = [
  "chain",
+ "kdf_codec",
  "kdf_primitives",
  "keys",
  "log 0.4.29",
@@ -7926,7 +7940,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serialization",
 ]
 
 [[package]]
@@ -8266,12 +8279,12 @@ version = "0.1.0"
 dependencies = [
  "blake2b_simd",
  "chain",
+ "kdf_codec",
  "kdf_crypto",
  "kdf_primitives",
  "keys",
  "log 0.4.29",
  "serde",
- "serialization",
 ]
 
 [[package]]
@@ -8627,25 +8640,6 @@ checksum = "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177"
 dependencies = [
  "base16ct",
  "serde",
-]
-
-[[package]]
-name = "serialization"
-version = "0.1.0"
-dependencies = [
- "byteorder 1.4.3",
- "derive_more 0.99.11",
- "kdf_primitives",
- "test_helpers",
-]
-
-[[package]]
-name = "serialization_derive"
-version = "0.1.0"
-dependencies = [
- "quote 0.3.15",
- "serialization",
- "syn 0.11.11",
 ]
 
 [[package]]
@@ -9761,12 +9755,12 @@ name = "spv_validation"
 version = "0.1.0"
 dependencies = [
  "chain",
+ "kdf_codec",
  "kdf_primitives",
  "ripemd160",
  "rustc-hex",
  "serde",
  "serde_json",
- "serialization",
  "sha2 0.9.9",
  "test_helpers",
 ]
@@ -9949,17 +9943,6 @@ checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
 
 [[package]]
 name = "syn"
-version = "0.11.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3b891b9015c88c576343b9b3e41c2c11a51c219ef067b264bd9c8aa9b441dad"
-dependencies = [
- "quote 0.3.15",
- "synom",
- "unicode-xid 0.0.4",
-]
-
-[[package]]
-name = "syn"
 version = "0.15.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ca4b3b69a77cbe1ffc9e198781b7acb0c7365a883670e8f1c1bc66fba79a5c5"
@@ -10014,15 +9997,6 @@ name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
-
-[[package]]
-name = "synom"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a393066ed9010ebaed60b9eafa373d4b1baac186dd7e008555b0f702b51945b6"
-dependencies = [
- "unicode-xid 0.0.4",
-]
 
 [[package]]
 name = "synstructure"
@@ -10972,12 +10946,6 @@ checksum = "3ed742d4ea2bd1176e236172c8429aaf54486e7ac098db29ffe6529e0ce50973"
 
 [[package]]
 name = "unicode-xid"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c1f860d7d29cf02cb2f3f359fd35991af3d30bac52c57d265a3c461074cb4dc"
-
-[[package]]
-name = "unicode-xid"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"
@@ -11077,12 +11045,12 @@ dependencies = [
  "crypto",
  "derive_more 0.99.11",
  "hex",
+ "kdf_codec",
  "kdf_primitives",
  "keys",
  "mm2_err_handle",
  "rpc",
  "script",
- "serialization",
 ]
 
 [[package]]

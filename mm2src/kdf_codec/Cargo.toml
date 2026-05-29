@@ -1,0 +1,17 @@
+[package]
+name = "kdf_codec"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+description = "Bitcoin-style binary codec used by KDF UTXO machinery: Stream/Reader/Serializable/Deserializable, CompactInteger varint, and primitive impls. KDF-original; replaces mm2_bitcoin/serialization."
+
+# Phase B (B.5) — drop-in replacement for the parity-derived serialization
+# crate. Encodings (little-endian fixed integers, the CompactInteger varint,
+# the byte-prefixed string/bytes layout) all follow the public Bitcoin P2P
+# protocol specification.
+
+[dependencies]
+byteorder = "1"
+derive_more = "0.99"
+primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
+test_helpers = { path = "../mm2_bitcoin/test_helpers" }
