@@ -8,7 +8,7 @@ authors = ["debris <marek.kotewicz@gmail.com>"]
 kdf_crypto = { path = "../../kdf_crypto" }
 chain = { path = "../chain" }
 keys = { path = "../keys" }
-primitives = { path = "../primitives" }
+primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 serde = "1.0"
 serialization = { path = "../serialization" }
 log = "0.4"

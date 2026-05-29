@@ -14,7 +14,7 @@ description = "Hash and checksum primitives used by KDF UTXO machinery. Clean-ro
 
 [dependencies]
 groestl = "0.10"
-primitives = { path = "../mm2_bitcoin/primitives" }
+primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
 ripemd = "0.1"
 sha1 = "0.10"
 sha2 = "0.10"

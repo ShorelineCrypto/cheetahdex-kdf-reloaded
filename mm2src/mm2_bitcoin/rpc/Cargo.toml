@@ -15,6 +15,6 @@ rustc-hex = "2"
 
 serialization = { path = "../serialization" }
 chain = { path = "../chain" }
-primitives = { path = "../primitives" }
+primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 keys = { path = "../keys" }
 script = { path = "../script" }

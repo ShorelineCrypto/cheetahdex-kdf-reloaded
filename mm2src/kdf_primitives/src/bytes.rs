@@ -1,37 +1,52 @@
-//! Wrapper around `Vec<u8>`
+//! Byte-vector wrappers used by the UTXO codecs.
+//!
+//! KDF-original. The hex parsing/formatting layer is implemented directly
+//! on top of the public `rustc-hex` crate.
 
-use hex::{FromHex, FromHexError, ToHex};
+use rustc_hex::{FromHex, FromHexError, ToHex};
 use std::{fmt, io, marker, ops, str};
 
-/// Wrapper around `Vec<u8>`
+/// Owned byte buffer with hex-encoded `Display`/`Debug`/`FromStr`.
+///
+/// Used as the script payload type in the UTXO codec, the witness item
+/// type, and as the inner buffer for blob fields generally. Deref-targets
+/// `Vec<u8>` so all standard byte-buffer operations are available.
 #[derive(Default, PartialEq, Clone, Eq, Hash)]
 pub struct Bytes(Vec<u8>);
 
 impl Bytes {
+    /// Empty buffer.
     pub fn new() -> Self {
-        Bytes::default()
+        Self::default()
     }
 
+    /// Buffer of the given length, zero-initialised.
     pub fn new_with_len(len: usize) -> Self {
-        Bytes(vec![0; len])
+        Bytes(vec![0u8; len])
     }
 
+    /// Consume the wrapper and return the inner `Vec<u8>`.
     pub fn take(self) -> Vec<u8> {
         self.0
     }
 
+    /// Number of bytes in the buffer.
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Whether the buffer contains zero bytes.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Append `other`, draining it into `self`.
     pub fn append(&mut self, other: &mut Bytes) {
         self.0.append(&mut other.0);
     }
 
+    /// Split the buffer at index `at`, returning the suffix as a new
+    /// `Bytes`. `self` retains the prefix.
     pub fn split_off(&mut self, at: usize) -> Bytes {
         Bytes(self.0.split_off(at))
     }
@@ -39,7 +54,7 @@ impl Bytes {
 
 impl From<&[u8]> for Bytes {
     fn from(v: &[u8]) -> Self {
-        Bytes(v.into())
+        Bytes(v.to_vec())
     }
 }
 
@@ -50,14 +65,14 @@ impl From<Vec<u8>> for Bytes {
 }
 
 impl From<Bytes> for Vec<u8> {
-    fn from(bytes: Bytes) -> Self {
-        bytes.0
+    fn from(b: Bytes) -> Self {
+        b.0
     }
 }
 
 impl From<&'static str> for Bytes {
     fn from(s: &'static str) -> Self {
-        s.parse().unwrap()
+        s.parse().expect("static hex literal must parse")
     }
 }
 
@@ -111,7 +126,8 @@ impl AsMut<[u8]> for Bytes {
     }
 }
 
-/// Wrapper around `Vec<u8>` which represent associated type
+/// Phantom-typed `Bytes`. Used by the codec to carry compile-time tags
+/// indicating, e.g., which side of an HTLC a payload corresponds to.
 #[derive(Default, PartialEq, Clone)]
 pub struct TaggedBytes<T> {
     bytes: Bytes,
@@ -162,13 +178,13 @@ mod tests {
     use super::Bytes;
 
     #[test]
-    fn test_bytes_from_hex() {
+    fn parses_hex_literal() {
         let bytes: Bytes = "0145".into();
         assert_eq!(bytes, vec![0x01, 0x45].into());
     }
 
     #[test]
-    fn test_bytes_debug_formatter() {
+    fn debug_renders_as_hex() {
         let bytes: Bytes = "0145".into();
         assert_eq!(format!("{:?}", bytes), "0145".to_owned());
     }

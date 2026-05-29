@@ -14,7 +14,7 @@ crypto = { path = "../../crypto" }
 derive_more = "0.99"
 hex = "0.4.2"
 keys = { path = "../../mm2_bitcoin/keys" }
-primitives = { path = "../../mm2_bitcoin/primitives" }
+primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 rpc = { path = "../../mm2_bitcoin/rpc" }
 script = { path = "../../mm2_bitcoin/script" }
 serialization = { path = "../../mm2_bitcoin/serialization" }

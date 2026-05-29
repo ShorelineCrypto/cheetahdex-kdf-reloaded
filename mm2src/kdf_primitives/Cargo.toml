@@ -1,0 +1,21 @@
+[package]
+name = "kdf_primitives"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+description = "Fixed-size hashes, U256, Compact difficulty and the Bytes/TaggedBytes wrappers used across KDF UTXO machinery. KDF-original; replaces mm2_bitcoin/primitives."
+
+# Phase B (B.4) — drop-in replacement for the parity-derived
+# mm2_bitcoin/primitives crate.
+#
+# The fixed-size hash types and the U256 newtype are mechanical adaptations
+# of standard data structures (FIPS / Bitcoin Core / Zcash spec). The
+# Compact (nBits) encoder/decoder follows the BIP-22 / Bitcoin Core
+# reference algorithm. The Bytes / TaggedBytes wrappers are KDF-original
+# convenience newtypes.
+
+[dependencies]
+byteorder = "1"
+hex = "0.4"
+rustc-hex = "2"
+uint = "0.9"

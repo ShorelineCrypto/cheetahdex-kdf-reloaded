@@ -1839,7 +1839,7 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "kdf_crypto",
- "primitives",
+ "kdf_primitives",
  "rustc-hex",
  "serialization",
  "serialization_derive",
@@ -1961,6 +1961,7 @@ dependencies = [
  "js-sys",
  "jsonrpc-core 8.0.1",
  "kdf_crypto",
+ "kdf_primitives",
  "keys",
  "lazy_static",
  "libc",
@@ -1982,7 +1983,6 @@ dependencies = [
  "mocktopus",
  "num-traits",
  "parking_lot 0.12.5",
- "primitives",
  "prost 0.12.6",
  "prost-build 0.12.6",
  "prost-types 0.12.6",
@@ -2093,6 +2093,7 @@ dependencies = [
  "itertools 0.10.3",
  "js-sys",
  "kdf_crypto",
+ "kdf_primitives",
  "keys",
  "lazy_static",
  "libc",
@@ -2106,7 +2107,6 @@ dependencies = [
  "parking_lot 0.12.5",
  "parking_lot_core 0.6.2",
  "paste",
- "primitives",
  "prost 0.12.6",
  "rand 0.7.3",
  "regex",
@@ -2478,6 +2478,7 @@ dependencies = [
  "http 0.2.12",
  "hw_common",
  "kdf_crypto",
+ "kdf_primitives",
  "keys",
  "lazy_static",
  "mm2_core",
@@ -2486,7 +2487,6 @@ dependencies = [
  "mm2_metamask",
  "num-traits",
  "parking_lot 0.12.5",
- "primitives",
  "rpc_task",
  "rustc-hex",
  "secp256k1 0.20.3",
@@ -4784,12 +4784,22 @@ name = "kdf_crypto"
 version = "0.1.0"
 dependencies = [
  "groestl",
- "primitives",
+ "kdf_primitives",
  "ripemd",
  "sha1 0.10.6",
  "sha2 0.10.9",
  "sha3 0.10.9",
  "siphasher",
+]
+
+[[package]]
+name = "kdf_primitives"
+version = "0.1.0"
+dependencies = [
+ "byteorder 1.4.3",
+ "hex",
+ "rustc-hex",
+ "uint 0.9.1",
 ]
 
 [[package]]
@@ -4860,8 +4870,8 @@ dependencies = [
  "bech32",
  "derive_more 0.99.11",
  "kdf_crypto",
+ "kdf_primitives",
  "lazy_static",
- "primitives",
  "rand 0.6.5",
  "rustc-hex",
  "secp256k1 0.20.3",
@@ -5692,12 +5702,12 @@ dependencies = [
  "futures 0.3.15",
  "gstuff",
  "hex",
+ "kdf_primitives",
  "keys",
  "lazy_static",
  "mm2_event_stream",
  "mm2_metrics",
  "mm2_rpc",
- "primitives",
  "rand 0.7.3",
  "serde",
  "serde_bytes",
@@ -5716,10 +5726,10 @@ dependencies = [
  "futures 0.3.15",
  "hex",
  "js-sys",
+ "kdf_primitives",
  "lazy_static",
  "mm2_core",
  "mm2_err_handle",
- "primitives",
  "rand 0.7.3",
  "serde",
  "serde_json",
@@ -5863,6 +5873,7 @@ dependencies = [
  "itertools 0.10.3",
  "js-sys",
  "kdf_crypto",
+ "kdf_primitives",
  "keys",
  "lazy_static",
  "libc",
@@ -5883,7 +5894,6 @@ dependencies = [
  "num-traits",
  "parity-util-mem",
  "parking_lot 0.12.5",
- "primitives",
  "prost 0.12.6",
  "prost-build 0.12.6",
  "rand 0.6.5",
@@ -6901,15 +6911,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "primitives"
-version = "0.1.0"
-dependencies = [
- "byteorder 1.4.3",
- "rustc-hex",
- "uint 0.9.1",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7917,9 +7918,9 @@ name = "rpc"
 version = "0.1.0"
 dependencies = [
  "chain",
+ "kdf_primitives",
  "keys",
  "log 0.4.29",
- "primitives",
  "rustc-hex",
  "script",
  "serde",
@@ -8266,9 +8267,9 @@ dependencies = [
  "blake2b_simd",
  "chain",
  "kdf_crypto",
+ "kdf_primitives",
  "keys",
  "log 0.4.29",
- "primitives",
  "serde",
  "serialization",
 ]
@@ -8634,7 +8635,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder 1.4.3",
  "derive_more 0.99.11",
- "primitives",
+ "kdf_primitives",
  "test_helpers",
 ]
 
@@ -9760,7 +9761,7 @@ name = "spv_validation"
 version = "0.1.0"
 dependencies = [
  "chain",
- "primitives",
+ "kdf_primitives",
  "ripemd160",
  "rustc-hex",
  "serde",
@@ -11076,9 +11077,9 @@ dependencies = [
  "crypto",
  "derive_more 0.99.11",
  "hex",
+ "kdf_primitives",
  "keys",
  "mm2_err_handle",
- "primitives",
  "rpc",
  "script",
  "serialization",

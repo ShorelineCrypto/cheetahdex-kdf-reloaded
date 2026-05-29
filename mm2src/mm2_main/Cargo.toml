@@ -92,7 +92,7 @@ rpc = { path = "../mm2_bitcoin/rpc" }
 rpc_task = { path = "../rpc_task" }
 parking_lot = { version = "0.12.0" }
 parity-util-mem = "0.11"
-primitives = { path = "../mm2_bitcoin/primitives" }
+primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
 prost = { workspace = true }
 rand = { version = "0.7", features = ["std", "small_rng"] }
 rand6 = { version = "0.6", package = "rand" }

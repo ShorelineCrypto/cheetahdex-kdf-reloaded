@@ -6,7 +6,7 @@ authors = ["Roman Sztergbaum <rmscastle@gmail.com>"]
 
 [dependencies]
 chain = {path = "../chain"}
-primitives = { path = "../primitives" }
+primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 ripemd160 = "0.9.0"
 rustc-hex = "2"
 serialization = { path = "../serialization" }

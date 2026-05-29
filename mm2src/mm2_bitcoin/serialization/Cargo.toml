@@ -6,6 +6,6 @@ authors = ["debris <marek.kotewicz@gmail.com>"]
 
 [dependencies]
 byteorder = "1.0"
-primitives = { path = "../primitives" }
+primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 derive_more = "0.99"
 test_helpers = { path = "../test_helpers" }
