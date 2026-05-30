@@ -1,0 +1,18 @@
+[package]
+name = "kdf_script"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+publish = false
+authors = ["KDF-RELOADED contributors"]
+description = "Bitcoin script types, builder, classifier and sighash signer for the KDF stack. Clean-room implementation written against the Bitcoin protocol spec (Bitcoin Core script.h, BIP-143, ZIP-243). No parity-bitcoin lineage."
+
+[dependencies]
+crypto = { package = "kdf_crypto", path = "../kdf_crypto" }
+chain = { package = "kdf_chain", path = "../kdf_chain" }
+keys = { path = "../mm2_bitcoin/keys" }
+primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
+serialization = { package = "kdf_codec", path = "../kdf_codec" }
+serde = "1.0"
+blake2b_simd = "0.5"
+log = "0.4"

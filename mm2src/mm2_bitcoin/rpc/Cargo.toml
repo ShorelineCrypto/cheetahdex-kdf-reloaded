@@ -17,4 +17,4 @@ serialization = { package = "kdf_codec", path = "../../kdf_codec" }
 chain = { package = "kdf_chain", path = "../../kdf_chain" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 keys = { path = "../keys" }
-script = { path = "../script" }
+script = { package = "kdf_script", path = "../../kdf_script" }

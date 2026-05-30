@@ -16,5 +16,5 @@ hex = "0.4.2"
 keys = { path = "../../mm2_bitcoin/keys" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 rpc = { path = "../../mm2_bitcoin/rpc" }
-script = { path = "../../mm2_bitcoin/script" }
+script = { package = "kdf_script", path = "../../kdf_script" }
 serialization = { package = "kdf_codec", path = "../../kdf_codec" }
