@@ -36,7 +36,7 @@ hex = "0.4.2"
 hmac = "0.12.1"
 http = "0.2"
 hw_common = { path = "../hw_common" }
-keys = { path = "../mm2_bitcoin/keys" }
+keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
 mm2_core = { path = "../mm2_core" }
 mm2_err_handle = { path = "../mm2_err_handle" }

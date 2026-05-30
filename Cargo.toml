@@ -19,7 +19,7 @@ members = [
     "mm2src/kdf_codec_derive",
     "mm2src/kdf_chain",
     "mm2src/kdf_script",
-    "mm2src/mm2_bitcoin/keys",
+    "mm2src/kdf_keys",
     "mm2src/mm2_bitcoin/rpc",
     "mm2src/mm2_bitcoin/test_helpers",
     "mm2src/mm2_bitcoin_wire_tests",

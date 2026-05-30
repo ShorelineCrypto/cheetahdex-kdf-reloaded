@@ -1,3 +1,6 @@
+// `DisplayLayout` — common trait for types that have a wire-level
+// byte serialization separate from their `Display` representation.
+
 use crate::Error;
 use std::ops::Deref;
 

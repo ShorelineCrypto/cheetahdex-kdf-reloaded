@@ -1,0 +1,20 @@
+[package]
+name = "kdf_keys"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+publish = false
+authors = ["KDF-RELOADED contributors"]
+description = "Bitcoin-family key, address and signature primitives for the KDF stack. Clean-room implementation written against public specs (BIP-32/144/173/350, BCH CashAddr, ZIP-203). No parity-bitcoin lineage."
+
+[dependencies]
+crypto = { package = "kdf_crypto", path = "../kdf_crypto" }
+primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
+base58 = "0.2"
+bech32 = "0.8.0"
+derive_more = "0.99"
+lazy_static = "1.4"
+rand = "0.6"
+rustc-hex = "2"
+secp256k1 = { version = "0.20", features = ["rand", "recovery"] }
+serde = { version = "1.0", features = ["derive"] }

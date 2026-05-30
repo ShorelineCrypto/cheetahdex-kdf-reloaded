@@ -1,47 +1,56 @@
-//! Bitcoin signatures.
-//!
-//! http://bitcoin.stackexchange.com/q/12554/40688
+// ECDSA signature wrappers.
+//
+// `Signature` — DER-serialised, variable length.
+// `CompactSignature` — 65-byte recoverable signature
+//   (1-byte recovery id + compressed flag + 64-byte (r||s)).
 
 use crate::hash::H520;
 use crate::Error;
-use hex::{FromHex, ToHex};
+use rustc_hex::{FromHex, ToHex};
 use std::{fmt, ops, str};
 
-#[derive(PartialEq, Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Signature(Vec<u8>);
 
+impl Signature {
+    /// BIP-62 low-S check (kept as a panicking placeholder — no caller
+    /// in the workspace exercises it).
+    pub fn check_low_s(&self) -> bool {
+        unimplemented!("Signature::check_low_s not used by KDF")
+    }
+}
+
 impl fmt::Debug for Signature {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.to_hex::<String>().fmt(f)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.to_hex::<String>())
     }
 }
 
 impl fmt::Display for Signature {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.to_hex::<String>().fmt(f)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.to_hex::<String>())
     }
 }
 
 impl ops::Deref for Signature {
     type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
+    fn deref(&self) -> &[u8] {
         &self.0
     }
 }
 
 impl str::FromStr for Signature {
     type Err = Error;
-
     fn from_str(s: &str) -> Result<Self, Error> {
-        let vec = s.from_hex().map_err(|_| Error::InvalidSignature)?;
-        Ok(Signature(vec))
+        s.from_hex::<Vec<u8>>()
+            .map(Signature)
+            .map_err(|_| Error::InvalidSignature)
     }
 }
 
 impl From<&'static str> for Signature {
     fn from(s: &'static str) -> Self {
-        s.parse().unwrap()
+        s.parse().expect("valid hex literal")
     }
 }
 
@@ -52,14 +61,8 @@ impl From<Vec<u8>> for Signature {
 }
 
 impl From<Signature> for Vec<u8> {
-    fn from(s: Signature) -> Self {
+    fn from(s: Signature) -> Vec<u8> {
         s.0
-    }
-}
-
-impl Signature {
-    pub fn check_low_s(&self) -> bool {
-        unimplemented!();
     }
 }
 
@@ -69,43 +72,38 @@ impl<'a> From<&'a [u8]> for Signature {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub struct CompactSignature(H520);
 
 impl fmt::Debug for CompactSignature {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0.to_hex::<String>())
     }
 }
 
 impl fmt::Display for CompactSignature {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0.to_hex::<String>())
     }
 }
 
 impl ops::Deref for CompactSignature {
     type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
+    fn deref(&self) -> &[u8] {
         &*self.0
     }
 }
 
 impl str::FromStr for CompactSignature {
     type Err = Error;
-
     fn from_str(s: &str) -> Result<Self, Error> {
-        match s.parse() {
-            Ok(hash) => Ok(CompactSignature(hash)),
-            _ => Err(Error::InvalidSignature),
-        }
+        s.parse().map(CompactSignature).map_err(|_| Error::InvalidSignature)
     }
 }
 
 impl From<&'static str> for CompactSignature {
     fn from(s: &'static str) -> Self {
-        s.parse().unwrap()
+        s.parse().expect("valid hex literal")
     }
 }
 

@@ -1,7 +1,10 @@
+// Error types for the keys crate.
+
 use secp256k1::Error as SecpError;
+use serde::Serialize;
 use std::fmt;
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum Error {
     InvalidPublic,
     InvalidSecret,
@@ -15,8 +18,8 @@ pub enum Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let msg = match *self {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
             Error::InvalidPublic => "Invalid Public",
             Error::InvalidSecret => "Invalid Secret",
             Error::InvalidMessage => "Invalid Message",
@@ -26,11 +29,11 @@ impl fmt::Display for Error {
             Error::InvalidPrivate => "Invalid Private",
             Error::InvalidAddress => "Invalid Address",
             Error::FailedKeyGeneration => "Key generation failed",
-        };
-
-        msg.fmt(f)
+        })
     }
 }
+
+impl std::error::Error for Error {}
 
 impl From<SecpError> for Error {
     fn from(e: SecpError) -> Self {

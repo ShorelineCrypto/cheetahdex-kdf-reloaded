@@ -13,7 +13,7 @@ mm2_err_handle = { path = "../../mm2_err_handle" }
 crypto = { path = "../../crypto" }
 derive_more = "0.99"
 hex = "0.4.2"
-keys = { path = "../../mm2_bitcoin/keys" }
+keys = { package = "kdf_keys", path = "../../kdf_keys" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
 rpc = { path = "../../mm2_bitcoin/rpc" }
 script = { package = "kdf_script", path = "../../kdf_script" }

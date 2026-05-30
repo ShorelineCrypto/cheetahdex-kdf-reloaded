@@ -10,7 +10,7 @@ description = "Bitcoin script types, builder, classifier and sighash signer for 
 [dependencies]
 crypto = { package = "kdf_crypto", path = "../kdf_crypto" }
 chain = { package = "kdf_chain", path = "../kdf_chain" }
-keys = { path = "../mm2_bitcoin/keys" }
+keys = { package = "kdf_keys", path = "../kdf_keys" }
 primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
 serialization = { package = "kdf_codec", path = "../kdf_codec" }
 serde = "1.0"

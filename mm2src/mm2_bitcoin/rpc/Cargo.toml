@@ -16,5 +16,5 @@ rustc-hex = "2"
 serialization = { package = "kdf_codec", path = "../../kdf_codec" }
 chain = { package = "kdf_chain", path = "../../kdf_chain" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
-keys = { path = "../keys" }
+keys = { package = "kdf_keys", path = "../../kdf_keys" }
 script = { package = "kdf_script", path = "../../kdf_script" }
