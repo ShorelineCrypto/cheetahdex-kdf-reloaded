@@ -8,7 +8,10 @@ on:
 
 jobs:
   unit-tests:
-    runs-on: self-hosted
+    # Constrain to the Linux self-hosted runner. Without the [Linux] label,
+    # GitHub may schedule this onto the Windows self-hosted runner, where
+    # the bash-only fmt step and rustup nightly install path are flaky.
+    runs-on: [self-hosted, Linux]
     timeout-minutes: 30
 
     steps:
@@ -54,7 +57,11 @@ jobs:
         run: cargo +nightly fmt --all -- --check
 
   docker-tests:
-    runs-on: self-hosted
+    # Constrain to Linux self-hosted runner: Docker is provisioned on the
+    # Linux host only. Without the [Linux] label this job can land on the
+    # Windows self-hosted runner where `docker` is not on PATH and the bash
+    # primitives below (ss, find ... -delete, /tmp paths) don't exist.
+    runs-on: [self-hosted, Linux]
     timeout-minutes: 60
     needs: unit-tests
 
