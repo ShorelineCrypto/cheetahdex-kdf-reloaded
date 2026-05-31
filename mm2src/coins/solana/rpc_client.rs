@@ -29,7 +29,10 @@
 //! - Hardware-wallet (Ledger) integration. Removing the
 //!   `solana-remote-wallet` dependency is the entire point of P14.
 
+use common::executor::Timer;
 use derive_more::Display;
+use futures::future::{select, Either};
+use futures::FutureExt;
 use mm2_err_handle::prelude::*;
 use mm2_net::native_http::slurp_post_json;
 use serde::de::DeserializeOwned;
@@ -46,6 +49,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 const JSONRPC_VERSION: &str = "2.0";
+
+/// Hard timeout for a single JSON-RPC round-trip. Matches the upstream
+/// `solana-client` default for non-block-subscribe calls and the
+/// 5-second cap used on the GLEEC-compatible network.
+const REQUEST_TIMEOUT_SECS: f64 = 5.0;
 
 /// Minimum compute-unit price at which sendTransaction is willing to
 /// accept a transaction with default settings (used to seed the request
@@ -128,9 +136,23 @@ impl SolanaRpcClient {
         })
         .to_string();
 
-        let (status, _headers, bytes) = slurp_post_json(&self.inner.url, body)
-            .await
-            .map_err(|e| RpcError::transport(method, e.get_inner().to_string()))?;
+        // Bound every round-trip with a hard timeout so a single dead
+        // endpoint cannot wedge an entire coin operation. Using
+        // `common::executor::Timer` keeps the wait portable across
+        // native and WASM (we are native-only here, but the helper is
+        // already part of the workspace's runtime abstraction).
+        let req_fut = Box::pin(slurp_post_json(&self.inner.url, body).fuse());
+        let timeout = Timer::sleep(REQUEST_TIMEOUT_SECS);
+        let (status, _headers, bytes) = match select(req_fut, timeout).await {
+            Either::Left((Ok(triple), _)) => triple,
+            Either::Left((Err(e), _)) => return Err(RpcError::transport(method, e.get_inner().to_string())),
+            Either::Right(_) => {
+                return Err(RpcError::transport(
+                    method,
+                    format!("{REQUEST_TIMEOUT_SECS}s timeout expired"),
+                ))
+            },
+        };
 
         if !status.is_success() {
             let body = String::from_utf8_lossy(&bytes).into_owned();
@@ -144,6 +166,34 @@ impl SolanaRpcClient {
             Envelope::Ok { result, .. } => Ok(result),
             Envelope::Err { error, .. } => Err(RpcError::rpc(method, error)),
         }
+    }
+
+    /// `getHealth` — RPC liveness probe. Returns `Ok(())` when the
+    /// node reports itself as healthy (`"ok"`); any other payload, a
+    /// transport failure, or a timeout surfaces as a normal
+    /// [`RpcError`].
+    pub async fn get_health(&self) -> Result<(), RpcError> {
+        let resp: String = self.call("getHealth", json!([])).await?;
+        if resp == "ok" {
+            Ok(())
+        } else {
+            Err(RpcError::rpc_simple(
+                "getHealth",
+                &format!("unexpected payload: {resp}"),
+            ))
+        }
+    }
+
+    /// `getMinimumBalanceForRentExemption` — minimum lamports an
+    /// account of `data_len` bytes must hold to be exempt from rent.
+    /// Used by the SPL withdraw path to size the rent reserve when an
+    /// associated-token account has to be created on the fly.
+    pub async fn get_minimum_balance_for_rent_exemption(&self, data_len: usize) -> Result<u64, RpcError> {
+        self.call(
+            "getMinimumBalanceForRentExemption",
+            json!([data_len, self.commitment_param()]),
+        )
+        .await
     }
 
     /// `getBalance` — returns lamports.
@@ -365,7 +415,7 @@ impl RpcErrorKind {
 }
 
 impl RpcError {
-    fn transport(method: &str, msg: impl Into<String>) -> Self {
+    pub(crate) fn transport(method: &str, msg: impl Into<String>) -> Self {
         Self {
             method: method.to_owned(),
             kind: RpcErrorKind::Transport(msg.into()),
@@ -474,7 +524,7 @@ mod tests {
         let body = br#"{"jsonrpc":"2.0","result":"5h3kS6vr8b8X9ksuY3jLZQbHWfqaJsy2DqERkdMzfiNJjQAQ4qAW9z3GjvPvjyDgyy3yL5fNwbpxgvCQEwTtq8R","id":1}"#;
         let env: Envelope<String> = serde_json::from_slice(body).unwrap();
         match env {
-            Envelope::Ok { result, .. } => assert_eq!(result.len(), 88),
+            Envelope::Ok { result, .. } => assert_eq!(result.len(), 87),
             _ => panic!(),
         }
     }
