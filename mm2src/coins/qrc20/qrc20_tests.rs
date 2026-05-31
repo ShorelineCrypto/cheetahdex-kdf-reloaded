@@ -3,13 +3,21 @@ use crate::utxo::rpc_clients::UnspentInfo;
 use crate::TxFeeDetails;
 use bigdecimal::Zero;
 use chain::OutPoint;
-use common::{block_on, DEX_FEE_ADDR_RAW_PUBKEY};
+use common::block_on;
 use itertools::Itertools;
 use mm2_core::mm_ctx::MmCtxBuilder;
 use mocktopus::mocking::{MockResult, Mockable};
 use rpc::v1::types::ToTxHash;
 use std::convert::TryFrom;
 use std::mem::discriminant;
+
+/// Test-only DEX-fee destination pubkey, resolved through `mm2_net_config`
+/// for the community netid. Replaces direct use of
+/// `common::DEX_FEE_ADDR_RAW_PUBKEY` so test fixtures go through the same
+/// per-netid registry as production code (LP-3F.A1).
+fn test_dex_fee_addr_raw_pubkey() -> &'static [u8] {
+    mm2_net_config::net_config_or_panic(8762).dex_fee_addr_raw_pubkey()
+}
 
 const EXPECTED_TX_FEE: i64 = 1000;
 const CONTRACT_CALL_GAS_FEE: i64 = (QRC20_GAS_LIMIT_DEFAULT * QRC20_GAS_PRICE_DEFAULT) as i64;
@@ -225,7 +233,7 @@ fn test_send_taker_fee() {
 
     let amount = BigDecimal::from_str("0.01").unwrap();
     let tx = coin
-        .send_taker_fee(&DexFee::Standard(amount.clone().into()), &DEX_FEE_ADDR_RAW_PUBKEY, &[])
+        .send_taker_fee(&DexFee::Standard(amount.clone().into()), test_dex_fee_addr_raw_pubkey(), &[])
         .wait()
         .unwrap();
     let tx_hash: H256Json = match tx {
@@ -238,7 +246,7 @@ fn test_send_taker_fee() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
             expected_sender: coin.my_public_key().unwrap(),
-            fee_addr: &DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 0,
             uuid: &[],
@@ -266,7 +274,7 @@ fn test_validate_fee() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
             expected_sender: &sender_pub,
-            fee_addr: &DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.clone().into()),
             min_block_number: 0,
             uuid: &[],
@@ -293,8 +301,8 @@ fn test_validate_fee() {
     let err = coin
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
-            expected_sender: &DEX_FEE_ADDR_RAW_PUBKEY,
-            fee_addr: &DEX_FEE_ADDR_RAW_PUBKEY,
+            expected_sender: test_dex_fee_addr_raw_pubkey(),
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.clone().into()),
             min_block_number: 0,
             uuid: &[],
@@ -309,7 +317,7 @@ fn test_validate_fee() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
             expected_sender: &sender_pub,
-            fee_addr: &DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.clone().into()),
             min_block_number: 2000000,
             uuid: &[],
@@ -325,7 +333,7 @@ fn test_validate_fee() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
             expected_sender: &sender_pub,
-            fee_addr: &DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount_dif.into()),
             min_block_number: 0,
             uuid: &[],
@@ -343,7 +351,7 @@ fn test_validate_fee() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
             expected_sender: &sender_pub,
-            fee_addr: &DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 0,
             uuid: &[],
