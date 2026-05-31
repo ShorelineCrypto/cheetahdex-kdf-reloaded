@@ -1955,6 +1955,7 @@ dependencies = [
  "kdf_primitives",
  "kdf_rpc_types",
  "kdf_script",
+ "kdf_spv_validation",
  "lazy_static",
  "libc",
  "lightning",
@@ -1998,7 +1999,6 @@ dependencies = [
  "solana-transaction-status",
  "spl-associated-token-account",
  "spl-token",
- "spv_validation",
  "tendermint-rpc",
  "thiserror 1.0.69",
  "tiny-bip39",
@@ -4864,6 +4864,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "kdf_spv_validation"
+version = "0.1.0"
+dependencies = [
+ "kdf_chain",
+ "kdf_codec",
+ "kdf_primitives",
+ "ripemd160",
+ "rustc-hex",
+ "serde",
+ "serde_json",
+ "sha2 0.9.9",
+ "test_helpers",
+]
+
+[[package]]
 name = "kdf_walletconnect"
 version = "0.1.0"
 dependencies = [
@@ -5923,6 +5938,7 @@ dependencies = [
  "kdf_primitives",
  "kdf_rpc_types",
  "kdf_script",
+ "kdf_spv_validation",
  "lazy_static",
  "libc",
  "metrics",
@@ -5957,7 +5973,6 @@ dependencies = [
  "serde_json",
  "sp-runtime-interface",
  "sp-trie",
- "spv_validation",
  "testcontainers",
  "timed-map",
  "tokio",
@@ -9743,21 +9758,6 @@ dependencies = [
  "num_enum 0.5.4",
  "solana-program",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "spv_validation"
-version = "0.1.0"
-dependencies = [
- "kdf_chain",
- "kdf_codec",
- "kdf_primitives",
- "ripemd160",
- "rustc-hex",
- "serde",
- "serde_json",
- "sha2 0.9.9",
- "test_helpers",
 ]
 
 [[package]]

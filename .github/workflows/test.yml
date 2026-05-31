@@ -27,7 +27,7 @@ jobs:
         run: cargo test -p coins --lib -- eth::eth_tests::test_addr_from_pubkey_str eth::eth_tests::test_gas_station_data eth::eth_tests::test_u256 eth::eth_tests::test_wei_from eth::eth_tests::test_wei_to
 
       - name: Run SPV validation tests
-        run: cargo test -p spv_validation
+        run: cargo test -p kdf_spv_validation
 
       - name: Run mock RPC response tests
         run: cargo test -p coins --lib rpc_response_tests

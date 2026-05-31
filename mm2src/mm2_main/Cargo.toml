@@ -109,7 +109,7 @@ ser_error = { path = "../derives/ser_error" }
 ser_error_derive = { path = "../derives/ser_error_derive" }
 serialization = { package = "kdf_codec", path = "../kdf_codec" }
 serialization_derive = { package = "kdf_codec_derive", path = "../kdf_codec_derive" }
-spv_validation = { path = "../mm2_bitcoin/spv_validation" }
+spv_validation = { package = "kdf_spv_validation", path = "../kdf_spv_validation" }
 sp-runtime-interface = { version = "6.0.0", default-features = false, features = ["disable_target_static_assertions"] }
 sp-trie = { version = "6.0", default-features = false }
 
