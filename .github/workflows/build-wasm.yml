@@ -1,0 +1,62 @@
+name: Build WASM
+
+# P7.1.a — WASM build safety net.
+#
+# Compiles the parts of the workspace that are known-good for the
+# `wasm32-unknown-unknown` target so we get an automatic red signal
+# whenever a change regresses the WASM build. Today this covers
+# `coins` and `mm2_db`. The umbrella build of `mm2_main` (and
+# `wasm-pack build`) will be added in P7.1.e once the remaining
+# WASM-specific compile errors in `mm2_main` and `mm2_gui_storage`
+# are fixed (P7.1.b–d).
+#
+# Build/test toolchain is stable per `rust-toolchain.toml`; rustfmt
+# is unrelated to this workflow.
+
+on:
+  push:
+    branches: [ reloaded-gplv2-base ]
+  pull_request:
+    branches: [ reloaded-gplv2-base ]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "dev"
+  workflow_call:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "dev"
+        type: string
+
+jobs:
+  check:
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add wasm32 target
+        shell: bash
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm32-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: cargo check -p coins (wasm32)
+        shell: bash
+        run: cargo check --target wasm32-unknown-unknown -p coins
+
+      - name: cargo check -p mm2_db (wasm32)
+        shell: bash
+        run: cargo check --target wasm32-unknown-unknown -p mm2_db

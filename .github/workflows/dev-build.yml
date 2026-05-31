@@ -31,3 +31,8 @@ jobs:
     uses: ./.github/workflows/build-android.yml
     with:
       profile: release
+
+  wasm:
+    uses: ./.github/workflows/build-wasm.yml
+    with:
+      profile: dev
