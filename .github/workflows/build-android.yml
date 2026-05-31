@@ -25,7 +25,8 @@ on:
 
 jobs:
   build:
-    runs-on: android-ndk
+    # Pin to the dedicated Android NDK runner via its custom label.
+    runs-on: [self-hosted, Linux, android-ndk]
     timeout-minutes: 90
 
     strategy:

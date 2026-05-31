@@ -8,10 +8,10 @@ on:
 
 jobs:
   unit-tests:
-    # Constrain to the Linux self-hosted runner. Without the [Linux] label,
-    # GitHub may schedule this onto the Windows self-hosted runner, where
-    # the bash-only fmt step and rustup nightly install path are flaky.
-    runs-on: [self-hosted, Linux]
+    # Pin to the bare-metal Linux runner (`kdf-runner`, label `docker`).
+    # Without a runner-specific label, the job could schedule onto the
+    # Android NDK VM, which is slower and lacks the cargo cache.
+    runs-on: [self-hosted, Linux, docker]
     timeout-minutes: 30
 
     steps:
@@ -57,11 +57,10 @@ jobs:
         run: cargo +nightly fmt --all -- --check
 
   docker-tests:
-    # Constrain to Linux self-hosted runner: Docker is provisioned on the
-    # Linux host only. Without the [Linux] label this job can land on the
-    # Windows self-hosted runner where `docker` is not on PATH and the bash
-    # primitives below (ss, find ... -delete, /tmp paths) don't exist.
-    runs-on: [self-hosted, Linux]
+    # Pin to the bare-metal Linux runner that has Docker (the `docker` label
+    # is set on `kdf-runner`). Without it, the job could schedule onto any
+    # Linux runner — e.g. the Android NDK VM — which has no Docker daemon.
+    runs-on: [self-hosted, Linux, docker]
     timeout-minutes: 60
     needs: unit-tests
 

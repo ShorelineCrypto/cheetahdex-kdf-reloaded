@@ -34,10 +34,11 @@ on:
 
 jobs:
   check:
-    # Linux-only: wasm-pack and the bash-based install fallback expect a
-    # POSIX shell. Without the [Linux] label this can land on the Windows
-    # self-hosted runner.
-    runs-on: [self-hosted, Linux]
+    # Pin to the bare-metal Linux runner (`kdf-runner`, label `docker`).
+    # The Android NDK VM also matches `[self-hosted, Linux]` but is slower
+    # and lacks the cargo/wasm caches; the `docker` label is currently the
+    # only way to disambiguate.
+    runs-on: [self-hosted, Linux, docker]
     timeout-minutes: 30
 
     steps:
