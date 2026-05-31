@@ -433,7 +433,7 @@ pub enum TxFeeDetails {
     Eth(EthTxFeeDetails),
     Qrc20(Qrc20FeeDetails),
     Slp(SlpFeeDetails),
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    #[cfg(not(target_arch = "wasm32"))]
     Solana(SolanaFeeDetails),
     Sia(siacoin::SiaFeeDetails),
     Tendermint(tendermint::TendermintFeeDetails),
@@ -452,7 +452,7 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
             Utxo(UtxoFeeDetails),
             Eth(EthTxFeeDetails),
             Qrc20(Qrc20FeeDetails),
-            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+            #[cfg(not(target_arch = "wasm32"))]
             Solana(SolanaFeeDetails),
             Tron(crate::eth::tron::fee::TronTxFeeDetails),
         }
@@ -461,7 +461,7 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
             TxFeeDetailsUnTagged::Utxo(f) => Ok(TxFeeDetails::Utxo(f)),
             TxFeeDetailsUnTagged::Eth(f) => Ok(TxFeeDetails::Eth(f)),
             TxFeeDetailsUnTagged::Qrc20(f) => Ok(TxFeeDetails::Qrc20(f)),
-            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+            #[cfg(not(target_arch = "wasm32"))]
             TxFeeDetailsUnTagged::Solana(f) => Ok(TxFeeDetails::Solana(f)),
             TxFeeDetailsUnTagged::Tron(f) => Ok(TxFeeDetails::Tron(f)),
         }
@@ -485,7 +485,7 @@ impl From<UtxoFeeDetails> for TxFeeDetails {
 impl From<Qrc20FeeDetails> for TxFeeDetails {
     fn from(qrc20_details: Qrc20FeeDetails) -> Self { TxFeeDetails::Qrc20(qrc20_details) }
 }
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaFeeDetails> for TxFeeDetails {
     fn from(solana_details: SolanaFeeDetails) -> Self { TxFeeDetails::Solana(solana_details) }
 }

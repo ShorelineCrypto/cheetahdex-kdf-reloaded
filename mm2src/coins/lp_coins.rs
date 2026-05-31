@@ -239,15 +239,11 @@ pub use test_coin::TestCoin;
 
 #[doc(hidden)]
 #[allow(unused_variables)]
-// Solana support is disabled on mobile (Android/iOS) because the
-// `solana-remote-wallet` transitive dep links against `libudev`, which
-// only exists on Linux desktop. The Cargo.toml dependency entries for
-// solana are gated to the same cfg.
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub mod solana;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub use solana::spl::SplToken;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub use solana::{solana_coin_from_conf_and_params, SolanaActivationParams, SolanaCoin, SolanaFeeDetails};
 
 pub mod siacoin;

@@ -11,9 +11,9 @@ pub enum MmCoinEnum {
     ZCoin(ZCoin),
     Bch(BchCoin),
     SlpToken(SlpToken),
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    #[cfg(not(target_arch = "wasm32"))]
     SolanaCoin(SolanaCoin),
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    #[cfg(not(target_arch = "wasm32"))]
     SplToken(SplToken),
     #[cfg(not(target_arch = "wasm32"))]
     LightningCoin(LightningCoin),
@@ -31,11 +31,11 @@ impl From<EthCoin> for MmCoinEnum {
 impl From<TestCoin> for MmCoinEnum {
     fn from(c: TestCoin) -> MmCoinEnum { MmCoinEnum::Test(c) }
 }
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaCoin> for MmCoinEnum {
     fn from(c: SolanaCoin) -> MmCoinEnum { MmCoinEnum::SolanaCoin(c) }
 }
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(not(target_arch = "wasm32"))]
 impl From<SplToken> for MmCoinEnum {
     fn from(c: SplToken) -> MmCoinEnum { MmCoinEnum::SplToken(c) }
 }
@@ -83,9 +83,9 @@ impl Deref for MmCoinEnum {
             #[cfg(not(target_arch = "wasm32"))]
             MmCoinEnum::ZCoin(ref c) => c,
             MmCoinEnum::Test(ref c) => c,
-            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+            #[cfg(not(target_arch = "wasm32"))]
             MmCoinEnum::SolanaCoin(ref c) => c,
-            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+            #[cfg(not(target_arch = "wasm32"))]
             MmCoinEnum::SplToken(ref c) => c,
             MmCoinEnum::SiaCoin(ref c) => c,
             MmCoinEnum::TendermintCoin(ref c) => c,
@@ -322,9 +322,9 @@ pub enum CoinProtocol {
         network: BlockchainNetwork,
         confirmations: PlatformCoinConfirmations,
     },
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    #[cfg(not(target_arch = "wasm32"))]
     SOLANA,
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    #[cfg(not(target_arch = "wasm32"))]
     SPLTOKEN {
         platform: String,
         token_contract_address: String,
