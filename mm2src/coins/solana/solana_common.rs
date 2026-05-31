@@ -7,8 +7,9 @@ use common::mm_number::BigDecimal;
 use derive_more::Display;
 use futures::compat::Future01CompatExt;
 use mm2_err_handle::prelude::*;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::{Signature, Signer};
+use solana_native_token::LAMPORTS_PER_SOL;
+use solana_signature::Signature;
+use solana_signer::Signer;
 use std::str::FromStr;
 
 #[derive(Debug, Display)]

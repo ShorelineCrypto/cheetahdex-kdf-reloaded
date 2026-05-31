@@ -4,8 +4,6 @@ use bip39::Language;
 use crypto::privkey::key_pair_from_seed;
 use ed25519_dalek_bip32::{DerivationPath, ExtendedSecretKey};
 use mm2_core::mm_ctx::MmCtxBuilder;
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::commitment_config::{CommitmentConfig, CommitmentLevel};
 use std::str::FromStr;
 
 pub enum SolanaNet {
@@ -39,7 +37,7 @@ pub fn generate_key_pair_from_seed(seed: String) -> Keypair {
         public: pub_key,
     };
 
-    solana_sdk::signature::keypair_from_seed(pair.to_bytes().as_ref()).unwrap()
+    solana_keypair::keypair_from_seed(pair.to_bytes().as_ref()).unwrap()
 }
 
 pub fn generate_key_pair_from_iguana_seed(seed: String) -> Keypair {
@@ -50,7 +48,7 @@ pub fn generate_key_pair_from_iguana_seed(seed: String) -> Keypair {
         secret: secret_key,
         public: public_key,
     };
-    solana_sdk::signature::keypair_from_seed(other_key_pair.to_bytes().as_ref()).unwrap()
+    solana_keypair::keypair_from_seed(other_key_pair.to_bytes().as_ref()).unwrap()
 }
 
 pub fn spl_coin_for_test(
@@ -72,7 +70,7 @@ pub fn spl_coin_for_test(
 
 pub fn solana_coin_for_test(seed: String, net_type: SolanaNet) -> (MmArc, SolanaCoin) {
     let url = solana_net_to_url(net_type);
-    let client = RpcClient::new_with_commitment(url, CommitmentConfig {
+    let client = SolanaRpcClient::with_commitment(url, CommitmentConfig {
         commitment: CommitmentLevel::Finalized,
     });
     let conf = json!({

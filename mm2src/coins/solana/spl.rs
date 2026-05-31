@@ -1,4 +1,5 @@
 use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, TradeFee, TransactionEnum, WatcherOps};
+use crate::solana::rpc_client::{SolanaRpcClient, TokenAccountsFilter};
 use crate::solana::solana_common::{ui_amount_to_amount, PrepareTransferData, SufficientBalanceError};
 use crate::solana::{solana_common, AccountError, SolanaCommonOps, SolanaFeeDetails};
 use crate::{BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, RawTransactionFut,
@@ -9,7 +10,7 @@ use crate::{BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapC
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use bincode::serialize;
-use common::{async_blocking, mm_number::MmNumber, now_ms};
+use common::{mm_number::MmNumber, now_ms};
 use futures::{FutureExt, TryFutureExt};
 use futures01::Future;
 use keys::KeyPair;
@@ -17,13 +18,13 @@ use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use rpc::v1::types::Bytes as BytesJson;
 use serde_json::Value as Json;
-use solana_client::{rpc_client::RpcClient, rpc_request::TokenAccountsFilter};
-use solana_sdk::message::Message;
-use solana_sdk::transaction::Transaction;
-use solana_sdk::{pubkey::Pubkey, signature::Signer};
-use spl_associated_token_account::{create_associated_token_account, get_associated_token_address};
-use std::{convert::TryFrom,
-          fmt::{Debug, Formatter, Result as FmtResult},
+use solana_message::Message;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
+use spl_associated_token_account_client::address::get_associated_token_address;
+use spl_associated_token_account_client::instruction::create_associated_token_account;
+use std::{fmt::{Debug, Formatter, Result as FmtResult},
           str::FromStr,
           sync::Arc};
 
@@ -69,7 +70,7 @@ impl SplToken {
         token_address: String,
         platform_coin: SolanaCoin,
     ) -> Result<SplToken, MmError<SplTokenCreationError>> {
-        let token_contract_address = solana_sdk::pubkey::Pubkey::from_str(&token_address)
+        let token_contract_address = Pubkey::from_str(&token_address)
             .map_err(|e| MmError::new(SplTokenCreationError::InvalidPubkey(format!("{:?}", e))))?;
         let conf = Arc::new(SplTokenConf {
             decimals,
@@ -93,24 +94,22 @@ async fn withdraw_spl_token_impl(coin: SplToken, req: WithdrawRequest) -> Withdr
         .check_balance_and_prepare_transfer(req.max, req.amount.clone(), fees)
         .await
         .mm_err(Into::into)?;
-    let system_destination_pubkey = solana_sdk::pubkey::Pubkey::try_from(&*req.to)?;
+    let system_destination_pubkey =
+        Pubkey::from_str(&req.to).map_err(|e| WithdrawError::InvalidAddress(format!("{:?}", e)))?;
     let contract_key = coin.get_underlying_contract_pubkey();
     let auth_key = coin.platform_coin.key_pair.pubkey();
     let funding_address = coin.get_pubkey().await.mm_err(Into::into)?;
     let dest_token_address = get_associated_token_address(&system_destination_pubkey, &contract_key);
     let mut instructions = Vec::with_capacity(1);
-    let account_info = async_blocking({
-        let coin = coin.clone();
-        move || coin.rpc().get_account(&dest_token_address)
-    })
-    .await;
-    if account_info.is_err() {
-        let instruction_creation = create_associated_token_account(&auth_key, &dest_token_address, &contract_key);
+    let dest_exists = coin.rpc().get_account_exists(&dest_token_address).await?;
+    if !dest_exists {
+        let instruction_creation =
+            create_associated_token_account(&auth_key, &system_destination_pubkey, &contract_key, &spl_token::ID);
         instructions.push(instruction_creation);
     }
     let amount = ui_amount_to_amount(req.amount, coin.conf.decimals).mm_err(Into::into)?;
     let instruction_transfer_checked = spl_token::instruction::transfer_checked(
-        &spl_token::id(),
+        &spl_token::ID,
         &funding_address,
         &contract_key,
         &dest_token_address,
@@ -165,7 +164,7 @@ async fn withdraw_impl(coin: SplToken, req: WithdrawRequest) -> WithdrawResult {
 
 #[async_trait]
 impl SolanaCommonOps for SplToken {
-    fn rpc(&self) -> &RpcClient { &self.platform_coin.client }
+    fn rpc(&self) -> &SolanaRpcClient { &self.platform_coin.client }
 
     fn is_token(&self) -> bool { true }
 
@@ -183,14 +182,13 @@ impl SplToken {
     fn get_underlying_contract_pubkey(&self) -> Pubkey { self.conf.token_contract_address }
 
     async fn get_pubkey(&self) -> Result<Pubkey, MmError<AccountError>> {
-        let coin = self.clone();
-        let token_accounts = async_blocking(move || {
-            coin.rpc().get_token_accounts_by_owner(
-                &coin.platform_coin.key_pair.pubkey(),
-                TokenAccountsFilter::Mint(coin.get_underlying_contract_pubkey()),
+        let token_accounts = self
+            .rpc()
+            .get_token_accounts_by_owner(
+                &self.platform_coin.key_pair.pubkey(),
+                TokenAccountsFilter::Mint(self.get_underlying_contract_pubkey()),
             )
-        })
-        .await?;
+            .await?;
         if token_accounts.is_empty() {
             return MmError::err(AccountError::NotFundedError("account_not_funded".to_string()));
         }

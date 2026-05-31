@@ -14,7 +14,7 @@ fn spl_coin_creation() {
         sol_coin.clone(),
         "USDC".to_string(),
         6,
-        solana_sdk::pubkey::Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
+        Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
     );
 
     println!("address: {}", sol_spl_usdc_coin.my_address().unwrap());
@@ -33,7 +33,7 @@ fn test_sign_message() {
         sol_coin.clone(),
         "USDC".to_string(),
         6,
-        solana_sdk::pubkey::Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
+        Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
     );
     let signature = sol_spl_usdc_coin.sign_message("test").unwrap();
     assert_eq!(
@@ -51,7 +51,7 @@ fn test_verify_message() {
         sol_coin.clone(),
         "USDC".to_string(),
         6,
-        solana_sdk::pubkey::Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
+        Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
     );
     let is_valid = sol_spl_usdc_coin
         .verify_message(
@@ -72,7 +72,7 @@ fn spl_my_balance() {
         sol_coin.clone(),
         "USDC".to_string(),
         6,
-        solana_sdk::pubkey::Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
+        Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
     );
 
     let res = block_on(sol_spl_usdc_coin.my_balance().compat()).unwrap();
@@ -83,7 +83,7 @@ fn spl_my_balance() {
         sol_coin.clone(),
         "WSOL".to_string(),
         8,
-        solana_sdk::pubkey::Pubkey::from_str("So11111111111111111111111111111111111111112").unwrap(),
+        Pubkey::from_str("So11111111111111111111111111111111111111112").unwrap(),
     );
     let res = block_on(sol_spl_wsol_coin.my_balance().compat()).unwrap();
     assert_eq!(res.spendable, BigDecimal::from(0));
@@ -98,7 +98,7 @@ fn test_spl_transactions() {
         sol_coin.clone(),
         "USDC".to_string(),
         6,
-        solana_sdk::pubkey::Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
+        Pubkey::from_str("CpMah17kQEL2wqyMKt3mZBdTnZbkbfx4nqmQMFDP5vwp").unwrap(),
     );
     let withdraw_amount = BigDecimal::from_str("0.0001").unwrap();
     let valid_tx_details = block_on(

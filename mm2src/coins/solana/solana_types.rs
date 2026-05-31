@@ -7,7 +7,7 @@ pub const LAMPORTS_DUMMY_AMOUNT: u64 = 10;
 
 #[async_trait]
 pub trait SolanaCommonOps {
-    fn rpc(&self) -> &RpcClient;
+    fn rpc(&self) -> &SolanaRpcClient;
 
     fn is_token(&self) -> bool;
 
@@ -19,17 +19,12 @@ pub trait SolanaCommonOps {
     ) -> Result<PrepareTransferData, MmError<SufficientBalanceError>>;
 }
 
-impl From<ClientError> for BalanceError {
-    fn from(e: ClientError) -> Self {
+impl From<RpcError> for BalanceError {
+    fn from(e: RpcError) -> Self {
         match e.kind {
-            ClientErrorKind::Io(e) => BalanceError::Transport(e.to_string()),
-            ClientErrorKind::Reqwest(e) => BalanceError::Transport(e.to_string()),
-            ClientErrorKind::RpcError(e) => BalanceError::Transport(format!("{:?}", e)),
-            ClientErrorKind::SerdeJson(e) => BalanceError::InvalidResponse(e.to_string()),
-            ClientErrorKind::Custom(e) => BalanceError::Internal(e),
-            ClientErrorKind::SigningError(_)
-            | ClientErrorKind::TransactionError(_)
-            | ClientErrorKind::FaucetError(_) => BalanceError::Internal("not_reacheable".to_string()),
+            RpcErrorKind::Transport(s) => BalanceError::Transport(s),
+            RpcErrorKind::Decode(s) => BalanceError::InvalidResponse(s),
+            RpcErrorKind::Rpc(obj) => BalanceError::Transport(format!("server error {}: {}", obj.code, obj.message)),
         }
     }
 }
@@ -38,17 +33,12 @@ impl From<ParsePubkeyError> for BalanceError {
     fn from(e: ParsePubkeyError) -> Self { BalanceError::Internal(format!("{:?}", e)) }
 }
 
-impl From<ClientError> for WithdrawError {
-    fn from(e: ClientError) -> Self {
+impl From<RpcError> for WithdrawError {
+    fn from(e: RpcError) -> Self {
         match e.kind {
-            ClientErrorKind::Io(e) => WithdrawError::Transport(e.to_string()),
-            ClientErrorKind::Reqwest(e) => WithdrawError::Transport(e.to_string()),
-            ClientErrorKind::RpcError(e) => WithdrawError::Transport(format!("{:?}", e)),
-            ClientErrorKind::SerdeJson(e) => WithdrawError::InternalError(e.to_string()),
-            ClientErrorKind::Custom(e) => WithdrawError::InternalError(e),
-            ClientErrorKind::SigningError(_)
-            | ClientErrorKind::TransactionError(_)
-            | ClientErrorKind::FaucetError(_) => WithdrawError::InternalError("not_reacheable".to_string()),
+            RpcErrorKind::Transport(s) => WithdrawError::Transport(s),
+            RpcErrorKind::Decode(s) => WithdrawError::InternalError(s),
+            RpcErrorKind::Rpc(obj) => WithdrawError::Transport(format!("server error {}: {}", obj.code, obj.message)),
         }
     }
 }
@@ -65,11 +55,11 @@ impl From<ProgramError> for WithdrawError {
 pub enum AccountError {
     NotFundedError(String),
     ParsePubKeyError(String),
-    ClientError(ClientErrorKind),
+    ClientError(RpcErrorKind),
 }
 
-impl From<ClientError> for AccountError {
-    fn from(e: ClientError) -> Self { AccountError::ClientError(e.kind) }
+impl From<RpcError> for AccountError {
+    fn from(e: RpcError) -> Self { AccountError::ClientError(e.kind) }
 }
 
 impl From<ParsePubkeyError> for AccountError {
@@ -118,7 +108,7 @@ fn generate_keypair_from_slice(priv_key: &[u8]) -> Result<Keypair, MmError<KeyPa
         secret: secret_key,
         public: public_key,
     };
-    solana_sdk::signature::keypair_from_seed(key_pair.to_bytes().as_ref())
+    solana_keypair::keypair_from_seed(key_pair.to_bytes().as_ref())
         .map_to_mm(|e| KeyPairCreationError::KeyPairFromSeed(e.to_string()))
 }
 
@@ -128,7 +118,7 @@ pub async fn solana_coin_from_conf_and_params(
     params: SolanaActivationParams,
     priv_key: &[u8],
 ) -> Result<SolanaCoin, String> {
-    let client = RpcClient::new_with_commitment(params.client_url.clone(), CommitmentConfig {
+    let client = SolanaRpcClient::with_commitment(params.client_url.clone(), CommitmentConfig {
         commitment: params.confirmation_commitment,
     });
     let decimals = conf["decimals"].as_u64().unwrap_or(SOLANA_DEFAULT_DECIMALS) as u8;
@@ -150,7 +140,7 @@ pub async fn solana_coin_from_conf_and_params(
 pub struct SolanaCoinImpl {
     pub(crate) ticker: String,
     pub(crate) key_pair: Keypair,
-    pub(crate) client: RpcClient,
+    pub(crate) client: SolanaRpcClient,
     pub(crate) decimals: u8,
     pub(crate) my_address: String,
     pub(crate) spl_tokens_infos: Arc<Mutex<HashMap<String, SplTokenInfo>>>,

@@ -1,4 +1,5 @@
-// solana_market_ops — MarketCoinOps trait implementation for SolanaCoin.
+//! # Purpose
+//! `MarketCoinOps` impl for `SolanaCoin`. All RPC calls are async.
 
 use super::*;
 
@@ -41,27 +42,23 @@ impl MarketCoinOps for SolanaCoin {
     fn send_raw_tx(&self, tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
         let coin = self.clone();
         let tx = tx.to_owned();
-        let fut = async_blocking(move || {
-            let bytes = hex::decode(tx).map_to_mm(|e| e).map_err(|e| format!("{:?}", e))?;
-            let tx: Transaction = deserialize(bytes.as_slice())
-                .map_to_mm(|e| e)
-                .map_err(|e| format!("{:?}", e))?;
-            // this is blocking IO
-            let signature = coin.rpc().send_transaction(&tx).map_err(|e| format!("{:?}", e))?;
+        let fut = async move {
+            let bytes = hex::decode(tx).map_err(|e| format!("{:?}", e))?;
+            let tx: Transaction = deserialize(bytes.as_slice()).map_err(|e| format!("{:?}", e))?;
+            let signature = coin.rpc().send_transaction(&tx).await.map_err(|e| format!("{:?}", e))?;
             Ok(signature.to_string())
-        });
+        };
         Box::new(fut.boxed().compat())
     }
 
     fn send_raw_tx_bytes(&self, tx: &[u8]) -> Box<dyn Future<Item = String, Error = String> + Send> {
         let coin = self.clone();
         let tx = tx.to_owned();
-        let fut = async_blocking(move || {
-            let tx = try_s!(deserialize(tx.as_slice()));
-            // this is blocking IO
-            let signature = coin.rpc().send_transaction(&tx).map_err(|e| format!("{:?}", e))?;
+        let fut = async move {
+            let tx: Transaction = try_s!(deserialize(tx.as_slice()));
+            let signature = coin.rpc().send_transaction(&tx).await.map_err(|e| format!("{:?}", e))?;
             Ok(signature.to_string())
-        });
+        };
         Box::new(fut.boxed().compat())
     }
 
@@ -90,7 +87,7 @@ impl MarketCoinOps for SolanaCoin {
 
     fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> {
         let coin = self.clone();
-        let fut = async_blocking(move || coin.rpc().get_block_height().map_err(|e| format!("{:?}", e)));
+        let fut = async move { coin.rpc().get_block_height().await.map_err(|e| format!("{:?}", e)) };
         Box::new(fut.boxed().compat())
     }
 

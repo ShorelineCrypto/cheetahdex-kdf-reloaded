@@ -1,13 +1,9 @@
 use super::*;
 use crate::solana::solana_common_tests::{generate_key_pair_from_iguana_seed, generate_key_pair_from_seed,
                                          solana_coin_for_test, SolanaNet};
-use crate::solana::solana_decode_tx_helpers::SolanaConfirmedTransaction;
 use crate::MarketCoinOps;
 use base58::ToBase58;
 use common::{block_on, Future01CompatExt};
-use solana_client::rpc_request::TokenAccountsFilter;
-use solana_sdk::signature::{Signature, Signer};
-use solana_transaction_status::UiTransactionEncoding;
 use std::ops::Neg;
 use std::str::FromStr;
 
@@ -41,8 +37,8 @@ fn solana_prerequisites() {
         assert_eq!(public_address.len(), 44);
         assert_eq!(public_address, "2bUBiBNZyD29gP1oV6de7nxowMLoDBtopMMTGgMvjG5m");
         assert_eq!(priv_key, "F6czu7fdefbsCDH52JesQrBSJS5Sz25AkPLWFf8zUWhm");
-        let client = solana_client::rpc_client::RpcClient::new("https://api.testnet.solana.com/".to_string());
-        let balance = client.get_balance(&fin.pubkey()).expect("Expect to retrieve balance");
+        let client = SolanaRpcClient::new("https://api.testnet.solana.com/".to_string());
+        let balance = block_on(client.get_balance(&fin.pubkey())).expect("Expect to retrieve balance");
         assert_eq!(balance, 0);
     }
 
@@ -51,20 +47,19 @@ fn solana_prerequisites() {
         let public_address = key_pair.pubkey().to_string();
         assert_eq!(public_address.len(), 44);
         assert_eq!(public_address, "2jTgfhf98GosnKSCXjL5YSiEa3MLrmR42yy9kZZq1i2c");
-        let client = solana_client::rpc_client::RpcClient::new("https://api.testnet.solana.com/".to_string());
-        let balance = client
-            .get_balance(&key_pair.pubkey())
-            .expect("Expect to retrieve balance");
+        let client = SolanaRpcClient::new("https://api.testnet.solana.com/".to_string());
+        let balance = block_on(client.get_balance(&key_pair.pubkey())).expect("Expect to retrieve balance");
         assert_eq!(lamports_to_sol(balance), BigDecimal::from(0));
         assert_eq!(balance, 0);
 
         //  This will fetch all the balance from all tokens
-        let token_accounts = client
-            .get_token_accounts_by_owner(&key_pair.pubkey(), TokenAccountsFilter::ProgramId(spl_token::id()))
-            .expect("");
+        let token_accounts = block_on(
+            client.get_token_accounts_by_owner(&key_pair.pubkey(), TokenAccountsFilter::ProgramId(spl_token::ID)),
+        )
+        .expect("");
         println!("{:?}", token_accounts);
-        let actual_token_pubkey = solana_sdk::pubkey::Pubkey::from_str(token_accounts[0].pubkey.as_str()).unwrap();
-        let amount = client.get_token_account_balance(&actual_token_pubkey).unwrap();
+        let actual_token_pubkey = Pubkey::from_str(token_accounts[0].pubkey.as_str()).unwrap();
+        let amount = block_on(client.get_token_account_balance(&actual_token_pubkey)).unwrap();
         assert_ne!(amount.ui_amount_string.as_str(), "0");
     }
 }
@@ -295,28 +290,7 @@ fn solana_test_transactions() {
 }
 
 // This test is just a unit test for brainstorming around tx_history for base_coin.
-#[test]
-#[ignore]
-#[cfg(not(target_arch = "wasm32"))]
-fn solana_test_tx_history() {
-    let passphrase = "federal stay trigger hour exist success game vapor become comfort action phone bright ill target wild nasty crumble dune close rare fabric hen iron".to_string();
-    let (_, sol_coin) = solana_coin_for_test(passphrase.clone(), SolanaNet::Testnet);
-    let res = sol_coin
-        .client
-        .get_signatures_for_address(&sol_coin.key_pair.pubkey())
-        .unwrap();
-    let mut history = Vec::new();
-    for cur in res.iter() {
-        let signature = Signature::from_str(cur.signature.clone().as_str()).unwrap();
-        let res = sol_coin
-            .client
-            .get_transaction(&signature, UiTransactionEncoding::JsonParsed)
-            .unwrap();
-        println!("{}", serde_json::to_string(&res).unwrap());
-        let parsed = serde_json::to_value(&res).unwrap();
-        let tx_infos: SolanaConfirmedTransaction = serde_json::from_value(parsed).unwrap();
-        let mut txs = tx_infos.extract_solana_transactions(&sol_coin).unwrap();
-        history.append(&mut txs);
-    }
-    println!("{}", serde_json::to_string(&history).unwrap());
-}
+// Disabled in P14: requires `getSignaturesForAddress` / `getTransaction` JSON-RPC
+// endpoints that are out of scope for the minimal in-tree `SolanaRpcClient`.
+#[allow(dead_code)]
+fn solana_test_tx_history() {}

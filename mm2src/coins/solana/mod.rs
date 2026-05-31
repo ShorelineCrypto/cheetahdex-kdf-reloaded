@@ -1,17 +1,22 @@
-// solana module — Solana blockchain support.
-//
-// Split into sub-modules for maintainability:
-//   solana_types      – constants, structs, enums, error types, core types
-//   solana_helpers    – SolanaCommonOps impl, inherent methods
-//   solana_swap_ops   – SwapOps and WatcherOps trait implementations
-//   solana_market_ops – MarketCoinOps trait implementation
-//   solana_mm_coin    – MmCoin trait implementation and withdraw logic
-//
+//! # Purpose
+//! Solana platform-coin and SPL-token support.
+//!
+//! # Sub-modules
+//! - `rpc_client` — KDF-original async JSON-RPC client (P14).
+//! - `solana_types` — constants, traits, errors, `SolanaCoin` struct.
+//! - `solana_common` — shared transfer/balance helpers.
+//! - `solana_helpers` — inherent methods on `SolanaCoin`.
+//! - `solana_swap_ops` — `SwapOps` and `WatcherOps` impls.
+//! - `solana_market_ops` — `MarketCoinOps` impl.
+//! - `solana_mm_coin` — `MmCoin` impl plus the SOL-side `withdraw`.
+//! - `spl` — `SplToken` and its `MmCoin` / `MarketCoinOps` impls.
+//! - `solana_decode_tx_helpers` — Solana JSON tx-history decoders.
 
-// ─── Imports (pub(crate) so child modules inherit via `use super::*`) ───────
+pub mod rpc_client;
 
 pub(crate) use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, TradeFee, TransactionEnum,
                        WatcherOps};
+pub(crate) use crate::solana::rpc_client::{RpcError, RpcErrorKind, SolanaRpcClient, TokenAccountsFilter};
 pub(crate) use crate::solana::solana_common::{lamports_to_sol, PrepareTransferData, SufficientBalanceError};
 pub(crate) use crate::solana::spl::SplTokenInfo;
 pub(crate) use crate::{BalanceError, BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend,
@@ -33,15 +38,12 @@ pub(crate) use mm2_core::mm_ctx::MmArc;
 pub(crate) use mm2_err_handle::prelude::*;
 pub(crate) use rpc::v1::types::Bytes as BytesJson;
 pub(crate) use serde_json::{self as json, Value as Json};
-pub(crate) use solana_client::rpc_request::TokenAccountsFilter;
-pub(crate) use solana_client::{client_error::{ClientError, ClientErrorKind},
-                               rpc_client::RpcClient};
-pub(crate) use solana_sdk::commitment_config::{CommitmentConfig, CommitmentLevel};
-pub(crate) use solana_sdk::program_error::ProgramError;
-pub(crate) use solana_sdk::pubkey::ParsePubkeyError;
-pub(crate) use solana_sdk::transaction::Transaction;
-pub(crate) use solana_sdk::{pubkey::Pubkey,
-                            signature::{Keypair, Signer}};
+pub(crate) use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
+pub(crate) use solana_keypair::{keypair_from_seed, Keypair};
+pub(crate) use solana_program_error::ProgramError;
+pub(crate) use solana_pubkey::{ParsePubkeyError, Pubkey};
+pub(crate) use solana_signer::Signer;
+pub(crate) use solana_transaction::Transaction;
 pub(crate) use std::collections::HashMap;
 pub(crate) use std::str::FromStr;
 pub(crate) use std::sync::Mutex;
@@ -50,8 +52,6 @@ pub(crate) use std::{convert::TryFrom,
                      ops::Deref,
                      sync::Arc};
 
-// ─── Existing sub-modules ───────────────────────────────────────────────────
-
 pub mod solana_common;
 #[cfg(test)] mod solana_common_tests;
 mod solana_decode_tx_helpers;
@@ -59,13 +59,10 @@ mod solana_decode_tx_helpers;
 pub mod spl;
 #[cfg(test)] mod spl_tests;
 
-// ─── Split sub-modules ─────────────────────────────────────────────────────
-
 mod solana_helpers;
 mod solana_market_ops;
 mod solana_mm_coin;
 mod solana_swap_ops;
 mod solana_types;
 
-// Re-export split module contents for backward-compatible access paths
 pub use solana_types::*;

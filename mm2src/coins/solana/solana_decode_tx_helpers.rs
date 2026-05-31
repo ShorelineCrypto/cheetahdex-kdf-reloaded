@@ -2,7 +2,7 @@ extern crate serde_derive;
 
 use crate::{NumConversResult, SolanaCoin, SolanaFeeDetails, TransactionDetails, TransactionType};
 use bigdecimal::BigDecimal;
-use solana_sdk::native_token::lamports_to_sol;
+use solana_native_token::lamports_to_sol;
 use std::convert::TryFrom;
 
 #[derive(Debug, Serialize, Deserialize)]

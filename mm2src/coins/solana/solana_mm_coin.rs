@@ -8,8 +8,8 @@ async fn withdraw_base_coin_impl(coin: SolanaCoin, req: WithdrawRequest) -> With
         .check_balance_and_prepare_transfer(req.max, req.amount.clone(), fees)
         .await
         .mm_err(Into::into)?;
-    let to = solana_sdk::pubkey::Pubkey::try_from(&*req.to)?;
-    let tx = solana_sdk::system_transaction::transfer(&coin.key_pair, &to, res.lamports_to_send, hash);
+    let to = Pubkey::from_str(&req.to).map_err(|e| WithdrawError::InvalidAddress(format!("{:?}", e)))?;
+    let tx = solana_system_transaction::transfer(&coin.key_pair, &to, res.lamports_to_send, hash);
     let serialized_tx = serialize(&tx).map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
     let total_amount = lamports_to_sol(res.lamports_to_send);
     let received_by_me = if req.to == coin.my_address {
@@ -74,7 +74,7 @@ impl MmCoin for SolanaCoin {
                 reason: Some("Invalid address length".to_string()),
             };
         }
-        let result = Pubkey::try_from(address);
+        let result = Pubkey::from_str(address);
         match result {
             Ok(pubkey) => {
                 if pubkey.is_on_curve() {
