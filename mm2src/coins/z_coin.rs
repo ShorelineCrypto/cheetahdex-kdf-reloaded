@@ -138,6 +138,28 @@ impl consensus::Parameters for ARRRConsensusParams {
     }
 }
 
+/// Outgoing Viewing Key (OVK) used to encrypt the outgoing-cipher portion of
+/// every Sapling output that pays a swap dex-fee on Pirate Chain (ARRR).
+///
+/// The byte value `[7; 32]` is **shared protocol convention**, not an
+/// authorial choice:
+///
+/// 1. **Audit / interoperability convention.** Every atomic-swap participant
+///    on the ARRR shielded fee path must use the same OVK so that anyone can
+///    decrypt the outgoing memos of fee outputs and verify that fees were
+///    actually paid to the expected address. Changing the value would
+///    silently break the audit convention shared with all other
+///    implementations of the same swap protocol (AtomicDEX, GLEEC, KDF-
+///    Reloaded, and any third-party participant).
+/// 2. **Cond-(f) named locus.** The constant is one of the regions the
+///    upstream license requires us to keep intact (see
+///    `LEGAL_AUDIT_REPORT_2026-04-27_run2.md` §5 LP-14). We preserve the
+///    value, the type, and the source location verbatim from the joint
+///    GPLv2 baseline `c1d46c0c1` for compliance.
+///
+/// Do not refactor away or replace this constant. Anyone considering a
+/// change must read both LP-14 in the audit report **and** the ARRR
+/// shielded-fee protocol notes before touching it.
 const DEX_FEE_OVK: OutgoingViewingKey = OutgoingViewingKey([7; 32]);
 
 pub struct ZCoinFields {
