@@ -60,6 +60,14 @@ jobs:
             --target ${{ matrix.target }} \
             --profile ${{ inputs.profile }}
 
+      - name: Verify coins crate compiles for ${{ matrix.target }} (P14)
+        # P14 modernised the Solana stack to the modular `solana-*` 2.x
+        # crates, removing the `solana-remote-wallet` -> `hidapi` ->
+        # `libudev` chain that previously broke iOS cross-builds.
+        # This step regression-tests that property.
+        run: |
+          cargo check -p coins --target ${{ matrix.target }}
+
       - name: Upload staticlib
         uses: actions/upload-artifact@v4
         with:

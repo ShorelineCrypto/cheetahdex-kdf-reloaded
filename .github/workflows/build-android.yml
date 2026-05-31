@@ -90,6 +90,17 @@ jobs:
             --platform 24 \
             -- build -p mm2_bin_lib --profile ${{ inputs.profile }}
 
+      - name: Verify coins crate compiles for ${{ matrix.target }} (P14)
+        # P14 modernised the Solana stack to the modular `solana-*` 2.x
+        # crates, removing the `solana-remote-wallet` -> `hidapi` ->
+        # `libudev` chain that previously broke Android cross-builds.
+        # This step regression-tests that property without relying on
+        # downstream linking.
+        run: |
+          cargo ndk --target ${{ matrix.target }} \
+            --platform 24 \
+            -- check -p coins
+
       - name: Upload shared library
         uses: actions/upload-artifact@v4
         with:
