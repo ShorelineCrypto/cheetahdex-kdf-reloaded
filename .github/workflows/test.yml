@@ -43,10 +43,15 @@ jobs:
         run: rustup toolchain install nightly --profile minimal --component rustfmt --no-self-update
 
       - name: Check formatting
-        # Force bash so `grep`/`head`/`PIPESTATUS` work on Windows self-hosted
-        # runners as well (PowerShell has none of these).
+        # Run nightly rustfmt in check mode. Avoid piping through
+        # `head`/`grep`: GitHub Actions runs bash with `-e -o pipefail`, so a
+        # `head -N` that closes the pipe early sends SIGPIPE to cargo, the
+        # pipeline reports non-zero, and `-e` kills the script BEFORE any
+        # downstream `PIPESTATUS` override can run — masking the real diff.
+        # Just let cargo print the full diff on failure; the runner log can
+        # show it.
         shell: bash
-        run: cargo +nightly fmt -- --check 2>&1 | grep -v "^Warning:" | head -20; test "${PIPESTATUS[0]}" -eq 0
+        run: cargo +nightly fmt --all -- --check
 
   docker-tests:
     runs-on: self-hosted
