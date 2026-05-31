@@ -31,7 +31,7 @@ pub(crate) use kdf_crypto::{keccak256, sha256};
 pub(crate) use common::custom_futures::TimedAsyncMutex;
 pub(crate) use common::executor::Timer;
 pub(crate) use common::log::error;
-pub(crate) use common::{now_ms, small_rng, DEX_FEE_ADDR_RAW_PUBKEY};
+pub(crate) use common::{now_ms, small_rng};
 pub(crate) use derive_more::Display;
 pub(crate) use ethabi::{Contract, Token};
 pub(crate) use ethereum_types::{Address, H160, H256, U256};
