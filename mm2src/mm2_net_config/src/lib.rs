@@ -37,6 +37,10 @@ pub trait NetConfig: Send + Sync + 'static {
     /// Z-address for shielded DEX fee collection (Zcash-based coins).
     fn dex_fee_z_addr(&self) -> &'static str;
 
+    /// Hex-encoded ed25519 public key that receives the DEX fee on Siacoin
+    /// and other Sia-style ed25519 chains.
+    fn dex_fee_pubkey_ed25519(&self) -> &'static str;
+
     // ── Fee Rates ────────────────────────────────────────────────────
 
     /// Base DEX fee rate as a precise rational number (e.g. 1/777).
@@ -132,6 +136,7 @@ mod tests {
             assert!(!cfg.dex_fee_addr_pubkey().is_empty());
             assert!(!cfg.dex_fee_addr_raw_pubkey().is_empty());
             assert!(!cfg.dex_fee_z_addr().is_empty());
+            assert!(!cfg.dex_fee_pubkey_ed25519().is_empty());
             // seed_nodes() may be empty — operators provide seeds via MM2.json config
         }
     }

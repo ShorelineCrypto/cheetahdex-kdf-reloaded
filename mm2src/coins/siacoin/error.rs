@@ -393,6 +393,10 @@ pub enum SiaWaitForHTLCTxSpendError {
 pub enum SiaCoinBuilderError {
     #[error("[builder] client init failed: {0}")]
     Client(#[from] ClientError),
+    #[error("[builder] DEX fee pubkey hex invalid: {0}")]
+    FeePubkeyHex(String),
+    #[error("[builder] DEX fee pubkey decode failed: {0}")]
+    FeePubkey(String),
 }
 
 /// Errors raised by `SiaCoin::new` during coin activation.

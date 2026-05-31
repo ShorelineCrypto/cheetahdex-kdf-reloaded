@@ -22,7 +22,7 @@ impl SiaCoin {
 
         let conf: SiaCoinConf = serde_json::from_value(json_conf)?;
 
-        Ok(SiaCoinBuilder::new(conf, key_pair, request).build().await?)
+        Ok(SiaCoinBuilder::new(conf, key_pair, request).build(_ctx).await?)
     }
 }
 
@@ -41,7 +41,7 @@ impl<'a> SiaCoinBuilder<'a> {
         }
     }
 
-    async fn build(self) -> Result<SiaCoin, SiaCoinBuilderError> {
+    async fn build(self, ctx: &MmArc) -> Result<SiaCoin, SiaCoinBuilderError> {
         let history_sync_state = if self.request.tx_history {
             HistorySyncState::NotStarted
         } else {
@@ -54,6 +54,15 @@ impl<'a> SiaCoinBuilder<'a> {
             .unwrap_or(self.conf.required_confirmations)
             .into();
 
+        // Resolve the DEX fee destination from the network configuration
+        // (per-netid; see `mm2_net_config`).
+        let net_cfg = mm2_net_config::net_config_or_panic(ctx.netid());
+        let fee_pubkey_bytes = hex::decode(net_cfg.dex_fee_pubkey_ed25519())
+            .map_err(|e| SiaCoinBuilderError::FeePubkeyHex(e.to_string()))?;
+        let fee_public_key = PublicKey::from_bytes(&fee_pubkey_bytes)
+            .map_err(|e| SiaCoinBuilderError::FeePubkey(e.to_string()))?;
+        let fee_address = Address::from_public_key(&fee_public_key);
+
         Ok(SiaCoin {
             conf: self.conf,
             client: Arc::new(
@@ -64,6 +73,7 @@ impl<'a> SiaCoinBuilder<'a> {
             priv_key_policy: PrivKeyPolicy::KeyPair(self.key_pair).into(),
             history_sync_state: Mutex::new(history_sync_state).into(),
             required_confirmations: required_confirmations.into(),
+            fee_address,
         })
     }
 }

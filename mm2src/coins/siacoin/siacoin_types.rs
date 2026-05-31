@@ -3,11 +3,6 @@
 use super::*;
 
 lazy_static! {
-    pub static ref FEE_PUBLIC_KEY_BYTES: Vec<u8> =
-        hex::decode(DEX_FEE_PUBKEY_ED25519).expect("DEX_FEE_PUBKEY_ED25519 is a valid hex string");
-    pub static ref FEE_PUBLIC_KEY: PublicKey =
-        PublicKey::from_bytes(&FEE_PUBLIC_KEY_BYTES).expect("DEX_FEE_PUBKEY_ED25519 is a valid PublicKey");
-    pub static ref FEE_ADDR: Address = Address::from_public_key(&FEE_PUBLIC_KEY);
     pub static ref SINGLE_ADDRESS_MODE_PATH: DalekDerivationPath =
         DalekDerivationPath::from_str("m/44'/1991'/0'/0'/0'").expect("Valid single address mode path");
 }

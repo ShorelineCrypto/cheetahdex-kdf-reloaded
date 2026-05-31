@@ -27,7 +27,7 @@ impl SiaCoin {
 
         let tx = V2TransactionBuilder::new()
             .miner_fee(Currency::DEFAULT_FEE)
-            .add_siacoin_output((FEE_ADDR.clone(), trade_fee_amount).into())
+            .add_siacoin_output((self.fee_address.clone(), trade_fee_amount).into())
             .fund_tx_single_source(&self.client, &my_keypair.public())
             .await?
             .arbitrary_data(uuid.to_vec().into())
@@ -273,7 +273,7 @@ impl SiaCoin {
             },
         }
 
-        if fee_tx.siacoin_outputs[0].address != *FEE_ADDR {
+        if fee_tx.siacoin_outputs[0].address != self.fee_address {
             return Err(ValidateFeeError::InvalidFeeAddress {
                 txid: fee_txid.clone(),
                 address: fee_tx.siacoin_outputs[0].address.clone(),

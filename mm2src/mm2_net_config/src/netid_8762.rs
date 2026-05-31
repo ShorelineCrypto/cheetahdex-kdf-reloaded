@@ -16,6 +16,9 @@ const DEX_FEE_ADDR_PUBKEY: &str = "03bc2c7ba671bae4a6fc835244c9762b41647b9827d47
 /// Z-address for shielded DEX fee (Zcash-based coins).
 const DEX_FEE_Z_ADDR: &str = "zs1rp6426e9r6jkq2nsanl66tkd34enewrmr0uvj0zelhkcwmsy0uvxz2fhm9eu9rl3ukxvgzy2v9f";
 
+/// Hex-encoded ed25519 public key for Siacoin-style DEX fee collection.
+const DEX_FEE_PUBKEY_ED25519: &str = "77b0936728f63257b074c7b3fb2c4fad98df345f57de1ec418fc42619e4e29f8";
+
 /// Seed nodes for P2P bootstrapping on netid 8762.
 /// No hardcoded seeds — operators must provide `"seednodes"` in MM2.json.
 const SEED_NODES: &[&str] = &[];
@@ -46,6 +49,10 @@ impl NetConfig for Netid8762 {
 
     fn dex_fee_z_addr(&self) -> &'static str {
         DEX_FEE_Z_ADDR
+    }
+
+    fn dex_fee_pubkey_ed25519(&self) -> &'static str {
+        DEX_FEE_PUBKEY_ED25519
     }
 
     fn dex_fee_rate(&self) -> BigRational {

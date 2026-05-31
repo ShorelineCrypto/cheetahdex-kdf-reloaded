@@ -38,7 +38,6 @@ pub(crate) use common::executor::Timer;
 pub(crate) use common::log::{debug, info};
 pub(crate) use common::mm_number::MmNumber;
 pub(crate) use common::now_ms;
-pub(crate) use common::DEX_FEE_PUBKEY_ED25519;
 pub(crate) use derive_more::{Display, From, Into};
 pub(crate) use ed25519_dalek_bip32::DerivationPath as DalekDerivationPath;
 pub(crate) use futures::compat::Future01CompatExt;
@@ -112,6 +111,10 @@ pub struct SiaCoinGeneric<T: SiaApiClient + ApiClientHelpers> {
     pub client: Arc<T>,
     pub history_sync_state: Arc<Mutex<HistorySyncState>>,
     required_confirmations: Arc<AtomicU64>,
+    /// DEX-fee destination address resolved from `mm2_net_config` at activation time.
+    /// Keyed on the active netid, so trades on netid 6133 use 6133's fee address
+    /// rather than the netid 8762 default.
+    pub(crate) fee_address: Address,
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -162,10 +165,16 @@ mod tests {
 
     #[test]
     fn test_sia_fee_pubkey_init() {
-        let pubkey_bytes: Vec<u8> = hex::decode(DEX_FEE_PUBKEY_ED25519).unwrap();
-        let pubkey = PublicKey::from_bytes(&FEE_PUBLIC_KEY_BYTES).unwrap();
-        assert_eq!(pubkey_bytes, *FEE_PUBLIC_KEY_BYTES);
-        assert_eq!(pubkey, *FEE_PUBLIC_KEY);
+        // Sanity-check that every supported netid has a valid hex-encoded ed25519
+        // pubkey decodable into a Sia `PublicKey` and a derivable fee `Address`.
+        for &netid in mm2_net_config::SUPPORTED_NETIDS {
+            let cfg = mm2_net_config::net_config_or_panic(netid);
+            let bytes = hex::decode(cfg.dex_fee_pubkey_ed25519())
+                .unwrap_or_else(|_| panic!("netid {netid}: dex_fee_pubkey_ed25519 must be valid hex"));
+            let pk = PublicKey::from_bytes(&bytes)
+                .unwrap_or_else(|_| panic!("netid {netid}: dex_fee_pubkey_ed25519 must decode into PublicKey"));
+            let _addr = Address::from_public_key(&pk);
+        }
     }
 
     #[test]
