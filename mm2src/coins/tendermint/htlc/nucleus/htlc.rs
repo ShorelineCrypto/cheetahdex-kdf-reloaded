@@ -1,3 +1,17 @@
+//! # Purpose
+//! Domain-side wrappers for the Nucleus (`nucleus.htlc`) HTLC protobuf
+//! messages, plus the `cosmrs::tx::Msg` and `cosmrs::proto::traits::Name`
+//! impls that let them be wrapped in a Cosmos `Tx` body.
+//!
+//! # External binding
+//! Structurally bound to the Nucleus `nucleus.htlc` protobuf schema and
+//! to the `cosmrs::tx::Msg` trait surface. Field names, field order,
+//! the `MsgCreateHTLC` / `MsgClaimHTLC` type names and the
+//! `nucleus.htlc` package string are wire invariants of the Nucleus
+//! chain and **must not** be reorganised for stylistic reasons.
+//! Any independent Rust client of `nucleus.htlc` will look
+//! structurally similar; the shape is the protocol, not authorship.
+
 use super::htlc_proto::{NucleusClaimHtlcProto, NucleusCreateHtlcProto};
 
 use cosmrs::proto::traits::Name;

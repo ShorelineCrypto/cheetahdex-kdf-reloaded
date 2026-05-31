@@ -1,3 +1,17 @@
+//! # Purpose
+//! Thin async-friendly wrapper around `rusqlite::Connection`, plus
+//! shared helpers used by every SQL DSL builder in this crate:
+//! validated identifiers, owned parameter buffers, common error
+//! conversions, and `Send`/`Sync` newtype wrappers.
+//!
+//! # External binding
+//! Structurally bound to the `rusqlite` 0.27 API contract
+//! (<https://docs.rs/rusqlite/0.27>). We are pinned to this version
+//! because of upstream MSRV/dependency constraints elsewhere in the
+//! workspace; the older API surface (e.g. `rusqlite::NO_PARAMS`,
+//! absence of `params_from_iter`) explains some of the call-site
+//! shape that differs from newer `rusqlite` users.
+
 #![allow(deprecated)] // TODO: remove this once rusqlite is >= 0.29
 
 pub use rusqlite;

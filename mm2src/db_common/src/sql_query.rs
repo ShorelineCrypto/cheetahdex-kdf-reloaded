@@ -1,3 +1,15 @@
+//! # Purpose
+//! Fluent builder for parameterised `SELECT` queries against
+//! `rusqlite::Connection`, with `WHERE` / `JOIN` / `GROUP BY` /
+//! `ORDER BY` / `LIMIT` clause helpers and identifier validation.
+//!
+//! # External binding
+//! Structurally bound to the SQLite `SELECT` grammar
+//! (<https://www.sqlite.org/lang_select.html>) and to the `rusqlite`
+//! API contract. The clause-method-per-keyword shape is the standard
+//! Rust SQL-builder idiom (compare `sea-query`, `diesel`); the
+//! similarity to other Rust SQL builders is forced by the grammar.
+
 use crate::sql_condition::SqlCondition;
 use crate::sql_value::{SqlValue, SqlValueToString};
 use crate::sqlite::{

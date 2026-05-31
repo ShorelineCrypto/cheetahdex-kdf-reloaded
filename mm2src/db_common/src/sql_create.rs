@@ -1,3 +1,13 @@
+//! # Purpose
+//! Fluent builder for `CREATE TABLE [IF NOT EXISTS]` statements with
+//! typed columns, defaults, and table-level constraints.
+//!
+//! # External binding
+//! Structurally bound to the SQLite `CREATE TABLE` grammar
+//! (<https://www.sqlite.org/lang_createtable.html>). The shape of the
+//! builder follows the grammar; the similarity to other Rust SQL
+//! builders (`sea-query`, `diesel`) is forced by the grammar.
+
 use crate::sql_constraint::SqlConstraint;
 use crate::sql_value::{FromQuoted, SqlValue};
 use crate::sqlite::StringError;

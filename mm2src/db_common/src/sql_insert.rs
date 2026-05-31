@@ -1,3 +1,17 @@
+//! # Purpose
+//! Fluent builder for parameterised `INSERT` statements against
+//! `rusqlite::Connection`, with optional `OR REPLACE` / `OR IGNORE`
+//! conflict resolution and column-name validation.
+//!
+//! # External binding
+//! Structurally bound to the SQLite `INSERT` grammar
+//! (<https://www.sqlite.org/lang_insert.html>) and to the
+//! `rusqlite` API contract. The fluent builder pattern itself is the
+//! standard Rust SQL-builder idiom (compare `sea-query`, `diesel`'s
+//! `InsertStatement`); the structural similarity to other Rust SQL
+//! builders is forced by the grammar plus the idiom and is **not** a
+//! sign of paraphrase.
+
 use crate::sql_value::{FromQuoted, SqlValueOptional, SqlValueToString};
 use crate::sqlite::{OwnedSqlParam, OwnedSqlParams, SqlParamsBuilder, ToValidSqlIdent};
 use common::write_safe;

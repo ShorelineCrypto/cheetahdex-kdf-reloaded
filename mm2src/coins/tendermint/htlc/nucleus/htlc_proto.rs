@@ -1,3 +1,12 @@
+//! # Purpose
+//! `prost`-generated protobuf message definitions for the Nucleus
+//! `nucleus.htlc` module (`MsgCreateHTLC`, `MsgClaimHTLC`, `Htlc` state).
+//!
+//! # External binding
+//! Mechanical 1:1 reflection of the upstream `.proto` schema. Field
+//! tag numbers, names, and types are wire invariants. Do not edit by
+//! hand for stylistic reasons.
+
 use crate::tendermint::htlc::HtlcState;
 
 #[derive(prost::Message)]

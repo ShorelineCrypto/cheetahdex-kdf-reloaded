@@ -1,3 +1,13 @@
+//! # Purpose
+//! Typed representations of SQLite table-level constraints
+//! (`PRIMARY KEY`, `UNIQUE`, `FOREIGN KEY`, `CHECK`) used by
+//! [`crate::sql_create::SqlCreateTable`].
+//!
+//! # External binding
+//! Structurally bound to the SQLite `table-constraint` grammar
+//! (<https://www.sqlite.org/syntax/table-constraint.html>). One enum
+//! variant per grammar production; this is the only sensible shape.
+
 use crate::sqlite::StringError;
 use common::write_safe::fmt::WriteJoin;
 use rusqlite::{Error as SqlError, Result as SqlResult};

@@ -1,3 +1,14 @@
+//! # Purpose
+//! `prost`-generated protobuf message definitions for the Iris
+//! `irismod.htlc` module (`MsgCreateHTLC`, `MsgClaimHTLC`, `Htlc` state).
+//!
+//! # External binding
+//! Mechanical 1:1 reflection of the upstream `.proto` schema. Field
+//! tag numbers, names, and types are wire invariants. Do not edit by
+//! hand for stylistic reasons; if regeneration ever becomes possible
+//! upstream, prefer that over manual edits.
+//! Source of truth: <https://github.com/irisnet/irismod/tree/master/proto/irismod/htlc>.
+
 use crate::tendermint::htlc::HtlcState;
 
 #[derive(prost::Message)]

@@ -1,3 +1,18 @@
+//! # Purpose
+//! Domain-side wrappers for the Iris (`irismod.htlc`) HTLC protobuf
+//! messages, plus the `cosmrs::tx::Msg` and `cosmrs::proto::traits::Name`
+//! impls that let them be wrapped in a Cosmos `Tx` body.
+//!
+//! # External binding
+//! Structurally bound to the Iris `irismod.htlc` protobuf schema and
+//! to the `cosmrs::tx::Msg` trait surface. Field names, field order,
+//! the `MsgCreateHTLC` / `MsgClaimHTLC` type names and the
+//! `irismod.htlc` package string are wire invariants of the Iris chain
+//! and **must not** be reorganised for stylistic reasons.
+//! Any independent Rust client of `irismod.htlc` will look
+//! structurally similar; the shape is the protocol, not authorship.
+//! Source of truth: <https://github.com/irisnet/irismod/tree/master/proto/irismod/htlc>.
+
 use super::htlc_proto::{IrisClaimHtlcProto, IrisCreateHtlcProto};
 
 use cosmrs::proto::traits::Name;
