@@ -1,0 +1,10 @@
+[package]
+name = "kdf_test_helpers"
+version = "0.1.0"
+edition = "2021"
+authors = ["KDF-RELOADED contributors"]
+license = "GPL-2.0-only"
+publish = false
+
+[dependencies]
+hex = "0.4.2"

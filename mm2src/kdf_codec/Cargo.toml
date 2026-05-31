@@ -14,4 +14,4 @@ description = "Bitcoin-style binary codec used by KDF UTXO machinery: Stream/Rea
 byteorder = "1"
 derive_more = "0.99"
 primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
-test_helpers = { path = "../mm2_bitcoin/test_helpers" }
+test_helpers = { package = "kdf_test_helpers", path = "../kdf_test_helpers" }

@@ -4785,7 +4785,7 @@ dependencies = [
  "byteorder 1.4.3",
  "derive_more 0.99.11",
  "kdf_primitives",
- "test_helpers",
+ "kdf_test_helpers",
 ]
 
 [[package]]
@@ -4870,12 +4870,19 @@ dependencies = [
  "kdf_chain",
  "kdf_codec",
  "kdf_primitives",
+ "kdf_test_helpers",
  "ripemd160",
  "rustc-hex",
  "serde",
  "serde_json",
  "sha2 0.9.9",
- "test_helpers",
+]
+
+[[package]]
+name = "kdf_test_helpers"
+version = "0.1.0"
+dependencies = [
+ "hex",
 ]
 
 [[package]]
@@ -10156,13 +10163,6 @@ checksum = "633c1a546cee861a1a6d0dc69ebeca693bf4296661ba7852b9d21d159e0506df"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "test_helpers"
-version = "0.1.0"
-dependencies = [
- "hex",
 ]
 
 [[package]]
