@@ -25,7 +25,7 @@ use crate::{DexFee, ValidateFeeArgs};
 use bigdecimal::{BigDecimal, Signed};
 use chain::OutPoint;
 use common::executor::Timer;
-use common::{block_on, now_ms, OrdRange, PagingOptionsEnum, DEX_FEE_ADDR_RAW_PUBKEY};
+use common::{block_on, now_ms, OrdRange, PagingOptionsEnum};
 use crypto::{privkey::key_pair_from_seed, Bip44Chain, RpcDerivationPath};
 use futures::future::join_all;
 use futures::TryFutureExt;
@@ -37,6 +37,14 @@ use std::convert::TryFrom;
 use std::iter;
 use std::mem::discriminant;
 use std::num::NonZeroUsize;
+
+/// Test-only DEX-fee destination pubkey, resolved through `mm2_net_config`
+/// for the community netid. Replaces direct use of
+/// `common::DEX_FEE_ADDR_RAW_PUBKEY` so test fixtures go through the same
+/// per-netid registry as production code (LP-3F.A1).
+fn test_dex_fee_addr_raw_pubkey() -> &'static [u8] {
+    mm2_net_config::net_config_or_panic(8762).dex_fee_addr_raw_pubkey()
+}
 
 const TEST_COIN_NAME: &'static str = "RICK";
 // Made-up hrp for rick to test p2wpkh script
@@ -2524,8 +2532,8 @@ fn test_validate_fee_wrong_sender() {
     let validate_err = coin
         .validate_fee(ValidateFeeArgs {
             fee_tx: &taker_fee_tx,
-            expected_sender: &*DEX_FEE_ADDR_RAW_PUBKEY,
-            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            expected_sender: test_dex_fee_addr_raw_pubkey(),
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 0,
             uuid: &[],
@@ -2552,7 +2560,7 @@ fn test_validate_fee_min_block() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &taker_fee_tx,
             expected_sender: &sender_pub,
-            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 810329,
             uuid: &[],
@@ -2579,7 +2587,7 @@ fn test_validate_fee_bch_70_bytes_signature() {
     coin.validate_fee(ValidateFeeArgs {
         fee_tx: &taker_fee_tx,
         expected_sender: &sender_pub,
-        fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+        fee_addr: test_dex_fee_addr_raw_pubkey(),
         dex_fee: &DexFee::Standard(amount.into()),
         min_block_number: 0,
         uuid: &[],
