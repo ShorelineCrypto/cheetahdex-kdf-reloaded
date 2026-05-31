@@ -32,8 +32,17 @@ jobs:
       - name: Run mock RPC response tests
         run: cargo test -p coins --lib rpc_response_tests
 
+      - name: Install nightly rustfmt
+        # rustfmt.toml uses nightly-only options (`unstable_features = true`,
+        # `fn_single_line`, `imports_indent = "Visual"`,
+        # `inline_attribute_width`, `overflow_delimited_expr`). Stable rustfmt
+        # silently ignores them and produces a different shape, so the format
+        # check below must run on nightly even though the build/test toolchain
+        # is stable.
+        run: rustup toolchain install nightly --profile minimal --component rustfmt --no-self-update
+
       - name: Check formatting
-        run: cargo fmt -- --check 2>&1 | grep -v "^Warning:" | head -20; test "${PIPESTATUS[0]}" -eq 0
+        run: cargo +nightly fmt -- --check 2>&1 | grep -v "^Warning:" | head -20; test "${PIPESTATUS[0]}" -eq 0
 
   docker-tests:
     runs-on: self-hosted
