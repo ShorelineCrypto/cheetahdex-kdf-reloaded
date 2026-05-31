@@ -39,9 +39,13 @@ jobs:
         # silently ignores them and produces a different shape, so the format
         # check below must run on nightly even though the build/test toolchain
         # is stable.
+        shell: bash
         run: rustup toolchain install nightly --profile minimal --component rustfmt --no-self-update
 
       - name: Check formatting
+        # Force bash so `grep`/`head`/`PIPESTATUS` work on Windows self-hosted
+        # runners as well (PowerShell has none of these).
+        shell: bash
         run: cargo +nightly fmt -- --check 2>&1 | grep -v "^Warning:" | head -20; test "${PIPESTATUS[0]}" -eq 0
 
   docker-tests:
