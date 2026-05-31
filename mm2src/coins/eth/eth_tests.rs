@@ -3,6 +3,14 @@ use common::block_on;
 use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
 use mocktopus::mocking::*;
 
+/// Test-only DEX-fee destination pubkey, resolved through `mm2_net_config`
+/// for the community netid. Replaces direct use of
+/// `common::DEX_FEE_ADDR_RAW_PUBKEY` so test fixtures go through the same
+/// per-netid registry as production code (LP-3F.A1).
+fn test_dex_fee_addr_raw_pubkey() -> &'static [u8] {
+    mm2_net_config::net_config_or_panic(8762).dex_fee_addr_raw_pubkey()
+}
+
 /// The gas price for the tests
 const GAS_PRICE: u64 = 50_000_000_000;
 // `GAS_PRICE` increased by 3%
@@ -246,7 +254,7 @@ fn send_and_refund_erc20_payment() {
         .send_maker_payment(
             (now_ms() / 1000) as u32 - 200,
             &[],
-            &DEX_FEE_ADDR_RAW_PUBKEY,
+            test_dex_fee_addr_raw_pubkey(),
             &[1; 20],
             "0.001".parse().unwrap(),
             &coin.swap_contract_address(),
@@ -262,7 +270,7 @@ fn send_and_refund_erc20_payment() {
         .send_maker_refunds_payment(
             &payment.tx_hex(),
             (now_ms() / 1000) as u32 - 200,
-            &DEX_FEE_ADDR_RAW_PUBKEY,
+            test_dex_fee_addr_raw_pubkey(),
             &[1; 20],
             &[],
             &coin.swap_contract_address(),
@@ -317,7 +325,7 @@ fn send_and_refund_eth_payment() {
         .send_maker_payment(
             (now_ms() / 1000) as u32 - 200,
             &[],
-            &DEX_FEE_ADDR_RAW_PUBKEY,
+            test_dex_fee_addr_raw_pubkey(),
             &[1; 20],
             "0.001".parse().unwrap(),
             &coin.swap_contract_address(),
@@ -333,7 +341,7 @@ fn send_and_refund_eth_payment() {
         .send_maker_refunds_payment(
             &payment.tx_hex(),
             (now_ms() / 1000) as u32 - 200,
-            &DEX_FEE_ADDR_RAW_PUBKEY,
+            test_dex_fee_addr_raw_pubkey(),
             &[1; 20],
             &[],
             &coin.swap_contract_address(),
@@ -1033,8 +1041,8 @@ fn validate_dex_fee_invalid_sender_eth() {
     let validate_err = coin
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
-            expected_sender: &*DEX_FEE_ADDR_RAW_PUBKEY,
-            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            expected_sender: test_dex_fee_addr_raw_pubkey(),
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 0,
             uuid: &[],
@@ -1069,8 +1077,8 @@ fn validate_dex_fee_invalid_sender_erc() {
     let validate_err = coin
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
-            expected_sender: &*DEX_FEE_ADDR_RAW_PUBKEY,
-            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            expected_sender: test_dex_fee_addr_raw_pubkey(),
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 0,
             uuid: &[],
@@ -1113,7 +1121,7 @@ fn validate_dex_fee_eth_confirmed_before_min_block() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
             expected_sender: &compressed_public,
-            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 11784793,
             uuid: &[],
@@ -1151,7 +1159,7 @@ fn validate_dex_fee_erc_confirmed_before_min_block() {
         .validate_fee(ValidateFeeArgs {
             fee_tx: &tx,
             expected_sender: &compressed_public,
-            fee_addr: &*DEX_FEE_ADDR_RAW_PUBKEY,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
             dex_fee: &DexFee::Standard(amount.into()),
             min_block_number: 11823975,
             uuid: &[],
