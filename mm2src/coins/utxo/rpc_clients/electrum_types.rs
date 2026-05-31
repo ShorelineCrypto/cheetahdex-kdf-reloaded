@@ -101,9 +101,7 @@ pub struct ElectrumBlockHeaderV14 {
 }
 
 impl ElectrumBlockHeaderV14 {
-    pub fn hash(&self) -> H256Json {
-        self.hex.clone().into_vec()[..].into()
-    }
+    pub fn hash(&self) -> H256Json { self.hex.clone().into_vec()[..].into() }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -211,16 +209,12 @@ pub enum ElectrumProtocol {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Default for ElectrumProtocol {
-    fn default() -> Self {
-        ElectrumProtocol::TCP
-    }
+    fn default() -> Self { ElectrumProtocol::TCP }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl Default for ElectrumProtocol {
-    fn default() -> Self {
-        ElectrumProtocol::WS
-    }
+    fn default() -> Self { ElectrumProtocol::WS }
 }
 
 #[derive(Debug, Deserialize, Serialize)]

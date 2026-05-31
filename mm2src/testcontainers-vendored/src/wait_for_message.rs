@@ -31,7 +31,10 @@ where
                 return Ok(());
             }
         }
-        error!("Failed to find message in stream after comparing {} lines.", number_of_compared_lines);
+        error!(
+            "Failed to find message in stream after comparing {} lines.",
+            number_of_compared_lines
+        );
         Err(WaitError::EndOfStream)
     }
 }

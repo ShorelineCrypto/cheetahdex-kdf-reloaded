@@ -2,10 +2,10 @@ use crate::crypto_ctx::{MM2_INTERNAL_DERIVATION_PATH, MM2_INTERNAL_ECDSA_CURVE};
 use crate::hw_client::{HwClient, HwError, HwProcessingError, TrezorConnectProcessor};
 use crate::trezor::TrezorSession;
 use crate::HwWalletType;
-use kdf_crypto::dhash160;
 use common::log::warn;
 use futures::lock::Mutex as AsyncMutex;
 use hw_common::primitives::{DerivationPath, Secp256k1ExtendedPublicKey};
+use kdf_crypto::dhash160;
 use keys::Public as PublicKey;
 use mm2_err_handle::prelude::*;
 use primitives::hash::{H160, H264};
@@ -24,15 +24,11 @@ pub struct HardwareWalletArc(Arc<HardwareWalletCtx>);
 impl Deref for HardwareWalletArc {
     type Target = HardwareWalletCtx;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl HardwareWalletArc {
-    pub fn new(ctx: HardwareWalletCtx) -> HardwareWalletArc {
-        HardwareWalletArc(Arc::new(ctx))
-    }
+    pub fn new(ctx: HardwareWalletCtx) -> HardwareWalletArc { HardwareWalletArc(Arc::new(ctx)) }
 }
 
 pub struct HardwareWalletCtx {
@@ -66,9 +62,7 @@ impl HardwareWalletCtx {
         }))
     }
 
-    pub fn hw_wallet_type(&self) -> HwWalletType {
-        self.hw_wallet_type
-    }
+    pub fn hw_wallet_type(&self) -> HwWalletType { self.hw_wallet_type }
 
     /// Connects to a Trezor device and checks if MM was initialized from this particular device.
     pub async fn trezor<Processor>(
@@ -98,13 +92,9 @@ impl HardwareWalletCtx {
         Ok(trezor)
     }
 
-    pub fn secp256k1_pubkey(&self) -> PublicKey {
-        PublicKey::Compressed(self.hw_internal_pubkey)
-    }
+    pub fn secp256k1_pubkey(&self) -> PublicKey { PublicKey::Compressed(self.hw_internal_pubkey) }
 
-    pub fn rmd160(&self) -> H160 {
-        dhash160(self.hw_internal_pubkey.as_slice())
-    }
+    pub fn rmd160(&self) -> H160 { dhash160(self.hw_internal_pubkey.as_slice()) }
 
     pub(crate) async fn trezor_mm_internal_pubkey<Processor>(
         trezor: &mut TrezorSession<'_>,

@@ -130,9 +130,7 @@ pub trait SwapOps {
 #[async_trait]
 pub trait WatcherOps {
     /// Whether this coin supports being monitored by watcher nodes.
-    fn is_supported_by_watchers(&self) -> bool {
-        false
-    }
+    fn is_supported_by_watchers(&self) -> bool { false }
 
     /// Watcher-specific taker fee validation (retrieves tx from chain by hash).
     fn watcher_validate_taker_fee(
@@ -277,9 +275,7 @@ pub trait MarketCoinOps {
         )))
     }
 
-    fn is_privacy(&self) -> bool {
-        false
-    }
+    fn is_privacy(&self) -> bool { false }
 }
 /// Rename to `GetWithdrawSenderAddresses` when withdraw supports multiple `from` addresses.
 #[async_trait]
@@ -298,9 +294,7 @@ pub trait ToBytes {
 }
 /// Blanket impl: anything that can deref to `[u8]` can produce bytes.
 impl<T: AsRef<[u8]>> ToBytes for T {
-    fn to_bytes(&self) -> Vec<u8> {
-        self.as_ref().to_vec()
-    }
+    fn to_bytes(&self) -> Vec<u8> { self.as_ref().to_vec() }
 }
 /// Converts an address to its canonical string representation.
 /// Separated from `fmt::Display` so impls can have both a debug repr and a wire repr.
@@ -309,9 +303,7 @@ pub trait AddrToString {
 }
 /// Blanket: any `Display` type can produce an address string.
 impl<T: fmt::Display> AddrToString for T {
-    fn addr_to_string(&self) -> String {
-        self.to_string()
-    }
+    fn addr_to_string(&self) -> String { self.to_string() }
 }
 /// Allows a coin to parse its strongly-typed associated types from raw bytes.
 ///
@@ -419,9 +411,7 @@ pub trait TakerCoinSwapOpsV2: ParseCoinAssocTypes + CommonSwapOpsV2 + Send + Syn
 
     /// Whether this coin can skip taker payment spend preimage validation.
     /// Returns `true` for EVM coins that don't need preimage exchange.
-    fn skip_taker_payment_spend_preimage(&self) -> bool {
-        false
-    }
+    fn skip_taker_payment_spend_preimage(&self) -> bool { false }
 
     /// Taker generates the taker-payment spend preimage for the maker.
     async fn gen_taker_payment_spend_preimage(
@@ -584,26 +574,16 @@ pub trait RpcTransportEventHandler {
     fn on_connected(&self, address: String) -> Result<(), String>;
 }
 impl fmt::Debug for dyn RpcTransportEventHandler + Send + Sync {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.debug_info())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.debug_info()) }
 }
 impl RpcTransportEventHandler for RpcTransportEventHandlerShared {
-    fn debug_info(&self) -> String {
-        self.deref().debug_info()
-    }
+    fn debug_info(&self) -> String { self.deref().debug_info() }
 
-    fn on_outgoing_request(&self, data: &[u8]) {
-        self.as_ref().on_outgoing_request(data)
-    }
+    fn on_outgoing_request(&self, data: &[u8]) { self.as_ref().on_outgoing_request(data) }
 
-    fn on_incoming_response(&self, data: &[u8]) {
-        self.as_ref().on_incoming_response(data)
-    }
+    fn on_incoming_response(&self, data: &[u8]) { self.as_ref().on_incoming_response(data) }
 
-    fn on_connected(&self, address: String) -> Result<(), String> {
-        self.as_ref().on_connected(address)
-    }
+    fn on_connected(&self, address: String) -> Result<(), String> { self.as_ref().on_connected(address) }
 }
 impl<T: RpcTransportEventHandler> RpcTransportEventHandler for Vec<T> {
     fn debug_info(&self) -> String {

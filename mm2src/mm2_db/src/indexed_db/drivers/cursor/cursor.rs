@@ -70,15 +70,11 @@ pub enum CursorBoundValue {
 }
 
 impl From<u32> for CursorBoundValue {
-    fn from(uint: u32) -> Self {
-        CursorBoundValue::Uint(uint)
-    }
+    fn from(uint: u32) -> Self { CursorBoundValue::Uint(uint) }
 }
 
 impl From<i32> for CursorBoundValue {
-    fn from(int: i32) -> Self {
-        CursorBoundValue::Int(int)
-    }
+    fn from(int: i32) -> Self { CursorBoundValue::Int(int) }
 }
 
 impl CursorBoundValue {
@@ -221,9 +217,7 @@ pub struct IdbCursorBuilder {
 }
 
 impl IdbCursorBuilder {
-    pub fn new(db_index: IdbIndex) -> IdbCursorBuilder {
-        IdbCursorBuilder { db_index }
-    }
+    pub fn new(db_index: IdbIndex) -> IdbCursorBuilder { IdbCursorBuilder { db_index } }
 
     /// Returns a cursor that is a representation of a range that includes records
     /// whose value of the `field_name` field equals to the `field_value` value.

@@ -5,9 +5,7 @@ use super::*;
 #[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl SwapOps for SolanaCoin {
-    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
-        unimplemented!()
-    }
+    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut { unimplemented!() }
 
     fn send_maker_payment(
         &self,
@@ -129,9 +127,7 @@ impl SwapOps for SolanaCoin {
         unimplemented!()
     }
 
-    fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
-        unimplemented!()
-    }
+    fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> { unimplemented!() }
 
     fn negotiate_swap_contract_addr(
         &self,
@@ -140,9 +136,7 @@ impl SwapOps for SolanaCoin {
         unimplemented!()
     }
 
-    fn get_htlc_key_pair(&self) -> Option<KeyPair> {
-        todo!()
-    }
+    fn get_htlc_key_pair(&self) -> Option<KeyPair> { todo!() }
 }
 
 #[async_trait]

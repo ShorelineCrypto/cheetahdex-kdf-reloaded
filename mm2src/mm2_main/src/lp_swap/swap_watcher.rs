@@ -114,15 +114,9 @@ impl Default for WatcherConf {
     }
 }
 
-fn default_wait_taker_payment() -> f64 {
-    WAIT_TAKER_PAYMENT_DEFAULT_SECS
-}
-fn default_search_interval() -> f64 {
-    SEARCH_INTERVAL_DEFAULT_SECS
-}
-fn default_refund_start_factor() -> f64 {
-    REFUND_START_FACTOR
-}
+fn default_wait_taker_payment() -> f64 { WAIT_TAKER_PAYMENT_DEFAULT_SECS }
+fn default_search_interval() -> f64 { SEARCH_INTERVAL_DEFAULT_SECS }
+fn default_refund_start_factor() -> f64 { REFUND_START_FACTOR }
 
 // ── Watcher State Machine Context ────────────────────────────────────
 
@@ -140,9 +134,7 @@ pub struct WatcherStateMachineCtx {
 }
 
 impl WatcherStateMachineCtx {
-    fn taker_locktime(&self) -> u64 {
-        self.data.swap_started_at + self.data.lock_duration
-    }
+    fn taker_locktime(&self) -> u64 { self.data.swap_started_at + self.data.lock_duration }
 
     fn refund_start_time(&self) -> u64 {
         let factor = self.conf.refund_start_factor;
@@ -511,9 +503,7 @@ impl Drop for SwapWatcherLock {
 // ── Entry Points ─────────────────────────────────────────────────────
 
 /// Build the gossipsub topic for watcher messages of a given coin.
-pub fn watcher_topic(coin_ticker: &str) -> String {
-    mm2_p2p::pub_sub_topic(WATCHER_PREFIX, coin_ticker)
-}
+pub fn watcher_topic(coin_ticker: &str) -> String { mm2_p2p::pub_sub_topic(WATCHER_PREFIX, coin_ticker) }
 
 /// Process an incoming watcher gossipsub message.
 /// Verifies the message signature, extracts watcher data, and spawns the

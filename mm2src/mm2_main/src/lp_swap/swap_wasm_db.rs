@@ -1,13 +1,11 @@
 use async_trait::async_trait;
-use mm2_db::indexed_db::{
-    DbIdentifier, DbInstance, DbUpgrader, IndexedDb, IndexedDbBuilder, OnUpgradeResult, TableSignature,
-};
+use mm2_db::indexed_db::{DbIdentifier, DbInstance, DbUpgrader, IndexedDb, IndexedDbBuilder, OnUpgradeResult,
+                         TableSignature};
 use std::ops::Deref;
 use uuid::Uuid;
 
-pub use mm2_db::indexed_db::{
-    cursor_prelude, DbTransactionError, DbTransactionResult, InitDbError, InitDbResult, ItemId,
-};
+pub use mm2_db::indexed_db::{cursor_prelude, DbTransactionError, DbTransactionResult, InitDbError, InitDbResult,
+                             ItemId};
 pub use tables::{MySwapsFiltersTable, SavedSwapTable, SwapLockTable};
 
 const DB_NAME: &str = "swap";
@@ -19,9 +17,7 @@ pub struct SwapDb {
 
 #[async_trait]
 impl DbInstance for SwapDb {
-    fn db_name() -> &'static str {
-        DB_NAME
-    }
+    fn db_name() -> &'static str { DB_NAME }
 
     async fn init(db_id: DbIdentifier) -> InitDbResult<Self> {
         let inner = IndexedDbBuilder::new(db_id)
@@ -38,9 +34,7 @@ impl DbInstance for SwapDb {
 impl Deref for SwapDb {
     type Target = IndexedDb;
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
+    fn deref(&self) -> &Self::Target { &self.inner }
 }
 
 pub mod tables {
@@ -54,9 +48,7 @@ pub mod tables {
     }
 
     impl TableSignature for SwapLockTable {
-        fn table_name() -> &'static str {
-            "swap_lock"
-        }
+        fn table_name() -> &'static str { "swap_lock" }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
             on_upgrade_swap_table_by_uuid_v1(upgrader, old_version, new_version, Self::table_name())
@@ -70,9 +62,7 @@ pub mod tables {
     }
 
     impl TableSignature for SavedSwapTable {
-        fn table_name() -> &'static str {
-            "saved_swap"
-        }
+        fn table_name() -> &'static str { "saved_swap" }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
             on_upgrade_swap_table_by_uuid_v1(upgrader, old_version, new_version, Self::table_name())
@@ -103,18 +93,12 @@ pub mod tables {
     pub struct BoolAsInt(u8);
 
     impl BoolAsInt {
-        pub fn as_bool(&self) -> bool {
-            self.0 != 0
-        }
-        pub fn from_bool(v: bool) -> Self {
-            BoolAsInt(v as u8)
-        }
+        pub fn as_bool(&self) -> bool { self.0 != 0 }
+        pub fn from_bool(v: bool) -> Self { BoolAsInt(v as u8) }
     }
 
     impl TableSignature for MySwapsFiltersTable {
-        fn table_name() -> &'static str {
-            "my_swaps"
-        }
+        fn table_name() -> &'static str { "my_swaps" }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
             match (old_version, new_version) {

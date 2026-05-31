@@ -26,9 +26,7 @@ impl EthCoinImpl {
     /// LP-17: returns a clone of the cached alloy
     /// [`super::alloy_compat::KdfProvider`]. The provider wraps an
     /// `Arc`-shared transport so cloning is cheap.
-    pub(crate) fn alloy_provider(&self) -> super::alloy_compat::KdfProvider {
-        self.web3.clone()
-    }
+    pub(crate) fn alloy_provider(&self) -> super::alloy_compat::KdfProvider { self.web3.clone() }
 
     /// Gets Transfer events from ERC20 smart contract `addr` between `from_block` and `to_block`
     pub(crate) fn erc20_transfer_events(
@@ -2397,9 +2395,7 @@ pub trait TryToAddress {
 }
 
 impl TryToAddress for BytesJson {
-    fn try_to_address(&self) -> Result<Address, String> {
-        Ok(Address::from(self.0.as_slice()))
-    }
+    fn try_to_address(&self) -> Result<Address, String> { Ok(Address::from(self.0.as_slice())) }
 }
 
 impl<T: TryToAddress> TryToAddress for Option<T> {
@@ -2461,23 +2457,15 @@ pub fn wei_from_big_decimal(amount: &BigDecimal, decimals: u8) -> NumConversResu
 }
 
 /// Convert a BigDecimal amount in gwei to U256 in wei (multiply by 10^9).
-pub fn wei_from_gwei_decimal(amount: &BigDecimal) -> NumConversResult<U256> {
-    wei_from_big_decimal(amount, 9)
-}
+pub fn wei_from_gwei_decimal(amount: &BigDecimal) -> NumConversResult<U256> { wei_from_big_decimal(amount, 9) }
 
 /// Convert a U256 in wei to BigDecimal in gwei (divide by 10^9).
-pub fn wei_to_gwei_decimal(amount: U256) -> NumConversResult<BigDecimal> {
-    u256_to_big_decimal(amount, 9)
-}
+pub fn wei_to_gwei_decimal(amount: U256) -> NumConversResult<BigDecimal> { u256_to_big_decimal(amount, 9) }
 
 impl Transaction for SignedEthTx {
-    fn tx_hex(&self) -> Vec<u8> {
-        rlp::encode(self).to_vec()
-    }
+    fn tx_hex(&self) -> Vec<u8> { rlp::encode(self).to_vec() }
 
-    fn tx_hash(&self) -> BytesJson {
-        self.hash.to_vec().into()
-    }
+    fn tx_hash(&self) -> BytesJson { self.hash.to_vec().into() }
 }
 
 /// LP-17: alloy-flavoured replacement for the legacy
@@ -2580,9 +2568,7 @@ pub enum GasStationPricePolicy {
 }
 
 impl Default for GasStationPricePolicy {
-    fn default() -> Self {
-        GasStationPricePolicy::MeanAverageFast
-    }
+    fn default() -> Self { GasStationPricePolicy::MeanAverageFast }
 }
 
 impl GasStationData {
@@ -2822,9 +2808,7 @@ pub fn checksum_address(addr: &str) -> String {
 
 /// Checks that input is valid mixed-case checksum form address
 /// The input must be 0x prefixed hex string
-pub fn is_valid_checksum_addr(addr: &str) -> bool {
-    addr == checksum_address(addr)
-}
+pub fn is_valid_checksum_addr(addr: &str) -> bool { addr == checksum_address(addr) }
 
 /// Requests the nonce from all available nodes and checks that returned results equal.
 /// Nodes might need some time to sync and there can be other coins that use same nodes in different order.

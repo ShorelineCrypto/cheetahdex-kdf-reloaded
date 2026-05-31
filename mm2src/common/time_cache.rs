@@ -21,11 +21,9 @@
 //! This implements a time-based LRU cache for checking gossipsub message duplicates.
 
 use fnv::FnvHashMap;
-use std::collections::hash_map::{
-    self,
-    Entry::{Occupied, Vacant},
-    Iter, Keys,
-};
+use std::collections::hash_map::{self,
+                                 Entry::{Occupied, Vacant},
+                                 Iter, Keys};
 use std::collections::VecDeque;
 use std::time::Duration;
 use wasm_timer::Instant;
@@ -39,13 +37,9 @@ pub struct ExpiringElement<Element> {
 }
 
 impl<Element> ExpiringElement<Element> {
-    pub fn get_element(&self) -> &Element {
-        &self.element
-    }
+    pub fn get_element(&self) -> &Element { &self.element }
 
-    pub fn update_expiration(&mut self, expires: Instant) {
-        self.expires = expires
-    }
+    pub fn update_expiration(&mut self, expires: Instant) { self.expires = expires }
 }
 
 #[derive(Debug)]
@@ -69,9 +63,7 @@ impl<'a, K, V> OccupiedEntry<'a, K, V>
 where
     K: Eq + std::hash::Hash + Clone,
 {
-    pub fn into_mut(self) -> &'a mut V {
-        &mut self.entry.into_mut().element
-    }
+    pub fn into_mut(self) -> &'a mut V { &mut self.entry.into_mut().element }
 
     #[allow(dead_code)]
     pub fn insert_without_updating_expiration(&mut self, value: V) -> V {
@@ -227,33 +219,19 @@ where
         self.list.clear();
     }
 
-    pub fn contains_key(&self, key: &Key) -> bool {
-        self.map.contains_key(key)
-    }
+    pub fn contains_key(&self, key: &Key) -> bool { self.map.contains_key(key) }
 
-    pub fn get(&self, key: &Key) -> Option<&Value> {
-        self.map.get(key).map(|e| &e.element)
-    }
+    pub fn get(&self, key: &Key) -> Option<&Value> { self.map.get(key).map(|e| &e.element) }
 
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
+    pub fn len(&self) -> usize { self.map.len() }
 
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.map.is_empty() }
 
-    pub fn ttl(&self) -> Duration {
-        self.ttl
-    }
+    pub fn ttl(&self) -> Duration { self.ttl }
 
-    pub fn iter(&self) -> Iter<'_, Key, ExpiringElement<Value>> {
-        self.map.iter()
-    }
+    pub fn iter(&self) -> Iter<'_, Key, ExpiringElement<Value>> { self.map.iter() }
 
-    pub fn keys(&self) -> Keys<'_, Key, ExpiringElement<Value>> {
-        self.map.keys()
-    }
+    pub fn keys(&self) -> Keys<'_, Key, ExpiringElement<Value>> { self.map.keys() }
 }
 
 impl<Key, Value> TimeCache<Key, Value>
@@ -277,9 +255,7 @@ impl<Key> DuplicateCache<Key>
 where
     Key: Eq + std::hash::Hash + Clone,
 {
-    pub fn new(ttl: Duration) -> Self {
-        Self(TimeCache::new(ttl))
-    }
+    pub fn new(ttl: Duration) -> Self { Self(TimeCache::new(ttl)) }
 
     // Inserts new elements and removes any expired elements.
     //
@@ -294,9 +270,7 @@ where
         }
     }
 
-    pub fn contains(&mut self, key: &Key) -> bool {
-        self.0.contains_key(key)
-    }
+    pub fn contains(&mut self, key: &Key) -> bool { self.0.contains_key(key) }
 }
 
 #[cfg(test)]

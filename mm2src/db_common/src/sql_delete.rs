@@ -26,9 +26,7 @@ impl<'a> SqlDelete<'a> {
 
     /// Returns a reference to the SQL params of the request.
     #[inline]
-    pub fn params(&self) -> &OwnedSqlParams {
-        self.params.params()
-    }
+    pub fn params(&self) -> &OwnedSqlParams { self.params.params() }
 
     /// Convenience method to execute the `DELETE` request.
     /// Returns a number of deleted records.
@@ -63,13 +61,9 @@ impl<'a> SqlDelete<'a> {
 /// - [`SqlQuery::or_where_in_quoted`]
 /// - [`SqlQuery::or_where_in_params`]
 impl SqlCondition for SqlDelete<'_> {
-    fn sql_builder(&mut self) -> &mut SqlBuilder {
-        &mut self.sql_builder
-    }
+    fn sql_builder(&mut self) -> &mut SqlBuilder { &mut self.sql_builder }
 
-    fn sql_params(&mut self) -> &mut SqlParamsBuilder {
-        &mut self.params
-    }
+    fn sql_params(&mut self) -> &mut SqlParamsBuilder { &mut self.params }
 }
 
 #[cfg(test)]
@@ -83,9 +77,7 @@ mod tests {
         description TEXT
     );";
 
-    fn init_table_for_test(conn: &Connection) {
-        conn.execute(CREATE_TX_HISTORY_TABLE, rusqlite::NO_PARAMS).unwrap();
-    }
+    fn init_table_for_test(conn: &Connection) { conn.execute(CREATE_TX_HISTORY_TABLE, rusqlite::NO_PARAMS).unwrap(); }
 
     #[test]
     fn test_delete_all_sql() {

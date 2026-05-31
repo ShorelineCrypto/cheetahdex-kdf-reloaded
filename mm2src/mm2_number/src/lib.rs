@@ -31,33 +31,23 @@ pub use paste::paste;
 pub struct BigIntStr(BigInt);
 
 impl fmt::Debug for BigIntStr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0.to_string())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0.to_string()) }
 }
 
 impl BigIntStr {
-    pub fn inner(&self) -> &BigInt {
-        &self.0
-    }
+    pub fn inner(&self) -> &BigInt { &self.0 }
 }
 
 impl From<BigInt> for BigIntStr {
-    fn from(n: BigInt) -> Self {
-        Self(n)
-    }
+    fn from(n: BigInt) -> Self { Self(n) }
 }
 
 impl From<BigIntStr> for BigInt {
-    fn from(s: BigIntStr) -> Self {
-        s.0
-    }
+    fn from(s: BigIntStr) -> Self { s.0 }
 }
 
 impl Serialize for BigIntStr {
-    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        ser.serialize_str(&self.0.to_string())
-    }
+    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> { ser.serialize_str(&self.0.to_string()) }
 }
 
 impl<'de> Deserialize<'de> for BigIntStr {
@@ -65,9 +55,7 @@ impl<'de> Deserialize<'de> for BigIntStr {
         struct Vis;
         impl<'de> serde::de::Visitor<'de> for Vis {
             type Value = BigIntStr;
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "a string representing an integer")
-            }
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "a string representing an integer") }
             fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 let n: BigInt = v
                     .parse()
@@ -93,12 +81,8 @@ pub struct Fraction {
 }
 
 impl Fraction {
-    pub fn numer(&self) -> &BigInt {
-        self.numer.inner()
-    }
-    pub fn denom(&self) -> &BigInt {
-        self.denom.inner()
-    }
+    pub fn numer(&self) -> &BigInt { self.numer.inner() }
+    pub fn denom(&self) -> &BigInt { self.denom.inner() }
 }
 
 impl From<BigRational> for Fraction {
@@ -112,15 +96,11 @@ impl From<BigRational> for Fraction {
 }
 
 impl From<Fraction> for BigRational {
-    fn from(f: Fraction) -> Self {
-        BigRational::new(f.numer.into(), f.denom.into())
-    }
+    fn from(f: Fraction) -> Self { BigRational::new(f.numer.into(), f.denom.into()) }
 }
 
 impl From<BigDecimal> for Fraction {
-    fn from(d: BigDecimal) -> Self {
-        dec_to_rational(&d).into()
-    }
+    fn from(d: BigDecimal) -> Self { dec_to_rational(&d).into() }
 }
 
 impl<'de> Deserialize<'de> for Fraction {
@@ -208,53 +188,37 @@ impl<'de> Deserialize<'de> for MmNumber {
 }
 
 impl fmt::Display for MmNumber {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", rational_to_dec(&self.0))
-    }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", rational_to_dec(&self.0)) }
 }
 
 impl Default for MmNumber {
-    fn default() -> Self {
-        BigRational::from_integer(0.into()).into()
-    }
+    fn default() -> Self { BigRational::from_integer(0.into()).into() }
 }
 
 // -- From conversions -------------------------------------------------------
 
 impl From<BigDecimal> for MmNumber {
-    fn from(d: BigDecimal) -> Self {
-        dec_to_rational(&d).into()
-    }
+    fn from(d: BigDecimal) -> Self { dec_to_rational(&d).into() }
 }
 
 impl From<BigRational> for MmNumber {
-    fn from(r: BigRational) -> Self {
-        Self(r)
-    }
+    fn from(r: BigRational) -> Self { Self(r) }
 }
 
 impl From<Fraction> for MmNumber {
-    fn from(f: Fraction) -> Self {
-        Self(f.into())
-    }
+    fn from(f: Fraction) -> Self { Self(f.into()) }
 }
 
 impl From<u64> for MmNumber {
-    fn from(n: u64) -> Self {
-        BigRational::from_integer(n.into()).into()
-    }
+    fn from(n: u64) -> Self { BigRational::from_integer(n.into()).into() }
 }
 
 impl From<i32> for MmNumber {
-    fn from(n: i32) -> Self {
-        Self(BigRational::from_integer(n.into()))
-    }
+    fn from(n: i32) -> Self { Self(BigRational::from_integer(n.into())) }
 }
 
 impl From<(u64, u64)> for MmNumber {
-    fn from((n, d): (u64, u64)) -> Self {
-        BigRational::new(n.into(), d.into()).into()
-    }
+    fn from((n, d): (u64, u64)) -> Self { BigRational::new(n.into(), d.into()).into() }
 }
 
 /// Convenience for tests — panics on invalid input.
@@ -268,85 +232,61 @@ impl From<&'static str> for MmNumber {
 // -- Into conversions -------------------------------------------------------
 
 impl From<MmNumber> for BigDecimal {
-    fn from(n: MmNumber) -> Self {
-        rational_to_dec(&n.0)
-    }
+    fn from(n: MmNumber) -> Self { rational_to_dec(&n.0) }
 }
 
 impl From<MmNumber> for BigRational {
-    fn from(n: MmNumber) -> Self {
-        n.0
-    }
+    fn from(n: MmNumber) -> Self { n.0 }
 }
 
 // -- Arithmetic operators ---------------------------------------------------
 
 impl Mul for MmNumber {
     type Output = Self;
-    fn mul(self, rhs: Self) -> Self {
-        (self.0 * rhs.0).into()
-    }
+    fn mul(self, rhs: Self) -> Self { (self.0 * rhs.0).into() }
 }
 
 impl Mul for &MmNumber {
     type Output = MmNumber;
-    fn mul(self, rhs: Self) -> MmNumber {
-        MmNumber(&self.0 * &rhs.0)
-    }
+    fn mul(self, rhs: Self) -> MmNumber { MmNumber(&self.0 * &rhs.0) }
 }
 
 impl Add for MmNumber {
     type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        (self.0 + rhs.0).into()
-    }
+    fn add(self, rhs: Self) -> Self { (self.0 + rhs.0).into() }
 }
 
 impl Add for &MmNumber {
     type Output = MmNumber;
-    fn add(self, rhs: Self) -> MmNumber {
-        MmNumber(&self.0 + &rhs.0)
-    }
+    fn add(self, rhs: Self) -> MmNumber { MmNumber(&self.0 + &rhs.0) }
 }
 
 impl AddAssign for MmNumber {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
+    fn add_assign(&mut self, rhs: Self) { self.0 += rhs.0; }
 }
 
 impl AddAssign<&MmNumber> for MmNumber {
-    fn add_assign(&mut self, rhs: &Self) {
-        self.0 += &rhs.0;
-    }
+    fn add_assign(&mut self, rhs: &Self) { self.0 += &rhs.0; }
 }
 
 impl Sub for MmNumber {
     type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        (self.0 - rhs.0).into()
-    }
+    fn sub(self, rhs: Self) -> Self { (self.0 - rhs.0).into() }
 }
 
 impl Sub for &MmNumber {
     type Output = MmNumber;
-    fn sub(self, rhs: Self) -> MmNumber {
-        (&self.0 - &rhs.0).into()
-    }
+    fn sub(self, rhs: Self) -> MmNumber { (&self.0 - &rhs.0).into() }
 }
 
 impl Div for MmNumber {
     type Output = Self;
-    fn div(self, rhs: Self) -> Self {
-        (self.0 / rhs.0).into()
-    }
+    fn div(self, rhs: Self) -> Self { (self.0 / rhs.0).into() }
 }
 
 impl Div for &MmNumber {
     type Output = MmNumber;
-    fn div(self, rhs: &MmNumber) -> MmNumber {
-        MmNumber(&self.0 / &rhs.0)
-    }
+    fn div(self, rhs: &MmNumber) -> MmNumber { MmNumber(&self.0 / &rhs.0) }
 }
 
 // -- Comparison with BigDecimal ---------------------------------------------
@@ -358,9 +298,7 @@ impl PartialOrd<BigDecimal> for MmNumber {
 }
 
 impl PartialEq<BigDecimal> for MmNumber {
-    fn eq(&self, rhs: &BigDecimal) -> bool {
-        self.0 == dec_to_rational(rhs)
-    }
+    fn eq(&self, rhs: &BigDecimal) -> bool { self.0 == dec_to_rational(rhs) }
 }
 
 // -- Methods ----------------------------------------------------------------
@@ -375,24 +313,14 @@ impl MmNumber {
     }
 
     /// Clone the underlying rational.
-    pub fn to_ratio(&self) -> BigRational {
-        self.0.clone()
-    }
+    pub fn to_ratio(&self) -> BigRational { self.0.clone() }
 
     /// Decimal approximation.
-    pub fn to_decimal(&self) -> BigDecimal {
-        rational_to_dec(&self.0)
-    }
+    pub fn to_decimal(&self) -> BigDecimal { rational_to_dec(&self.0) }
 
-    pub fn numer(&self) -> &BigInt {
-        self.0.numer()
-    }
-    pub fn denom(&self) -> &BigInt {
-        self.0.denom()
-    }
-    pub fn is_zero(&self) -> bool {
-        self.0.is_zero()
-    }
+    pub fn numer(&self) -> &BigInt { self.0.numer() }
+    pub fn denom(&self) -> &BigInt { self.0.denom() }
+    pub fn is_zero(&self) -> bool { self.0.is_zero() }
 }
 
 // ---------------------------------------------------------------------------

@@ -23,9 +23,7 @@ pub type Mm2InternalKeyPair = KeyPair;
 pub struct Bip39Seed(pub [u8; 64]);
 
 impl Drop for Bip39Seed {
-    fn drop(&mut self) {
-        self.0.zeroize();
-    }
+    fn drop(&mut self) { self.0.zeroize(); }
 }
 
 /// Thread-safe reference-counted handle to [`GlobalHDAccountCtx`].
@@ -34,9 +32,7 @@ pub struct GlobalHDAccountArc(Arc<GlobalHDAccountCtx>);
 
 impl Deref for GlobalHDAccountArc {
     type Target = GlobalHDAccountCtx;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 /// Global HD account context holding the master BIP39 seed and derived master keys.
@@ -99,24 +95,16 @@ impl GlobalHDAccountCtx {
 
     /// Wraps this context in a thread-safe `Arc`.
     #[inline]
-    pub fn into_arc(self) -> GlobalHDAccountArc {
-        GlobalHDAccountArc(Arc::new(self))
-    }
+    pub fn into_arc(self) -> GlobalHDAccountArc { GlobalHDAccountArc(Arc::new(self)) }
 
     /// Returns a reference to the root BIP39 seed.
-    pub fn root_seed(&self) -> &Bip39Seed {
-        &self.bip39_seed
-    }
+    pub fn root_seed(&self) -> &Bip39Seed { &self.bip39_seed }
 
     /// Returns the root BIP39 seed as a byte slice.
-    pub fn root_seed_bytes(&self) -> &[u8] {
-        &self.bip39_seed.0
-    }
+    pub fn root_seed_bytes(&self) -> &[u8] { &self.bip39_seed.0 }
 
     /// Returns the root BIP32 secp256k1 extended private key.
-    pub fn root_priv_key(&self) -> &ExtendedPrivateKey<secp256k1::SecretKey> {
-        &self.bip39_secp_priv_key
-    }
+    pub fn root_priv_key(&self) -> &ExtendedPrivateKey<secp256k1::SecretKey> { &self.bip39_secp_priv_key }
 
     /// Derives a secp256k1 secret key at the given BIP32 derivation path.
     ///

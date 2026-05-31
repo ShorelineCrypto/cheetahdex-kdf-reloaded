@@ -24,26 +24,21 @@
 //! - Event name `TakerPaymentSpent` is emitted by the V2 contract and
 //!   keyed on by [`EthCoin::find_taker_payment_spend_tx_impl`].
 
-use super::{
-    check_decoded_length, extract_id_from_tx_data, validate_amount, validate_from_to_addresses, EthPaymentType,
-    PaymentMethod, PrepareTxDataError, SpendTxSearchParams, ZERO_VALUE,
-};
-use crate::eth::{
-    decode_contract_call, get_function_input_data, u256_from_big_decimal, EthCoin, EthCoinType, ParseCoinAssocTypes,
-    RefundFundingSecretArgs, RefundTakerPaymentArgs, SendTakerFundingArgs, SignedEthTx, SwapTxTypeWithSecretHash,
-    TakerPaymentStateV2, TransactionErr, ValidateSwapV2TxError, ValidateSwapV2TxResult, ValidateTakerFundingArgs,
-    TAKER_SWAP_V2,
-};
-use crate::{
-    FindPaymentSpendError, FundingTxSpend, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs, SearchForFundingSpendErr,
-};
+use super::{check_decoded_length, extract_id_from_tx_data, validate_amount, validate_from_to_addresses,
+            EthPaymentType, PaymentMethod, PrepareTxDataError, SpendTxSearchParams, ZERO_VALUE};
+use crate::eth::legacy_tx::Action;
+use crate::eth::{decode_contract_call, get_function_input_data, u256_from_big_decimal, EthCoin, EthCoinType,
+                 ParseCoinAssocTypes, RefundFundingSecretArgs, RefundTakerPaymentArgs, SendTakerFundingArgs,
+                 SignedEthTx, SwapTxTypeWithSecretHash, TakerPaymentStateV2, TransactionErr, ValidateSwapV2TxError,
+                 ValidateSwapV2TxResult, ValidateTakerFundingArgs, TAKER_SWAP_V2};
+use crate::{FindPaymentSpendError, FundingTxSpend, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs,
+            SearchForFundingSpendErr};
 use derive_more::Display;
 use ethabi::{Contract, Function, Token};
-use crate::eth::legacy_tx::Action;
 use ethereum_types::{Address, Public, U256};
-use mm2_eth::keys::public_to_address;
 use futures::compat::Future01CompatExt;
 use mm2_err_handle::prelude::{MapToMmResult, MmError, MmResult, MmResultExt};
+use mm2_eth::keys::public_to_address;
 use std::convert::TryInto;
 
 // ABI entrypoint names + state-tuple offsets -------------------------------
@@ -770,9 +765,7 @@ enum PaymentStatusErr {
 }
 
 impl From<ethabi::Error> for PaymentStatusErr {
-    fn from(err: ethabi::Error) -> Self {
-        PaymentStatusErr::ABIError(err.to_string())
-    }
+    fn from(err: ethabi::Error) -> Self { PaymentStatusErr::ABIError(err.to_string()) }
 }
 
 // Calldata verifiers -------------------------------------------------------

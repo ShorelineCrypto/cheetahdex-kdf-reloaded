@@ -72,13 +72,9 @@ impl NftCtx {
     /// Borrow the SQLite-backed store. The store itself is `Clone` so
     /// callers can move a handle into spawned futures when needed.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn store(&self) -> &SqliteNftStore {
-        &self.store
-    }
+    pub fn store(&self) -> &SqliteNftStore { &self.store }
 
     /// Borrow the IndexedDB-backed store on `wasm32`.
     #[cfg(target_arch = "wasm32")]
-    pub fn store(&self) -> &IndexedDbNftStore {
-        &self.store
-    }
+    pub fn store(&self) -> &IndexedDbNftStore { &self.store }
 }

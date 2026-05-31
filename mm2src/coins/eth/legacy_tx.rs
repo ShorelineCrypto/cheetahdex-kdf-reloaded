@@ -21,9 +21,8 @@
 
 use alloy::rlp::{Buf, BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
 use ethereum_types::{Address, H256, U256};
-use mm2_eth::keys::{
-    public_to_address, recover_public_key, sign as eth_sign, EthKeyError, Public, Secret, Signature, H520,
-};
+use mm2_eth::keys::{public_to_address, recover_public_key, sign as eth_sign, EthKeyError, Public, Secret, Signature,
+                    H520};
 use std::ops::Deref;
 
 pub type Bytes = Vec<u8>;
@@ -103,7 +102,11 @@ impl Transaction {
     pub fn hash(&self, chain_id: Option<u64>) -> H256 {
         let mut buf = Vec::new();
         let payload_len = self.signing_payload_len(chain_id);
-        Header { list: true, payload_length: payload_len }.encode(&mut buf);
+        Header {
+            list: true,
+            payload_length: payload_len,
+        }
+        .encode(&mut buf);
         u256_to_alloy(&self.nonce).encode(&mut buf);
         u256_to_alloy(&self.gas_price).encode(&mut buf);
         u256_to_alloy(&self.gas).encode(&mut buf);
@@ -134,17 +137,22 @@ impl Transaction {
     /// Sign with `secret`. EIP-155 replay protection is applied when
     /// `chain_id` is `Some`.
     pub fn sign(self, secret: &Secret, chain_id: Option<u64>) -> SignedTransaction {
-        let sig = eth_sign(secret, &self.hash(chain_id))
-            .expect("data is valid and context has signing capabilities");
-        SignedTransaction::new(self.with_signature(sig, chain_id))
-            .expect("secret is valid so it's recoverable")
+        let sig = eth_sign(secret, &self.hash(chain_id)).expect("data is valid and context has signing capabilities");
+        SignedTransaction::new(self.with_signature(sig, chain_id)).expect("secret is valid so it's recoverable")
     }
 
     fn with_signature(self, sig: Signature, chain_id: Option<u64>) -> UnverifiedTransaction {
         let r = U256::from_big_endian(sig.r());
         let s = U256::from_big_endian(sig.s());
         let v = add_chain_replay_protection(sig.v() as u64, chain_id);
-        UnverifiedTransaction { unsigned: self, r, s, v, hash: H256::zero() }.compute_hash()
+        UnverifiedTransaction {
+            unsigned: self,
+            r,
+            s,
+            v,
+            hash: H256::zero(),
+        }
+        .compute_hash()
     }
 }
 
@@ -168,7 +176,12 @@ impl Encodable for UnverifiedTransaction {
     fn encode(&self, out: &mut dyn BufMut) { self.rlp_append_sealed(out); }
     fn length(&self) -> usize {
         let payload_len = self.sealed_payload_len();
-        Header { list: true, payload_length: payload_len }.length() + payload_len
+        Header {
+            list: true,
+            payload_length: payload_len,
+        }
+        .length()
+            + payload_len
     }
 }
 
@@ -201,7 +214,14 @@ impl Decodable for UnverifiedTransaction {
 
         let hash = keccak256_h256(raw_tx);
         Ok(UnverifiedTransaction {
-            unsigned: Transaction { nonce, gas_price, gas, action, value, data: data.to_vec() },
+            unsigned: Transaction {
+                nonce,
+                gas_price,
+                gas,
+                action,
+                value,
+                data: data.to_vec(),
+            },
             v,
             r,
             s,
@@ -231,7 +251,11 @@ impl UnverifiedTransaction {
 
     fn rlp_append_sealed(&self, out: &mut dyn BufMut) {
         let payload_len = self.sealed_payload_len();
-        Header { list: true, payload_length: payload_len }.encode(out);
+        Header {
+            list: true,
+            payload_length: payload_len,
+        }
+        .encode(out);
         u256_to_alloy(&self.nonce).encode(out);
         u256_to_alloy(&self.gas_price).encode(out);
         u256_to_alloy(&self.gas).encode(out);
@@ -271,8 +295,8 @@ impl UnverifiedTransaction {
 
     /// Recover the secp256k1 public key from the signature.
     pub fn recover_public(&self) -> Result<Public, EthKeyError> {
-        let pubkey_h520: H520 = recover_public_key(self.unsigned.hash(self.chain_id()), self.signature())
-            .map_err(|e| e.into_inner())?;
+        let pubkey_h520: H520 =
+            recover_public_key(self.unsigned.hash(self.chain_id()), self.signature()).map_err(|e| e.into_inner())?;
         // mm2_eth::keys returns the 65-byte SEC1-prefixed pubkey; the
         // legacy `Public` (H512) is the 64 bytes following the 0x04 prefix.
         let mut public = Public::default();
@@ -306,11 +330,19 @@ impl From<SignedTransaction> for UnverifiedTransaction {
 impl SignedTransaction {
     pub fn new(transaction: UnverifiedTransaction) -> Result<Self, EthKeyError> {
         if transaction.is_unsigned() {
-            Ok(SignedTransaction { transaction, sender: UNSIGNED_SENDER, public: None })
+            Ok(SignedTransaction {
+                transaction,
+                sender: UNSIGNED_SENDER,
+                public: None,
+            })
         } else {
             let public = transaction.recover_public()?;
             let sender = public_to_address(&public);
-            Ok(SignedTransaction { transaction, sender, public: Some(public) })
+            Ok(SignedTransaction {
+                transaction,
+                sender,
+                public: Some(public),
+            })
         }
     }
 
@@ -384,9 +416,7 @@ mod tests {
     /// https://eips.ethereum.org/EIPS/eip-155
     #[test]
     fn eip155_spec_vector_signs_to_canonical_rlp() {
-        let secret =
-            Secret::from_str("4646464646464646464646464646464646464646464646464646464646464646")
-                .unwrap();
+        let secret = Secret::from_str("4646464646464646464646464646464646464646464646464646464646464646").unwrap();
         let to = Address::from_str("3535353535353535353535353535353535353535").unwrap();
 
         let tx = Transaction {
@@ -401,7 +431,11 @@ mod tests {
         // Spec signing hash:
         let expected_signing_hash =
             H256::from_slice(&hex::decode("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53").unwrap());
-        assert_eq!(tx.clone().hash(Some(1)), expected_signing_hash, "EIP-155 signing hash mismatch");
+        assert_eq!(
+            tx.clone().hash(Some(1)),
+            expected_signing_hash,
+            "EIP-155 signing hash mismatch"
+        );
 
         let signed = tx.sign(&secret, Some(1));
         let bytes = alloy::rlp::encode(&signed);
@@ -420,9 +454,7 @@ mod tests {
 
     #[test]
     fn round_trip_decode_encode() {
-        let secret =
-            Secret::from_str("4646464646464646464646464646464646464646464646464646464646464646")
-                .unwrap();
+        let secret = Secret::from_str("4646464646464646464646464646464646464646464646464646464646464646").unwrap();
         let to = Address::from_str("3535353535353535353535353535353535353535").unwrap();
         let tx = Transaction {
             nonce: U256::from(9u64),
@@ -444,9 +476,7 @@ mod tests {
 
     #[test]
     fn create_action_round_trips() {
-        let secret =
-            Secret::from_str("0000000000000000000000000000000000000000000000000000000000000001")
-                .unwrap();
+        let secret = Secret::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap();
         let tx = Transaction {
             nonce: U256::from(0u64),
             gas_price: U256::from(1u64),

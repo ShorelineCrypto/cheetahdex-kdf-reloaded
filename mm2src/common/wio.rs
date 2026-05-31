@@ -15,9 +15,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 
-fn start_core_thread() -> Mm2Runtime {
-    Mm2Runtime(Runtime::new().unwrap())
-}
+fn start_core_thread() -> Mm2Runtime { Mm2Runtime(Runtime::new().unwrap()) }
 
 pub struct Mm2Runtime(pub Runtime);
 
@@ -36,9 +34,7 @@ lazy_static! {
 }
 
 impl<Fut: std::future::Future<Output = ()> + Send + 'static> hyper::rt::Executor<Fut> for &Mm2Runtime {
-    fn execute(&self, fut: Fut) {
-        self.0.spawn(fut);
-    }
+    fn execute(&self, fut: Fut) { self.0.spawn(fut); }
 }
 
 /// With a shared reactor drives the future `f` to completion.

@@ -3,23 +3,20 @@ use crate::coin_balance::HDAddressBalance;
 use crate::hd_wallet::HDAccountsMap;
 use crate::hd_wallet_storage::{HDWalletMockStorage, HDWalletStorageInternalOps};
 use crate::rpc_command::account_balance::{AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
-use crate::rpc_command::init_scan_for_new_addresses::{
-    InitScanAddressesRpcOps, ScanAddressesParams, ScanAddressesResponse,
-};
+use crate::rpc_command::init_scan_for_new_addresses::{InitScanAddressesRpcOps, ScanAddressesParams,
+                                                      ScanAddressesResponse};
 use crate::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin, QtumDelegationOps, QtumDelegationRequest};
-use crate::utxo::rpc_clients::{
-    BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl, GetAddressInfoRes, ListSinceBlockRes,
-    ListTransactionsItem, NativeClient, NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps,
-    ValidateAddressRes, VerboseBlock,
-};
+use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl,
+                               GetAddressInfoRes, ListSinceBlockRes, ListTransactionsItem, NativeClient,
+                               NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps, ValidateAddressRes,
+                               VerboseBlock};
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
 use crate::utxo::utxo_common::UtxoTxBuilder;
 use crate::utxo::utxo_common_tests;
 use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::WithdrawFee;
+#[cfg(not(target_arch = "wasm32"))] use crate::WithdrawFee;
 use crate::{CoinBalance, PrivKeyBuildPolicy, StakingInfosDetails, SwapOps, TradePreimageValue, TxFeeDetails};
 use crate::{DexFee, ValidateFeeArgs};
 use bigdecimal::{BigDecimal, Signed};
@@ -85,9 +82,7 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
 
 /// Returned client won't work by default, requires some mocks to be usable
 #[cfg(not(target_arch = "wasm32"))]
-fn native_client_for_test() -> NativeClient {
-    NativeClient(Arc::new(NativeClientImpl::default()))
-}
+fn native_client_for_test() -> NativeClient { NativeClient(Arc::new(NativeClientImpl::default())) }
 
 fn utxo_coin_fields_for_test(
     rpc_client: UtxoRpcClientEnum,
@@ -3356,15 +3351,12 @@ fn test_account_balance_rpc() {
     macro_rules! known_address {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:literal) => {
             addresses_map.insert($address.to_string(), $balance);
-            balances_by_der_path.insert(
-                $der_path.to_string(),
-                HDAddressBalance {
-                    address: $address.to_string(),
-                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                    chain: $chain,
-                    balance: CoinBalance::new(BigDecimal::from($balance)),
-                },
-            )
+            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
+                address: $address.to_string(),
+                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                chain: $chain,
+                balance: CoinBalance::new(BigDecimal::from($balance)),
+            })
         };
     }
 
@@ -3696,15 +3688,12 @@ fn test_scan_for_new_addresses() {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:expr) => {{
             let balance = $balance;
             checking_addresses.insert($address.to_string(), balance);
-            balances_by_der_path.insert(
-                $der_path.to_string(),
-                HDAddressBalance {
-                    address: $address.to_string(),
-                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                    chain: $chain,
-                    balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
-                },
-            );
+            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
+                address: $address.to_string(),
+                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                chain: $chain,
+                balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
+            });
             if balance.is_some() {
                 non_empty_addresses.push($address.to_string());
             }

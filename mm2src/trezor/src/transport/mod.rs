@@ -4,10 +4,8 @@ use async_trait::async_trait;
 use rand::RngCore;
 
 mod protocol;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod usb;
-#[cfg(target_arch = "wasm32")]
-pub mod webusb;
+#[cfg(not(target_arch = "wasm32"))] pub mod usb;
+#[cfg(target_arch = "wasm32")] pub mod webusb;
 
 pub const TREZOR_DEVICES: [TrezorDevice; 3] = [
     // TREZOR v1
@@ -26,9 +24,7 @@ pub struct TrezorDevice {
 }
 
 impl TrezorDevice {
-    const fn new(vendor_id: u16, product_id: u16) -> TrezorDevice {
-        TrezorDevice { vendor_id, product_id }
-    }
+    const fn new(vendor_id: u16, product_id: u16) -> TrezorDevice { TrezorDevice { vendor_id, product_id } }
 }
 
 /// The transport interface that is implemented by the different ways to communicate with a Trezor
@@ -49,9 +45,7 @@ pub trait Transport {
 pub struct SessionId([u8; 32]);
 
 impl Default for SessionId {
-    fn default() -> Self {
-        SessionId::new()
-    }
+    fn default() -> Self { SessionId::new() }
 }
 
 impl SessionId {
@@ -66,7 +60,5 @@ impl SessionId {
 }
 
 impl AsRef<[u8]> for SessionId {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
+    fn as_ref(&self) -> &[u8] { &self.0 }
 }

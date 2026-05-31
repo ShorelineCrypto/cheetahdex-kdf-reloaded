@@ -2,9 +2,7 @@ use super::*;
 
 #[async_trait]
 impl MmCoin for SlpToken {
-    fn is_asset_chain(&self) -> bool {
-        false
-    }
+    fn is_asset_chain(&self) -> bool { false }
 
     fn get_raw_transaction(&self, req: RawTransactionRequest) -> RawTransactionFut {
         Box::new(
@@ -143,9 +141,7 @@ impl MmCoin for SlpToken {
         Box::new(fut.boxed().compat())
     }
 
-    fn decimals(&self) -> u8 {
-        self.decimals()
-    }
+    fn decimals(&self) -> u8 { self.decimals() }
 
     fn convert_to_address(&self, from: &str, to_address_format: Json) -> Result<String, String> {
         utxo_common::convert_to_address(&self.platform_coin, from, to_address_format)
@@ -185,9 +181,7 @@ impl MmCoin for SlpToken {
         Box::new(futures01::future::err(()))
     }
 
-    fn history_sync_status(&self) -> HistorySyncState {
-        self.platform_coin.history_sync_status()
-    }
+    fn history_sync_status(&self) -> HistorySyncState { self.platform_coin.history_sync_status() }
 
     /// Get fee to be paid per 1 swap transaction
     fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
@@ -275,13 +269,9 @@ impl MmCoin for SlpToken {
         })
     }
 
-    fn required_confirmations(&self) -> u64 {
-        self.conf.required_confirmations.load(AtomicOrdering::Relaxed)
-    }
+    fn required_confirmations(&self) -> u64 { self.conf.required_confirmations.load(AtomicOrdering::Relaxed) }
 
-    fn requires_notarization(&self) -> bool {
-        false
-    }
+    fn requires_notarization(&self) -> bool { false }
 
     fn set_required_confirmations(&self, confirmations: u64) {
         self.conf
@@ -293,19 +283,11 @@ impl MmCoin for SlpToken {
         warn!("set_requires_notarization has no effect on SLPTOKEN!")
     }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        None
-    }
+    fn swap_contract_address(&self) -> Option<BytesJson> { None }
 
-    fn mature_confirmations(&self) -> Option<u32> {
-        self.platform_coin.mature_confirmations()
-    }
+    fn mature_confirmations(&self) -> Option<u32> { self.platform_coin.mature_confirmations() }
 
-    fn coin_protocol_info(&self) -> Vec<u8> {
-        Vec::new()
-    }
+    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
 
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
-        true
-    }
+    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool { true }
 }

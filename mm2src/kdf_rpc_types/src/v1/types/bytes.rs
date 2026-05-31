@@ -14,41 +14,29 @@ pub struct Bytes(pub Vec<u8>);
 
 impl Bytes {
     #[inline]
-    pub fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
+    pub fn new(bytes: Vec<u8>) -> Self { Self(bytes) }
 
     #[inline]
-    pub fn into_vec(self) -> Vec<u8> {
-        self.0
-    }
+    pub fn into_vec(self) -> Vec<u8> { self.0 }
 
     #[inline]
-    pub fn as_slice(&self) -> &[u8] {
-        &self.0
-    }
+    pub fn as_slice(&self) -> &[u8] { &self.0 }
 }
 
 impl<T> From<T> for Bytes
 where
     PrimitivesBytes: From<T>,
 {
-    fn from(value: T) -> Self {
-        Bytes(PrimitivesBytes::from(value).take())
-    }
+    fn from(value: T) -> Self { Bytes(PrimitivesBytes::from(value).take()) }
 }
 
 impl From<Bytes> for Vec<u8> {
-    fn from(value: Bytes) -> Self {
-        value.0
-    }
+    fn from(value: Bytes) -> Self { value.0 }
 }
 
 impl Deref for Bytes {
     type Target = Vec<u8>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl fmt::LowerHex for Bytes {
@@ -93,9 +81,7 @@ impl<'de> Visitor<'de> for BytesHexVisitor {
         Ok(Bytes::new(parsed))
     }
 
-    fn visit_string<E: DeError>(self, value: String) -> Result<Self::Value, E> {
-        self.visit_str(&value)
-    }
+    fn visit_string<E: DeError>(self, value: String) -> Result<Self::Value, E> { self.visit_str(&value) }
 }
 
 #[cfg(test)]

@@ -71,15 +71,11 @@ impl TokenInitializer for SlpTokenInitializer {
         Ok(tokens)
     }
 
-    fn platform_coin(&self) -> &BchCoin {
-        &self.platform_coin
-    }
+    fn platform_coin(&self) -> &BchCoin { &self.platform_coin }
 }
 
 impl RegisterTokenInfo<SlpToken> for BchCoin {
-    fn register_token_info(&self, token: &SlpToken) {
-        self.add_slp_token_info(token.ticker().into(), token.get_info())
-    }
+    fn register_token_info(&self, token: &SlpToken) { self.add_slp_token_info(token.ticker().into(), token.get_info()) }
 }
 
 impl From<BchWithTokensActivationError> for EnablePlatformCoinWithTokensError {
@@ -114,9 +110,7 @@ pub struct BchWithTokensActivationRequest {
 }
 
 impl TxHistory for BchWithTokensActivationRequest {
-    fn tx_history(&self) -> bool {
-        self.platform_request.utxo_params.tx_history
-    }
+    fn tx_history(&self) -> bool { self.platform_request.utxo_params.tx_history }
 }
 
 pub struct BchProtocolInfo {
@@ -153,9 +147,7 @@ impl GetPlatformBalance for BchWithTokensActivationResult {
 }
 
 impl CurrentBlock for BchWithTokensActivationResult {
-    fn current_block(&self) -> u64 {
-        self.current_block
-    }
+    fn current_block(&self) -> u64 { self.current_block }
 }
 
 #[derive(Debug)]
@@ -176,9 +168,7 @@ pub enum BchWithTokensActivationError {
 }
 
 impl From<UtxoRpcError> for BchWithTokensActivationError {
-    fn from(err: UtxoRpcError) -> Self {
-        BchWithTokensActivationError::Transport(err.to_string())
-    }
+    fn from(err: UtxoRpcError) -> Self { BchWithTokensActivationError::Transport(err.to_string()) }
 }
 
 impl From<UnexpectedDerivationMethod> for BchWithTokensActivationError {
@@ -188,9 +178,7 @@ impl From<UnexpectedDerivationMethod> for BchWithTokensActivationError {
 }
 
 impl From<PrivKeyNotAllowed> for BchWithTokensActivationError {
-    fn from(e: PrivKeyNotAllowed) -> Self {
-        BchWithTokensActivationError::PrivKeyNotAllowed(e.to_string())
-    }
+    fn from(e: PrivKeyNotAllowed) -> Self { BchWithTokensActivationError::PrivKeyNotAllowed(e.to_string()) }
 }
 
 #[async_trait]
@@ -270,23 +258,19 @@ impl PlatformWithTokensActivationOps for BchCoin {
             slp_addresses_infos: HashMap::new(),
         };
 
-        result.bch_addresses_infos.insert(
-            my_address.to_string(),
-            CoinAddressInfo {
+        result
+            .bch_addresses_infos
+            .insert(my_address.to_string(), CoinAddressInfo {
                 derivation_method: DerivationMethod::Iguana,
                 pubkey: self.my_public_key().mm_err(Into::into)?.to_string(),
                 balances: bch_balance,
-            },
-        );
+            });
 
-        result.slp_addresses_infos.insert(
-            my_slp_address,
-            CoinAddressInfo {
-                derivation_method: DerivationMethod::Iguana,
-                pubkey: self.my_public_key().mm_err(Into::into)?.to_string(),
-                balances: token_balances,
-            },
-        );
+        result.slp_addresses_infos.insert(my_slp_address, CoinAddressInfo {
+            derivation_method: DerivationMethod::Iguana,
+            pubkey: self.my_public_key().mm_err(Into::into)?.to_string(),
+            balances: token_balances,
+        });
         Ok(result)
     }
 

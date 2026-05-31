@@ -30,20 +30,14 @@ pub struct TypedDataError(String);
 
 impl TypedDataError {
     /// Build a new error from any displayable message.
-    pub fn new<M: fmt::Display>(message: M) -> Self {
-        Self(message.to_string())
-    }
+    pub fn new<M: fmt::Display>(message: M) -> Self { Self(message.to_string()) }
 
     /// Borrow the underlying message.
-    pub fn message(&self) -> &str {
-        &self.0
-    }
+    pub fn message(&self) -> &str { &self.0 }
 }
 
 impl fmt::Display for TypedDataError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EIP-712 decode error: {}", self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "EIP-712 decode error: {}", self.0) }
 }
 
 impl StdError for TypedDataError {}
@@ -383,9 +377,7 @@ fn type_error(expected: &str, found: &serde_json::Value, ctx: Option<&str>) -> T
     ))
 }
 
-fn encode_err<E: fmt::Display>(e: E) -> TypedDataError {
-    TypedDataError::new(e)
-}
+fn encode_err<E: fmt::Display>(e: E) -> TypedDataError { TypedDataError::new(e) }
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -400,59 +392,50 @@ mod tests {
     fn eip712_mail_example() {
         let mut types = IndexMap::new();
 
-        types.insert(
-            "EIP712Domain".to_string(),
-            vec![
-                TypedField {
-                    name: "name".into(),
-                    field_type: "string".into(),
-                },
-                TypedField {
-                    name: "version".into(),
-                    field_type: "string".into(),
-                },
-                TypedField {
-                    name: "chainId".into(),
-                    field_type: "uint256".into(),
-                },
-                TypedField {
-                    name: "verifyingContract".into(),
-                    field_type: "address".into(),
-                },
-            ],
-        );
+        types.insert("EIP712Domain".to_string(), vec![
+            TypedField {
+                name: "name".into(),
+                field_type: "string".into(),
+            },
+            TypedField {
+                name: "version".into(),
+                field_type: "string".into(),
+            },
+            TypedField {
+                name: "chainId".into(),
+                field_type: "uint256".into(),
+            },
+            TypedField {
+                name: "verifyingContract".into(),
+                field_type: "address".into(),
+            },
+        ]);
 
-        types.insert(
-            "Person".to_string(),
-            vec![
-                TypedField {
-                    name: "name".into(),
-                    field_type: "string".into(),
-                },
-                TypedField {
-                    name: "wallet".into(),
-                    field_type: "address".into(),
-                },
-            ],
-        );
+        types.insert("Person".to_string(), vec![
+            TypedField {
+                name: "name".into(),
+                field_type: "string".into(),
+            },
+            TypedField {
+                name: "wallet".into(),
+                field_type: "address".into(),
+            },
+        ]);
 
-        types.insert(
-            "Mail".to_string(),
-            vec![
-                TypedField {
-                    name: "from".into(),
-                    field_type: "Person".into(),
-                },
-                TypedField {
-                    name: "to".into(),
-                    field_type: "Person".into(),
-                },
-                TypedField {
-                    name: "contents".into(),
-                    field_type: "string".into(),
-                },
-            ],
-        );
+        types.insert("Mail".to_string(), vec![
+            TypedField {
+                name: "from".into(),
+                field_type: "Person".into(),
+            },
+            TypedField {
+                name: "to".into(),
+                field_type: "Person".into(),
+            },
+            TypedField {
+                name: "contents".into(),
+                field_type: "string".into(),
+            },
+        ]);
 
         #[derive(Serialize)]
         struct Domain {
@@ -508,36 +491,30 @@ mod tests {
     #[test]
     fn type_encoding_string() {
         let mut types = IndexMap::new();
-        types.insert(
-            "Person".to_string(),
-            vec![
-                TypedField {
-                    name: "name".into(),
-                    field_type: "string".into(),
-                },
-                TypedField {
-                    name: "wallet".into(),
-                    field_type: "address".into(),
-                },
-            ],
-        );
-        types.insert(
-            "Mail".to_string(),
-            vec![
-                TypedField {
-                    name: "from".into(),
-                    field_type: "Person".into(),
-                },
-                TypedField {
-                    name: "to".into(),
-                    field_type: "Person".into(),
-                },
-                TypedField {
-                    name: "contents".into(),
-                    field_type: "string".into(),
-                },
-            ],
-        );
+        types.insert("Person".to_string(), vec![
+            TypedField {
+                name: "name".into(),
+                field_type: "string".into(),
+            },
+            TypedField {
+                name: "wallet".into(),
+                field_type: "address".into(),
+            },
+        ]);
+        types.insert("Mail".to_string(), vec![
+            TypedField {
+                name: "from".into(),
+                field_type: "Person".into(),
+            },
+            TypedField {
+                name: "to".into(),
+                field_type: "Person".into(),
+            },
+            TypedField {
+                name: "contents".into(),
+                field_type: "string".into(),
+            },
+        ]);
 
         let encoded = encode_type_string(&types, "Mail").unwrap();
         assert_eq!(

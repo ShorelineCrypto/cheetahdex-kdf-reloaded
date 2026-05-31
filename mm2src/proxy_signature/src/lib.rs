@@ -149,9 +149,7 @@ mod tests {
         Keypair::Ed25519(ed_kp)
     }
 
-    fn test_uri() -> Uri {
-        "https://proxy.example.com/rpc".parse().unwrap()
-    }
+    fn test_uri() -> Uri { "https://proxy.example.com/rpc".parse().unwrap() }
 
     #[test]
     fn sign_and_verify() {

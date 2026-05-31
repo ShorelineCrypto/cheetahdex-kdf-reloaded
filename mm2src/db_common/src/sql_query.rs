@@ -12,10 +12,8 @@
 
 use crate::sql_condition::SqlCondition;
 use crate::sql_value::{SqlValue, SqlValueToString};
-use crate::sqlite::{
-    query_single_row, validate_ident, validate_table_name, OwnedSqlParam, OwnedSqlParams, SqlParamsBuilder,
-    StringError, ToValidSqlIdent, ToValidSqlTable,
-};
+use crate::sqlite::{query_single_row, validate_ident, validate_table_name, OwnedSqlParam, OwnedSqlParams,
+                    SqlParamsBuilder, StringError, ToValidSqlIdent, ToValidSqlTable};
 use log::debug;
 use rusqlite::{Connection, Error as SqlError, Result as SqlResult, Row, ToSql};
 use sql_builder::SqlBuilder;
@@ -210,15 +208,11 @@ impl<'a> SqlQuery<'a> {
 
     /// Returns an SQL subquery that can be used in [`SqlQuery::select_from_subquery`].
     #[inline]
-    pub fn subquery(self) -> SqlSubquery<'a> {
-        SqlSubquery(self)
-    }
+    pub fn subquery(self) -> SqlSubquery<'a> { SqlSubquery(self) }
 
     /// Returns the reference to the specified SQL parameters.
     #[inline]
-    pub fn params(&self) -> &OwnedSqlParams {
-        self.params.params()
-    }
+    pub fn params(&self) -> &OwnedSqlParams { self.params.params() }
 
     /// # Usage
     ///
@@ -369,13 +363,9 @@ impl<'a> SqlQuery<'a> {
 /// - [`SqlQuery::or_where_in_quoted`]
 /// - [`SqlQuery::or_where_in_params`]
 impl SqlCondition for SqlQuery<'_> {
-    fn sql_builder(&mut self) -> &mut SqlBuilder {
-        &mut self.sql_builder
-    }
+    fn sql_builder(&mut self) -> &mut SqlBuilder { &mut self.sql_builder }
 
-    fn sql_params(&mut self) -> &mut SqlParamsBuilder {
-        &mut self.params
-    }
+    fn sql_params(&mut self) -> &mut SqlParamsBuilder { &mut self.params }
 }
 
 /// An instance of this structure is returned by [`SqlQuery::subquery`].

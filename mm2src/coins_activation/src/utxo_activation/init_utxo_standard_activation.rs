@@ -1,13 +1,11 @@
 use crate::context::CoinsActivationContext;
 use crate::prelude::TryFromCoinProtocol;
-use crate::standalone_coin::{
-    InitStandaloneCoinActivationOps, InitStandaloneCoinTaskHandle, InitStandaloneCoinTaskManagerShared,
-};
+use crate::standalone_coin::{InitStandaloneCoinActivationOps, InitStandaloneCoinTaskHandle,
+                             InitStandaloneCoinTaskManagerShared};
 use crate::utxo_activation::common_impl::{get_activation_result, priv_key_build_policy};
 use crate::utxo_activation::init_utxo_standard_activation_error::InitUtxoStandardError;
-use crate::utxo_activation::init_utxo_standard_statuses::{
-    UtxoStandardAwaitingStatus, UtxoStandardInProgressStatus, UtxoStandardUserAction,
-};
+use crate::utxo_activation::init_utxo_standard_statuses::{UtxoStandardAwaitingStatus, UtxoStandardInProgressStatus,
+                                                          UtxoStandardUserAction};
 use crate::utxo_activation::utxo_standard_activation_result::UtxoStandardActivationResult;
 use async_trait::async_trait;
 use coins::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilder};

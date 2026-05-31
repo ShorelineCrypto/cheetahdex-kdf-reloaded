@@ -1,6 +1,5 @@
-use crate::hd_wallet_storage::{
-    HDAccountStorageItem, HDWalletId, HDWalletStorageError, HDWalletStorageInternalOps, HDWalletStorageResult,
-};
+use crate::hd_wallet_storage::{HDAccountStorageItem, HDWalletId, HDWalletStorageError, HDWalletStorageInternalOps,
+                               HDWalletStorageResult};
 use async_trait::async_trait;
 use common::async_blocking;
 use db_common::sqlite::rusqlite::{Connection, Error as SqlError, Row, ToSql, NO_PARAMS};

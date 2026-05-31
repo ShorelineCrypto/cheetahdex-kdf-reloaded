@@ -80,9 +80,7 @@ impl FromStr for NetworkPrefix {
 }
 
 impl From<&'static str> for NetworkPrefix {
-    fn from(s: &str) -> Self {
-        s.parse().expect("infallible")
-    }
+    fn from(s: &str) -> Self { s.parse().expect("infallible") }
 }
 
 impl NetworkPrefix {
@@ -204,15 +202,11 @@ impl CashAddress {
 
 impl FromStr for CashAddress {
     type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        CashAddress::decode(s)
-    }
+    fn from_str(s: &str) -> Result<Self, Self::Err> { CashAddress::decode(s) }
 }
 
 impl From<&'static str> for CashAddress {
-    fn from(s: &'static str) -> Self {
-        s.parse().expect("valid cashaddr literal")
-    }
+    fn from(s: &'static str) -> Self { s.parse().expect("valid cashaddr literal") }
 }
 
 fn hash_size_from_version(v: u8) -> usize {

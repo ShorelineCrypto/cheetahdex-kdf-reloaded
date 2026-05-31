@@ -53,9 +53,7 @@ pub enum WebUsbError {
 }
 
 impl InternalError for WebUsbError {
-    fn internal(e: String) -> Self {
-        WebUsbError::Internal(e)
-    }
+    fn internal(e: String) -> Self { WebUsbError::Internal(e) }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -332,9 +330,7 @@ impl WebUsbDevice {
         Ok(())
     }
 
-    fn on_is_open(device: &UsbDevice) -> WebUsbResult<bool> {
-        Ok(device.opened())
-    }
+    fn on_is_open(device: &UsbDevice) -> WebUsbResult<bool> { Ok(device.opened()) }
 
     async fn on_reset_device(device: &UsbDevice) -> WebUsbResult<()> {
         JsFuture::from(device.reset())

@@ -17,21 +17,11 @@ pub struct KeyPair {
 }
 
 impl KeyPair {
-    pub fn private(&self) -> &Private {
-        &self.private
-    }
-    pub fn private_bytes(&self) -> [u8; 32] {
-        self.private.secret.take()
-    }
-    pub fn private_ref(&self) -> &[u8; 32] {
-        &self.private.secret
-    }
-    pub fn public(&self) -> &Public {
-        &self.public
-    }
-    pub fn public_slice(&self) -> &[u8] {
-        &self.public
-    }
+    pub fn private(&self) -> &Private { &self.private }
+    pub fn private_bytes(&self) -> [u8; 32] { self.private.secret.take() }
+    pub fn private_ref(&self) -> &[u8; 32] { &self.private.secret }
+    pub fn public(&self) -> &Public { &self.public }
+    pub fn public_slice(&self) -> &[u8] { &self.public }
 
     pub fn from_private(private: Private) -> Result<KeyPair, Error> {
         let secret = SecretKey::from_slice(&*private.secret)?;
@@ -108,9 +98,7 @@ mod tests {
     const SIGN_1: &str = "304402205dbbddda71772d95ce91cd2d14b592cfbc1dd0aabd6a394b6c2d377bbe59d31d022014ddda21494a4e221f0824f0b8b924c43fa43c0ad57dccdaa11f81a6bd4582f6";
     const SIGN_2: &str = "3044022052d8a32079c11e79db95af63bb9600c5b04f21a9ca33dc129c2bfa8ac9dc1cd5022061d8ae5e0f6c1a16bde3719c64c2fd70e404b6428ab9a69566962e8771b5944d";
 
-    fn compressed(secret: &'static str) -> bool {
-        KeyPair::from_private(secret.into()).unwrap().private().compressed
-    }
+    fn compressed(secret: &'static str) -> bool { KeyPair::from_private(secret.into()).unwrap().private().compressed }
 
     fn signed(secret: &'static str, msg: &[u8], sig: &'static str) -> bool {
         let m = dhash256(msg);

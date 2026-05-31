@@ -89,13 +89,10 @@ impl StreamingManager {
         // Buffer up to 256 events per client before back-pressure kicks in.
         let (tx, rx) = mpsc::channel(256);
         let mut inner = self.inner.write();
-        inner.clients.insert(
-            client_id,
-            ClientInfo {
-                listening_to: HashSet::new(),
-                tx,
-            },
-        );
+        inner.clients.insert(client_id, ClientInfo {
+            listening_to: HashSet::new(),
+            tx,
+        });
         ClientHandle { rx }
     }
 
@@ -130,18 +127,15 @@ impl StreamingManager {
 
         {
             let mut inner = self.inner.write();
-            inner.streamers.insert(
-                sid.clone(),
-                StreamerInfo {
-                    shutdown_tx: Some(shutdown_tx),
-                    subscribers: {
-                        let mut s = HashSet::new();
-                        s.insert(client_id);
-                        s
-                    },
-                    data_in: Box::new(data_tx),
+            inner.streamers.insert(sid.clone(), StreamerInfo {
+                shutdown_tx: Some(shutdown_tx),
+                subscribers: {
+                    let mut s = HashSet::new();
+                    s.insert(client_id);
+                    s
                 },
-            );
+                data_in: Box::new(data_tx),
+            });
             if let Some(client) = inner.clients.get_mut(&client_id) {
                 client.listening_to.insert(origin);
             }
@@ -290,9 +284,7 @@ mod tests {
     impl EventStreamer for TestStreamer {
         type DataInType = crate::NoDataIn;
 
-        fn streamer_id(&self) -> StreamerId {
-            StreamerId::Heartbeat
-        }
+        fn streamer_id(&self) -> StreamerId { StreamerId::Heartbeat }
 
         async fn handle(
             self,

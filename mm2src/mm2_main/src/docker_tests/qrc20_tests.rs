@@ -1,21 +1,19 @@
 use crate::docker_tests::docker_tests_common::*;
 use crate::mm2::lp_swap::{dex_fee_amount, max_taker_vol_from_available};
-use kdf_crypto::dhash160;
 use coins::qrc20::rpc_clients::for_tests::Qrc20NativeWalletOps;
 use coins::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin};
 use coins::utxo::rpc_clients::UtxoRpcClientEnum;
 use coins::utxo::utxo_common::big_decimal_from_sat;
 use coins::utxo::{UtxoActivationParams, UtxoCommonOps};
-use coins::{
-    DexFee, FeeApproxStage, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, TradePreimageValue, TransactionEnum,
-    ValidatePaymentInput,
-};
+use coins::{DexFee, FeeApproxStage, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, TradePreimageValue,
+            TransactionEnum, ValidatePaymentInput};
 use common::log::debug;
 use common::mm_number::BigDecimal;
 use common::temp_dir;
 use ethereum_types::H160;
 use futures01::Future;
 use http::StatusCode;
+use kdf_crypto::dhash160;
 use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
 use mm2_net_config::net_config_or_panic;
 use rand6::Rng;
@@ -40,9 +38,7 @@ pub struct QtumDockerOps {
 }
 
 impl CoinDockerOps for QtumDockerOps {
-    fn rpc_client(&self) -> &UtxoRpcClientEnum {
-        &self.coin.as_ref().rpc_client
-    }
+    fn rpc_client(&self) -> &UtxoRpcClientEnum { &self.coin.as_ref().rpc_client }
 }
 
 impl QtumDockerOps {
@@ -1521,28 +1517,18 @@ fn segwit_address_in_the_orderbook() {
 }
 
 #[test]
-fn test_trade_qrc20() {
-    trade_base_rel(("QICK", "QORTY"));
-}
+fn test_trade_qrc20() { trade_base_rel(("QICK", "QORTY")); }
 
 #[test]
-fn trade_test_with_maker_segwit() {
-    trade_base_rel(("QTUM", "MYCOIN"));
-}
+fn trade_test_with_maker_segwit() { trade_base_rel(("QTUM", "MYCOIN")); }
 
 #[test]
-fn trade_test_with_taker_segwit() {
-    trade_base_rel(("MYCOIN", "QTUM"));
-}
+fn trade_test_with_taker_segwit() { trade_base_rel(("MYCOIN", "QTUM")); }
 
 #[test]
 #[ignore]
-fn test_trade_qrc20_utxo() {
-    trade_base_rel(("QICK", "MYCOIN"));
-}
+fn test_trade_qrc20_utxo() { trade_base_rel(("QICK", "MYCOIN")); }
 
 #[test]
 #[ignore]
-fn test_trade_utxo_qrc20() {
-    trade_base_rel(("MYCOIN", "QICK"));
-}
+fn test_trade_utxo_qrc20() { trade_base_rel(("MYCOIN", "QICK")); }

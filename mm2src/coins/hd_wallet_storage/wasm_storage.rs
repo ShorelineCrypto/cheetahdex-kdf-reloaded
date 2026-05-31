@@ -1,15 +1,13 @@
-use crate::hd_wallet_storage::{
-    HDAccountStorageItem, HDWalletId, HDWalletStorageError, HDWalletStorageInternalOps, HDWalletStorageResult,
-};
+use crate::hd_wallet_storage::{HDAccountStorageItem, HDWalletId, HDWalletStorageError, HDWalletStorageInternalOps,
+                               HDWalletStorageResult};
 use crate::CoinsContext;
 use async_trait::async_trait;
 use crypto::XPub;
 use mm2_core::mm_ctx::MmArc;
 use mm2_db::indexed_db::cursor_prelude::*;
-use mm2_db::indexed_db::{
-    DbIdentifier, DbInstance, DbLocked, DbTable, DbTransactionError, DbUpgrader, IndexedDb, IndexedDbBuilder,
-    InitDbError, InitDbResult, ItemId, OnUpgradeResult, SharedDb, TableSignature, WeakDb,
-};
+use mm2_db::indexed_db::{DbIdentifier, DbInstance, DbLocked, DbTable, DbTransactionError, DbUpgrader, IndexedDb,
+                         IndexedDbBuilder, InitDbError, InitDbResult, ItemId, OnUpgradeResult, SharedDb,
+                         TableSignature, WeakDb};
 use mm2_err_handle::prelude::*;
 
 const DB_NAME: &str = "hd_wallet";
@@ -61,9 +59,7 @@ impl From<CursorError> for HDWalletStorageError {
 }
 
 impl From<InitDbError> for HDWalletStorageError {
-    fn from(e: InitDbError) -> Self {
-        HDWalletStorageError::Internal(e.to_string())
-    }
+    fn from(e: InitDbError) -> Self { HDWalletStorageError::Internal(e.to_string()) }
 }
 
 /// The table has the following individually non-unique indexes: `coin`, `mm2_rmd160`, `hd_wallet_rmd160`, `account_id`,
@@ -91,9 +87,7 @@ pub struct HDAccountTable {
 }
 
 impl TableSignature for HDAccountTable {
-    fn table_name() -> &'static str {
-        "hd_account"
-    }
+    fn table_name() -> &'static str { "hd_account" }
 
     fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
         match (old_version, new_version) {
@@ -147,9 +141,7 @@ pub struct HDWalletDb {
 
 #[async_trait]
 impl DbInstance for HDWalletDb {
-    fn db_name() -> &'static str {
-        DB_NAME
-    }
+    fn db_name() -> &'static str { DB_NAME }
 
     async fn init(db_id: DbIdentifier) -> InitDbResult<Self> {
         let inner = IndexedDbBuilder::new(db_id)

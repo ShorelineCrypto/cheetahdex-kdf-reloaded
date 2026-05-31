@@ -34,15 +34,11 @@ pub enum SavedSwap {
 }
 
 impl From<MakerSavedSwap> for SavedSwap {
-    fn from(maker: MakerSavedSwap) -> Self {
-        SavedSwap::Maker(maker)
-    }
+    fn from(maker: MakerSavedSwap) -> Self { SavedSwap::Maker(maker) }
 }
 
 impl From<TakerSavedSwap> for SavedSwap {
-    fn from(taker: TakerSavedSwap) -> Self {
-        SavedSwap::Taker(taker)
-    }
+    fn from(taker: TakerSavedSwap) -> Self { SavedSwap::Taker(taker) }
 }
 
 impl SavedSwap {
@@ -281,9 +277,7 @@ mod wasm_impl {
     }
 
     impl From<InitDbError> for SavedSwapError {
-        fn from(e: InitDbError) -> Self {
-            SavedSwapError::InternalError(e.to_string())
-        }
+        fn from(e: InitDbError) -> Self { SavedSwapError::InternalError(e.to_string()) }
     }
 
     #[async_trait]

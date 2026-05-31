@@ -26,33 +26,23 @@ pub enum Qrc20GenTxError {
 }
 
 impl From<GenerateTxError> for Qrc20GenTxError {
-    fn from(e: GenerateTxError) -> Self {
-        Qrc20GenTxError::ErrorGeneratingUtxoTx(e)
-    }
+    fn from(e: GenerateTxError) -> Self { Qrc20GenTxError::ErrorGeneratingUtxoTx(e) }
 }
 
 impl From<UtxoSignWithKeyPairError> for Qrc20GenTxError {
-    fn from(e: UtxoSignWithKeyPairError) -> Self {
-        Qrc20GenTxError::ErrorSigningTx(e)
-    }
+    fn from(e: UtxoSignWithKeyPairError) -> Self { Qrc20GenTxError::ErrorSigningTx(e) }
 }
 
 impl From<PrivKeyNotAllowed> for Qrc20GenTxError {
-    fn from(e: PrivKeyNotAllowed) -> Self {
-        Qrc20GenTxError::PrivKeyNotAllowed(e)
-    }
+    fn from(e: PrivKeyNotAllowed) -> Self { Qrc20GenTxError::PrivKeyNotAllowed(e) }
 }
 
 impl From<UnexpectedDerivationMethod> for Qrc20GenTxError {
-    fn from(e: UnexpectedDerivationMethod) -> Self {
-        Qrc20GenTxError::UnexpectedDerivationMethod(e)
-    }
+    fn from(e: UnexpectedDerivationMethod) -> Self { Qrc20GenTxError::UnexpectedDerivationMethod(e) }
 }
 
 impl From<UtxoRpcError> for Qrc20GenTxError {
-    fn from(e: UtxoRpcError) -> Self {
-        Qrc20GenTxError::ErrorGeneratingUtxoTx(GenerateTxError::from(e))
-    }
+    fn from(e: UtxoRpcError) -> Self { Qrc20GenTxError::ErrorGeneratingUtxoTx(GenerateTxError::from(e)) }
 }
 
 impl Qrc20GenTxError {
@@ -84,9 +74,7 @@ pub enum Qrc20FromLegacyReqErr {
 }
 
 impl From<UtxoFromLegacyReqErr> for Qrc20FromLegacyReqErr {
-    fn from(err: UtxoFromLegacyReqErr) -> Self {
-        Qrc20FromLegacyReqErr::InvalidUtxoParams(err)
-    }
+    fn from(err: UtxoFromLegacyReqErr) -> Self { Qrc20FromLegacyReqErr::InvalidUtxoParams(err) }
 }
 
 impl Qrc20ActivationParams {
@@ -118,15 +106,11 @@ pub struct Qrc20Coin(pub(crate) Arc<Qrc20CoinFields>);
 
 impl Deref for Qrc20Coin {
     type Target = Qrc20CoinFields;
-    fn deref(&self) -> &Qrc20CoinFields {
-        &*self.0
-    }
+    fn deref(&self) -> &Qrc20CoinFields { &*self.0 }
 }
 
 impl AsRef<UtxoCoinFields> for Qrc20Coin {
-    fn as_ref(&self) -> &UtxoCoinFields {
-        &self.utxo
-    }
+    fn as_ref(&self) -> &UtxoCoinFields { &self.utxo }
 }
 
 impl qtum::QtumBasedCoin for Qrc20Coin {}
@@ -208,9 +192,7 @@ impl MutContractCallType {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn short_signature(&self) -> [u8; 4] {
-        self.as_function().short_signature()
-    }
+    pub(crate) fn short_signature(&self) -> [u8; 4] { self.as_function().short_signature() }
 }
 
 pub struct GenerateQrc20TxResult {
@@ -228,15 +210,11 @@ pub enum Qrc20AbiError {
 }
 
 impl From<ethabi::Error> for Qrc20AbiError {
-    fn from(e: ethabi::Error) -> Qrc20AbiError {
-        Qrc20AbiError::AbiError(e.to_string())
-    }
+    fn from(e: ethabi::Error) -> Qrc20AbiError { Qrc20AbiError::AbiError(e.to_string()) }
 }
 
 impl From<Qrc20AbiError> for GenerateTxError {
-    fn from(e: Qrc20AbiError) -> Self {
-        GenerateTxError::Internal(e.to_string())
-    }
+    fn from(e: Qrc20AbiError) -> Self { GenerateTxError::Internal(e.to_string()) }
 }
 
 impl From<Qrc20AbiError> for TradePreimageError {
@@ -267,9 +245,7 @@ pub fn qrc20_swap_id(time_lock: u32, secret_hash: &[u8]) -> Vec<u8> {
     sha256(&input).to_vec()
 }
 
-pub fn contract_addr_into_rpc_format(address: &H160) -> H160Json {
-    H160Json::from(address.0)
-}
+pub fn contract_addr_into_rpc_format(address: &H160) -> H160Json { H160Json::from(address.0) }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Qrc20FeeDetails {

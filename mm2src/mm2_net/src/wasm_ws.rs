@@ -1,10 +1,8 @@
 use async_trait::async_trait;
 use common::log::{debug, error};
 use common::stringify_js_error;
-use common::{
-    executor::spawn,
-    state_machine::{LastState, State, StateExt, StateMachine, StateResult, TransitionFrom},
-};
+use common::{executor::spawn,
+             state_machine::{LastState, State, StateExt, StateMachine, StateResult, TransitionFrom}};
 use futures::channel::mpsc::{self, SendError, TrySendError};
 use futures::channel::oneshot;
 use futures::{FutureExt, SinkExt, Stream, StreamExt};
@@ -125,13 +123,9 @@ pub struct WsOutgoingSender {
 /// Please note `WsOutgoingSender` must not provide a way to close the [`WsOutgoingSender::inner`] channel,
 /// because the shutdown_tx wouldn't be closed properly.
 impl WsOutgoingSender {
-    pub async fn send(&mut self, msg: Json) -> Result<(), SendError> {
-        self.inner.send(msg).await
-    }
+    pub async fn send(&mut self, msg: Json) -> Result<(), SendError> { self.inner.send(msg).await }
 
-    pub fn try_send(&mut self, msg: Json) -> Result<(), TrySendError<Json>> {
-        self.inner.try_send(msg)
-    }
+    pub fn try_send(&mut self, msg: Json) -> Result<(), TrySendError<Json>> { self.inner.try_send(msg) }
 }
 
 #[derive(Debug)]
@@ -423,9 +417,7 @@ impl StateEventListener {
         }
     }
 
-    async fn receive_one(&mut self) -> Option<StateEvent> {
-        self.rx.next().await
-    }
+    async fn receive_one(&mut self) -> Option<StateEvent> { self.rx.next().await }
 }
 
 /// The combination of `WsTransportEvent` and `OutgoingEvent`
@@ -465,9 +457,7 @@ enum WsTransportError {
 }
 
 impl From<CloseEvent> for WsTransportEvent {
-    fn from(close: CloseEvent) -> Self {
-        WsTransportEvent::Close { code: close.code() }
-    }
+    fn from(close: CloseEvent) -> Self { WsTransportEvent::Close { code: close.code() } }
 }
 
 struct ConnectingState;
@@ -645,9 +635,7 @@ impl ClosedState {
         }
     }
 
-    fn from_reason(reason: ClosureReason) -> ClosedState {
-        ClosedState { reason }
-    }
+    fn from_reason(reason: ClosureReason) -> ClosedState { ClosedState { reason } }
 }
 
 fn decode_incoming(incoming: MessageEvent) -> Result<Json, String> {

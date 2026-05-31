@@ -19,11 +19,17 @@ impl Default for WaitFor {
 
 impl WaitFor {
     pub fn message_on_stdout<S: Into<String>>(message: S) -> WaitFor {
-        WaitFor::LogMessage { message: message.into(), stream: Stream::StdOut }
+        WaitFor::LogMessage {
+            message: message.into(),
+            stream: Stream::StdOut,
+        }
     }
 
     pub fn message_on_stderr<S: Into<String>>(message: S) -> WaitFor {
-        WaitFor::LogMessage { message: message.into(), stream: Stream::StdErr }
+        WaitFor::LogMessage {
+            message: message.into(),
+            stream: Stream::StdErr,
+        }
     }
 
     fn wait<D: Docker, I: Image>(&self, container: &Container<D, I>) -> Result<(), WaitError> {
@@ -47,7 +53,12 @@ pub struct GenericImage {
 
 impl GenericImage {
     pub fn new<S: Into<String>>(descriptor: S) -> GenericImage {
-        Self { descriptor: descriptor.into(), arguments: vec![], env_vars: HashMap::new(), wait_for: WaitFor::Nothing }
+        Self {
+            descriptor: descriptor.into(),
+            arguments: vec![],
+            env_vars: HashMap::new(),
+            wait_for: WaitFor::Nothing,
+        }
     }
 
     pub fn with_env_var<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {

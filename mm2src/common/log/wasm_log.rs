@@ -67,9 +67,7 @@ pub enum LogLevel {
 }
 
 impl Default for LogLevel {
-    fn default() -> Self {
-        DEFAULT_LEVEL_FILTER
-    }
+    fn default() -> Self { DEFAULT_LEVEL_FILTER }
 }
 
 pub struct WasmCallback {
@@ -150,9 +148,7 @@ struct WasmLogger {
 }
 
 impl Log for WasmLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        LogLevel::from(metadata.level()) <= self.filter
-    }
+    fn enabled(&self, metadata: &Metadata) -> bool { LogLevel::from(metadata.level()) <= self.filter }
 
     fn log(&self, record: &Record) {
         if let Some(ref mut log_cb) = *LOG_CALLBACK.lock() {

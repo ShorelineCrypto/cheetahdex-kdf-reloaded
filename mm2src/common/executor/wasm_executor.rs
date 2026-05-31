@@ -14,16 +14,12 @@ use wasm_bindgen::prelude::*;
 pub struct AbortOnDropHandle(AbortHandle);
 
 impl From<AbortHandle> for AbortOnDropHandle {
-    fn from(handle: AbortHandle) -> Self {
-        AbortOnDropHandle(handle)
-    }
+    fn from(handle: AbortHandle) -> Self { AbortOnDropHandle(handle) }
 }
 
 impl Drop for AbortOnDropHandle {
     #[inline(always)]
-    fn drop(&mut self) {
-        self.0.abort();
-    }
+    fn drop(&mut self) { self.0.abort(); }
 }
 
 #[wasm_bindgen]
@@ -35,17 +31,11 @@ extern "C" {
     fn clearTimeout(id: i32);
 }
 
-pub fn spawn(future: impl Future<Output = ()> + Send + 'static) {
-    spawn_local(future)
-}
+pub fn spawn(future: impl Future<Output = ()> + Send + 'static) { spawn_local(future) }
 
-pub fn spawn_boxed(future: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) {
-    spawn_local(future)
-}
+pub fn spawn_boxed(future: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) { spawn_local(future) }
 
-pub fn spawn_local(future: impl Future<Output = ()> + 'static) {
-    wasm_bindgen_futures::spawn_local(future)
-}
+pub fn spawn_local(future: impl Future<Output = ()> + 'static) { wasm_bindgen_futures::spawn_local(future) }
 
 /// Spawns a local (non-`Send`) future that is automatically aborted when the
 /// returned [`AbortOnDropHandle`] is dropped.
@@ -114,9 +104,7 @@ impl Timer {
 
 /// When the `Timer` is destroyed, cancel its `setTimeout` timer.
 impl Drop for Timer {
-    fn drop(&mut self) {
-        clearTimeout(self.timeout_id)
-    }
+    fn drop(&mut self) { clearTimeout(self.timeout_id) }
 }
 
 impl Future for Timer {

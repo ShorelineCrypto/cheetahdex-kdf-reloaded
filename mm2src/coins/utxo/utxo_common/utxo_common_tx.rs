@@ -241,13 +241,10 @@ impl<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> UtxoTxBuilder<'a, T> {
         for output in self.tx.outputs.iter() {
             let script: Script = output.script_pubkey.clone().into();
             if script.opcodes().next() != Some(Ok(Opcode::OP_RETURN)) {
-                true_or!(
-                    output.value >= dust,
-                    GenerateTxError::OutputValueLessThanDust {
-                        value: output.value,
-                        dust
-                    }
-                );
+                true_or!(output.value >= dust, GenerateTxError::OutputValueLessThanDust {
+                    value: output.value,
+                    dust
+                });
             }
             self.sum_outputs_value += output.value;
             if output.script_pubkey == change_script_pubkey {
@@ -293,14 +290,11 @@ impl<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> UtxoTxBuilder<'a, T> {
             FeePolicy::DeductFromOutput(i) => {
                 let min_output = self.tx_fee + dust;
                 let val = self.tx.outputs[i].value;
-                true_or!(
-                    val >= min_output,
-                    GenerateTxError::DeductFeeFromOutputFailed {
-                        output_idx: i,
-                        output_value: val,
-                        required: min_output,
-                    }
-                );
+                true_or!(val >= min_output, GenerateTxError::DeductFeeFromOutputFailed {
+                    output_idx: i,
+                    output_value: val,
+                    required: min_output,
+                });
                 self.tx.outputs[i].value -= self.tx_fee;
                 if self.tx.outputs[i].script_pubkey == change_script_pubkey {
                     received_by_me -= self.tx_fee;
@@ -752,9 +746,7 @@ where
     T: UtxoCommonOps,
 {
     /// Returns `true` if the given transaction has a known non-zero height.
-    fn can_tx_be_cached(tx: &RpcTransaction) -> bool {
-        tx.height > Some(0)
-    }
+    fn can_tx_be_cached(tx: &RpcTransaction) -> bool { tx.height > Some(0) }
 
     /// Calculates actual confirmations number of the given `tx` transaction loaded from cache.
     fn calc_actual_cached_tx_confirmations(tx: &RpcTransaction, block_count: u64) -> UtxoRpcResult<u32> {

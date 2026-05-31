@@ -45,9 +45,7 @@ where
 
 /// Default page size used by the NFT list and transfer history requests
 /// when no explicit `limit` is provided in the JSON payload.
-pub(crate) const fn default_page_size() -> usize {
-    10
-}
+pub(crate) const fn default_page_size() -> usize { 10 }
 
 #[cfg(test)]
 mod tests {

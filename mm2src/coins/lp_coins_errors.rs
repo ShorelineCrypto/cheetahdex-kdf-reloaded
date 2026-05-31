@@ -94,14 +94,10 @@ pub enum TradePreimageError {
     InternalError(String),
 }
 impl From<NumConversError> for TradePreimageError {
-    fn from(e: NumConversError) -> Self {
-        TradePreimageError::InternalError(e.to_string())
-    }
+    fn from(e: NumConversError) -> Self { TradePreimageError::InternalError(e.to_string()) }
 }
 impl From<UnexpectedDerivationMethod> for TradePreimageError {
-    fn from(e: UnexpectedDerivationMethod) -> Self {
-        TradePreimageError::InternalError(e.to_string())
-    }
+    fn from(e: UnexpectedDerivationMethod) -> Self { TradePreimageError::InternalError(e.to_string()) }
 }
 impl TradePreimageError {
     /// Construct [`TradePreimageError`] from [`GenerateTxError`] using additional `coin` and `decimals`.
@@ -173,18 +169,12 @@ impl TradePreimageError {
 #[derive(Debug, Display)]
 pub struct NumConversError(pub(crate) String);
 impl From<ParseBigDecimalError> for NumConversError {
-    fn from(e: ParseBigDecimalError) -> Self {
-        NumConversError::new(e.to_string())
-    }
+    fn from(e: ParseBigDecimalError) -> Self { NumConversError::new(e.to_string()) }
 }
 impl NumConversError {
-    pub fn new(description: String) -> NumConversError {
-        NumConversError(description)
-    }
+    pub fn new(description: String) -> NumConversError { NumConversError(description) }
 
-    pub fn description(&self) -> &str {
-        &self.0
-    }
+    pub fn description(&self) -> &str { &self.0 }
 }
 #[derive(Debug, Display, PartialEq)]
 pub enum BalanceError {
@@ -206,24 +196,16 @@ pub enum GetNonZeroBalance {
     BalanceIsZero,
 }
 impl From<BalanceError> for GetNonZeroBalance {
-    fn from(e: BalanceError) -> Self {
-        GetNonZeroBalance::MyBalanceError(e)
-    }
+    fn from(e: BalanceError) -> Self { GetNonZeroBalance::MyBalanceError(e) }
 }
 impl From<NumConversError> for BalanceError {
-    fn from(e: NumConversError) -> Self {
-        BalanceError::Internal(e.to_string())
-    }
+    fn from(e: NumConversError) -> Self { BalanceError::Internal(e.to_string()) }
 }
 impl From<UnexpectedDerivationMethod> for BalanceError {
-    fn from(e: UnexpectedDerivationMethod) -> Self {
-        BalanceError::UnexpectedDerivationMethod(e)
-    }
+    fn from(e: UnexpectedDerivationMethod) -> Self { BalanceError::UnexpectedDerivationMethod(e) }
 }
 impl From<Bip32Error> for BalanceError {
-    fn from(e: Bip32Error) -> Self {
-        BalanceError::Internal(e.to_string())
-    }
+    fn from(e: Bip32Error) -> Self { BalanceError::Internal(e.to_string()) }
 }
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
@@ -253,9 +235,7 @@ impl From<UtxoRpcError> for StakingInfosError {
     }
 }
 impl From<UnexpectedDerivationMethod> for StakingInfosError {
-    fn from(e: UnexpectedDerivationMethod) -> Self {
-        StakingInfosError::UnexpectedDerivationMethod(e.to_string())
-    }
+    fn from(e: UnexpectedDerivationMethod) -> Self { StakingInfosError::UnexpectedDerivationMethod(e.to_string()) }
 }
 impl From<Qrc20AddressError> for StakingInfosError {
     fn from(e: Qrc20AddressError) -> Self {
@@ -387,9 +367,7 @@ impl From<UtxoSignWithKeyPairError> for DelegationError {
     }
 }
 impl From<PrivKeyNotAllowed> for DelegationError {
-    fn from(e: PrivKeyNotAllowed) -> Self {
-        DelegationError::DelegationOpsNotSupported { reason: e.to_string() }
-    }
+    fn from(e: PrivKeyNotAllowed) -> Self { DelegationError::DelegationOpsNotSupported { reason: e.to_string() } }
 }
 impl From<UnexpectedDerivationMethod> for DelegationError {
     fn from(e: UnexpectedDerivationMethod) -> Self {
@@ -397,9 +375,7 @@ impl From<UnexpectedDerivationMethod> for DelegationError {
     }
 }
 impl From<ScriptHashTypeNotSupported> for DelegationError {
-    fn from(e: ScriptHashTypeNotSupported) -> Self {
-        DelegationError::AddressError(e.to_string())
-    }
+    fn from(e: ScriptHashTypeNotSupported) -> Self { DelegationError::AddressError(e.to_string()) }
 }
 impl HttpStatusCode for DelegationError {
     fn status_code(&self) -> StatusCode {
@@ -551,9 +527,7 @@ impl HttpStatusCode for WithdrawError {
     }
 }
 impl From<NumConversError> for WithdrawError {
-    fn from(e: NumConversError) -> Self {
-        WithdrawError::InternalError(e.to_string())
-    }
+    fn from(e: NumConversError) -> Self { WithdrawError::InternalError(e.to_string()) }
 }
 impl From<BalanceError> for WithdrawError {
     fn from(e: BalanceError) -> Self {
@@ -579,14 +553,10 @@ impl From<UtxoSignWithKeyPairError> for WithdrawError {
     }
 }
 impl From<UnexpectedDerivationMethod> for WithdrawError {
-    fn from(e: UnexpectedDerivationMethod) -> Self {
-        WithdrawError::InternalError(e.to_string())
-    }
+    fn from(e: UnexpectedDerivationMethod) -> Self { WithdrawError::InternalError(e.to_string()) }
 }
 impl From<PrivKeyNotAllowed> for WithdrawError {
-    fn from(e: PrivKeyNotAllowed) -> Self {
-        WithdrawError::InternalError(e.to_string())
-    }
+    fn from(e: PrivKeyNotAllowed) -> Self { WithdrawError::InternalError(e.to_string()) }
 }
 impl WithdrawError {
     /// Construct [`WithdrawError`] from [`GenerateTxError`] using additional `coin` and `decimals`.
@@ -654,24 +624,16 @@ impl HttpStatusCode for SignatureError {
     }
 }
 impl From<keys::Error> for SignatureError {
-    fn from(e: keys::Error) -> Self {
-        SignatureError::InternalError(e.to_string())
-    }
+    fn from(e: keys::Error) -> Self { SignatureError::InternalError(e.to_string()) }
 }
 impl From<mm2_eth::keys::EthKeyError> for SignatureError {
-    fn from(e: mm2_eth::keys::EthKeyError) -> Self {
-        SignatureError::InternalError(e.to_string())
-    }
+    fn from(e: mm2_eth::keys::EthKeyError) -> Self { SignatureError::InternalError(e.to_string()) }
 }
 impl From<PrivKeyNotAllowed> for SignatureError {
-    fn from(e: PrivKeyNotAllowed) -> Self {
-        SignatureError::InternalError(e.to_string())
-    }
+    fn from(e: PrivKeyNotAllowed) -> Self { SignatureError::InternalError(e.to_string()) }
 }
 impl From<CoinFindError> for SignatureError {
-    fn from(e: CoinFindError) -> Self {
-        SignatureError::CoinIsNotFound(e.to_string())
-    }
+    fn from(e: CoinFindError) -> Self { SignatureError::CoinIsNotFound(e.to_string()) }
 }
 #[derive(Serialize, Display, Debug, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
@@ -702,14 +664,10 @@ impl HttpStatusCode for VerificationError {
     }
 }
 impl From<base64::DecodeError> for VerificationError {
-    fn from(e: base64::DecodeError) -> Self {
-        VerificationError::SignatureDecodingError(e.to_string())
-    }
+    fn from(e: base64::DecodeError) -> Self { VerificationError::SignatureDecodingError(e.to_string()) }
 }
 impl From<hex::FromHexError> for VerificationError {
-    fn from(e: hex::FromHexError) -> Self {
-        VerificationError::AddressDecodingError(e.to_string())
-    }
+    fn from(e: hex::FromHexError) -> Self { VerificationError::AddressDecodingError(e.to_string()) }
 }
 impl From<FromBase58Error> for VerificationError {
     fn from(e: FromBase58Error) -> Self {
@@ -724,19 +682,13 @@ impl From<FromBase58Error> for VerificationError {
     }
 }
 impl From<keys::Error> for VerificationError {
-    fn from(e: keys::Error) -> Self {
-        VerificationError::InternalError(e.to_string())
-    }
+    fn from(e: keys::Error) -> Self { VerificationError::InternalError(e.to_string()) }
 }
 impl From<mm2_eth::keys::EthKeyError> for VerificationError {
-    fn from(e: mm2_eth::keys::EthKeyError) -> Self {
-        VerificationError::InternalError(e.to_string())
-    }
+    fn from(e: mm2_eth::keys::EthKeyError) -> Self { VerificationError::InternalError(e.to_string()) }
 }
 impl From<CoinFindError> for VerificationError {
-    fn from(e: CoinFindError) -> Self {
-        VerificationError::CoinIsNotFound(e.to_string())
-    }
+    fn from(e: CoinFindError) -> Self { VerificationError::CoinIsNotFound(e.to_string()) }
 }
 /// Errors during transaction generation (preimage creation, signing).
 #[derive(Debug, Display)]

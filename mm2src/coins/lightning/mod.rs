@@ -29,19 +29,16 @@ pub(crate) use super::{lp_coinfind_or_err, DerivationMethod, MmCoinEnum};
 pub(crate) use crate::utxo::rpc_clients::UtxoRpcClientEnum;
 pub(crate) use crate::utxo::utxo_common::{big_decimal_from_sat_unsigned, UtxoTxBuilder};
 pub(crate) use crate::utxo::{sat_from_big_decimal, BlockchainNetwork, FeePolicy, GetUtxoListOps, UtxoTxGenerationOps};
-pub(crate) use crate::{
-    BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
-    NegotiateSwapContractAddrErr, RawTransactionFut, RawTransactionRequest, SignatureError, SignatureResult, SwapOps,
-    TradeFee, TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionEnum, TransactionFut,
-    UnexpectedDerivationMethod, UtxoStandardCoin, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
-    VerificationError, VerificationResult, WatcherOps, WithdrawError, WithdrawFut, WithdrawRequest,
-};
+pub(crate) use crate::{BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState,
+                       MarketCoinOps, MmCoin, NegotiateSwapContractAddrErr, RawTransactionFut, RawTransactionRequest,
+                       SignatureError, SignatureResult, SwapOps, TradeFee, TradePreimageFut, TradePreimageResult,
+                       TradePreimageValue, TransactionEnum, TransactionFut, UnexpectedDerivationMethod,
+                       UtxoStandardCoin, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
+                       VerificationError, VerificationResult, WatcherOps, WithdrawError, WithdrawFut, WithdrawRequest};
 pub(crate) use async_trait::async_trait;
 pub(crate) use bigdecimal::BigDecimal;
 pub(crate) use bitcoin::hashes::Hash;
 pub(crate) use bitcoin_hashes::sha256::Hash as Sha256;
-pub(crate) use kdf_crypto::dhash256;
-pub(crate) use kdf_crypto::ChecksumType;
 pub(crate) use chain::TransactionOutput;
 pub(crate) use common::executor::spawn;
 pub(crate) use common::log::{LogOnError, LogState};
@@ -49,6 +46,8 @@ pub(crate) use common::mm_number::MmNumber;
 pub(crate) use common::{async_blocking, calc_total_pages, log, now_ms, ten, PagingOptionsEnum};
 pub(crate) use futures::{FutureExt, TryFutureExt};
 pub(crate) use futures01::Future;
+pub(crate) use kdf_crypto::dhash256;
+pub(crate) use kdf_crypto::ChecksumType;
 pub(crate) use keys::{hash::H256, AddressHashEnum, CompactSignature, KeyPair, Private, Public};
 pub(crate) use lightning::chain::channelmonitor::Balance;
 pub(crate) use lightning::chain::keysinterface::{KeysInterface, KeysManager, Recipient};
@@ -61,19 +60,17 @@ pub(crate) use lightning_background_processor::BackgroundProcessor;
 pub(crate) use lightning_invoice::payment;
 pub(crate) use lightning_invoice::utils::{create_invoice_from_channelmanager, DefaultRouter};
 pub(crate) use lightning_invoice::{Invoice, InvoiceDescription};
-pub(crate) use lightning_persister::storage::{
-    ClosedChannelsFilter, DbStorage, FileSystemStorage, HTLCStatus, NodesAddressesMapShared, PaymentInfo, PaymentType,
-    PaymentsFilter, Scorer, SqlChannelDetails,
-};
+pub(crate) use lightning_persister::storage::{ClosedChannelsFilter, DbStorage, FileSystemStorage, HTLCStatus,
+                                              NodesAddressesMapShared, PaymentInfo, PaymentType, PaymentsFilter,
+                                              Scorer, SqlChannelDetails};
 pub(crate) use lightning_persister::LightningPersister;
 pub(crate) use ln_conf::{ChannelOptions, LightningCoinConf, LightningProtocolConf, PlatformCoinConfirmations};
-pub(crate) use ln_errors::{
-    ClaimableBalancesError, ClaimableBalancesResult, CloseChannelError, CloseChannelResult, ConnectToNodeError,
-    ConnectToNodeResult, EnableLightningError, EnableLightningResult, GenerateInvoiceError, GenerateInvoiceResult,
-    GetChannelDetailsError, GetChannelDetailsResult, GetPaymentDetailsError, GetPaymentDetailsResult,
-    ListChannelsError, ListChannelsResult, ListPaymentsError, ListPaymentsResult, OpenChannelError, OpenChannelResult,
-    SendPaymentError, SendPaymentResult,
-};
+pub(crate) use ln_errors::{ClaimableBalancesError, ClaimableBalancesResult, CloseChannelError, CloseChannelResult,
+                           ConnectToNodeError, ConnectToNodeResult, EnableLightningError, EnableLightningResult,
+                           GenerateInvoiceError, GenerateInvoiceResult, GetChannelDetailsError,
+                           GetChannelDetailsResult, GetPaymentDetailsError, GetPaymentDetailsResult,
+                           ListChannelsError, ListChannelsResult, ListPaymentsError, ListPaymentsResult,
+                           OpenChannelError, OpenChannelResult, SendPaymentError, SendPaymentResult};
 pub(crate) use ln_events::LightningEventHandler;
 pub(crate) use ln_p2p::{connect_to_node, ConnectToNodeRes, PeerManager};
 pub(crate) use ln_platform::{h256_json_from_txid, Platform};

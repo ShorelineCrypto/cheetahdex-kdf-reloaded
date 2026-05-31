@@ -1,8 +1,6 @@
 use crate::solana::SolanaCommonOps;
-use crate::{
-    BalanceError, MarketCoinOps, NumConversError, SignatureError, SignatureResult, SolanaCoin,
-    UnexpectedDerivationMethod, VerificationError, VerificationResult, WithdrawError,
-};
+use crate::{BalanceError, MarketCoinOps, NumConversError, SignatureError, SignatureResult, SolanaCoin,
+            UnexpectedDerivationMethod, VerificationError, VerificationResult, WithdrawError};
 use base58::FromBase58;
 use bigdecimal::ToPrimitive;
 use common::mm_number::BigDecimal;
@@ -41,9 +39,7 @@ pub enum SufficientBalanceError {
 }
 
 impl From<NumConversError> for SufficientBalanceError {
-    fn from(e: NumConversError) -> Self {
-        SufficientBalanceError::Internal(e.to_string())
-    }
+    fn from(e: NumConversError) -> Self { SufficientBalanceError::Internal(e.to_string()) }
 }
 
 impl From<BalanceError> for SufficientBalanceError {
@@ -90,9 +86,7 @@ pub struct PrepareTransferData {
     pub lamports_to_send: u64,
 }
 
-pub fn lamports_to_sol(lamports: u64) -> BigDecimal {
-    BigDecimal::from(lamports) / BigDecimal::from(LAMPORTS_PER_SOL)
-}
+pub fn lamports_to_sol(lamports: u64) -> BigDecimal { BigDecimal::from(lamports) / BigDecimal::from(LAMPORTS_PER_SOL) }
 
 pub fn sol_to_lamports(sol: &BigDecimal) -> Result<u64, MmError<NumConversError>> {
     let maybe_lamports = (sol * BigDecimal::from(LAMPORTS_PER_SOL)).to_u64();

@@ -63,9 +63,7 @@ impl UpgradeInfo for ProtocolConfig {
     type Info = Cow<'static, [u8]>;
     type InfoIter = iter::Once<Self::Info>;
 
-    fn protocol_info(&self) -> Self::InfoIter {
-        iter::once(self.protocol_id.clone())
-    }
+    fn protocol_info(&self) -> Self::InfoIter { iter::once(self.protocol_id.clone()) }
 }
 
 type PinBoxFut<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
@@ -323,15 +321,11 @@ impl Decoder for GossipsubCodec {
 pub struct MessageId(pub String);
 
 impl std::fmt::Display for MessageId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
 }
 
 impl From<MessageId> for String {
-    fn from(mid: MessageId) -> Self {
-        mid.0
-    }
+    fn from(mid: MessageId) -> Self { mid.0 }
 }
 
 /// A message received by the gossipsub system.

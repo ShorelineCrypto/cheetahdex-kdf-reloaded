@@ -219,7 +219,10 @@ impl<E: NotMmError> MmError<E> {
     #[track_caller]
     pub fn new_with_trace(etype: E, mut trace: MmErrorTrace) -> MmError<E> {
         trace.trace.push(TraceLocation::from(Location::caller()));
-        MmError { etype, trace: trace.trace }
+        MmError {
+            etype,
+            trace: trace.trace,
+        }
     }
 
     /// Decompose into the inner error and its trace; the inverse of
@@ -235,7 +238,10 @@ impl<E: NotMmError> MmError<E> {
         F: FnOnce(E) -> MapE,
     {
         self.trace.push(TraceLocation::from(Location::caller()));
-        MmError { etype: f(self.etype), trace: self.trace }
+        MmError {
+            etype: f(self.etype),
+            trace: self.trace,
+        }
     }
 
     /// Shorthand for `Err(MmError::new(etype))`.
@@ -434,7 +440,9 @@ mod tests {
     #[allow(dead_code)]
     enum ForwardedErrorWithBox {
         #[display(fmt = "Not sufficient balance. Top up your balance by {}", missing)]
-        NotSufficientBalance { missing: u64 },
+        NotSufficientBalance {
+            missing: u64,
+        },
         Box(Box<dyn std::error::Error>),
     }
 

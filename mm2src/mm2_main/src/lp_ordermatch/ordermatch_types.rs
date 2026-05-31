@@ -1,8 +1,6 @@
 use super::*;
 
-pub(crate) fn get_true() -> bool {
-    true
-}
+pub(crate) fn get_true() -> bool { true }
 
 /// Result of match_order_and_request function
 #[derive(Debug, PartialEq)]
@@ -133,13 +131,9 @@ impl From<TakerOrder> for new_protocol::OrdermatchMessage {
 }
 
 impl TakerRequest {
-    pub(crate) fn get_base_amount(&self) -> &MmNumber {
-        &self.base_amount
-    }
+    pub(crate) fn get_base_amount(&self) -> &MmNumber { &self.base_amount }
 
-    pub(crate) fn get_rel_amount(&self) -> &MmNumber {
-        &self.rel_amount
-    }
+    pub(crate) fn get_rel_amount(&self) -> &MmNumber { &self.rel_amount }
 }
 
 pub struct TakerOrderBuilder<'a> {
@@ -471,9 +465,7 @@ pub(crate) enum MatchReservedResult {
 }
 
 impl TakerOrder {
-    pub(crate) fn is_cancellable(&self) -> bool {
-        self.matches.is_empty()
-    }
+    pub(crate) fn is_cancellable(&self) -> bool { self.matches.is_empty() }
 
     pub(crate) fn match_reserved(&self, reserved: &MakerReserved) -> MatchReservedResult {
         match &self.request.match_by {
@@ -548,9 +540,7 @@ impl TakerOrder {
         orderbook_topic_from_base_rel(self.base_orderbook_ticker(), self.rel_orderbook_ticker())
     }
 
-    pub(crate) fn p2p_keypair(&self) -> Option<&KeyPair> {
-        self.p2p_privkey.as_ref().map(|key| key.key_pair())
-    }
+    pub(crate) fn p2p_keypair(&self) -> Option<&KeyPair> { self.p2p_privkey.as_ref().map(|key| key.key_pair()) }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -888,14 +878,10 @@ impl<'a> MakerOrderBuilder<'a> {
 }
 
 #[allow(dead_code)]
-pub(crate) fn zero_rat() -> BigRational {
-    BigRational::zero()
-}
+pub(crate) fn zero_rat() -> BigRational { BigRational::zero() }
 
 impl MakerOrder {
-    pub(crate) fn available_amount(&self) -> MmNumber {
-        &self.max_base_vol - &self.reserved_amount()
-    }
+    pub(crate) fn available_amount(&self) -> MmNumber { &self.max_base_vol - &self.reserved_amount() }
 
     pub(crate) fn reserved_amount(&self) -> MmNumber {
         self.matches.iter().fold(
@@ -904,9 +890,7 @@ impl MakerOrder {
         )
     }
 
-    pub(crate) fn is_cancellable(&self) -> bool {
-        !self.has_ongoing_matches()
-    }
+    pub(crate) fn is_cancellable(&self) -> bool { !self.has_ongoing_matches() }
 
     pub(crate) fn has_ongoing_matches(&self) -> bool {
         for (_, order_match) in self.matches.iter() {
@@ -985,25 +969,17 @@ impl MakerOrder {
         self.updated_at = Some(now_ms());
     }
 
-    pub(crate) fn base_orderbook_ticker(&self) -> &str {
-        self.base_orderbook_ticker.as_deref().unwrap_or(&self.base)
-    }
+    pub(crate) fn base_orderbook_ticker(&self) -> &str { self.base_orderbook_ticker.as_deref().unwrap_or(&self.base) }
 
-    pub(crate) fn rel_orderbook_ticker(&self) -> &str {
-        self.rel_orderbook_ticker.as_deref().unwrap_or(&self.rel)
-    }
+    pub(crate) fn rel_orderbook_ticker(&self) -> &str { self.rel_orderbook_ticker.as_deref().unwrap_or(&self.rel) }
 
     pub(crate) fn orderbook_topic(&self) -> String {
         orderbook_topic_from_base_rel(self.base_orderbook_ticker(), self.rel_orderbook_ticker())
     }
 
-    pub(crate) fn was_updated(&self) -> bool {
-        self.updated_at != Some(self.created_at)
-    }
+    pub(crate) fn was_updated(&self) -> bool { self.updated_at != Some(self.created_at) }
 
-    pub(crate) fn p2p_keypair(&self) -> Option<&KeyPair> {
-        self.p2p_privkey.as_ref().map(|key| key.key_pair())
-    }
+    pub(crate) fn p2p_keypair(&self) -> Option<&KeyPair> { self.p2p_privkey.as_ref().map(|key| key.key_pair()) }
 }
 
 impl From<TakerOrder> for MakerOrder {
@@ -1111,17 +1087,11 @@ pub struct MakerReserved {
 }
 
 impl MakerReserved {
-    pub(crate) fn get_base_amount(&self) -> &MmNumber {
-        &self.base_amount
-    }
+    pub(crate) fn get_base_amount(&self) -> &MmNumber { &self.base_amount }
 
-    pub(crate) fn get_rel_amount(&self) -> &MmNumber {
-        &self.rel_amount
-    }
+    pub(crate) fn get_rel_amount(&self) -> &MmNumber { &self.rel_amount }
 
-    pub(crate) fn price(&self) -> MmNumber {
-        &self.rel_amount / &self.base_amount
-    }
+    pub(crate) fn price(&self) -> MmNumber { &self.rel_amount / &self.base_amount }
 }
 
 impl MakerReserved {

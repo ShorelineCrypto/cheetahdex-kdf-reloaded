@@ -18,9 +18,8 @@ use crate::bytes::Bytes;
 use crate::hash::{H256, H512};
 use crate::{Builder, Script};
 use blake2b_simd::Params as Blake2b;
-use chain::{
-    JoinSplit, OutPoint, ShieldedOutput, ShieldedSpend, Transaction, TransactionInput, TransactionOutput, TxHashAlgo,
-};
+use chain::{JoinSplit, OutPoint, ShieldedOutput, ShieldedSpend, Transaction, TransactionInput, TransactionOutput,
+            TxHashAlgo};
 use crypto::{dhash256, sha256};
 use keys::KeyPair;
 use serde::Deserialize;
@@ -58,9 +57,7 @@ pub enum SighashBase {
 }
 
 impl From<SighashBase> for u32 {
-    fn from(b: SighashBase) -> u32 {
-        b as u32
-    }
+    fn from(b: SighashBase) -> u32 { b as u32 }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -609,10 +606,8 @@ fn blake2b_personal(input: &[u8], personal: &[u8]) -> H256 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        blake2b_personal, Sighash, SighashBase, SignatureVersion, SignerHashAlgo, TransactionInputSigner,
-        UnsignedTransactionInput,
-    };
+    use super::{blake2b_personal, Sighash, SighashBase, SignatureVersion, SignerHashAlgo, TransactionInputSigner,
+                UnsignedTransactionInput};
     use crate::bytes::Bytes;
     use crate::hash::{H160, H256};
     use crate::script::Script;

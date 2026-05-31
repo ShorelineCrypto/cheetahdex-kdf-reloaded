@@ -9,15 +9,11 @@ use std::str::FromStr;
 pub struct InvoiceForRPC(Invoice);
 
 impl From<Invoice> for InvoiceForRPC {
-    fn from(i: Invoice) -> Self {
-        InvoiceForRPC(i)
-    }
+    fn from(i: Invoice) -> Self { InvoiceForRPC(i) }
 }
 
 impl From<InvoiceForRPC> for Invoice {
-    fn from(i: InvoiceForRPC) -> Self {
-        i.0
-    }
+    fn from(i: InvoiceForRPC) -> Self { i.0 }
 }
 
 impl Serialize for InvoiceForRPC {
@@ -70,9 +66,7 @@ impl<'de> de::Deserialize<'de> for NodeAddress {
         impl<'de> de::Visitor<'de> for NodeAddressVisitor {
             type Value = NodeAddress;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "pubkey@host:port")
-            }
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result { write!(formatter, "pubkey@host:port") }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 let mut pubkey_and_addr = v.split('@');
@@ -111,9 +105,7 @@ impl<'de> de::Deserialize<'de> for NodeAddress {
 pub struct PublicKeyForRPC(pub PublicKey);
 
 impl From<PublicKeyForRPC> for PublicKey {
-    fn from(p: PublicKeyForRPC) -> Self {
-        p.0
-    }
+    fn from(p: PublicKeyForRPC) -> Self { p.0 }
 }
 
 impl Serialize for PublicKeyForRPC {
@@ -129,9 +121,7 @@ impl<'de> de::Deserialize<'de> for PublicKeyForRPC {
         impl<'de> de::Visitor<'de> for PublicKeyForRPCVisitor {
             type Value = PublicKeyForRPC;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "a public key")
-            }
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result { write!(formatter, "a public key") }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 let pubkey = PublicKey::from_str(v).map_err(|e| {

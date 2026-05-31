@@ -26,9 +26,7 @@ pub enum EncodeBodyError {
 }
 
 impl From<prost::EncodeError> for EncodeBodyError {
-    fn from(err: prost::EncodeError) -> Self {
-        EncodeBodyError::Encode(err)
-    }
+    fn from(err: prost::EncodeError) -> Self { EncodeBodyError::Encode(err) }
 }
 
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -68,9 +66,7 @@ pub enum DecodeBodyError {
 }
 
 impl From<prost::DecodeError> for DecodeBodyError {
-    fn from(err: DecodeError) -> Self {
-        DecodeBodyError::DecodeError(err)
-    }
+    fn from(err: DecodeError) -> Self { DecodeBodyError::DecodeError(err) }
 }
 
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -104,22 +100,16 @@ pub enum PostGrpcWebErr {
 }
 
 impl From<EncodeBodyError> for PostGrpcWebErr {
-    fn from(err: EncodeBodyError) -> Self {
-        PostGrpcWebErr::EncodeBody(format!("{:?}", err))
-    }
+    fn from(err: EncodeBodyError) -> Self { PostGrpcWebErr::EncodeBody(format!("{:?}", err)) }
 }
 
 impl From<DecodeBodyError> for PostGrpcWebErr {
-    fn from(err: DecodeBodyError) -> Self {
-        PostGrpcWebErr::DecodeBody(format!("{:?}", err))
-    }
+    fn from(err: DecodeBodyError) -> Self { PostGrpcWebErr::DecodeBody(format!("{:?}", err)) }
 }
 
 /// `http::Error` can appear on an HTTP request [`http::Builder::build`] building.
 impl From<http::Error> for PostGrpcWebErr {
-    fn from(err: http::Error) -> Self {
-        PostGrpcWebErr::InvalidRequest(err.to_string())
-    }
+    fn from(err: http::Error) -> Self { PostGrpcWebErr::InvalidRequest(err.to_string()) }
 }
 
 impl From<SlurpError> for PostGrpcWebErr {

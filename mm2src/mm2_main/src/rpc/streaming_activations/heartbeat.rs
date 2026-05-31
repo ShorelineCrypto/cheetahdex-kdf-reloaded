@@ -24,9 +24,7 @@ pub struct EnableHeartbeatRequest {
     pub interval_secs: u64,
 }
 
-fn default_interval() -> u64 {
-    30
-}
+fn default_interval() -> u64 { 30 }
 
 /// The heartbeat streamer itself.
 pub struct HeartbeatStreamer {
@@ -45,9 +43,7 @@ impl HeartbeatStreamer {
 impl EventStreamer for HeartbeatStreamer {
     type DataInType = mm2_event_stream::NoDataIn;
 
-    fn streamer_id(&self) -> StreamerId {
-        StreamerId::Heartbeat
-    }
+    fn streamer_id(&self) -> StreamerId { StreamerId::Heartbeat }
 
     async fn handle(
         self,

@@ -29,9 +29,7 @@ pub struct EnableStreamingResponse {
 }
 
 impl EnableStreamingResponse {
-    pub fn new() -> Self {
-        Self { active: true }
-    }
+    pub fn new() -> Self { Self { active: true } }
 }
 
 /// Errors that can occur during streaming operations.

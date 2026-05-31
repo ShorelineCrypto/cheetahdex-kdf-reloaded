@@ -1,11 +1,9 @@
-use crate::mm2::{
-    lp_ordermatch::lp_bot::simple_market_maker_bot::vwap,
-    lp_ordermatch::lp_bot::Provider,
-    lp_ordermatch::lp_bot::SimpleCoinMarketMakerCfg,
-    lp_ordermatch::lp_bot::TickerInfos,
-    lp_ordermatch::lp_bot::TickerInfosRegistry,
-    lp_swap::{MakerSavedSwap, MyRecentSwapsResponse, SavedSwap},
-};
+use crate::mm2::{lp_ordermatch::lp_bot::simple_market_maker_bot::vwap,
+                 lp_ordermatch::lp_bot::Provider,
+                 lp_ordermatch::lp_bot::SimpleCoinMarketMakerCfg,
+                 lp_ordermatch::lp_bot::TickerInfos,
+                 lp_ordermatch::lp_bot::TickerInfosRegistry,
+                 lp_swap::{MakerSavedSwap, MyRecentSwapsResponse, SavedSwap}};
 use common::{block_on, log::UnifiedLoggerBuilder, mm_number::MmNumber};
 
 use std::num::NonZeroUsize;
@@ -220,65 +218,56 @@ mod tests {
         assert_eq!(rates.base_provider, Provider::Unknown);
         assert_eq!(rates.rel_provider, Provider::Unknown);
 
-        registry.0.insert(
-            "KMD".to_string(),
-            TickerInfos {
-                ticker: "KMD".to_string(),
-                last_price: MmNumber::from("10"),
-                last_updated: "".to_string(),
-                last_updated_timestamp: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-                volume24_h: MmNumber::from("25000"),
-                price_provider: Provider::Binance,
-                volume_provider: Provider::Coinpaprika,
-                sparkline_7_d: None,
-                sparkline_provider: Default::default(),
-                change_24_h: MmNumber::default(),
-                change_24_h_provider: Default::default(),
-            },
-        );
+        registry.0.insert("KMD".to_string(), TickerInfos {
+            ticker: "KMD".to_string(),
+            last_price: MmNumber::from("10"),
+            last_updated: "".to_string(),
+            last_updated_timestamp: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            volume24_h: MmNumber::from("25000"),
+            price_provider: Provider::Binance,
+            volume_provider: Provider::Coinpaprika,
+            sparkline_7_d: None,
+            sparkline_provider: Default::default(),
+            change_24_h: MmNumber::default(),
+            change_24_h_provider: Default::default(),
+        });
 
-        registry.0.insert(
-            "LTC".to_string(),
-            TickerInfos {
-                ticker: "LTC".to_string(),
-                last_price: MmNumber::from("500.0"),
-                last_updated: "".to_string(),
-                last_updated_timestamp: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-                volume24_h: MmNumber::from("25000"),
-                price_provider: Provider::Coingecko,
-                volume_provider: Provider::Binance,
-                sparkline_7_d: None,
-                sparkline_provider: Default::default(),
-                change_24_h: MmNumber::default(),
-                change_24_h_provider: Default::default(),
-            },
-        );
+        registry.0.insert("LTC".to_string(), TickerInfos {
+            ticker: "LTC".to_string(),
+            last_price: MmNumber::from("500.0"),
+            last_updated: "".to_string(),
+            last_updated_timestamp: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            volume24_h: MmNumber::from("25000"),
+            price_provider: Provider::Coingecko,
+            volume_provider: Provider::Binance,
+            sparkline_7_d: None,
+            sparkline_provider: Default::default(),
+            change_24_h: MmNumber::default(),
+            change_24_h_provider: Default::default(),
+        });
 
-        registry.0.insert(
-            "USDT".to_string(),
-            TickerInfos {
-                ticker: "USDT".to_string(),
-                last_price: MmNumber::from("1"),
-                last_updated: "".to_string(),
-                last_updated_timestamp: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-                volume24_h: MmNumber::from("25000"),
-                price_provider: Provider::Coingecko,
-                volume_provider: Provider::Binance,
-                sparkline_7_d: None,
-                sparkline_provider: Default::default(),
-                change_24_h: MmNumber::default(),
-                change_24_h_provider: Default::default(),
-            },
-        );
+        registry.0.insert("USDT".to_string(), TickerInfos {
+            ticker: "USDT".to_string(),
+            last_price: MmNumber::from("1"),
+            last_updated: "".to_string(),
+            last_updated_timestamp: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            volume24_h: MmNumber::from("25000"),
+            price_provider: Provider::Coingecko,
+            volume_provider: Provider::Binance,
+            sparkline_7_d: None,
+            sparkline_provider: Default::default(),
+            change_24_h: MmNumber::default(),
+            change_24_h_provider: Default::default(),
+        });
 
         let rates = registry
             .get_cex_rates("KMD".to_string(), "LTC".to_string())

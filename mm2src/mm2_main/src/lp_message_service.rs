@@ -1,5 +1,4 @@
-#[path = "notification/telegram/telegram.rs"]
-pub mod telegram;
+#[path = "notification/telegram/telegram.rs"] pub mod telegram;
 
 use crate::mm2::lp_message_service::telegram::{ChatIdRegistry, TelegramError, TgClient};
 use async_trait::async_trait;
@@ -23,9 +22,7 @@ pub enum MessageError {
 }
 
 impl From<TelegramError> for MessageError {
-    fn from(e: TelegramError) -> Self {
-        MessageError::TelegramError(e)
-    }
+    fn from(e: TelegramError) -> Self { MessageError::TelegramError(e) }
 }
 
 #[async_trait]
@@ -59,14 +56,10 @@ impl MessageService {
     }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
-    pub fn nb_services(&self) -> usize {
-        self.services.len()
-    }
+    pub fn nb_services(&self) -> usize { self.services.len() }
 
     #[cfg(all(test, not(target_arch = "wasm32")))]
-    pub fn new() -> Self {
-        Default::default()
-    }
+    pub fn new() -> Self { Default::default() }
 }
 
 #[derive(Default)]

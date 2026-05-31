@@ -1,7 +1,5 @@
-use super::{
-    index_key_as_array, CollectCursorAction, CollectItemAction, CursorBoundValue, CursorError, CursorOps, CursorResult,
-    DbFilter,
-};
+use super::{index_key_as_array, CollectCursorAction, CollectItemAction, CursorBoundValue, CursorError, CursorOps,
+            CursorResult, DbFilter};
 use async_trait::async_trait;
 use common::{deserialize_from_js, serialize_to_js, stringify_js_error};
 use js_sys::Array;
@@ -82,9 +80,7 @@ impl IdbMultiKeyBoundCursor {
 
 #[async_trait(?Send)]
 impl CursorOps for IdbMultiKeyBoundCursor {
-    fn db_index(&self) -> &IdbIndex {
-        &self.db_index
-    }
+    fn db_index(&self) -> &IdbIndex { &self.db_index }
 
     fn key_range(&self) -> CursorResult<Option<IdbKeyRange>> {
         let lower = Array::new();

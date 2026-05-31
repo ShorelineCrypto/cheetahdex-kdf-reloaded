@@ -3,8 +3,7 @@
 #![test_runner(docker_tests_runner)]
 #![recursion_limit = "512"]
 
-#[cfg(test)]
-use docker_tests::docker_tests_runner;
+#[cfg(test)] use docker_tests::docker_tests_runner;
 
 #[cfg(test)]
 #[macro_use]
@@ -33,16 +32,13 @@ extern crate serialization_derive;
 #[cfg(test)]
 #[macro_use]
 extern crate ser_error_derive;
-#[cfg(test)]
-extern crate test;
+#[cfg(test)] extern crate test;
 
 #[cfg(test)]
 #[path = "mm2.rs"]
 pub mod mm2;
 
-fn main() {
-    unimplemented!()
-}
+fn main() { unimplemented!() }
 
 /// rustfmt cannot resolve the module path within docker_tests.
 /// Specify the path manually outside the docker_tests.
@@ -105,7 +101,6 @@ mod docker_tests {
 
     use docker_tests_common::*;
 
-    use kdf_crypto::ChecksumType;
     use chain::{OutPoint, TransactionOutput};
     use coins::eth::{eth_coin_from_conf_and_request, EthCoin};
     use coins::utxo::bch::{bch_coin_from_conf_and_params, BchActivationRequest, BchCoin};
@@ -115,14 +110,13 @@ mod docker_tests {
     use coins::utxo::utxo_common::send_outputs_from_my_address;
     use coins::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
     use coins::utxo::{dhash160, GetUtxoListOps, UtxoActivationParams, UtxoCommonOps};
-    use coins::{
-        CoinProtocol, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, Transaction, TransactionEnum,
-        ValidatePaymentInput, WithdrawRequest,
-    };
+    use coins::{CoinProtocol, FoundSwapTxSpend, MarketCoinOps, MmCoin, SwapOps, Transaction, TransactionEnum,
+                ValidatePaymentInput, WithdrawRequest};
     use common::mm_number::{BigDecimal, MmNumber};
     use common::{block_on, now_ms};
     use crypto::privkey::{key_pair_from_secret, key_pair_from_seed};
     use futures01::Future;
+    use kdf_crypto::ChecksumType;
     use keys::{Address, KeyPair, NetworkPrefix as CashAddrPrefix, Private};
     use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
     use mm2_test_helpers::for_tests::{check_my_swap_status_amounts, enable_electrum};
@@ -237,9 +231,7 @@ mod docker_tests {
     }
 
     impl CoinDockerOps for UtxoAssetDockerOps {
-        fn rpc_client(&self) -> &UtxoRpcClientEnum {
-            &self.coin.as_ref().rpc_client
-        }
+        fn rpc_client(&self) -> &UtxoRpcClientEnum { &self.coin.as_ref().rpc_client }
     }
 
     impl UtxoAssetDockerOps {
@@ -396,9 +388,7 @@ mod docker_tests {
     }
 
     impl CoinDockerOps for BchDockerOps {
-        fn rpc_client(&self) -> &UtxoRpcClientEnum {
-            &self.coin.as_ref().rpc_client
-        }
+        fn rpc_client(&self) -> &UtxoRpcClientEnum { &self.coin.as_ref().rpc_client }
     }
 
     /// Generate random privkey, create a UTXO coin and fill it's address with the specified balance.
@@ -2446,16 +2436,11 @@ mod docker_tests {
 
         log!([block_on(enable_native(&mm_alice, "MYCOIN1", &[]))]);
         log!([block_on(enable_native(&mm_alice, "MYCOIN", &[]))]);
-        log!([block_on(enable_electrum(
-            &mm_alice,
-            "KMD",
-            false,
-            &[
-                "electrum1.cipig.net:10001",
-                "electrum2.cipig.net:10001",
-                "electrum3.cipig.net:10001"
-            ]
-        ))]);
+        log!([block_on(enable_electrum(&mm_alice, "KMD", false, &[
+            "electrum1.cipig.net:10001",
+            "electrum2.cipig.net:10001",
+            "electrum3.cipig.net:10001"
+        ]))]);
         let rc = block_on(mm_alice.rpc(&json! ({
             "userpass": mm_alice.userpass,
             "method": "max_taker_vol",

@@ -3,8 +3,7 @@
 //! Wire format mirrors the previous parity-derived implementation byte-for-byte;
 //! the implementation is original, GPL-2.0-only.
 
-#[macro_use]
-extern crate serialization_derive;
+#[macro_use] extern crate serialization_derive;
 
 mod block;
 mod constants_;
@@ -26,8 +25,7 @@ pub use primitives::{bytes, compact, hash, U256};
 pub use raw_header::{RawBlockHeader, RawHeaderError};
 pub use read_hash::{HashedData, ReadAndHash};
 pub use repr::RepresentH256;
-pub use transaction::{
-    JoinSplit, OutPoint, ShieldedOutput, ShieldedSpend, Transaction, TransactionInput, TransactionOutput, TxHashAlgo,
-};
+pub use transaction::{JoinSplit, OutPoint, ShieldedOutput, ShieldedSpend, Transaction, TransactionInput,
+                      TransactionOutput, TxHashAlgo};
 
 pub type ShortTransactionId = hash::H48;

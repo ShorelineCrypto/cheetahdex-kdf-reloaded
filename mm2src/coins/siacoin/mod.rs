@@ -18,22 +18,19 @@
 
 // ─── Imports (pub(crate) so child modules inherit via `use super::*`) ───────
 
-pub(crate) use super::{
-    BalanceError, CoinBalance, CoinsContext, HistorySyncState, MarketCoinOps, MmCoin, RawTransactionError,
-    RawTransactionFut, RawTransactionRequest, RawTransactionResult, SignRawTransactionRequest, SignatureError, SwapOps,
-    TradeFee, TransactionDetails, TransactionEnum, TransactionErr, TransactionFut, TransactionType,
-    UnexpectedDerivationMethod, VerificationError,
-};
-pub(crate) use crate::{
-    BalanceFut, CanRefundHtlc, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr,
-    PrivKeyBuildPolicy, PrivKeyPolicy, RawTransactionRes, SignatureResult, TradePreimageFut, TradePreimageResult,
-    TradePreimageValue, Transaction, TxFeeDetails, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
-    VerificationResult, WatcherOps, WithdrawFut, WithdrawRequest,
-};
+pub(crate) use super::{BalanceError, CoinBalance, CoinsContext, HistorySyncState, MarketCoinOps, MmCoin,
+                       RawTransactionError, RawTransactionFut, RawTransactionRequest, RawTransactionResult,
+                       SignRawTransactionRequest, SignatureError, SwapOps, TradeFee, TransactionDetails,
+                       TransactionEnum, TransactionErr, TransactionFut, TransactionType, UnexpectedDerivationMethod,
+                       VerificationError};
+pub(crate) use crate::{BalanceFut, CanRefundHtlc, DexFee, FeeApproxStage, FoundSwapTxSpend,
+                       NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, PrivKeyPolicy, RawTransactionRes,
+                       SignatureResult, TradePreimageFut, TradePreimageResult, TradePreimageValue, Transaction,
+                       TxFeeDetails, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult,
+                       WatcherOps, WithdrawFut, WithdrawRequest};
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use bigdecimal::BigDecimal;
-pub(crate) use kdf_crypto::sha256;
 pub(crate) use common::executor::Timer;
 pub(crate) use common::log::{debug, info};
 pub(crate) use common::mm_number::MmNumber;
@@ -44,6 +41,7 @@ pub(crate) use futures::compat::Future01CompatExt;
 pub(crate) use futures::{FutureExt, TryFutureExt};
 pub(crate) use futures01::Future;
 pub(crate) use hex;
+pub(crate) use kdf_crypto::sha256;
 pub(crate) use keys::KeyPair;
 pub(crate) use mm2_core::mm_ctx::MmArc;
 pub(crate) use mm2_err_handle::prelude::*;
@@ -64,18 +62,15 @@ pub(crate) use uuid::Uuid;
 
 // expose all of sia-rust so mm2_main can use it via coins::siacoin::sia_rust
 pub use sia_rust;
-pub use sia_rust::transport::client::{
-    error as client_error, ApiClient as SiaApiClient, ApiClientHelpers, Client as SiaClient,
-};
-pub use sia_rust::transport::endpoints::{
-    AddressesEventsRequest, ConsensusTipRequest, GetAddressUtxosRequest, GetEventRequest, TxpoolBroadcastRequest,
-    TxpoolTransactionsRequest, TxpoolTransactionsResponse,
-};
-pub use sia_rust::types::{
-    Address, Currency, Event, EventDataWrapper, EventPayout, EventType, Hash256, Hash256Error, Keypair as SiaKeypair,
-    KeypairError, Preimage, PreimageError, PublicKey, PublicKeyError, SiacoinElement, SiacoinOutput, SiacoinOutputId,
-    SpendPolicy, TransactionId, V1Transaction, V2Transaction,
-};
+pub use sia_rust::transport::client::{error as client_error, ApiClient as SiaApiClient, ApiClientHelpers,
+                                      Client as SiaClient};
+pub use sia_rust::transport::endpoints::{AddressesEventsRequest, ConsensusTipRequest, GetAddressUtxosRequest,
+                                         GetEventRequest, TxpoolBroadcastRequest, TxpoolTransactionsRequest,
+                                         TxpoolTransactionsResponse};
+pub use sia_rust::types::{Address, Currency, Event, EventDataWrapper, EventPayout, EventType, Hash256, Hash256Error,
+                          Keypair as SiaKeypair, KeypairError, Preimage, PreimageError, PublicKey, PublicKeyError,
+                          SiacoinElement, SiacoinOutput, SiacoinOutputId, SpendPolicy, TransactionId, V1Transaction,
+                          V2Transaction};
 pub use sia_rust::utils::{V2TransactionBuilder, V2TransactionBuilderError};
 
 // ─── Existing sub-modules ───────────────────────────────────────────────────

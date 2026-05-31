@@ -12,10 +12,10 @@ use crate::utxo::{sat_from_big_decimal, UtxoAddressFormat};
 use crate::z_coin::{ARRRConsensusParams, SendOutputsErr, ZOutput, DEX_FEE_OVK};
 use crate::{NumConversError, PrivKeyNotAllowed, TransactionEnum};
 use bigdecimal::BigDecimal;
-use kdf_crypto::dhash160;
 use chain::Transaction as UtxoTx;
 use derive_more::Display;
 use futures::compat::Future01CompatExt;
+use kdf_crypto::dhash160;
 use keys::{Address, Public};
 use mm2_err_handle::prelude::*;
 use script::{Builder as ScriptBuilder, Opcode, Script};
@@ -104,21 +104,15 @@ pub enum ZP2SHSpendError {
 }
 
 impl From<ZTxBuilderError> for ZP2SHSpendError {
-    fn from(tx_builder: ZTxBuilderError) -> ZP2SHSpendError {
-        ZP2SHSpendError::ZTxBuilderError(tx_builder)
-    }
+    fn from(tx_builder: ZTxBuilderError) -> ZP2SHSpendError { ZP2SHSpendError::ZTxBuilderError(tx_builder) }
 }
 
 impl From<PrivKeyNotAllowed> for ZP2SHSpendError {
-    fn from(err: PrivKeyNotAllowed) -> Self {
-        ZP2SHSpendError::PrivKeyNotAllowed(err)
-    }
+    fn from(err: PrivKeyNotAllowed) -> Self { ZP2SHSpendError::PrivKeyNotAllowed(err) }
 }
 
 impl From<UtxoRpcError> for ZP2SHSpendError {
-    fn from(rpc: UtxoRpcError) -> ZP2SHSpendError {
-        ZP2SHSpendError::Rpc(rpc)
-    }
+    fn from(rpc: UtxoRpcError) -> ZP2SHSpendError { ZP2SHSpendError::Rpc(rpc) }
 }
 
 impl ZP2SHSpendError {

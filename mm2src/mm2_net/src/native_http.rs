@@ -6,9 +6,7 @@ use hyper::Body;
 use mm2_err_handle::prelude::*;
 
 impl From<Canceled> for SlurpError {
-    fn from(_: Canceled) -> Self {
-        SlurpError::Internal("Spawned Slurp future has been canceled".to_owned())
-    }
+    fn from(_: Canceled) -> Self { SlurpError::Internal("Spawned Slurp future has been canceled".to_owned()) }
 }
 
 impl SlurpError {
@@ -28,9 +26,7 @@ impl SlurpError {
 
 /// `http::Error` can appear on an HTTP request [`http::Builder::build`] building.
 impl From<http::Error> for SlurpError {
-    fn from(e: http::Error) -> Self {
-        SlurpError::InvalidRequest(e.to_string())
-    }
+    fn from(e: http::Error) -> Self { SlurpError::InvalidRequest(e.to_string()) }
 }
 
 /// Executes a Hyper request, returning the response status, headers and body.

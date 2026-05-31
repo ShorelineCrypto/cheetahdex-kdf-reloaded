@@ -28,13 +28,11 @@ use rpc::v1::types::Bytes as BytesJson;
 
 use common::now_ms;
 
-use crate::siacoin::{
-    hastings_to_siacoin, siacoin_to_hastings, Address, ApiClientHelpers, Currency, SiaCoin, SiaFeeDetails,
-    SiaFeePolicy, SiaKeypair as Keypair, SiacoinElement, SiacoinOutput, SpendPolicy, V2TransactionBuilder,
-};
-use crate::{
-    MarketCoinOps, PrivKeyPolicy, TransactionDetails, TransactionType, WithdrawError, WithdrawRequest, WithdrawResult,
-};
+use crate::siacoin::{hastings_to_siacoin, siacoin_to_hastings, Address, ApiClientHelpers, Currency, SiaCoin,
+                     SiaFeeDetails, SiaFeePolicy, SiaKeypair as Keypair, SiacoinElement, SiacoinOutput, SpendPolicy,
+                     V2TransactionBuilder};
+use crate::{MarketCoinOps, PrivKeyPolicy, TransactionDetails, TransactionType, WithdrawError, WithdrawRequest,
+            WithdrawResult};
 
 /// Flat miner fee applied to every withdraw transaction (10 SC, in hastings).
 ///
@@ -146,8 +144,8 @@ impl<'a> SiaWithdrawBuilder<'a> {
         }
 
         // Specific-amount mode: take only what's needed plus fee, return change.
-        let recipient_amount = siacoin_to_hastings(self.req.amount.clone())
-            .map_err(|e| WithdrawError::InternalError(e.to_string()))?;
+        let recipient_amount =
+            siacoin_to_hastings(self.req.amount.clone()).map_err(|e| WithdrawError::InternalError(e.to_string()))?;
         let target = recipient_amount + fee;
         let inputs = self.pick_inputs_largest_first(available, target.into())?;
         let input_sum: Currency = inputs.iter().map(|o| o.siacoin_output.value).sum();

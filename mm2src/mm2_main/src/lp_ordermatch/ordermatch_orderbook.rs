@@ -503,9 +503,7 @@ pub enum OrdermatchRequest {
 pub(crate) struct TryFromBytesError(String);
 
 impl From<String> for TryFromBytesError {
-    fn from(string: String) -> Self {
-        TryFromBytesError(string)
-    }
+    fn from(string: String) -> Self { TryFromBytesError(string) }
 }
 
 pub(crate) trait TryFromBytes {
@@ -703,15 +701,11 @@ pub(crate) enum TrieDiffHistoryError {
 }
 
 impl std::fmt::Display for TrieDiffHistoryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "({:?})", self)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "({:?})", self) }
 }
 
 impl From<TryFromBytesError> for TrieDiffHistoryError {
-    fn from(error: TryFromBytesError) -> TrieDiffHistoryError {
-        TrieDiffHistoryError::TryFromBytesError(error)
-    }
+    fn from(error: TryFromBytesError) -> TrieDiffHistoryError { TrieDiffHistoryError::TryFromBytesError(error) }
 }
 
 impl From<Box<trie_db::TrieError<H64, sp_trie::Error>>> for TrieDiffHistoryError {
@@ -828,13 +822,10 @@ pub(crate) fn process_sync_pubkey_orderbook_state(
         .map(|(pair, trie)| {
             let new_trie = trie.map_to(|uuid, order| match order {
                 Some(o) => {
-                    protocol_infos.insert(
-                        o.uuid,
-                        BaseRelProtocolInfo {
-                            base: o.base_protocol_info.clone(),
-                            rel: o.rel_protocol_info.clone(),
-                        },
-                    );
+                    protocol_infos.insert(o.uuid, BaseRelProtocolInfo {
+                        base: o.base_protocol_info.clone(),
+                        rel: o.rel_protocol_info.clone(),
+                    });
                     if let Some(info) = o.conf_settings {
                         conf_infos.insert(o.uuid, info);
                     }
@@ -869,9 +860,7 @@ pub(crate) fn orderbook_topic_from_base_rel(base: &str, rel: &str) -> String {
     pub_sub_topic(ORDERBOOK_PREFIX, &alb_ordered_pair(base, rel))
 }
 
-pub(crate) fn orderbook_topic_from_ordered_pair(pair: &str) -> String {
-    pub_sub_topic(ORDERBOOK_PREFIX, pair)
-}
+pub(crate) fn orderbook_topic_from_ordered_pair(pair: &str) -> String { pub_sub_topic(ORDERBOOK_PREFIX, pair) }
 
 #[test]
 pub(crate) fn test_alb_ordered_pair() {
@@ -987,23 +976,15 @@ impl<Key, Value> TrieDiffHistory<Key, Value> {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn remove_key(&mut self, key: H64) {
-        self.inner.remove(key);
-    }
+    pub(crate) fn remove_key(&mut self, key: H64) { self.inner.remove(key); }
 
     #[allow(dead_code)]
-    pub(crate) fn contains_key(&self, key: &H64) -> bool {
-        self.inner.contains_key(key)
-    }
+    pub(crate) fn contains_key(&self, key: &H64) -> bool { self.inner.contains_key(key) }
 
-    pub(crate) fn get(&self, key: &H64) -> Option<&TrieDiff<Key, Value>> {
-        self.inner.get(key)
-    }
+    pub(crate) fn get(&self, key: &H64) -> Option<&TrieDiff<Key, Value>> { self.inner.get(key) }
 
     #[allow(dead_code)]
-    pub(crate) fn len(&self) -> usize {
-        self.inner.len()
-    }
+    pub(crate) fn len(&self) -> usize { self.inner.len() }
 }
 
 pub(crate) type TrieOrderHistory = TrieDiffHistory<Uuid, OrderbookItem>;
@@ -1180,13 +1161,10 @@ impl TrieStore {
 
         if prev_root != H64::default() {
             let history = pair_history_mut(&mut pubkey_state.order_pairs_trie_state_history, alb_pair);
-            history.insert_new_diff(
-                prev_root,
-                TrieDiff {
-                    delta: vec![(uuid, Some(order))],
-                    next_root: *pair_root,
-                },
-            );
+            history.insert_new_diff(prev_root, TrieDiff {
+                delta: vec![(uuid, Some(order))],
+                next_root: *pair_root,
+            });
         }
     }
 
@@ -1197,11 +1175,10 @@ impl TrieStore {
 
         pubkey_state.orders_uuids.remove(&(uuid, alb_pair.to_owned()));
 
-        *pair_state = match delta_trie_root::<Layout, _, _, _, _, _>(
-            &mut self.memory_db,
-            old_state,
-            vec![(*uuid.as_bytes(), None::<Vec<u8>>)],
-        ) {
+        *pair_state = match delta_trie_root::<Layout, _, _, _, _, _>(&mut self.memory_db, old_state, vec![(
+            *uuid.as_bytes(),
+            None::<Vec<u8>>,
+        )]) {
             Ok(root) => root,
             Err(_) => {
                 log::error!("Failed to get existing trie with root {:?}", pair_state);
@@ -1215,13 +1192,10 @@ impl TrieStore {
             .is_some()
         {
             let history = pair_history_mut(&mut pubkey_state.order_pairs_trie_state_history, alb_pair);
-            history.insert_new_diff(
-                old_state,
-                TrieDiff {
-                    delta: vec![(uuid, None)],
-                    next_root: *pair_state,
-                },
-            );
+            history.insert_new_diff(old_state, TrieDiff {
+                delta: vec![(uuid, None)],
+                next_root: *pair_state,
+            });
         }
     }
 
@@ -1328,9 +1302,7 @@ impl Default for Orderbook {
     }
 }
 
-pub(crate) fn hashed_null_node<T: TrieConfiguration>() -> TrieHash<T> {
-    <T::Codec as NodeCodecT>::hashed_null_node()
-}
+pub(crate) fn hashed_null_node<T: TrieConfiguration>() -> TrieHash<T> { <T::Codec as NodeCodecT>::hashed_null_node() }
 
 impl Orderbook {
     pub(crate) fn find_order_by_uuid_and_pubkey(&self, uuid: &Uuid, from_pubkey: &str) -> Option<OrderbookItem> {
@@ -1343,9 +1315,7 @@ impl Orderbook {
         })
     }
 
-    pub(crate) fn find_order_by_uuid(&self, uuid: &Uuid) -> Option<OrderbookItem> {
-        self.order_set.get(uuid).cloned()
-    }
+    pub(crate) fn find_order_by_uuid(&self, uuid: &Uuid) -> Option<OrderbookItem> { self.order_set.get(uuid).cloned() }
 
     /// Index-only method: updates in-memory indices and returns the trie mutations
     /// that must be applied by TrieStore. No trie/memory_db mutation happens here.
@@ -2127,9 +2097,7 @@ pub(crate) enum OrderbookAddrErr {
 }
 
 impl From<json::Error> for OrderbookAddrErr {
-    fn from(err: json::Error) -> Self {
-        OrderbookAddrErr::DeserializationError(err)
-    }
+    fn from(err: json::Error) -> Self { OrderbookAddrErr::DeserializationError(err) }
 }
 
 pub(crate) fn orderbook_address(

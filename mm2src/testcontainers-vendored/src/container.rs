@@ -22,7 +22,11 @@ where
     I: Image,
 {
     pub fn new(id: String, docker_client: &'d D, image: I) -> Self {
-        let container = Container { id, docker_client, image };
+        let container = Container {
+            id,
+            docker_client,
+            image,
+        };
         container.block_until_ready();
         container
     }
@@ -67,7 +71,10 @@ where
     I: Image,
 {
     fn drop(&mut self) {
-        let keep_container = var("KEEP_CONTAINERS").ok().and_then(|v| v.parse().ok()).unwrap_or(false);
+        let keep_container = var("KEEP_CONTAINERS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(false);
         if keep_container {
             self.stop();
         } else {

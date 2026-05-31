@@ -1,10 +1,8 @@
 //! In-memory SQLite tests for [`SqliteNftStore`].
 
 use crate::eth::EthTxFeeDetails;
-use crate::nft::model::{
-    Chain, ContractType, Nft, NftCommon, NftListFilters, NftTransfer, NftTransferCommon, NftTransfersFilters,
-    TransferStatus, UriMeta,
-};
+use crate::nft::model::{Chain, ContractType, Nft, NftCommon, NftListFilters, NftTransfer, NftTransferCommon,
+                        NftTransfersFilters, TransferStatus, UriMeta};
 use crate::nft::store::history::NftHistoryStore;
 use crate::nft::store::list::NftListStore;
 use crate::nft::store::sqlite::SqliteNftStore;

@@ -4,9 +4,7 @@ use super::*;
 #[async_trait]
 // Todo: Implement this when implementing swaps for lightning as it's is used only for swaps
 impl SwapOps for LightningCoin {
-    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
-        unimplemented!()
-    }
+    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut { unimplemented!() }
 
     fn send_maker_payment(
         &self,
@@ -134,9 +132,7 @@ impl SwapOps for LightningCoin {
         unimplemented!()
     }
 
-    fn extract_secret(&self, _secret_hash: &[u8], _spend_tx: &[u8]) -> Result<Vec<u8>, String> {
-        unimplemented!()
-    }
+    fn extract_secret(&self, _secret_hash: &[u8], _spend_tx: &[u8]) -> Result<Vec<u8>, String> { unimplemented!() }
 
     fn negotiate_swap_contract_addr(
         &self,
@@ -145,9 +141,7 @@ impl SwapOps for LightningCoin {
         unimplemented!()
     }
 
-    fn get_htlc_key_pair(&self) -> Option<KeyPair> {
-        unimplemented!()
-    }
+    fn get_htlc_key_pair(&self) -> Option<KeyPair> { unimplemented!() }
 }
 
 #[async_trait]

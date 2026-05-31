@@ -46,10 +46,13 @@ pub fn insert_new_swap(
 ) -> SqlResult<()> {
     debug!("Inserting new swap {} to the SQLite database", uuid);
     let conn = ctx.sqlite_connection();
-    conn.execute(
-        INSERT_MY_SWAP,
-        &[my_coin, other_coin, uuid, started_at, &swap_type.to_string()],
-    )
+    conn.execute(INSERT_MY_SWAP, &[
+        my_coin,
+        other_coin,
+        uuid,
+        started_at,
+        &swap_type.to_string(),
+    ])
     .map(|_| ())
 }
 
@@ -77,21 +80,15 @@ pub enum SelectRecentSwapsUuidsErr {
 }
 
 impl std::fmt::Display for SelectRecentSwapsUuidsErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{:?}", self) }
 }
 
 impl From<SqlError> for SelectRecentSwapsUuidsErr {
-    fn from(err: SqlError) -> Self {
-        SelectRecentSwapsUuidsErr::Sql(err)
-    }
+    fn from(err: SqlError) -> Self { SelectRecentSwapsUuidsErr::Sql(err) }
 }
 
 impl From<uuid::parser::ParseError> for SelectRecentSwapsUuidsErr {
-    fn from(err: uuid::parser::ParseError) -> Self {
-        SelectRecentSwapsUuidsErr::Parse(err)
-    }
+    fn from(err: uuid::parser::ParseError) -> Self { SelectRecentSwapsUuidsErr::Parse(err) }
 }
 
 /// Adds where clauses determined by MySwapsFilter

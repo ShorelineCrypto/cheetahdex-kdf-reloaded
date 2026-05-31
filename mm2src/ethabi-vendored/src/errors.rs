@@ -2,25 +2,25 @@
 #![allow(missing_docs)]
 
 use std::{num, string};
-use {serde_json, hex};
+use {hex, serde_json};
 
 error_chain! {
-	foreign_links {
-		SerdeJson(serde_json::Error);
-		ParseInt(num::ParseIntError);
-		Utf8(string::FromUtf8Error);
-		Hex(hex::FromHexError);
-	}
+    foreign_links {
+        SerdeJson(serde_json::Error);
+        ParseInt(num::ParseIntError);
+        Utf8(string::FromUtf8Error);
+        Hex(hex::FromHexError);
+    }
 
-	errors {
-		InvalidName(name: String) {
-			description("Invalid name"),
-			display("Invalid name `{}`", name),
-		}
+    errors {
+        InvalidName(name: String) {
+            description("Invalid name"),
+            display("Invalid name `{}`", name),
+        }
 
-		InvalidData {
-			description("Invalid data"),
-			display("Invalid data"),
-		}
-	}
+        InvalidData {
+            description("Invalid data"),
+            display("Invalid data"),
+        }
+    }
 }

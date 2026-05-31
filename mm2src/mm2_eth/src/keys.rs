@@ -138,8 +138,11 @@ pub fn recover_public_key(message_hash: H256, mut sig: Signature) -> MmResult<H5
 
     let recovery_id = RecoveryId::from_i32(sig[64] as i32).map_to_mm(EthKeyError::from)?;
     let recoverable = RecoverableSignature::from_compact(&sig[0..64], recovery_id).map_to_mm(EthKeyError::from)?;
-    let msg = SecpMessage::from_slice(AsRef::<[u8]>::as_ref(&message_hash)).map_to_mm(|_| EthKeyError::InvalidMessage)?;
-    let pubkey = Secp256k1::new().recover(&msg, &recoverable).map_to_mm(EthKeyError::from)?;
+    let msg =
+        SecpMessage::from_slice(AsRef::<[u8]>::as_ref(&message_hash)).map_to_mm(|_| EthKeyError::InvalidMessage)?;
+    let pubkey = Secp256k1::new()
+        .recover(&msg, &recoverable)
+        .map_to_mm(EthKeyError::from)?;
 
     let serialized = pubkey.serialize_uncompressed(); // [u8; 65] starting with 0x04
     let mut out = H520::default();
@@ -261,11 +264,7 @@ pub fn sign(secret: &Secret, message: &H256) -> Result<Signature, EthKeyError> {
 }
 
 /// Verify that the given `signature` over `message` recovers to `address`.
-pub fn verify_address(
-    address: &Address,
-    signature: &Signature,
-    message: &H256,
-) -> Result<bool, EthKeyError> {
+pub fn verify_address(address: &Address, signature: &Signature, message: &H256) -> Result<bool, EthKeyError> {
     let mut sig = signature.clone();
     if sig.0[64] >= 27 {
         sig.0[64] -= 27;
@@ -300,17 +299,22 @@ mod tests {
     #[test]
     fn keypair_address_matches_known_vector() {
         // Test vector: secret = 1, expected address = 7E5F4552091A69125d5DfCb7b8C2659029395Bdf.
-        let kp =
-            KeyPair::from_secret_slice(&hex::decode("0000000000000000000000000000000000000000000000000000000000000001").unwrap())
-                .unwrap();
-        assert_eq!(format!("{:?}", kp.address()), "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf");
+        let kp = KeyPair::from_secret_slice(
+            &hex::decode("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            format!("{:?}", kp.address()),
+            "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        );
     }
 
     #[test]
     fn sign_and_verify_round_trip() {
-        let kp =
-            KeyPair::from_secret_slice(&hex::decode("0000000000000000000000000000000000000000000000000000000000000042").unwrap())
-                .unwrap();
+        let kp = KeyPair::from_secret_slice(
+            &hex::decode("0000000000000000000000000000000000000000000000000000000000000042").unwrap(),
+        )
+        .unwrap();
         let msg = H256::from([0xAB; 32]);
         let sig = sign(kp.secret(), &msg).unwrap();
         assert_eq!(sig.len(), 65);

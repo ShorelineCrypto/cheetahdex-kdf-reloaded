@@ -38,7 +38,6 @@ pub mod utxo_withdraw;
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use bitcoin::network::constants::Network as BitcoinNetwork;
-pub use kdf_crypto::{dhash160, sha256, ChecksumType};
 pub use chain::Transaction as UtxoTx;
 use chain::{OutPoint, TransactionOutput, TxHashAlgo};
 #[cfg(not(target_arch = "wasm32"))]
@@ -46,27 +45,23 @@ use common::first_char_to_upper;
 use common::jsonrpc_client::JsonRpcError;
 use common::now_ms;
 use crypto::trezor::utxo::TrezorUtxoCoin;
-use crypto::{
-    Bip32DerPathOps, Bip32Error, Bip44Chain, Bip44DerPathError, Bip44PathToAccount, Bip44PathToCoin, ChildNumber,
-    DerivationPath, Secp256k1ExtendedPublicKey,
-};
+use crypto::{Bip32DerPathOps, Bip32Error, Bip44Chain, Bip44DerPathError, Bip44PathToAccount, Bip44PathToCoin,
+             ChildNumber, DerivationPath, Secp256k1ExtendedPublicKey};
 use derive_more::Display;
-#[cfg(not(target_arch = "wasm32"))]
-use dirs::home_dir;
+#[cfg(not(target_arch = "wasm32"))] use dirs::home_dir;
 use futures::channel::mpsc;
 use futures::compat::Future01CompatExt;
 use futures::lock::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
 use futures01::Future;
+pub use kdf_crypto::{dhash160, sha256, ChecksumType};
 use keys::bytes::Bytes;
-pub use keys::{
-    Address, AddressFormat as UtxoAddressFormat, AddressHashEnum, KeyPair, Private, Public, Secret, Type as ScriptType,
-};
+pub use keys::{Address, AddressFormat as UtxoAddressFormat, AddressHashEnum, KeyPair, Private, Public, Secret,
+               Type as ScriptType};
 use lightning_invoice::Currency as LightningCurrency;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use mm2_metrics::MetricsArc;
-#[cfg(test)]
-use mocktopus::macros::*;
+#[cfg(test)] use mocktopus::macros::*;
 use num_traits::ToPrimitive;
 use primitives::hash::{H256, H264};
 use rpc::v1::types::{Bytes as BytesJson, Transaction as RpcTransaction, H256 as H256Json};
@@ -90,25 +85,19 @@ use utxo_common::{big_decimal_from_sat, UtxoTxBuilder};
 use utxo_signer::with_key_pair::sign_tx;
 use utxo_signer::{TxProvider, TxProviderError, UtxoSignTxError, UtxoSignTxResult};
 
-use self::rpc_clients::{
-    electrum_script_hash, ElectrumClient, ElectrumRpcRequest, EstimateFeeMethod, EstimateFeeMode, NativeClient,
-    UnspentInfo, UnspentMap, UtxoRpcClientEnum, UtxoRpcError, UtxoRpcFut, UtxoRpcResult,
-};
-use super::{
-    big_decimal_from_sat_unsigned, BalanceError, BalanceFut, BalanceResult, CoinBalance, CoinsContext,
-    DerivationMethod, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, KmdRewardsDetails, MarketCoinOps, MmCoin,
-    NumConversError, NumConversResult, PrivKeyActivationPolicy, PrivKeyNotAllowed, PrivKeyPolicy, RawTransactionFut,
-    RawTransactionRequest, RawTransactionResult, RpcTransportEventHandler, RpcTransportEventHandlerShared, TradeFee,
-    TradePreimageError, TradePreimageFut, TradePreimageResult, Transaction, TransactionDetails, TransactionEnum,
-    UnexpectedDerivationMethod, WithdrawError, WithdrawRequest,
-};
+use self::rpc_clients::{electrum_script_hash, ElectrumClient, ElectrumRpcRequest, EstimateFeeMethod, EstimateFeeMode,
+                        NativeClient, UnspentInfo, UnspentMap, UtxoRpcClientEnum, UtxoRpcError, UtxoRpcFut,
+                        UtxoRpcResult};
+use super::{big_decimal_from_sat_unsigned, BalanceError, BalanceFut, BalanceResult, CoinBalance, CoinsContext,
+            DerivationMethod, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, KmdRewardsDetails, MarketCoinOps,
+            MmCoin, NumConversError, NumConversResult, PrivKeyActivationPolicy, PrivKeyNotAllowed, PrivKeyPolicy,
+            RawTransactionFut, RawTransactionRequest, RawTransactionResult, RpcTransportEventHandler,
+            RpcTransportEventHandlerShared, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult,
+            Transaction, TransactionDetails, TransactionEnum, UnexpectedDerivationMethod, WithdrawError,
+            WithdrawRequest};
 use crate::coin_balance::{EnableCoinScanPolicy, HDAddressBalanceScanner};
-use crate::hd_wallet::{
-    HDAccountOps, HDAccountsMutex, HDAddress, HDWalletCoinOps, HDWalletOps, InvalidBip44ChainError,
-};
-use crate::hd_wallet_storage::{
-    HDAccountStorageItem, HDWalletCoinStorage, HDWalletStorageError, HDWalletStorageResult,
-};
+use crate::hd_wallet::{HDAccountOps, HDAccountsMutex, HDAddress, HDWalletCoinOps, HDWalletOps, InvalidBip44ChainError};
+use crate::hd_wallet_storage::{HDAccountStorageItem, HDWalletCoinStorage, HDWalletStorageError, HDWalletStorageResult};
 use crate::utxo::tx_cache::UtxoVerboseCacheShared;
 use crate::utxo::utxo_block_header_storage::BlockHeaderStorageError;
 use crate::TransactionErr;
@@ -122,10 +111,8 @@ pub mod utxo_sql_block_header_storage;
 
 #[cfg(any(test, target_arch = "wasm32"))]
 pub mod utxo_common_tests;
-#[cfg(test)]
-pub mod utxo_tests;
-#[cfg(target_arch = "wasm32")]
-pub mod utxo_wasm_tests;
+#[cfg(test)] pub mod utxo_tests;
+#[cfg(target_arch = "wasm32")] pub mod utxo_wasm_tests;
 
 const KILO_BYTE: u64 = 1000;
 /// https://bitcoin.stackexchange.com/a/77192
@@ -169,9 +156,7 @@ fn get_special_folder_path() -> PathBuf {
 
 #[cfg(not(windows))]
 #[cfg(not(target_arch = "wasm32"))]
-fn get_special_folder_path() -> PathBuf {
-    panic!("!windows")
-}
+fn get_special_folder_path() -> PathBuf { panic!("!windows") }
 
 impl Transaction for UtxoTx {
     fn tx_hex(&self) -> Vec<u8> {
@@ -182,15 +167,11 @@ impl Transaction for UtxoTx {
         }
     }
 
-    fn tx_hash(&self) -> BytesJson {
-        self.hash().reversed().to_vec().into()
-    }
+    fn tx_hash(&self) -> BytesJson { self.hash().reversed().to_vec().into() }
 }
 
 impl From<JsonRpcError> for BalanceError {
-    fn from(e: JsonRpcError) -> Self {
-        BalanceError::Transport(e.to_string())
-    }
+    fn from(e: JsonRpcError) -> Self { BalanceError::Transport(e.to_string()) }
 }
 
 impl From<UtxoRpcError> for BalanceError {
@@ -215,9 +196,7 @@ impl From<UtxoRpcError> for WithdrawError {
 }
 
 impl From<JsonRpcError> for TradePreimageError {
-    fn from(e: JsonRpcError) -> Self {
-        TradePreimageError::Transport(e.to_string())
-    }
+    fn from(e: JsonRpcError) -> Self { TradePreimageError::Transport(e.to_string()) }
 }
 
 impl From<UtxoRpcError> for TradePreimageError {
@@ -245,15 +224,11 @@ impl From<UtxoRpcError> for TxProviderError {
 }
 
 impl From<Bip44DerPathError> for HDWalletStorageError {
-    fn from(e: Bip44DerPathError) -> Self {
-        HDWalletStorageError::ErrorDeserializing(e.to_string())
-    }
+    fn from(e: Bip44DerPathError) -> Self { HDWalletStorageError::ErrorDeserializing(e.to_string()) }
 }
 
 impl From<Bip32Error> for HDWalletStorageError {
-    fn from(e: Bip32Error) -> Self {
-        HDWalletStorageError::ErrorDeserializing(e.to_string())
-    }
+    fn from(e: Bip32Error) -> Self { HDWalletStorageError::ErrorDeserializing(e.to_string()) }
 }
 
 #[async_trait]
@@ -592,9 +567,7 @@ pub enum UnsupportedAddr {
 }
 
 impl From<UnsupportedAddr> for WithdrawError {
-    fn from(e: UnsupportedAddr) -> Self {
-        WithdrawError::InvalidAddress(e.to_string())
-    }
+    fn from(e: UnsupportedAddr) -> Self { WithdrawError::InvalidAddress(e.to_string()) }
 }
 
 #[derive(Debug)]
@@ -622,9 +595,7 @@ pub enum GetBlockHeaderError {
 }
 
 impl From<JsonRpcError> for GetBlockHeaderError {
-    fn from(err: JsonRpcError) -> Self {
-        GetBlockHeaderError::RpcError(err)
-    }
+    fn from(err: JsonRpcError) -> Self { GetBlockHeaderError::RpcError(err) }
 }
 
 impl From<UtxoRpcError> for GetBlockHeaderError {
@@ -638,21 +609,15 @@ impl From<UtxoRpcError> for GetBlockHeaderError {
 }
 
 impl From<SPVError> for GetBlockHeaderError {
-    fn from(e: SPVError) -> Self {
-        GetBlockHeaderError::SPVError(e)
-    }
+    fn from(e: SPVError) -> Self { GetBlockHeaderError::SPVError(e) }
 }
 
 impl From<serialization::Error> for GetBlockHeaderError {
-    fn from(err: serialization::Error) -> Self {
-        GetBlockHeaderError::SerializationError(err)
-    }
+    fn from(err: serialization::Error) -> Self { GetBlockHeaderError::SerializationError(err) }
 }
 
 impl From<BlockHeaderStorageError> for GetBlockHeaderError {
-    fn from(err: BlockHeaderStorageError) -> Self {
-        GetBlockHeaderError::StorageError(err)
-    }
+    fn from(err: BlockHeaderStorageError) -> Self { GetBlockHeaderError::StorageError(err) }
 }
 
 impl UtxoCoinFields {
@@ -706,9 +671,7 @@ pub enum BroadcastTxErr {
 }
 
 impl From<UtxoRpcError> for BroadcastTxErr {
-    fn from(err: UtxoRpcError) -> Self {
-        BroadcastTxErr::Rpc(err)
-    }
+    fn from(err: UtxoRpcError) -> Self { BroadcastTxErr::Rpc(err) }
 }
 
 #[async_trait]
@@ -812,9 +775,7 @@ impl MatureUnspentList {
     }
 
     #[inline]
-    pub fn only_mature(self) -> Vec<UnspentInfo> {
-        self.mature
-    }
+    pub fn only_mature(self) -> Vec<UnspentInfo> { self.mature }
 
     #[inline]
     pub fn to_coin_balance(&self, decimals: u8) -> CoinBalance {
@@ -1010,31 +971,21 @@ pub trait UtxoStandardOps {
 pub struct UtxoArc(Arc<UtxoCoinFields>);
 impl Deref for UtxoArc {
     type Target = UtxoCoinFields;
-    fn deref(&self) -> &UtxoCoinFields {
-        &*self.0
-    }
+    fn deref(&self) -> &UtxoCoinFields { &*self.0 }
 }
 
 impl From<UtxoCoinFields> for UtxoArc {
-    fn from(coin: UtxoCoinFields) -> UtxoArc {
-        UtxoArc::new(coin)
-    }
+    fn from(coin: UtxoCoinFields) -> UtxoArc { UtxoArc::new(coin) }
 }
 
 impl From<Arc<UtxoCoinFields>> for UtxoArc {
-    fn from(arc: Arc<UtxoCoinFields>) -> UtxoArc {
-        UtxoArc(arc)
-    }
+    fn from(arc: Arc<UtxoCoinFields>) -> UtxoArc { UtxoArc(arc) }
 }
 
 impl UtxoArc {
-    pub fn new(fields: UtxoCoinFields) -> UtxoArc {
-        UtxoArc(Arc::new(fields))
-    }
+    pub fn new(fields: UtxoCoinFields) -> UtxoArc { UtxoArc(Arc::new(fields)) }
 
-    pub fn with_arc(inner: Arc<UtxoCoinFields>) -> UtxoArc {
-        UtxoArc(inner)
-    }
+    pub fn with_arc(inner: Arc<UtxoCoinFields>) -> UtxoArc { UtxoArc(inner) }
 
     /// Returns weak reference to the inner UtxoCoinFields
     pub fn downgrade(&self) -> UtxoWeak {
@@ -1047,15 +998,11 @@ impl UtxoArc {
 pub struct UtxoWeak(Weak<UtxoCoinFields>);
 
 impl From<Weak<UtxoCoinFields>> for UtxoWeak {
-    fn from(weak: Weak<UtxoCoinFields>) -> Self {
-        UtxoWeak(weak)
-    }
+    fn from(weak: Weak<UtxoCoinFields>) -> Self { UtxoWeak(weak) }
 }
 
 impl UtxoWeak {
-    pub fn upgrade(&self) -> Option<UtxoArc> {
-        self.0.upgrade().map(UtxoArc::from)
-    }
+    pub fn upgrade(&self) -> Option<UtxoArc> { self.0.upgrade().map(UtxoArc::from) }
 }
 
 // We can use a shared UTXO lock for all UTXO coins at 1 time.
@@ -1099,9 +1046,7 @@ pub enum GenerateTxError {
 }
 
 impl From<JsonRpcError> for GenerateTxError {
-    fn from(rpc_err: JsonRpcError) -> Self {
-        GenerateTxError::Transport(rpc_err.to_string())
-    }
+    fn from(rpc_err: JsonRpcError) -> Self { GenerateTxError::Transport(rpc_err.to_string()) }
 }
 
 impl From<UtxoRpcError> for GenerateTxError {
@@ -1117,9 +1062,7 @@ impl From<UtxoRpcError> for GenerateTxError {
 }
 
 impl From<NumConversError> for GenerateTxError {
-    fn from(e: NumConversError) -> Self {
-        GenerateTxError::Internal(e.to_string())
-    }
+    fn from(e: NumConversError) -> Self { GenerateTxError::Internal(e.to_string()) }
 }
 
 pub enum RequestTxHistoryResult {
@@ -1230,15 +1173,11 @@ struct ElectrumProtoVerifier {
 }
 
 impl ElectrumProtoVerifier {
-    fn into_shared(self) -> RpcTransportEventHandlerShared {
-        Arc::new(self)
-    }
+    fn into_shared(self) -> RpcTransportEventHandlerShared { Arc::new(self) }
 }
 
 impl RpcTransportEventHandler for ElectrumProtoVerifier {
-    fn debug_info(&self) -> String {
-        "ElectrumProtoVerifier".into()
-    }
+    fn debug_info(&self) -> String { "ElectrumProtoVerifier".into() }
 
     fn on_outgoing_request(&self, _data: &[u8]) {}
 
@@ -1386,17 +1325,11 @@ pub struct UtxoHDWallet {
 impl HDWalletOps for UtxoHDWallet {
     type HDAccount = UtxoHDAccount;
 
-    fn coin_type(&self) -> u32 {
-        self.derivation_path.coin_type()
-    }
+    fn coin_type(&self) -> u32 { self.derivation_path.coin_type() }
 
-    fn gap_limit(&self) -> u32 {
-        self.gap_limit
-    }
+    fn gap_limit(&self) -> u32 { self.gap_limit }
 
-    fn get_accounts_mutex(&self) -> &HDAccountsMutex<Self::HDAccount> {
-        &self.accounts
-    }
+    fn get_accounts_mutex(&self) -> &HDAccountsMutex<Self::HDAccount> { &self.accounts }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1422,13 +1355,9 @@ impl HDAccountOps for UtxoHDAccount {
         }
     }
 
-    fn account_derivation_path(&self) -> DerivationPath {
-        self.account_derivation_path.to_derivation_path()
-    }
+    fn account_derivation_path(&self) -> DerivationPath { self.account_derivation_path.to_derivation_path() }
 
-    fn account_id(&self) -> u32 {
-        self.account_id
-    }
+    fn account_id(&self) -> u32 { self.account_id }
 }
 
 impl UtxoHDAccount {

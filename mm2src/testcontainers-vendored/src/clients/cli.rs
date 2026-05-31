@@ -3,12 +3,10 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Instant;
-use std::{
-    io::{BufRead, BufReader},
-    process::{Command, Stdio},
-    thread::sleep,
-    time::Duration,
-};
+use std::{io::{BufRead, BufReader},
+          process::{Command, Stdio},
+          thread::sleep,
+          time::Duration};
 
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const ZERO: Duration = Duration::from_secs(0);
@@ -53,7 +51,12 @@ impl Cli {
         for (key, value) in image.env_vars() {
             command.arg("-e").arg(format!("{}={}", key, value));
         }
-        command.arg("-d").arg("-P").args(image.args()).arg(image.descriptor()).stdout(Stdio::piped())
+        command
+            .arg("-d")
+            .arg("-P")
+            .args(image.args())
+            .arg(image.descriptor())
+            .stdout(Stdio::piped())
     }
 }
 
@@ -80,7 +83,10 @@ impl Docker for Cli {
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to execute docker command");
-        Logs { stdout: Box::new(child.stdout.unwrap()), stderr: Box::new(child.stderr.unwrap()) }
+        Logs {
+            stdout: Box::new(child.stdout.unwrap()),
+            stderr: Box::new(child.stderr.unwrap()),
+        }
     }
 
     fn ports(&self, id: &str) -> crate::Ports {
@@ -165,6 +171,7 @@ impl Ports {
     }
 
     fn parse_port(port: &str) -> u32 {
-        port.parse().unwrap_or_else(|e| panic!("Failed to parse {} as u32 because {}", port, e))
+        port.parse()
+            .unwrap_or_else(|e| panic!("Failed to parse {} as u32 because {}", port, e))
     }
 }

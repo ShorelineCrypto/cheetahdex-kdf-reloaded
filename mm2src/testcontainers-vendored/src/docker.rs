@@ -40,6 +40,9 @@ pub struct Logs {
 
 impl std::fmt::Debug for Logs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Logs").field("stdout", &"stream").field("stderr", &"stream").finish()
+        f.debug_struct("Logs")
+            .field("stdout", &"stream")
+            .field("stderr", &"stream")
+            .finish()
     }
 }

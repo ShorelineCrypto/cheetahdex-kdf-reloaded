@@ -82,9 +82,7 @@ impl MessageCache {
     }
 
     /// Get a message with `message_id`
-    pub fn get(&self, message_id: &MessageId) -> Option<&GossipsubMessage> {
-        self.msgs.get(message_id)
-    }
+    pub fn get(&self, message_id: &MessageId) -> Option<&GossipsubMessage> { self.msgs.get(message_id) }
 
     /// Get a list of GossipIds for a given topic
     pub fn get_gossip_ids(&self, topic: &TopicHash) -> Vec<MessageId> {

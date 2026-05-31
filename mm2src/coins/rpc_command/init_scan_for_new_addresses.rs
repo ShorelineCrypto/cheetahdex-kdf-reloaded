@@ -77,9 +77,7 @@ impl RpcTaskTypes for InitScanAddressesTask {
 #[async_trait]
 impl RpcTask for InitScanAddressesTask {
     #[inline]
-    fn initial_status(&self) -> Self::InProgressStatus {
-        ScanAddressesInProgressStatus::InProgress
-    }
+    fn initial_status(&self) -> Self::InProgressStatus { ScanAddressesInProgressStatus::InProgress }
 
     async fn run(self, _task_handle: &ScanAddressesTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         match self.coin {

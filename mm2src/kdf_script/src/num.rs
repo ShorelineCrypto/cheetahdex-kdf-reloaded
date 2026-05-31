@@ -14,9 +14,7 @@ macro_rules! num_from_int {
 num_from_int!(i32, i64, u8, u32, usize);
 
 impl From<bool> for Num {
-    fn from(b: bool) -> Self {
-        Num(if b { 1 } else { 0 })
-    }
+    fn from(b: bool) -> Self { Num(if b { 1 } else { 0 }) }
 }
 
 impl Num {

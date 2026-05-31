@@ -36,27 +36,19 @@ pub enum GenTxError {
 }
 
 impl From<GetUnspentWitnessErr> for GenTxError {
-    fn from(err: GetUnspentWitnessErr) -> GenTxError {
-        GenTxError::GetWitnessErr(err)
-    }
+    fn from(err: GetUnspentWitnessErr) -> GenTxError { GenTxError::GetWitnessErr(err) }
 }
 
 impl From<NumConversError> for GenTxError {
-    fn from(err: NumConversError) -> GenTxError {
-        GenTxError::NumConversion(err)
-    }
+    fn from(err: NumConversError) -> GenTxError { GenTxError::NumConversion(err) }
 }
 
 impl From<UtxoRpcError> for GenTxError {
-    fn from(err: UtxoRpcError) -> GenTxError {
-        GenTxError::Rpc(err)
-    }
+    fn from(err: UtxoRpcError) -> GenTxError { GenTxError::Rpc(err) }
 }
 
 impl From<ZTxBuilderError> for GenTxError {
-    fn from(err: ZTxBuilderError) -> GenTxError {
-        GenTxError::TxBuilderError(err)
-    }
+    fn from(err: ZTxBuilderError) -> GenTxError { GenTxError::TxBuilderError(err) }
 }
 
 impl From<GenTxError> for WithdrawError {
@@ -94,27 +86,19 @@ pub enum SendOutputsErr {
 }
 
 impl From<PrivKeyNotAllowed> for SendOutputsErr {
-    fn from(err: PrivKeyNotAllowed) -> Self {
-        SendOutputsErr::PrivKeyNotAllowed(err)
-    }
+    fn from(err: PrivKeyNotAllowed) -> Self { SendOutputsErr::PrivKeyNotAllowed(err) }
 }
 
 impl From<GenTxError> for SendOutputsErr {
-    fn from(err: GenTxError) -> SendOutputsErr {
-        SendOutputsErr::GenTxError(err)
-    }
+    fn from(err: GenTxError) -> SendOutputsErr { SendOutputsErr::GenTxError(err) }
 }
 
 impl From<NumConversError> for SendOutputsErr {
-    fn from(err: NumConversError) -> SendOutputsErr {
-        SendOutputsErr::NumConversion(err)
-    }
+    fn from(err: NumConversError) -> SendOutputsErr { SendOutputsErr::NumConversion(err) }
 }
 
 impl From<UtxoRpcError> for SendOutputsErr {
-    fn from(err: UtxoRpcError) -> SendOutputsErr {
-        SendOutputsErr::Rpc(err)
-    }
+    fn from(err: UtxoRpcError) -> SendOutputsErr { SendOutputsErr::Rpc(err) }
 }
 
 #[derive(Debug, Display)]
@@ -126,9 +110,7 @@ pub enum GetUnspentWitnessErr {
 }
 
 impl From<SqliteError> for GetUnspentWitnessErr {
-    fn from(err: SqliteError) -> GetUnspentWitnessErr {
-        GetUnspentWitnessErr::Sql(err)
-    }
+    fn from(err: SqliteError) -> GetUnspentWitnessErr { GetUnspentWitnessErr::Sql(err) }
 }
 
 #[derive(Debug, Display)]
@@ -146,25 +128,17 @@ pub enum ZCoinBuildError {
 }
 
 impl From<SqliteError> for ZCoinBuildError {
-    fn from(err: SqliteError) -> ZCoinBuildError {
-        ZCoinBuildError::SqliteError(err)
-    }
+    fn from(err: SqliteError) -> ZCoinBuildError { ZCoinBuildError::SqliteError(err) }
 }
 
 impl From<UtxoRpcError> for ZCoinBuildError {
-    fn from(err: UtxoRpcError) -> ZCoinBuildError {
-        ZCoinBuildError::Rpc(err)
-    }
+    fn from(err: UtxoRpcError) -> ZCoinBuildError { ZCoinBuildError::Rpc(err) }
 }
 
 impl From<UtxoCoinBuildError> for ZCoinBuildError {
-    fn from(err: UtxoCoinBuildError) -> Self {
-        ZCoinBuildError::UtxoBuilderError(err)
-    }
+    fn from(err: UtxoCoinBuildError) -> Self { ZCoinBuildError::UtxoBuilderError(err) }
 }
 
 impl From<std::io::Error> for ZCoinBuildError {
-    fn from(err: std::io::Error) -> ZCoinBuildError {
-        ZCoinBuildError::Io(err)
-    }
+    fn from(err: std::io::Error) -> ZCoinBuildError { ZCoinBuildError::Io(err) }
 }

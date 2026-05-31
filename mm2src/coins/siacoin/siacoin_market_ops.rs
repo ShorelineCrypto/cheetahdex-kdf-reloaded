@@ -3,9 +3,7 @@
 use super::*;
 
 impl MarketCoinOps for SiaCoin {
-    fn ticker(&self) -> &str {
-        &self.conf.ticker
-    }
+    fn ticker(&self) -> &str { &self.conf.ticker }
 
     fn my_address(&self) -> Result<String, String> {
         let key_pair = match &*self.priv_key_policy {
@@ -24,9 +22,7 @@ impl MarketCoinOps for SiaCoin {
         Ok(public_key.to_string())
     }
 
-    fn sign_message_hash(&self, _message: &str) -> Option<[u8; 32]> {
-        None
-    }
+    fn sign_message_hash(&self, _message: &str) -> Option<[u8; 32]> { None }
 
     fn sign_message(&self, _message: &str) -> SignatureResult<String> {
         MmError::err(SignatureError::InternalError(
@@ -64,13 +60,9 @@ impl MarketCoinOps for SiaCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn base_coin_balance(&self) -> BalanceFut<BigDecimal> {
-        Box::new(self.my_balance().map(|res| res.spendable))
-    }
+    fn base_coin_balance(&self) -> BalanceFut<BigDecimal> { Box::new(self.my_balance().map(|res| res.spendable)) }
 
-    fn platform_ticker(&self) -> &str {
-        self.ticker()
-    }
+    fn platform_ticker(&self) -> &str { self.ticker() }
 
     fn send_raw_tx(&self, tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
         let client = self.client.clone();
@@ -200,15 +192,9 @@ impl MarketCoinOps for SiaCoin {
         Box::new(height_fut)
     }
 
-    fn display_priv_key(&self) -> Result<String, String> {
-        Err("SiaCoin::display_priv_key: Unsupported".to_string())
-    }
+    fn display_priv_key(&self) -> Result<String, String> { Err("SiaCoin::display_priv_key: Unsupported".to_string()) }
 
-    fn min_tx_amount(&self) -> BigDecimal {
-        hastings_to_siacoin(1u64.into())
-    }
+    fn min_tx_amount(&self) -> BigDecimal { hastings_to_siacoin(1u64.into()) }
 
-    fn min_trading_vol(&self) -> MmNumber {
-        hastings_to_siacoin(1u64.into()).into()
-    }
+    fn min_trading_vol(&self) -> MmNumber { hastings_to_siacoin(1u64.into()).into() }
 }

@@ -1,8 +1,7 @@
 use crate::utxo::utxo_block_header_storage::BlockHeaderStorage;
-use crate::utxo::utxo_builder::{
-    UtxoCoinBuildError, UtxoCoinBuilder, UtxoCoinBuilderCommonOps, UtxoFieldsWithGlobalHDBuilder,
-    UtxoFieldsWithHardwareWalletBuilder, UtxoFieldsWithIguanaPrivKeyBuilder,
-};
+use crate::utxo::utxo_builder::{UtxoCoinBuildError, UtxoCoinBuilder, UtxoCoinBuilderCommonOps,
+                                UtxoFieldsWithGlobalHDBuilder, UtxoFieldsWithHardwareWalletBuilder,
+                                UtxoFieldsWithIguanaPrivKeyBuilder};
 use crate::utxo::utxo_common::{block_header_utxo_loop, merge_utxo_loop};
 use crate::utxo::{GetUtxoListOps, UtxoArc, UtxoCommonOps, UtxoWeak};
 use crate::{PrivKeyBuildPolicy, UtxoActivationParams};
@@ -54,21 +53,13 @@ impl<'a, F, T> UtxoCoinBuilderCommonOps for UtxoArcBuilder<'a, F, T>
 where
     F: Fn(UtxoArc) -> T + Send + Sync + 'static,
 {
-    fn ctx(&self) -> &MmArc {
-        self.ctx
-    }
+    fn ctx(&self) -> &MmArc { self.ctx }
 
-    fn conf(&self) -> &Json {
-        self.conf
-    }
+    fn conf(&self) -> &Json { self.conf }
 
-    fn activation_params(&self) -> &UtxoActivationParams {
-        self.activation_params
-    }
+    fn activation_params(&self) -> &UtxoActivationParams { self.activation_params }
 
-    fn ticker(&self) -> &str {
-        self.ticker
-    }
+    fn ticker(&self) -> &str { self.ticker }
 }
 
 impl<'a, F, T> UtxoFieldsWithIguanaPrivKeyBuilder for UtxoArcBuilder<'a, F, T> where
@@ -95,9 +86,7 @@ where
     type ResultCoin = T;
     type Error = UtxoCoinBuildError;
 
-    fn priv_key_policy(&self) -> PrivKeyBuildPolicy {
-        self.priv_key_policy.clone()
-    }
+    fn priv_key_policy(&self) -> PrivKeyBuildPolicy { self.priv_key_policy.clone() }
 
     async fn build(self) -> MmResult<Self::ResultCoin, Self::Error> {
         let utxo = self.build_utxo_fields().await?;

@@ -38,9 +38,7 @@ impl RawBlockHeader {
     }
 
     /// Block hash = DSHA-256 of the entire raw header bytes.
-    pub fn digest(&self) -> H256 {
-        crypto::dhash256(&self.0)
-    }
+    pub fn digest(&self) -> H256 { crypto::dhash256(&self.0) }
 
     /// Bytes 36..68 of the standard Bitcoin header layout.
     pub fn extract_merkle_root(&self) -> H256 {
@@ -56,27 +54,19 @@ impl RawBlockHeader {
         H256::from(out)
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
+    pub fn as_bytes(&self) -> &[u8] { &self.0 }
 }
 
 impl AsRef<[u8]> for RawBlockHeader {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
+    fn as_ref(&self) -> &[u8] { &self.0 }
 }
 
 impl From<BlockHeader> for RawBlockHeader {
-    fn from(header: BlockHeader) -> Self {
-        RawBlockHeader(serialize(&header).take().into())
-    }
+    fn from(header: BlockHeader) -> Self { RawBlockHeader(serialize(&header).take().into()) }
 }
 
 impl Serializable for RawBlockHeader {
-    fn serialize(&self, stream: &mut Stream) {
-        stream.append(&self.0);
-    }
+    fn serialize(&self, stream: &mut Stream) { stream.append(&self.0); }
 }
 
 impl Deserializable for RawBlockHeader {

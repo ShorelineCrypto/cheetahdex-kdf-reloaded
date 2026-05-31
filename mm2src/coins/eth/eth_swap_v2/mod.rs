@@ -18,9 +18,8 @@
 //! - [`ZERO_VALUE`] is consumed by the eth_*_swap_v2 modules and by
 //!   the NFT swap_v2 module; renaming requires updating all call sites.
 
-use crate::eth::{
-    decode_contract_call, signed_tx_from_alloy_tx, EthCoin, EthCoinType, Log, Transaction, TransactionErr,
-};
+use crate::eth::legacy_tx::{Action, SignedTransaction as SignedEthTx};
+use crate::eth::{decode_contract_call, signed_tx_from_alloy_tx, EthCoin, EthCoinType, Log, Transaction, TransactionErr};
 use crate::{FindPaymentSpendError, MarketCoinOps};
 use bigdecimal::BigDecimal;
 use common::executor::Timer;
@@ -28,7 +27,6 @@ use common::log::{error, info};
 use common::now_ms;
 use derive_more::Display;
 use ethabi::{Contract, Token};
-use crate::eth::legacy_tx::{Action, SignedTransaction as SignedEthTx};
 use ethereum_types::{Address, H256, U256};
 use futures::compat::Future01CompatExt;
 use mm2_err_handle::prelude::{MmError, MmResult};
@@ -97,9 +95,7 @@ pub(crate) enum PrepareTxDataError {
 }
 
 impl From<ethabi::Error> for PrepareTxDataError {
-    fn from(err: ethabi::Error) -> Self {
-        PrepareTxDataError::ABIError(err.to_string())
-    }
+    fn from(err: ethabi::Error) -> Self { PrepareTxDataError::ABIError(err.to_string()) }
 }
 
 // On-chain polling helpers -------------------------------------------------

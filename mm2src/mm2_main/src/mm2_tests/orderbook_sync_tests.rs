@@ -844,26 +844,16 @@ fn orderbook_extended_data() {
     .unwrap();
     let (_dump_log, _dump_dashboard) = &mm.mm_dump();
     log!({"Log path: {}", mm.log_path.display()});
-    block_on(enable_electrum(
-        &mm,
-        "RICK",
-        false,
-        &[
-            "electrum3.cipig.net:10017",
-            "electrum2.cipig.net:10017",
-            "electrum1.cipig.net:10017",
-        ],
-    ));
-    block_on(enable_electrum(
-        &mm,
-        "MORTY",
-        false,
-        &[
-            "electrum3.cipig.net:10018",
-            "electrum2.cipig.net:10018",
-            "electrum1.cipig.net:10018",
-        ],
-    ));
+    block_on(enable_electrum(&mm, "RICK", false, &[
+        "electrum3.cipig.net:10017",
+        "electrum2.cipig.net:10017",
+        "electrum1.cipig.net:10017",
+    ]));
+    block_on(enable_electrum(&mm, "MORTY", false, &[
+        "electrum3.cipig.net:10018",
+        "electrum2.cipig.net:10018",
+        "electrum1.cipig.net:10018",
+    ]));
 
     let bob_orders = &[
         // (base, rel, price, volume)
@@ -965,26 +955,16 @@ fn orderbook_should_display_base_rel_volumes() {
     .unwrap();
     let (_dump_log, _dump_dashboard) = &mm.mm_dump();
     log!({"Log path: {}", mm.log_path.display()});
-    block_on(enable_electrum(
-        &mm,
-        "RICK",
-        false,
-        &[
-            "electrum3.cipig.net:10017",
-            "electrum2.cipig.net:10017",
-            "electrum1.cipig.net:10017",
-        ],
-    ));
-    block_on(enable_electrum(
-        &mm,
-        "MORTY",
-        false,
-        &[
-            "electrum3.cipig.net:10018",
-            "electrum2.cipig.net:10018",
-            "electrum1.cipig.net:10018",
-        ],
-    ));
+    block_on(enable_electrum(&mm, "RICK", false, &[
+        "electrum3.cipig.net:10017",
+        "electrum2.cipig.net:10017",
+        "electrum1.cipig.net:10017",
+    ]));
+    block_on(enable_electrum(&mm, "MORTY", false, &[
+        "electrum3.cipig.net:10018",
+        "electrum2.cipig.net:10018",
+        "electrum1.cipig.net:10018",
+    ]));
 
     let price = BigRational::new(2.into(), 1.into());
     let volume = BigRational::new(1.into(), 1.into());
@@ -1161,26 +1141,16 @@ fn test_all_orders_per_pair_per_node_must_be_displayed_in_orderbook() {
     .unwrap();
     let (_dump_log, _dump_dashboard) = mm.mm_dump();
     log!({"Log path: {}", mm.log_path.display()});
-    block_on(enable_electrum(
-        &mm,
-        "RICK",
-        false,
-        &[
-            "electrum3.cipig.net:10017",
-            "electrum2.cipig.net:10017",
-            "electrum1.cipig.net:10017",
-        ],
-    ));
-    block_on(enable_electrum(
-        &mm,
-        "MORTY",
-        false,
-        &[
-            "electrum3.cipig.net:10018",
-            "electrum2.cipig.net:10018",
-            "electrum1.cipig.net:10018",
-        ],
-    ));
+    block_on(enable_electrum(&mm, "RICK", false, &[
+        "electrum3.cipig.net:10017",
+        "electrum2.cipig.net:10017",
+        "electrum1.cipig.net:10017",
+    ]));
+    block_on(enable_electrum(&mm, "MORTY", false, &[
+        "electrum3.cipig.net:10018",
+        "electrum2.cipig.net:10018",
+        "electrum1.cipig.net:10018",
+    ]));
 
     // set 2 orders with different prices
     let rc = block_on(mm.rpc(&json! ({

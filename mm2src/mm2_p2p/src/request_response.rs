@@ -6,10 +6,8 @@ use futures::io::{AsyncRead, AsyncWrite};
 use futures::task::{Context, Poll};
 use futures::StreamExt;
 use libp2p::core::upgrade::{read_length_prefixed, write_length_prefixed};
-use libp2p::request_response::{
-    ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec, RequestResponseConfig,
-    RequestResponseEvent, RequestResponseMessage, ResponseChannel,
-};
+use libp2p::request_response::{ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
+                               RequestResponseConfig, RequestResponseEvent, RequestResponseMessage, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters};
 use libp2p::NetworkBehaviour;
 use libp2p::PeerId;
@@ -86,9 +84,7 @@ pub struct RequestResponseBehaviour {
 }
 
 impl RequestResponseBehaviour {
-    pub fn sender(&self) -> RequestResponseSender {
-        self.tx.clone()
-    }
+    pub fn sender(&self) -> RequestResponseSender { self.tx.clone() }
 
     pub fn send_response(&mut self, ch: ResponseChannel<PeerResponse>, rs: PeerResponse) -> Result<(), PeerResponse> {
         self.inner.send_response(ch, rs)

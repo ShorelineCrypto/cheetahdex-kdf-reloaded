@@ -58,9 +58,7 @@ impl IdbSingleKeyBoundCursor {
 
 #[async_trait(?Send)]
 impl CursorOps for IdbSingleKeyBoundCursor {
-    fn db_index(&self) -> &IdbIndex {
-        &self.db_index
-    }
+    fn db_index(&self) -> &IdbIndex { &self.db_index }
 
     fn key_range(&self) -> CursorResult<Option<IdbKeyRange>> {
         let key_range = IdbKeyRange::bound(&self.lower_bound.to_js_value(), &self.upper_bound.to_js_value())

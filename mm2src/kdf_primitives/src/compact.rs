@@ -18,21 +18,15 @@ use crate::U256;
 pub struct Compact(u32);
 
 impl From<u32> for Compact {
-    fn from(u: u32) -> Self {
-        Compact(u)
-    }
+    fn from(u: u32) -> Self { Compact(u) }
 }
 
 impl From<Compact> for u32 {
-    fn from(c: Compact) -> Self {
-        c.0
-    }
+    fn from(c: Compact) -> Self { c.0 }
 }
 
 impl From<U256> for Compact {
-    fn from(u: U256) -> Self {
-        Compact::from_u256(u)
-    }
+    fn from(u: U256) -> Self { Compact::from_u256(u) }
 }
 
 impl From<Compact> for U256 {
@@ -46,14 +40,10 @@ impl From<Compact> for U256 {
 
 impl Compact {
     /// Construct from a raw `u32` `nBits` value.
-    pub fn new(u: u32) -> Self {
-        Compact(u)
-    }
+    pub fn new(u: u32) -> Self { Compact(u) }
 
     /// Maximum representable target.
-    pub fn max_value() -> Self {
-        U256::max_value().into()
-    }
+    pub fn max_value() -> Self { U256::max_value().into() }
 
     /// Decode the compact form into a `U256` target.
     ///

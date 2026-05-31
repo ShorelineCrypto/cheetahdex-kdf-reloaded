@@ -18,20 +18,16 @@
 //! coin is not enabled are reported as `NoSuchCoin` errors but the
 //! remaining chains continue to crawl.
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::lp_coinfind;
+#[cfg(not(target_arch = "wasm32"))] use crate::lp_coinfind;
 use crate::nft::context::NftCtx;
 use crate::nft::errors::{ClearNftDbError, GetNftInfoError, UpdateNftError};
-use crate::nft::model::{
-    Chain, ClearNftDbReq, Nft, NftList, NftListReq, NftMetadataReq, NftTransferList, NftTransfersReq,
-    RefreshMetadataReq, UpdateNftReq, WithdrawNftReq,
-};
+use crate::nft::model::{Chain, ClearNftDbReq, Nft, NftList, NftListReq, NftMetadataReq, NftTransferList,
+                        NftTransfersReq, RefreshMetadataReq, UpdateNftReq, WithdrawNftReq};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::nft::providers::HttpCrawlProvider;
 use crate::nft::providers::{apply_spam_protection_to_nft, apply_spam_protection_to_transfer, HttpMetadataProvider};
 use crate::nft::store::{ensure_initialised, NftHistoryStore, NftListStore};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::MmCoinEnum;
+#[cfg(not(target_arch = "wasm32"))] use crate::MmCoinEnum;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 
@@ -274,13 +270,10 @@ mod tests {
     #[tokio::test]
     async fn clear_with_no_chains_and_no_clear_all_is_invalid() {
         let ctx = ctx_with_in_memory_db().await;
-        let err = clear_nft_db(
-            ctx,
-            ClearNftDbReq {
-                chains: vec![],
-                clear_all: false,
-            },
-        )
+        let err = clear_nft_db(ctx, ClearNftDbReq {
+            chains: vec![],
+            clear_all: false,
+        })
         .await
         .expect_err("expected InvalidRequest");
         match err.into_inner() {
@@ -362,13 +355,10 @@ mod tests {
     #[tokio::test]
     async fn clear_all_succeeds_on_empty_db() {
         let ctx = ctx_with_in_memory_db().await;
-        clear_nft_db(
-            ctx,
-            ClearNftDbReq {
-                chains: vec![],
-                clear_all: true,
-            },
-        )
+        clear_nft_db(ctx, ClearNftDbReq {
+            chains: vec![],
+            clear_all: true,
+        })
         .await
         .expect("clear_all should succeed on an empty db");
     }

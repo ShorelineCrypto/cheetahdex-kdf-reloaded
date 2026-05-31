@@ -7,10 +7,9 @@
 use ethabi::Token;
 
 use super::address::TronAddress;
-use super::proto::{
-    ContractType, TaposBlockData, TransactionContract, TransactionRaw, TransferContract, TriggerSmartContract,
-    DEFAULT_EXPIRATION_SEC, TRANSFER_CONTRACT_TYPE_URL, TRIGGER_SMART_CONTRACT_TYPE_URL,
-};
+use super::proto::{ContractType, TaposBlockData, TransactionContract, TransactionRaw, TransferContract,
+                   TriggerSmartContract, DEFAULT_EXPIRATION_SEC, TRANSFER_CONTRACT_TYPE_URL,
+                   TRIGGER_SMART_CONTRACT_TYPE_URL};
 
 use prost::Message;
 
@@ -131,13 +130,9 @@ mod tests {
         }
     }
 
-    fn test_address_a() -> TronAddress {
-        TronAddress::from_hex("410000000000000000000000000000000000000001").unwrap()
-    }
+    fn test_address_a() -> TronAddress { TronAddress::from_hex("410000000000000000000000000000000000000001").unwrap() }
 
-    fn test_address_b() -> TronAddress {
-        TronAddress::from_hex("410000000000000000000000000000000000000002").unwrap()
-    }
+    fn test_address_b() -> TronAddress { TronAddress::from_hex("410000000000000000000000000000000000000002").unwrap() }
 
     #[test]
     fn test_tapos_from_block() {
@@ -150,10 +145,9 @@ mod tests {
         // ref_block_bytes = last 2 bytes of block_num big-endian
         assert_eq!(tapos.ref_block_bytes, vec![0x07, 0x08]);
         // ref_block_hash = block_id[8..16]
-        assert_eq!(
-            tapos.ref_block_hash,
-            vec![0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F]
-        );
+        assert_eq!(tapos.ref_block_hash, vec![
+            0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
+        ]);
     }
 
     #[test]

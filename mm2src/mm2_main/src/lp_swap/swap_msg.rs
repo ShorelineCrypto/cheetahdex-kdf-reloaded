@@ -34,9 +34,7 @@ impl SwapMsgStore {
 pub struct AbortOnDropHandle(AbortHandle);
 
 impl Drop for AbortOnDropHandle {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
+    fn drop(&mut self) { self.0.abort(); }
 }
 
 /// Spawns the loop that broadcasts message every `interval` seconds returning the AbortOnDropHandle
@@ -151,9 +149,7 @@ pub async fn process_msg(ctx: MmArc, topic: &str, msg: &[u8]) {
     }
 }
 
-pub fn swap_topic(uuid: &Uuid) -> String {
-    pub_sub_topic(SWAP_PREFIX, &uuid.to_string())
-}
+pub fn swap_topic(uuid: &Uuid) -> String { pub_sub_topic(SWAP_PREFIX, &uuid.to_string()) }
 
 /// Formats and returns a topic format for `txhlp`.
 ///
@@ -163,14 +159,10 @@ pub fn swap_topic(uuid: &Uuid) -> String {
 /// // Returns topic format `txhlp/BTC` as String type.
 /// ```
 #[inline(always)]
-pub fn tx_helper_topic(coin: &str) -> String {
-    pub_sub_topic(TX_HELPER_PREFIX, coin)
-}
+pub fn tx_helper_topic(coin: &str) -> String { pub_sub_topic(TX_HELPER_PREFIX, coin) }
 
 /// Returns the P2P topic for a V2 swap: `swapv2/<uuid>`.
-pub fn swap_v2_topic(uuid: &Uuid) -> String {
-    pub_sub_topic(SWAP_V2_PREFIX, &uuid.to_string())
-}
+pub fn swap_v2_topic(uuid: &Uuid) -> String { pub_sub_topic(SWAP_V2_PREFIX, &uuid.to_string()) }
 
 // ────────────────────────────────────────────────────────────────────────────
 // V2 swap P2P messaging (protobuf / prost)

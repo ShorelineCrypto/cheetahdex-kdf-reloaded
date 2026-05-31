@@ -26,9 +26,7 @@ pub enum MnemonicError {
 }
 
 impl From<KeyDerivationError> for MnemonicError {
-    fn from(e: KeyDerivationError) -> Self {
-        MnemonicError::KeyDerivationFailed(e)
-    }
+    fn from(e: KeyDerivationError) -> Self { MnemonicError::KeyDerivationFailed(e) }
 }
 
 /// Encrypted mnemonic bundle with the key derivation details needed for decryption.

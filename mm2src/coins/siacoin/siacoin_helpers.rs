@@ -59,8 +59,8 @@ impl<'a> SiaCoinBuilder<'a> {
         let net_cfg = mm2_net_config::net_config_or_panic(ctx.netid());
         let fee_pubkey_bytes = hex::decode(net_cfg.dex_fee_pubkey_ed25519())
             .map_err(|e| SiaCoinBuilderError::FeePubkeyHex(e.to_string()))?;
-        let fee_public_key = PublicKey::from_bytes(&fee_pubkey_bytes)
-            .map_err(|e| SiaCoinBuilderError::FeePubkey(e.to_string()))?;
+        let fee_public_key =
+            PublicKey::from_bytes(&fee_pubkey_bytes).map_err(|e| SiaCoinBuilderError::FeePubkey(e.to_string()))?;
         let fee_address = Address::from_public_key(&fee_public_key);
 
         Ok(SiaCoin {

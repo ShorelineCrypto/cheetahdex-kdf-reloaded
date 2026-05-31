@@ -1,9 +1,7 @@
 use super::*;
 
 impl BchCoin {
-    pub fn slp_prefix(&self) -> &CashAddrPrefix {
-        &self.slp_addr_prefix
-    }
+    pub fn slp_prefix(&self) -> &CashAddrPrefix { &self.slp_addr_prefix }
 
     pub fn slp_address(&self, address: &Address) -> Result<CashAddress, String> {
         let conf = &self.as_ref().conf;
@@ -14,9 +12,7 @@ impl BchCoin {
         )
     }
 
-    pub fn bchd_urls(&self) -> &[String] {
-        &self.bchd_urls
-    }
+    pub fn bchd_urls(&self) -> &[String] { &self.bchd_urls }
 
     pub(crate) async fn utxos_into_bch_unspents(&self, utxos: Vec<UnspentInfo>) -> UtxoRpcResult<BchUnspents> {
         let mut result = BchUnspents::default();
