@@ -32,6 +32,7 @@ mm2_core = { path = "../mm2_core" }
 mm2_metrics = { path = "../mm2_metrics" }
 mm2_err_handle = { path = "../mm2_err_handle" }
 mm2_net = { path = "../mm2_net" }
+mm2_net_config = { path = "../mm2_net_config" }
 mm2_number = { path = "../mm2_number" }
 regex = "1"
 url = { version = "2.2.2", features = ["serde"] }

@@ -18,7 +18,6 @@ use bigdecimal::BigDecimal;
 use kdf_crypto::sha256;
 use common::mm_number::MmNumber;
 use common::now_ms;
-use common::DEX_FEE_ADDR_PUBKEY;
 use cosmrs::proto::cosmos::bank::v1beta1::MsgSend as MsgSendProto;
 use cosmrs::proto::cosmos::base::v1beta1::Coin as CoinProto;
 use cosmrs::proto::prost::Message;
@@ -28,6 +27,7 @@ use futures::compat::Future01CompatExt;
 use futures::{FutureExt, TryFutureExt};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+use mm2_net_config::net_config_or_panic;
 use rpc::v1::types::Bytes as BytesJson;
 use serde_json::Value as Json;
 use std::str::FromStr;
@@ -39,6 +39,21 @@ const MSG_SEND_TYPE_URL: &str = "/cosmos.bank.v1beta1.MsgSend";
 // ————————————————————————————————————————————————————————————————
 
 impl TendermintCoin {
+    /// Resolves the active netid for fee-preimage destination lookups.
+    ///
+    /// Tendermint coins hold a weak `MmCtx` reference; if the context has
+    /// been dropped (only possible during shutdown), fall back to the
+    /// default community netid. The resulting address is only used to
+    /// build a representative HTLC / `MsgSend` for fee estimation, never
+    /// for an actual fund transfer — the real destination is resolved
+    /// through `DexFee` / `DexFeeBurnDestination` on the swap path.
+    fn netid_for_preimage(&self) -> u16 {
+        match MmArc::from_weak(&self.ctx) {
+            Some(ctx) => ctx.netid(),
+            None => mm2_net_config::SUPPORTED_NETIDS[0],
+        }
+    }
+
     /// Estimate the sender (maker/taker) trade fee for a given denom.
     pub(super) async fn get_sender_trade_fee_for_denom(
         &self,
@@ -53,8 +68,10 @@ impl TendermintCoin {
         common::os_rng(&mut sec).map_err(|e| MmError::new(TradePreimageError::InternalError(e.to_string())))?;
         let secret_hash = sha256(&sec);
 
-        let to_address = account_id_from_pubkey_hex(&self.protocol_info.account_prefix, DEX_FEE_ADDR_PUBKEY)
-            .map_err(|e| MmError::new(TradePreimageError::InternalError(e.to_string())))?;
+        let net_cfg = net_config_or_panic(self.netid_for_preimage());
+        let to_address =
+            account_id_from_pubkey_hex(&self.protocol_info.account_prefix, net_cfg.dex_fee_addr_pubkey())
+                .map_err(|e| MmError::new(TradePreimageError::InternalError(e.to_string())))?;
 
         let amount_sat = sat_from_big_decimal(&amount, decimals).map_mm_err()?;
 
@@ -105,8 +122,10 @@ impl TendermintCoin {
     ) -> TradePreimageResult<TradeFee> {
         let amount_sat = sat_from_big_decimal(&dex_fee_amount, decimals).map_mm_err()?;
 
-        let to_address = account_id_from_pubkey_hex(&self.protocol_info.account_prefix, DEX_FEE_ADDR_PUBKEY)
-            .map_err(|e| MmError::new(TradePreimageError::InternalError(e.to_string())))?;
+        let net_cfg = net_config_or_panic(self.netid_for_preimage());
+        let to_address =
+            account_id_from_pubkey_hex(&self.protocol_info.account_prefix, net_cfg.dex_fee_addr_pubkey())
+                .map_err(|e| MmError::new(TradePreimageError::InternalError(e.to_string())))?;
 
         let msg = MsgSendProto {
             from_address: self.account_id.to_string(),

@@ -1971,6 +1971,7 @@ dependencies = [
  "mm2_io",
  "mm2_metrics",
  "mm2_net",
+ "mm2_net_config",
  "mm2_number",
  "mm2_test_helpers",
  "mocktopus",
