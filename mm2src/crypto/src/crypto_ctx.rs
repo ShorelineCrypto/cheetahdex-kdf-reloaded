@@ -207,7 +207,10 @@ impl CryptoCtx {
                 HardwareWalletCtxState::NotInitialized => (),
                 HardwareWalletCtxState::Initializing => return MmError::err(HwCtxInitError::InitializingAlready),
                 HardwareWalletCtxState::Ready(_) => {
-                    // Reset and re-initialize (GLEEC behavior: allows re-init)
+                    // Intentional fall-through: re-initialization replaces the existing
+                    // hardware-wallet context (e.g. when the user reconnects a Trezor or
+                    // switches devices). The previous `Ready` value is dropped when
+                    // `*state` is overwritten below.
                 },
             }
             *state = HardwareWalletCtxState::Initializing;
