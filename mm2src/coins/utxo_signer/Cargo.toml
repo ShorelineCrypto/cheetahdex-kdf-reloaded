@@ -15,6 +15,6 @@ derive_more = "0.99"
 hex = "0.4.2"
 keys = { package = "kdf_keys", path = "../../kdf_keys" }
 primitives = { package = "kdf_primitives", path = "../../kdf_primitives" }
-rpc = { path = "../../mm2_bitcoin/rpc" }
+rpc = { package = "kdf_rpc_types", path = "../../kdf_rpc_types" }
 script = { package = "kdf_script", path = "../../kdf_script" }
 serialization = { package = "kdf_codec", path = "../../kdf_codec" }

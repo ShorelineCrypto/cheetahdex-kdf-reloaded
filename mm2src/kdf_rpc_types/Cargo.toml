@@ -1,0 +1,22 @@
+[package]
+name = "kdf_rpc_types"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+authors = ["KDF-RELOADED contributors"]
+publish = false
+description = "Bitcoin/Komodo RPC JSON wire types (clean-room)."
+
+[lib]
+
+[dependencies]
+serde = "1.0"
+serde_derive = "1.0"
+rustc-hex = "2"
+
+primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
+keys = { package = "kdf_keys", path = "../kdf_keys" }
+script = { package = "kdf_script", path = "../kdf_script" }
+
+[dev-dependencies]
+serde_json = "1.0"

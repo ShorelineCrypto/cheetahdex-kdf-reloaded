@@ -88,7 +88,7 @@ libc = "0.2"
 metrics = "0.12"
 mm2_p2p = { path = "../mm2_p2p" }
 num-traits = "0.2"
-rpc = { path = "../mm2_bitcoin/rpc" }
+rpc = { package = "kdf_rpc_types", path = "../kdf_rpc_types" }
 rpc_task = { path = "../rpc_task" }
 parking_lot = { version = "0.12.0" }
 parity-util-mem = "0.11"

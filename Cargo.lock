@@ -1953,6 +1953,7 @@ dependencies = [
  "kdf_crypto",
  "kdf_keys",
  "kdf_primitives",
+ "kdf_rpc_types",
  "kdf_script",
  "lazy_static",
  "libc",
@@ -1980,7 +1981,6 @@ dependencies = [
  "rand 0.7.3",
  "regex",
  "rmp-serde",
- "rpc",
  "rpc_task",
  "rust-ini",
  "rustls 0.20.4",
@@ -2034,10 +2034,10 @@ dependencies = [
  "derive_more 0.99.11",
  "futures 0.3.15",
  "hex",
+ "kdf_rpc_types",
  "mm2_core",
  "mm2_err_handle",
  "mm2_metrics",
- "rpc",
  "rpc_task",
  "ser_error",
  "ser_error_derive",
@@ -4837,6 +4837,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kdf_rpc_types"
+version = "0.1.0"
+dependencies = [
+ "kdf_keys",
+ "kdf_primitives",
+ "kdf_script",
+ "rustc-hex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "kdf_script"
 version = "0.1.0"
 dependencies = [
@@ -5836,12 +5849,12 @@ dependencies = [
  "common",
  "db_common",
  "derive_more 0.99.11",
+ "kdf_rpc_types",
  "mm2_core",
  "mm2_db",
  "mm2_err_handle",
  "mm2_number",
  "mm2_test_helpers",
- "rpc",
  "ser_error",
  "ser_error_derive",
  "serde",
@@ -5908,6 +5921,7 @@ dependencies = [
  "kdf_crypto",
  "kdf_keys",
  "kdf_primitives",
+ "kdf_rpc_types",
  "kdf_script",
  "lazy_static",
  "libc",
@@ -5934,7 +5948,6 @@ dependencies = [
  "rand 0.7.3",
  "regex",
  "rmp-serde",
- "rpc",
  "rpc_task",
  "secp256k1 0.20.3",
  "ser_error",
@@ -7936,22 +7949,6 @@ checksum = "ffc936cf8a7ea60c58f030fd36a612a48f440610214dc54bc36431f9ea0c3efb"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "rpc"
-version = "0.1.0"
-dependencies = [
- "kdf_chain",
- "kdf_codec",
- "kdf_keys",
- "kdf_primitives",
- "kdf_script",
- "log 0.4.29",
- "rustc-hex",
- "serde",
- "serde_derive",
- "serde_json",
 ]
 
 [[package]]
@@ -11046,9 +11043,9 @@ dependencies = [
  "kdf_codec",
  "kdf_keys",
  "kdf_primitives",
+ "kdf_rpc_types",
  "kdf_script",
  "mm2_err_handle",
- "rpc",
 ]
 
 [[package]]

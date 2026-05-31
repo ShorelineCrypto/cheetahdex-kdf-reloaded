@@ -14,7 +14,7 @@ derive_more.workspace = true
 mm2_core = { path = "../mm2_core" }
 mm2_err_handle = { path = "../mm2_err_handle" }
 mm2_number = { path = "../mm2_number" }
-rpc = { path = "../mm2_bitcoin/rpc" }
+rpc = { package = "kdf_rpc_types", path = "../kdf_rpc_types" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
 serde_repr.workspace = true
