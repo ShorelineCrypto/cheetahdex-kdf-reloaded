@@ -139,11 +139,6 @@ impl consensus::Parameters for ARRRConsensusParams {
 }
 
 const DEX_FEE_OVK: OutgoingViewingKey = OutgoingViewingKey([7; 32]);
-/// DEPRECATED: Use `mm2_net_config::NetConfig::dex_fee_z_addr()` for the correct netid.
-/// This constant uses the netid 8762 (AtomicDEX) value and exists only for
-/// backward compatibility until the ZCoin trait is refactored to receive
-/// the fee address from the caller.
-const DEX_FEE_Z_ADDR: &str = "zs1rp6426e9r6jkq2nsanl66tkd34enewrmr0uvj0zelhkcwmsy0uvxz2fhm9eu9rl3ukxvgzy2v9f";
 
 pub struct ZCoinFields {
     dex_fee_addr: PaymentAddress,
@@ -444,9 +439,10 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             .default_address()
             .map_err(|_| MmError::new(ZCoinBuildError::GetAddressError))?;
 
-        let dex_fee_addr = decode_payment_address(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS, DEX_FEE_Z_ADDR)
-            .expect("DEX_FEE_Z_ADDR is a valid z-address")
-            .expect("DEX_FEE_Z_ADDR is a valid z-address");
+        let dex_fee_z_addr = mm2_net_config::net_config_or_panic(self.ctx.netid()).dex_fee_z_addr();
+        let dex_fee_addr = decode_payment_address(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS, dex_fee_z_addr)
+            .expect("NetConfig dex_fee_z_addr must be a valid z-address")
+            .expect("NetConfig dex_fee_z_addr must be a valid z-address");
 
         let z_tx_prover = tokio::task::block_in_place(LocalTxProver::with_default_location)
             .or_mm_err(|| ZCoinBuildError::ZCashParamsNotFound)?;
