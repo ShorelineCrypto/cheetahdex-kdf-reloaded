@@ -5,6 +5,14 @@ use mm2_core::mm_ctx::MmCtxBuilder;
 use wasm_bindgen_test::*;
 use web_sys::console;
 
+/// Test-only DEX-fee destination pubkey, resolved through `mm2_net_config`
+/// for the community netid. Replaces direct use of
+/// `common::DEX_FEE_ADDR_RAW_PUBKEY` so WASM test fixtures go through the
+/// same per-netid registry as production code (LP-3F.A1).
+fn test_dex_fee_addr_raw_pubkey() -> &'static [u8] {
+    mm2_net_config::net_config_or_panic(8762).dex_fee_addr_raw_pubkey()
+}
+
 wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
@@ -54,7 +62,7 @@ async fn test_send() {
         .send_maker_payment(
             1000,
             &[],
-            &DEX_FEE_ADDR_RAW_PUBKEY,
+            test_dex_fee_addr_raw_pubkey(),
             &[1; 20],
             "0.001".parse().unwrap(),
             &None,
