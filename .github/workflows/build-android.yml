@@ -50,7 +50,26 @@ jobs:
         run: cargo install cargo-ndk --locked
 
       - name: Verify Android NDK
+        # The runner's systemd service launches with a minimal environment
+        # and does not source the user's shell rc, so an NDK exported in
+        # ~/.bashrc is invisible here. If ANDROID_NDK_ROOT is not already
+        # set (via /etc/environment or ~/actions-runner/.env), probe the
+        # standard install locations as a fallback.
         run: |
+          if [ -z "$ANDROID_NDK_ROOT" ]; then
+            for cand in \
+              "$ANDROID_NDK_HOME" \
+              "$HOME/Android/Sdk/ndk"/* \
+              "/opt/android-ndk" \
+              "/opt/android-sdk/ndk"/* \
+              "/usr/local/lib/android/sdk/ndk"/*; do
+              if [ -d "$cand" ] && [ -f "$cand/source.properties" ]; then
+                echo "ANDROID_NDK_ROOT=$cand" >> $GITHUB_ENV
+                ANDROID_NDK_ROOT="$cand"
+                break
+              fi
+            done
+          fi
           test -d "$ANDROID_NDK_ROOT" || {
             echo "ANDROID_NDK_ROOT not set or missing"; exit 1;
           }

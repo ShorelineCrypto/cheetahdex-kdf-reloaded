@@ -70,18 +70,33 @@ jobs:
       - name: Check Docker availability
         run: docker --version && docker info --format '{{.ServerVersion}}'
 
-      - name: Verify required ports are free
+      - name: Free required host ports
+        # The previous version only warned on busy ports and only cleaned
+        # containers matching the two known images, so a stale container
+        # (or any other process) bound to e.g. :8000 caused testcontainers
+        # to abort with `failed to bind host port 0.0.0.0:8000/tcp`.
+        # Aggressively remove every container publishing one of the test
+        # ports, then SIGKILL any remaining host process bound to them.
         run: |
+          set -eu
           for port in 7000 8000 9000 10000; do
-            if ss -tlnp sport = :$port | grep -q LISTEN; then
-              echo "::warning::Port $port is in use, docker tests may fail"
+            stale=$(docker ps -q --filter "publish=$port" || true)
+            if [ -n "$stale" ]; then
+              echo "Removing containers publishing :$port: $stale"
+              docker rm -f $stale || true
+            fi
+            pids=$(ss -tlnpH "sport = :$port" 2>/dev/null \
+              | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+            if [ -n "$pids" ]; then
+              echo "Killing host pids on :$port: $pids"
+              kill -9 $pids || true
             fi
           done
 
       - name: Clean up stale test containers
         run: |
-          docker rm -f $(docker ps -q --filter ancestor=artempikulin/testblockchain:multiarch) 2>/dev/null || true
-          docker rm -f $(docker ps -q --filter ancestor=sergeyboyko/qtumregtest) 2>/dev/null || true
+          docker rm -f $(docker ps -aq --filter ancestor=artempikulin/testblockchain:multiarch) 2>/dev/null || true
+          docker rm -f $(docker ps -aq --filter ancestor=sergeyboyko/qtumregtest) 2>/dev/null || true
 
       - name: Run UTXO docker tests
         run: cargo test --bin docker_tests -- --test-threads=1 test_search_for_swap_tx_spend test_one_hundred_maker_payments test_withdraw test_utxo_merge test_send_and_validate test_validate_maker_payment_wrong_amount test_list_unspent test_multiple_sequential
