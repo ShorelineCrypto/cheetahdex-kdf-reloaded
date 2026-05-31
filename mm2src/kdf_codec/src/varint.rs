@@ -185,15 +185,21 @@ mod tests {
     fn parse_examples_from_spec() {
         assert_eq!(parse_compact_int(&force_deserialize_hex("0x01")).unwrap().as_usize(), 1);
         assert_eq!(
-            parse_compact_int(&force_deserialize_hex("0xff0000000000000000")).unwrap().as_usize(),
+            parse_compact_int(&force_deserialize_hex("0xff0000000000000000"))
+                .unwrap()
+                .as_usize(),
             0
         );
         assert_eq!(
-            parse_compact_int(&force_deserialize_hex("0xfe03000000")).unwrap().as_usize(),
+            parse_compact_int(&force_deserialize_hex("0xfe03000000"))
+                .unwrap()
+                .as_usize(),
             3
         );
         assert_eq!(
-            parse_compact_int(&force_deserialize_hex("0xfd0001")).unwrap().as_usize(),
+            parse_compact_int(&force_deserialize_hex("0xfd0001"))
+                .unwrap()
+                .as_usize(),
             256
         );
     }
@@ -212,15 +218,7 @@ mod tests {
 
     #[test]
     fn round_trip_through_stream_and_reader() {
-        let values = [
-            0u64,
-            0xfc,
-            0xfd,
-            0xffff,
-            0x10000,
-            0xffff_ffff,
-            0x1_0000_0000,
-        ];
+        let values = [0u64, 0xfc, 0xfd, 0xffff, 0x10000, 0xffff_ffff, 0x1_0000_0000];
 
         let mut stream = Stream::default();
         for v in values {

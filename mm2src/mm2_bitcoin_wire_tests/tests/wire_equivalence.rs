@@ -153,24 +153,23 @@ const HEADER_FIXTURES: &[HeaderFixture] = &[
 // ---------------------------------------------------------------------------
 
 fn assert_tx_round_trip(name: &str, source: &str, bytes: &[u8]) {
-    let tx: Transaction = deserialize(bytes)
-        .unwrap_or_else(|e| panic!("[{}] deserialize failed (source: {}): {:?}", name, source, e));
+    let tx: Transaction =
+        deserialize(bytes).unwrap_or_else(|e| panic!("[{}] deserialize failed (source: {}): {:?}", name, source, e));
     // Always request witness data on the way out; the codec only emits it when
     // the parsed transaction actually carries witness, so legacy txs are not
     // affected. Without the flag, segwit fixtures lose their witness section
     // and round-trip fails.
     let re = serialize_with_flags(&tx, SERIALIZE_TRANSACTION_WITNESS).take();
-    assert_eq!(
-        re, bytes,
-        "[{}] wire-equivalence broken (source: {})",
-        name, source
-    );
+    assert_eq!(re, bytes, "[{}] wire-equivalence broken (source: {})", name, source);
 }
 
 fn assert_header_round_trip(fx: &HeaderFixture) {
     let bytes = hex::decode(fx.hex).expect("header fixture hex is malformed");
     let header: BlockHeader = deserialize(&bytes[..]).unwrap_or_else(|e| {
-        panic!("[{}] header deserialize failed (source: {}): {:?}", fx.name, fx.source, e)
+        panic!(
+            "[{}] header deserialize failed (source: {}): {:?}",
+            fx.name, fx.source, e
+        )
     });
     let re = serialization::serialize(&header).take();
     assert_eq!(
