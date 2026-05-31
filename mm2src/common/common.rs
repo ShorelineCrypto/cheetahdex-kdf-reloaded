@@ -642,7 +642,16 @@ pub fn is_a_test_drill() -> bool {
 /// RPC response, returned by the RPC handlers.  
 /// NB: By default the future is executed on the shared asynchronous reactor (`CORE`),
 /// the handler is responsible for spawning the future on another reactor if it doesn't fit the `CORE` well.
+///
+/// On native targets the boxed future must be `Send` because RPC futures are
+/// dispatched onto a multi-thread executor. On `wasm32` there is a single JS
+/// event loop and no real threads, so requiring `Send` here would only force
+/// callers to wrap futures (e.g. alloy's `RpcCall`) in fake-`Send` types or
+/// duplicate the activation paths under cfg. Drop the `Send` bound on wasm32.
+#[cfg(not(target_arch = "wasm32"))]
 pub type HyRes = Box<dyn Future<Item = Response<Vec<u8>>, Error = String> + Send>;
+#[cfg(target_arch = "wasm32")]
+pub type HyRes = Box<dyn Future<Item = Response<Vec<u8>>, Error = String>>;
 
 pub type BoxFut<T, E> = Box<dyn Future<Item = T, Error = E> + Send>;
 

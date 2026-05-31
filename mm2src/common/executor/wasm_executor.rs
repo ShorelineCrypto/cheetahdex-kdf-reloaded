@@ -31,7 +31,13 @@ extern "C" {
     fn clearTimeout(id: i32);
 }
 
-pub fn spawn(future: impl Future<Output = ()> + Send + 'static) { spawn_local(future) }
+// `spawn`/`spawn_boxed` mirror the native-side signatures (which require
+// `Send` because the native executor is multi-threaded). On `wasm32` there
+// is a single JS event loop and futures are inherently `!Send`; requiring
+// `Send` here would force every legacy RPC future to also be `Send`, which
+// conflicts with non-`Send` types pulled in by alloy's `RpcCall`. Drop the
+// bound and hand the future straight to `wasm_bindgen_futures::spawn_local`.
+pub fn spawn(future: impl Future<Output = ()> + 'static) { spawn_local(future) }
 
 pub fn spawn_boxed(future: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) { spawn_local(future) }
 

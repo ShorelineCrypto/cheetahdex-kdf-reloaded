@@ -43,8 +43,18 @@ async fn auth(json: &Json, ctx: &MmArc, client: &SocketAddr) -> Result<(), Strin
 
 /// Using async/await (futures 0.3) in `dispatcher`
 /// will pave the way for porting the remaining system threading code to async/await green threads.
+///
+/// On `wasm32` the boxed future is single-threaded (no real threads in the
+/// browser); requiring `Send` here would propagate `Send`-bounds onto every
+/// transitive dependency (e.g. alloy's non-`Send` `RpcCall`). Drop the bound
+/// for wasm32, mirroring the cfg-conditional `HyRes` definition in `common`.
+#[cfg(not(target_arch = "wasm32"))]
 fn hyres(handler: impl Future03<Output = Result<Response<Vec<u8>>, String>> + Send + 'static) -> HyRes {
     Box::new(handler.boxed().compat())
+}
+#[cfg(target_arch = "wasm32")]
+fn hyres(handler: impl Future03<Output = Result<Response<Vec<u8>>, String>> + 'static) -> HyRes {
+    Box::new(handler.boxed_local().compat())
 }
 
 /// The dispatcher, with full control over the HTTP result and the way we run the `Future` producing it.
@@ -124,7 +134,7 @@ pub fn dispatcher(req: Json, ctx: MmArc) -> DispatcherRes {
 #[cfg(target_arch = "wasm32")]
 fn spawn_highload_future<F>(f: F) -> HyRes
 where
-    F: FnOnce() -> HyRes + Send + 'static,
+    F: FnOnce() -> HyRes + 'static,
 {
     f()
 }
