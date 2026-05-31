@@ -92,6 +92,9 @@ mod docker_tests {
     mod qrc20_tests;
     #[rustfmt::skip]
     mod slp_tests;
+    // Solana tests depend on the desktop-only Solana stack (libudev via
+    // solana-remote-wallet); skip on mobile targets.
+    #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
     #[rustfmt::skip]
     mod solana_tests;
     #[rustfmt::skip]

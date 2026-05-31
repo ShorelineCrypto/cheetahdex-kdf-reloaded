@@ -56,10 +56,15 @@ cfg_native! {
     use coins::lightning::{close_channel, connect_to_lightning_node, generate_invoice, get_channel_details,
         get_claimable_balances, get_payment_details, list_closed_channels_by_filter, list_open_channels_by_filter, list_payments_by_filter, open_channel,
         send_payment, LightningCoin};
-    use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
     use crate::mm2::lp_wallet::{create_wallet_rpc, delete_wallet_rpc, get_wallet_names_rpc};
 }
+
+// Solana support is desktop-only — the `solana-remote-wallet` transitive
+// dep links against `libudev`, which only exists on Linux desktop. The
+// matching dispatcher arms below are gated identically.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+use coins::{SolanaCoin, SplToken};
 
 pub async fn process_single_request(
     ctx: MmArc,
@@ -240,9 +245,11 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             "list_payments_by_filter" => handle_mmrpc(ctx, request, list_payments_by_filter).await,
             "open_channel" => handle_mmrpc(ctx, request, open_channel).await,
             "send_payment" => handle_mmrpc(ctx, request, send_payment).await,
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
             "enable_solana_with_tokens" => {
                 handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<SolanaCoin>).await
             },
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
             "enable_spl" => handle_mmrpc(ctx, request, enable_token::<SplToken>).await,
             _ => MmError::err(DispatcherError::NoSuchMethod),
         },
