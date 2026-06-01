@@ -3,6 +3,7 @@
 //!
 //! # Sub-modules
 //! - `rpc_client` — KDF-original async JSON-RPC client (P14).
+//! - `rpc_pool` — failover-aware multi-endpoint dispatch layer (P14.11).
 //! - `solana_types` — constants, traits, errors, `SolanaCoin` struct.
 //! - `solana_common` — shared transfer/balance helpers.
 //! - `solana_helpers` — inherent methods on `SolanaCoin`.
@@ -13,10 +14,12 @@
 //! - `solana_decode_tx_helpers` — Solana JSON tx-history decoders.
 
 pub mod rpc_client;
+pub mod rpc_pool;
 
 pub(crate) use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, TradeFee, TransactionEnum,
                        WatcherOps};
 pub(crate) use crate::solana::rpc_client::{RpcError, RpcErrorKind, SolanaRpcClient, TokenAccountsFilter};
+pub(crate) use crate::solana::rpc_pool::SolanaRpcPool;
 pub(crate) use crate::solana::solana_common::{lamports_to_sol, PrepareTransferData, SufficientBalanceError};
 pub(crate) use crate::solana::spl::SplTokenInfo;
 pub(crate) use crate::{BalanceError, BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend,

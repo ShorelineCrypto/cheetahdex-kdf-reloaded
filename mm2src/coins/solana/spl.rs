@@ -1,5 +1,6 @@
 use super::{CoinBalance, HistorySyncState, MarketCoinOps, MmCoin, SwapOps, TradeFee, TransactionEnum, WatcherOps};
-use crate::solana::rpc_client::{SolanaRpcClient, TokenAccountsFilter};
+use crate::solana::rpc_client::TokenAccountsFilter;
+use crate::solana::rpc_pool::SolanaRpcPool;
 use crate::solana::solana_common::{ui_amount_to_amount, PrepareTransferData, SufficientBalanceError};
 use crate::solana::{solana_common, AccountError, SolanaCommonOps, SolanaFeeDetails};
 use crate::{BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, RawTransactionFut,
@@ -164,7 +165,7 @@ async fn withdraw_impl(coin: SplToken, req: WithdrawRequest) -> WithdrawResult {
 
 #[async_trait]
 impl SolanaCommonOps for SplToken {
-    fn rpc(&self) -> &SolanaRpcClient { &self.platform_coin.client }
+    fn rpc(&self) -> &SolanaRpcPool { &self.platform_coin.client }
 
     fn is_token(&self) -> bool { true }
 

@@ -8,7 +8,7 @@ use super::*;
 
 #[async_trait]
 impl SolanaCommonOps for SolanaCoin {
-    fn rpc(&self) -> &SolanaRpcClient { &self.client }
+    fn rpc(&self) -> &SolanaRpcPool { &self.client }
 
     fn is_token(&self) -> bool { false }
 

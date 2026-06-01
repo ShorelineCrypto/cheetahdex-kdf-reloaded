@@ -1,13 +1,14 @@
 // solana_types — Constants, structs, enums, error types, and core types.
 
 use super::*;
+use crate::solana::rpc_pool::SolanaRpcPool;
 
 pub const SOLANA_DEFAULT_DECIMALS: u64 = 9;
 pub const LAMPORTS_DUMMY_AMOUNT: u64 = 10;
 
 #[async_trait]
 pub trait SolanaCommonOps {
-    fn rpc(&self) -> &SolanaRpcClient;
+    fn rpc(&self) -> &SolanaRpcPool;
 
     fn is_token(&self) -> bool;
 
@@ -79,7 +80,29 @@ impl From<AccountError> for WithdrawError {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SolanaActivationParams {
     confirmation_commitment: CommitmentLevel,
-    client_url: String,
+    /// Single-endpoint shorthand. Kept for backwards compatibility
+    /// with existing GUI configs; if `client_urls` is also supplied
+    /// the two lists are concatenated (this URL first).
+    #[serde(default)]
+    client_url: Option<String>,
+    /// Multi-endpoint pool. Activation succeeds if at least one URL
+    /// is provided across both fields. Endpoints are tried in the
+    /// order given; on a transport failure the offender is
+    /// quarantined for `QUARANTINE_TTL_SECS` and traffic moves on.
+    #[serde(default)]
+    client_urls: Vec<String>,
+}
+
+impl SolanaActivationParams {
+    /// Flattened endpoint list in dispatch order.
+    pub(crate) fn collected_urls(&self) -> Vec<String> {
+        let mut v: Vec<String> = Vec::with_capacity(self.client_urls.len() + 1);
+        if let Some(u) = self.client_url.as_ref() {
+            v.push(u.clone());
+        }
+        v.extend(self.client_urls.iter().cloned());
+        v
+    }
 }
 
 #[derive(Debug, Display)]
@@ -118,9 +141,14 @@ pub async fn solana_coin_from_conf_and_params(
     params: SolanaActivationParams,
     priv_key: &[u8],
 ) -> Result<SolanaCoin, String> {
-    let client = SolanaRpcClient::with_commitment(params.client_url.clone(), CommitmentConfig {
+    let urls = params.collected_urls();
+    if urls.is_empty() {
+        return Err("Solana activation requires at least one RPC endpoint (client_url or client_urls)".to_owned());
+    }
+    let client = SolanaRpcPool::with_commitment(urls, CommitmentConfig {
         commitment: params.confirmation_commitment,
-    });
+    })
+    .ok_or_else(|| "Solana RPC pool initialisation returned no clients".to_owned())?;
     let decimals = conf["decimals"].as_u64().unwrap_or(SOLANA_DEFAULT_DECIMALS) as u8;
     let key_pair = try_s!(generate_keypair_from_slice(priv_key));
     let my_address = key_pair.pubkey().to_string();
@@ -140,7 +168,7 @@ pub async fn solana_coin_from_conf_and_params(
 pub struct SolanaCoinImpl {
     pub(crate) ticker: String,
     pub(crate) key_pair: Keypair,
-    pub(crate) client: SolanaRpcClient,
+    pub(crate) client: SolanaRpcPool,
     pub(crate) decimals: u8,
     pub(crate) my_address: String,
     pub(crate) spl_tokens_infos: Arc<Mutex<HashMap<String, SplTokenInfo>>>,
