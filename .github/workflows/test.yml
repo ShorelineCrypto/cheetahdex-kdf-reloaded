@@ -6,34 +6,23 @@ on:
   pull_request:
     branches: [ reloaded-gplv2-base ]
 
+# Supersede in-flight runs of the same workflow on the same ref so the
+# single self-hosted runner doesn't queue stale work behind a fast
+# follow-up push. If a push to the base branch ever needs to complete
+# unconditionally, scope this group with `github.run_id` instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  unit-tests:
-    # Pin to the bare-metal Linux runner (`kdf-runner`, label `docker`).
-    # Without a runner-specific label, the job could schedule onto the
-    # Android NDK VM, which is slower and lacks the cargo cache.
+  fmt:
+    # Cheap fast-feedback job. Keeps a fmt-only failure from forcing a
+    # full unit-test rebuild on "Re-run failed jobs".
     runs-on: [self-hosted, Linux, docker]
-    timeout-minutes: 30
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check Rust toolchain
-        run: rustc --version && cargo --version
-
-      - name: Run coins_activation tests
-        run: cargo test -p coins_activation --lib
-
-      - name: Run ordermatch tests
-        run: cargo test -p mm2_main --lib ordermatch_tests
-
-      - name: Run ETH utility tests
-        run: cargo test -p coins --lib -- eth::eth_tests::test_addr_from_pubkey_str eth::eth_tests::test_gas_station_data eth::eth_tests::test_u256 eth::eth_tests::test_wei_from eth::eth_tests::test_wei_to
-
-      - name: Run SPV validation tests
-        run: cargo test -p kdf_spv_validation
-
-      - name: Run mock RPC response tests
-        run: cargo test -p coins --lib rpc_response_tests
 
       - name: Install nightly rustfmt
         # rustfmt.toml uses nightly-only options (`unstable_features = true`,
@@ -56,13 +45,46 @@ jobs:
         shell: bash
         run: cargo +nightly fmt --all -- --check
 
+  unit-tests:
+    # One matrix cell per cargo invocation so "Re-run failed jobs" only
+    # re-queues the cells that actually failed. Cells share the on-disk
+    # `target/` cache on this self-hosted runner, so the incremental
+    # rebuild cost is small.
+    runs-on: [self-hosted, Linux, docker]
+    timeout-minutes: 30
+    needs: fmt
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: coins_activation
+            cmd: cargo test -p coins_activation --lib
+          - name: ordermatch
+            cmd: cargo test -p mm2_main --lib ordermatch_tests
+          - name: eth-utility
+            cmd: cargo test -p coins --lib -- eth::eth_tests::test_addr_from_pubkey_str eth::eth_tests::test_gas_station_data eth::eth_tests::test_u256 eth::eth_tests::test_wei_from eth::eth_tests::test_wei_to
+          - name: spv-validation
+            cmd: cargo test -p kdf_spv_validation
+          - name: rpc-response
+            cmd: cargo test -p coins --lib rpc_response_tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Rust toolchain
+        run: rustc --version && cargo --version
+
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.cmd }}
+
   docker-tests:
     # Pin to the bare-metal Linux runner that has Docker (the `docker` label
     # is set on `kdf-runner`). Without it, the job could schedule onto any
     # Linux runner — e.g. the Android NDK VM — which has no Docker daemon.
     runs-on: [self-hosted, Linux, docker]
     timeout-minutes: 60
-    needs: unit-tests
+    needs: [fmt, unit-tests]
+
 
     steps:
       - uses: actions/checkout@v4
