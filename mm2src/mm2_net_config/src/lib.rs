@@ -12,8 +12,7 @@
 
 mod netid_6133;
 mod netid_8762;
-#[cfg(feature = "regtest-netid")]
-mod netid_9000;
+#[cfg(feature = "regtest-netid")] mod netid_9000;
 
 use num_rational::BigRational;
 
