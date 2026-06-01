@@ -98,6 +98,32 @@ jobs:
           docker rm -f $(docker ps -aq --filter ancestor=artempikulin/testblockchain:multiarch) 2>/dev/null || true
           docker rm -f $(docker ps -aq --filter ancestor=sergeyboyko/qtumregtest) 2>/dev/null || true
 
+      - name: Ensure Zcash params are present
+        # The artempikulin/testblockchain image bind-mounts ~/.zcash-params
+        # into komodod. If any of the five params files is missing, komodod
+        # aborts with "Cannot find the Zcash network parameters" and never
+        # binds its RPC port, which causes wait_ready to hit its 120 s
+        # assert and the entire docker_tests job to fail with exit 101.
+        # Lazily fetch only what is missing so a fresh runner self-heals.
+        run: |
+          set -eu
+          dir="$HOME/.zcash-params"
+          mkdir -p "$dir"
+          declare -A urls=(
+            [sapling-spend.params]=https://download.z.cash/downloads/sapling-spend.params
+            [sapling-output.params]=https://download.z.cash/downloads/sapling-output.params
+            [sprout-groth16.params]=https://download.z.cash/downloads/sprout-groth16.params
+            [sprout-verifying.key]=https://download.z.cash/downloads/sprout-verifying.key
+            [sprout-proving.key]=https://download.z.cash/downloads/sprout-proving.key.deprecated-sworn-elves
+          )
+          for f in "${!urls[@]}"; do
+            if [ ! -s "$dir/$f" ]; then
+              echo "Fetching $f"
+              curl -fL --retry 3 -o "$dir/$f" "${urls[$f]}"
+            fi
+          done
+          ls -lh "$dir"
+
       - name: Run UTXO docker tests
         run: cargo test --bin docker_tests -- --test-threads=1 test_search_for_swap_tx_spend test_one_hundred_maker_payments test_withdraw test_utxo_merge test_send_and_validate test_validate_maker_payment_wrong_amount test_list_unspent test_multiple_sequential
         env:
