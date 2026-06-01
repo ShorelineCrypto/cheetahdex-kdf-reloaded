@@ -20,6 +20,9 @@ native = []
 track-ctx-pointer = ["common/track-ctx-pointer"]
 custom-swap-locktime = [] # only for testing purposes, should never be activated on release builds.
 zhtlc-native-tests = ["coins/zhtlc-native-tests"]
+# Compiles in netid 9000 (regtest) for the docker_tests harness.
+# Never enable on the production `mm2` binary.
+regtest-netid = ["mm2_net_config/regtest-netid"]
 
 [[bin]]
 name = "mm2"

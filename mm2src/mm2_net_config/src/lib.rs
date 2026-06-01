@@ -12,6 +12,8 @@
 
 mod netid_6133;
 mod netid_8762;
+#[cfg(feature = "regtest-netid")]
+mod netid_9000;
 
 use num_rational::BigRational;
 
@@ -86,6 +88,8 @@ pub fn net_config_for(netid: u16) -> Option<&'static dyn NetConfig> {
     match netid {
         8762 => Some(&netid_8762::Netid8762),
         6133 => Some(&netid_6133::Netid6133),
+        #[cfg(feature = "regtest-netid")]
+        9000 => Some(&netid_9000::Netid9000),
         _ => None,
     }
 }
@@ -113,7 +117,13 @@ fn supported_netids_display() -> String {
 }
 
 /// All compiled netids, for validation and display.
+#[cfg(not(feature = "regtest-netid"))]
 pub const SUPPORTED_NETIDS: &[u16] = &[8762, 6133];
+
+/// All compiled netids, for validation and display.
+/// With the `regtest-netid` feature, the docker-test netid 9000 is included.
+#[cfg(feature = "regtest-netid")]
+pub const SUPPORTED_NETIDS: &[u16] = &[8762, 6133, 9000];
 
 #[cfg(test)]
 mod tests {

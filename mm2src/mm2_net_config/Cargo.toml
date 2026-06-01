@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Compile-time network configuration keyed by netid"
 
+[features]
+# Compiles in netid 9000 (regtest) for the docker_tests harness.
+# Never enable this on the production `mm2` binary.
+regtest-netid = []
+
 [dependencies]
 lazy_static = "1"
 hex = "0.4"
