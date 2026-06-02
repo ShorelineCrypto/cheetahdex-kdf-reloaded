@@ -12,6 +12,11 @@ on:
   workflow_dispatch:
 
 jobs:
+  linux:
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      profile: release
+
   macos:
     uses: ./.github/workflows/build-macos.yml
     with:

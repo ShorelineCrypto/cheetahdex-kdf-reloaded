@@ -1,0 +1,59 @@
+name: Build Linux
+
+# Linux x86_64 release build.
+#
+# Manually dispatched (and callable from `dev-build.yml`). We don't run
+# this on every push — `test.yml` already exercises the Linux compile
+# path via `cargo test`, and Linux release artifacts aren't needed on
+# every commit. Trigger this when you actually want a downloadable
+# binary, or when a downstream Docker / packaging step needs one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+  workflow_call:
+    inputs:
+      profile:
+        description: "cargo profile"
+        required: false
+        default: "release"
+        type: string
+
+jobs:
+  build:
+    # Pin to the bare-metal Linux runner (`kdf-runner`, label `docker`).
+    # Same pinning as `test.yml` so the on-disk `target/` cache is
+    # shared between the two workflows when both run on this host.
+    runs-on: [self-hosted, Linux, docker]
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Rust toolchain (stable + x86_64-unknown-linux-gnu) is pre-installed
+      # on the self-hosted runner; see docs/CI_RUNNERS.md.
+
+      - name: Check Rust toolchain
+        run: rustc --version && cargo --version
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build mm2
+        run: cargo build --bin mm2 --target x86_64-unknown-linux-gnu --profile ${{ inputs.profile }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm2-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/${{ inputs.profile }}/mm2
