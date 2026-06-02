@@ -141,6 +141,22 @@ async fn enable_coins_rick_morty_electrum(mm: &MarketMakerIt) -> HashMap<&'stati
     replies
 }
 
+// DOC/MARTY counterparts of `enable_coins_rick_morty_electrum` /
+// `enable_coins_eth_electrum`. RICK/MORTY were retired by cipig (the
+// `:10017`/`:10018` services no longer listen). Tests that still need a live
+// public-network smartchain pair should use these helpers and DOC/MARTY coin
+// configs instead.
+#[allow(dead_code)]
+async fn enable_coins_doc_marty_electrum(mm: &MarketMakerIt) -> HashMap<&'static str, EnableElectrumResponse> {
+    let mut replies = HashMap::new();
+    replies.insert("DOC", enable_electrum_json(mm, "DOC", false, doc_electrums()).await);
+    replies.insert(
+        "MARTY",
+        enable_electrum_json(mm, "MARTY", false, marty_electrums()).await,
+    );
+    replies
+}
+
 async fn enable_coins_eth_electrum(
     mm: &MarketMakerIt,
     eth_urls: &[&str],
@@ -150,6 +166,22 @@ async fn enable_coins_eth_electrum(
     replies.insert(
         "MORTY",
         enable_electrum_json(mm, "MORTY", false, morty_electrums()).await,
+    );
+    replies.insert("ETH", enable_native(mm, "ETH", eth_urls).await);
+    replies.insert("JST", enable_native(mm, "JST", eth_urls).await);
+    replies
+}
+
+#[allow(dead_code)]
+async fn enable_coins_eth_electrum_doc_marty(
+    mm: &MarketMakerIt,
+    eth_urls: &[&str],
+) -> HashMap<&'static str, EnableElectrumResponse> {
+    let mut replies = HashMap::new();
+    replies.insert("DOC", enable_electrum_json(mm, "DOC", false, doc_electrums()).await);
+    replies.insert(
+        "MARTY",
+        enable_electrum_json(mm, "MARTY", false, marty_electrums()).await,
     );
     replies.insert("ETH", enable_native(mm, "ETH", eth_urls).await);
     replies.insert("JST", enable_native(mm, "JST", eth_urls).await);
@@ -1235,7 +1267,16 @@ fn withdraw_and_send(
     assert_eq!(tx_details.tx_hash, send_json["tx_hash"]);
 }
 
+// Depends on live external endpoints (cipig DOC/MARTY electrums + the
+// public ETH dev chain). The legacy RICK/MORTY targets this test used to
+// hit (`electrum*.cipig.net:10017`/`:10018`) have been retired; we now
+// point at the DOC/MARTY successors (`:10020`/`:10021`). The test is
+// `#[ignore]` so it is skipped by default `cargo test` (and therefore by
+// the substring filter the `docker-tests` CI job uses) and is only
+// exercised by the dedicated allow-to-fail `external-network-tests` CI
+// job invoked with `--ignored`.
 #[test]
+#[ignore = "external network: requires live cipig DOC/MARTY electrums and ETH dev chain"]
 #[cfg(not(target_arch = "wasm32"))]
 fn test_withdraw_and_send() {
     let (alice_file_passphrase, _alice_file_userpass) = from_env_file(slurp(&".env.client").unwrap());
@@ -1246,9 +1287,9 @@ fn test_withdraw_and_send() {
         .expect("No ALICE_PASSPHRASE or .env.client/PASSPHRASE");
 
     let coins = json! ([
-        {"coin":"RICK","asset":"RICK","rpcport":8923,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
-        {"coin":"MORTY","asset":"MORTY","rpcport":8923,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
-        {"coin":"MORTY_SEGWIT","asset":"MORTY_SEGWIT","txversion":4,"overwintered":1,"segwit":true,"txfee":1000,"protocol":{"type":"UTXO"}},
+        {"coin":"DOC","asset":"DOC","rpcport":62415,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
+        {"coin":"MARTY","asset":"MARTY","rpcport":52592,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
+        {"coin":"MARTY_SEGWIT","asset":"MORTY_SEGWIT","txversion":4,"overwintered":1,"segwit":true,"txfee":1000,"protocol":{"type":"UTXO"}},
         {"coin":"ETH","name":"ethereum","protocol":{"type":"ETH"}},
         {"coin":"JST","name":"jst","protocol":{"type":"ERC20","protocol_data":{"platform":"ETH","contract_address":"0x2b294F029Fde858b2c62184e8390591755521d8E"}}}
     ]);
@@ -1278,20 +1319,20 @@ fn test_withdraw_and_send() {
     // wait until RPC API is active
 
     // Enable coins. Print the replies in case we need the address.
-    let mut enable_res = block_on(enable_coins_eth_electrum(&mm_alice, &["http://195.201.0.6:8565"]));
+    let mut enable_res = block_on(enable_coins_eth_electrum_doc_marty(&mm_alice, &["http://195.201.0.6:8565"]));
     enable_res.insert(
-        "MORTY_SEGWIT",
-        block_on(enable_electrum(&mm_alice, "MORTY_SEGWIT", false, &[
-            "electrum1.cipig.net:10018",
-            "electrum2.cipig.net:10018",
-            "electrum3.cipig.net:10018",
+        "MARTY_SEGWIT",
+        block_on(enable_electrum(&mm_alice, "MARTY_SEGWIT", false, &[
+            "electrum1.cipig.net:10021",
+            "electrum2.cipig.net:10021",
+            "electrum3.cipig.net:10021",
         ])),
     );
 
     log!("enable_coins (alice): "[enable_res]);
     withdraw_and_send(
         &mm_alice,
-        "MORTY",
+        "MARTY",
         "RJTYiYeJ8eVvJ53n2YbrVmxWNNMVZjDGLh",
         &enable_res,
         "-0.00101",
@@ -1321,7 +1362,7 @@ fn test_withdraw_and_send() {
         "mmrpc": "2.0",
         "method": "withdraw",
         "params": {
-            "coin": "MORTY",
+            "coin": "MARTY",
             "to": "bUN5nesdt1xsAjCtAaYUnNbQhGqUWwQT1Q",
             "amount": "0.001",
         },
@@ -1329,13 +1370,13 @@ fn test_withdraw_and_send() {
     })))
     .unwrap();
 
-    assert!(withdraw.0.is_client_error(), "MORTY withdraw: {}", withdraw.1);
+    assert!(withdraw.0.is_client_error(), "MARTY withdraw: {}", withdraw.1);
     let res: RpcErrorResponse<String> = json::from_str(&withdraw.1).unwrap();
     assert_eq!(res.error_type, "InvalidAddress");
     assert!(res
         .error_data
         .unwrap()
-        .contains("Expected a valid P2PKH or P2SH prefix for MORTY"));
+        .contains("Expected a valid P2PKH or P2SH prefix for MARTY"));
 
     // but must allow to withdraw to P2SH addresses if Segwit flag is true
     let withdraw = block_on(mm_alice.rpc(&json! ({
@@ -1343,7 +1384,7 @@ fn test_withdraw_and_send() {
         "mmrpc": "2.0",
         "method": "withdraw",
         "params": {
-            "coin": "MORTY_SEGWIT",
+            "coin": "MARTY_SEGWIT",
             "to": "bUN5nesdt1xsAjCtAaYUnNbQhGqUWwQT1Q",
             "amount": "0.001",
         },
@@ -1351,7 +1392,7 @@ fn test_withdraw_and_send() {
     })))
     .unwrap();
 
-    assert!(withdraw.0.is_success(), "MORTY_SEGWIT withdraw: {}", withdraw.1);
+    assert!(withdraw.0.is_success(), "MARTY_SEGWIT withdraw: {}", withdraw.1);
 
     // must not allow to withdraw to invalid checksum address
     let withdraw = block_on(mm_alice.rpc(&json! ({
@@ -1379,7 +1420,7 @@ fn test_withdraw_and_send() {
         "mmrpc": "2.0",
         "method": "withdraw",
         "params": {
-            "coin": "MORTY",
+            "coin": "MARTY",
             "to": "RHzSYSHv3G6J8xL3MyGH3y2gU588VCTC7X",
             "amount": small_amount,
         },
@@ -1387,7 +1428,7 @@ fn test_withdraw_and_send() {
     })))
     .unwrap();
 
-    assert!(withdraw.0.is_client_error(), "MORTY withdraw: {}", withdraw.1);
+    assert!(withdraw.0.is_client_error(), "MARTY withdraw: {}", withdraw.1);
     log!("error: "[withdraw.1]);
     let error: RpcErrorResponse<withdraw_error::AmountTooLow> = json::from_str(&withdraw.1).unwrap();
     let threshold = MmNumber::from("0.00001").to_decimal();
@@ -1488,7 +1529,11 @@ fn test_tbtc_withdraw_to_cashaddresses_should_fail() {
     block_on(mm_alice.stop()).unwrap();
 }
 
+// Same external-network rationale as `test_withdraw_and_send`: depends on
+// live cipig DOC/MARTY electrums, so it is `#[ignore]` and only exercised
+// by the dedicated allow-to-fail `external-network-tests` CI job.
 #[test]
+#[ignore = "external network: requires live cipig DOC/MARTY electrums"]
 #[cfg(not(target_arch = "wasm32"))]
 fn test_withdraw_legacy() {
     let (alice_file_passphrase, _alice_file_userpass) = from_env_file(slurp(&".env.client").unwrap());
@@ -1499,9 +1544,9 @@ fn test_withdraw_legacy() {
         .expect("No ALICE_PASSPHRASE or .env.client/PASSPHRASE");
 
     let coins = json!([
-        {"coin":"RICK","asset":"RICK","rpcport":8923,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
-        {"coin":"MORTY","asset":"MORTY","rpcport":8923,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
-        {"coin":"MORTY_SEGWIT","asset":"MORTY_SEGWIT","txversion":4,"overwintered":1,"segwit":true,"txfee":1000,"protocol":{"type":"UTXO"}}
+        {"coin":"DOC","asset":"DOC","rpcport":62415,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
+        {"coin":"MARTY","asset":"MARTY","rpcport":52592,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
+        {"coin":"MARTY_SEGWIT","asset":"MORTY_SEGWIT","txversion":4,"overwintered":1,"segwit":true,"txfee":1000,"protocol":{"type":"UTXO"}}
     ]);
 
     let mm_alice = MarketMakerIt::start(
@@ -1529,13 +1574,13 @@ fn test_withdraw_legacy() {
     // wait until RPC API is active
 
     // Enable coins. Print the replies in case we need the address.
-    let mut enable_res = block_on(enable_coins_rick_morty_electrum(&mm_alice));
+    let mut enable_res = block_on(enable_coins_doc_marty_electrum(&mm_alice));
     enable_res.insert(
-        "MORTY_SEGWIT",
-        block_on(enable_electrum(&mm_alice, "MORTY_SEGWIT", false, &[
-            "electrum1.cipig.net:10018",
-            "electrum2.cipig.net:10018",
-            "electrum3.cipig.net:10018",
+        "MARTY_SEGWIT",
+        block_on(enable_electrum(&mm_alice, "MARTY_SEGWIT", false, &[
+            "electrum1.cipig.net:10021",
+            "electrum2.cipig.net:10021",
+            "electrum3.cipig.net:10021",
         ])),
     );
     log!("enable_coins (alice): "[enable_res]);
@@ -1543,25 +1588,25 @@ fn test_withdraw_legacy() {
     let withdraw = block_on(mm_alice.rpc(&json!({
         "userpass": mm_alice.userpass,
         "method": "withdraw",
-        "coin": "MORTY",
+        "coin": "MARTY",
         "to": "RJTYiYeJ8eVvJ53n2YbrVmxWNNMVZjDGLh",
         "amount": 0.001,
     })))
     .unwrap();
-    assert!(withdraw.0.is_success(), "MORTY withdraw: {}", withdraw.1);
+    assert!(withdraw.0.is_success(), "MARTY withdraw: {}", withdraw.1);
     let _: TransactionDetails = json::from_str(&withdraw.1).expect("Expected 'TransactionDetails'");
 
     // must not allow to withdraw to non-P2PKH addresses
     let withdraw = block_on(mm_alice.rpc(&json!({
         "userpass": mm_alice.userpass,
         "method": "withdraw",
-        "coin": "MORTY",
+        "coin": "MARTY",
         "to": "bUN5nesdt1xsAjCtAaYUnNbQhGqUWwQT1Q",
         "amount": "0.001",
     })))
     .unwrap();
 
-    assert!(withdraw.0.is_server_error(), "MORTY withdraw: {}", withdraw.1);
+    assert!(withdraw.0.is_server_error(), "MARTY withdraw: {}", withdraw.1);
     log!([withdraw.1]);
     let withdraw_error: Json = json::from_str(&withdraw.1).unwrap();
     withdraw_error["error"]

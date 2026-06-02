@@ -152,3 +152,49 @@ jobs:
           RUST_LOG: debug
           BOB_PASSPHRASE: "also shoot benefit prefer juice shell elder veteran woman mimic image kidney"
           ALICE_PASSPHRASE: "spice describe gravity federal blast come thank unfair canal monkey style afraid"
+
+  external-network-tests:
+    # Allow-to-fail job for tests that depend on live external endpoints
+    # outside our control (cipig DOC/MARTY electrums, the public ETH dev
+    # chain at 195.201.0.6:8565, etc.). They are `#[ignore]` in source so
+    # they are skipped by `cargo test` everywhere else — including the
+    # `docker-tests` job, where their old RICK/MORTY substring would
+    # otherwise be picked up by the `test_withdraw` libtest filter and
+    # bring the whole pipeline down whenever the upstream services move
+    # or go offline. Run them here on a best-effort basis.
+    runs-on: [self-hosted, Linux, docker]
+    timeout-minutes: 20
+    needs: fmt
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Rust toolchain
+        run: rustc --version && cargo --version
+
+      - name: Run withdraw integration tests against DOC/MARTY
+        # The two `test_withdraw_and_send` / `test_withdraw_legacy` tests
+        # live in `mm2_main::mm2_tests` and are only compiled into the
+        # `docker_tests` test binary (the lib has `test = false`). They
+        # are `#[ignore]`d so the docker-tests job's substring filter no
+        # longer picks them up; here we run them explicitly with
+        # `--include-ignored --exact`.
+        #
+        # `_MM2_TEST_CONF=1` short-circuits the `docker_tests_runner`
+        # container bring-up (MYCOIN/MYCOIN1/qtum/for_slp), which these
+        # two tests do not need — they spawn their own MarketMaker and
+        # talk to public cipig electrums + the public ETH dev chain.
+        # `continue-on-error` mirrors the job-level setting so the step's
+        # status is preserved even when the upstream services are flaky.
+        continue-on-error: true
+        run: |
+          cargo test --bin docker_tests --features regtest-netid -- \
+            --test-threads=1 --include-ignored --exact \
+            mm2::mm2_tests::test_withdraw_and_send \
+            mm2::mm2_tests::test_withdraw_legacy
+        env:
+          RUST_LOG: debug
+          _MM2_TEST_CONF: "1"
+          BOB_PASSPHRASE: "also shoot benefit prefer juice shell elder veteran woman mimic image kidney"
+          ALICE_PASSPHRASE: "spice describe gravity federal blast come thank unfair canal monkey style afraid"

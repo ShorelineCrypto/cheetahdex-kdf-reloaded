@@ -38,6 +38,52 @@ pub fn morty_electrums() -> Vec<Json> {
     ]
 }
 
+// DOC/MARTY are the live successors of the retired RICK/MORTY dev assetchains.
+// The legacy `electrum*.cipig.net:10017` (RICK) and `:10018` (MORTY) services no
+// longer listen; cipig moved them to per-coin port allocations on the same
+// hosts: DOC on :10020 (TCP) / :30020 (WSS), MARTY on :10021 / :30021. The
+// RICK/MORTY helpers above are kept only so that other tests still using them
+// stay compilable until they are migrated as well.
+#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
+pub fn doc_electrums() -> Vec<Json> {
+    vec![
+        json!({ "url": "electrum1.cipig.net:30020", "protocol": "WSS" }),
+        json!({ "url": "electrum2.cipig.net:30020", "protocol": "WSS" }),
+        json!({ "url": "electrum3.cipig.net:30020", "protocol": "WSS" }),
+    ]
+}
+
+#[allow(dead_code)]
+#[cfg(not(target_arch = "wasm32"))]
+pub fn doc_electrums() -> Vec<Json> {
+    vec![
+        json!({ "url": "electrum1.cipig.net:10020" }),
+        json!({ "url": "electrum2.cipig.net:10020" }),
+        json!({ "url": "electrum3.cipig.net:10020" }),
+    ]
+}
+
+#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
+pub fn marty_electrums() -> Vec<Json> {
+    vec![
+        json!({ "url": "electrum1.cipig.net:30021", "protocol": "WSS" }),
+        json!({ "url": "electrum2.cipig.net:30021", "protocol": "WSS" }),
+        json!({ "url": "electrum3.cipig.net:30021", "protocol": "WSS" }),
+    ]
+}
+
+#[allow(dead_code)]
+#[cfg(not(target_arch = "wasm32"))]
+pub fn marty_electrums() -> Vec<Json> {
+    vec![
+        json!({ "url": "electrum1.cipig.net:10021" }),
+        json!({ "url": "electrum2.cipig.net:10021" }),
+        json!({ "url": "electrum3.cipig.net:10021" }),
+    ]
+}
+
 #[allow(dead_code)]
 #[cfg(target_arch = "wasm32")]
 pub fn tbtc_electrums() -> Vec<Json> {
