@@ -879,8 +879,23 @@ pub fn validate_payment<T: UtxoCommonOps>(
 
             let actual_output = tx.outputs.get(output_index);
             if actual_output != Some(&expected_output) {
+                // Distinguish amount mismatch from script mismatch so failed swaps
+                // and `validate_*_payment` callers get an actionable diagnostic
+                // instead of a raw struct dump.
+                let kind = match actual_output {
+                    Some(actual)
+                        if actual.value != expected_output.value
+                            && actual.script_pubkey == expected_output.script_pubkey =>
+                    {
+                        "amount mismatch"
+                    },
+                    Some(actual) if actual.script_pubkey != expected_output.script_pubkey => "script mismatch",
+                    Some(_) => "output mismatch",
+                    None => "missing output",
+                };
                 return ERR!(
-                    "Provided payment tx output doesn't match expected {:?} {:?}",
+                    "Provided payment tx output {}: actual {:?}, expected {:?}",
+                    kind,
                     actual_output,
                     expected_output
                 );
