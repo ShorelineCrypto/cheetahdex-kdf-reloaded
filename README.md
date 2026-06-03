@@ -1,202 +1,107 @@
-<p align="center">
-    <a href="https://atomicdex.io" alt="Contributors">
-        <img src="https://user-images.githubusercontent.com/35845239/147651230-827e8c0f-baf0-4f28-8be0-e08624baad37.png" />
-    </a>
-</p>
+# KDF Reloaded
 
-<p align="center">
-    <a href="https://github.com/komodoplatform/atomicdex-api/graphs/contributors" alt="Contributors">
-        <img src="https://img.shields.io/github/contributors/komodoplatform/atomicdex-api" />
-    </a>
-    <a href="https://github.com/komodoplatform/atomicdex-api/releases">
-        <img src="https://img.shields.io/github/downloads/komodoplatform/atomicdex-api/total" alt="downloads">
-    </a>
-    <a href="https://github.com/komodoplatform/atomicdex-api/">
-        <img src="https://img.shields.io/github/last-commit/komodoplatform/atomicdex-api" alt="last commit">
-    </a>
-    <a href="https://github.com/komodoplatform/atomicdex-api/pulse" alt="Activity">
-        <img src="https://img.shields.io/github/commit-activity/m/komodoplatform/atomicdex-api" />
-    </a>
-    <br/>
-    <a href="https://github.com/komodoplatform/atomicdex-api/issues">
-        <img src="https://img.shields.io/github/issues-raw/komodoplatform/atomicdex-api" alt="issues">
-    </a>
-    <a href="https://github.com/komodoplatform/atomicdex-api/issues?q=is%3Aissue+is%3Aclosed">
-        <img src="https://img.shields.io/github/issues-closed-raw/komodoplatform/atomicdex-api" alt="issues closed">
-    </a>
-    <a href="https://github.com/komodoplatform/atomicdex-api/pulls">
-        <img src="https://img.shields.io/github/issues-pr/komodoplatform/atomicdex-api" alt="pulls">
-    </a>
-    <a href="https://github.com/komodoplatform/atomicdex-api/pulls?q=is%3Apr+is%3Aclosed">
-        <img src="https://img.shields.io/github/issues-pr-closed/komodoplatform/atomicdex-api" alt="pulls closed">
-    </a>
-    <br/>
-    <a href="https://github.com/KomodoPlatform/atomicdex-api/releases">
-        <img src="https://img.shields.io/github/v/release/komodoplatform/atomicdex-api" alt="release version">
-    </a>
-    <a href="https://discord.gg/3rzDPAr">
-        <img src="https://img.shields.io/discord/412898016371015680?logo=discord" alt="chat on Discord">
-    </a>
-    <a href="https://twitter.com/intent/follow?screen_name=https://twitter.com/atomicdex">
-        <img src="https://img.shields.io/twitter/follow/atomicdex?style=social&logo=twitter" alt="follow on Twitter">
-    </a>
-</p>
+> **GPLv2-only continuation of the Komodo DeFi Framework — peer-to-peer atomic swaps, no central authority.**
 
+[![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LEGAL/LICENSE)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#alpha-disclaimer)
 
-## About this fork — KDF-Reloaded
+KDF Reloaded is an open-source [atomic-swap](https://en.wikipedia.org/wiki/Atomic_swap) engine for trustless peer-to-peer trading across blockchains, derived from the Komodo DeFi Framework / AtomicDEX-API codebase as it stood under the GPLv2 license.
 
-**KDF-Reloaded** is a hard fork of the Komodo DeFi Framework (formerly
-AtomicDEX-API) maintained on the `reloaded-gplv2-base` branch. It targets
-reproducible self-hosted CI, multi-network support (netid 8762 AtomicDEX,
-netid 6133 GLEEC), and a leaner module layout. See [RELOADED-PLAN.md](./RELOADED-PLAN.md)
-for active phases and [docs/NETWORK_CONFIG.md](./docs/NETWORK_CONFIG.md) for
-supported networks.
+> **TODO — Counsel review pending.** This repository is being prepared for public release. Independent legal counsel review of the licensing posture is in progress; see [`SECURITY.md`](SECURITY.md) and the [release checklist](RELEASE_CHECKLIST.md) for the current state of pre-release gating items.
 
-The rest of this README describes the underlying AtomicDEX-API technology,
-which is unchanged in this fork.
+## Heritage
 
-## What is the AtomicDEX-API?
+This project is a **continuation**, not a fork-of-current-upstream. It is anchored to the last commit of the upstream Komodo DeFi Framework that was unambiguously distributed under GPLv2-only (commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, dated 2022-06-03). All work since that anchor is original to this project and licensed under GPLv2-only.
 
-The AtomicDEX API core is open-source [atomic-swap](https://komodoplatform.com/en/academy/atomic-swaps/) software for seamless, decentralised, peer to peer trading between almost every blockchain asset in existence. This software works with propagation of orderbooks and swap states through the [libp2p](https://libp2p.io/) protocol and uses [Hash Time Lock Contracts (HTLCs)](https://en.bitcoinwiki.org/wiki/Hashed_Timelock_Contracts) for ensuring that the two parties in a swap either mutually complete a trade, or funds return to thier original owner.
+For the relationship to other downstream projects (notably the GLEEC fork), see [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md).
 
-There is no 3rd party intermediatary, no proxy tokens, and at all times users remain in sole possession of their private keys.
+## Alpha disclaimer
 
-A [well documented API](https://developers.komodoplatform.com/basic-docs/atomicdex/introduction-to-atomicdex.html) offers simple access to the underlying services using simple language agnostic JSON structured methods and parameters such that users can communicate with the core in a variety of methods such as [curl](https://developers.komodoplatform.com/basic-docs/atomicdex-api-legacy/buy.html) in CLI, or fully functioning [desktop and mobile applications](https://atomicdex.io/) like [AtomicDEX Desktop](https://github.com/KomodoPlatform/atomicDEX-Desktop).
+KDF Reloaded is currently in **public alpha**. APIs, on-disk formats, and the network protocol may change between alpha releases. Use only with funds you can afford to lose.
 
-For a curated list of AtomicDEX based projects and resources, check out [Awesome AtomicDEX](https://github.com/KomodoPlatform/awesome-atomicdex).
+- The `mm2` binary is provided for evaluation, testing, and review.
+- Mainnet swaps function on netid `8762` (AtomicDEX network) and netid `6133` (GLEEC network), but you are running unaudited pre-release software.
+- A GPG/minisign signature on the release artifacts is **TODO** for the alpha cycle; verify provenance from this repository directly until signatures are published. See [`SECURITY.md`](SECURITY.md).
 
+## What it does
 
-## Features
+- **Atomic swaps** between supported chains via Hash Time Locked Contracts (HTLCs) — no custodian, no proxy tokens, you keep your keys.
+- **Multi-protocol coin support**: UTXO chains (Bitcoin family), EVM chains, Tendermint/Cosmos, Zcash (sapling), Lightning Network, and others — see [`mm2src/coins/`](mm2src/coins/).
+- **Distributed orderbook** propagated over [libp2p](https://libp2p.io/) gossipsub.
+- **JSON-RPC API** consumable from CLI, scripts, or third-party GUIs.
 
-- Perform blockchain transactions without a local native chain (e.g. via Electrum servers)
-- Query orderbooks for all pairs within the [supported coins](https://github.com/KomodoPlatform/coins/blob/master/coins)
-- Buy/sell from the orderbook, or create maker orders
-- Configure automated ["makerbot" trading](https://developers.komodoplatform.com/basic-docs/atomicdex-api-20-dev/start_simple_market_maker_bot.html) with periodic price updates and optional [telegram](https://telegram.org/) alerts
- 
+## Networks
 
-## System Requirements
+| netid | Network | Status in alpha |
+|------:|---------|-----------------|
+| 8762  | AtomicDEX (default upstream network) | Supported |
+| 6133  | GLEEC                                | Supported |
 
-- 64-bit MacOS, Windows, or Linux operating system
-- 2GB of free RAM (or more)
-- User account with admin/root privileges
+Other netids (including 7777, 8100, 8999, 9000, 9998) are not part of the supported alpha surface. Test-only netids exist in the codebase under the `regtest-netid` Cargo feature, off by default. See [`docs/NETWORK_CONFIG.md`](docs/NETWORK_CONFIG.md).
 
 ## Building from source
 
-[Pre-built release binaries](https://developers.komodoplatform.com/basic-docs/atomicdex/atomicdex-setup/get-started-atomicdex.html) are available for OSX, Linux or Windows.
+Requirements:
 
-If you want to build from source, the following prerequisites are required:
-- [Rustup](https://rustup.rs/)
-- [Cmake](https://cmake.org/download/) version 3.12 or higher
-- OS specific build tools (e.g. [build-essential](https://linuxhint.com/install-build-essential-ubuntu/) on Linux, [XCode](https://apps.apple.com/us/app/xcode/id497799835?mt=12) on OSX or [MSVC](https://docs.microsoft.com/en-us/cpp/build/vscpp-step-0-installation?view=vs-2017) on Win)
-- (Optional) OSX: install [openssl](https://www.openssl.org/), e.g. `brew install openssl`.
-- (Optional) OSX: run `LIBRARY_PATH=/usr/local/opt/openssl/lib`
-- Additional Rust Components
-    ```
-    rustup install nightly-2022-02-01
-    rustup default nightly-2022-02-01
-    rustup component add rustfmt-preview
-    ```
-        
-To build, run `cargo build` (or `cargo build -vv` to get verbose build output).
+- Stable Rust toolchain (see [`rust-toolchain.toml`](rust-toolchain.toml))
+- CMake ≥ 3.12
+- A C/C++ toolchain (build-essential / Xcode CLT / MSVC)
 
-For more detailed instructions, please refer to the [Installation Guide](https://developers.komodoplatform.com/basic-docs/atomicdex/atomicdex-setup/get-started-atomicdex.html). 
+```sh
+cargo build --release --bin mm2
+```
 
-## Building WASM binary
+The binary is placed at `target/release/mm2`. For a development environment with full test infrastructure (Docker-based integration tests, electrum mocks, etc.) see [`docs/DEV_ENVIRONMENT.md`](docs/DEV_ENVIRONMENT.md).
 
-Please refer to the [WASM Build Guide](./docs/WASM_BUILD.md).
+For WebAssembly builds, see [`docs/WASM_BUILD.md`](docs/WASM_BUILD.md).
 
 ## Configuration
 
-Basic config is contained in two files, `MM2.json` and `coins`
+Two files drive runtime configuration:
 
-The user configuration [MM2.json file](https://developers.komodoplatform.com/basic-docs/atomicdex/atomicdex-setup/configure-mm2-json.html) contains rpc credentials, your mnemonic seed phrase, a `netid` (supported values: 8762 for AtomicDEX, 6133 for GLEEC; netid 7777 is deprecated) and some extra [optional parameters](https://developers.komodoplatform.com/basic-docs/atomicdex/atomicdex-setup/get-started-atomicdex.html).
+- `MM2.json` — RPC credentials, mnemonic, `netid`, optional toggles. See the upstream developer docs for the full schema.
+- `coins` — list of activatable coin definitions. A community-maintained registry lives at [github.com/KomodoPlatform/coins](https://github.com/KomodoPlatform/coins).
 
-For example:
+Minimal example:
+
 ```json
 {
-  "gui": "core_readme",
+  "gui": "kdf-reloaded",
   "netid": 8762,
   "rpc_password": "Ent3r_Un1Qu3_Pa$$w0rd",
-  "passphrase": "ENTER_UNIQUE_SEED_PHRASE_DONT_USE_THIS_CHANGE_IT_OR_FUNDS_NOT_SAFU"
+  "passphrase": "ENTER_UNIQUE_SEED_PHRASE_DO_NOT_REUSE"
 }
 ```
 
-The coins file contains information about the coins and tokens you want to trade. A regularly updated version is maintained in the [Komodo Platform coins repository](https://github.com/KomodoPlatform/coins/blob/master/coins). Pull Requests to add any coins not yet included are welcome.
-
+iOS builds are not currently part of the alpha release matrix.
 
 ## Usage
 
-To launch the AtomicDEX API, run `./mm2` (or `mm2.exe` in Windows)
+Launch the daemon:
 
-To activate a coin:
-```bash
-curl --url "http://127.0.0.1:7783" --data '{
-	"coin": "KMD",
-	"method": "electrum",
-	"servers": [
-		{"url": "electrum1.cipig.net:10001"},
-		{"url": "electrum2.cipig.net:10001"},
-		{"url": "electrum3.cipig.net:10001"}
-	],
-	"required_confirmations":10,
-	"requires_notarization":true,
-	"mm2":1,
-	"userpass": "$userpass"
-}'
+```sh
+./mm2
 ```
 
-To view the orderbook for a pair:
-```bash
-curl --url "http://127.0.0.1:7783" --data '{
-    "userpass":"$userpass",
-    "method":"orderbook",
-    "base":"KMD",
-    "rel":"BTC"
-}'
+It exposes a JSON-RPC server on `127.0.0.1:7783` by default. The RPC catalogue is identical to the upstream Komodo DeFi Framework where unchanged; differences are tracked in [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md). RPC namespaces include unprefixed stable methods, `task::*` for long-running operations, `stream::*` for SSE subscriptions, and others.
+
+## Project layout
+
+```
+mm2src/         Workspace crates (Rust)
+docs/           Developer documentation
+LEGAL/          License, contributor agreement, third-party notices
+.github/        CI workflows
 ```
 
-To place a buy order:
-```bash
-curl --url "http://127.0.0.1:7783" --data '{
-  "userpass": "$userpass",
-  "method": "buy",
-  "base": "KMD",
-  "rel": "DOGE",
-  "volume": "10",
-  "price": "4"
-}'
-```
+Notable crates: [`mm2src/mm2_main/`](mm2src/mm2_main/) (entry, RPC, swaps, ordermatch), [`mm2src/coins/`](mm2src/coins/), [`mm2src/mm2_p2p/`](mm2src/mm2_p2p/), [`mm2src/crypto/`](mm2src/crypto/).
 
-Refer to the [Komodo Developer Docs](https://developers.komodoplatform.com/basic-docs/atomicdex/introduction-to-atomicdex.html) for details of additional RPC methods and parameters
+## Contributing
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [PR review checklist](docs/PR_REVIEW_CHECKLIST.md). All contributors must agree to the [Developer Agreement](LEGAL/DEVELOPER-AGREEMENT) and abide by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Project structure
+For the project roadmap beyond the alpha, see [`ROADMAP.md`](ROADMAP.md). For the change log, see [`CHANGELOG.md`](CHANGELOG.md).
 
-[mm2src](mm2src) - Rust code, contains some parts ported from C `as is` (e.g. `lp_ordermatch`) to reach the most essential/error prone code. Some other modules/crates are reimplemented from scratch.
+## License
 
-
-## Additional docs for developers
-
-- [Contribution guide](./CONTRIBUTING.md)
-- [Setting up the environment to run the full tests suite](./docs/DEV_ENVIRONMENT.md)
-- [Unit tests added in Reloaded](./docs/UNIT_TESTS.md)
-- [PR review checklist](./docs/PR_REVIEW_CHECKLIST.md)
-- [Git flow and branch strategy](./docs/GIT_FLOW_AND_WORKING_PROCESS.md)
-- [Network configuration (netid 8762 / 6133)](./docs/NETWORK_CONFIG.md)
-- [Self-hosted CI runners](./docs/CI_RUNNERS.md)
-- [WASM build guide](./docs/WASM_BUILD.md)
-- [Komodo Developer Docs (upstream)](https://developers.komodoplatform.com/basic-docs/atomicdex/introduction-to-atomicdex.html)
-
-
-## Disclaimer
-
-This repository contains the `work in progress` code of the brand new AtomicDEX API core (mm2) built mainly on Rust.  
-The current state can be considered as a alpha version.
-
-**<b>WARNING: Use with test coins only or with assets which value does not exceed an amount you are willing to lose. This is alpha stage software! </b>**
-
-
-## Help and troubleshooting
-
-If you have any question/want to report a bug/suggest an improvement feel free to [open an issue](https://github.com/artemii235/SuperNET/issues/new) or join the  [Komodo Platform Discord](https://discord.gg/PGxVm2y) `dev-marketmaker` channel.  
-
+GPLv2-only. See [`LEGAL/LICENSE`](LEGAL/LICENSE), [`LEGAL/COPYING`](LEGAL/COPYING), and [`LEGAL/THIRDPARTY-LICENSES`](LEGAL/THIRDPARTY-LICENSES).
