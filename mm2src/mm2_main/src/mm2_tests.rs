@@ -1319,7 +1319,9 @@ fn test_withdraw_and_send() {
     // wait until RPC API is active
 
     // Enable coins. Print the replies in case we need the address.
-    let mut enable_res = block_on(enable_coins_eth_electrum_doc_marty(&mm_alice, &["http://195.201.0.6:8565"]));
+    let mut enable_res = block_on(enable_coins_eth_electrum_doc_marty(&mm_alice, &[
+        "http://195.201.0.6:8565",
+    ]));
     enable_res.insert(
         "MARTY_SEGWIT",
         block_on(enable_electrum(&mm_alice, "MARTY_SEGWIT", false, &[
