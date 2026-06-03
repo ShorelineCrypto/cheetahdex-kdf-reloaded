@@ -69,3 +69,6 @@ MM2.json
 
 # Rust compiler playground output
 rust_out
+
+# Developer notes never tracked
+/local/
