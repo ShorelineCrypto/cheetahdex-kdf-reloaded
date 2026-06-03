@@ -254,8 +254,13 @@ impl CryptoCtx {
         let (secp256k1_key_pair, key_pair_policy) = policy_builder.build(passphrase)?;
         let rmd160 = secp256k1_key_pair.public().address_hash();
 
-        // We need a separate key pair for the legacy MmCtx fields.
-        // TODO: Remove this when lp_swap and lp_ordermatch fully support CryptoCtx.
+        // Legacy MmCtx fields read this iguana-style key directly. In `Iguana` mode it equals
+        // `secp256k1_key_pair` above; in `GlobalHDAccount` mode it is a *different* key derived
+        // by hashing the mnemonic bytes (matching the baseline derivation). Code paths
+        // in `lp_swap` and `lp_ordermatch` that fetch the keypair from `MmCtx` rather than
+        // `CryptoCtx` therefore use the iguana key even when the user opted into HD mode.
+        // DEFERRED(hd-dispatch): refactoring lp_swap/lp_ordermatch to consult `CryptoCtx`
+        // is a substantial swap-state-machine change deferred past v0.1.
         let secp256k1_key_pair_for_legacy = key_pair_from_seed(passphrase).mm_err(Into::into)?;
 
         let crypto_ctx = CryptoCtx {
