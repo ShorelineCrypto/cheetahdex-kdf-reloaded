@@ -16,17 +16,20 @@ A release is not cut until every box below is ticked. This checklist applies to 
 ## Documentation
 
 - [ ] `CHANGELOG.md` has an entry for the new version with an accurate date.
-- [ ] `RELOADED_VS_GLEEC.md` Added / Removed / WIP / Switches lists are up to date.
+- [ ] `RELOADED_VS_GLEEC.md` Added / Removed / WIP lists are up to date.
 - [ ] `ROADMAP.md` reflects items moved between sections.
 - [ ] `README.md` build and configuration instructions still apply verbatim.
 - [ ] AGENTS.md files updated if module structure or conventions changed.
 
 ## Compatibility
 
-- [ ] Any new compatibility switch is documented in `docs/COMPAT_SWITCHES.md` with a row in the active table AND a per-switch detail subsection.
-- [ ] Any new compatibility switch is added to `MM2_classic.json` with the GLEEC-compatible value.
-- [ ] Any new compatibility switch is referenced from `RELOADED_VS_GLEEC.md` (Added + Compatibility-switches lists).
-- [ ] Any removed switch has a row in the removed table with a final-behaviour note and a migration entry.
+For each behavioural divergence from GLEEC KDF introduced in this release (see [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md) for the developer rule):
+
+- [ ] The per-setting documentation includes a clearly visible "set this to `<value>` for GLEEC compatibility" note (or an explicit "GLEEC has no equivalent" note for net-new settings).
+- [ ] A row exists in [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md) pointing back to the per-setting documentation.
+- [ ] If the GLEEC-compatible value is acknowledgement-gated, both the per-setting docs and the central-chapter row spell out the acknowledgement requirement and the runtime warning.
+- [ ] The change is referenced from `RELOADED_VS_GLEEC.md` (Added / Removed / WIP lists, as appropriate).
+- [ ] Any retired divergence is noted in `CHANGELOG.md`, the corresponding row in `docs/GLEEC_COMPATIBILITY.md` is removed, and the per-setting docs are updated.
 
 ## Security
 

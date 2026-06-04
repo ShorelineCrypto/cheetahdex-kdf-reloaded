@@ -10,7 +10,7 @@ Goal: a publicly reviewable, buildable codebase exercising the same atomic-swap 
 - [x] Stable Rust toolchain, no nightly pin.
 - [x] Self-hosted CI: format → unit tests (matrix) → docker tests, on-demand release builds.
 - [x] Test-only netids gated behind `regtest-netid` Cargo feature.
-- [x] Per-feature compatibility-switch framework + `MM2_classic.json` template.
+- [x] Compatibility convention documented (developer rule + central admin chapter `docs/GLEEC_COMPATIBILITY.md`).
 - [ ] Public alpha tag with signed Linux binary.
 - [ ] Vulnerability disclosure mailbox and signing key fingerprints published.
 
@@ -21,7 +21,7 @@ Goal: stabilise APIs and on-disk formats; broaden platform coverage.
 - Hardware wallet flows: complete Trezor coverage; promote Ledger out of `experimental-`.
 - WalletConnect v2 stabilisation across native and WASM.
 - Resolve outstanding HD-wallet dispatch TODOs in swap and ordermatch paths.
-- Track GLEEC KDF evolution; add compatibility switches for divergent behaviours as features land.
+- Track GLEEC KDF evolution; populate `docs/GLEEC_COMPATIBILITY.md` as divergent behaviours land.
 - Reproducible builds for Linux x86-64 and ARM64.
 - WASM build kept in CI; documented integration story for downstream GUIs.
 

@@ -12,29 +12,20 @@ The GLEEC fork of the same upstream codebase diverged from the joint history at 
 
 For licensing details, see [`LEGAL/LICENSE`](LEGAL/LICENSE) and [`LEGAL/COPYING`](LEGAL/COPYING).
 
-## Compatibility framework
+## Compatibility convention
 
-KDF Reloaded does **not** use a single global compatibility mode. Instead, every behavioural divergence from GLEEC KDF that could affect operators, users, or third-party API integrations ships with a **dedicated per-feature switch** under the `compatibility` object in `MM2.json`.
+KDF Reloaded does **not** define a single global compatibility mode, and does **not** introduce a common code construct (no `compatibility` JSON object, no `CompatMode` enum, no shared registry). Instead, every behavioural divergence from GLEEC KDF that could affect operators, users, or third-party API integrations is implemented in whatever shape fits the feature, and is then documented in two specific places so that any operator can reach the GLEEC-equivalent behaviour:
 
-```json
-{
-  "netid": 8762,
-  "compatibility": {
-    "<switch_name>": "<value>"
-  }
-}
-```
+1. Next to the setting itself, a short "set this to `<value>` for GLEEC compatibility" note.
+2. A row in the central admin chapter [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md), which lists every such setting end-to-end.
 
-Each switch documents its own default and its own compatibility value. A maintained drop-in template, [`MM2_classic.json`](MM2_classic.json), pins every switch to the GLEEC-compatible value.
-
-The full catalogue of switches, their defaults, and the rationale behind each one lives in [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md). For v0.1.0-alpha.1 the catalogue is empty — no switches are active yet — but the framework, the template, and the developer rule ("any divergent change must ship with a switch") are in place.
+The developer-facing rule (mandatory for AI assistants, strong recommendation for human contributors) lives in [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md). For v0.1.0-alpha.1 the central chapter is empty — no behavioural divergences require operator configuration yet — but the convention, the central chapter scaffold, and the developer rule are in place.
 
 ## Summary
 
 ### Added in KDF Reloaded
 
-- Per-feature compatibility switch framework (`compatibility` object in `MM2.json`); see [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md).
-- [`MM2_classic.json`](MM2_classic.json) drop-in template for GLEEC-KDF replacement deployments.
+- Compatibility convention and central admin chapter for GLEEC-equivalent operation; see [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md) and [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md).
 - `regtest-netid` Cargo feature exposing test-only netids 8100, 8999, 9000, 9998 (off by default in production builds).
 - On-demand `Build Linux` GitHub Actions workflow for release-profile binaries.
 - Self-hosted CI runner support ([`docs/CI_RUNNERS.md`](docs/CI_RUNNERS.md)).
@@ -53,11 +44,9 @@ The full catalogue of switches, their defaults, and the rationale behind each on
 - HD wallet dispatch in swap/ordermatch paths (legacy iguana-key fallback retained for parity with upstream and GLEEC; documented in code).
 - *(further entries to be enumerated.)*
 
-### Compatibility switches
+### Settings to set for GLEEC-compatible operation
 
-| Switch | Default | Compatibility value | Introduced |
-|--------|---------|---------------------|------------|
-| *(none in v0.1.0-alpha.1)* | — | — | — |
+See [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md). For v0.1.0-alpha.1 the list is empty — no operator configuration is required to match GLEEC KDF behaviour.
 
 ## Detail sections
 
@@ -84,5 +73,5 @@ Detail subsections will be added as features land. Each entry above expands here
 KDF Reloaded commits to following GLEEC KDF's evolution:
 
 - We monitor GLEEC KDF releases and incorporate compatible changes when they are legally and technically feasible.
-- For changes we *cannot* incorporate verbatim (licensing, project-direction, or quality reasons), we still expose a compatibility switch so the GLEEC behaviour remains reachable.
-- The only exception is a behaviour that would either violate GPLv2 or directly contradict the project's principle of free, open trading at reasonable cost. In that case the switch defaults to the KDF Reloaded behaviour and the original-compatible value is gated behind an explicit acknowledgement key with a runtime warning. See the developer rule in [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md).
+- For changes we *cannot* incorporate verbatim (licensing, project-direction, or quality reasons), we still expose a per-setting opt-in so the GLEEC-equivalent behaviour remains reachable, and we list that setting in [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md).
+- The only exception is a behaviour that would either violate GPLv2 or directly contradict the project's principle of free, open trading at reasonable cost. In that case the divergent setting defaults to the KDF Reloaded behaviour and the original-compatible value is gated behind an explicit acknowledgement with a runtime warning. See the developer rule in [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md).

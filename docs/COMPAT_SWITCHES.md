@@ -1,89 +1,71 @@
-# Compatibility switches
+# Compatibility convention
 
-KDF Reloaded is a continuation of the upstream Komodo DeFi Framework. Where our behaviour intentionally diverges from the GLEEC KDF fork (or the upstream KDF), we expose a **per-feature compatibility switch** under the `compatibility` object in `MM2.json` so operators, third-party API clients, and existing integrations can opt back into the original behaviour on a feature-by-feature basis.
+KDF Reloaded is a continuation of the upstream Komodo DeFi Framework and aims to remain a drop-in replacement for the GLEEC KDF fork wherever practical. When our behaviour intentionally diverges, we follow a **documentation convention** so that every operator and every third-party integration can recover the GLEEC-compatible behaviour by setting one or more configuration values.
 
-There is **no single global compatibility mode**. Each divergent feature ships with its own switch, its own default, and its own documentation entry below.
+This document defines that convention. **It deliberately does not define a common code construct, schema, or JSON object.** Each divergent feature implements its own switch in whatever shape fits that feature best (a config key, an RPC argument, an env var, a Cargo feature, a startup flag, etc.). The unified surface is the *documentation*, not the code.
 
-## Why per-feature
+## The rule
 
-A single global flag would force operators to choose between "all old" and "all new" — they could not, for instance, opt into our improved order-matching while keeping legacy fee-reporting semantics. Per-feature switches make every divergence a deliberate, narrow operator decision and keep the migration path granular.
+> Any change to KDF Reloaded that diverges from upstream / GLEEC KDF behaviour in a way that can break an existing third-party integration, change the shape or meaning of an RPC, change order-matching / fee / settlement semantics, surprise an operator who is migrating from GLEEC KDF, or — in the worst case — lead to coin loss, **must ship together with a way to opt back into the original behaviour**, and that opt-in must be documented in both places listed below.
 
-## Configuration shape
+For human contributors, this is a **strong recommendation** — the reviewer should push back on any divergent change that fails the rule without a justification.
 
-```json
-{
-  "netid": 8762,
-  "compatibility": {
-    "<switch_name>": "<value>"
-  }
-}
-```
+For AI assistants working on this codebase, this is a **strict, mandatory rule** — divergent changes that omit the opt-in or its documentation must not be proposed or committed.
 
-A `compatibility` object that omits a switch implicitly takes that switch's documented default. Unknown keys are rejected at startup so typos cannot silently change behaviour.
+## The two documentation locations
 
-## `MM2_classic.json` template
+Every divergent change must be marked in **both** of the following places. There is no other unifying surface — there is no global enum, no `compatibility` object, no `kdf_compat_mode` value, no central registry in code.
 
-A maintained template, [`MM2_classic.json`](../MM2_classic.json), pins every active switch to the value that reproduces upstream / GLEEC KDF behaviour as closely as practical. Operators replacing a GLEEC KDF deployment with KDF Reloaded should start from this template and remove individual switches as they evaluate the corresponding KDF Reloaded behaviour.
+### 1. Next to the setting itself
 
-The template is updated alongside every new switch.
+Wherever the new or changed setting is documented (the RPC reference, the configuration reference, the relevant in-tree `AGENTS.md`, an admin-facing README chapter, a Cargo-feature list, etc.), include a short, clearly visible note of the form:
 
-## Active switches
+> **Compatibility:** for behaviour matching GLEEC KDF (and the upstream pre-divergence Komodo DeFi Framework), set this to `<value>`. *(Optional one-line rationale.)*
 
-| Switch | Default | Compatibility value | Introduced | Risk if mismatched | Notes |
-|--------|---------|---------------------|------------|--------------------|-------|
-| *(none in v0.1.0-alpha.1)* | — | — | — | — | The framework is shipped without any divergent switches active. |
+If the setting is new and has no GLEEC counterpart, say so explicitly:
 
-Each switch added to this table also gets its own subsection below explaining the behavioural difference, the rationale, the third-party-API impact, and the migration path.
+> **Compatibility:** GLEEC KDF has no equivalent. Leave at the default to retain GLEEC-equivalent behaviour.
 
-## Adding a new switch (developer rule)
+### 2. Central admin chapter
 
-**Any change to KDF Reloaded that diverts from upstream / GLEEC KDF behaviour in a way that can:**
+Add or update an entry in [`docs/GLEEC_COMPATIBILITY.md`](GLEEC_COMPATIBILITY.md) — the user/admin-facing chapter listing **every** setting an operator must configure to run a KDF Reloaded node in full compatibility with GLEEC KDF. One row per divergent setting; the row points back to the per-setting documentation in (1).
 
-- break an existing third-party integration,
-- change the shape of an RPC response,
-- change the meaning of an RPC argument,
-- change order-matching, fee, or settlement semantics,
-- cause user error reports of the form "it worked in GLEEC KDF",
-- or in the worst case lead to coin loss,
+This central chapter is the single document an operator migrating from a GLEEC KDF deployment needs to read end-to-end.
 
-**must ship together with a compatibility switch** in `docs/COMPAT_SWITCHES.md`, the `MM2_classic.json` template, the `compatibility` schema, and the `RELOADED_VS_GLEEC.md` summary lists.
+The same chapter pattern can be reused for other significant forks or versions in the future — for example, a `docs/UPSTREAM_COMPATIBILITY.md` if a meaningful divergence from upstream Komodo DeFi Framework ever emerges. Each such chapter is independent.
 
-Procedure:
+## Defaults
 
-1. Add a row to the active-switches table above with a stable, descriptive `snake_case` name.
-2. Decide and document the **default**. The default should be whichever behaviour we expect the majority of new operators to want; it is **not** required to be the upstream-compatible value.
-3. Add a subsection below describing: the divergent behaviour, the compatibility behaviour, the chosen default and why, the risk if the operator picks the wrong value, the third-party-API impact, and the migration path.
-4. Wire the switch through the configuration loader so it lands in `MmCtx` as a typed value (no `String`/`Value` access at decision points).
-5. Add the switch to `MM2_classic.json` with the compatibility value.
-6. Add the switch to the `Added` section of `RELOADED_VS_GLEEC.md`.
-7. Cover both branches with tests.
-8. Note the change in `CHANGELOG.md`.
+Each divergent change picks its own default. The default does **not** have to be the GLEEC-compatible value; pick whichever value the majority of new operators are expected to want. The documentation in both locations above must make the GLEEC-compatible value unambiguous regardless of which side of the divergence is the default.
 
-### When the default departs from GPLv2-or-fair-trading principles
+### Departures from GPLv2-or-fair-trading principles
 
-If GLEEC KDF (or upstream) introduces a behaviour that conflicts with this project's principles — non-GPLv2 distribution, non-free trading, restrictions on who may participate, or similar — the corresponding switch:
+If the upstream / GLEEC behaviour conflicts with this project's principles — non-GPLv2 distribution, restrictions on free trading, restrictions on participation, or similar — the divergent setting:
 
 - defaults to the KDF Reloaded behaviour;
-- still exposes the original-compatible value, but **only behind an explicit acknowledgement gate** (a second config key such as `i_understand_<switch>_implications: true`); and
+- still exposes a way to reach the original-compatible behaviour, but **only behind an explicit acknowledgement** (a second key, an env var, a CLI flag — whatever fits the feature) named so that selecting it is a deliberate operator act; and
 - emits a prominent runtime warning whenever the original-compatible value is selected.
 
-Document the rationale in the per-switch subsection.
+The per-setting documentation must spell out the rationale; the central chapter must flag the entry as acknowledgement-gated.
 
-## Removing a switch
+## What this convention is not
 
-A switch may be removed when:
+- **Not** a JSON schema. There is no `compatibility: {}` object in `MM2.json`.
+- **Not** a code interface. There is no `CompatMode` enum, no `compat_value_for(...)` helper, no `MmCtx::compat_*` field common to all switches.
+- **Not** a single global mode. An operator who wants GLEEC behaviour in one area and KDF Reloaded behaviour in another sets exactly the values they want and leaves the rest alone.
+- **Not** a versioned bundle. There is no "GLEEC-classic profile". The central chapter lists settings; the operator picks the ones they need.
 
-- the compatibility branch is no longer reachable in any supported configuration; or
-- a migration path (with a deprecation warning issued for at least one minor release) has been provided to operators.
+## Removing a divergence
 
-Removed switches are listed below with their final release.
+A divergent setting (and its corresponding rows in both documentation locations) may be removed when:
 
-| Switch | Removed in | Final behaviour | Migration |
-|--------|------------|-----------------|-----------|
-| *(none)* | — | — | — |
+- the divergence has been retired and the implementation no longer supports the alternative behaviour at all; or
+- a deprecation has been published in `CHANGELOG.md` for at least one minor release with a documented migration path.
+
+When a row is removed from `docs/GLEEC_COMPATIBILITY.md`, note the removal in `CHANGELOG.md`.
 
 ## Related documents
 
-- [`RELOADED_VS_GLEEC.md`](../RELOADED_VS_GLEEC.md) — public catalogue of the same divergences.
-- [`MM2_classic.json`](../MM2_classic.json) — drop-in compatibility template.
-- [`CHANGELOG.md`](../CHANGELOG.md) — every switch addition or removal is logged.
+- [`GLEEC_COMPATIBILITY.md`](GLEEC_COMPATIBILITY.md) — the central admin chapter (user-facing list of every setting).
+- [`../RELOADED_VS_GLEEC.md`](../RELOADED_VS_GLEEC.md) — public catalogue of the divergences themselves.
+- [`../CHANGELOG.md`](../CHANGELOG.md) — every divergent change is logged here.
