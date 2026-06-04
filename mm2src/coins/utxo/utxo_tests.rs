@@ -3,20 +3,23 @@ use crate::coin_balance::HDAddressBalance;
 use crate::hd_wallet::HDAccountsMap;
 use crate::hd_wallet_storage::{HDWalletMockStorage, HDWalletStorageInternalOps};
 use crate::rpc_command::account_balance::{AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
-use crate::rpc_command::init_scan_for_new_addresses::{InitScanAddressesRpcOps, ScanAddressesParams,
-                                                      ScanAddressesResponse};
+use crate::rpc_command::init_scan_for_new_addresses::{
+    InitScanAddressesRpcOps, ScanAddressesParams, ScanAddressesResponse,
+};
 use crate::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin, QtumDelegationOps, QtumDelegationRequest};
-use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl,
-                               GetAddressInfoRes, ListSinceBlockRes, ListTransactionsItem, NativeClient,
-                               NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps, ValidateAddressRes,
-                               VerboseBlock};
+use crate::utxo::rpc_clients::{
+    BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl, GetAddressInfoRes, ListSinceBlockRes,
+    ListTransactionsItem, NativeClient, NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps,
+    ValidateAddressRes, VerboseBlock,
+};
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
 use crate::utxo::utxo_common::UtxoTxBuilder;
 use crate::utxo::utxo_common_tests;
 use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
-#[cfg(not(target_arch = "wasm32"))] use crate::WithdrawFee;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::WithdrawFee;
 use crate::{CoinBalance, PrivKeyBuildPolicy, StakingInfosDetails, SwapOps, TradePreimageValue, TxFeeDetails};
 use crate::{DexFee, ValidateFeeArgs};
 use bigdecimal::{BigDecimal, Signed};
@@ -82,7 +85,9 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
 
 /// Returned client won't work by default, requires some mocks to be usable
 #[cfg(not(target_arch = "wasm32"))]
-fn native_client_for_test() -> NativeClient { NativeClient(Arc::new(NativeClientImpl::default())) }
+fn native_client_for_test() -> NativeClient {
+    NativeClient(Arc::new(NativeClientImpl::default()))
+}
 
 fn utxo_coin_fields_for_test(
     rpc_client: UtxoRpcClientEnum,
@@ -3351,12 +3356,15 @@ fn test_account_balance_rpc() {
     macro_rules! known_address {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:literal) => {
             addresses_map.insert($address.to_string(), $balance);
-            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
-                address: $address.to_string(),
-                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                chain: $chain,
-                balance: CoinBalance::new(BigDecimal::from($balance)),
-            })
+            balances_by_der_path.insert(
+                $der_path.to_string(),
+                HDAddressBalance {
+                    address: $address.to_string(),
+                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                    chain: $chain,
+                    balance: CoinBalance::new(BigDecimal::from($balance)),
+                },
+            )
         };
     }
 
@@ -3688,12 +3696,15 @@ fn test_scan_for_new_addresses() {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:expr) => {{
             let balance = $balance;
             checking_addresses.insert($address.to_string(), balance);
-            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
-                address: $address.to_string(),
-                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                chain: $chain,
-                balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
-            });
+            balances_by_der_path.insert(
+                $der_path.to_string(),
+                HDAddressBalance {
+                    address: $address.to_string(),
+                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                    chain: $chain,
+                    balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
+                },
+            );
             if balance.is_some() {
                 non_empty_addresses.push($address.to_string());
             }
@@ -4040,4 +4051,658 @@ fn test_sign_verify_message_segwit() {
         .verify_message(&signature, message, "R9o9xTocqr6CeEDGDH6mEYpwLoMz6jNjMW")
         .unwrap();
     assert!(is_valid);
+}
+
+// ─── V2 swap-protocol script-layout tests (chapter 15 §15.10 item 1) ───────
+mod swap_proto_v2_script_tests {
+    use crate::utxo::swap_proto_v2_scripts::{maker_payment_script, taker_funding_script, taker_payment_script};
+    use keys::Public;
+    use script::Opcode;
+
+    // Compressed (33-byte) secp256k1 pubkeys, distinct & valid as data pushes.
+    const TAKER_PUB_HEX: &str = "02031d4256c4bc9f99ac88bf3dba21773132281f65f9bf23a59928bce08961e2f3";
+    const MAKER_PUB_HEX: &str = "03f8f8d75dbbbd3f7e1eedf7b2c3b2a5b59ed46e22b8eef0e2ef62e0c1aab9a3a3";
+    // 32-byte sha256(secret) digests. Content is arbitrary; the script
+    // applies ripemd160 internally.
+    const TAKER_SECRET_HASH: [u8; 32] = [0xaa; 32];
+    const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
+    const LOCKTIME: u32 = 0x6800_0000; // future, fits in u32
+
+    fn taker_pub() -> Public {
+        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
+    }
+    fn maker_pub() -> Public {
+        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
+    }
+
+    /// Collect every opcode in the script in order, ignoring push payloads.
+    fn opcodes(script: &script::Script) -> Vec<Opcode> {
+        script.iter().filter_map(|i| i.ok()).map(|i| i.opcode).collect()
+    }
+
+    #[test]
+    fn should_build_taker_funding_script_with_expected_layout() {
+        let s = taker_funding_script(LOCKTIME, &TAKER_SECRET_HASH, &taker_pub(), &maker_pub());
+        let ops = opcodes(&s);
+
+        // Layout: IF <push locktime> CLTV DROP <push pub> CHECKSIG
+        //         ELSE
+        //           IF <push pub> CHECKSIGVERIFY <push pub> CHECKSIG
+        //           ELSE
+        //             SIZE <push 32> EQUALVERIFY HASH160 <push r160> EQUALVERIFY <push pub> CHECKSIG
+        //           ENDIF
+        //         ENDIF
+        let expected = [
+            // IF branch (timelock refund)
+            Opcode::OP_IF,
+            Opcode::OP_PUSHBYTES_4, // 4-byte locktime little-endian
+            Opcode::OP_CHECKLOCKTIMEVERIFY,
+            Opcode::OP_DROP,
+            Opcode::OP_PUSHBYTES_33, // taker pub
+            Opcode::OP_CHECKSIG,
+            // ELSE — outer
+            Opcode::OP_ELSE,
+            // inner IF (cooperative co-sig)
+            Opcode::OP_IF,
+            Opcode::OP_PUSHBYTES_33, // taker pub
+            Opcode::OP_CHECKSIGVERIFY,
+            Opcode::OP_PUSHBYTES_33, // maker pub
+            Opcode::OP_CHECKSIG,
+            // inner ELSE (secret-reveal refund)
+            Opcode::OP_ELSE,
+            Opcode::OP_SIZE,
+            Opcode::OP_PUSHBYTES_1, // literal 32
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_HASH160,
+            Opcode::OP_PUSHBYTES_20, // r160(secret_hash)
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_PUSHBYTES_33, // taker pub
+            Opcode::OP_CHECKSIG,
+            Opcode::OP_ENDIF,
+            Opcode::OP_ENDIF,
+        ];
+        assert_eq!(ops, expected, "taker_funding_script layout mismatch");
+    }
+
+    #[test]
+    fn should_build_taker_payment_script_with_expected_layout() {
+        let s = taker_payment_script(LOCKTIME, &MAKER_SECRET_HASH, &taker_pub(), &maker_pub());
+        let ops = opcodes(&s);
+        let expected = [
+            Opcode::OP_IF,
+            Opcode::OP_PUSHBYTES_4,
+            Opcode::OP_CHECKLOCKTIMEVERIFY,
+            Opcode::OP_DROP,
+            Opcode::OP_PUSHBYTES_33,
+            Opcode::OP_CHECKSIG,
+            Opcode::OP_ELSE,
+            Opcode::OP_SIZE,
+            Opcode::OP_PUSHBYTES_1,
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_HASH160,
+            Opcode::OP_PUSHBYTES_20,
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_PUSHBYTES_33,
+            Opcode::OP_CHECKSIGVERIFY,
+            Opcode::OP_PUSHBYTES_33,
+            Opcode::OP_CHECKSIG,
+            Opcode::OP_ENDIF,
+        ];
+        assert_eq!(ops, expected, "taker_payment_script layout mismatch");
+    }
+
+    #[test]
+    fn should_build_maker_payment_script_with_expected_layout() {
+        let s = maker_payment_script(
+            LOCKTIME,
+            &MAKER_SECRET_HASH,
+            &TAKER_SECRET_HASH,
+            &maker_pub(),
+            &taker_pub(),
+        );
+        let ops = opcodes(&s);
+        // Layout: IF <push locktime> CLTV DROP <push maker_pub> CHECKSIG
+        //         ELSE
+        //           IF SIZE <32> EQUALVERIFY HASH160 <r160 maker_secret> EQUALVERIFY
+        //              <push taker_pub> CHECKSIG
+        //           ELSE
+        //              SIZE <32> EQUALVERIFY HASH160 <r160 taker_secret> EQUALVERIFY
+        //              <push maker_pub> CHECKSIG
+        //           ENDIF
+        //         ENDIF
+        let expected = [
+            Opcode::OP_IF,
+            Opcode::OP_PUSHBYTES_4,
+            Opcode::OP_CHECKLOCKTIMEVERIFY,
+            Opcode::OP_DROP,
+            Opcode::OP_PUSHBYTES_33,
+            Opcode::OP_CHECKSIG,
+            Opcode::OP_ELSE,
+            Opcode::OP_IF,
+            Opcode::OP_SIZE,
+            Opcode::OP_PUSHBYTES_1,
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_HASH160,
+            Opcode::OP_PUSHBYTES_20,
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_PUSHBYTES_33,
+            Opcode::OP_CHECKSIG,
+            Opcode::OP_ELSE,
+            Opcode::OP_SIZE,
+            Opcode::OP_PUSHBYTES_1,
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_HASH160,
+            Opcode::OP_PUSHBYTES_20,
+            Opcode::OP_EQUALVERIFY,
+            Opcode::OP_PUSHBYTES_33,
+            Opcode::OP_CHECKSIG,
+            Opcode::OP_ENDIF,
+            Opcode::OP_ENDIF,
+        ];
+        assert_eq!(ops, expected, "maker_payment_script layout mismatch");
+    }
+
+    #[test]
+    fn should_embed_ripemd160_of_provided_secret_hash() {
+        use kdf_crypto::ripemd160;
+
+        let s = taker_payment_script(LOCKTIME, &MAKER_SECRET_HASH, &taker_pub(), &maker_pub());
+        let pushes: Vec<&[u8]> = s.iter().filter_map(|i| i.ok()).filter_map(|i| i.data).collect();
+        let expected_r160 = ripemd160(&MAKER_SECRET_HASH);
+        assert!(
+            pushes.iter().any(|p| *p == expected_r160.as_slice()),
+            "expected ripemd160(maker_secret_hash) as a push in taker_payment_script"
+        );
+    }
+}
+
+// ─── V2 maker-payment trait wiring tests (chapter 15 §15.4 IMPL block) ─────
+mod swap_v2_maker_tests {
+    use crate::utxo::swap_proto_v2_scripts::maker_payment_script;
+    use crate::SwapTxTypeWithSecretHash;
+    use keys::Public;
+    use script::{Builder, Opcode, Script};
+
+    const TAKER_PUB_HEX: &str = "02031d4256c4bc9f99ac88bf3dba21773132281f65f9bf23a59928bce08961e2f3";
+    const MAKER_PUB_HEX: &str = "03f8f8d75dbbbd3f7e1eedf7b2c3b2a5b59ed46e22b8eef0e2ef62e0c1aab9a3a3";
+    const TAKER_SECRET: [u8; 32] = [0x11; 32];
+    const MAKER_SECRET: [u8; 32] = [0x22; 32];
+    const TAKER_SECRET_HASH: [u8; 32] = [0xaa; 32];
+    const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
+    const LOCKTIME: u32 = 0x6800_0000;
+
+    fn taker_pub() -> Public {
+        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
+    }
+    fn maker_pub() -> Public {
+        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
+    }
+
+    /// The dispatch table must produce the exact same bytes as the direct
+    /// builder, so refund paths and validators agree on the redeem script.
+    #[test]
+    fn should_dispatch_redeem_script_for_maker_payment_v2_to_correct_builder() {
+        let direct = maker_payment_script(
+            LOCKTIME,
+            &MAKER_SECRET_HASH,
+            &TAKER_SECRET_HASH,
+            &maker_pub(),
+            &taker_pub(),
+        );
+        let via_dispatch = SwapTxTypeWithSecretHash::MakerPaymentV2 {
+            maker_secret_hash: &MAKER_SECRET_HASH,
+            taker_secret_hash: &TAKER_SECRET_HASH,
+        }
+        .redeem_script(LOCKTIME, &maker_pub(), &taker_pub());
+        assert_eq!(direct.to_bytes(), via_dispatch.to_bytes());
+    }
+
+    /// §15.4.5 script_data must be `[push maker_secret, OP_1, OP_0]` so the
+    /// outer-ELSE / inner-IF (taker-spends-with-maker-secret) branch is selected.
+    #[test]
+    fn should_select_secret_branch_for_spend_maker_payment_v2_script_data() {
+        let script_data: Script = Builder::default()
+            .push_data(&MAKER_SECRET)
+            .push_opcode(Opcode::OP_1)
+            .push_opcode(Opcode::OP_0)
+            .into_script();
+        let ops: Vec<Opcode> = script_data.iter().filter_map(|i| i.ok()).map(|i| i.opcode).collect();
+        assert_eq!(ops, vec![Opcode::OP_PUSHBYTES_32, Opcode::OP_1, Opcode::OP_0]);
+        let pushed = script_data
+            .iter()
+            .filter_map(|i| i.ok())
+            .find_map(|i| i.data.map(|d| d.to_vec()))
+            .expect("expected a single 32-byte push of the maker secret");
+        assert_eq!(pushed.as_slice(), &MAKER_SECRET);
+    }
+
+    /// §15.4.4 script_data must be `[push taker_secret, OP_0, OP_0]` so the
+    /// outer-ELSE / inner-ELSE (maker-refunds-with-taker-secret) branch is selected.
+    #[test]
+    fn should_select_taker_secret_branch_for_refund_maker_payment_v2_secret_script_data() {
+        let script_data: Script = Builder::default()
+            .push_data(&TAKER_SECRET)
+            .push_opcode(Opcode::OP_0)
+            .push_opcode(Opcode::OP_0)
+            .into_script();
+        let ops: Vec<Opcode> = script_data.iter().filter_map(|i| i.ok()).map(|i| i.opcode).collect();
+        assert_eq!(ops, vec![Opcode::OP_PUSHBYTES_32, Opcode::OP_0, Opcode::OP_0]);
+        let pushed = script_data
+            .iter()
+            .filter_map(|i| i.ok())
+            .find_map(|i| i.data.map(|d| d.to_vec()))
+            .expect("expected a single 32-byte push of the taker secret");
+        assert_eq!(pushed.as_slice(), &TAKER_SECRET);
+    }
+}
+
+// ─── V2 taker-funding trait wiring tests (chapter 15 §15.5 IMPL block 2B) ──
+mod swap_v2_taker_funding_tests {
+    use crate::utxo::swap_proto_v2_scripts::taker_funding_script;
+    use crate::utxo::utxo_common::{classify_funding_spend_script_sig, extract_secret_v2, FundingSpendBranchTag};
+    use crate::utxo::UtxoTx;
+    use crate::SwapTxTypeWithSecretHash;
+    use chain::{TransactionInput, TransactionOutput};
+    use kdf_crypto::dhash160;
+    use keys::Public;
+    use script::{Builder, Opcode, Script};
+
+    const TAKER_PUB_HEX: &str = "02031d4256c4bc9f99ac88bf3dba21773132281f65f9bf23a59928bce08961e2f3";
+    const MAKER_PUB_HEX: &str = "03f8f8d75dbbbd3f7e1eedf7b2c3b2a5b59ed46e22b8eef0e2ef62e0c1aab9a3a3";
+    const TAKER_SECRET: [u8; 32] = [0x11; 32];
+    const TAKER_SECRET_HASH: [u8; 32] = [0xaa; 32];
+    const LOCKTIME: u32 = 0x6800_0000;
+
+    fn taker_pub() -> Public {
+        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
+    }
+    fn maker_pub() -> Public {
+        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
+    }
+
+    /// The dispatch table must produce the exact same bytes as the direct
+    /// builder, so refund paths and validators agree on the redeem script.
+    #[test]
+    fn should_dispatch_redeem_script_for_taker_funding_to_correct_builder() {
+        let direct = taker_funding_script(LOCKTIME, &TAKER_SECRET_HASH, &taker_pub(), &maker_pub());
+        let via_dispatch = SwapTxTypeWithSecretHash::TakerFunding {
+            taker_secret_hash: &TAKER_SECRET_HASH,
+        }
+        .redeem_script(LOCKTIME, &taker_pub(), &maker_pub());
+        assert_eq!(direct.to_bytes(), via_dispatch.to_bytes());
+    }
+
+    /// §15.5.3 script_data must be `[OP_1, OP_0]` so the funding script's
+    /// outer-IF (timelock) branch is selected.
+    #[test]
+    fn should_select_timelock_branch_for_refund_taker_funding_timelock_script_data() {
+        let script_data: Script = Builder::default()
+            .push_opcode(Opcode::OP_1)
+            .push_opcode(Opcode::OP_0)
+            .into_script();
+        let ops: Vec<Opcode> = script_data.iter().filter_map(|i| i.ok()).map(|i| i.opcode).collect();
+        assert_eq!(ops, vec![Opcode::OP_1, Opcode::OP_0]);
+    }
+
+    /// §15.5.4 script_data must be `[push taker_secret, OP_0, OP_0]` so the
+    /// outer-ELSE / inner-ELSE (secret-reveal refund) branch is selected.
+    #[test]
+    fn should_select_secret_branch_for_refund_taker_funding_secret_script_data() {
+        let script_data: Script = Builder::default()
+            .push_data(&TAKER_SECRET)
+            .push_opcode(Opcode::OP_0)
+            .push_opcode(Opcode::OP_0)
+            .into_script();
+        let ops: Vec<Opcode> = script_data.iter().filter_map(|i| i.ok()).map(|i| i.opcode).collect();
+        assert_eq!(ops, vec![Opcode::OP_PUSHBYTES_32, Opcode::OP_0, Opcode::OP_0]);
+        let pushed = script_data
+            .iter()
+            .filter_map(|i| i.ok())
+            .find_map(|i| i.data.map(|d| d.to_vec()))
+            .expect("expected a single 32-byte push of the taker secret");
+        assert_eq!(pushed.as_slice(), &TAKER_SECRET);
+    }
+
+    /// §15.5.15: walk the spend tx's input[0] script_sig and recover the
+    /// 32-byte secret whose `dhash160` matches the supplied hash.
+    #[test]
+    fn should_extract_secret_from_spend_tx_script_sig() {
+        let secret = [0x33u8; 32];
+        let secret_hash = dhash160(&secret);
+        // Fabricate a script_sig: [signature, secret_32_bytes, OP_0, OP_0, redeem]
+        let fake_sig = vec![0x42u8; 72]; // OP_PUSHBYTES_72-sized blob
+        let fake_redeem = vec![0xAAu8; 25]; // small placeholder redeem script
+        let script_sig: Script = Builder::default()
+            .push_data(&fake_sig)
+            .push_data(&secret)
+            .push_opcode(Opcode::OP_0)
+            .push_opcode(Opcode::OP_0)
+            .push_data(&fake_redeem)
+            .into_script();
+        let mut tx = UtxoTx::default();
+        tx.inputs.push(TransactionInput {
+            script_sig: script_sig.to_bytes(),
+            ..Default::default()
+        });
+        tx.outputs.push(TransactionOutput::default());
+        let recovered = extract_secret_v2(secret_hash.as_slice(), &tx).unwrap();
+        assert_eq!(recovered, secret);
+    }
+
+    /// §15.5.5: classifier helper must identify a script_sig whose instruction
+    /// at index 1 is `OP_1` as the timelock-refund branch.
+    #[test]
+    fn should_classify_funding_spend_with_op1_flag_as_timelock_refund() {
+        let fake_sig = vec![0x42u8; 72];
+        let fake_redeem = vec![0xAAu8; 25];
+        let script_sig: Script = Builder::default()
+            .push_data(&fake_sig)
+            .push_opcode(Opcode::OP_1)
+            .push_opcode(Opcode::OP_0)
+            .push_data(&fake_redeem)
+            .into_script();
+        let tag = classify_funding_spend_script_sig(&script_sig.to_bytes());
+        assert_eq!(tag, FundingSpendBranchTag::Timelock);
+    }
+
+    /// Companion sanity check: a 32-byte raw push at index 1 → Secret branch.
+    #[test]
+    fn should_classify_funding_spend_with_32byte_push_as_secret_refund() {
+        let fake_sig = vec![0x42u8; 72];
+        let secret = [0x55u8; 32];
+        let fake_redeem = vec![0xAAu8; 25];
+        let script_sig: Script = Builder::default()
+            .push_data(&fake_sig)
+            .push_data(&secret)
+            .push_opcode(Opcode::OP_0)
+            .push_opcode(Opcode::OP_0)
+            .push_data(&fake_redeem)
+            .into_script();
+        let tag = classify_funding_spend_script_sig(&script_sig.to_bytes());
+        assert_eq!(tag, FundingSpendBranchTag::Secret(secret));
+    }
+}
+
+// ─── V2 cooperative funding-spend tests (chapter 15 §15.5.6 — §15.5.9) ─────
+mod swap_v2_funding_spend_tests {
+    use crate::utxo::rpc_clients::UtxoRpcClientEnum;
+    use crate::utxo::swap_proto_v2_scripts::{taker_funding_script, taker_payment_script};
+    use crate::utxo::utxo_common::{build_funding_spend_preimage_tx, sign_funding_spend_input};
+    use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test};
+    use crate::utxo::UtxoTx;
+    use chain::TransactionOutput;
+    use crypto::privkey::key_pair_from_seed;
+    use kdf_crypto::dhash160;
+    use keys::{KeyPair, Public};
+    use script::{Builder, Opcode, Script};
+
+    const TAKER_SECRET_HASH: [u8; 32] = [0xaa; 32];
+    const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
+    const FUNDING_TIME_LOCK: u32 = 0x6800_0000;
+    const TAKER_PAYMENT_TIME_LOCK: u32 = 0x6810_0000;
+    const FUNDING_VALUE: u64 = 1_000_000;
+    const FEE: u64 = 1_000;
+
+    fn taker_kp() -> KeyPair {
+        key_pair_from_seed("ch15 funding-spend taker").unwrap()
+    }
+    fn maker_kp() -> KeyPair {
+        key_pair_from_seed("ch15 funding-spend maker").unwrap()
+    }
+
+    fn synthetic_funding_tx() -> UtxoTx {
+        let mut tx = UtxoTx::default();
+        tx.version = 4;
+        tx.outputs.push(TransactionOutput {
+            value: FUNDING_VALUE,
+            script_pubkey: vec![0xaa; 23].into(),
+        });
+        tx
+    }
+
+    /// §15.5.6 step 3 — the preimage has a single output whose `script_pubkey`
+    /// is P2SH of the taker-payment redeem script, with value `funding_value - fee`.
+    #[test]
+    fn should_build_funding_spend_preimage_with_expected_output_layout() {
+        let fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
+        let funding = synthetic_funding_tx();
+        let taker_payment_redeem = taker_payment_script(
+            TAKER_PAYMENT_TIME_LOCK,
+            &MAKER_SECRET_HASH,
+            taker_kp().public(),
+            maker_kp().public(),
+        );
+        let signer =
+            build_funding_spend_preimage_tx(&fields, &funding, &taker_payment_redeem, FEE).expect("build preimage");
+
+        assert_eq!(signer.outputs.len(), 1, "expected single P2SH(taker_payment) output");
+        let expected_p2sh = Builder::build_p2sh(&dhash160(&taker_payment_redeem).into()).to_bytes();
+        assert_eq!(signer.outputs[0].script_pubkey, expected_p2sh);
+        assert_eq!(signer.outputs[0].value, FUNDING_VALUE - FEE);
+
+        assert_eq!(signer.inputs.len(), 1);
+        assert_eq!(signer.inputs[0].previous_output.hash, funding.hash());
+        assert_eq!(signer.inputs[0].previous_output.index, 0);
+    }
+
+    /// §15.5.7 — the partial signature returned by `sign_funding_spend_input`
+    /// verifies (via `keys::Public::verify`) against the signing party's pub
+    /// for the funding script's cooperative branch sighash.
+    #[test]
+    fn should_recover_partial_signature_from_funding_spend_preimage() {
+        let fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
+        let funding = synthetic_funding_tx();
+        let kp = taker_kp();
+        let taker_payment_redeem = taker_payment_script(
+            TAKER_PAYMENT_TIME_LOCK,
+            &MAKER_SECRET_HASH,
+            kp.public(),
+            maker_kp().public(),
+        );
+        let funding_redeem =
+            taker_funding_script(FUNDING_TIME_LOCK, &TAKER_SECRET_HASH, kp.public(), maker_kp().public());
+        let signer =
+            build_funding_spend_preimage_tx(&fields, &funding, &taker_payment_redeem, FEE).expect("build preimage");
+        let sig = sign_funding_spend_input(&signer, &funding_redeem, &kp, &fields).expect("sign");
+
+        // Recompute the cooperative-branch sighash and verify the supplied sig.
+        let sighash_type = 1u32 | fields.conf.fork_id;
+        let digest = signer.signature_hash(
+            0,
+            signer.inputs[0].amount,
+            &funding_redeem,
+            fields.conf.signature_version,
+            sighash_type,
+        );
+        assert!(
+            kp.public().verify(&digest, &sig).expect("verify"),
+            "partial sig must verify against signer's pub"
+        );
+
+        // Sanity check: it must NOT verify against an unrelated pub.
+        let other_pub: Public = *maker_kp().public();
+        assert!(
+            !other_pub.verify(&digest, &sig).expect("verify"),
+            "partial sig should not verify against an unrelated pub"
+        );
+    }
+
+    /// §15.5.9 — script_data for `refund_combined_taker_payment` is just
+    /// `[OP_1]` (the taker-payment script has a single OP_IF whose true arm
+    /// is the timelock refund branch).
+    #[test]
+    fn should_select_timelock_branch_for_refund_combined_taker_payment_script_data() {
+        let script_data: Script = Builder::default().push_opcode(Opcode::OP_1).into_script();
+        let ops: Vec<Opcode> = script_data.iter().filter_map(|i| i.ok()).map(|i| i.opcode).collect();
+        assert_eq!(ops, vec![Opcode::OP_1]);
+    }
+}
+
+#[cfg(test)]
+mod swap_v2_taker_payment_spend_tests {
+    use crate::utxo::rpc_clients::UtxoRpcClientEnum;
+    use crate::utxo::swap_proto_v2_scripts::taker_payment_script;
+    use crate::utxo::utxo_common::{
+        build_taker_payment_spend_cooperative_script_sig, build_taker_payment_spend_preimage_tx,
+        sign_taker_payment_spend_input,
+    };
+    use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test};
+    use crate::utxo::{output_script, ScriptType, UtxoTx};
+    use chain::TransactionOutput;
+    use crypto::privkey::key_pair_from_seed;
+    use kdf_crypto::ChecksumType;
+    use keys::{Address, AddressFormat as UtxoAddressFormat, KeyPair, Public};
+    use script::{Builder, Opcode, Script};
+
+    const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
+    const MAKER_SECRET: [u8; 32] = [0x42; 32];
+    const TAKER_PAYMENT_TIME_LOCK: u32 = 0x6810_0000;
+    const TAKER_PAYMENT_VALUE: u64 = 1_000_000;
+    const DEX_FEE_SAT: u64 = 10_000;
+    const SPEND_FEE: u64 = 1_000;
+
+    fn taker_kp() -> KeyPair {
+        key_pair_from_seed("ch15 payment-spend taker").unwrap()
+    }
+    fn maker_kp() -> KeyPair {
+        key_pair_from_seed("ch15 payment-spend maker").unwrap()
+    }
+
+    fn maker_address() -> Address {
+        Address {
+            prefix: 60,
+            hash: maker_kp().public().address_hash().into(),
+            t_addr_prefix: 0,
+            checksum_type: ChecksumType::DSHA256,
+            hrp: None,
+            addr_format: UtxoAddressFormat::Standard,
+        }
+    }
+
+    fn synthetic_taker_payment_tx() -> UtxoTx {
+        let mut tx = UtxoTx::default();
+        tx.version = 4;
+        // P2SH of the taker-payment redeem — value matters; script_pubkey contents
+        // are not consulted by the preimage builder.
+        tx.outputs.push(TransactionOutput {
+            value: TAKER_PAYMENT_VALUE,
+            script_pubkey: vec![0xaa; 23].into(),
+        });
+        tx
+    }
+
+    /// §15.5.11 step 1 — DexFee::Standard preimage has a single output whose
+    /// `script_pubkey` is `output_script(maker_address)` and whose value is
+    /// `taker_payment_value - dex_fee - spend_fee`.
+    #[test]
+    fn should_build_taker_payment_spend_preimage_with_expected_output_to_maker_address() {
+        let fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
+        let taker_payment = synthetic_taker_payment_tx();
+        let maker_addr = maker_address();
+        let expected_value = TAKER_PAYMENT_VALUE - DEX_FEE_SAT - SPEND_FEE;
+        let expected_script_pubkey = output_script(&maker_addr, ScriptType::P2PKH).to_bytes();
+        let outputs = vec![TransactionOutput {
+            value: expected_value,
+            script_pubkey: expected_script_pubkey.clone(),
+        }];
+
+        let signer = build_taker_payment_spend_preimage_tx(&fields, &taker_payment, outputs).expect("build preimage");
+
+        assert_eq!(signer.outputs.len(), 1, "Standard preimage has exactly one output");
+        assert_eq!(signer.outputs[0].script_pubkey, expected_script_pubkey);
+        assert_eq!(signer.outputs[0].value, expected_value);
+
+        assert_eq!(signer.inputs.len(), 1);
+        assert_eq!(signer.inputs[0].previous_output.hash, taker_payment.hash());
+        assert_eq!(signer.inputs[0].previous_output.index, 0);
+        assert_eq!(signer.inputs[0].amount, TAKER_PAYMENT_VALUE);
+    }
+
+    /// §15.5.12 — the partial signature returned by `sign_taker_payment_spend_input`
+    /// verifies (via `keys::Public::verify`) against the signing party's pub
+    /// for the cooperative-branch sighash of the taker-payment redeem script.
+    #[test]
+    fn should_recover_partial_signature_from_taker_payment_spend_preimage() {
+        let fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
+        let taker_payment = synthetic_taker_payment_tx();
+        let taker = taker_kp();
+        let maker = maker_kp();
+        let redeem = taker_payment_script(
+            TAKER_PAYMENT_TIME_LOCK,
+            &MAKER_SECRET_HASH,
+            taker.public(),
+            maker.public(),
+        );
+        let maker_addr = maker_address();
+        let outputs = vec![TransactionOutput {
+            value: TAKER_PAYMENT_VALUE - DEX_FEE_SAT - SPEND_FEE,
+            script_pubkey: output_script(&maker_addr, ScriptType::P2PKH).to_bytes(),
+        }];
+        let signer = build_taker_payment_spend_preimage_tx(&fields, &taker_payment, outputs).expect("build preimage");
+
+        // SIGHASH_SINGLE (3) for the DexFee::Standard path.
+        let sighash_type = 3u32 | fields.conf.fork_id;
+        let sig = sign_taker_payment_spend_input(&signer, &redeem, &taker, &fields, sighash_type).expect("sign");
+        let digest = signer.signature_hash(
+            0,
+            signer.inputs[0].amount,
+            &redeem,
+            fields.conf.signature_version,
+            sighash_type,
+        );
+        assert!(
+            taker.public().verify(&digest, &sig).expect("verify"),
+            "taker partial sig must verify against the cooperative-branch sighash"
+        );
+
+        // Sanity: must NOT verify against an unrelated pub.
+        let other_pub: Public = *maker.public();
+        assert!(
+            !other_pub.verify(&digest, &sig).expect("verify"),
+            "partial sig should not verify against an unrelated pub"
+        );
+    }
+
+    /// §15.5.13 — cooperative-branch script_sig pushes (bottom→top):
+    /// `maker_sig, taker_sig, maker_secret, OP_0, redeem`. No leading OP_0
+    /// stuffer because the redeem uses CHECKSIGVERIFY/CHECKSIG, not OP_CHECKMULTISIG.
+    #[test]
+    fn should_select_maker_secret_branch_for_taker_payment_spend_script_data() {
+        let redeem = taker_payment_script(
+            TAKER_PAYMENT_TIME_LOCK,
+            &MAKER_SECRET_HASH,
+            taker_kp().public(),
+            maker_kp().public(),
+        );
+        let maker_sig_der = vec![0x30, 0x44, 0xAA, 0xBB];
+        let taker_sig_der = vec![0x30, 0x44, 0xCC, 0xDD];
+        let sighash_byte = 0x01u8;
+
+        let script_sig_bytes = build_taker_payment_spend_cooperative_script_sig(
+            &maker_sig_der,
+            &taker_sig_der,
+            &MAKER_SECRET,
+            sighash_byte,
+            &redeem,
+        );
+        let script: Script = script_sig_bytes.into();
+        let instrs: Vec<_> = script.iter().collect::<Result<Vec<_>, _>>().expect("script parses");
+
+        assert_eq!(instrs.len(), 5, "expected 5 stack contributions");
+        // instrs[0]: maker_sig + sighash
+        let mut expected_maker = maker_sig_der.clone();
+        expected_maker.push(sighash_byte);
+        assert_eq!(instrs[0].data, Some(expected_maker.as_slice()));
+        // instrs[1]: taker_sig + sighash
+        let mut expected_taker = taker_sig_der.clone();
+        expected_taker.push(sighash_byte);
+        assert_eq!(instrs[1].data, Some(expected_taker.as_slice()));
+        // instrs[2]: 32-byte maker secret
+        assert_eq!(instrs[2].opcode, Opcode::OP_PUSHBYTES_32);
+        assert_eq!(instrs[2].data, Some(MAKER_SECRET.as_slice()));
+        // instrs[3]: OP_0 selects the cooperative branch of the outer OP_IF
+        assert_eq!(instrs[3].opcode, Opcode::OP_0);
+        // instrs[4]: redeem script push
+        assert_eq!(instrs[4].data, Some(redeem.to_bytes().as_slice()));
+    }
 }

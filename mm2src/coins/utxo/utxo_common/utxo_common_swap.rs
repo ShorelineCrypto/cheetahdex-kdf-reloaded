@@ -1121,6 +1121,1261 @@ where
     }
 }
 
+// ─── V2 swap helpers (chapter 15 §15.4) ─────────────────────────────────────
+//
+// These mirror the V1 `send_*`/`refund_*`/`validate_*`/`spend_*` helpers
+// above but use the V2 maker-payment script (`swap_proto_v2_scripts`) and the
+// V2 trait argument structs from `lp_coins_types`.
+
+use crate::utxo::swap_proto_v2_scripts::{maker_payment_script, taker_funding_script, taker_payment_script};
+use crate::utxo::utxo_standard_swap_v2::UtxoTxPreimage;
+use crate::{
+    FindPaymentSpendError, FundingTxSpend, GenPreimageResult, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs,
+    RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs, RefundTakerPaymentArgs,
+    SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs,
+    SwapTxTypeWithSecretHash, TxGenError, TxPreimageWithSig, ValidateMakerPaymentArgs, ValidateSwapV2TxError,
+    ValidateSwapV2TxResult, ValidateTakerFundingArgs, ValidateTakerFundingSpendPreimageError,
+    ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageError,
+    ValidateTakerPaymentSpendPreimageResult,
+};
+
+/// Derives the maker/taker per-swap HTLC keypair for V2 swaps.
+///
+/// For Iguana / HD-wallet policies the activated keypair is returned. The
+/// `_swap_unique_data` argument is accepted to match the future per-swap
+/// derivation surface, but is not consulted yet (ch15 phase 3).
+pub fn get_htlc_key_pair_v2<T>(coin: &T, _swap_unique_data: &[u8]) -> Result<KeyPair, String>
+where
+    T: AsRef<UtxoCoinFields>,
+{
+    match &coin.as_ref().priv_key_policy {
+        PrivKeyPolicy::KeyPair(kp) => Ok(*kp),
+        PrivKeyPolicy::HDWallet { activated_key, .. } => Ok(*activated_key),
+        PrivKeyPolicy::Trezor => Err("get_htlc_key_pair_v2 not implemented for Trezor (ch15 phase 3)".to_string()),
+    }
+}
+
+/// §15.4.1 — Build and broadcast the maker-payment V2 transaction.
+pub async fn send_maker_payment_v2<T>(
+    coin: T,
+    args: SendMakerPaymentArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps + GetUtxoListOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(&coin, args.swap_unique_data));
+    let redeem = maker_payment_script(
+        args.time_lock as u32,
+        args.maker_secret_hash,
+        args.taker_secret_hash,
+        htlc_kp.public(),
+        args.taker_pub,
+    );
+    let amount_sat = try_tx_s!(sat_from_big_decimal(&args.amount, coin.as_ref().decimals));
+    let htlc_out = TransactionOutput {
+        value: amount_sat,
+        script_pubkey: Builder::build_p2sh(&dhash160(&redeem).into()).into(),
+    };
+    // Mirror the V1 OP_RETURN convention: record the maker_secret_hash on-chain
+    // so wallet recovery flows can locate swap outputs without out-of-band data.
+    let op_return = TransactionOutput {
+        value: 0,
+        script_pubkey: Builder::default()
+            .push_opcode(Opcode::OP_RETURN)
+            .push_bytes(args.maker_secret_hash)
+            .into_bytes(),
+    };
+    send_outputs_from_my_address_impl(coin, vec![htlc_out, op_return]).await
+}
+
+/// §15.4.2 — Validate a received maker-payment V2 transaction.
+pub async fn validate_maker_payment_v2<T>(
+    coin: &T,
+    args: ValidateMakerPaymentArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> ValidateSwapV2TxResult
+where
+    T: UtxoCommonOps,
+{
+    let expected_amount_sat = sat_from_big_decimal(&args.amount, coin.as_ref().decimals)
+        .mm_err(|e| ValidateSwapV2TxError::InternalError(e.to_string()))?;
+    // Spec layout: first_pub = maker_pub, second_pub = taker_pub (per
+    // `SwapTxTypeWithSecretHash::redeem_script` dispatch table).
+    // The taker pub is recovered from args.maker_pub on the validator side?
+    // No — validators know both pubs from the swap context. Per §15.4.2 the
+    // verifier passes maker_pub and reconstructs the taker pub from
+    // its own HTLC keypair (the validator is the taker).
+    let taker_htlc_kp =
+        get_htlc_key_pair_v2(coin, args.swap_unique_data).map_to_mm(ValidateSwapV2TxError::InternalError)?;
+    let tx_type = SwapTxTypeWithSecretHash::MakerPaymentV2 {
+        maker_secret_hash: args.maker_secret_hash,
+        taker_secret_hash: args.taker_secret_hash,
+    };
+    let expected_redeem = tx_type.redeem_script(args.time_lock as u32, args.maker_pub, taker_htlc_kp.public());
+    let expected_script_pubkey: Bytes = Builder::build_p2sh(&dhash160(&expected_redeem).into()).into();
+
+    let actual = args
+        .maker_payment_tx
+        .outputs
+        .get(DEFAULT_SWAP_VOUT)
+        .ok_or_else(|| MmError::new(ValidateSwapV2TxError::WrongPaymentTx("missing output 0".to_string())))?;
+    if actual.script_pubkey != expected_script_pubkey {
+        return MmError::err(ValidateSwapV2TxError::WrongPaymentTx(format!(
+            "script mismatch: expected {:?}, got {:?}",
+            expected_script_pubkey, actual.script_pubkey
+        )));
+    }
+    if actual.value != expected_amount_sat {
+        return MmError::err(ValidateSwapV2TxError::WrongPaymentTx(format!(
+            "amount mismatch: expected {}, got {}",
+            expected_amount_sat, actual.value
+        )));
+    }
+    Ok(())
+}
+
+/// Common spend-path machinery shared by §15.4.3 / §15.4.4 / §15.4.5: build a
+/// P2SH spending tx with the supplied `script_data` selector and broadcast it.
+async fn build_and_broadcast_maker_v2_spend<T>(
+    coin: &T,
+    prev_tx_bytes: &[u8],
+    redeem: Script,
+    script_data: Script,
+    sequence: u32,
+    lock_time: u32,
+    keypair: &KeyPair,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let mut prev_tx: UtxoTx = try_tx_s!(deserialize(prev_tx_bytes).map_err(|e| ERRL!("{:?}", e)));
+    prev_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
+    let my_address = try_tx_s!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+
+    let fee = try_tx_s!(coin.get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE).await);
+    let script_pubkey = output_script(&my_address, ScriptType::P2PKH).to_bytes();
+    let output = TransactionOutput {
+        value: prev_tx.outputs[DEFAULT_SWAP_VOUT].value - fee,
+        script_pubkey,
+    };
+
+    let transaction = try_tx_s!(
+        coin.p2sh_spending_tx(
+            prev_tx,
+            redeem.into(),
+            vec![output],
+            script_data,
+            sequence,
+            lock_time,
+            keypair,
+        )
+        .await
+    );
+
+    let tx_fut = coin.as_ref().rpc_client.send_transaction(&transaction).compat();
+    try_tx_s!(tx_fut.await, transaction);
+    Ok(transaction)
+}
+
+/// §15.4.3 — Maker timelock-refund of the maker payment.
+pub async fn refund_maker_payment_v2_timelock<T>(
+    coin: &T,
+    args: RefundMakerPaymentTimelockArgs<'_>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, args.swap_unique_data));
+    let taker_pub = try_tx_s!(Public::from_slice(args.taker_pub));
+    // Use the dispatch table — both branches of the V2 redeem script live in
+    // `SwapTxTypeWithSecretHash::redeem_script` so refund paths share the
+    // script construction with `validate_*`.
+    let redeem = args
+        .tx_type_with_secret_hash
+        .redeem_script(args.time_lock as u32, htlc_kp.public(), &taker_pub);
+    let script_data = Builder::default().push_opcode(Opcode::OP_1).into_script();
+    build_and_broadcast_maker_v2_spend(
+        coin,
+        args.payment_tx,
+        redeem,
+        script_data,
+        SEQUENCE_FINAL - 1,
+        args.time_lock as u32,
+        &htlc_kp,
+    )
+    .await
+}
+
+/// §15.4.4 — Maker immediate refund by revealing the taker's secret.
+pub async fn refund_maker_payment_v2_secret<T>(
+    coin: &T,
+    args: RefundMakerPaymentSecretArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, args.swap_unique_data));
+    let tx_type = SwapTxTypeWithSecretHash::MakerPaymentV2 {
+        maker_secret_hash: args.maker_secret_hash,
+        taker_secret_hash: args.taker_secret_hash,
+    };
+    let redeem = tx_type.redeem_script(args.time_lock as u32, htlc_kp.public(), args.taker_pub);
+    // Selects the maker-refund-with-taker-secret branch (outer ELSE → inner ELSE).
+    let script_data = Builder::default()
+        .push_data(args.taker_secret.as_slice())
+        .push_opcode(Opcode::OP_0)
+        .push_opcode(Opcode::OP_0)
+        .into_script();
+    let prev_bytes = serialize(args.maker_payment_tx).take();
+    build_and_broadcast_maker_v2_spend(coin, &prev_bytes, redeem, script_data, SEQUENCE_FINAL, 0, &htlc_kp).await
+}
+
+/// §15.4.5 — Taker spends the maker payment by revealing the maker secret.
+pub async fn spend_maker_payment_v2<T>(
+    coin: &T,
+    args: SpendMakerPaymentArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, args.swap_unique_data));
+    // Note: in this branch the taker is the spender, the maker provided the
+    // payment. The script's `(first_pub, second_pub)` for `MakerPaymentV2` is
+    // `(maker_pub, taker_pub)`, so:
+    let redeem = maker_payment_script(
+        args.time_lock as u32,
+        args.maker_secret_hash,
+        args.taker_secret_hash,
+        args.maker_pub,
+        htlc_kp.public(),
+    );
+    // Selects the taker-spends-with-maker-secret branch (outer ELSE → inner IF).
+    let script_data = Builder::default()
+        .push_data(&args.maker_secret)
+        .push_opcode(Opcode::OP_1)
+        .push_opcode(Opcode::OP_0)
+        .into_script();
+    let prev_bytes = serialize(args.maker_payment_tx).take();
+    build_and_broadcast_maker_v2_spend(coin, &prev_bytes, redeem, script_data, SEQUENCE_FINAL, 0, &htlc_kp).await
+}
+
+// ─── V2 taker-funding helpers (chapter 15 §15.5.1 — §15.5.5, §15.5.15) ─────
+
+/// §15.5.5 classification tags. Public(crate) to enable unit tests that
+/// fabricate a script_sig without going through RPC.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FundingSpendBranchTag {
+    Timelock,
+    Secret([u8; 32]),
+    Cooperative,
+}
+
+/// Inspect a funding-spend tx's input[0] script_sig at instruction index 1
+/// (immediately after the spender's signature push) and tell which branch
+/// of the V2 funding redeem script was taken.
+pub(crate) fn classify_funding_spend_script_sig(script_sig: &Bytes) -> FundingSpendBranchTag {
+    let script: Script = script_sig.clone().into();
+    match script.get_instruction(1) {
+        Some(Ok(instr)) => match instr.opcode {
+            Opcode::OP_1 => FundingSpendBranchTag::Timelock,
+            Opcode::OP_PUSHBYTES_32 => match instr.data {
+                Some(d) if d.len() == 32 => {
+                    let mut secret = [0u8; 32];
+                    secret.copy_from_slice(d);
+                    FundingSpendBranchTag::Secret(secret)
+                },
+                _ => FundingSpendBranchTag::Cooperative,
+            },
+            _ => FundingSpendBranchTag::Cooperative,
+        },
+        _ => FundingSpendBranchTag::Cooperative,
+    }
+}
+
+/// §15.5.1 — Build and broadcast the taker funding V2 transaction.
+pub async fn send_taker_funding<T>(coin: T, args: SendTakerFundingArgs<'_>) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps + GetUtxoListOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(&coin, args.swap_unique_data));
+    let maker_pub = try_tx_s!(Public::from_slice(args.maker_pub));
+    let redeem = taker_funding_script(
+        args.funding_time_lock as u32,
+        args.taker_secret_hash,
+        htlc_kp.public(),
+        &maker_pub,
+    );
+    let total = &args.trading_amount + &args.premium_amount + &args.dex_fee.fee_amount().to_decimal();
+    let amount_sat = try_tx_s!(sat_from_big_decimal(&total, coin.as_ref().decimals));
+    let htlc_out = TransactionOutput {
+        value: amount_sat,
+        script_pubkey: Builder::build_p2sh(&dhash160(&redeem).into()).into(),
+    };
+    // Mirror V1/V2 OP_RETURN convention: record taker_secret_hash on-chain for
+    // wallet-recovery discoverability.
+    let op_return = TransactionOutput {
+        value: 0,
+        script_pubkey: Builder::default()
+            .push_opcode(Opcode::OP_RETURN)
+            .push_bytes(args.taker_secret_hash)
+            .into_bytes(),
+    };
+    send_outputs_from_my_address_impl(coin, vec![htlc_out, op_return]).await
+}
+
+/// §15.5.2 — Validate a received taker funding V2 transaction.
+pub async fn validate_taker_funding<T>(
+    coin: &T,
+    args: ValidateTakerFundingArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> ValidateSwapV2TxResult
+where
+    T: UtxoCommonOps,
+{
+    let maker_htlc_kp =
+        get_htlc_key_pair_v2(coin, args.swap_unique_data).map_to_mm(ValidateSwapV2TxError::InternalError)?;
+    let expected_redeem = taker_funding_script(
+        args.funding_time_lock as u32,
+        args.taker_secret_hash,
+        args.taker_pub,
+        maker_htlc_kp.public(),
+    );
+    let expected_script_pubkey: Bytes = Builder::build_p2sh(&dhash160(&expected_redeem).into()).into();
+
+    let total = &args.trading_amount + &args.premium_amount + &args.dex_fee.fee_amount().to_decimal();
+    let expected_amount_sat = sat_from_big_decimal(&total, coin.as_ref().decimals)
+        .mm_err(|e| ValidateSwapV2TxError::InternalError(e.to_string()))?;
+
+    let actual = args
+        .funding_tx
+        .outputs
+        .get(DEFAULT_SWAP_VOUT)
+        .ok_or_else(|| MmError::new(ValidateSwapV2TxError::WrongPaymentTx("missing output 0".to_string())))?;
+    if actual.script_pubkey != expected_script_pubkey {
+        return MmError::err(ValidateSwapV2TxError::WrongPaymentTx(format!(
+            "script mismatch: expected {:?}, got {:?}",
+            expected_script_pubkey, actual.script_pubkey
+        )));
+    }
+    if actual.value != expected_amount_sat {
+        return MmError::err(ValidateSwapV2TxError::WrongPaymentTx(format!(
+            "amount mismatch: expected {}, got {}",
+            expected_amount_sat, actual.value
+        )));
+    }
+
+    // §15.5.2 step 5: on native mode, import the P2SH address so the node
+    // tracks spends. Best-effort — log and continue on failure.
+    if let UtxoRpcClientEnum::Native(client) = &coin.as_ref().rpc_client {
+        let p2sh_addr = Address {
+            checksum_type: coin.as_ref().conf.checksum_type,
+            hash: dhash160(&expected_redeem).into(),
+            prefix: coin.as_ref().conf.p2sh_addr_prefix,
+            t_addr_prefix: coin.as_ref().conf.p2sh_t_addr_prefix,
+            hrp: coin.as_ref().conf.bech32_hrp.clone(),
+            addr_format: UtxoAddressFormat::Standard,
+        };
+        if let Ok(addr_string) = p2sh_addr.display_address() {
+            if let Err(e) = client.import_address(&addr_string, &addr_string, false).compat().await {
+                log!("validate_taker_funding: import_address failed: "[e]);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// §15.5.3 — Taker timelock-refund of the funding payment.
+pub async fn refund_taker_funding_timelock<T>(
+    coin: &T,
+    args: RefundTakerPaymentArgs<'_>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, args.swap_unique_data));
+    let maker_pub = try_tx_s!(Public::from_slice(args.maker_pub));
+    // `TakerFunding` redeem-script dispatch uses (taker_pub, maker_pub).
+    let redeem = args
+        .tx_type_with_secret_hash
+        .redeem_script(args.time_lock as u32, htlc_kp.public(), &maker_pub);
+    // Outer-IF true arm selects the timelock branch.
+    let script_data = Builder::default()
+        .push_opcode(Opcode::OP_1)
+        .push_opcode(Opcode::OP_0)
+        .into_script();
+    build_and_broadcast_maker_v2_spend(
+        coin,
+        args.payment_tx,
+        redeem,
+        script_data,
+        SEQUENCE_FINAL - 1,
+        args.time_lock as u32,
+        &htlc_kp,
+    )
+    .await
+}
+
+/// §15.5.4 — Taker immediate refund of the funding payment by revealing the taker's own secret.
+pub async fn refund_taker_funding_secret<T>(
+    coin: &T,
+    args: RefundFundingSecretArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, args.swap_unique_data));
+    let redeem = taker_funding_script(
+        args.funding_time_lock as u32,
+        args.taker_secret_hash,
+        htlc_kp.public(),
+        args.maker_pubkey,
+    );
+    // Outer-ELSE / inner-ELSE branch: reveal taker secret then prove ownership.
+    let script_data = Builder::default()
+        .push_data(args.taker_secret.as_slice())
+        .push_opcode(Opcode::OP_0)
+        .push_opcode(Opcode::OP_0)
+        .into_script();
+    let prev_bytes = serialize(args.funding_tx).take();
+    build_and_broadcast_maker_v2_spend(coin, &prev_bytes, redeem, script_data, SEQUENCE_FINAL, 0, &htlc_kp).await
+}
+
+/// §15.5.5 — Locate and classify the spend of a taker funding output.
+pub async fn search_for_taker_funding_spend<T>(
+    coin: &T,
+    tx: &UtxoTx,
+    from_block: u64,
+    _secret_hash: &[u8],
+) -> Result<Option<FundingTxSpend<crate::utxo::utxo_standard::UtxoStandardCoin>>, SearchForFundingSpendErr>
+where
+    T: UtxoCommonOps,
+{
+    let output = tx
+        .outputs
+        .get(DEFAULT_SWAP_VOUT)
+        .ok_or_else(|| SearchForFundingSpendErr::InvalidInputTx("missing funding output 0".to_string()))?;
+    let spent = coin
+        .as_ref()
+        .rpc_client
+        .find_output_spend(
+            tx.hash(),
+            &output.script_pubkey,
+            DEFAULT_SWAP_VOUT,
+            BlockHashOrHeight::Height(from_block as i64),
+        )
+        .compat()
+        .await
+        .map_err(SearchForFundingSpendErr::Rpc)?;
+    let spent = match spent {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    let mut spend_tx = spent.spending_tx;
+    spend_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
+    let input = spend_tx
+        .inputs
+        .get(DEFAULT_SWAP_VOUT)
+        .ok_or_else(|| SearchForFundingSpendErr::FailedToProcessSpendTx("spend tx has no inputs".to_string()))?;
+    let branch = classify_funding_spend_script_sig(&input.script_sig);
+    let res = match branch {
+        FundingSpendBranchTag::Timelock => FundingTxSpend::RefundedTimelock(spend_tx),
+        FundingSpendBranchTag::Secret(secret) => FundingTxSpend::RefundedSecret { tx: spend_tx, secret },
+        FundingSpendBranchTag::Cooperative => FundingTxSpend::TransferredToTakerPayment(spend_tx),
+    };
+    Ok(Some(res))
+}
+
+/// §15.5.15 — Recover the 32-byte protocol secret from a spend transaction
+/// by walking its input[0] script_sig instructions and matching the push
+/// whose `dhash160` equals `secret_hash`.
+pub fn extract_secret_v2(secret_hash: &[u8], spend_tx: &UtxoTx) -> Result<[u8; 32], String> {
+    let input = spend_tx
+        .inputs
+        .first()
+        .ok_or_else(|| "Spend tx has no inputs".to_string())?;
+    let script: Script = input.script_sig.clone().into();
+    for instr in script.iter().flatten() {
+        if instr.opcode != Opcode::OP_PUSHBYTES_32 {
+            continue;
+        }
+        let push = match instr.data {
+            Some(d) if d.len() == 32 => d,
+            _ => continue,
+        };
+        if dhash160(push).as_slice() == secret_hash {
+            let mut out = [0u8; 32];
+            out.copy_from_slice(push);
+            return Ok(out);
+        }
+    }
+    Err("Secret not found in spend transaction".to_string())
+}
+
+// ─── V2 cooperative funding-spend helpers (chapter 15 §15.5.6 — §15.5.9) ───
+//
+// The funding-spend converts the taker-funding UTXO into a taker-payment
+// P2SH output. The funding script's cooperative branch requires both
+// maker_sig and taker_sig (no OP_CHECKMULTISIG — sequential
+// CHECKSIGVERIFY/CHECKSIG), so this is a two-party exchange:
+//
+//   1. Party A (`gen_taker_funding_spend_preimage`) builds the unsigned
+//      spend tx and signs the input with its own HTLC keypair, returning
+//      `TxPreimageWithSig { preimage, signature: a_sig }`.
+//   2. Party B (`validate_taker_funding_spend_preimage`) re-derives the
+//      same skeleton (allowing ±10% on the fee output) and verifies
+//      `a_sig` against the cooperative-branch sighash for the funding
+//      redeem script.
+//   3. Party B (`sign_and_send_taker_funding_spend`) signs with its own
+//      HTLC keypair, splices both sigs + branch-flags + redeem into a
+//      script_sig (maker_sig at the bottom of the stack), and broadcasts.
+//
+// "A" / "B" labels: the `MakerCoinSwapOpsV2` / `TakerCoinSwapOpsV2` trait
+// doc-comments specify A = maker, B = taker, but the underlying mechanics
+// are symmetric — `get_htlc_key_pair_v2` always returns the calling
+// instance's keypair, and the counterpart pub is read from `args`.
+
+/// Build the unsigned funding-spend preimage with a single P2SH output bound
+/// to the taker-payment redeem script (§15.5.6 step 3). Pure / sync so that
+/// unit tests can drive it without RPC; the async wrapper computes `fee`
+/// via `get_htlc_spend_fee` first.
+pub(crate) fn build_funding_spend_preimage_tx(
+    fields: &UtxoCoinFields,
+    funding_tx: &UtxoTx,
+    taker_payment_redeem: &Script,
+    fee: u64,
+) -> Result<TransactionInputSigner, TxGenError> {
+    let funding_output = funding_tx
+        .outputs
+        .get(DEFAULT_SWAP_VOUT)
+        .ok_or_else(|| TxGenError::PrevTxIsNotValid("funding tx has no output 0".to_string()))?;
+    if funding_output.value <= fee {
+        return Err(TxGenError::PrevOutputTooLow);
+    }
+    let output = TransactionOutput {
+        value: funding_output.value - fee,
+        script_pubkey: Builder::build_p2sh(&dhash160(taker_payment_redeem).into()).into(),
+    };
+    let n_time = if fields.conf.is_pos {
+        Some((now_ms() / 1000) as u32)
+    } else {
+        None
+    };
+    Ok(TransactionInputSigner {
+        version: fields.conf.tx_version,
+        n_time,
+        overwintered: fields.conf.overwintered,
+        inputs: vec![UnsignedTransactionInput {
+            sequence: SEQUENCE_FINAL,
+            previous_output: OutPoint {
+                hash: funding_tx.hash(),
+                index: DEFAULT_SWAP_VOUT as u32,
+            },
+            amount: funding_output.value,
+            witness: Vec::new(),
+        }],
+        outputs: vec![output],
+        lock_time: 0,
+        expiry_height: 0,
+        join_splits: vec![],
+        shielded_spends: vec![],
+        shielded_outputs: vec![],
+        value_balance: 0,
+        version_group_id: fields.conf.version_group_id,
+        consensus_branch_id: fields.conf.consensus_branch_id,
+        zcash: fields.conf.zcash,
+        str_d_zeel: None,
+        hash_algo: fields.tx_hash_algo.into(),
+    })
+}
+
+/// Sign input 0 of `signer` over the cooperative branch of the funding redeem
+/// script with SIGHASH_ALL (§15.5.6 step 5). Returns the raw DER signature
+/// — the trailing sighash byte is added at script_sig assembly time.
+pub(crate) fn sign_funding_spend_input(
+    signer: &TransactionInputSigner,
+    funding_redeem: &Script,
+    keypair: &KeyPair,
+    fields: &UtxoCoinFields,
+) -> Result<keys::Signature, String> {
+    let sighash_type = 1u32 | fields.conf.fork_id;
+    let digest = signer.signature_hash(
+        DEFAULT_SWAP_VOUT,
+        signer.inputs[DEFAULT_SWAP_VOUT].amount,
+        funding_redeem,
+        fields.conf.signature_version,
+        sighash_type,
+    );
+    keypair.private().sign(&digest).map_err(|e| e.to_string())
+}
+
+/// Build the cooperative-branch script_sig of a funding-spend. The script's
+/// inner-IF body runs `<taker_pub> CHECKSIGVERIFY <maker_pub> CHECKSIG`,
+/// which consumes the stack `[..., maker_sig, taker_sig]`. With branch flags
+/// `OP_1`/`OP_0` on top, the spender's stack contributions become (bottom→top):
+/// `maker_sig, taker_sig, OP_1 (inner-IF), OP_0 (outer-ELSE)`. The script is
+/// not OP_CHECKMULTISIG, so the leading OP_0 stuffer is omitted.
+pub(crate) fn build_funding_spend_cooperative_script_sig(
+    maker_sig_der: &[u8],
+    taker_sig_der: &[u8],
+    fork_id: u32,
+    funding_redeem: &Script,
+) -> Bytes {
+    let sighash_byte = (1u32 | fork_id) as u8;
+    let mut maker_sig = maker_sig_der.to_vec();
+    maker_sig.push(sighash_byte);
+    let mut taker_sig = taker_sig_der.to_vec();
+    taker_sig.push(sighash_byte);
+    Builder::default()
+        .push_data(&maker_sig)
+        .push_data(&taker_sig)
+        .push_opcode(Opcode::OP_1)
+        .push_opcode(Opcode::OP_0)
+        .push_data(funding_redeem)
+        .into_script()
+        .to_bytes()
+}
+
+/// §15.5.6 — Generate the funding-spend preimage and the caller's
+/// partial signature over the cooperative branch.
+pub async fn gen_taker_funding_spend_preimage<T>(
+    coin: &T,
+    args: &GenTakerFundingSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+    swap_unique_data: &[u8],
+) -> GenPreimageResult<crate::utxo::utxo_standard::UtxoStandardCoin>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = get_htlc_key_pair_v2(coin, swap_unique_data).map_to_mm(TxGenError::Signing)?;
+    let taker_payment_redeem = taker_payment_script(
+        args.taker_payment_time_lock as u32,
+        args.maker_secret_hash,
+        args.taker_pub,
+        args.maker_pub,
+    );
+    let funding_redeem = taker_funding_script(
+        args.funding_time_lock as u32,
+        args.taker_secret_hash,
+        args.taker_pub,
+        args.maker_pub,
+    );
+    let fee = coin
+        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+        .await
+        .mm_err(|e| TxGenError::Rpc(e.to_string()))?;
+    let signer =
+        build_funding_spend_preimage_tx(coin.as_ref(), args.funding_tx, &taker_payment_redeem, fee).map_to_mm(|e| e)?;
+    let sig =
+        sign_funding_spend_input(&signer, &funding_redeem, &htlc_kp, coin.as_ref()).map_to_mm(TxGenError::Signing)?;
+    Ok(TxPreimageWithSig {
+        preimage: UtxoTxPreimage(signer),
+        signature: sig,
+    })
+}
+
+/// §15.5.7 — Validate a received funding-spend preimage and the
+/// counterparty's partial signature.
+pub async fn validate_taker_funding_spend_preimage<T>(
+    coin: &T,
+    gen_args: &GenTakerFundingSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+    preimage: &TxPreimageWithSig<crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> ValidateTakerFundingSpendPreimageResult
+where
+    T: UtxoCommonOps,
+{
+    let funding_output = gen_args.funding_tx.outputs.get(DEFAULT_SWAP_VOUT).ok_or_else(|| {
+        MmError::new(ValidateTakerFundingSpendPreimageError::InvalidPreimage(
+            "funding tx has no output 0".to_string(),
+        ))
+    })?;
+    let expected_fee = coin
+        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+        .await
+        .mm_err(|e| ValidateTakerFundingSpendPreimageError::InternalError(e.to_string()))?;
+    let expected_value = funding_output.value.checked_sub(expected_fee).ok_or_else(|| {
+        MmError::new(ValidateTakerFundingSpendPreimageError::InvalidPreimage(
+            "funding value below expected fee".to_string(),
+        ))
+    })?;
+
+    let signer = &preimage.preimage.0;
+    if signer.inputs.len() != 1
+        || signer.inputs[0].previous_output.hash != gen_args.funding_tx.hash()
+        || signer.inputs[0].previous_output.index != DEFAULT_SWAP_VOUT as u32
+    {
+        return MmError::err(ValidateTakerFundingSpendPreimageError::InvalidPreimage(
+            "preimage input does not spend the funding outpoint".to_string(),
+        ));
+    }
+    if signer.outputs.len() != 1 {
+        return MmError::err(ValidateTakerFundingSpendPreimageError::InvalidPreimage(format!(
+            "expected 1 output in preimage, got {}",
+            signer.outputs.len()
+        )));
+    }
+    let taker_payment_redeem = taker_payment_script(
+        gen_args.taker_payment_time_lock as u32,
+        gen_args.maker_secret_hash,
+        gen_args.taker_pub,
+        gen_args.maker_pub,
+    );
+    let expected_script_pubkey: Bytes = Builder::build_p2sh(&dhash160(&taker_payment_redeem).into()).into();
+    if signer.outputs[0].script_pubkey != expected_script_pubkey {
+        return MmError::err(ValidateTakerFundingSpendPreimageError::InvalidPreimage(
+            "preimage output script does not match taker-payment P2SH".to_string(),
+        ));
+    }
+    // ±10% fee tolerance on the output value.
+    let actual_value = signer.outputs[0].value;
+    let diff = actual_value.abs_diff(expected_value);
+    let tolerance = expected_value / 10;
+    if diff > tolerance {
+        return MmError::err(ValidateTakerFundingSpendPreimageError::InvalidPreimage(format!(
+            "preimage output value {} differs from expected {} by more than 10% (fee tolerance)",
+            actual_value, expected_value
+        )));
+    }
+
+    // Verify the supplied signature against the counterparty's pub. The
+    // caller's own keypair tells us which side they are.
+    let htlc_kp = get_htlc_key_pair_v2(coin, b"").map_to_mm(ValidateTakerFundingSpendPreimageError::InternalError)?;
+    let counterparty_pub = if htlc_kp.public() == gen_args.taker_pub {
+        gen_args.maker_pub
+    } else {
+        gen_args.taker_pub
+    };
+    let funding_redeem = taker_funding_script(
+        gen_args.funding_time_lock as u32,
+        gen_args.taker_secret_hash,
+        gen_args.taker_pub,
+        gen_args.maker_pub,
+    );
+    let sighash_type = 1u32 | coin.as_ref().conf.fork_id;
+    let digest = signer.signature_hash(
+        DEFAULT_SWAP_VOUT,
+        signer.inputs[DEFAULT_SWAP_VOUT].amount,
+        &funding_redeem,
+        coin.as_ref().conf.signature_version,
+        sighash_type,
+    );
+    let ok = counterparty_pub
+        .verify(&digest, &preimage.signature)
+        .map_to_mm(|e| ValidateTakerFundingSpendPreimageError::InternalError(e.to_string()))?;
+    if !ok {
+        return MmError::err(ValidateTakerFundingSpendPreimageError::InvalidPreimage(
+            "counterparty signature does not verify against cooperative branch".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// §15.5.8 — Add the caller's signature on top of the validated preimage and
+/// broadcast the finalised funding-spend transaction.
+pub async fn sign_and_send_taker_funding_spend<T>(
+    coin: &T,
+    preimage: &TxPreimageWithSig<crate::utxo::utxo_standard::UtxoStandardCoin>,
+    args: &GenTakerFundingSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+    swap_unique_data: &[u8],
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, swap_unique_data));
+    let funding_redeem = taker_funding_script(
+        args.funding_time_lock as u32,
+        args.taker_secret_hash,
+        args.taker_pub,
+        args.maker_pub,
+    );
+    let signer = &preimage.preimage.0;
+    let my_sig = try_tx_s!(sign_funding_spend_input(
+        signer,
+        &funding_redeem,
+        &htlc_kp,
+        coin.as_ref()
+    ));
+
+    // Determine which side `my_sig` belongs to so the cooperative-branch
+    // script_sig keeps `maker_sig` at the bottom of the stack.
+    let (maker_sig_der, taker_sig_der): (&[u8], &[u8]) = if htlc_kp.public() == args.maker_pub {
+        (my_sig.as_ref(), preimage.signature.as_ref())
+    } else {
+        (preimage.signature.as_ref(), my_sig.as_ref())
+    };
+    let script_sig = build_funding_spend_cooperative_script_sig(
+        maker_sig_der,
+        taker_sig_der,
+        coin.as_ref().conf.fork_id,
+        &funding_redeem,
+    );
+
+    let signed_input = chain::TransactionInput {
+        previous_output: signer.inputs[DEFAULT_SWAP_VOUT].previous_output,
+        sequence: signer.inputs[DEFAULT_SWAP_VOUT].sequence,
+        script_sig,
+        script_witness: vec![],
+    };
+    let mut tx: UtxoTx = signer.clone().into();
+    tx.inputs = vec![signed_input];
+    tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
+
+    let tx_fut = coin.as_ref().rpc_client.send_transaction(&tx).compat();
+    try_tx_s!(tx_fut.await, tx);
+    Ok(tx)
+}
+
+/// §15.5.9 — Timelock-refund of a taker-payment (post cooperative funding spend).
+pub async fn refund_combined_taker_payment<T>(
+    coin: &T,
+    args: RefundTakerPaymentArgs<'_>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, args.swap_unique_data));
+    let maker_pub = try_tx_s!(Public::from_slice(args.maker_pub));
+    // Dispatch table for `TakerPaymentV2` produces the same script as
+    // `taker_payment_script(time_lock, maker_secret_hash, first_pub=taker, second_pub=maker)`.
+    let redeem = args
+        .tx_type_with_secret_hash
+        .redeem_script(args.time_lock as u32, htlc_kp.public(), &maker_pub);
+    // The taker-payment script has only one OP_IF — `OP_1` selects the
+    // timelock-refund branch.
+    let script_data = Builder::default().push_opcode(Opcode::OP_1).into_script();
+    build_and_broadcast_maker_v2_spend(
+        coin,
+        args.payment_tx,
+        redeem,
+        script_data,
+        SEQUENCE_FINAL - 1,
+        args.time_lock as u32,
+        &htlc_kp,
+    )
+    .await
+}
+
+// ─── V2 taker-payment-spend helpers (chapter 15 §15.5.10 — §15.5.14) ───
+//
+// The taker-payment output (a P2SH-wrapped `taker_payment_script`) is the
+// post-cooperative-funding-spend UTXO held by the taker. Its cooperative
+// branch (`OP_0`) requires both sigs plus the maker's secret. The
+// preimage-exchange flow mirrors the funding-spend coop flow (§15.5.6 —
+// §15.5.8) but operates on this taker-payment output:
+//
+//   1. Taker (`gen_taker_payment_spend_preimage`) builds the unsigned spend
+//      tx paying the maker, partial-signs and returns the bundle.
+//   2. Maker (`validate_taker_payment_spend_preimage`) re-derives the
+//      skeleton and verifies the taker sig.
+//   3. Maker (`sign_and_broadcast_taker_payment_spend`) appends the dex-fee
+//      output (Standard only), signs, assembles a cooperative-branch
+//      script_sig that also pushes the maker secret, and broadcasts.
+//
+// For `DexFee::Standard` the taker signs with `SIGHASH_SINGLE` so the maker
+// can append outputs without invalidating the taker sig. `DexFee::WithBurn`
+// fixes every output up-front and uses `SIGHASH_ALL` — that variant is
+// deferred to the pre-burn chapter (ch16) and currently returns a
+// `TxGenError::Other` describing the deferral.
+
+const SIGHASH_ALL_BASE: u32 = 1;
+const SIGHASH_SINGLE_BASE: u32 = 3;
+
+/// Build the unsigned taker-payment-spend preimage with the supplied output
+/// list (single maker-bound output for `DexFee::Standard`, or all fixed
+/// outputs for fully-locked variants).
+pub(crate) fn build_taker_payment_spend_preimage_tx(
+    fields: &UtxoCoinFields,
+    taker_payment_tx: &UtxoTx,
+    outputs: Vec<TransactionOutput>,
+) -> Result<TransactionInputSigner, TxGenError> {
+    let taker_output = taker_payment_tx
+        .outputs
+        .get(DEFAULT_SWAP_VOUT)
+        .ok_or_else(|| TxGenError::PrevTxIsNotValid("taker-payment tx has no output 0".to_string()))?;
+    let n_time = if fields.conf.is_pos {
+        Some((now_ms() / 1000) as u32)
+    } else {
+        None
+    };
+    Ok(TransactionInputSigner {
+        version: fields.conf.tx_version,
+        n_time,
+        overwintered: fields.conf.overwintered,
+        inputs: vec![UnsignedTransactionInput {
+            sequence: SEQUENCE_FINAL,
+            previous_output: OutPoint {
+                hash: taker_payment_tx.hash(),
+                index: DEFAULT_SWAP_VOUT as u32,
+            },
+            amount: taker_output.value,
+            witness: Vec::new(),
+        }],
+        outputs,
+        lock_time: 0,
+        expiry_height: 0,
+        join_splits: vec![],
+        shielded_spends: vec![],
+        shielded_outputs: vec![],
+        value_balance: 0,
+        version_group_id: fields.conf.version_group_id,
+        consensus_branch_id: fields.conf.consensus_branch_id,
+        zcash: fields.conf.zcash,
+        str_d_zeel: None,
+        hash_algo: fields.tx_hash_algo.into(),
+    })
+}
+
+/// Sign input 0 of `signer` over the cooperative branch of the taker-payment
+/// redeem script with the supplied `sighash_type` (raw 32-bit value already
+/// or'd with the fork id). Returns the raw DER signature; the trailing
+/// sighash byte is added at script_sig assembly time.
+pub(crate) fn sign_taker_payment_spend_input(
+    signer: &TransactionInputSigner,
+    taker_payment_redeem: &Script,
+    keypair: &KeyPair,
+    fields: &UtxoCoinFields,
+    sighash_type: u32,
+) -> Result<keys::Signature, String> {
+    let digest = signer.signature_hash(
+        DEFAULT_SWAP_VOUT,
+        signer.inputs[DEFAULT_SWAP_VOUT].amount,
+        taker_payment_redeem,
+        fields.conf.signature_version,
+        sighash_type,
+    );
+    keypair.private().sign(&digest).map_err(|e| e.to_string())
+}
+
+/// Build the cooperative-branch script_sig of a taker-payment spend. The
+/// taker-payment script's inner cooperative body is
+/// `OP_SIZE <32> OP_EQUALVERIFY OP_HASH160 <h(secret_hash)> OP_EQUALVERIFY
+///  <taker_pub> OP_CHECKSIGVERIFY <maker_pub> OP_CHECKSIG`, fed by an outer
+/// OP_IF whose ELSE arm runs cooperative spending. Stack contributions
+/// (bottom→top): `maker_sig, taker_sig, maker_secret, OP_0 (selects ELSE)`.
+/// The script is not OP_CHECKMULTISIG so no leading OP_0 stuffer.
+pub(crate) fn build_taker_payment_spend_cooperative_script_sig(
+    maker_sig_der: &[u8],
+    taker_sig_der: &[u8],
+    maker_secret: &[u8],
+    sighash_byte: u8,
+    taker_payment_redeem: &Script,
+) -> Bytes {
+    let mut maker_sig = maker_sig_der.to_vec();
+    maker_sig.push(sighash_byte);
+    let mut taker_sig = taker_sig_der.to_vec();
+    taker_sig.push(sighash_byte);
+    Builder::default()
+        .push_data(&maker_sig)
+        .push_data(&taker_sig)
+        .push_data(maker_secret)
+        .push_opcode(Opcode::OP_0)
+        .push_data(taker_payment_redeem)
+        .into_script()
+        .to_bytes()
+}
+
+/// Resolve the dex-fee P2PKH output for a given `DexFee::Standard` amount.
+fn dex_fee_standard_output<T: UtxoCommonOps>(coin: &T, fee_sat: u64) -> Result<TransactionOutput, TxGenError> {
+    let fee_address = address_from_raw_pubkey(
+        &common::DEX_FEE_ADDR_RAW_PUBKEY,
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    )
+    .map_err(TxGenError::Other)?;
+    Ok(TransactionOutput {
+        value: fee_sat,
+        script_pubkey: Builder::build_p2pkh(&fee_address.hash).to_bytes(),
+    })
+}
+
+/// §15.5.11 — Taker builds the unsigned taker-payment-spend preimage and
+/// partial-signs it. `DexFee::Standard` uses SIGHASH_SINGLE so the maker can
+/// later append the dex-fee output; other variants are deferred to ch16.
+pub async fn gen_taker_payment_spend_preimage<T>(
+    coin: &T,
+    args: &GenTakerPaymentSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+    swap_unique_data: &[u8],
+) -> GenPreimageResult<crate::utxo::utxo_standard::UtxoStandardCoin>
+where
+    T: UtxoCommonOps,
+{
+    let htlc_kp = get_htlc_key_pair_v2(coin, swap_unique_data).map_to_mm(TxGenError::Signing)?;
+    let taker_payment_redeem = taker_payment_script(
+        args.time_lock as u32,
+        args.maker_secret_hash,
+        args.taker_pub,
+        args.maker_pub,
+    );
+    let taker_output = args.taker_tx.outputs.get(DEFAULT_SWAP_VOUT).ok_or_else(|| {
+        MmError::new(TxGenError::PrevTxIsNotValid(
+            "taker-payment tx has no output 0".to_string(),
+        ))
+    })?;
+    let fee = coin
+        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+        .await
+        .mm_err(|e| TxGenError::Rpc(e.to_string()))?;
+    let maker_script_pubkey = output_script(args.maker_address, ScriptType::P2PKH).to_bytes();
+
+    let (outputs, sighash_type) = match args.dex_fee {
+        DexFee::Standard(amount) => {
+            let dex_fee_sat = sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| MmError::new(TxGenError::NumConversion(e.to_string())))?;
+            let maker_value = taker_output
+                .value
+                .checked_sub(dex_fee_sat)
+                .and_then(|v| v.checked_sub(fee))
+                .ok_or_else(|| MmError::new(TxGenError::PrevOutputTooLow))?;
+            let outs = vec![TransactionOutput {
+                value: maker_value,
+                script_pubkey: maker_script_pubkey,
+            }];
+            (outs, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
+        },
+        DexFee::NoFee | DexFee::WithBurn { .. } => {
+            return MmError::err(TxGenError::Other(
+                "DexFee variant deferred to ch16 pre-burn batch".to_string(),
+            ));
+        },
+    };
+
+    let signer = build_taker_payment_spend_preimage_tx(coin.as_ref(), args.taker_tx, outputs).map_to_mm(|e| e)?;
+    let sig = sign_taker_payment_spend_input(&signer, &taker_payment_redeem, &htlc_kp, coin.as_ref(), sighash_type)
+        .map_to_mm(TxGenError::Signing)?;
+    Ok(TxPreimageWithSig {
+        preimage: UtxoTxPreimage(signer),
+        signature: sig,
+    })
+}
+
+/// §15.5.12 — Maker validates the taker-payment-spend preimage's shape and
+/// the taker's partial signature.
+pub async fn validate_taker_payment_spend_preimage<T>(
+    coin: &T,
+    gen_args: &GenTakerPaymentSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+    preimage: &TxPreimageWithSig<crate::utxo::utxo_standard::UtxoStandardCoin>,
+) -> ValidateTakerPaymentSpendPreimageResult
+where
+    T: UtxoCommonOps,
+{
+    let taker_output = gen_args.taker_tx.outputs.get(DEFAULT_SWAP_VOUT).ok_or_else(|| {
+        MmError::new(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+            "taker-payment tx has no output 0".to_string(),
+        ))
+    })?;
+    let expected_fee = coin
+        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+        .await
+        .mm_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
+    let maker_script_pubkey = output_script(gen_args.maker_address, ScriptType::P2PKH).to_bytes();
+
+    let (expected_outputs_len, expected_maker_value, sighash_type) = match gen_args.dex_fee {
+        DexFee::Standard(ref amount) => {
+            let dex_fee_sat = sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
+            let expected = taker_output
+                .value
+                .checked_sub(dex_fee_sat)
+                .and_then(|v| v.checked_sub(expected_fee))
+                .ok_or_else(|| {
+                    MmError::new(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+                        "taker-payment value below dex_fee + spend_fee".to_string(),
+                    ))
+                })?;
+            (1usize, expected, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
+        },
+        DexFee::NoFee | DexFee::WithBurn { .. } => {
+            return MmError::err(ValidateTakerPaymentSpendPreimageError::InternalError(
+                "DexFee variant deferred to ch16 pre-burn batch".to_string(),
+            ));
+        },
+    };
+
+    let signer = &preimage.preimage.0;
+    if signer.inputs.len() != 1
+        || signer.inputs[0].previous_output.hash != gen_args.taker_tx.hash()
+        || signer.inputs[0].previous_output.index != DEFAULT_SWAP_VOUT as u32
+    {
+        return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+            "preimage input does not spend the taker-payment outpoint".to_string(),
+        ));
+    }
+    if signer.outputs.len() != expected_outputs_len {
+        return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
+            "expected {} output(s) in preimage, got {}",
+            expected_outputs_len,
+            signer.outputs.len()
+        )));
+    }
+    if signer.outputs[0].script_pubkey != maker_script_pubkey {
+        return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+            "preimage output 0 script does not pay the maker address".to_string(),
+        ));
+    }
+    let actual_value = signer.outputs[0].value;
+    let diff = actual_value.abs_diff(expected_maker_value);
+    let tolerance = expected_maker_value / 10;
+    if diff > tolerance {
+        return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
+            "preimage maker output value {} differs from expected {} by more than 10% (fee tolerance)",
+            actual_value, expected_maker_value
+        )));
+    }
+
+    let taker_payment_redeem = taker_payment_script(
+        gen_args.time_lock as u32,
+        gen_args.maker_secret_hash,
+        gen_args.taker_pub,
+        gen_args.maker_pub,
+    );
+    let digest = signer.signature_hash(
+        DEFAULT_SWAP_VOUT,
+        signer.inputs[DEFAULT_SWAP_VOUT].amount,
+        &taker_payment_redeem,
+        coin.as_ref().conf.signature_version,
+        sighash_type,
+    );
+    let ok = gen_args
+        .taker_pub
+        .verify(&digest, &preimage.signature)
+        .map_to_mm(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
+    if !ok {
+        return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+            "taker signature does not verify against cooperative branch".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// §15.5.13 — Maker appends the dex-fee output (Standard only), signs with
+/// her HTLC key under the same sighash scheme the taker used, assembles the
+/// cooperative-branch script_sig (revealing the maker secret) and
+/// broadcasts.
+pub async fn sign_and_broadcast_taker_payment_spend<T>(
+    coin: &T,
+    preimage: Option<&TxPreimageWithSig<crate::utxo::utxo_standard::UtxoStandardCoin>>,
+    gen_args: &GenTakerPaymentSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
+    secret: &[u8],
+    swap_unique_data: &[u8],
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps,
+{
+    let preimage = match preimage {
+        Some(p) => p,
+        None => return TX_PLAIN_ERR!("UTXO sign_and_broadcast_taker_payment_spend requires Some(preimage)"),
+    };
+    let htlc_kp = try_tx_s!(get_htlc_key_pair_v2(coin, swap_unique_data));
+    let taker_payment_redeem = taker_payment_script(
+        gen_args.time_lock as u32,
+        gen_args.maker_secret_hash,
+        gen_args.taker_pub,
+        gen_args.maker_pub,
+    );
+
+    let (mut outputs, sighash_type) = match gen_args.dex_fee {
+        DexFee::Standard(ref amount) => {
+            let dex_fee_sat = try_tx_s!(sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals));
+            let fee_out = try_tx_s!(dex_fee_standard_output(coin, dex_fee_sat));
+            let mut outs = preimage.preimage.0.outputs.clone();
+            outs.push(fee_out);
+            (outs, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
+        },
+        DexFee::NoFee | DexFee::WithBurn { .. } => {
+            return TX_PLAIN_ERR!("DexFee variant deferred to ch16 pre-burn batch");
+        },
+    };
+    // Re-attach outputs onto a fresh signer so the maker's signature commits
+    // to the final output set under SIGHASH_SINGLE (which only covers
+    // output[input_index] anyway, but keep the signer self-consistent so the
+    // serialised tx matches what is signed).
+    let signer = TransactionInputSigner {
+        outputs: std::mem::take(&mut outputs),
+        ..preimage.preimage.0.clone()
+    };
+
+    let maker_sig = try_tx_s!(sign_taker_payment_spend_input(
+        &signer,
+        &taker_payment_redeem,
+        &htlc_kp,
+        coin.as_ref(),
+        sighash_type,
+    ));
+
+    let sighash_byte = sighash_type as u8;
+    let script_sig = build_taker_payment_spend_cooperative_script_sig(
+        maker_sig.as_ref(),
+        preimage.signature.as_ref(),
+        secret,
+        sighash_byte,
+        &taker_payment_redeem,
+    );
+
+    let signed_input = chain::TransactionInput {
+        previous_output: signer.inputs[DEFAULT_SWAP_VOUT].previous_output,
+        sequence: signer.inputs[DEFAULT_SWAP_VOUT].sequence,
+        script_sig,
+        script_witness: vec![],
+    };
+    let mut tx: UtxoTx = signer.clone().into();
+    tx.inputs = vec![signed_input];
+    tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
+
+    let tx_fut = coin.as_ref().rpc_client.send_transaction(&tx).compat();
+    try_tx_s!(tx_fut.await, tx);
+    Ok(tx)
+}
+
+/// §15.5.14 — Poll the chain from `from_block` for any transaction spending
+/// the taker-payment output. Polls every 10 seconds until `wait_until`
+/// (unix seconds); returns the spending tx or `FindPaymentSpendError::Timeout`.
+pub async fn find_taker_payment_spend_tx<T>(
+    coin: &T,
+    taker_payment: &UtxoTx,
+    from_block: u64,
+    wait_until: u64,
+) -> MmResult<UtxoTx, FindPaymentSpendError>
+where
+    T: UtxoCommonOps,
+{
+    let output = taker_payment.outputs.get(DEFAULT_SWAP_VOUT).ok_or_else(|| {
+        MmError::new(FindPaymentSpendError::InvalidInputTx(
+            "missing taker-payment output 0".to_string(),
+        ))
+    })?;
+    let tx_hash = taker_payment.hash();
+    let script_pubkey = output.script_pubkey.clone();
+    let from_block_i64 = from_block as i64;
+
+    loop {
+        let now = now_ms() / 1000;
+        if now > wait_until {
+            return MmError::err(FindPaymentSpendError::Timeout { wait_until, now });
+        }
+        match coin
+            .as_ref()
+            .rpc_client
+            .find_output_spend(
+                tx_hash,
+                &script_pubkey,
+                DEFAULT_SWAP_VOUT,
+                BlockHashOrHeight::Height(from_block_i64),
+            )
+            .compat()
+            .await
+        {
+            Ok(Some(spent)) => {
+                let mut spend_tx = spent.spending_tx;
+                spend_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
+                return Ok(spend_tx);
+            },
+            Ok(None) => {},
+            Err(e) => warn!("find_output_spend error: {}; retrying", e),
+        }
+        Timer::sleep(10.).await;
+    }
+}
+
 #[test]
 fn test_pubkey_from_script_sig() {
     let script_sig = Script::from("473044022071edae37cf518e98db3f7637b9073a7a980b957b0c7b871415dbb4898ec3ebdc022031b402a6b98e64ffdf752266449ca979a9f70144dba77ed7a6a25bfab11648f6012103ad6f89abc2e5beaa8a3ac28e22170659b3209fe2ddf439681b4b8f31508c36fa");

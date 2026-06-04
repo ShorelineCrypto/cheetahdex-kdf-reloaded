@@ -99,10 +99,14 @@ ifrom!(TransactionEnum, SignedEthTx);
 #[cfg(not(target_arch = "wasm32"))]
 ifrom!(TransactionEnum, ZTransaction);
 impl From<siacoin::SiaTransaction> for TransactionEnum {
-    fn from(t: siacoin::SiaTransaction) -> TransactionEnum { TransactionEnum::SiaTransaction(t) }
+    fn from(t: siacoin::SiaTransaction) -> TransactionEnum {
+        TransactionEnum::SiaTransaction(t)
+    }
 }
 impl From<tendermint::CosmosTransaction> for TransactionEnum {
-    fn from(t: tendermint::CosmosTransaction) -> TransactionEnum { TransactionEnum::CosmosTransaction(t) }
+    fn from(t: tendermint::CosmosTransaction) -> TransactionEnum {
+        TransactionEnum::CosmosTransaction(t)
+    }
 }
 impl Deref for TransactionEnum {
     type Target = dyn Transaction;
@@ -410,7 +414,9 @@ pub enum StakingInfosDetails {
     Qtum(QtumStakingInfosDetails),
 }
 impl From<QtumStakingInfosDetails> for StakingInfosDetails {
-    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self { StakingInfosDetails::Qtum(qtum_staking_infos) }
+    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self {
+        StakingInfosDetails::Qtum(qtum_staking_infos)
+    }
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StakingInfos {
@@ -468,26 +474,40 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
     }
 }
 impl From<siacoin::SiaFeeDetails> for TxFeeDetails {
-    fn from(d: siacoin::SiaFeeDetails) -> Self { TxFeeDetails::Sia(d) }
+    fn from(d: siacoin::SiaFeeDetails) -> Self {
+        TxFeeDetails::Sia(d)
+    }
 }
 impl From<tendermint::TendermintFeeDetails> for TxFeeDetails {
-    fn from(d: tendermint::TendermintFeeDetails) -> Self { TxFeeDetails::Tendermint(d) }
+    fn from(d: tendermint::TendermintFeeDetails) -> Self {
+        TxFeeDetails::Tendermint(d)
+    }
 }
 impl From<EthTxFeeDetails> for TxFeeDetails {
-    fn from(eth_details: EthTxFeeDetails) -> Self { TxFeeDetails::Eth(eth_details) }
+    fn from(eth_details: EthTxFeeDetails) -> Self {
+        TxFeeDetails::Eth(eth_details)
+    }
 }
 impl From<crate::eth::tron::fee::TronTxFeeDetails> for TxFeeDetails {
-    fn from(tron_details: crate::eth::tron::fee::TronTxFeeDetails) -> Self { TxFeeDetails::Tron(tron_details) }
+    fn from(tron_details: crate::eth::tron::fee::TronTxFeeDetails) -> Self {
+        TxFeeDetails::Tron(tron_details)
+    }
 }
 impl From<UtxoFeeDetails> for TxFeeDetails {
-    fn from(utxo_details: UtxoFeeDetails) -> Self { TxFeeDetails::Utxo(utxo_details) }
+    fn from(utxo_details: UtxoFeeDetails) -> Self {
+        TxFeeDetails::Utxo(utxo_details)
+    }
 }
 impl From<Qrc20FeeDetails> for TxFeeDetails {
-    fn from(qrc20_details: Qrc20FeeDetails) -> Self { TxFeeDetails::Qrc20(qrc20_details) }
+    fn from(qrc20_details: Qrc20FeeDetails) -> Self {
+        TxFeeDetails::Qrc20(qrc20_details)
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaFeeDetails> for TxFeeDetails {
-    fn from(solana_details: SolanaFeeDetails) -> Self { TxFeeDetails::Solana(solana_details) }
+    fn from(solana_details: SolanaFeeDetails) -> Self {
+        TxFeeDetails::Solana(solana_details)
+    }
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct KmdRewardsDetails {
@@ -511,7 +531,9 @@ pub enum TransactionType {
     TokenTransfer(BytesJson),
 }
 impl Default for TransactionType {
-    fn default() -> Self { TransactionType::StandardTransfer }
+    fn default() -> Self {
+        TransactionType::StandardTransfer
+    }
 }
 /// Transaction details
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -571,7 +593,9 @@ impl TransactionDetails {
         self.timestamp == 0
     }
 
-    pub fn should_update_kmd_rewards(&self) -> bool { self.coin == "KMD" && self.kmd_rewards.is_none() }
+    pub fn should_update_kmd_rewards(&self) -> bool {
+        self.coin == "KMD" && self.kmd_rewards.is_none()
+    }
 
     pub fn firo_negative_fee(&self) -> bool {
         match &self.fee_details {
@@ -606,9 +630,13 @@ impl CoinBalance {
         }
     }
 
-    pub fn into_total(self) -> BigDecimal { self.spendable + self.unspendable }
+    pub fn into_total(self) -> BigDecimal {
+        self.spendable + self.unspendable
+    }
 
-    pub fn get_total(&self) -> BigDecimal { &self.spendable + &self.unspendable }
+    pub fn get_total(&self) -> BigDecimal {
+        &self.spendable + &self.unspendable
+    }
 }
 impl Add for CoinBalance {
     type Output = CoinBalance;
@@ -655,6 +683,35 @@ pub enum SwapTxTypeWithSecretHash<'a> {
         maker_secret_hash: &'a [u8],
         taker_secret_hash: &'a [u8],
     },
+}
+
+impl<'a> SwapTxTypeWithSecretHash<'a> {
+    /// Build the redeem script for this swap output, dispatching to the
+    /// correct V1 or V2 builder. `first_pub`/`second_pub` are the two
+    /// HTLC pubkeys whose ordering matches each variant's builder:
+    ///   - `TakerOrMakerPayment`: `pub_0`, `pub_1` (V1 layout)
+    ///   - `TakerFunding`        : `taker_pub`, `maker_pub`
+    ///   - `TakerPaymentV2`      : `taker_pub`, `maker_pub`
+    ///   - `MakerPaymentV2`      : `maker_pub`, `taker_pub`
+    pub fn redeem_script(&self, time_lock: u32, first_pub: &keys::Public, second_pub: &keys::Public) -> script::Script {
+        use crate::utxo::swap_proto_v2_scripts::{maker_payment_script, taker_funding_script, taker_payment_script};
+        use crate::utxo::utxo_common::payment_script;
+        match self {
+            SwapTxTypeWithSecretHash::TakerOrMakerPayment { maker_secret_hash } => {
+                payment_script(time_lock, maker_secret_hash, first_pub, second_pub)
+            },
+            SwapTxTypeWithSecretHash::TakerFunding { taker_secret_hash } => {
+                taker_funding_script(time_lock, taker_secret_hash, first_pub, second_pub)
+            },
+            SwapTxTypeWithSecretHash::TakerPaymentV2 { maker_secret_hash, .. } => {
+                taker_payment_script(time_lock, maker_secret_hash, first_pub, second_pub)
+            },
+            SwapTxTypeWithSecretHash::MakerPaymentV2 {
+                maker_secret_hash,
+                taker_secret_hash,
+            } => maker_payment_script(time_lock, maker_secret_hash, taker_secret_hash, first_pub, second_pub),
+        }
+    }
 }
 /// A preimage bundled with the signature needed to complete the transaction.
 #[derive(Debug)]
