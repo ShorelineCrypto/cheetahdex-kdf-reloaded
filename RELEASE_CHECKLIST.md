@@ -23,8 +23,10 @@ A release is not cut until every box below is ticked. This checklist applies to 
 
 ## Compatibility
 
-- [ ] Any new `kdf_compat_mode` switch is documented in `docs/COMPAT_SWITCHES.md` with a row in the active table.
-- [ ] Any removed switch has a row in the removed table with a final-behaviour note.
+- [ ] Any new compatibility switch is documented in `docs/COMPAT_SWITCHES.md` with a row in the active table AND a per-switch detail subsection.
+- [ ] Any new compatibility switch is added to `MM2_classic.json` with the GLEEC-compatible value.
+- [ ] Any new compatibility switch is referenced from `RELOADED_VS_GLEEC.md` (Added + Compatibility-switches lists).
+- [ ] Any removed switch has a row in the removed table with a final-behaviour note and a migration entry.
 
 ## Security
 

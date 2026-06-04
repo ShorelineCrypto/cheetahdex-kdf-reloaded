@@ -18,7 +18,7 @@ Highlights:
 - Stable Rust toolchain (no nightly pin).
 - Self-hosted CI with split format / unit-test / docker-test jobs.
 - On-demand release builds for Linux (additional platforms via the umbrella dev-build workflow).
-- Compatibility-mode framework (`kdf_compat_mode`) introduced for future behavioural switches; no switches active in this release.
+- Per-feature compatibility switch framework (`compatibility` object in `MM2.json`); no switches active in this release. See [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md) and the [`MM2_classic.json`](MM2_classic.json) drop-in template.
 - Test-only netids (8100, 8999, 9000, 9998) gated behind the `regtest-netid` Cargo feature, off by default in production builds.
 
 [Unreleased]: https://example.invalid/compare/v0.1.0-alpha.1...HEAD
