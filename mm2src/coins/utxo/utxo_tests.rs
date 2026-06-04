@@ -3,23 +3,20 @@ use crate::coin_balance::HDAddressBalance;
 use crate::hd_wallet::HDAccountsMap;
 use crate::hd_wallet_storage::{HDWalletMockStorage, HDWalletStorageInternalOps};
 use crate::rpc_command::account_balance::{AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
-use crate::rpc_command::init_scan_for_new_addresses::{
-    InitScanAddressesRpcOps, ScanAddressesParams, ScanAddressesResponse,
-};
+use crate::rpc_command::init_scan_for_new_addresses::{InitScanAddressesRpcOps, ScanAddressesParams,
+                                                      ScanAddressesResponse};
 use crate::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin, QtumDelegationOps, QtumDelegationRequest};
-use crate::utxo::rpc_clients::{
-    BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl, GetAddressInfoRes, ListSinceBlockRes,
-    ListTransactionsItem, NativeClient, NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps,
-    ValidateAddressRes, VerboseBlock,
-};
+use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl,
+                               GetAddressInfoRes, ListSinceBlockRes, ListTransactionsItem, NativeClient,
+                               NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps, ValidateAddressRes,
+                               VerboseBlock};
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
 use crate::utxo::utxo_common::UtxoTxBuilder;
 use crate::utxo::utxo_common_tests;
 use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::WithdrawFee;
+#[cfg(not(target_arch = "wasm32"))] use crate::WithdrawFee;
 use crate::{CoinBalance, PrivKeyBuildPolicy, StakingInfosDetails, SwapOps, TradePreimageValue, TxFeeDetails};
 use crate::{DexFee, ValidateFeeArgs};
 use bigdecimal::{BigDecimal, Signed};
@@ -85,9 +82,7 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
 
 /// Returned client won't work by default, requires some mocks to be usable
 #[cfg(not(target_arch = "wasm32"))]
-fn native_client_for_test() -> NativeClient {
-    NativeClient(Arc::new(NativeClientImpl::default()))
-}
+fn native_client_for_test() -> NativeClient { NativeClient(Arc::new(NativeClientImpl::default())) }
 
 fn utxo_coin_fields_for_test(
     rpc_client: UtxoRpcClientEnum,
@@ -3356,15 +3351,12 @@ fn test_account_balance_rpc() {
     macro_rules! known_address {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:literal) => {
             addresses_map.insert($address.to_string(), $balance);
-            balances_by_der_path.insert(
-                $der_path.to_string(),
-                HDAddressBalance {
-                    address: $address.to_string(),
-                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                    chain: $chain,
-                    balance: CoinBalance::new(BigDecimal::from($balance)),
-                },
-            )
+            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
+                address: $address.to_string(),
+                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                chain: $chain,
+                balance: CoinBalance::new(BigDecimal::from($balance)),
+            })
         };
     }
 
@@ -3696,15 +3688,12 @@ fn test_scan_for_new_addresses() {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:expr) => {{
             let balance = $balance;
             checking_addresses.insert($address.to_string(), balance);
-            balances_by_der_path.insert(
-                $der_path.to_string(),
-                HDAddressBalance {
-                    address: $address.to_string(),
-                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                    chain: $chain,
-                    balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
-                },
-            );
+            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
+                address: $address.to_string(),
+                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                chain: $chain,
+                balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
+            });
             if balance.is_some() {
                 non_empty_addresses.push($address.to_string());
             }
@@ -4068,12 +4057,8 @@ mod swap_proto_v2_script_tests {
     const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
     const LOCKTIME: u32 = 0x6800_0000; // future, fits in u32
 
-    fn taker_pub() -> Public {
-        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
-    }
-    fn maker_pub() -> Public {
-        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
-    }
+    fn taker_pub() -> Public { Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap() }
+    fn maker_pub() -> Public { Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap() }
 
     /// Collect every opcode in the script in order, ignoring push payloads.
     fn opcodes(script: &script::Script) -> Vec<Opcode> {
@@ -4231,12 +4216,8 @@ mod swap_v2_maker_tests {
     const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
     const LOCKTIME: u32 = 0x6800_0000;
 
-    fn taker_pub() -> Public {
-        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
-    }
-    fn maker_pub() -> Public {
-        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
-    }
+    fn taker_pub() -> Public { Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap() }
+    fn maker_pub() -> Public { Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap() }
 
     /// The dispatch table must produce the exact same bytes as the direct
     /// builder, so refund paths and validators agree on the redeem script.
@@ -4313,12 +4294,8 @@ mod swap_v2_taker_funding_tests {
     const TAKER_SECRET_HASH: [u8; 32] = [0xaa; 32];
     const LOCKTIME: u32 = 0x6800_0000;
 
-    fn taker_pub() -> Public {
-        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
-    }
-    fn maker_pub() -> Public {
-        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
-    }
+    fn taker_pub() -> Public { Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap() }
+    fn maker_pub() -> Public { Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap() }
 
     /// The dispatch table must produce the exact same bytes as the direct
     /// builder, so refund paths and validators agree on the redeem script.
@@ -4443,12 +4420,8 @@ mod swap_v2_funding_spend_tests {
     const FUNDING_VALUE: u64 = 1_000_000;
     const FEE: u64 = 1_000;
 
-    fn taker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 funding-spend taker").unwrap()
-    }
-    fn maker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 funding-spend maker").unwrap()
-    }
+    fn taker_kp() -> KeyPair { key_pair_from_seed("ch15 funding-spend taker").unwrap() }
+    fn maker_kp() -> KeyPair { key_pair_from_seed("ch15 funding-spend maker").unwrap() }
 
     fn synthetic_funding_tx() -> UtxoTx {
         let mut tx = UtxoTx::default();
@@ -4542,10 +4515,8 @@ mod swap_v2_funding_spend_tests {
 mod swap_v2_taker_payment_spend_tests {
     use crate::utxo::rpc_clients::UtxoRpcClientEnum;
     use crate::utxo::swap_proto_v2_scripts::taker_payment_script;
-    use crate::utxo::utxo_common::{
-        build_taker_payment_spend_cooperative_script_sig, build_taker_payment_spend_preimage_tx,
-        sign_taker_payment_spend_input,
-    };
+    use crate::utxo::utxo_common::{build_taker_payment_spend_cooperative_script_sig,
+                                   build_taker_payment_spend_preimage_tx, sign_taker_payment_spend_input};
     use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test};
     use crate::utxo::{output_script, ScriptType, UtxoTx};
     use chain::TransactionOutput;
@@ -4561,12 +4532,8 @@ mod swap_v2_taker_payment_spend_tests {
     const DEX_FEE_SAT: u64 = 10_000;
     const SPEND_FEE: u64 = 1_000;
 
-    fn taker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 payment-spend taker").unwrap()
-    }
-    fn maker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 payment-spend maker").unwrap()
-    }
+    fn taker_kp() -> KeyPair { key_pair_from_seed("ch15 payment-spend taker").unwrap() }
+    fn maker_kp() -> KeyPair { key_pair_from_seed("ch15 payment-spend maker").unwrap() }
 
     fn maker_address() -> Address {
         Address {
@@ -4704,5 +4671,334 @@ mod swap_v2_taker_payment_spend_tests {
         assert_eq!(instrs[3].opcode, Opcode::OP_0);
         // instrs[4]: redeem script push
         assert_eq!(instrs[4].data, Some(redeem.to_bytes().as_slice()));
+    }
+}
+
+/// §16.6 — Pre-burn output unit tests for the V2 taker-payment-spend.
+#[cfg(test)]
+mod swap_v2_pre_burn_tests {
+    use crate::utxo::rpc_clients::UtxoRpcClientEnum;
+    use crate::utxo::utxo_common;
+    use crate::utxo::utxo_standard::UtxoStandardCoin;
+    use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test, utxo_coin_from_fields};
+    use crate::utxo::{output_script, ScriptType, UtxoTx};
+    use crate::{DexFee, DexFeeBurnDestination, GenTakerPaymentSpendArgs, MmCoin,
+                ValidateTakerPaymentSpendPreimageError};
+    use chain::TransactionOutput;
+    use common::block_on;
+    use common::mm_number::MmNumber;
+    use kdf_crypto::ChecksumType;
+    use keys::{Address, AddressFormat as UtxoAddressFormat};
+    use mm2_net_config::net_config_or_panic;
+    use script::Opcode;
+
+    const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
+    const TAKER_PAYMENT_TIME_LOCK: u32 = 0x6810_0000;
+    const TAKER_PAYMENT_VALUE: u64 = 100_000_000;
+    const SWAP_UNIQUE_DATA: &[u8] = b"ch16 pre-burn unit tests";
+
+    /// Build a non-KMD `UtxoStandardCoin` (ticker = "RICK") with the standard
+    /// test fixture; `should_burn_dex_fee` is `true`, `should_burn_directly`
+    /// is `false`.
+    fn rick_coin() -> UtxoStandardCoin {
+        let fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
+        utxo_coin_from_fields(fields)
+    }
+
+    /// Build a KMD-flavoured fixture (ticker = "KMD") for the
+    /// `should_burn_directly = true` path.
+    fn kmd_coin() -> UtxoStandardCoin {
+        let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
+        fields.conf.ticker = "KMD".to_owned();
+        utxo_coin_from_fields(fields)
+    }
+
+    fn synthetic_taker_payment_tx() -> UtxoTx {
+        let mut tx = UtxoTx::default();
+        tx.version = 4;
+        tx.outputs.push(TransactionOutput {
+            value: TAKER_PAYMENT_VALUE,
+            script_pubkey: vec![0xaa; 23].into(),
+        });
+        tx
+    }
+
+    fn maker_address_for(coin: &UtxoStandardCoin) -> Address {
+        Address {
+            prefix: coin.as_ref().conf.pub_addr_prefix,
+            hash: coin
+                .as_ref()
+                .priv_key_policy
+                .key_pair_or_err()
+                .unwrap()
+                .public()
+                .address_hash()
+                .into(),
+            t_addr_prefix: coin.as_ref().conf.pub_t_addr_prefix,
+            checksum_type: ChecksumType::DSHA256,
+            hrp: None,
+            addr_format: UtxoAddressFormat::Standard,
+        }
+    }
+
+    /// §16.3.2 — burn-enabled netid + non-KMD coin produces
+    /// `WithBurn { PreBurnAccount }` with the configured 75/25 split.
+    #[test]
+    fn should_compute_dex_fee_with_burn_split_for_burn_enabled_coin() {
+        let coin = rick_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let total = MmNumber::from("1");
+        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
+        match dex_fee {
+            DexFee::WithBurn {
+                fee_amount,
+                burn_amount,
+                burn_destination: DexFeeBurnDestination::PreBurnAccount { burn_pubkey },
+            } => {
+                assert_eq!(fee_amount, &total * &MmNumber::from((3, 4)));
+                assert_eq!(burn_amount, &total * &MmNumber::from((1, 4)));
+                assert_eq!(burn_pubkey.as_slice(), net_cfg.burn_addr_raw_pubkey());
+            },
+            other => panic!("expected WithBurn{{PreBurnAccount}}, got {:?}", other),
+        }
+    }
+
+    /// §16.3.2 — when the burn portion would be below `min_tx_amount`,
+    /// the factory falls back to `Standard`.
+    #[test]
+    fn should_fall_back_to_standard_when_burn_share_is_dust() {
+        let coin = rick_coin();
+        let net_cfg = net_config_or_panic(6133);
+        // dust = 1000 sat = 0.00001 KMD; pick a base fee so 25% < 0.00001.
+        let total = MmNumber::from("0.00002");
+        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
+        assert_eq!(dex_fee, DexFee::Standard(total));
+    }
+
+    /// §16.3.2 — KMD-style coin (`should_burn_directly = true`) uses
+    /// `KmdOpReturn`.
+    #[test]
+    fn should_emit_kmd_op_return_for_should_burn_directly_coin() {
+        let coin = kmd_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let total = MmNumber::from("1");
+        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
+        match dex_fee {
+            DexFee::WithBurn {
+                fee_amount,
+                burn_amount,
+                burn_destination: DexFeeBurnDestination::KmdOpReturn,
+            } => {
+                assert_eq!(fee_amount, MmNumber::from(0));
+                assert_eq!(burn_amount, total);
+            },
+            other => panic!("expected WithBurn{{KmdOpReturn}}, got {:?}", other),
+        }
+    }
+
+    /// §16.3.2 — when the taker pubkey *is* the burn pubkey, no fee is
+    /// charged.
+    #[test]
+    fn should_emit_no_fee_when_taker_pubkey_is_burn_pubkey() {
+        let coin = rick_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let total = MmNumber::from("1");
+        let burn_pubkey = net_cfg.burn_addr_raw_pubkey();
+        let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total, burn_pubkey);
+        assert_eq!(dex_fee, DexFee::NoFee);
+    }
+
+    /// §16.5.1 — `gen_taker_payment_spend_preimage` for `WithBurn{PreBurnAccount}`
+    /// produces three outputs: maker / fee / burn.
+    #[test]
+    fn should_build_taker_payment_spend_preimage_with_three_outputs_for_with_burn() {
+        let coin = rick_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let taker_payment = synthetic_taker_payment_tx();
+        let maker_addr = maker_address_for(&coin);
+        let taker_pub = *coin.as_ref().priv_key_policy.key_pair_or_err().unwrap().public();
+        let maker_pub = taker_pub;
+        let dex_fee = DexFee::WithBurn {
+            fee_amount: MmNumber::from("0.0075"),
+            burn_amount: MmNumber::from("0.0025"),
+            burn_destination: DexFeeBurnDestination::PreBurnAccount {
+                burn_pubkey: net_cfg.burn_addr_raw_pubkey().to_vec(),
+            },
+        };
+        let args = GenTakerPaymentSpendArgs {
+            taker_tx: &taker_payment,
+            time_lock: TAKER_PAYMENT_TIME_LOCK as u64,
+            maker_secret_hash: &MAKER_SECRET_HASH,
+            maker_pub: &maker_pub,
+            maker_address: &maker_addr,
+            taker_pub: &taker_pub,
+            dex_fee: &dex_fee,
+            premium_amount: 0u64.into(),
+            trading_amount: 1u64.into(),
+        };
+        let preimage = block_on(utxo_common::gen_taker_payment_spend_preimage(
+            &coin,
+            &args,
+            SWAP_UNIQUE_DATA,
+        ))
+        .expect("preimage");
+        let signer = preimage.preimage.0;
+        assert_eq!(signer.outputs.len(), 3, "WithBurn preimage has 3 outputs");
+        // Output 0 — maker P2PKH.
+        let expected_maker = output_script(&maker_addr, ScriptType::P2PKH).to_bytes();
+        assert_eq!(signer.outputs[0].script_pubkey, expected_maker);
+        // Output 2 — P2PKH for the burn pubkey, value = 250_000 sat (0.0025 * 10^8).
+        assert_eq!(signer.outputs[2].value, 250_000);
+        // Sanity: P2PKH has 25-byte script.
+        assert_eq!(signer.outputs[2].script_pubkey.len(), 25);
+    }
+
+    /// §16.5.1 — KMD `WithBurn{KmdOpReturn}` path: output 2 is an
+    /// `OP_RETURN` whose value is zero.
+    #[test]
+    fn should_build_taker_payment_spend_preimage_with_op_return_for_kmd_burn() {
+        let coin = kmd_coin();
+        let taker_payment = synthetic_taker_payment_tx();
+        let maker_addr = maker_address_for(&coin);
+        let taker_pub = *coin.as_ref().priv_key_policy.key_pair_or_err().unwrap().public();
+        let maker_pub = taker_pub;
+        let dex_fee = DexFee::WithBurn {
+            fee_amount: MmNumber::from(0),
+            burn_amount: MmNumber::from("0.01"),
+            burn_destination: DexFeeBurnDestination::KmdOpReturn,
+        };
+        let args = GenTakerPaymentSpendArgs {
+            taker_tx: &taker_payment,
+            time_lock: TAKER_PAYMENT_TIME_LOCK as u64,
+            maker_secret_hash: &MAKER_SECRET_HASH,
+            maker_pub: &maker_pub,
+            maker_address: &maker_addr,
+            taker_pub: &taker_pub,
+            dex_fee: &dex_fee,
+            premium_amount: 0u64.into(),
+            trading_amount: 1u64.into(),
+        };
+        let preimage = block_on(utxo_common::gen_taker_payment_spend_preimage(
+            &coin,
+            &args,
+            SWAP_UNIQUE_DATA,
+        ))
+        .expect("preimage");
+        let signer = preimage.preimage.0;
+        assert_eq!(signer.outputs.len(), 3, "WithBurn preimage has 3 outputs");
+        assert_eq!(signer.outputs[2].value, 0, "OP_RETURN output value must be 0");
+        assert_eq!(
+            signer.outputs[2].script_pubkey[0],
+            Opcode::OP_RETURN as u8,
+            "OP_RETURN opcode must lead the burn script"
+        );
+    }
+
+    /// §16.5.2 — the taker's partial signature on a `WithBurn` preimage
+    /// verifies under `SIGHASH_ALL_BASE | fork_id` against the cooperative
+    /// branch.
+    #[test]
+    fn should_recover_partial_signature_from_with_burn_preimage_under_sighash_all() {
+        use crate::utxo::swap_proto_v2_scripts::taker_payment_script;
+
+        let coin = rick_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let taker_payment = synthetic_taker_payment_tx();
+        let maker_addr = maker_address_for(&coin);
+        let taker_kp = *coin.as_ref().priv_key_policy.key_pair_or_err().unwrap();
+        let taker_pub = *taker_kp.public();
+        let maker_pub = taker_pub;
+        let dex_fee = DexFee::WithBurn {
+            fee_amount: MmNumber::from("0.0075"),
+            burn_amount: MmNumber::from("0.0025"),
+            burn_destination: DexFeeBurnDestination::PreBurnAccount {
+                burn_pubkey: net_cfg.burn_addr_raw_pubkey().to_vec(),
+            },
+        };
+        let args = GenTakerPaymentSpendArgs {
+            taker_tx: &taker_payment,
+            time_lock: TAKER_PAYMENT_TIME_LOCK as u64,
+            maker_secret_hash: &MAKER_SECRET_HASH,
+            maker_pub: &maker_pub,
+            maker_address: &maker_addr,
+            taker_pub: &taker_pub,
+            dex_fee: &dex_fee,
+            premium_amount: 0u64.into(),
+            trading_amount: 1u64.into(),
+        };
+        let preimage = block_on(utxo_common::gen_taker_payment_spend_preimage(
+            &coin,
+            &args,
+            SWAP_UNIQUE_DATA,
+        ))
+        .expect("preimage");
+        let signer = preimage.preimage.0;
+        let redeem = taker_payment_script(TAKER_PAYMENT_TIME_LOCK, &MAKER_SECRET_HASH, &taker_pub, &maker_pub);
+        // SIGHASH_ALL_BASE = 1, fork_id from fixture is 0.
+        let sighash = 1u32 | coin.as_ref().conf.fork_id;
+        let digest = signer.signature_hash(
+            0,
+            signer.inputs[0].amount,
+            &redeem,
+            coin.as_ref().conf.signature_version,
+            sighash,
+        );
+        assert!(
+            taker_pub.verify(&digest, &preimage.signature).expect("verify"),
+            "WithBurn partial sig must verify under SIGHASH_ALL"
+        );
+    }
+
+    /// §16.5.2 — mutating the burn output's value triggers
+    /// `InvalidPreimage("burn output value …")`.
+    #[test]
+    fn should_reject_with_burn_preimage_with_wrong_burn_value() {
+        let coin = rick_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let taker_payment = synthetic_taker_payment_tx();
+        let maker_addr = maker_address_for(&coin);
+        let taker_pub = *coin.as_ref().priv_key_policy.key_pair_or_err().unwrap().public();
+        let maker_pub = taker_pub;
+        let dex_fee = DexFee::WithBurn {
+            fee_amount: MmNumber::from("0.0075"),
+            burn_amount: MmNumber::from("0.0025"),
+            burn_destination: DexFeeBurnDestination::PreBurnAccount {
+                burn_pubkey: net_cfg.burn_addr_raw_pubkey().to_vec(),
+            },
+        };
+        let args = GenTakerPaymentSpendArgs {
+            taker_tx: &taker_payment,
+            time_lock: TAKER_PAYMENT_TIME_LOCK as u64,
+            maker_secret_hash: &MAKER_SECRET_HASH,
+            maker_pub: &maker_pub,
+            maker_address: &maker_addr,
+            taker_pub: &taker_pub,
+            dex_fee: &dex_fee,
+            premium_amount: 0u64.into(),
+            trading_amount: 1u64.into(),
+        };
+        let mut preimage = block_on(utxo_common::gen_taker_payment_spend_preimage(
+            &coin,
+            &args,
+            SWAP_UNIQUE_DATA,
+        ))
+        .expect("preimage");
+        // Mutate burn output value to something well outside the expected.
+        preimage.preimage.0.outputs[2].value = 1;
+
+        let res = block_on(utxo_common::validate_taker_payment_spend_preimage(
+            &coin, &args, &preimage,
+        ));
+        let err = res.expect_err("validation must fail when burn output value is wrong");
+        let msg = err.to_string();
+        match err.into_inner() {
+            ValidateTakerPaymentSpendPreimageError::InvalidPreimage(_) => (),
+            other => panic!("expected InvalidPreimage, got {:?} ({})", other, msg),
+        }
+        assert!(
+            msg.contains("burn output value"),
+            "error message must mention burn output value, got: {}",
+            msg
+        );
     }
 }

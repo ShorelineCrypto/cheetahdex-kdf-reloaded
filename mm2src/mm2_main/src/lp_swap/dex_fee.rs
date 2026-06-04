@@ -9,7 +9,7 @@
 //! not resolve a destination address. Address resolution happens at the
 //! coin-side (see for example `siacoin::SiaCoinBuilder`).
 
-use coins::{DexFee, DexFeeBurnDestination, MmCoinEnum};
+use coins::{DexFee, MmCoinEnum};
 use common::mm_number::MmNumber;
 use common::var;
 use mm2_net_config::NetConfig;
@@ -102,38 +102,5 @@ pub fn compute_dex_fee(
     trade_amount: &MmNumber,
 ) -> DexFee {
     let total = dex_fee_amount_from_taker_coin(net_cfg, taker_coin, maker_coin, trade_amount);
-
-    if !net_cfg.burn_enabled() {
-        return DexFee::Standard(total);
-    }
-
-    let share: MmNumber = net_cfg.dex_fee_share().into();
-    let fee_amount = &total * &share;
-    let burn_amount = &total - &fee_amount;
-
-    // If burn amount would be zero or negative (rounding), fall back to standard
-    if burn_amount <= MmNumber::from(0) {
-        return DexFee::Standard(total);
-    }
-
-    let min_tx_amount = MmNumber::from(taker_coin.min_tx_amount());
-    // If either portion falls below the minimum tx amount, fall back to standard
-    if fee_amount < min_tx_amount || burn_amount < min_tx_amount {
-        return DexFee::Standard(total);
-    }
-
-    // KMD uses OP_RETURN; all other coins use a pre-burn address
-    let burn_destination = if taker_coin.ticker() == "KMD" {
-        DexFeeBurnDestination::KmdOpReturn
-    } else {
-        DexFeeBurnDestination::PreBurnAccount {
-            burn_pubkey: net_cfg.burn_addr_raw_pubkey().to_vec(),
-        }
-    };
-
-    DexFee::WithBurn {
-        fee_amount,
-        burn_amount,
-        burn_destination,
-    }
+    DexFee::new_from_taker_coin(&**taker_coin, net_cfg, total)
 }

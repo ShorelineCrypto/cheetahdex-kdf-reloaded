@@ -99,14 +99,10 @@ ifrom!(TransactionEnum, SignedEthTx);
 #[cfg(not(target_arch = "wasm32"))]
 ifrom!(TransactionEnum, ZTransaction);
 impl From<siacoin::SiaTransaction> for TransactionEnum {
-    fn from(t: siacoin::SiaTransaction) -> TransactionEnum {
-        TransactionEnum::SiaTransaction(t)
-    }
+    fn from(t: siacoin::SiaTransaction) -> TransactionEnum { TransactionEnum::SiaTransaction(t) }
 }
 impl From<tendermint::CosmosTransaction> for TransactionEnum {
-    fn from(t: tendermint::CosmosTransaction) -> TransactionEnum {
-        TransactionEnum::CosmosTransaction(t)
-    }
+    fn from(t: tendermint::CosmosTransaction) -> TransactionEnum { TransactionEnum::CosmosTransaction(t) }
 }
 impl Deref for TransactionEnum {
     type Target = dyn Transaction;
@@ -236,6 +232,83 @@ impl fmt::Display for DexFee {
                 ..
             } => write!(f, "WithBurn(fee={}, burn={})", fee_amount, burn_amount),
         }
+    }
+}
+
+/// KMD path: total fee goes into a zero-value `OP_RETURN`. The
+/// `min_tx_amount` dust check applies only to the fee itself; if the entire
+/// fee is dust, fall back to `Standard` so the trade can still proceed.
+pub fn calc_dex_fee_for_op_return(fee: MmNumber, min_tx_amount: MmNumber) -> DexFee {
+    if fee < min_tx_amount {
+        return DexFee::Standard(fee);
+    }
+    DexFee::WithBurn {
+        fee_amount: MmNumber::from(0),
+        burn_amount: fee,
+        burn_destination: DexFeeBurnDestination::KmdOpReturn,
+    }
+}
+
+/// Non-KMD path: split into two P2PKH outputs. Falls back to `Standard`
+/// when either leg would be dust under the coin's `min_tx_amount`.
+pub fn calc_dex_fee_for_burn_account(
+    fee: MmNumber,
+    min_tx_amount: MmNumber,
+    fee_share: MmNumber,
+    burn_pubkey: Vec<u8>,
+) -> DexFee {
+    let fee_part = &fee * &fee_share;
+    let burn_part = &fee - &fee_part;
+    if burn_part < min_tx_amount || fee_part < min_tx_amount {
+        return DexFee::Standard(fee);
+    }
+    DexFee::WithBurn {
+        fee_amount: fee_part,
+        burn_amount: burn_part,
+        burn_destination: DexFeeBurnDestination::PreBurnAccount { burn_pubkey },
+    }
+}
+
+impl DexFee {
+    /// Build a `DexFee` from a taker coin and the network burn policy at
+    /// swap-initiation time (taker pubkey not yet known).
+    pub fn new_from_taker_coin(
+        taker_coin: &dyn MmCoin,
+        net_cfg: &dyn mm2_net_config::NetConfig,
+        base_fee: MmNumber,
+    ) -> DexFee {
+        if !net_cfg.burn_enabled() || !taker_coin.should_burn_dex_fee() {
+            return DexFee::Standard(base_fee);
+        }
+        let min_tx_amount = MmNumber::from(taker_coin.min_tx_amount());
+        if taker_coin.should_burn_directly() {
+            return calc_dex_fee_for_op_return(base_fee, min_tx_amount);
+        }
+        let burn_pubkey = match taker_coin.burn_pubkey() {
+            ref v if !v.is_empty() => v.clone(),
+            _ => net_cfg.burn_addr_raw_pubkey().to_vec(),
+        };
+        let fee_share: MmNumber = net_cfg.dex_fee_share().into();
+        calc_dex_fee_for_burn_account(base_fee, min_tx_amount, fee_share, burn_pubkey)
+    }
+
+    /// Validation-time variant. Returns `NoFee` when the taker is the burn
+    /// pubkey itself (it is not charged a fee on its own trades). Otherwise
+    /// delegates to `new_from_taker_coin`.
+    pub fn new_with_taker_pubkey(
+        taker_coin: &dyn MmCoin,
+        net_cfg: &dyn mm2_net_config::NetConfig,
+        base_fee: MmNumber,
+        taker_pubkey: &[u8],
+    ) -> DexFee {
+        let burn_pubkey = match taker_coin.burn_pubkey() {
+            ref v if !v.is_empty() => v.clone(),
+            _ => net_cfg.burn_addr_raw_pubkey().to_vec(),
+        };
+        if !burn_pubkey.is_empty() && burn_pubkey.as_slice() == taker_pubkey {
+            return DexFee::NoFee;
+        }
+        DexFee::new_from_taker_coin(taker_coin, net_cfg, base_fee)
     }
 }
 /// Structured arguments for fee validation (replaces positional parameter lists).
@@ -414,9 +487,7 @@ pub enum StakingInfosDetails {
     Qtum(QtumStakingInfosDetails),
 }
 impl From<QtumStakingInfosDetails> for StakingInfosDetails {
-    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self {
-        StakingInfosDetails::Qtum(qtum_staking_infos)
-    }
+    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self { StakingInfosDetails::Qtum(qtum_staking_infos) }
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StakingInfos {
@@ -474,40 +545,26 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
     }
 }
 impl From<siacoin::SiaFeeDetails> for TxFeeDetails {
-    fn from(d: siacoin::SiaFeeDetails) -> Self {
-        TxFeeDetails::Sia(d)
-    }
+    fn from(d: siacoin::SiaFeeDetails) -> Self { TxFeeDetails::Sia(d) }
 }
 impl From<tendermint::TendermintFeeDetails> for TxFeeDetails {
-    fn from(d: tendermint::TendermintFeeDetails) -> Self {
-        TxFeeDetails::Tendermint(d)
-    }
+    fn from(d: tendermint::TendermintFeeDetails) -> Self { TxFeeDetails::Tendermint(d) }
 }
 impl From<EthTxFeeDetails> for TxFeeDetails {
-    fn from(eth_details: EthTxFeeDetails) -> Self {
-        TxFeeDetails::Eth(eth_details)
-    }
+    fn from(eth_details: EthTxFeeDetails) -> Self { TxFeeDetails::Eth(eth_details) }
 }
 impl From<crate::eth::tron::fee::TronTxFeeDetails> for TxFeeDetails {
-    fn from(tron_details: crate::eth::tron::fee::TronTxFeeDetails) -> Self {
-        TxFeeDetails::Tron(tron_details)
-    }
+    fn from(tron_details: crate::eth::tron::fee::TronTxFeeDetails) -> Self { TxFeeDetails::Tron(tron_details) }
 }
 impl From<UtxoFeeDetails> for TxFeeDetails {
-    fn from(utxo_details: UtxoFeeDetails) -> Self {
-        TxFeeDetails::Utxo(utxo_details)
-    }
+    fn from(utxo_details: UtxoFeeDetails) -> Self { TxFeeDetails::Utxo(utxo_details) }
 }
 impl From<Qrc20FeeDetails> for TxFeeDetails {
-    fn from(qrc20_details: Qrc20FeeDetails) -> Self {
-        TxFeeDetails::Qrc20(qrc20_details)
-    }
+    fn from(qrc20_details: Qrc20FeeDetails) -> Self { TxFeeDetails::Qrc20(qrc20_details) }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaFeeDetails> for TxFeeDetails {
-    fn from(solana_details: SolanaFeeDetails) -> Self {
-        TxFeeDetails::Solana(solana_details)
-    }
+    fn from(solana_details: SolanaFeeDetails) -> Self { TxFeeDetails::Solana(solana_details) }
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct KmdRewardsDetails {
@@ -531,9 +588,7 @@ pub enum TransactionType {
     TokenTransfer(BytesJson),
 }
 impl Default for TransactionType {
-    fn default() -> Self {
-        TransactionType::StandardTransfer
-    }
+    fn default() -> Self { TransactionType::StandardTransfer }
 }
 /// Transaction details
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -593,9 +648,7 @@ impl TransactionDetails {
         self.timestamp == 0
     }
 
-    pub fn should_update_kmd_rewards(&self) -> bool {
-        self.coin == "KMD" && self.kmd_rewards.is_none()
-    }
+    pub fn should_update_kmd_rewards(&self) -> bool { self.coin == "KMD" && self.kmd_rewards.is_none() }
 
     pub fn firo_negative_fee(&self) -> bool {
         match &self.fee_details {
@@ -630,13 +683,9 @@ impl CoinBalance {
         }
     }
 
-    pub fn into_total(self) -> BigDecimal {
-        self.spendable + self.unspendable
-    }
+    pub fn into_total(self) -> BigDecimal { self.spendable + self.unspendable }
 
-    pub fn get_total(&self) -> BigDecimal {
-        &self.spendable + &self.unspendable
-    }
+    pub fn get_total(&self) -> BigDecimal { &self.spendable + &self.unspendable }
 }
 impl Add for CoinBalance {
     type Output = CoinBalance;

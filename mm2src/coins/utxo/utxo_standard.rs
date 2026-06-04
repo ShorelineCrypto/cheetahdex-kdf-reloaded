@@ -634,6 +634,10 @@ impl MmCoin for UtxoStandardCoin {
     fn is_coin_protocol_supported(&self, info: &Option<Vec<u8>>) -> bool {
         utxo_common::is_coin_protocol_supported(self, info)
     }
+
+    fn should_burn_directly(&self) -> bool { self.utxo_arc.conf.ticker == "KMD" }
+
+    fn should_burn_dex_fee(&self) -> bool { true }
 }
 
 #[async_trait]

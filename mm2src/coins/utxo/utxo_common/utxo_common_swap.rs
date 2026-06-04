@@ -1129,15 +1129,13 @@ where
 
 use crate::utxo::swap_proto_v2_scripts::{maker_payment_script, taker_funding_script, taker_payment_script};
 use crate::utxo::utxo_standard_swap_v2::UtxoTxPreimage;
-use crate::{
-    FindPaymentSpendError, FundingTxSpend, GenPreimageResult, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs,
-    RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs, RefundTakerPaymentArgs,
-    SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs,
-    SwapTxTypeWithSecretHash, TxGenError, TxPreimageWithSig, ValidateMakerPaymentArgs, ValidateSwapV2TxError,
-    ValidateSwapV2TxResult, ValidateTakerFundingArgs, ValidateTakerFundingSpendPreimageError,
-    ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageError,
-    ValidateTakerPaymentSpendPreimageResult,
-};
+use crate::{FindPaymentSpendError, FundingTxSpend, GenPreimageResult, GenTakerFundingSpendArgs,
+            GenTakerPaymentSpendArgs, RefundFundingSecretArgs, RefundMakerPaymentSecretArgs,
+            RefundMakerPaymentTimelockArgs, RefundTakerPaymentArgs, SearchForFundingSpendErr, SendMakerPaymentArgs,
+            SendTakerFundingArgs, SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TxGenError, TxPreimageWithSig,
+            ValidateMakerPaymentArgs, ValidateSwapV2TxError, ValidateSwapV2TxResult, ValidateTakerFundingArgs,
+            ValidateTakerFundingSpendPreimageError, ValidateTakerFundingSpendPreimageResult,
+            ValidateTakerPaymentSpendPreimageError, ValidateTakerPaymentSpendPreimageResult};
 
 /// Derives the maker/taker per-swap HTLC keypair for V2 swaps.
 ///
@@ -2088,6 +2086,41 @@ fn dex_fee_standard_output<T: UtxoCommonOps>(coin: &T, fee_sat: u64) -> Result<T
     })
 }
 
+/// §16.5.4 — Build the burn-leg output of a `DexFee::WithBurn`
+/// taker-payment-spend. `KmdOpReturn` encodes the burned amount as an
+/// 8-byte little-endian payload of an `OP_RETURN` (output value is zero).
+/// `PreBurnAccount` produces a P2PKH paying the burn address.
+fn build_burn_output<T: UtxoCommonOps>(
+    coin: &T,
+    burn_amount_sat: u64,
+    destination: &DexFeeBurnDestination,
+) -> Result<TransactionOutput, TxGenError> {
+    match destination {
+        DexFeeBurnDestination::KmdOpReturn => Ok(TransactionOutput {
+            value: 0,
+            script_pubkey: Builder::default()
+                .push_opcode(Opcode::OP_RETURN)
+                .push_bytes(&burn_amount_sat.to_le_bytes())
+                .into_bytes(),
+        }),
+        DexFeeBurnDestination::PreBurnAccount { burn_pubkey } => {
+            let burn_address = address_from_raw_pubkey(
+                burn_pubkey,
+                coin.as_ref().conf.pub_addr_prefix,
+                coin.as_ref().conf.pub_t_addr_prefix,
+                coin.as_ref().conf.checksum_type,
+                coin.as_ref().conf.bech32_hrp.clone(),
+                coin.addr_format().clone(),
+            )
+            .map_err(TxGenError::Other)?;
+            Ok(TransactionOutput {
+                value: burn_amount_sat,
+                script_pubkey: Builder::build_p2pkh(&burn_address.hash).to_bytes(),
+            })
+        },
+    }
+}
+
 /// §15.5.11 — Taker builds the unsigned taker-payment-spend preimage and
 /// partial-signs it. `DexFee::Standard` uses SIGHASH_SINGLE so the maker can
 /// later append the dex-fee output; other variants are deferred to ch16.
@@ -2132,10 +2165,43 @@ where
             }];
             (outs, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
         },
-        DexFee::NoFee | DexFee::WithBurn { .. } => {
-            return MmError::err(TxGenError::Other(
-                "DexFee variant deferred to ch16 pre-burn batch".to_string(),
-            ));
+        DexFee::WithBurn {
+            fee_amount,
+            burn_amount,
+            burn_destination,
+        } => {
+            let dex_fee_sat = sat_from_big_decimal(&fee_amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| MmError::new(TxGenError::NumConversion(e.to_string())))?;
+            let burn_sat = sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| MmError::new(TxGenError::NumConversion(e.to_string())))?;
+            let maker_value = taker_output
+                .value
+                .checked_sub(dex_fee_sat)
+                .and_then(|v| v.checked_sub(burn_sat))
+                .and_then(|v| v.checked_sub(fee))
+                .ok_or_else(|| MmError::new(TxGenError::PrevOutputTooLow))?;
+            let fee_out = dex_fee_standard_output(coin, dex_fee_sat).map_to_mm(|e| e)?;
+            let burn_out = build_burn_output(coin, burn_sat, burn_destination).map_to_mm(|e| e)?;
+            let outs = vec![
+                TransactionOutput {
+                    value: maker_value,
+                    script_pubkey: maker_script_pubkey,
+                },
+                fee_out,
+                burn_out,
+            ];
+            (outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id)
+        },
+        DexFee::NoFee => {
+            let maker_value = taker_output
+                .value
+                .checked_sub(fee)
+                .ok_or_else(|| MmError::new(TxGenError::PrevOutputTooLow))?;
+            let outs = vec![TransactionOutput {
+                value: maker_value,
+                script_pubkey: maker_script_pubkey,
+            }];
+            (outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id)
         },
     };
 
@@ -2169,7 +2235,7 @@ where
         .mm_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
     let maker_script_pubkey = output_script(gen_args.maker_address, ScriptType::P2PKH).to_bytes();
 
-    let (expected_outputs_len, expected_maker_value, sighash_type) = match gen_args.dex_fee {
+    let (expected_outputs_len, expected_maker_value, sighash_type, with_burn_extras) = match gen_args.dex_fee {
         DexFee::Standard(ref amount) => {
             let dex_fee_sat = sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals)
                 .map_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
@@ -2182,12 +2248,41 @@ where
                         "taker-payment value below dex_fee + spend_fee".to_string(),
                     ))
                 })?;
-            (1usize, expected, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
+            (1usize, expected, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id, None)
         },
-        DexFee::NoFee | DexFee::WithBurn { .. } => {
-            return MmError::err(ValidateTakerPaymentSpendPreimageError::InternalError(
-                "DexFee variant deferred to ch16 pre-burn batch".to_string(),
-            ));
+        DexFee::WithBurn {
+            fee_amount,
+            burn_amount,
+            burn_destination,
+        } => {
+            let dex_fee_sat = sat_from_big_decimal(&fee_amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
+            let burn_sat = sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
+            let expected = taker_output
+                .value
+                .checked_sub(dex_fee_sat)
+                .and_then(|v| v.checked_sub(burn_sat))
+                .and_then(|v| v.checked_sub(expected_fee))
+                .ok_or_else(|| {
+                    MmError::new(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+                        "taker-payment value below fee + burn + spend_fee".to_string(),
+                    ))
+                })?;
+            (
+                3usize,
+                expected,
+                SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id,
+                Some((dex_fee_sat, burn_sat, burn_destination.clone())),
+            )
+        },
+        DexFee::NoFee => {
+            let expected = taker_output.value.checked_sub(expected_fee).ok_or_else(|| {
+                MmError::new(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+                    "taker-payment value below spend_fee".to_string(),
+                ))
+            })?;
+            (1usize, expected, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id, None)
         },
     };
 
@@ -2220,6 +2315,39 @@ where
             "preimage maker output value {} differs from expected {} by more than 10% (fee tolerance)",
             actual_value, expected_maker_value
         )));
+    }
+
+    if let Some((expected_dex_fee_sat, expected_burn_sat, burn_destination)) = with_burn_extras {
+        let expected_fee_out = dex_fee_standard_output(coin, expected_dex_fee_sat)
+            .map_to_mm(|e| ValidateTakerPaymentSpendPreimageError::InternalError(format!("{:?}", e)))?;
+        if signer.outputs[1].script_pubkey != expected_fee_out.script_pubkey {
+            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+                "preimage output 1 script does not pay the dex-fee address".to_string(),
+            ));
+        }
+        let actual_fee = signer.outputs[1].value;
+        let fee_diff = actual_fee.abs_diff(expected_dex_fee_sat);
+        let fee_tol = (expected_dex_fee_sat / 10).max(1);
+        if fee_diff > fee_tol {
+            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
+                "preimage dex-fee output value {} differs from expected {} by more than 10%",
+                actual_fee, expected_dex_fee_sat
+            )));
+        }
+
+        let expected_burn_out = build_burn_output(coin, expected_burn_sat, &burn_destination)
+            .map_to_mm(|e| ValidateTakerPaymentSpendPreimageError::InternalError(format!("{:?}", e)))?;
+        if signer.outputs[2].script_pubkey != expected_burn_out.script_pubkey {
+            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
+                "preimage burn output script does not match expected destination".to_string(),
+            ));
+        }
+        if signer.outputs[2].value != expected_burn_out.value {
+            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
+                "preimage burn output value {} does not match expected {}",
+                signer.outputs[2].value, expected_burn_out.value
+            )));
+        }
     }
 
     let taker_payment_redeem = taker_payment_script(
@@ -2281,8 +2409,11 @@ where
             outs.push(fee_out);
             (outs, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
         },
-        DexFee::NoFee | DexFee::WithBurn { .. } => {
-            return TX_PLAIN_ERR!("DexFee variant deferred to ch16 pre-burn batch");
+        DexFee::WithBurn { .. } | DexFee::NoFee => {
+            // For WithBurn / NoFee the preimage already contains the final output set;
+            // the maker does not append anything, only (re-)signs under SIGHASH_ALL.
+            let outs = preimage.preimage.0.outputs.clone();
+            (outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id)
         },
     };
     // Re-attach outputs onto a fresh signer so the maker's signature commits

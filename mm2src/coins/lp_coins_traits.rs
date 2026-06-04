@@ -546,6 +546,17 @@ pub trait MmCoin: SwapOps + WatcherOps + MarketCoinOps + fmt::Debug + Send + Syn
 
     /// Check if serialized coin protocol info is supported by current version.
     fn is_coin_protocol_supported(&self, info: &Option<Vec<u8>>) -> bool;
+
+    /// Compressed public key of the network-designated burn address for this
+    /// coin family. Empty when burn is not configured for the coin.
+    fn burn_pubkey(&self) -> Vec<u8> { Vec::new() }
+
+    /// True iff the burn portion should be attached as an `OP_RETURN` output
+    /// rather than sent to a P2PKH burn address (currently KMD-only).
+    fn should_burn_directly(&self) -> bool { false }
+
+    /// True iff this coin participates in the pre-burn DEX-fee split.
+    fn should_burn_dex_fee(&self) -> bool { false }
 }
 #[async_trait]
 pub trait BalanceTradeFeeUpdatedHandler {
