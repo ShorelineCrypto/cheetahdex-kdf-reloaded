@@ -3,7 +3,7 @@
 //! A clean-room, wasm-bindgen-only EIP-1193 transport for the
 //! browser-injected MetaMask provider (`window.ethereum`). Replaces
 //! the previous wrapper around `web3::transports::eip_1193::Eip1193`
-//! and removes the last GLEECBTC/rust-web3 dependency from the
+//! and removes the last upstream-fork rust-web3 dependency from the
 //! project (LP-17 step closing §0 of RELOADED-CODING-STANDARDS.md).
 //!
 //! # Public exports

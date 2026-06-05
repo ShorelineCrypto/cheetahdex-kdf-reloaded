@@ -1,0 +1,15 @@
+[package]
+name = "core2"
+version = "0.3.4"
+edition = "2018"
+description = "Local shim: bitcoin 0.27 and bitcoin_hashes 0.10 declare an optional core2 = ^0.3 dep (only used under no-std, which this workspace never enables). All 0.3.x versions are yanked upstream, so a stub at 0.3.4 is required for fresh resolution. Internally re-exports core2 0.4."
+license = "Apache-2.0 OR MIT"
+
+[features]
+default = []
+alloc = []
+nightly = []
+std = []
+
+[dependencies]
+core2_real = { package = "core2", version = "0.4", default-features = false, features = ["alloc"] }

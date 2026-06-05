@@ -62,9 +62,9 @@ jsonrpc-core = "8.0.1"
 keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
 libc = "0.2"
-lightning = { git = "https://github.com/shamardy/rust-lightning", branch = "0.0.106" }
+lightning = { path = "../../rust-lightning-patched/lightning" }
 lightning-background-processor = { path = "lightning_background_processor" }
-lightning-invoice = { git = "https://github.com/shamardy/rust-lightning", branch = "0.0.106" }
+lightning-invoice = { path = "../../rust-lightning-patched/lightning-invoice" }
 metrics = "0.12"
 mocktopus = "0.8.0"
 num-traits = "0.2"
@@ -118,17 +118,17 @@ dirs = { version = "1" }
 hyper = { version = "0.14", features = ["client", "http2", "http1"] }
 hyper-rustls = { version = "0.23", default-features = false, features = ["http1", "http2", "webpki-roots", "webpki-tokio"] }
 lightning-persister = { path = "lightning_persister" }
-lightning-net-tokio = { git = "https://github.com/shamardy/rust-lightning", branch = "0.0.106" }
+lightning-net-tokio = { path = "../../rust-lightning-patched/lightning-net-tokio" }
 rust-ini = { version = "0.13" }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
 tokio = { version = "1.7" }
 tokio-rustls = { version = "0.23" }
 tonic = { version = "0.11", features = ["tls", "channel"] }
 webpki-roots = { version = "0.22" }
-zcash_client_backend = { git = "https://github.com/KomodoPlatform/librustzcash.git" }
-zcash_client_sqlite = { git = "https://github.com/KomodoPlatform/librustzcash.git" }
-zcash_primitives = { features = ["transparent-inputs"], git = "https://github.com/KomodoPlatform/librustzcash.git" }
-zcash_proofs = { git = "https://github.com/KomodoPlatform/librustzcash.git" }
+zcash_client_backend = { path = "../../librustzcash-patched/zcash_client_backend" }
+zcash_client_sqlite = { path = "../../librustzcash-patched/zcash_client_sqlite" }
+zcash_primitives = { features = ["transparent-inputs"], path = "../../librustzcash-patched/zcash_primitives" }
+zcash_proofs = { path = "../../librustzcash-patched/zcash_proofs" }
 
 # Solana stack — modular `solana-*` 2.x crates plus `spl-token` 8 and
 # the `spl-associated-token-account-client` helper. The legacy

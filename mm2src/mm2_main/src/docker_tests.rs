@@ -120,7 +120,7 @@ mod docker_tests {
     use keys::{Address, KeyPair, NetworkPrefix as CashAddrPrefix, Private};
     use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
     use mm2_test_helpers::for_tests::{check_my_swap_status_amounts, enable_electrum};
-    use qrc20_tests::{qtum_docker_node, QtumDockerOps, QTUM_REGTEST_DOCKER_IMAGE};
+    use qrc20_tests::{qtum_docker_node, qtum_regtest_docker_image, QtumDockerOps};
     use script::Builder;
     use secp256k1::SecretKey;
     use serde_json::{self as json, Value as Json};
@@ -149,9 +149,9 @@ mod docker_tests {
         // skip Docker containers initialization if we are intended to run test_mm_start only
         if std::env::var("_MM2_TEST_CONF").is_err() {
             pull_docker_image(UTXO_ASSET_DOCKER_IMAGE);
-            pull_docker_image(QTUM_REGTEST_DOCKER_IMAGE);
+            pull_docker_image(&qtum_regtest_docker_image());
             remove_docker_containers(UTXO_ASSET_DOCKER_IMAGE);
-            remove_docker_containers(QTUM_REGTEST_DOCKER_IMAGE);
+            remove_docker_containers(&qtum_regtest_docker_image());
 
             let utxo_node = utxo_asset_docker_node(&docker, "MYCOIN", 7000);
             let utxo_node1 = utxo_asset_docker_node(&docker, "MYCOIN1", 8000);

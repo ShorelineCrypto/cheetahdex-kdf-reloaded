@@ -123,7 +123,7 @@ mm2_metrics = { path = "mm2src/mm2_metrics" }
 mm2_number = { path = "mm2src/mm2_number" }
 prost = "0.12"
 prost-types = "0.12"
-sia-rust = { git = "https://github.com/KomodoPlatform/sia-rust", branch = "refactor/rc-cleanup" }
+sia-rust = { path = "sia-rust-patched" }
 # using the same version as cosmrs
 tendermint-rpc = { version = "0.35", default-features = false }
 thiserror = "1"
@@ -139,5 +139,10 @@ debug-assertions = false
 # Turns debugging symbols off for the out-of-workspace dependencies.
 debug = false
 
-[patch."https://github.com/KomodoPlatform/sia-rust"]
-sia-rust = { path = "sia-rust-patched" }
+# bitcoin 0.27 / bitcoin_hashes 0.10 both declare an optional `core2 = "^0.3"`
+# dep used only under `no-std`. Every 0.3.x release is yanked upstream, which
+# blocks fresh resolution against vendored lightning/zcash crates. The shim at
+# `core2-shim/` re-exports core2 0.4 under version 0.3.4 so the optional dep
+# resolves without affecting any std build (no-std is never enabled here).
+[patch.crates-io]
+core2 = { path = "core2-shim" }

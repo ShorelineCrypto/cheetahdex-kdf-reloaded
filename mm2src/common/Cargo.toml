@@ -36,7 +36,7 @@ http-body = "0.1"
 itertools = "0.10"
 keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
-lightning = { git = "https://github.com/shamardy/rust-lightning", branch = "0.0.106" }
+lightning = { path = "../../rust-lightning-patched/lightning" }
 log = { version = "0.4.8", features = ["std"] }
 mm2_number = { path = "../mm2_number" }
 num-bigint = { version = "0.4", features = ["serde", "std"] }
