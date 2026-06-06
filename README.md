@@ -11,7 +11,7 @@ KDF Reloaded is an open-source [atomic-swap](https://en.wikipedia.org/wiki/Atomi
 
 ## Heritage
 
-This project is a **continuation**, not a fork-of-current-upstream. It is anchored to the last commit of the upstream Komodo DeFi Framework that was unambiguously distributed under GPLv2-only (commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, dated 2022-06-03). All work since that anchor is original to this project and licensed under GPLv2-only.
+This project is a **continuation**, not a fork-of-current-upstream. It is anchored to the last commit of the upstream Komodo DeFi Framework that was unambiguously distributed under GPLv2-only (commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, dated 2022-06-03). Post-anchor development includes independently authored work and selected imported/adapted components from publicly available, license-compatible sources; provenance notes are tracked in [`docs/reloaded-rewrite/34-provenance-ledger.md`](docs/reloaded-rewrite/34-provenance-ledger.md). All material distributed in this repository is intended to remain under GPLv2-only-compatible terms.
 
 For the relationship to other downstream projects (notably the GLEEC fork), see [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md).
 
@@ -21,7 +21,7 @@ KDF Reloaded is currently in **public alpha**. APIs, on-disk formats, and the ne
 
 - The `mm2` binary is provided for evaluation, testing, and review.
 - Mainnet swaps function on netid `8762` (AtomicDEX network) and netid `6133` (GLEEC network), but you are running unaudited pre-release software.
-- A GPG/minisign signature on the release artifacts is **TODO** for the alpha cycle; verify provenance from this repository directly until signatures are published. See [`SECURITY.md`](SECURITY.md).
+- GPG/minisign signatures on release artifacts are planned for the alpha cycle; verify provenance from this repository directly until signatures are published. See [`SECURITY.md`](SECURITY.md).
 
 ## What it does
 

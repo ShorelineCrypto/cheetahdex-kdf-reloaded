@@ -3,13 +3,9 @@
 //! # Provenance
 //!
 //! The numeric parameters below (fee rates, public keys, z-addresses) are
-//! **independently observed network constants** — they are publicly visible
-//! to any node joining netid 6133 and are not copyrightable subject matter
-//! (cf. *Feist v. Rural Telephone*, 499 U.S. 340 (1991)).
-//!
-//! No source code was copied from the GLEEC fork.  The architecture
-//! (`NetConfig` trait, per-netid modules, registry) is original to this
-//! project and shares no structural similarity with the GLEEC codebase.
+//! network parameters used for inter-operation on netid 6133.
+//! They are treated as externally observable compatibility values;
+//! project-wide provenance details are tracked in `docs/reloaded-rewrite/34-provenance-ledger.md`.
 //!
 //! # Parameters
 //!

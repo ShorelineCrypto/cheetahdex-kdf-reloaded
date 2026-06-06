@@ -1,21 +1,59 @@
-The following third party projects are incorporated into SuperNET and their respective licenses are adopted for each of these projects. Please see the files for each project for the exact details of their licensing. Most of them are in the public domain, MIT license or GPL.
+KDF Reloaded — Third-Party License Notice
+========================================
 
-libtom: Tom St Denis, tomstdenis@gmail.com, http://libtom.org
+This repository includes third-party software and derived works under
+their respective licenses. The authoritative source of third-party
+licensing terms is:
 
-tweetnacl: http://tweetnacl.cr.yp.to/
+1. The `LICENSE` / `COPYING` files shipped with vendored components.
+2. Crate/package metadata resolved from `Cargo.lock` and workspace
+	 manifests.
+3. Per-file copyright headers where present.
 
-curve25519: http://code.google.com/p/curve25519-donna/ and http://cr.yp.to/ecdh.html
+This notice file is a top-level pointer and policy statement, not an
+exhaustive legal inventory of every transitive dependency.
 
-libtai: also from DJB http://tweetnacl.cr.yp.to/
+Repository-level provenance and import/adaptation tracking is maintained
+in `docs/reloaded-rewrite/34-provenance-ledger.md`.
 
-SaM and vps: from Come-from-Beyond
+Maintainer policy:
+- New vendored/imported code must include or reference upstream license
+	text in-tree.
+- New externally sourced components must be recorded in the provenance
+	ledger.
+- Release preparation must verify that third-party notices align with
+	the actual distributed tree (`RELEASE_CHECKLIST.md`, Security section).
 
-cJSON: Copyright (c) 2009 Dave Gamble http://sourceforge.net/projects/cjson/
+Adapted sources
+---------------
 
-uthash/utlist: Copyright (c) 2003-2014, Troy D. Hanson     http://troydhanson.github.com/uthash/
+The following in-tree code is adapted from a public, license-compatible
+upstream and is recorded in the provenance ledger (classification
+`adapted-source`):
 
-inet.c: Copyright (c) 2004 by Internet Systems Consortium, Inc. ("ISC") Copyright (c) 1996-1999 by Internet Software Consortium.
+* `mm2src/db_common/src/async_sql_conn.rs` and
+	`mm2src/db_common/src/async_conn_tests.rs` adapt the background-thread
+	async `rusqlite` wrapper from `tokio-rusqlite`
+	(https://github.com/programatik29/tokio-rusqlite), under the MIT license.
+	The upstream notice is reproduced below as required by the MIT license:
 
-libgfshare: Copyright Daniel Silverstone <dsilvers@digital-scurf.org>
+		Copyright 2022 Eray Karatay
 
-misc: there might be some other third party files not listed above, in such cases the relevant copyright header in the top of these files govern
+		Permission is hereby granted, free of charge, to any person obtaining a
+		copy of this software and associated documentation files (the
+		"Software"), to deal in the Software without restriction, including
+		without limitation the rights to use, copy, modify, merge, publish,
+		distribute, sublicense, and/or sell copies of the Software, and to
+		permit persons to whom the Software is furnished to do so, subject to
+		the following conditions:
+
+		The above copyright notice and this permission notice shall be included
+		in all copies or substantial portions of the Software.
+
+		THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+		OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+		MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+		IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+		CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+		TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+		SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
