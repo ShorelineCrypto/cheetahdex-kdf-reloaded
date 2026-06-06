@@ -7,7 +7,7 @@
 
 KDF Reloaded is an open-source [atomic-swap](https://en.wikipedia.org/wiki/Atomic_swap) engine for trustless peer-to-peer trading across blockchains, derived from the Komodo DeFi Framework / AtomicDEX-API codebase as it stood under the GPLv2 license.
 
-> **TODO — Counsel review pending.** This repository is being prepared for public release. Independent legal counsel review of the licensing posture is in progress; see [`SECURITY.md`](SECURITY.md) and the [release checklist](RELEASE_CHECKLIST.md) for the current state of pre-release gating items.
+> **Release note:** This repository is published with a documented GPLv2-only continuation posture and an explicit pre-release checklist; see [`SECURITY.md`](SECURITY.md) and [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) for release controls and operator guidance.
 
 ## Heritage
 

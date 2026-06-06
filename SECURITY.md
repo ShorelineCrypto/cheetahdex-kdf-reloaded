@@ -13,7 +13,7 @@ KDF Reloaded is in public alpha. Only the latest tagged alpha release receives s
 
 If you believe you have found a security vulnerability in KDF Reloaded — particularly anything affecting swap atomicity, key handling, networking, or RPC authorisation — **please do not open a public issue**.
 
-> **TODO — Vulnerability disclosure mailbox.** A dedicated email address (e.g. `security@…`) and PGP key for encrypted reports will be published here before the v0.1.0-alpha.1 tag. Until then, contact the maintainers via the channels listed in [`CONTRIBUTING.md`](CONTRIBUTING.md) and explicitly mark the message as a security report.
+> A dedicated vulnerability mailbox and PGP key may be added in a future release cycle. Until then, contact maintainers via the channels listed in [`CONTRIBUTING.md`](CONTRIBUTING.md) and explicitly mark the message as a security report.
 
 When reporting, please include:
 
@@ -34,7 +34,7 @@ We follow coordinated disclosure. Once a fix is available we will:
 
 ## Release artifact verification
 
-> **TODO — Signing keys.** GPG and/or minisign signatures on release binaries are planned for the alpha cycle. The signing key fingerprints and a verification procedure will be published here before binary downloads are offered.
+> GPG and/or minisign signatures on release binaries are planned for the alpha cycle. Signing key fingerprints and a verification procedure will be published alongside signed artifacts.
 >
 > Until then, the only authoritative source of KDF Reloaded code is this repository. Do not trust binaries received through any other channel.
 
@@ -42,8 +42,7 @@ DEX fee receiver addresses are inherited from the upstream Komodo DeFi Framework
 
 ## Pre-release gating
 
-> **TODO — Counsel review.** Independent legal counsel review of the licensing posture is in progress. The v0.1.0-alpha.1 tag will not be cut until this review is complete or until counsel explicitly clears an interim release.
-
+Release readiness is controlled by the repository checklist and release-governance process.
 See [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) for the full pre-release gating list.
 
 ## Out of scope

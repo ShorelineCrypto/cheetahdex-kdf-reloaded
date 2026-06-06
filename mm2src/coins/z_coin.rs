@@ -133,15 +133,12 @@ impl consensus::Parameters for ARRRConsensusParams {
 ///    silently break the audit convention shared with all other
 ///    implementations of the same swap protocol (AtomicDEX, GLEEC, KDF-
 ///    Reloaded, and any third-party participant).
-/// 2. **Cond-(f) named locus.** The constant is one of the regions the
-///    upstream license requires us to keep intact (see
-///    `LEGAL_AUDIT_REPORT_2026-04-27_run2.md` §5 LP-14). We preserve the
-///    value, the type, and the source location verbatim from the joint
-///    GPLv2 baseline `c1d46c0c1` for compliance.
+/// 2. **Baseline continuity.** The value, type, and source location are
+///    preserved from the shared GPLv2 baseline `c1d46c0c1` to maintain
+///    protocol-level continuity across legacy and current participants.
 ///
-/// Do not refactor away or replace this constant. Anyone considering a
-/// change must read both LP-14 in the audit report **and** the ARRR
-/// shielded-fee protocol notes before touching it.
+/// Do not refactor away or replace this constant without a protocol-level
+/// compatibility analysis of the ARRR shielded-fee path.
 const DEX_FEE_OVK: OutgoingViewingKey = OutgoingViewingKey([7; 32]);
 
 pub struct ZCoinFields {

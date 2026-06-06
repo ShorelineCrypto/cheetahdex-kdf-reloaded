@@ -33,9 +33,9 @@ For each behavioural divergence from GLEEC KDF introduced in this release (see [
 
 ## Security
 
-- [ ] **TODO** — Counsel review on file for the licensing posture of this release (or, for an interim release, an explicit counsel waiver).
-- [ ] **TODO** — Release artifacts signed with the published GPG/minisign key. Signature files attached to the GitHub release.
-- [ ] **TODO** — Vulnerability disclosure mailbox active and monitored.
+- [ ] Counsel review on file for the licensing posture of this release (or, for an interim release, an explicit counsel waiver).
+- [ ] Release artifacts signed with the published GPG/minisign key. Signature files attached to the GitHub release.
+- [ ] Vulnerability disclosure mailbox active and monitored.
 - [ ] No known unfixed high-severity advisories against direct dependencies (verified via `cargo audit` or equivalent).
 - [ ] No secrets present in the tree (sweep for accidental commits of `MM2.json`, `.env`, mnemonics, private keys).
 

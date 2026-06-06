@@ -1,6 +1,6 @@
 # Compatibility convention
 
-KDF Reloaded is a continuation of the upstream Komodo DeFi Framework and aims to remain a drop-in replacement for the GLEEC KDF fork wherever practical. When our behaviour intentionally diverges, we follow a **documentation convention** so that every operator and every third-party integration can recover the GLEEC-compatible behaviour by setting one or more configuration values.
+KDF Reloaded is a continuation of the upstream Komodo DeFi Framework and aims to remain operationally compatible with the GLEEC KDF fork wherever practical. When our behaviour intentionally diverges, we follow a **documentation convention** so that every operator and every third-party integration can recover the GLEEC-compatible behaviour by setting one or more configuration values.
 
 This document defines that convention. **It deliberately does not define a common code construct, schema, or JSON object.** Each divergent feature implements its own switch in whatever shape fits that feature best (a config key, an RPC argument, an env var, a Cargo feature, a startup flag, etc.). The unified surface is the *documentation*, not the code.
 
