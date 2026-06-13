@@ -59,7 +59,7 @@ For WebAssembly builds, see [`docs/WASM_BUILD.md`](docs/WASM_BUILD.md).
 
 Two files drive runtime configuration:
 
-- `MM2.json` — RPC credentials, mnemonic, `netid`, optional toggles. See the upstream developer docs for the full schema.
+- `MM2.json` — RPC credentials, mnemonic, `netid`, optional toggles. This project targets RPC/config compatibility with the Komodo DeFi Framework API; see the [Komodo DeFi Framework documentation](https://komodoplatform.com/en/docs/komodo-defi-framework/) for the full schema.
 - `coins` — list of activatable coin definitions. A community-maintained registry lives at [github.com/KomodoPlatform/coins](https://github.com/KomodoPlatform/coins).
 
 Minimal example:
@@ -85,6 +85,8 @@ Launch the daemon:
 
 It exposes a JSON-RPC server on `127.0.0.1:7783` by default. The RPC catalogue is identical to the upstream Komodo DeFi Framework where unchanged; differences are tracked in [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md). RPC namespaces include unprefixed stable methods, `task::*` for long-running operations, `stream::*` for SSE subscriptions, and others.
 
+For method semantics and request/response shapes, see the upstream reference documentation: <https://komodoplatform.com/en/docs/komodo-defi-framework/>. KDF Reloaded aims for API compatibility with that reference; this link is provided for interoperability and does not imply endorsement by Komodo Platform.
+
 ## Project layout
 
 ```
@@ -104,4 +106,8 @@ For the project roadmap beyond the alpha, see [`ROADMAP.md`](ROADMAP.md). For th
 
 ## License
 
-GPLv2-only. See [`LEGAL/LICENSE`](LEGAL/LICENSE), [`LEGAL/COPYING`](LEGAL/COPYING), and [`LEGAL/THIRDPARTY-LICENSES`](LEGAL/THIRDPARTY-LICENSES).
+The repository as a whole is distributed under **GPL-2.0-only**, inherited from the GPLv2 upstream base this project continues (which we do not have the right to relicense).
+
+Original code authored by this project **after** the anchor commit is additionally offered by its authors under **GPL-2.0-or-later**; this does not change the GPL-2.0-only terms of the combined work, but grants downstream the "or later" option for our own contributions. Vendored or adapted third-party components keep their own licenses (e.g. MIT, Apache-2.0, GPL-3.0).
+
+See [`LEGAL/LICENSING-POLICY.md`](LEGAL/LICENSING-POLICY.md) for the full posture and known open items, plus [`LEGAL/LICENSE`](LEGAL/LICENSE), [`LEGAL/COPYING`](LEGAL/COPYING), and [`LEGAL/THIRDPARTY-LICENSES`](LEGAL/THIRDPARTY-LICENSES).
