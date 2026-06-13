@@ -1,0 +1,30 @@
+name: clean-room-gate
+
+# Residual-similarity gate (R35 / R36) from the clean-room rewrite documents.
+# See docs/reloaded-rewrite/01-clean-room-rules.md (R35, R36, D1) and
+# tools/clean_room_gate.py. The gate scores discretionary-body similarity of
+# reloaded files against a relicensed historical-record reference, excluding
+# pinned-interface / R28-R33 lines. It never reads the forbidden corpus (R8).
+
+on:
+  push:
+    branches: [main, staging, dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  r35-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the gate can resolve `git:<ref>:<path>` references
+          # to the relicensed historical record.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run R35 residual-similarity gate
+        run: |
+          python3 tools/clean_room_gate.py \
+            --manifest tools/clean_room_gate.manifest.json
