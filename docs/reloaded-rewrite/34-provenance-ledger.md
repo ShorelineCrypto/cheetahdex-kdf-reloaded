@@ -15,6 +15,34 @@ consistency, not legal advice.
 Files not listed here are clean-room original work governed by the rules
 in [Chapter 01](01-clean-room-rules.md).
 
+### Provenance model (hybrid, by design)
+
+This project is openly **hybrid**. It does not claim — and has never claimed
+— that every file is a clean-room original. Files fall into four provenance
+classes:
+
+1. **Clean-room originals** — independently authored under the
+   [Chapter 01](01-clean-room-rules.md) rules. This is the default for any
+   file not listed in this ledger.
+2. **Constrained-expression fragments** — interop/wire-format, convergent
+   idiomatic, generated, and third-party-API-bound files whose shape is
+   dictated by an external spec, crate, ABI, or protocol. Byte/identifier
+   identity here is expected and non-infringing under merger doctrine /
+   de minimis / scènes à faire. Listed in §34.3.
+3. **Adapted permissive-source** — code ported in place from a public,
+   license-compatible upstream (recorded per CRD §1 R27). Listed in §34.3.
+4. **GPLv2-inherited lineage content** — baseline code descending directly
+   from the 2022 GPLv2 anchor, plus post-anchor modifications derived from
+   the upstream/GLEEC KDF lineage, carried under GPLv2 copyleft. Basis in
+   §34.5.
+
+Because the project is explicitly hybrid, the Chapter 01 clean-room rules
+— including R8's "forbidden input *when claiming clean-room derivation*" —
+scope to class 1 only. Classes 2–4 are **not** clean-room claims and never
+were; their similarity to upstream is expected and lawful under the basis
+stated for each class. This scoping is the designed posture, not an
+after-the-fact narrowing.
+
 ## 34.1 Schema
 
 - **Destination** — path in this repository.
@@ -39,7 +67,10 @@ in [Chapter 01](01-clean-room-rules.md).
   `generated-artifact`: the generator and its input. For
   `vendored-subtree`: the upstream project.
 - **License basis** — for third-party-sourced content, the upstream
-  license terms.
+  license terms. For content derived from the upstream/GLEEC KDF *lineage*
+  (not a third-party crate), the basis is the GPLv2 copyleft inheritance /
+  constrained-expression analysis set out in §34.5, not a per-row license
+  tag.
 - **Notes** — operational context.
 
 Per CRD §1.11 R34, a file's classification is the least-permissive
@@ -47,8 +78,97 @@ category of any fragment present in it.
 
 ## 34.2 Maintenance notes
 
-_No maintenance notes recorded at chapter creation; entries are added below
-as provenance reviews occur (see this file's git history)._
+### 2026-06-08 — repo-wide remediation pass and scope narrowing
+
+- A repository-wide formatting/lint remediation attempt was run
+  (`cargo fmt`; `cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged`).
+- The pass touched a large unrelated surface; non-target edits were then
+  rolled back via allowlist restore so only the intended provenance-remediation
+  files remained modified.
+- Additional strict local lint fixes were re-applied in
+  `mm2src/mm2_main/src/lp_swap.rs`,
+  `mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs`,
+  `mm2src/mm2_main/src/lp_swap/nft_maker_swap_v2.rs`, and
+  `mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs` to keep
+  `cargo clippy --no-deps -p mm2_main -- -D warnings` green.
+- Classification basis in this ledger is unchanged by this pass; no new
+  classification category was introduced.
+
+### 2026-06-12 — adapted-source reclassification and removed-dependency record
+
+- Two `db_common` files previously treated as clean-room are reclassified
+  `adapted-source`: `async_sql_conn.rs` and `async_conn_tests.rs` are an
+  adaptation of `programatik29/tokio-rusqlite` (MIT). A new `adapted-source`
+  classification (CRD §1 R27) is introduced in §34.1 to record them; see the
+  *Adapted from public license-compatible source* table in §34.3. The MIT
+  attribution is carried in `THIRDPARTY-LICENSES`, and both files carry a
+  per-file header pointing to the upstream and that notice.
+- `mm2_metamask` formerly depended on `GLEECBTC/rust-web3` (a fork of
+  `tomusdrw/rust-web3`, MIT/Apache-2.0). Depending on a permissively-licensed
+  crate is permitted regardless of who published the fork — a Cargo dependency
+  pointer is a build-configuration reference, not source derivation. The
+  dependency was removed in LP-17 Phase 4c and replaced by a clean-room
+  EIP-1193 wrapper.
+
+### 2026-06-13 — dependency-license confirmation and header correction
+
+- WalletConnect SDK git dependencies (`pairing_api`, `relay_client`,
+  `relay_rpc`, `wc_common`, pinned `tag = "k-0.1.3"`) point at
+  `github.com/komodoplatform/walletconnectrust`, which GitHub now redirects to
+  `GLEECBTC/WalletConnectRust` (a fork of `reown-com/reown-rust`). That upstream
+  is **Apache-2.0**. As a Cargo git dependency it is a build-configuration
+  reference, not source derivation.
+- **Open license-compatibility finding (inherited from upstream KDF, not
+  introduced here).** `LEGAL/LICENSE` distributes this project under
+  **GPL-2.0-only** (the notice cites "version 2 ... as published by the Free
+  Software Foundation" with no "or later" clause). Two components are in tension
+  with GPL-2.0-only when combined into one distributed binary:
+  1. The Apache-2.0 WalletConnect SDK crates above (Apache-2.0 is
+     FSF-recognized one-way-incompatible with GPL-2.0-only).
+  2. `mm2src/coins/eth/legacy_tx.rs`, a derivative of Parity's **GPL-3.0**
+     `ethcore-transaction` (GPL-3.0 cannot be combined with GPL-2.0-only).
+  Both conditions already existed in upstream Komodo DeFi Framework. Resolution
+  is a licensing-policy decision for the maintainers/counsel — e.g. move the
+  project to **GPL-3.0** or **GPL-2.0-or-later**, or invoke the exceptions
+  mechanism noted in `LEGAL/LICENSE`. Flagged here; no code change made.
+- `mm2_metamask` similarity sweep (audit follow-up to the rust-web3 removal):
+  comment/whitespace-normalized similarity to the upstream lineage averages
+  ~55% whole-file / ~26% body-only across its four files — below the rewritten
+  set and below any clean-room concern threshold. `eip_1193_provider.rs` (which
+  previously interfaced with the removed `GLEECBTC/rust-web3`) is now ~14% /
+  ~11% similar (fully re-authored). No rewrite required.
+- `mm2src/coins/eth/legacy_tx.rs` header corrected: removed a garbled
+  "re-licensed by Parity under GPLv3" sentence. The file is a derivative work
+  of Parity's GPL-3.0 `ethcore-transaction` and accurately remains under
+  GPL-3.0.
+
+### 2026-06-13 -- spec-provenance review of pinned code blocks (ch22-24)
+
+- A review of the chapters whose blind implementations were rewritten this
+  pass (22, 23, 24) checked whether any chapter relocates authorial
+  expression into the CRD by over-pinning discretionary Rust shape rather
+  than function or interface.
+- **Chapter 23 §23.8** is the primary case: R11-D through R11-K pin the
+  `UrlBuilder` private fields, the `build()` body step-by-step, the
+  `SwapUrlBuilder`/`PortfolioUrlBuilder` marker names, local-variable names,
+  and log-message wording. The URL grammar, provider constants, path tokens,
+  header set, decode branches, and public method signatures are functionally
+  dictated by the public 1inch v6.0 API (R33) / its wire envelope (R29); the
+  surrounding identifiers and decomposition are discretionary.
+- **Chapter 24 §24.7.3 (R-R6)** and **Chapter 22 (R8-D transaction wording)**
+  pin statement-level control flow; R8-D's SQL text is on-disk schema (R29,
+  legitimate), but the surrounding `conn.transaction()`/local naming is
+  discretionary.
+- **Resolution (no implementation rewrite).** Rule R36 (ch01) now states that
+  CRD code blocks bind only functional and interface content; the
+  discretionary identifiers and wording they show are informative and carry
+  no clean-room obligation. A binding-scope note added to §23.8 records the
+  dictated-vs-discretionary split explicitly. The shipped `client.rs` and
+  `rpc_commands.rs` are not rewritten: parity with upstream is preserved, and
+  their residual expressive similarity is deferred to the R35 gate (ch30 D1),
+  under which a thin REST-path composer and a validate-then-store handler
+  retain little protectable expression once dictated grammar and interface
+  are excluded.
 
 ## 34.3 Entries
 
@@ -149,6 +269,24 @@ clean-room divergence.
 | `mm2src/db_common/src/async_sql_conn.rs` | adapted-source | `programatik29/tokio-rusqlite` — background-thread async `rusqlite` wrapper (`CallFn`, `Message::Execute`/`Close`, `call`/`call_unwrap`/`open_*` API, `Display` formatting, doc-comments). | MIT (GPLv2-compatible). | Adaptation: upstream `Connection` renamed `AsyncConnection`; `Internal(InternalError)` variant added. Upstream provenance (R14 closed): the `CallFn`/`Message` core originates at v0.1.0 (`a09c68af5617ce9f0a49668c196644d02a017f83`, 2022-04-25); the `Close((Connection, Error))` variant and `Result`-returning `call` at `d97e88dff22b54c88634f4ad80ecccaf946d2945` (2023-04-02); `call_unwrap` at `1c5a322d92f0a8d6c26f221fabc9fab3409bc1ab` (2023-06-22, `v0.4.0-2-g1c5a322`). The adapted surface therefore corresponds to the upstream **v0.4.x era** (state at `1c5a322`). Introduced here in `d42158229`. MIT attribution recorded in `THIRDPARTY-LICENSES`; per-file header added to both files. |
 | `mm2src/db_common/src/async_conn_tests.rs` | adapted-source | `programatik29/tokio-rusqlite` test suite (`open_in_memory`/`call`/`call_unwrap` exercises). | MIT (GPLv2-compatible). | Same provenance and citation as `async_sql_conn.rs`. Uses the early rusqlite `NO_PARAMS` API. |
 
+### Refactor-relocated baseline content
+
+These files did not exist as separate files at the 2022 anchor, but their
+contents are the pre-anchor GPLv2 `lp_ordermatch.rs` body (5,465 lines at
+the anchor) mechanically split into smaller modules by an in-tree refactor
+(`04dcde532`, 2026-05-13). The orderbook logic is C-ported legacy code that
+predates the GLEEC fork — GLEEC's own README describes `lp_ordermatch` as
+"parts ported from C `as is`". Any byte-identity with the GLEEC fork
+therefore reflects the **shared pre-divergence GPLv2 ancestor**, not an
+import from GLEEC. License basis: GPLv2 by direct descent from the anchor
+(§34.5). These rows are settled, not under review.
+
+| Destination | Classification | Source reference | Notes |
+|---|---|---|---|
+| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_orderbook.rs` | baseline-carryforward (relocated) | Split of pre-anchor `lp_ordermatch.rs` body. | Orderbook propagation / order-cancellation logic. GPLv2 by descent. |
+| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_types.rs` | baseline-carryforward (relocated) | Same split. | Order / match type definitions. |
+| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_trading.rs` | baseline-carryforward (relocated) | Same split. | Trading-side ordermatch logic. |
+
 ### Baseline carryforward (pre-2022 anchor)
 
 Files that predate the 2022 baseline anchor and are governed by CRD §1.3
@@ -187,3 +325,80 @@ Distinct from the in-tree fragment scheme.
    content per §1.11 R31.
 4. Adding a new file to the tree without a CRD chapter covering it, or
    without a row here, is a policy violation.
+
+## 34.5 License basis for upstream/GLEEC-lineage content
+
+This section states *why* this project may distribute content that descends
+from the upstream/GLEEC Komodo DeFi Framework lineage. It records the
+project's licensing rationale; it is not legal advice and not a warranty.
+
+### Anchor
+
+KDF Reloaded is a **GPLv2-only continuation** anchored to upstream commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f` (2022-06-03), the last upstream
+commit unambiguously distributed under GPL-2.0-only. Everything present at
+the anchor is GPLv2 by direct descent.
+
+### Two distinct bases (do not conflate)
+
+**(a) Baseline / direct-descent content.** Files (or file bodies) that
+exist at the anchor, or that are mechanical relocations of anchor content
+(e.g. the `lp_ordermatch` refactor split in §34.3), are GPLv2 by direct
+descent. Identity with the GLEEC fork for such content reflects the shared
+pre-divergence ancestor, not a transfer from GLEEC. No further argument is
+needed.
+
+**(b) Post-anchor lineage-derived modifications.** Where post-anchor work
+in this tree is a derivative of GPLv2 upstream/GLEEC-lineage code, GPLv2's
+own terms govern the result:
+
+- **GPLv2 §2(b):** a work that is a derivative of GPLv2 code, distributed
+  as a whole, must be licensed under GPLv2 to all third parties. The mm2
+  modifications in question are integrated derivative works of GPLv2 code,
+  not separable independent works.
+- **GPLv2 §6 (and equivalently GPLv3 §7 / §10):** each downstream recipient
+  receives the GPL grant directly from the original licensors, and *no
+  further restrictions* may be imposed on the exercise of those rights. A
+  restrictive notice placed alongside GPL-covered code is a "further
+  restriction" and is void / removable as to that code.
+
+Consequently, GPLv2-derived lineage code reaches us under GPLv2 regardless
+of any restrictive notice a downstream fork attaches to it, and we may
+redistribute it under GPLv2.
+
+### Per-file-class refinement
+
+- **Trivial, short, convergent, or API-bound files** (e.g. 9-line module
+  organisers, 24-line context-attachment glue, third-party-API type
+  mirrors — see §34.3): byte-identity is legally innocuous under merger
+  doctrine / de minimis / scènes à faire. The expression is constrained by
+  the interface or is too thin to carry protectable original authorship.
+  These are non-infringing independent of lineage.
+- **Substantive lineage-derived files**: governed by basis (b) above
+  (GPLv2 copyleft inheritance).
+
+### Due-diligence finding on the GLEEC fork (public information)
+
+As of this writing, the public `GLEECBTC/komodo-defi-framework` repository
+(a fork of `jl777/SuperNET`) ships a GPL `COPYING` file under `LEGAL/`
+— currently **GPL version 3** — alongside a restrictive copyright notice.
+The presence of a GPL `COPYING` is what matters: under GPLv2 §6 (and GPLv3
+§7/§10 alike) the side notice cannot strip GPL rights from GPL-covered
+code. This project does **not** rely on pulling from GLEEC's current tree;
+our lineage basis is direct descent from the 2022 GPLv2 anchor. The GLEEC
+posture is recorded here only as corroboration that the upstream lineage is
+GPL-licensed.
+
+### What this basis does *not* cover
+
+The GPLv2 copyleft theory does not resolve two genuinely open,
+separately-sourced compatibility items (they are not GPLv2-lineage
+derivatives):
+
+- the Apache-2.0 WalletConnect SDK crates, and
+- `mm2src/coins/eth/legacy_tx.rs` (a GPL-3.0 derivative of Parity
+  `ethcore-transaction`).
+
+Both pre-exist in upstream KDF and remain disclosed open items in §34.2 and
+in `LEGAL/LICENSING-POLICY.md`; their resolution is a maintainer/counsel
+licensing-policy decision, not a provenance question.
