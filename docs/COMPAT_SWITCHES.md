@@ -48,6 +48,15 @@ If the upstream / GLEEC behaviour conflicts with this project's principles — n
 
 The per-setting documentation must spell out the rationale; the central chapter must flag the entry as acknowledgement-gated.
 
+### Security-versus-compatibility departures
+
+A different case arises when matching GLEEC / upstream behaviour requires a *less secure* implementation than KDF Reloaded would otherwise choose — for example, persisting a secret at rest in plaintext because the on-disk format must stay byte-compatible with an existing deployment. Unlike the principle-based departures above, such a setting **may default to the compatible (less-secure) value** when:
+
+- the security exposure is clearly bounded and is *not* a fund-controlling secret (wallet seeds and private keys keep their stronger protection regardless of compatibility); and
+- the governing CRD chapter explicitly describes the exposure and the reason the weaker behaviour is required for interoperability (see [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §5.1).
+
+The reduced-security cost must be stated in the per-setting documentation and in `GLEEC_COMPATIBILITY.md`. A stronger-security value of the same setting should be offered as an alternative where practical. Because the compatible value is the default here, the entry is **not** acknowledgement-gated; a runtime warning and acknowledgement key become appropriate only if and when the stronger-security value is made the default.
+
 ## What this convention is not
 
 - **Not** a JSON schema. There is no `compatibility: {}` object in `MM2.json`.

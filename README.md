@@ -73,6 +73,12 @@ Minimal example:
 }
 ```
 
+> **WalletConnect session storage.** The optional `wc_session_persistence`
+> setting controls whether and how WalletConnect v2 sessions are persisted.
+> It defaults to `open` (GLEEC-compatible plaintext, byte-interchangeable with
+> GLEEC KDF); set it to `none` to disable session persistence. See
+> [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md) for details.
+
 iOS builds are not currently part of the alpha release matrix.
 
 ## Usage
