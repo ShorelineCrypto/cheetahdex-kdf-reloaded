@@ -1,1 +1,34 @@
-[]
+{
+  "_note": "Object form. 'reference_origin' pins the upstream tree we assert independence from. Each file's 'reference' is the upstream PATH; the gate expands it to git:<reference_origin.commit>:<path> and resolves it INSIDE a gated reference repository (an existing corpus clone that holds the pinned commit, else a shallow clone materialised outside the clean checkout). The upstream tree is never vendored here; only similarity scores cross back. See tools/clean_room_gate.py.",
+  "reference_origin": {
+    "url": "https://github.com/GLEECBTC/komodo-defi-framework",
+    "branch": "dev",
+    "commit": "e686ef3500585f01c9f0e89c8c01bc036c42253c"
+  },
+  "defaults": {
+    "margin": 0.15,
+    "max_discretionary": 0.50
+  },
+  "files": [
+    { "reloaded": "mm2src/kdf_walletconnect/src/chain.rs",              "reference": "mm2src/kdf_walletconnect/src/chain.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/connection_handler.rs", "reference": "mm2src/kdf_walletconnect/src/connection_handler.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/error.rs",              "reference": "mm2src/kdf_walletconnect/src/error.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/inbound_message.rs",    "reference": "mm2src/kdf_walletconnect/src/inbound_message.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/lib.rs",                "reference": "mm2src/kdf_walletconnect/src/lib.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/metadata.rs",           "reference": "mm2src/kdf_walletconnect/src/metadata.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/pairing.rs",            "reference": "mm2src/kdf_walletconnect/src/pairing.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/key.rs",        "reference": "mm2src/kdf_walletconnect/src/session/key.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/mod.rs",        "reference": "mm2src/kdf_walletconnect/src/session/mod.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/delete.rs", "reference": "mm2src/kdf_walletconnect/src/session/rpc/delete.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/event.rs",  "reference": "mm2src/kdf_walletconnect/src/session/rpc/event.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/extend.rs", "reference": "mm2src/kdf_walletconnect/src/session/rpc/extend.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/mod.rs",    "reference": "mm2src/kdf_walletconnect/src/session/rpc/mod.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/ping.rs",   "reference": "mm2src/kdf_walletconnect/src/session/rpc/ping.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/propose.rs","reference": "mm2src/kdf_walletconnect/src/session/rpc/propose.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/settle.rs", "reference": "mm2src/kdf_walletconnect/src/session/rpc/settle.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/update.rs", "reference": "mm2src/kdf_walletconnect/src/session/rpc/update.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/storage/indexed_db.rs", "reference": "mm2src/kdf_walletconnect/src/storage/indexed_db.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/storage/mod.rs",        "reference": "mm2src/kdf_walletconnect/src/storage/mod.rs" },
+    { "reloaded": "mm2src/kdf_walletconnect/src/storage/sqlite.rs",     "reference": "mm2src/kdf_walletconnect/src/storage/sqlite.rs" }
+  ]
+}

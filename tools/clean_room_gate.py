@@ -4,10 +4,19 @@
 
 This tool implements the residual-similarity gate that chapter 01 (rule R35,
 deferral D1) and chapter 30 of the clean-room rewrite documents defer to an
-automated check. It does NOT touch the forbidden corpus (R8). It compares a
-reloaded source file against a *relicensed historical record* reference (an
-allowed input: the GPLv2-anchored base or another permitted baseline) and
+automated check. It compares a reloaded source file against a reference tree and
 scores similarity over *discretionary expression only*.
+
+The reference may be a relicensed historical baseline (e.g. the GPLv2-anchored
+base) OR the upstream we assert independence from, pinned by commit in the
+manifest. To honour the R8 wall, the upstream is never vendored into the clean
+checkout: it is read only through `git show` inside a GATED reference repository
+(an existing corpus clone that holds the pinned commit, or a shallow clone
+materialised in a cache directory kept OUTSIDE the clean tree). Only
+clean-channel results cross back -- similarity scores, line counts, and
+residual-identical lines. Every residual-identical line, by construction, also
+exists verbatim in the reloaded source, so no upstream-only expression is ever
+emitted.
 
 What R35 requires (see docs/reloaded-rewrite/01-clean-room-rules.md):
 
@@ -50,7 +59,26 @@ Usage:
     clean_room_gate.py --manifest tools/clean_room_gate.manifest.json
     clean_room_gate.py --reloaded a.rs --reference git:<ref>:path/to/a.rs
 
-Manifest entries (JSON list):
+Manifest forms (JSON):
+
+  Object form -- pins an upstream origin; each file's "reference" is the upstream
+  PATH, expanded to git:<reference_origin.commit>:<path> and resolved against the
+  gated reference repository:
+    {
+      "reference_origin": {
+        "url": "https://github.com/EXAMPLE/repo",
+        "branch": "dev",
+        "commit": "<40-hex sha>",
+        "local_clones": ["/optional/hint/to/an/existing/clone"]
+      },
+      "defaults": { "margin": 0.15, "max_discretionary": 0.50 },
+      "files": [
+        { "reloaded": "mm2src/foo/src/bar.rs", "reference": "mm2src/foo/src/bar.rs" }
+      ]
+    }
+
+  Legacy list form -- each "reference" is used verbatim and resolved against the
+  local repo:
     [
       {
         "reloaded": "mm2src/foo/src/bar.rs",
@@ -59,6 +87,11 @@ Manifest entries (JSON list):
         "max_discretionary": 0.50 // optional absolute cap override
       }
     ]
+
+Reference repository resolution (object form), in order: --reference-repo, the
+CRD_GATE_REFERENCE_REPO env var, manifest 'local_clones' hints (each used only
+if it already contains the pinned commit), else a shallow clone of the upstream
+into --cache-dir (default under ~/.cache), outside the clean checkout.
 
 Exit status is non-zero if any gated file fails, so the tool can run in CI.
 """
@@ -117,12 +150,18 @@ class FileResult:
         return below_whole and under_cap
 
 
-def read_source(spec: str, repo_root: str) -> str:
-    """Read a file by path or by `git:<ref>:<path>` spec."""
+def read_source(spec: str, repo_root: str, git_repo: str | None = None) -> str:
+    """Read a file by path or by `git:<ref>:<path>` spec.
+
+    Plain paths resolve against ``repo_root`` (the clean checkout). ``git:``
+    specs resolve against ``git_repo`` when provided (the gated reference
+    repository), otherwise against ``repo_root`` for backwards compatibility.
+    """
     if spec.startswith("git:"):
         _, ref, path = spec.split(":", 2)
+        src_repo = git_repo or repo_root
         out = subprocess.run(
-            ["git", "-C", repo_root, "show", f"{ref}:{path}"],
+            ["git", "-C", src_repo, "show", f"{ref}:{path}"],
             capture_output=True,
             text=True,
         )
@@ -193,10 +232,11 @@ def gate_file(
     margin: float,
     max_discretionary: float,
     auto_pin: bool,
+    reference_repo: str | None = None,
 ) -> FileResult:
     try:
         rel_text = read_source(reloaded, repo_root)
-        ref_text = read_source(reference, repo_root)
+        ref_text = read_source(reference, repo_root, git_repo=reference_repo)
     except (FileNotFoundError, OSError) as exc:
         return FileResult(reloaded, reference, 0.0, 0.0, margin, max_discretionary, error=str(exc))
 
@@ -221,12 +261,88 @@ def gate_file(
     )
 
 
-def load_manifest(path: str) -> list[dict]:
+def load_manifest(path: str) -> tuple[dict | None, dict, list[dict]]:
+    """Load a manifest, supporting the legacy flat-list form and the object form.
+
+    Returns ``(origin, defaults, entries)``. For the legacy list form ``origin``
+    is ``None``, ``defaults`` is empty, and each entry's ``reference`` is used
+    verbatim. For the object form each file's ``reference`` is an upstream PATH
+    that the caller expands to ``git:<origin.commit>:<path>``.
+    """
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
-    if not isinstance(data, list):
-        raise ValueError("manifest must be a JSON list of entries")
-    return data
+    if isinstance(data, list):
+        return None, {}, data
+    if isinstance(data, dict):
+        defaults = data.get("defaults", {})
+        entries = data.get("files", [])
+        if not isinstance(entries, list):
+            raise ValueError("manifest 'files' must be a JSON list")
+        return data.get("reference_origin"), defaults, entries
+    raise ValueError("manifest must be a JSON list or object")
+
+
+DEFAULT_CACHE = os.path.join(
+    os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+    "crd-clean-room-gate",
+)
+
+
+def _git(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True)
+
+
+def repo_has_commit(repo: str, commit: str) -> bool:
+    """True if ``commit`` resolves to a commit object inside ``repo``."""
+    if not repo or not os.path.isdir(repo):
+        return False
+    return _git(["git", "-C", repo, "cat-file", "-e", f"{commit}^{{commit}}"]).returncode == 0
+
+
+def _provision_clone(url: str, commit: str, branch: str | None, dest: str) -> None:
+    """Materialise a shallow clone of ``url`` holding ``commit`` at ``dest``.
+
+    Tries to fetch the exact commit first; falls back to the pinned branch tip
+    (sufficient when the commit is the branch tip). The tree is only ever read
+    via ``git show`` afterwards -- nothing is checked out into the clean repo.
+    """
+    os.makedirs(dest, exist_ok=True)
+    _git(["git", "-C", dest, "init", "-q"])
+    if _git(["git", "-C", dest, "remote", "get-url", "origin"]).returncode != 0:
+        _git(["git", "-C", dest, "remote", "add", "origin", url])
+    if _git(["git", "-C", dest, "fetch", "--depth", "1", "origin", commit]).returncode != 0 and branch:
+        _git(["git", "-C", dest, "fetch", "--depth", "1", "origin", branch])
+
+
+def resolve_reference_repo(origin: dict, explicit: str | None, cache_dir: str) -> str:
+    """Return a git repo that contains ``origin['commit']`` (clean-room access).
+
+    Resolution order: an explicit ``--reference-repo``/``CRD_GATE_REFERENCE_REPO``
+    (e.g. a local corpus clone), then manifest ``local_clones`` hints, then a
+    shallow clone of ``origin['url']`` under ``cache_dir`` -- kept outside the
+    clean checkout so the upstream tree is never mixed with code under review.
+    """
+    commit = origin["commit"]
+    candidates = [explicit, os.environ.get("CRD_GATE_REFERENCE_REPO"), *origin.get("local_clones", [])]
+    for cand in candidates:
+        if cand:
+            expanded = os.path.expanduser(cand)
+            if repo_has_commit(expanded, commit):
+                return expanded
+
+    dest = os.path.join(cache_dir, commit)
+    if repo_has_commit(dest, commit):
+        return dest
+
+    url = origin.get("url")
+    if not url:
+        raise FileNotFoundError(
+            f"commit {commit} not found in any reference repo and no upstream 'url' to clone"
+        )
+    _provision_clone(url, commit, origin.get("branch"), dest)
+    if not repo_has_commit(dest, commit):
+        raise FileNotFoundError(f"failed to provision reference repo for {commit} from {url}")
+    return dest
 
 
 def print_result(r: FileResult, verbose: bool) -> None:
@@ -267,6 +383,16 @@ def main(argv: list[str]) -> int:
         help="absolute cap (0-1) on discretionary-body similarity",
     )
     ap.add_argument("--auto-pin", action="store_true", help="also exclude structural interface lines")
+    ap.add_argument(
+        "--reference-repo",
+        default=None,
+        help="path to a gated repo holding the pinned upstream commit; overrides CRD_GATE_REFERENCE_REPO",
+    )
+    ap.add_argument(
+        "--cache-dir",
+        default=None,
+        help=f"where to shallow-clone the upstream when no local reference repo is found (default: {DEFAULT_CACHE})",
+    )
     ap.add_argument("-v", "--verbose", action="store_true", help="list residual identical body lines")
     args = ap.parse_args(argv)
 
@@ -281,14 +407,37 @@ def main(argv: list[str]) -> int:
         ap.error("provide --manifest or both --reloaded and --reference")
 
     entries: list[dict] = []
+    origin: dict | None = None
+    manifest_defaults: dict = {}
     if args.manifest:
-        entries.extend(load_manifest(args.manifest))
+        origin, manifest_defaults, manifest_entries = load_manifest(args.manifest)
+        entries.extend(manifest_entries)
     if args.reloaded and args.reference:
         entries.append({"reloaded": args.reloaded, "reference": args.reference})
 
     if not entries:
         print("No gated files in manifest; R35 gate is a no-op.")
         return 0
+
+    # Resolve the gated reference repository when an upstream origin is pinned,
+    # then expand each upstream PATH into a git:<commit>:<path> spec.
+    reference_repo = args.reference_repo
+    if origin is not None:
+        try:
+            reference_repo = resolve_reference_repo(
+                origin, args.reference_repo, args.cache_dir or DEFAULT_CACHE
+            )
+        except (FileNotFoundError, OSError) as exc:
+            print(f"ERROR: could not resolve reference repository: {exc}", file=sys.stderr)
+            return 2
+        commit = origin["commit"]
+        for entry in entries:
+            ref = entry.get("reference", entry["reloaded"])
+            if not ref.startswith("git:"):
+                entry["reference"] = f"git:{commit}:{ref}"
+
+    margin_default = float(manifest_defaults.get("margin", args.margin))
+    maxd_default = float(manifest_defaults.get("max_discretionary", args.max_discretionary))
 
     results: list[FileResult] = []
     for entry in entries:
@@ -297,9 +446,10 @@ def main(argv: list[str]) -> int:
                 reloaded=entry["reloaded"],
                 reference=entry["reference"],
                 repo_root=repo_root,
-                margin=float(entry.get("margin", args.margin)),
-                max_discretionary=float(entry.get("max_discretionary", args.max_discretionary)),
+                margin=float(entry.get("margin", margin_default)),
+                max_discretionary=float(entry.get("max_discretionary", maxd_default)),
                 auto_pin=args.auto_pin,
+                reference_repo=reference_repo,
             )
         )
 
