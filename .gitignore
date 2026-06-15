@@ -70,5 +70,10 @@ MM2.json
 # Rust compiler playground output
 rust_out
 
+# Python artefacts
+__pycache__/
+*.pyc
+.venv/
+
 # Developer notes never tracked
 /local/
