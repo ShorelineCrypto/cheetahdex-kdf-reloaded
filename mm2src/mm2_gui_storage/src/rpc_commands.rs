@@ -423,13 +423,8 @@ fn validate_account_name(name: &str) -> MmResult<(), AccountRpcError> {
 
 /// Rejects descriptions longer than [`MAX_ACCOUNT_DESCRIPTION_LENGTH`].
 fn validate_account_desc(description: &str) -> MmResult<(), AccountRpcError> {
-    ensure_max_len(description, MAX_ACCOUNT_DESCRIPTION_LENGTH, |_max| {
-        // NOTE: reports the account-NAME limit, not the description limit
-        // actually enforced above. Known upstream quirk preserved bug-for-bug
-        // for wire compatibility (see ch24 R-R7).
-        AccountRpcError::DescriptionTooLong {
-            max_len: MAX_ACCOUNT_NAME_LENGTH,
-        }
+    ensure_max_len(description, MAX_ACCOUNT_DESCRIPTION_LENGTH, |max_len| {
+        AccountRpcError::DescriptionTooLong { max_len }
     })
 }
 
@@ -443,3 +438,24 @@ fn validate_tickers(tickers: &[String]) -> MmResult<(), AccountRpcError> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn description_too_long_reports_description_limit() {
+        let over_long = "x".repeat(MAX_ACCOUNT_DESCRIPTION_LENGTH + 1);
+        match validate_account_desc(&over_long).unwrap_err().into_inner() {
+            AccountRpcError::DescriptionTooLong { max_len } => {
+                assert_eq!(max_len, MAX_ACCOUNT_DESCRIPTION_LENGTH);
+            },
+            other => panic!("expected DescriptionTooLong, got {other}"),
+        }
+    }
+
+    #[test]
+    fn description_at_limit_is_accepted() {
+        let at_limit = "x".repeat(MAX_ACCOUNT_DESCRIPTION_LENGTH);
+        assert!(validate_account_desc(&at_limit).is_ok());
+    }
+}
