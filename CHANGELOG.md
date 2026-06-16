@@ -21,5 +21,5 @@ Highlights:
 - Documentation-only compatibility convention for GLEEC-equivalent operation (developer rule in [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md), central admin chapter in [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md)); no divergent settings active in this release.
 - Test-only netids (8100, 8999, 9000, 9998) gated behind the `regtest-netid` Cargo feature, off by default in production builds.
 
-[Unreleased]: https://example.invalid/compare/v0.1.0-alpha.1...HEAD
-[0.1.0-alpha.1]: https://example.invalid/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/kdf-reloaded/kdf/releases/tag/v0.1.0-alpha.1
