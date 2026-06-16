@@ -1,17 +1,9 @@
 use crate::account::storage::{AccountStorage, AccountStorageError, AccountStorageResult};
-use crate::account::{
-    AccountId,
-    AccountInfo,
-    AccountType,
-    AccountWithCoins,
-    AccountWithEnabledFlag,
-    EnabledAccountId, // crd:pin
-    EnabledAccountType,
-    HwPubkey,
-    MAX_ACCOUNT_DESCRIPTION_LENGTH,
-    MAX_ACCOUNT_NAME_LENGTH,
-    MAX_TICKER_LENGTH, // crd:pin
-};
+use crate::account::{AccountId, AccountInfo, AccountType, AccountWithCoins, AccountWithEnabledFlag,
+                     EnabledAccountType, HwPubkey, MAX_ACCOUNT_DESCRIPTION_LENGTH, MAX_ACCOUNT_NAME_LENGTH};
+// crd:pin-begin
+use crate::account::{EnabledAccountId, MAX_TICKER_LENGTH};
+// crd:pin-end
 use async_trait::async_trait;
 use db_common::foreign_columns;
 use db_common::sql_build::*;
@@ -151,15 +143,16 @@ impl SqliteAccountStorage {
             .sqlite_connection
             .as_option()
             .or_mm_err(|| AccountStorageError::Internal("'MmCtx::sqlite_connection' is not initialized".to_owned()))?;
-        Ok(SqliteAccountStorage {
-            conn: Arc::clone(shared),
-        })
+        let conn = Arc::clone(shared);
+        Ok(SqliteAccountStorage { conn })
     }
 
     fn lock_conn_mutex(&self) -> AccountStorageResult<MutexGuard<'_, Connection>> {
-        self.conn
+        let guard = self
+            .conn
             .lock()
-            .map_to_mm(|e| AccountStorageError::Internal(format!("Error locking sqlite connection: {e}")))
+            .map_to_mm(|e| AccountStorageError::Internal(format!("Error locking sqlite connection: {e}")))?;
+        Ok(guard)
     }
 
     fn init_account_table(conn: &Connection) -> AccountStorageResult<()> {
@@ -179,14 +172,11 @@ impl SqliteAccountStorage {
         ));
         builder.column(SqlColumn::new(account_table::BALANCE_USD, SqlType::Varchar(BALANCE_MAX_LENGTH)).not_null());
         // The three identity columns together are the primary key.
-        builder.constraint(PrimaryKey::new(
-            account_table::ACCOUNT_ID_PRIMARY_KEY,
-            [
-                account_table::ACCOUNT_TYPE,
-                account_table::ACCOUNT_IDX,
-                account_table::DEVICE_PUBKEY,
-            ],
-        )?);
+        builder.constraint(PrimaryKey::new(account_table::ACCOUNT_ID_PRIMARY_KEY, [
+            account_table::ACCOUNT_TYPE,
+            account_table::ACCOUNT_IDX,
+            account_table::DEVICE_PUBKEY,
+        ])?);
         builder.create().map_to_mm(AccountStorageError::from)
         // crd:pin-end
     }
@@ -208,27 +198,21 @@ impl SqliteAccountStorage {
 
         // The identity columns mirror the accounts-table primary key; a cascade
         // drops the activated tickers when the parent account is removed.
-        let parent_fk = ForeignKey::new(
-            foreign_key::ParentTable(account_table::TABLE_NAME),
-            foreign_columns![
-                account_coins_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
-                account_coins_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
-                account_coins_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY
-            ],
-        )?
+        let parent_fk = ForeignKey::new(foreign_key::ParentTable(account_table::TABLE_NAME), foreign_columns![
+            account_coins_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
+            account_coins_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
+            account_coins_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY
+        ])?
         .on_event(foreign_key::Event::OnDelete, foreign_key::Action::Cascade);
         builder.constraint(parent_fk);
 
         // No account may list the same ticker twice.
-        builder.constraint(Unique::new(
-            account_coins_table::ACCOUNT_ID_COIN_CONSTRAINT,
-            [
-                account_coins_table::ACCOUNT_TYPE,
-                account_coins_table::ACCOUNT_IDX,
-                account_coins_table::DEVICE_PUBKEY,
-                account_coins_table::COIN,
-            ],
-        )?);
+        builder.constraint(Unique::new(account_coins_table::ACCOUNT_ID_COIN_CONSTRAINT, [
+            account_coins_table::ACCOUNT_TYPE,
+            account_coins_table::ACCOUNT_IDX,
+            account_coins_table::DEVICE_PUBKEY,
+            account_coins_table::COIN,
+        ])?);
         builder.create().map_to_mm(AccountStorageError::from)
         // crd:pin-end
     }
@@ -249,14 +233,11 @@ impl SqliteAccountStorage {
         );
 
         // Clearing the parent account clears its enabled marker too.
-        let parent_fk = ForeignKey::new(
-            foreign_key::ParentTable(account_table::TABLE_NAME),
-            foreign_columns![
-                enabled_account_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
-                enabled_account_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
-                enabled_account_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY,
-            ],
-        )?
+        let parent_fk = ForeignKey::new(foreign_key::ParentTable(account_table::TABLE_NAME), foreign_columns![
+            enabled_account_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
+            enabled_account_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
+            enabled_account_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY,
+        ])?
         .on_event(foreign_key::Event::OnDelete, foreign_key::Action::Cascade);
         builder.constraint(parent_fk);
 
@@ -268,11 +249,14 @@ impl SqliteAccountStorage {
     /// when none has been set.
     fn load_enabled_account_id_or_err(conn: &Connection) -> AccountStorageResult<EnabledAccountId> {
         let mut select = SqlQuery::select_from(conn, enabled_account_table::TABLE_NAME)?;
-        select.field(enabled_account_table::ACCOUNT_TYPE)?;
-        select.field(enabled_account_table::ACCOUNT_IDX)?;
-        select
-            .query_single_row(enabled_account_id_from_row)?
-            .or_mm_err(|| AccountStorageError::NoEnabledAccount)
+        add_select_fields(&mut select, &[
+            enabled_account_table::ACCOUNT_TYPE,
+            enabled_account_table::ACCOUNT_IDX,
+        ])?;
+        match select.query_single_row(enabled_account_id_from_row)? {
+            Some(enabled_id) => Ok(enabled_id),
+            None => MmError::err(AccountStorageError::NoEnabledAccount),
+        }
     }
 
     /// Returns the activated tickers of `account_id`.
@@ -284,7 +268,10 @@ impl SqliteAccountStorage {
         select.field(account_coins_table::COIN)?;
         restrict_to_account(&mut select, COINS_TABLE_ID_COLUMNS, account_id.to_sql_tuple())?;
 
-        let coins = select.query(|row| row.get::<_, String>(0))?.into_iter().collect();
+        let mut coins = BTreeSet::new();
+        for coin in select.query(|row| row.get::<_, String>(0))? {
+            coins.insert(coin);
+        }
         Ok(coins)
     }
 
@@ -294,21 +281,19 @@ impl SqliteAccountStorage {
         conn: &Connection,
         account_id: &AccountId,
     ) -> AccountStorageResult<Option<AccountWithCoins>> {
-        Self::load_account(conn, account_id)?
-            .map(|account_info| {
-                let coins = Self::load_account_coins(conn, account_id)?;
-                Ok(AccountWithCoins { account_info, coins })
-            })
-            .transpose()
+        let account_info = match Self::load_account(conn, account_id)? {
+            Some(account_info) => account_info,
+            None => return Ok(None),
+        };
+        let coins = Self::load_account_coins(conn, account_id)?;
+        Ok(Some(AccountWithCoins { account_info, coins }))
     }
 
     /// Loads a single account record, or `None` when the identity is unknown.
     fn load_account(conn: &Connection, account_id: &AccountId) -> AccountStorageResult<Option<AccountInfo>> {
         let mut select = SqlQuery::select_from(conn, account_table::TABLE_NAME)?;
         // The select order must match the indices read by `account_from_row`.
-        for column in ACCOUNT_COLUMNS {
-            select.field(column)?;
-        }
+        add_select_fields(&mut select, &ACCOUNT_COLUMNS)?;
         restrict_to_account(&mut select, ACCOUNT_TABLE_ID_COLUMNS, account_id.to_sql_tuple())?;
 
         select
@@ -318,15 +303,12 @@ impl SqliteAccountStorage {
 
     fn load_accounts(conn: &Connection) -> AccountStorageResult<BTreeMap<AccountId, AccountInfo>> {
         let mut select = SqlQuery::select_from(conn, account_table::TABLE_NAME)?;
-        for column in ACCOUNT_COLUMNS {
-            select.field(column)?;
-        }
+        add_select_fields(&mut select, &ACCOUNT_COLUMNS)?;
 
-        let accounts = select
-            .query(account_from_row)?
-            .into_iter()
-            .map(|account| (account.account_id.clone(), account))
-            .collect();
+        let mut accounts = BTreeMap::new();
+        for account in select.query(account_from_row)? {
+            accounts.insert(account.account_id.clone(), account);
+        }
         Ok(accounts)
     }
 
@@ -335,22 +317,24 @@ impl SqliteAccountStorage {
         select.count(account_table::NAME)?;
         restrict_to_account(&mut select, ACCOUNT_TABLE_ID_COLUMNS, account_id.to_sql_tuple())?;
 
-        select
+        let count = select
             .query_single_row(count_from_row)?
-            .or_mm_err(|| AccountStorageError::Internal("'COUNT' query unexpectedly returned no row".to_string()))
-            .map(|count| count > 0)
+            .or_mm_err(|| AccountStorageError::Internal("'COUNT' query unexpectedly returned no row".to_string()))?;
+        Ok(count > 0)
     }
 
     fn upload_account(conn: &Connection, account: AccountInfo) -> AccountStorageResult<()> {
         let mut insert = SqlInsert::new(conn, account_table::TABLE_NAME);
-        write_account_columns(&mut insert, ACCOUNT_TABLE_ID_COLUMNS, account.account_id.to_sql_tuple())?;
+        let sql_id = account.account_id.to_sql_tuple();
+        write_account_columns(&mut insert, ACCOUNT_TABLE_ID_COLUMNS, sql_id)?;
         insert.column_param(account_table::NAME, account.name)?; // crd:pin
         insert.column_param(account_table::DESCRIPTION, account.description)?; // crd:pin
         insert.column_param(account_table::BALANCE_USD, account.balance_usd.to_string())?; // crd:pin
 
         // A primary-key clash means this identity is already stored.
+        let account_id = account.account_id;
         handle_constraint_error(insert.insert(), || {
-            AccountStorageError::AccountExistsAlready(account.account_id)
+            AccountStorageError::AccountExistsAlready(account_id)
         })?;
         Ok(())
     }
@@ -360,10 +344,10 @@ impl SqliteAccountStorage {
         restrict_to_account(&mut delete, ACCOUNT_TABLE_ID_COLUMNS, account_id.to_sql_tuple())?;
 
         // Cascades take care of the coins and enabled-marker rows.
-        if delete.delete()? == 0 {
-            return MmError::err(AccountStorageError::NoSuchAccount(account_id));
+        match delete.delete()? {
+            0 => MmError::err(AccountStorageError::NoSuchAccount(account_id)),
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     /// Runs an in-place metadata update. The caller's `set_columns` closure
@@ -377,10 +361,10 @@ impl SqliteAccountStorage {
         set_columns(&mut update)?;
         restrict_to_account(&mut update, ACCOUNT_TABLE_ID_COLUMNS, account_id.to_sql_tuple())?;
 
-        if update.update()? == 0 {
-            return MmError::err(AccountStorageError::NoSuchAccount(account_id));
+        match update.update()? {
+            0 => MmError::err(AccountStorageError::NoSuchAccount(account_id)),
+            _ => Ok(()),
         }
-        Ok(())
     }
 }
 
@@ -406,8 +390,8 @@ impl AccountStorage for SqliteAccountStorage {
         // The coins and enabled tables reference the accounts table, so it must
         // be created first.
         Self::init_account_table(&tx)?;
-        Self::init_account_coins_table(&tx)?;
         Self::init_enabled_account_table(&tx)?;
+        Self::init_account_coins_table(&tx)?;
 
         tx.commit()?;
         Ok(())
@@ -417,17 +401,12 @@ impl AccountStorage for SqliteAccountStorage {
         let conn = self.lock_conn_mutex()?;
         let coins = Self::load_account_coins(&conn, &account_id)?;
 
-        // A non-empty set already implies the account exists; return straight
-        // away. Only an empty set needs an existence probe to tell "no coins"
-        // apart from "no account".
-        if !coins.is_empty() {
-            return Ok(coins);
+        // A non-empty set already proves the account exists. Only an empty set is
+        // ambiguous, so probe for the account before reporting "no coins".
+        if coins.is_empty() && !Self::account_exists(&conn, &account_id)? {
+            return MmError::err(AccountStorageError::NoSuchAccount(account_id));
         }
-        if Self::account_exists(&conn, &account_id)? {
-            Ok(coins)
-        } else {
-            MmError::err(AccountStorageError::NoSuchAccount(account_id))
-        }
+        Ok(coins)
     }
 
     async fn load_accounts(&self) -> AccountStorageResult<BTreeMap<AccountId, AccountInfo>> {
@@ -441,21 +420,20 @@ impl AccountStorage for SqliteAccountStorage {
         let conn = self.lock_conn_mutex()?;
         let enabled_id = AccountId::from(Self::load_enabled_account_id_or_err(&conn)?);
 
-        let accounts: BTreeMap<AccountId, AccountWithEnabledFlag> = Self::load_accounts(&conn)?
-            .into_iter()
-            .map(|(account_id, account_info)| {
-                let enabled = account_id == enabled_id;
-                (account_id, AccountWithEnabledFlag { account_info, enabled })
-            })
-            .collect();
+        let mut accounts: BTreeMap<AccountId, AccountWithEnabledFlag> = BTreeMap::new();
+        let mut enabled_seen = false;
+        for (account_id, account_info) in Self::load_accounts(&conn)? {
+            let enabled = account_id == enabled_id;
+            enabled_seen |= enabled;
+            accounts.insert(account_id, AccountWithEnabledFlag { account_info, enabled });
+        }
 
         // The marker returned by `load_enabled_account_id_or_err` must point at a
         // real account row; otherwise the storage invariant is broken.
-        if accounts.contains_key(&enabled_id) {
-            Ok(accounts)
-        } else {
-            MmError::err(AccountStorageError::unknown_account_in_enabled_table(enabled_id))
+        if !enabled_seen {
+            return MmError::err(AccountStorageError::unknown_account_in_enabled_table(enabled_id));
         }
+        Ok(accounts)
     }
 
     async fn load_enabled_account_id(&self) -> AccountStorageResult<EnabledAccountId> {
@@ -467,8 +445,10 @@ impl AccountStorage for SqliteAccountStorage {
         let conn = self.lock_conn_mutex()?;
         let enabled_id = AccountId::from(Self::load_enabled_account_id_or_err(&conn)?);
 
-        Self::load_account_with_coins(&conn, &enabled_id)?
-            .or_mm_err(|| AccountStorageError::unknown_account_in_enabled_table(enabled_id))
+        match Self::load_account_with_coins(&conn, &enabled_id)? {
+            Some(account) => Ok(account),
+            None => MmError::err(AccountStorageError::unknown_account_in_enabled_table(enabled_id)),
+        }
     }
 
     async fn enable_account(&self, enabled_account_id: EnabledAccountId) -> AccountStorageResult<()> {
@@ -483,12 +463,12 @@ impl AccountStorage for SqliteAccountStorage {
         write_account_columns(&mut insert, ENABLED_TABLE_ID_COLUMNS, enabled_account_id.to_sql_tuple())?;
 
         // A foreign-key violation here means the referenced account does not exist.
-        let inserted = handle_constraint_error(insert.insert(), || {
+        let rows = handle_constraint_error(insert.insert(), || {
             AccountStorageError::NoSuchAccount(AccountId::from(enabled_account_id))
         })?;
-        if inserted != 1 {
+        if rows != 1 {
             return MmError::err(AccountStorageError::Internal(format!(
-                "Enabling an account inserted {inserted} rows, expected exactly 1"
+                "Enabling an account inserted {rows} rows, expected exactly 1"
             )));
         }
 
@@ -535,7 +515,7 @@ impl AccountStorage for SqliteAccountStorage {
         let tx = conn.transaction()?;
 
         let sql_id = account_id.to_sql_tuple();
-        tickers.into_iter().try_for_each(|ticker| -> AccountStorageResult<()> {
+        for ticker in tickers {
             let mut insert = SqlInsert::new(&tx, account_coins_table::TABLE_NAME);
             insert.or_ignore();
             write_account_columns(&mut insert, COINS_TABLE_ID_COLUMNS, sql_id.clone())?;
@@ -546,8 +526,7 @@ impl AccountStorage for SqliteAccountStorage {
             handle_constraint_error(insert.insert(), || {
                 AccountStorageError::NoSuchAccount(account_id.clone())
             })?;
-            Ok(())
-        })?;
+        }
 
         tx.commit()?;
         Ok(())
@@ -563,19 +542,18 @@ impl AccountStorage for SqliteAccountStorage {
         // Removing at least one row already proves the account exists. When
         // nothing matched, fall back to an existence probe to tell apart an
         // unknown account from tickers that simply were not activated.
-        let removed = delete.delete()?;
-        if removed > 0 || Self::account_exists(&conn, &account_id)? {
-            Ok(())
-        } else {
-            MmError::err(AccountStorageError::NoSuchAccount(account_id))
+        if delete.delete()? == 0 && !Self::account_exists(&conn, &account_id)? {
+            return MmError::err(AccountStorageError::NoSuchAccount(account_id));
         }
+        Ok(())
     }
 }
 
 /// Wraps an identity-decode failure as a column-conversion error so it can flow
 /// back through rusqlite's `Result` channel.
 fn into_sql_decode_error(e: MmError<AccountStorageError>) -> SqlError {
-    let cause = std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string());
+    let message = e.to_string();
+    let cause = std::io::Error::new(std::io::ErrorKind::InvalidData, message);
     SqlError::FromSqlConversionFailure(0, Type::Text, Box::new(cause))
 }
 
@@ -607,13 +585,14 @@ fn account_from_row(row: &Row<'_>) -> Result<AccountInfo, SqlError> {
     // crd:pin-end
 }
 
-fn count_from_row(row: &Row<'_>) -> Result<i64, SqlError> {
-    row.get(0)
-}
+fn count_from_row(row: &Row<'_>) -> Result<i64, SqlError> { row.get(0) }
 
 fn bigdecimal_from_row(row: &Row<'_>, idx: usize) -> Result<BigDecimal, SqlError> {
     let raw: String = row.get(idx)?;
-    BigDecimal::from_str(&raw).map_err(|e| SqlError::FromSqlConversionFailure(idx, Type::Text, Box::new(e)))
+    match BigDecimal::from_str(&raw) {
+        Ok(value) => Ok(value),
+        Err(e) => Err(SqlError::FromSqlConversionFailure(idx, Type::Text, Box::new(e))),
+    }
 }
 
 /// Routes a SQL result: a constraint violation is reinterpreted as the supplied
@@ -622,12 +601,9 @@ fn handle_constraint_error<T, F>(result: SqlResult<T>, on_constraint_error: F) -
 where
     F: FnOnce() -> AccountStorageError,
 {
-    result.map_to_mm(|e| {
-        if is_constraint_error(&e) {
-            on_constraint_error()
-        } else {
-            AccountStorageError::from(e)
-        }
+    result.map_to_mm(|e| match is_constraint_error(&e) {
+        true => on_constraint_error(),
+        false => AccountStorageError::from(e),
     })
 }
 
@@ -656,7 +632,8 @@ const ENABLED_TABLE_ID_COLUMNS: IdentityColumns = (
 /// Renders the SQL representation of an identity: the discriminant and index as
 /// integers and the device pubkey as prefix-less lowercase hex.
 fn encode_sql_identity(account_type: i64, account_idx: u32, device_pubkey: &HwPubkey) -> (i64, i64, String) {
-    (account_type, i64::from(account_idx), format!("{device_pubkey:x}"))
+    let pubkey_hex = format!("{device_pubkey:x}");
+    (account_type, i64::from(account_idx), pubkey_hex)
 }
 
 /// Adds the shared three-column identity predicate to a WHERE-clause builder.
@@ -666,9 +643,10 @@ where
 {
     let (type_col, idx_col, pubkey_col) = columns;
     let (type_val, idx_val, pubkey_val) = id;
-    builder.and_where_eq(type_col, type_val)?;
-    builder.and_where_eq(idx_col, idx_val)?;
-    builder.and_where_eq_param(pubkey_col, pubkey_val)?;
+    builder
+        .and_where_eq(type_col, type_val)?
+        .and_where_eq(idx_col, idx_val)?
+        .and_where_eq_param(pubkey_col, pubkey_val)?;
     Ok(())
 }
 
@@ -680,8 +658,14 @@ fn write_account_columns(
 ) -> SqlResult<()> {
     let (type_col, idx_col, pubkey_col) = columns;
     let (type_val, idx_val, pubkey_val) = id;
-    insert.column(type_col, type_val)?;
-    insert.column(idx_col, idx_val)?;
-    insert.column_param(pubkey_col, pubkey_val)?;
+    insert
+        .column(type_col, type_val)?
+        .column(idx_col, idx_val)?
+        .column_param(pubkey_col, pubkey_val)?;
     Ok(())
+}
+
+/// Appends every column in `columns` to a SELECT projection, preserving order.
+fn add_select_fields(select: &mut SqlQuery<'_>, columns: &[&str]) -> SqlResult<()> {
+    columns.iter().try_for_each(|&column| select.field(column).map(drop))
 }

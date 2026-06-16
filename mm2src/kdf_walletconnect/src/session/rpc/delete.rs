@@ -4,7 +4,10 @@ use super::IrnTag;
 use serde::{Deserialize, Serialize};
 
 /// IRN relay tags for `wc_sessionDelete`.
-pub const TAG: IrnTag = IrnTag { request: 1112, response: 1113 };
+pub const TAG: IrnTag = IrnTag {
+    request: 1112,
+    response: 1113,
+};
 
 /// JSON-RPC `method` name for a session-delete request.
 pub const METHOD: &str = "wc_sessionDelete";
@@ -19,6 +22,9 @@ pub struct DeleteRequest {
 impl Default for DeleteRequest {
     fn default() -> Self {
         // 6000 = USER_DISCONNECTED in the WalletConnect reason registry.
-        DeleteRequest { code: 6000, message: "User disconnected".to_string() }
+        DeleteRequest {
+            code: 6000,
+            message: "User disconnected".to_string(),
+        }
     }
 }

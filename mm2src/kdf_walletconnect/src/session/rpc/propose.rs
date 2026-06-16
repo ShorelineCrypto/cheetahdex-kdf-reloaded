@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 /// IRN relay tags for `wc_sessionPropose`.
-pub const TAG: IrnTag = IrnTag { request: 1100, response: 1101 };
+pub const TAG: IrnTag = IrnTag {
+    request: 1100,
+    response: 1101,
+};
 
 /// A single proposed namespace entry (chains, methods, events).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

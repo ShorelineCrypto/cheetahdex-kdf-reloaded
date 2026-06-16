@@ -14,9 +14,7 @@ use std::str::FromStr;
 pub struct UnknownChain(pub String);
 
 impl fmt::Display for UnknownChain {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unrecognised chain identifier: {}", self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "unrecognised chain identifier: {}", self.0) }
 }
 
 impl std::error::Error for UnknownChain {}
@@ -28,12 +26,14 @@ impl std::error::Error for UnknownChain {}
 /// [`FromStr`] rather than left to serde defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WcChain {
+    // crd:pin-begin
     /// Ethereum / EVM-compatible chains.
     Eip155,
     /// Cosmos SDK chains.
     Cosmos,
     /// UTXO chains (Bitcoin family), keyed by a genesis-hash prefix.
     Bip122,
+    // crd:pin-end
 }
 
 impl WcChain {
@@ -59,12 +59,10 @@ impl FromStr for WcChain {
     type Err = UnknownChain;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "eip155" => Ok(WcChain::Eip155),
-            "cosmos" => Ok(WcChain::Cosmos),
-            "bip122" => Ok(WcChain::Bip122),
-            other => Err(UnknownChain(other.to_string())),
-        }
+        [WcChain::Eip155, WcChain::Cosmos, WcChain::Bip122]
+            .into_iter()
+            .find(|family| family.token() == s)
+            .ok_or_else(|| UnknownChain(s.to_owned()))
     }
 }
 
@@ -72,41 +70,36 @@ impl FromStr for WcChain {
 /// with its reference string (chain id, hub name, genesis prefix, ...).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WcChainId {
+    // crd:pin-begin
     pub chain: WcChain,
     pub id: String,
+    // crd:pin-end
 }
 
 impl WcChainId {
+    fn of(chain: WcChain, id: String) -> Self { Self { chain, id } }
+
     /// Build an `eip155:<id>` identifier.
-    pub fn new_eip155(id: String) -> Self {
-        WcChainId { chain: WcChain::Eip155, id }
-    }
+    pub fn new_eip155(id: String) -> Self { Self::of(WcChain::Eip155, id) }
 
     /// Build a `cosmos:<id>` identifier.
-    pub fn new_cosmos(id: String) -> Self {
-        WcChainId { chain: WcChain::Cosmos, id }
-    }
+    pub fn new_cosmos(id: String) -> Self { Self::of(WcChain::Cosmos, id) }
 
     /// Parse a `<namespace>:<reference>` CAIP-2 string. The string must contain
     /// exactly one colon separating a recognised namespace from a non-empty
     /// reference; anything else is rejected.
     pub fn try_from_str(s: &str) -> Result<Self, UnknownChain> {
-        let mut segments = s.split(':');
-        let namespace = segments.next().ok_or_else(|| UnknownChain(s.to_string()))?;
-        let reference = segments.next().ok_or_else(|| UnknownChain(s.to_string()))?;
-        if segments.next().is_some() {
-            // More than two colon-delimited segments.
+        let (namespace, reference) = s.split_once(':').ok_or_else(|| UnknownChain(s.to_string()))?;
+        if reference.contains(':') {
             return Err(UnknownChain(s.to_string()));
         }
         let chain = WcChain::from_str(namespace)?;
-        Ok(WcChainId { chain, id: reference.to_string() })
+        Ok(Self::of(chain, reference.to_string()))
     }
 }
 
 impl fmt::Display for WcChainId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.chain.as_ref(), self.id)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}:{}", self.chain.as_ref(), self.id) }
 }
 
 /// The JSON-RPC method names the subsystem may issue inside a session request,
@@ -114,6 +107,7 @@ impl fmt::Display for WcChainId {
 /// dictated wire string via [`AsRef<str>`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WcRequestMethods {
+    // crd:pin-begin
     /// `cosmos_signDirect` — protobuf SignDirect (software wallets).
     CosmosSignDirect,
     /// `cosmos_signAmino` — Amino-JSON (Ledger-compatible path).
@@ -134,6 +128,7 @@ pub enum WcRequestMethods {
     UtxoSignPsbt,
     /// `signMessage` — UTXO message signing.
     UtxoPersonalSign,
+    // crd:pin-end
 }
 
 impl WcRequestMethods {

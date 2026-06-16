@@ -40,9 +40,7 @@ impl DataGranularity {
 }
 
 impl fmt::Display for DataGranularity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_token())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_token()) }
 }
 
 /// API params builder to get OHLC price history for token pair

@@ -40,9 +40,7 @@ impl WcStorageOps for SqliteSessionStorage {
     }
 
     async fn save_session(&self, session: StoredSession) -> Result<(), WalletConnectError> {
-        let sql = format!(
-            "INSERT OR REPLACE INTO {WC_SESSION_TABLE} (topic, data, expiry) VALUES (?1, ?2, ?3);"
-        );
+        let sql = format!("INSERT OR REPLACE INTO {WC_SESSION_TABLE} (topic, data, expiry) VALUES (?1, ?2, ?3);");
         self.conn
             .call(move |conn| {
                 conn.execute(&sql, params![session.topic, session.data, session.expiry])?;
@@ -54,8 +52,7 @@ impl WcStorageOps for SqliteSessionStorage {
 
     async fn get_session(&self, topic: &str) -> Result<Option<StoredSession>, WalletConnectError> {
         let topic = topic.to_string();
-        let sql =
-            format!("SELECT topic, data, expiry FROM {WC_SESSION_TABLE} WHERE topic = ?1;");
+        let sql = format!("SELECT topic, data, expiry FROM {WC_SESSION_TABLE} WHERE topic = ?1;");
         let row = self
             .conn
             .call(move |conn| {

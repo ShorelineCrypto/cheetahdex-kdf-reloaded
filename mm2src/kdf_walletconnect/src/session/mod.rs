@@ -72,9 +72,7 @@ where
     match Option::<KeysWire>::deserialize(deserializer)? {
         None => Ok(None),
         Some(KeysWire::Decoded(keys)) => Ok(Some(keys)),
-        Some(KeysWire::Encoded(blob)) => {
-            serde_json::from_str(&blob).map(Some).map_err(serde::de::Error::custom)
-        },
+        Some(KeysWire::Encoded(blob)) => serde_json::from_str(&blob).map(Some).map_err(serde::de::Error::custom),
     }
 }
 

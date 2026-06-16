@@ -4,7 +4,10 @@ use super::IrnTag;
 use serde::{Deserialize, Serialize};
 
 /// IRN relay tags for `wc_sessionEvent`.
-pub const TAG: IrnTag = IrnTag { request: 1110, response: 1111 };
+pub const TAG: IrnTag = IrnTag {
+    request: 1110,
+    response: 1111,
+};
 
 /// The inner event description.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

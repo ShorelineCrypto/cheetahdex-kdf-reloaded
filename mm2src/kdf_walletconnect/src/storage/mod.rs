@@ -9,10 +9,8 @@ use crate::error::WalletConnectError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod sqlite;
-#[cfg(target_arch = "wasm32")]
-pub mod indexed_db;
+#[cfg(target_arch = "wasm32")] pub mod indexed_db;
+#[cfg(not(target_arch = "wasm32"))] pub mod sqlite;
 
 /// The single table / object-store name shared by both backends.
 pub const WC_SESSION_TABLE: &str = "wc_session";

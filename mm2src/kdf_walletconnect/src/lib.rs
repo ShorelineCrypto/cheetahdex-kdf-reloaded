@@ -80,9 +80,7 @@ impl WalletConnectConfig {
         let project_id = section["project_id"]
             .as_str()
             .filter(|id| !id.is_empty())
-            .ok_or_else(|| {
-                WalletConnectError::Config("`walletconnect.project_id` is required".to_string())
-            })?
+            .ok_or_else(|| WalletConnectError::Config("`walletconnect.project_id` is required".to_string()))?
             .to_string();
         let relay_address = section["relay_address"]
             .as_str()
@@ -254,31 +252,21 @@ impl WalletConnectCtx {
 
     /// Encrypts and encodes a JSON-RPC payload into a WalletConnect Type 0
     /// envelope using the session symmetric key.
-    pub fn encode_payload(
-        &self,
-        sym_key: &SymKey,
-        payload: &serde_json::Value,
-    ) -> Result<String, WalletConnectError> {
+    pub fn encode_payload(&self, sym_key: &SymKey, payload: &serde_json::Value) -> Result<String, WalletConnectError> {
         let bytes = serde_json::to_vec(payload)?;
         wc_common::encrypt_and_encode(EnvelopeType::Type0, bytes, sym_key)
             .map_err(|e| WalletConnectError::Codec(e.to_string()))
     }
 
     /// Decodes and decrypts a Type 0 envelope back into a JSON-RPC payload.
-    pub fn decode_payload(
-        &self,
-        sym_key: &SymKey,
-        message: &str,
-    ) -> Result<serde_json::Value, WalletConnectError> {
+    pub fn decode_payload(&self, sym_key: &SymKey, message: &str) -> Result<serde_json::Value, WalletConnectError> {
         let json = wc_common::decode_and_decrypt_type0(message.as_bytes(), sym_key)
             .map_err(|e| WalletConnectError::Codec(e.to_string()))?;
         serde_json::from_str(&json).map_err(WalletConnectError::from)
     }
 
     /// Applies the negotiated transport encoding to already-enveloped bytes.
-    pub fn apply_transport_encoding(&self, algo: EncodingAlgo, envelope: &[u8]) -> String {
-        algo.encode(envelope)
-    }
+    pub fn apply_transport_encoding(&self, algo: EncodingAlgo, envelope: &[u8]) -> String { algo.encode(envelope) }
 
     /// Sends a `wc_sessionRequest` over the relay and awaits the wallet's
     /// response.
@@ -446,11 +434,15 @@ impl WalletConnectCtx {
             return;
         }
 
-        let method = payload.get("method").and_then(serde_json::Value::as_str).unwrap_or_default();
+        let method = payload
+            .get("method")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
         match method {
             "wc_sessionPing" => {
                 if let Some(id) = id {
-                    self.reply_success(&topic, &sym_key, id, session::rpc::ping::TAG.response).await;
+                    self.reply_success(&topic, &sym_key, id, session::rpc::ping::TAG.response)
+                        .await;
                 }
             },
             "wc_sessionDelete" => {
@@ -466,13 +458,15 @@ impl WalletConnectCtx {
                     self.persist_expiry(topic.as_ref(), expiry).await;
                 }
                 if let Some(id) = id {
-                    self.reply_success(&topic, &sym_key, id, session::rpc::extend::TAG.response).await;
+                    self.reply_success(&topic, &sym_key, id, session::rpc::extend::TAG.response)
+                        .await;
                 }
             },
             "wc_sessionUpdate" => {
                 common::log::debug!("walletconnect: received session update");
                 if let Some(id) = id {
-                    self.reply_success(&topic, &sym_key, id, session::rpc::update::TAG.response).await;
+                    self.reply_success(&topic, &sym_key, id, session::rpc::update::TAG.response)
+                        .await;
                 }
             },
             "wc_sessionEvent" => {
@@ -481,7 +475,8 @@ impl WalletConnectCtx {
             "wc_sessionSettle" => {
                 common::log::debug!("walletconnect: received session settle");
                 if let Some(id) = id {
-                    self.reply_success(&topic, &sym_key, id, session::rpc::settle::TAG.response).await;
+                    self.reply_success(&topic, &sym_key, id, session::rpc::settle::TAG.response)
+                        .await;
                 }
             },
             "wc_sessionPropose" => {
@@ -504,7 +499,14 @@ impl WalletConnectCtx {
         if let Ok(encoded) = self.encode_payload(sym_key, &response) {
             let _ = self
                 .client
-                .publish(topic.clone(), encoded, no_attestation(), tag, REQUEST_RESPONSE_TTL, false)
+                .publish(
+                    topic.clone(),
+                    encoded,
+                    no_attestation(),
+                    tag,
+                    REQUEST_RESPONSE_TTL,
+                    false,
+                )
                 .await;
         }
     }
@@ -572,9 +574,9 @@ mod persistence_tests {
     use super::*;
     use common::block_on;
     use db_common::async_sql_conn::AsyncConnection;
+    use relay_rpc::domain::Topic;
     use relay_rpc::rpc::params::session::{ProposeNamespaces, SettleNamespaces};
     use relay_rpc::rpc::params::{Metadata, Relay};
-    use relay_rpc::domain::Topic;
     use session::{SessionKey, SessionType};
     use storage::sqlite::SqliteSessionStorage;
     use storage::WcStorageOps;
@@ -654,7 +656,10 @@ mod persistence_tests {
         let msg = encrypted.to_string();
         assert!(msg.contains("wc_session_persistence"), "names the setting: {msg}");
         assert!(msg.contains("encrypted"), "names the offending value: {msg}");
-        assert!(msg.contains("open") && msg.contains("none"), "lists allowed values: {msg}");
+        assert!(
+            msg.contains("open") && msg.contains("none"),
+            "lists allowed values: {msg}"
+        );
 
         // An unrecognised string is rejected.
         let invalid = WcSessionPersistence::from_conf(&json!({ "wc_session_persistence": "bogus" }))
@@ -695,9 +700,8 @@ mod persistence_tests {
         let plaintext = br#"{"jsonrpc":"2.0","id":1}"#.to_vec();
         let envelope =
             wc_common::encrypt_and_encode(EnvelopeType::Type0, plaintext.clone(), &original_key).expect("encrypt");
-        let decrypted =
-            wc_common::decode_and_decrypt_type0(envelope.as_bytes(), &restored.session_key.symmetric_key())
-                .expect("decrypt with restored key");
+        let decrypted = wc_common::decode_and_decrypt_type0(envelope.as_bytes(), &restored.session_key.symmetric_key())
+            .expect("decrypt with restored key");
         assert_eq!(decrypted.as_bytes(), plaintext.as_slice());
     }
 

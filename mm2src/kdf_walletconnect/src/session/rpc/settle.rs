@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// IRN relay tags for `wc_sessionSettle`.
-pub const TAG: IrnTag = IrnTag { request: 1102, response: 1103 };
+pub const TAG: IrnTag = IrnTag {
+    request: 1102,
+    response: 1103,
+};
 
 /// A settled namespace entry: accounts plus the granted methods and events.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
