@@ -43,32 +43,60 @@ explicit markers are authoritative.
 ### Usage
 
 ```sh
-# Gate everything listed in the manifest
-python3 tools/clean_room_gate.py --manifest tools/clean_room_gate.manifest.json
+# Gate everything listed in the manifest (the canonical invocation)
+python3 tools/clean_room_gate.py \
+  --manifest tools/clean_room_gate.manifest.json --auto-pin
 
-# One-off check against the GPLv2 anchor commit
+# One-off check against the relicensed historical record
 python3 tools/clean_room_gate.py \
   --reloaded mm2src/foo/src/bar.rs \
   --reference git:c1d46c0c1592faa0860f704008b2b2381bc3840f:mm2src/foo/src/bar.rs \
   --verbose
 ```
 
-### Manifest format
+### Run it on *formatted* code
 
-`clean_room_gate.manifest.json` is a JSON list. Each entry names a reloaded
-file and its reference record; `reference` may be a working-tree path or a
-`git:<ref>:<path>` spec resolved with `git show`.
+The gate compares **normalized line lists**, so how source is split across lines
+affects the score. This repository's `rustfmt.toml` is the same canonical style
+upstream uses, so leaving code hand-formatted can mask real structural
+similarity behind cosmetic line-break differences. The honest, format-invariant
+standard is therefore:
 
-```json
-[
-  {
-    "reloaded": "mm2src/foo/src/bar.rs",
-    "reference": "git:c1d46c0c1592faa0860f704008b2b2381bc3840f:mm2src/foo/src/bar.rs",
-    "margin": 0.15,
-    "max_discretionary": 0.50
-  }
-]
+```sh
+cargo +nightly-2026-05-08 fmt --all
+python3 tools/clean_room_gate.py \
+  --manifest tools/clean_room_gate.manifest.json --auto-pin
 ```
 
-The manifest ships empty; entries are added as clean-room chapters land. CI runs
-the gate via [`.github/workflows/clean-room-gate.yml`](../.github/workflows/clean-room-gate.yml).
+A file is only considered to pass when it passes **after** `cargo fmt`. The
+whole manifest currently passes 51/51 under this format-invariant standard.
+
+### Manifest format
+
+`clean_room_gate.manifest.json` is an object: `reference_origin` pins the
+relicensed historical-record tree independence is asserted from, `defaults`
+holds the thresholds (`margin`, `max_discretionary`, `margin_floor`), and
+`files` is the list of gated entries. Each entry names a reloaded file and its
+upstream `reference` path; the gate expands it to
+`git:<reference_origin.commit>:<path>` and resolves it inside a gated reference
+repository (the upstream tree is never vendored here — only similarity scores
+cross back). Per-file `interface_only: true` waives the cap/margin for
+re-export / module-glue shims that are identical by structural necessity.
+
+```json
+{
+  "reference_origin": { "commit": "<upstream commit>", "...": "..." },
+  "defaults": { "margin": 0.15, "max_discretionary": 0.50, "margin_floor": 0.50 },
+  "files": [
+    { "reloaded": "mm2src/foo/src/bar.rs", "reference": "mm2src/foo/src/bar.rs" }
+  ]
+}
+```
+
+### How the gate is run
+
+The gate is run **locally** at chapter-edit and pre-publication time — this is
+the manual audit boundary that chapter 30 (D1) describes as deferred. It is not
+wired into CI: the reference comparison needs the relicensed historical record,
+which is not vendored into this repository, so the gate is exercised by the
+maintainer against a local reference checkout rather than on hosted CI runners.
