@@ -31,8 +31,14 @@ jobs:
         # silently ignores them and produces a different shape, so the format
         # check below must run on nightly even though the build/test toolchain
         # is stable.
+        #
+        # The nightly is PINNED to a fixed date: rustfmt output drifts between
+        # nightly releases, so a rolling `nightly` would make this check fail
+        # spontaneously when an unrelated rustfmt change lands upstream. Bump
+        # this date deliberately (and re-run `cargo +nightly-<date> fmt --all`)
+        # when you want to adopt newer formatting.
         shell: bash
-        run: rustup toolchain install nightly --profile minimal --component rustfmt --no-self-update
+        run: rustup toolchain install nightly-2026-05-08 --profile minimal --component rustfmt --no-self-update
 
       - name: Check formatting
         # Run nightly rustfmt in check mode. Avoid piping through
@@ -42,8 +48,11 @@ jobs:
         # downstream `PIPESTATUS` override can run — masking the real diff.
         # Just let cargo print the full diff on failure; the runner log can
         # show it.
+        #
+        # Uses the pinned nightly installed above. Vendored `*-patched` crates
+        # are excluded from formatting via `ignore` in rustfmt.toml.
         shell: bash
-        run: cargo +nightly fmt --all -- --check
+        run: cargo +nightly-2026-05-08 fmt --all -- --check
 
   unit-tests:
     # One matrix cell per cargo invocation so "Re-run failed jobs" only
