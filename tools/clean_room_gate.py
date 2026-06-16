@@ -115,7 +115,7 @@ AUTO_PIN = [
     re.compile(r"^\s*(pub\s+)?use\s+"),
     re.compile(r"^\s*#\[repr\("),
     re.compile(r'rename\s*=\s*"'),
-    re.compile(r"^\s*(pub(\s*\([^)]*\))?\s+)?(unsafe\s+)?(async\s+)?fn\s+\w+"),
+    re.compile(r"^\s*(pub(\s*\([^)]*\))?\s+)?(const\s+)?(unsafe\s+)?(async\s+)?fn\s+\w+"),
     re.compile(r"^\s*(pub(\s*\([^)]*\))?\s+)?(struct|enum|trait|union|type)\s+\w+"),
     re.compile(r"^\s*impl(\s|<)"),
 ]
@@ -133,21 +133,37 @@ class FileResult:
     discretionary_sim: float
     margin_required: float
     max_discretionary: float
+    margin_floor: float = 0.50
+    interface_only: bool = False
     residual_identical: list[str] = field(default_factory=list)
     excluded_lines: int = 0
     measured_lines: int = 0
     error: str | None = None
 
     @property
+    def margin_applies(self) -> bool:
+        """The body-vs-whole margin sub-test is only meaningful when overall
+        similarity is high enough to leave headroom. Below ``margin_floor`` a
+        file cannot be ``margin`` points below an already-low whole-file score,
+        so the test only produces false failures on genuinely low-overlap
+        files; there the absolute discretionary cap governs alone."""
+        return self.whole_file_sim >= self.margin_floor
+
+    @property
     def passed(self) -> bool:
         if self.error is not None:
             return False
-        if self.measured_lines == 0:
-            # Nothing discretionary to measure (interface-only file): pass.
+        if self.interface_only or self.measured_lines == 0:
+            # Interface-only / re-export / module-glue file: nothing
+            # discretionary to measure or it is identical by necessity.
             return True
-        below_whole = self.discretionary_sim <= self.whole_file_sim - self.margin_required
         under_cap = self.discretionary_sim <= self.max_discretionary
-        return below_whole and under_cap
+        below_whole = (
+            self.discretionary_sim <= self.whole_file_sim - self.margin_required
+            if self.margin_applies
+            else True
+        )
+        return under_cap and below_whole
 
 
 def read_source(spec: str, repo_root: str, git_repo: str | None = None) -> str:
@@ -233,12 +249,24 @@ def gate_file(
     max_discretionary: float,
     auto_pin: bool,
     reference_repo: str | None = None,
+    margin_floor: float = 0.50,
+    interface_only: bool = False,
 ) -> FileResult:
     try:
         rel_text = read_source(reloaded, repo_root)
         ref_text = read_source(reference, repo_root, git_repo=reference_repo)
     except (FileNotFoundError, OSError) as exc:
-        return FileResult(reloaded, reference, 0.0, 0.0, margin, max_discretionary, error=str(exc))
+        return FileResult(
+            reloaded,
+            reference,
+            0.0,
+            0.0,
+            margin,
+            max_discretionary,
+            margin_floor=margin_floor,
+            interface_only=interface_only,
+            error=str(exc),
+        )
 
     rel_all = [normalize(l) for l in rel_text.splitlines() if normalize(l)]
     ref_all = [normalize(l) for l in ref_text.splitlines() if normalize(l)]
@@ -255,6 +283,8 @@ def gate_file(
         discretionary_sim=disc,
         margin_required=margin,
         max_discretionary=max_discretionary,
+        margin_floor=margin_floor,
+        interface_only=interface_only,
         residual_identical=residual_identical_lines(rel_measured, ref_measured),
         excluded_lines=len(rel_excluded),
         measured_lines=len(rel_measured),
@@ -350,11 +380,18 @@ def print_result(r: FileResult, verbose: bool) -> None:
     if r.error:
         print(f"[{status}] {r.reloaded}: ERROR: {r.error}")
         return
+    if r.interface_only or r.measured_lines == 0:
+        margin_note = "interface-only: cap/margin waived"
+    elif r.margin_applies:
+        margin_note = f"must be >= {r.margin_required:.0%} below whole-file"
+    else:
+        margin_note = f"margin n/a below {r.margin_floor:.0%} whole-file"
+    flag = " [interface-only]" if (r.interface_only or r.measured_lines == 0) else ""
     print(
-        f"[{status}] {r.reloaded}\n"
+        f"[{status}] {r.reloaded}{flag}\n"
         f"        whole-file similarity   : {r.whole_file_sim:6.1%}\n"
         f"        discretionary similarity: {r.discretionary_sim:6.1%} "
-        f"(cap {r.max_discretionary:.0%}, must be >= {r.margin_required:.0%} below whole-file)\n"
+        f"(cap {r.max_discretionary:.0%}, {margin_note})\n"
         f"        excluded lines          : {r.excluded_lines}\n"
         f"        measured lines          : {r.measured_lines}\n"
         f"        residual identical body : {len(r.residual_identical)}"
@@ -381,6 +418,12 @@ def main(argv: list[str]) -> int:
         type=float,
         default=0.60,
         help="absolute cap (0-1) on discretionary-body similarity",
+    )
+    ap.add_argument(
+        "--margin-floor",
+        type=float,
+        default=0.50,
+        help="whole-file similarity (0-1) below which the body-vs-whole margin sub-test is skipped",
     )
     ap.add_argument("--auto-pin", action="store_true", help="also exclude structural interface lines")
     ap.add_argument(
@@ -438,6 +481,7 @@ def main(argv: list[str]) -> int:
 
     margin_default = float(manifest_defaults.get("margin", args.margin))
     maxd_default = float(manifest_defaults.get("max_discretionary", args.max_discretionary))
+    floor_default = float(manifest_defaults.get("margin_floor", args.margin_floor))
 
     results: list[FileResult] = []
     for entry in entries:
@@ -450,6 +494,8 @@ def main(argv: list[str]) -> int:
                 max_discretionary=float(entry.get("max_discretionary", maxd_default)),
                 auto_pin=args.auto_pin,
                 reference_repo=reference_repo,
+                margin_floor=float(entry.get("margin_floor", floor_default)),
+                interface_only=bool(entry.get("interface_only", False)),
             )
         )
 

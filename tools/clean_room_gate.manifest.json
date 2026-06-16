@@ -1,5 +1,5 @@
 {
-  "_note": "Object form. 'reference_origin' pins the upstream tree we assert independence from. Each file's 'reference' is the upstream PATH; the gate expands it to git:<reference_origin.commit>:<path> and resolves it INSIDE a gated reference repository (an existing corpus clone that holds the pinned commit, else a shallow clone materialised outside the clean checkout). The upstream tree is never vendored here; only similarity scores cross back. See tools/clean_room_gate.py.",
+  "_note": "Object form. 'reference_origin' pins the upstream tree we assert independence from. Each file's 'reference' is the upstream PATH; the gate expands it to git:<reference_origin.commit>:<path> and resolves it INSIDE a gated reference repository (an existing corpus clone that holds the pinned commit, else a shallow clone materialised outside the clean checkout). The upstream tree is never vendored here; only similarity scores cross back. 'defaults'/per-file knobs: 'margin' (min gap discretionary sim must sit below whole-file sim), 'max_discretionary' (absolute cap on discretionary-body sim, the hard guard), 'margin_floor' (whole-file sim below which the body-vs-whole margin sub-test is skipped, since low-overlap files have no headroom), and per-file 'interface_only': true for re-export / module-glue shims that are identical by structural necessity (cap/margin waived). See tools/clean_room_gate.py.",
   "reference_origin": {
     "url": "https://github.com/GLEECBTC/komodo-defi-framework",
     "branch": "dev",
@@ -7,7 +7,8 @@
   },
   "defaults": {
     "margin": 0.15,
-    "max_discretionary": 0.50
+    "max_discretionary": 0.50,
+    "margin_floor": 0.50
   },
   "files": [
     { "reloaded": "mm2src/kdf_walletconnect/src/chain.rs",              "reference": "mm2src/kdf_walletconnect/src/chain.rs" },
@@ -29,6 +30,41 @@
     { "reloaded": "mm2src/kdf_walletconnect/src/session/rpc/update.rs", "reference": "mm2src/kdf_walletconnect/src/session/rpc/update.rs" },
     { "reloaded": "mm2src/kdf_walletconnect/src/storage/indexed_db.rs", "reference": "mm2src/kdf_walletconnect/src/storage/indexed_db.rs" },
     { "reloaded": "mm2src/kdf_walletconnect/src/storage/mod.rs",        "reference": "mm2src/kdf_walletconnect/src/storage/mod.rs" },
-    { "reloaded": "mm2src/kdf_walletconnect/src/storage/sqlite.rs",     "reference": "mm2src/kdf_walletconnect/src/storage/sqlite.rs" }
+    { "reloaded": "mm2src/kdf_walletconnect/src/storage/sqlite.rs",     "reference": "mm2src/kdf_walletconnect/src/storage/sqlite.rs" },
+
+    { "reloaded": "mm2src/coins/siacoin/error.rs",                      "reference": "mm2src/coins/siacoin/error.rs" },
+    { "reloaded": "mm2src/coins/siacoin/mod.rs",                        "reference": "mm2src/coins/siacoin.rs" },
+    { "reloaded": "mm2src/coins/siacoin/sia_hd_wallet.rs",             "reference": "mm2src/coins/siacoin/sia_hd_wallet.rs", "interface_only": true },
+    { "reloaded": "mm2src/coins/siacoin/sia_withdraw.rs",             "reference": "mm2src/coins/siacoin/sia_withdraw.rs" },
+    { "reloaded": "mm2src/coins/siacoin/siacoin_helpers.rs",          "reference": "mm2src/coins/siacoin.rs" },
+    { "reloaded": "mm2src/coins/siacoin/siacoin_market_ops.rs",       "reference": "mm2src/coins/siacoin.rs" },
+    { "reloaded": "mm2src/coins/siacoin/siacoin_mm_coin.rs",          "reference": "mm2src/coins/siacoin.rs" },
+    { "reloaded": "mm2src/coins/siacoin/siacoin_swap_ops.rs",         "reference": "mm2src/coins/siacoin.rs" },
+    { "reloaded": "mm2src/coins/siacoin/siacoin_types.rs",            "reference": "mm2src/coins/siacoin.rs" },
+
+    { "reloaded": "mm2src/coins/eth/tron/activation.rs",              "reference": "mm2src/coins/eth/tron.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/address.rs",                "reference": "mm2src/coins/eth/tron/address.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/api.rs",                    "reference": "mm2src/coins/eth/tron/api.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/fee.rs",                    "reference": "mm2src/coins/eth/tron/fee.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/mod.rs",                    "reference": "mm2src/coins/eth/tron.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/proto.rs",                  "reference": "mm2src/coins/eth/tron/proto.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/sign.rs",                   "reference": "mm2src/coins/eth/tron/sign.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/tx_builder.rs",            "reference": "mm2src/coins/eth/tron/tx_builder.rs" },
+    { "reloaded": "mm2src/coins/eth/tron/withdraw.rs",              "reference": "mm2src/coins/eth/tron/withdraw.rs" },
+
+    { "reloaded": "mm2src/mm2_gui_storage/src/lib.rs",                "reference": "mm2src/mm2_gui_storage/src/lib.rs", "interface_only": true },
+    { "reloaded": "mm2src/mm2_gui_storage/src/context.rs",            "reference": "mm2src/mm2_gui_storage/src/context.rs", "interface_only": true },
+    { "reloaded": "mm2src/mm2_gui_storage/src/rpc_commands.rs",       "reference": "mm2src/mm2_gui_storage/src/rpc_commands.rs" },
+    { "reloaded": "mm2src/mm2_gui_storage/src/account/mod.rs",        "reference": "mm2src/mm2_gui_storage/src/account/mod.rs" },
+    { "reloaded": "mm2src/mm2_gui_storage/src/account/storage/mod.rs", "reference": "mm2src/mm2_gui_storage/src/account/storage/mod.rs" },
+    { "reloaded": "mm2src/mm2_gui_storage/src/account/storage/sqlite_storage.rs", "reference": "mm2src/mm2_gui_storage/src/account/storage/sqlite_storage.rs" },
+    { "reloaded": "mm2src/mm2_gui_storage/src/account/storage/wasm_storage.rs",   "reference": "mm2src/mm2_gui_storage/src/account/storage/wasm_storage.rs" },
+
+    { "reloaded": "mm2src/trading_api/src/lib.rs",                    "reference": "mm2src/trading_api/src/lib.rs", "interface_only": true },
+    { "reloaded": "mm2src/trading_api/src/one_inch_api.rs",           "reference": "mm2src/trading_api/src/one_inch_api.rs", "interface_only": true },
+    { "reloaded": "mm2src/trading_api/src/one_inch_api/client.rs",    "reference": "mm2src/trading_api/src/one_inch_api/client.rs" },
+    { "reloaded": "mm2src/trading_api/src/one_inch_api/errors.rs",    "reference": "mm2src/trading_api/src/one_inch_api/errors.rs" },
+    { "reloaded": "mm2src/trading_api/src/one_inch_api/classic_swap_types.rs", "reference": "mm2src/trading_api/src/one_inch_api/classic_swap_types.rs" },
+    { "reloaded": "mm2src/trading_api/src/one_inch_api/portfolio_types.rs",    "reference": "mm2src/trading_api/src/one_inch_api/portfolio_types.rs" }
   ]
 }

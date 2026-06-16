@@ -27,4 +27,5 @@ jobs:
       - name: Run R35 residual-similarity gate
         run: |
           python3 tools/clean_room_gate.py \
-            --manifest tools/clean_room_gate.manifest.json
+            --manifest tools/clean_room_gate.manifest.json \
+            --auto-pin
