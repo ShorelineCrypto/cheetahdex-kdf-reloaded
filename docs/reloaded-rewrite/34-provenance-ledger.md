@@ -62,6 +62,9 @@ after-the-fact narrowing.
     license-compatible upstream crate or project, recorded per CRD §1 R27.
     Distinct from `vendored-subtree`: the upstream is not imported wholesale
     but adapted in place.
+  - `lineage-derived` — post-anchor code derived from the upstream/GLEEC
+    KDF lineage (a derivative of GPLv2 mm2 code), carried under GPLv2
+    copyleft per §34.5 basis (b). Explicitly **not** a clean-room original.
 - **Source reference** — for `interop-reuse` and `third-party-api-bound`:
   the external spec, crate, or protocol that constrains the shape. For
   `generated-artifact`: the generator and its input. For
@@ -155,10 +158,11 @@ category of any fragment present in it.
   header set, decode branches, and public method signatures are functionally
   dictated by the public 1inch v6.0 API (R33) / its wire envelope (R29); the
   surrounding identifiers and decomposition are discretionary.
-- **Chapter 24 §24.7.3 (R-R6)** and **Chapter 22 (R8-D transaction wording)**
-  pin statement-level control flow; R8-D's SQL text is on-disk schema (R29,
-  legitimate), but the surrounding `conn.transaction()`/local naming is
-  discretionary.
+- **Chapter 24 §24.7.3 (R-R6)** pinned statement-level control flow at the
+  time of this review; its surrounding local naming is discretionary. (The
+  Chapter 22 transaction-wording item originally noted here was removed
+  entirely when Chapter 22 was clean-room rewritten — see the 2026-06-17
+  note below.)
 - **Resolution (no implementation rewrite).** Rule R36 (ch01) now states that
   CRD code blocks bind only functional and interface content; the
   discretionary identifiers and wording they show are informative and carry
@@ -169,6 +173,68 @@ category of any fragment present in it.
   under which a thin REST-path composer and a validate-then-store handler
   retain little protectable expression once dictated grammar and interface
   are excluded.
+
+### 2026-06-13 — provenance-accuracy corrections (external-audit response)
+
+Two provenance statements were tightened after an external audit:
+
+- **`lp_ordermatch` orderbook.** The refactor-relocated entry previously
+  described `ordermatch_orderbook.rs` as wholly "GPLv2 by descent". That
+  overstated the facts: while the bulk is relocated pre-anchor body, the
+  file also carries post-anchor additions absent at the anchor — notably the
+  `recently_cancelled` logic (entered `de85bd5b4`, 2026-04-19), for which
+  materially similar logic existed earlier in the GLEEC lineage (2024-10-04).
+  The entry now records a **mixed basis** (descent for the relocated body,
+  copyleft-inheritance basis (b) for the post-anchor additions). The
+  `RELOADED_VS_GLEEC.md` and README wordings were corrected to match.
+- **WalletConnect.** The substantive `mm2src/kdf_walletconnect/` files were
+  not listed, so by the ledger default rule they implicitly read as
+  clean-room originals. They are not: the crate is a post-anchor feature
+  (introduced 2026-05-05) whose integration code is lineage-derived from the
+  upstream/GLEEC KDF WalletConnect work product (same crate path, introduced
+  in the lineage 2025-06-03). A new `lineage-derived` classification was
+  added to §34.1 and the substantive crate files are now listed explicitly
+  with GPLv2 copyleft basis (§34.5 b). No code changed; the legal basis is
+  unchanged — only the documentation was made accurate. **(Superseded
+  2026-06-17 — the WalletConnect crate was clean-room reimplemented and
+  reclassified; see the next note.)**
+
+### 2026-06-17 — WalletConnect clean-room reimplementation, reclassification, and companion CRD rewrites
+
+- Chapter 22 was rewritten into a clean-room **driving-spec** (functional /
+  interface / dictated-interop only), and the substantive
+  `mm2src/kdf_walletconnect/` source files were **blind-reimplemented** from
+  that spec — without consulting the forbidden corpus or any lineage source —
+  and gated under R35 (residual-similarity) and R36 (binding-scope).
+- The crate is therefore reclassified from `lineage-derived` to **clean-room
+  original**. The substantive files are removed from the *WalletConnect
+  integration* table (operating-rule §34.4(2)); being ledger-absent they are
+  governed by the default clean-room rule. The genuinely thin files remain
+  classified `third-party-api-bound` (`error.rs`, `session/rpc/extend.rs`) or
+  `convergent-idiomatic` (`session/rpc/mod.rs`, `pairing.rs`) in §34.3.
+- One Interop / wire-format reuse fragment (R29/R31) is retained and marked:
+  the `open` on-disk session-record field names embedded in Chapter 22 §22.5.3,
+  needed for byte-interop with GLEEC KDF session stores. No discretionary
+  lineage expression accompanies it.
+- **Basis shift.** For the WalletConnect crate the **primary** legal basis is
+  now clean-room independence; the GPLv2 copyleft inheritance of §34.5(b) is
+  retained only as a **backstop**. The `tools/clean_room_gate.py` manifest
+  enrols the crate's source files against the pinned upstream reference so the
+  R35 gate enforces this going forward.
+- **Companion CRD rewrites (ch23, ch24, ch32).** Chapters 23 (trading-api
+  client), 24 (GUI account-state), and 32 (orderbook P2P + trie) were rewritten
+  as clean-room driving-specs in the same pass: verbatim bodies, private
+  identifiers, helper-decomposition / call-chain tables, control-flow
+  transcription, and diagnostic/format string literals were removed, leaving
+  functional/behavioural contracts, public interface, and externally-dictated
+  interop (R29/R31/R33) under R36 binding-scope notes. Each was independently
+  Dirty-Gate verified. Chapter 32 additionally gained a *Baseline Verification*
+  section epoch-classifying its components as pre-2022 baseline-carryforward
+  (R3) or post-2022. These rewrites **supersede, at the CRD level**, the
+  Chapter 23 §23.8 (R11-D…R11-K) and Chapter 24 §24.7.3 (R-R6) over-pinning
+  items recorded in the 2026-06-13 *spec-provenance review* note above; the
+  shipped code's residual expressive similarity remains deferred to the R35
+  gate (ch30 D1) per the locked review order.
 
 ## 34.3 Entries
 
@@ -266,26 +332,74 @@ clean-room divergence.
 
 | Destination | Classification | Source reference | License basis | Notes |
 |---|---|---|---|---|
-| `mm2src/db_common/src/async_sql_conn.rs` | adapted-source | `programatik29/tokio-rusqlite` — background-thread async `rusqlite` wrapper (`CallFn`, `Message::Execute`/`Close`, `call`/`call_unwrap`/`open_*` API, `Display` formatting, doc-comments). | MIT (GPLv2-compatible). | Adaptation: upstream `Connection` renamed `AsyncConnection`; `Internal(InternalError)` variant added. Upstream provenance (R14 closed): the `CallFn`/`Message` core originates at v0.1.0 (`a09c68af5617ce9f0a49668c196644d02a017f83`, 2022-04-25); the `Close((Connection, Error))` variant and `Result`-returning `call` at `d97e88dff22b54c88634f4ad80ecccaf946d2945` (2023-04-02); `call_unwrap` at `1c5a322d92f0a8d6c26f221fabc9fab3409bc1ab` (2023-06-22, `v0.4.0-2-g1c5a322`). The adapted surface therefore corresponds to the upstream **v0.4.x era** (state at `1c5a322`). Introduced here in `d42158229`. MIT attribution recorded in `THIRDPARTY-LICENSES`; per-file header added to both files. |
+| `mm2src/db_common/src/async_sql_conn.rs` | adapted-source | `programatik29/tokio-rusqlite` — background-thread async `rusqlite` wrapper (`CallFn`, `Message::Execute`/`Close`, `call`/`call_unwrap`/`open_*` API, `Display` formatting, doc-comments). | MIT (GPLv2-compatible). | Adaptation: upstream `Connection` renamed `AsyncConnection`; `Internal(InternalError)` variant added. Upstream provenance (R14 closed): the `CallFn`/`Message` core originates at v0.1.0 (`a09c68af5617ce9f0a49668c196644d02a017f83`, 2022-04-25); the `Close((Connection, Error))` variant and `Result`-returning `call` at `d97e88dff22b54c88634f4ad80ecccaf946d2945` (2023-04-02); `call_unwrap` at `1c5a322d92f0a8d6c26f221fabc9fab3409bc1ab` (2023-06-22, `v0.4.0-2-g1c5a322`). The adapted surface therefore corresponds to the upstream **v0.4.x era** (state at `1c5a322`). Introduced here in `531634ebe` (2026-05-01). MIT attribution recorded in `THIRDPARTY-LICENSES`; per-file header added to both files. |
 | `mm2src/db_common/src/async_conn_tests.rs` | adapted-source | `programatik29/tokio-rusqlite` test suite (`open_in_memory`/`call`/`call_unwrap` exercises). | MIT (GPLv2-compatible). | Same provenance and citation as `async_sql_conn.rs`. Uses the early rusqlite `NO_PARAMS` API. |
 
-### Refactor-relocated baseline content
+### Refactor-relocated baseline content (mixed: descent + post-anchor)
 
-These files did not exist as separate files at the 2022 anchor, but their
-contents are the pre-anchor GPLv2 `lp_ordermatch.rs` body (5,465 lines at
-the anchor) mechanically split into smaller modules by an in-tree refactor
-(`04dcde532`, 2026-05-13). The orderbook logic is C-ported legacy code that
-predates the GLEEC fork — GLEEC's own README describes `lp_ordermatch` as
-"parts ported from C `as is`". Any byte-identity with the GLEEC fork
-therefore reflects the **shared pre-divergence GPLv2 ancestor**, not an
-import from GLEEC. License basis: GPLv2 by direct descent from the anchor
-(§34.5). These rows are settled, not under review.
+These files did not exist as separate files at the 2022 anchor. They were
+created by an in-tree refactor (`284b66cd4`, 2026-05-13) that split the
+`lp_ordermatch.rs` body (5,465 lines at the anchor) into smaller modules.
+**Most** of their content is the pre-anchor GPLv2 `lp_ordermatch.rs` body
+relocated unchanged — C-ported legacy code that predates the GLEEC fork
+(GLEEC's own README describes `lp_ordermatch` as "parts ported from C
+`as is`"); that portion is GPLv2 by direct descent from the anchor, and its
+identity with the GLEEC fork reflects the shared pre-divergence ancestor.
+
+**However, these files are not 100% anchor content.** They also carry
+post-anchor additions that were not present at the anchor — most notably the
+`recently_cancelled` order-tracking / stale-cancellation logic, which first
+entered this tree on 2026-04-19 (`de85bd5b4`) and was later relocated into
+`ordermatch_orderbook.rs` by the split. That logic is **not** "by descent";
+it is a post-anchor modification of GPLv2 lineage code and is governed by
+the copyleft-inheritance basis (b) in §34.5 (materially similar logic
+existed in the GLEEC lineage earlier, from 2024-10-04). The earlier version
+of this entry overstated the whole file as "GPLv2 by descent"; that is
+corrected here.
 
 | Destination | Classification | Source reference | Notes |
 |---|---|---|---|
-| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_orderbook.rs` | baseline-carryforward (relocated) | Split of pre-anchor `lp_ordermatch.rs` body. | Orderbook propagation / order-cancellation logic. GPLv2 by descent. |
-| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_types.rs` | baseline-carryforward (relocated) | Same split. | Order / match type definitions. |
-| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_trading.rs` | baseline-carryforward (relocated) | Same split. | Trading-side ordermatch logic. |
+| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_orderbook.rs` | baseline-carryforward (relocated) **+ post-anchor lineage additions** | Bulk: split of pre-anchor `lp_ordermatch.rs` body (basis a). Additions (e.g. `recently_cancelled`): post-anchor lineage-derived (basis b). | Orderbook propagation / cancellation logic. Mixed basis — see prose above. |
+| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_types.rs` | baseline-carryforward (relocated) | Split of pre-anchor `lp_ordermatch.rs` body. | Order / match type definitions; any post-anchor additions follow basis (b). |
+| `mm2src/mm2_main/src/lp_ordermatch/ordermatch_trading.rs` | baseline-carryforward (relocated) | Split of pre-anchor `lp_ordermatch.rs` body. | Trading-side ordermatch logic; any post-anchor additions follow basis (b). |
+
+### WalletConnect integration (post-anchor, clean-room reimplementation)
+
+The entire `mm2src/kdf_walletconnect/` crate is a **post-anchor feature**
+(introduced here 2026-05-05, `d34589ef7`); nothing in it exists at the 2022
+anchor. The corresponding WalletConnect work also appeared in the
+upstream/GLEEC KDF lineage. As of the 2026-06-17 clean-room pass (§34.2) the
+crate's substantive files were **independently reimplemented** against
+Chapter 22's clean-room driving-spec — a blind reimplementation that did not
+consult the forbidden corpus or any lineage source — and were gated under the
+R35 residual-similarity / R36 binding-scope rules (ch01, ch30). They are
+therefore **clean-room originals** and, per operating-rule §34.4(2), are
+**removed from this ledger**: being ledger-absent, they are governed by the
+default clean-room rule in Chapter 01.
+
+Three WalletConnect files remain explicitly listed elsewhere in §34.3,
+because their shape is dictated rather than discretionary and is not a
+clean-room claim:
+
+- `mm2src/kdf_walletconnect/src/error.rs` and
+  `mm2src/kdf_walletconnect/src/session/rpc/extend.rs` — *third-party-api-bound*
+  (WalletConnect v2 / `relay_rpc` surface);
+- `mm2src/kdf_walletconnect/src/session/rpc/mod.rs` and
+  `mm2src/kdf_walletconnect/src/pairing.rs` — *convergent-idiomatic*.
+
+One constrained-expression fragment is retained inside otherwise clean-room
+files: the `open` on-disk session-record field names embedded in Chapter 22
+§22.5.3 (an Interop / wire-format reuse fragment, R29/R31), required for
+byte-interop with GLEEC KDF session stores. The fragment is marked at its
+point of use and carries no discretionary lineage expression.
+
+**License basis.** The primary basis for the WalletConnect crate is now
+**clean-room independence** (R35/R36-gated reimplementation), enforced going
+forward by the `tools/clean_room_gate.py` manifest, which enrols the crate's
+source files against the pinned upstream reference. The GPLv2 copyleft
+inheritance of §34.5(b) is retained only as a **backstop**: even were the
+independence of any fragment disputed, the WalletConnect feature descends
+from a GPLv2-licensed lineage and reaches us under GPLv2 regardless (§34.5).
 
 ### Baseline carryforward (pre-2022 anchor)
 
@@ -358,9 +472,11 @@ own terms govern the result:
   not separable independent works.
 - **GPLv2 §6 (and equivalently GPLv3 §7 / §10):** each downstream recipient
   receives the GPL grant directly from the original licensors, and *no
-  further restrictions* may be imposed on the exercise of those rights. A
-  restrictive notice placed alongside GPL-covered code is a "further
-  restriction" and is void / removable as to that code.
+  further restrictions* may be imposed on the exercise of those rights. On
+  that basis we read a restrictive notice placed alongside GPL-covered code
+  as an impermissible "further restriction" — in our view unenforceable /
+  removable as to that code. This is the project's good-faith legal position,
+  not a settled adjudication (see the disclaimer opening this section).
 
 Consequently, GPLv2-derived lineage code reaches us under GPLv2 regardless
 of any restrictive notice a downstream fork attaches to it, and we may
@@ -376,6 +492,15 @@ redistribute it under GPLv2.
   These are non-infringing independent of lineage.
 - **Substantive lineage-derived files**: governed by basis (b) above
   (GPLv2 copyleft inheritance).
+
+### WalletConnect crate (primary: clean-room; basis (b) as backstop)
+
+The `mm2src/kdf_walletconnect/` crate is **not** carried under basis (b) as
+its primary justification. Following the 2026-06-17 clean-room reimplementation
+(§34.2), its primary basis is clean-room independence, R35/R36-gated. Basis
+(b) is retained only as a fallback: the WalletConnect feature descends from a
+GPLv2-licensed lineage, so even a disputed-independence fragment reaches us
+under GPLv2 and is redistributable under GPLv2 regardless.
 
 ### Due-diligence finding on the GLEEC fork (public information)
 
