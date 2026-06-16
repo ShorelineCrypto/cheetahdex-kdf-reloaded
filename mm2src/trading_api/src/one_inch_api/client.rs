@@ -265,19 +265,23 @@ impl ApiClient {
         lazy_static! {
             /// Mutual-exclusion point shared by every test call.
             static ref ONE_INCH_REQ_SYNC: AsyncMutex<()> = AsyncMutex::new(());
-            /// Entry instant of the previous test call, used to size the wait.
+            /// Dispatch instant of the previous test call, used to size the wait.
             static ref ONE_INCH_LAST_CALL: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
         }
         let guard = ONE_INCH_REQ_SYNC.lock().await;
+        // Size the wait against the previous *dispatch* instant. Read it without
+        // holding the lock across the sleep.
         let pending_wait = {
-            let mut last_call = ONE_INCH_LAST_CALL.lock().unwrap();
-            let remaining = last_call.map(|prev| 1. - prev.elapsed().as_secs_f64()).unwrap_or(0.);
-            *last_call = Some(Instant::now());
-            remaining
+            let last_call = ONE_INCH_LAST_CALL.lock().unwrap();
+            last_call.map(|prev| 1. - prev.elapsed().as_secs_f64()).unwrap_or(0.)
         };
         if pending_wait > 0. {
             Timer::sleep(pending_wait).await;
         }
+        // Record the instant the request is actually dispatched (after the wait),
+        // so the next call measures its window from the real send time rather
+        // than from this call's lock-acquisition.
+        *ONE_INCH_LAST_CALL.lock().unwrap() = Some(Instant::now());
         guard
     }
 }
