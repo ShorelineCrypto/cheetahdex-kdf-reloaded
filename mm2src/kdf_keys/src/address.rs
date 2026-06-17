@@ -50,9 +50,15 @@ pub enum AddressFormat {
 }
 
 impl AddressFormat {
-    pub fn is_segwit(&self) -> bool { matches!(self, AddressFormat::Segwit) }
-    pub fn is_cashaddress(&self) -> bool { matches!(self, AddressFormat::CashAddress { .. }) }
-    pub fn is_legacy(&self) -> bool { matches!(self, AddressFormat::Standard) }
+    pub fn is_segwit(&self) -> bool {
+        matches!(self, AddressFormat::Segwit)
+    }
+    pub fn is_cashaddress(&self) -> bool {
+        matches!(self, AddressFormat::CashAddress { .. })
+    }
+    pub fn is_legacy(&self) -> bool {
+        matches!(self, AddressFormat::Standard)
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -84,7 +90,9 @@ pub struct AddressDisplayLayout(Vec<u8>);
 
 impl Deref for AddressDisplayLayout {
     type Target = [u8];
-    fn deref(&self) -> &[u8] { &self.0 }
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl DisplayLayout for Address {
@@ -154,7 +162,9 @@ impl FromStr for Address {
 }
 
 impl From<&'static str> for Address {
-    fn from(s: &'static str) -> Self { s.parse().expect("valid address literal") }
+    fn from(s: &'static str) -> Self {
+        s.parse().expect("valid address literal")
+    }
 }
 
 impl Address {

@@ -117,9 +117,13 @@ pub struct ElectrumConnection {
 }
 
 impl ElectrumConnection {
-    async fn is_connected(&self) -> bool { self.tx.lock().await.is_some() }
+    async fn is_connected(&self) -> bool {
+        self.tx.lock().await.is_some()
+    }
 
-    async fn set_protocol_version(&self, version: f32) { self.protocol_version.lock().await.replace(version); }
+    async fn set_protocol_version(&self, version: f32) {
+        self.protocol_version.lock().await.replace(version);
+    }
 }
 
 impl Drop for ElectrumConnection {
@@ -161,7 +165,9 @@ impl<K, V> Default for ConcurrentRequestMap<K, V> {
 }
 
 impl<K: Clone + Eq + std::hash::Hash, V: Clone> ConcurrentRequestMap<K, V> {
-    pub fn new() -> ConcurrentRequestMap<K, V> { ConcurrentRequestMap::default() }
+    pub fn new() -> ConcurrentRequestMap<K, V> {
+        ConcurrentRequestMap::default()
+    }
 
     pub(crate) async fn wrap_request(&self, request_arg: K, request_fut: RpcRes<V>) -> Result<V, JsonRpcError> {
         let mut map = self.inner.lock().await;
@@ -315,7 +321,9 @@ impl ElectrumClientImpl {
         false
     }
 
-    pub async fn count_connections(&self) -> usize { self.connections.lock().await.len() }
+    pub async fn count_connections(&self) -> usize {
+        self.connections.lock().await.len()
+    }
 
     /// Check if the protocol version was checked for one of the spawned connections.
     pub async fn is_protocol_version_checked(&self) -> bool {
@@ -339,28 +347,40 @@ impl ElectrumClientImpl {
     }
 
     /// Get available protocol versions.
-    pub fn protocol_version(&self) -> &OrdRange<f32> { &self.protocol_version }
+    pub fn protocol_version(&self) -> &OrdRange<f32> {
+        &self.protocol_version
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct ElectrumClient(pub Arc<ElectrumClientImpl>);
 impl Deref for ElectrumClient {
     type Target = ElectrumClientImpl;
-    fn deref(&self) -> &ElectrumClientImpl { &*self.0 }
+    fn deref(&self) -> &ElectrumClientImpl {
+        &*self.0
+    }
 }
 
 const BLOCKCHAIN_HEADERS_SUB_ID: &str = "blockchain.headers.subscribe";
 
 impl UtxoJsonRpcClientInfo for ElectrumClient {
-    fn coin_name(&self) -> &str { self.coin_ticker.as_str() }
+    fn coin_name(&self) -> &str {
+        self.coin_ticker.as_str()
+    }
 }
 
 impl JsonRpcClient for ElectrumClient {
-    fn version(&self) -> &'static str { "2.0" }
+    fn version(&self) -> &'static str {
+        "2.0"
+    }
 
-    fn next_id(&self) -> String { self.next_id.fetch_add(1, AtomicOrdering::Relaxed).to_string() }
+    fn next_id(&self) -> String {
+        self.next_id.fetch_add(1, AtomicOrdering::Relaxed).to_string()
+    }
 
-    fn client_info(&self) -> String { UtxoJsonRpcClientInfo::client_info(self) }
+    fn client_info(&self) -> String {
+        UtxoJsonRpcClientInfo::client_info(self)
+    }
 
     fn transport(&self, request: JsonRpcRequestEnum) -> JsonRpcResponseFut {
         Box::new(electrum_request_multi(self.clone(), request).boxed().compat())
@@ -377,7 +397,9 @@ impl JsonRpcMultiClient for ElectrumClient {
 
 impl ElectrumClient {
     /// https://electrumx.readthedocs.io/en/latest/protocol-methods.html#server-ping
-    pub fn server_ping(&self) -> RpcRes<()> { rpc_func!(self, "server.ping") }
+    pub fn server_ping(&self) -> RpcRes<()> {
+        rpc_func!(self, "server.ping")
+    }
 
     /// https://electrumx.readthedocs.io/en/latest/protocol-methods.html#server-version
     pub fn server_version(
@@ -698,7 +720,9 @@ impl UtxoRpcClientOps for ElectrumClient {
         }))
     }
 
-    fn get_relay_fee(&self) -> RpcRes<BigDecimal> { rpc_func!(self, "blockchain.relayfee") }
+    fn get_relay_fee(&self) -> RpcRes<BigDecimal> {
+        rpc_func!(self, "blockchain.relayfee")
+    }
 
     fn find_output_spend(
         &self,

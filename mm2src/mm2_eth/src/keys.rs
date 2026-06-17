@@ -29,16 +29,24 @@ pub type Public = H512;
 pub struct Signature([u8; 65]);
 
 impl Signature {
-    pub fn into_bytes(self) -> [u8; 65] { self.0 }
+    pub fn into_bytes(self) -> [u8; 65] {
+        self.0
+    }
 
     /// Slice into the `r` (first 32 bytes) component.
-    pub fn r(&self) -> &[u8] { &self.0[0..32] }
+    pub fn r(&self) -> &[u8] {
+        &self.0[0..32]
+    }
 
     /// Slice into the `s` (second 32 bytes) component.
-    pub fn s(&self) -> &[u8] { &self.0[32..64] }
+    pub fn s(&self) -> &[u8] {
+        &self.0[32..64]
+    }
 
     /// The 1-byte recovery id `v` (0 or 1 in compact form).
-    pub fn v(&self) -> u8 { self.0[64] }
+    pub fn v(&self) -> u8 {
+        self.0[64]
+    }
 
     /// Construct from `r || s || v` components.
     pub fn from_rsv(r: &H256, s: &H256, v: u8) -> Self {
@@ -51,16 +59,22 @@ impl Signature {
 }
 
 impl Default for Signature {
-    fn default() -> Self { Signature([0u8; 65]) }
+    fn default() -> Self {
+        Signature([0u8; 65])
+    }
 }
 
 impl Deref for Signature {
     type Target = [u8; 65];
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl DerefMut for Signature {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 impl FromStr for Signature {
@@ -110,7 +124,9 @@ impl fmt::Display for EthKeyError {
 impl std::error::Error for EthKeyError {}
 
 impl From<secp256k1::Error> for EthKeyError {
-    fn from(_: secp256k1::Error) -> Self { EthKeyError::InvalidSignature }
+    fn from(_: secp256k1::Error) -> Self {
+        EthKeyError::InvalidSignature
+    }
 }
 
 /// Compatibility alias matching the legacy `ethkey::Error` re-export.
@@ -185,7 +201,9 @@ impl Secret {
         Ok(Secret(buf))
     }
 
-    pub fn as_bytes(&self) -> &[u8; 32] { &self.0 }
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
 }
 
 impl FromStr for Secret {
@@ -197,7 +215,9 @@ impl FromStr for Secret {
 }
 
 impl fmt::Debug for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { f.write_str("Secret(***)") }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("Secret(***)")
+    }
 }
 
 impl fmt::LowerHex for Secret {
@@ -216,7 +236,9 @@ impl fmt::LowerHex for Secret {
 }
 
 impl Drop for Secret {
-    fn drop(&mut self) { self.0.zeroize(); }
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
 }
 
 /// secp256k1 keypair (`Secret` + derived uncompressed `Public`).
@@ -243,9 +265,15 @@ impl KeyPair {
         Self::from_secret(secret)
     }
 
-    pub fn secret(&self) -> &Secret { &self.secret }
-    pub fn public(&self) -> &Public { &self.public }
-    pub fn address(&self) -> Address { public_to_address(&self.public) }
+    pub fn secret(&self) -> &Secret {
+        &self.secret
+    }
+    pub fn public(&self) -> &Public {
+        &self.public
+    }
+    pub fn address(&self) -> Address {
+        public_to_address(&self.public)
+    }
 }
 
 /// Sign a 32-byte message hash with `secret`.

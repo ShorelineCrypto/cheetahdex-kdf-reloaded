@@ -28,11 +28,13 @@ use rpc::v1::types::Bytes as BytesJson;
 
 use common::now_ms;
 
-use crate::siacoin::{hastings_to_siacoin, siacoin_to_hastings, Address, ApiClientHelpers, Currency, SiaCoin,
-                     SiaFeeDetails, SiaFeePolicy, SiaKeypair as Keypair, SiacoinElement, SiacoinOutput, SpendPolicy,
-                     V2TransactionBuilder};
-use crate::{MarketCoinOps, PrivKeyPolicy, TransactionDetails, TransactionType, WithdrawError, WithdrawRequest,
-            WithdrawResult};
+use crate::siacoin::{
+    hastings_to_siacoin, siacoin_to_hastings, Address, ApiClientHelpers, Currency, SiaCoin, SiaFeeDetails,
+    SiaFeePolicy, SiaKeypair as Keypair, SiacoinElement, SiacoinOutput, SpendPolicy, V2TransactionBuilder,
+};
+use crate::{
+    MarketCoinOps, PrivKeyPolicy, TransactionDetails, TransactionType, WithdrawError, WithdrawRequest, WithdrawResult,
+};
 
 /// Flat miner fee applied to every withdraw transaction (10 SC, in hastings).
 ///

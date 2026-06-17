@@ -1,6 +1,8 @@
 use curve25519_dalek::edwards::CompressedEdwardsY;
-use ed25519_dalek::{ExpandedSecretKey, PublicKey as Ed25519PublicKey, SecretKey,
-                    SignatureError as Ed25519SignatureError, Signer, Verifier, SECRET_KEY_LENGTH};
+use ed25519_dalek::{
+    ExpandedSecretKey, PublicKey as Ed25519PublicKey, SecretKey, SignatureError as Ed25519SignatureError, Signer,
+    Verifier, SECRET_KEY_LENGTH,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::str::FromStr;
@@ -42,16 +44,22 @@ impl Keypair {
         Ok(Keypair { public, private })
     }
 
-    pub fn sign(&self, message: &[u8]) -> Signature { Signer::sign(self, message) }
+    pub fn sign(&self, message: &[u8]) -> Signature {
+        Signer::sign(self, message)
+    }
 
     /// Verify a signature of a message with this keypair's public key.
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), KeypairError> {
         Ok(self.public.verify(message, signature)?)
     }
 
-    pub fn public(&self) -> PublicKey { self.public.clone() }
+    pub fn public(&self) -> PublicKey {
+        self.public.clone()
+    }
 
-    pub fn private(&self) -> [u8; SECRET_KEY_LENGTH] { self.private.0.to_bytes() }
+    pub fn private(&self) -> [u8; SECRET_KEY_LENGTH] {
+        self.private.0.to_bytes()
+    }
 }
 
 struct PrivateKey(SecretKey);
@@ -100,9 +108,13 @@ impl PublicKey {
             .is_some()
     }
 
-    pub fn as_bytes(&self) -> &[u8] { self.0.as_bytes() }
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
 
-    pub fn to_bytes(&self) -> [u8; 32] { self.0.to_bytes() }
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
 
     // Method for parsing a hex string without the "ed25519:" prefix
     pub fn from_str_no_prefix(hex_str: &str) -> Result<Self, PublicKeyError> {
@@ -118,10 +130,14 @@ impl PublicKey {
     }
 
     /// Generate the default v1 address from the public key
-    pub fn v1_address(&self) -> Address { SpendPolicy::unlock_condition(vec![self.clone()], 0, 1).address() }
+    pub fn v1_address(&self) -> Address {
+        SpendPolicy::unlock_condition(vec![self.clone()], 0, 1).address()
+    }
 
     /// Generate the default v2 address from the public key
-    pub fn address(&self) -> Address { SpendPolicy::PublicKey(self.clone()).address() }
+    pub fn address(&self) -> Address {
+        SpendPolicy::PublicKey(self.clone()).address()
+    }
 
     /// Verify a signature of a message with this keypair's public key.
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), PublicKeyError> {
@@ -182,9 +198,13 @@ impl Serialize for PublicKey {
 }
 
 impl fmt::Display for PublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "ed25519:{:02x}", self) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ed25519:{:02x}", self)
+    }
 }
 
 impl fmt::LowerHex for PublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", hex::encode(self.as_bytes())) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.as_bytes()))
+    }
 }

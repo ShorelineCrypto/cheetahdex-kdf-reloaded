@@ -53,7 +53,9 @@ pub struct MySwapsStorage {
 }
 
 impl MySwapsStorage {
-    pub fn new(ctx: MmArc) -> MySwapsStorage { MySwapsStorage { ctx } }
+    pub fn new(ctx: MmArc) -> MySwapsStorage {
+        MySwapsStorage { ctx }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -72,7 +74,9 @@ mod native_impl {
     }
 
     impl From<SqlError> for MySwapsError {
-        fn from(e: SqlError) -> Self { MySwapsError::UnknownSqlError(e.to_string()) }
+        fn from(e: SqlError) -> Self {
+            MySwapsError::UnknownSqlError(e.to_string())
+        }
     }
 
     #[async_trait]
@@ -164,7 +168,9 @@ mod wasm_impl {
     }
 
     impl From<InitDbError> for MySwapsError {
-        fn from(e: InitDbError) -> Self { MySwapsError::InternalError(e.to_string()) }
+        fn from(e: InitDbError) -> Self {
+            MySwapsError::InternalError(e.to_string())
+        }
     }
 
     #[async_trait]

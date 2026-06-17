@@ -99,10 +99,14 @@ ifrom!(TransactionEnum, SignedEthTx);
 #[cfg(not(target_arch = "wasm32"))]
 ifrom!(TransactionEnum, ZTransaction);
 impl From<siacoin::SiaTransaction> for TransactionEnum {
-    fn from(t: siacoin::SiaTransaction) -> TransactionEnum { TransactionEnum::SiaTransaction(t) }
+    fn from(t: siacoin::SiaTransaction) -> TransactionEnum {
+        TransactionEnum::SiaTransaction(t)
+    }
 }
 impl From<tendermint::CosmosTransaction> for TransactionEnum {
-    fn from(t: tendermint::CosmosTransaction) -> TransactionEnum { TransactionEnum::CosmosTransaction(t) }
+    fn from(t: tendermint::CosmosTransaction) -> TransactionEnum {
+        TransactionEnum::CosmosTransaction(t)
+    }
 }
 impl Deref for TransactionEnum {
     type Target = dyn Transaction;
@@ -487,7 +491,9 @@ pub enum StakingInfosDetails {
     Qtum(QtumStakingInfosDetails),
 }
 impl From<QtumStakingInfosDetails> for StakingInfosDetails {
-    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self { StakingInfosDetails::Qtum(qtum_staking_infos) }
+    fn from(qtum_staking_infos: QtumStakingInfosDetails) -> Self {
+        StakingInfosDetails::Qtum(qtum_staking_infos)
+    }
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StakingInfos {
@@ -545,26 +551,40 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
     }
 }
 impl From<siacoin::SiaFeeDetails> for TxFeeDetails {
-    fn from(d: siacoin::SiaFeeDetails) -> Self { TxFeeDetails::Sia(d) }
+    fn from(d: siacoin::SiaFeeDetails) -> Self {
+        TxFeeDetails::Sia(d)
+    }
 }
 impl From<tendermint::TendermintFeeDetails> for TxFeeDetails {
-    fn from(d: tendermint::TendermintFeeDetails) -> Self { TxFeeDetails::Tendermint(d) }
+    fn from(d: tendermint::TendermintFeeDetails) -> Self {
+        TxFeeDetails::Tendermint(d)
+    }
 }
 impl From<EthTxFeeDetails> for TxFeeDetails {
-    fn from(eth_details: EthTxFeeDetails) -> Self { TxFeeDetails::Eth(eth_details) }
+    fn from(eth_details: EthTxFeeDetails) -> Self {
+        TxFeeDetails::Eth(eth_details)
+    }
 }
 impl From<crate::eth::tron::fee::TronTxFeeDetails> for TxFeeDetails {
-    fn from(tron_details: crate::eth::tron::fee::TronTxFeeDetails) -> Self { TxFeeDetails::Tron(tron_details) }
+    fn from(tron_details: crate::eth::tron::fee::TronTxFeeDetails) -> Self {
+        TxFeeDetails::Tron(tron_details)
+    }
 }
 impl From<UtxoFeeDetails> for TxFeeDetails {
-    fn from(utxo_details: UtxoFeeDetails) -> Self { TxFeeDetails::Utxo(utxo_details) }
+    fn from(utxo_details: UtxoFeeDetails) -> Self {
+        TxFeeDetails::Utxo(utxo_details)
+    }
 }
 impl From<Qrc20FeeDetails> for TxFeeDetails {
-    fn from(qrc20_details: Qrc20FeeDetails) -> Self { TxFeeDetails::Qrc20(qrc20_details) }
+    fn from(qrc20_details: Qrc20FeeDetails) -> Self {
+        TxFeeDetails::Qrc20(qrc20_details)
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaFeeDetails> for TxFeeDetails {
-    fn from(solana_details: SolanaFeeDetails) -> Self { TxFeeDetails::Solana(solana_details) }
+    fn from(solana_details: SolanaFeeDetails) -> Self {
+        TxFeeDetails::Solana(solana_details)
+    }
 }
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct KmdRewardsDetails {
@@ -588,7 +608,9 @@ pub enum TransactionType {
     TokenTransfer(BytesJson),
 }
 impl Default for TransactionType {
-    fn default() -> Self { TransactionType::StandardTransfer }
+    fn default() -> Self {
+        TransactionType::StandardTransfer
+    }
 }
 /// Transaction details
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -648,7 +670,9 @@ impl TransactionDetails {
         self.timestamp == 0
     }
 
-    pub fn should_update_kmd_rewards(&self) -> bool { self.coin == "KMD" && self.kmd_rewards.is_none() }
+    pub fn should_update_kmd_rewards(&self) -> bool {
+        self.coin == "KMD" && self.kmd_rewards.is_none()
+    }
 
     pub fn firo_negative_fee(&self) -> bool {
         match &self.fee_details {
@@ -683,9 +707,13 @@ impl CoinBalance {
         }
     }
 
-    pub fn into_total(self) -> BigDecimal { self.spendable + self.unspendable }
+    pub fn into_total(self) -> BigDecimal {
+        self.spendable + self.unspendable
+    }
 
-    pub fn get_total(&self) -> BigDecimal { &self.spendable + &self.unspendable }
+    pub fn get_total(&self) -> BigDecimal {
+        &self.spendable + &self.unspendable
+    }
 }
 impl Add for CoinBalance {
     type Output = CoinBalance;

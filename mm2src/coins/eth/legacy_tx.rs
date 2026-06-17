@@ -21,8 +21,9 @@
 
 use alloy::rlp::{Buf, BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
 use ethereum_types::{Address, H256, U256};
-use mm2_eth::keys::{public_to_address, recover_public_key, sign as eth_sign, EthKeyError, Public, Secret, Signature,
-                    H520};
+use mm2_eth::keys::{
+    public_to_address, recover_public_key, sign as eth_sign, EthKeyError, Public, Secret, Signature, H520,
+};
 use std::ops::Deref;
 
 pub type Bytes = Vec<u8>;
@@ -40,7 +41,9 @@ pub enum Action {
 }
 
 impl Default for Action {
-    fn default() -> Self { Action::Create }
+    fn default() -> Self {
+        Action::Create
+    }
 }
 
 impl Encodable for Action {
@@ -169,11 +172,15 @@ pub struct UnverifiedTransaction {
 
 impl Deref for UnverifiedTransaction {
     type Target = Transaction;
-    fn deref(&self) -> &Self::Target { &self.unsigned }
+    fn deref(&self) -> &Self::Target {
+        &self.unsigned
+    }
 }
 
 impl Encodable for UnverifiedTransaction {
-    fn encode(&self, out: &mut dyn BufMut) { self.rlp_append_sealed(out); }
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.rlp_append_sealed(out);
+    }
     fn length(&self) -> usize {
         let payload_len = self.sealed_payload_len();
         Header {
@@ -268,10 +275,14 @@ impl UnverifiedTransaction {
     }
 
     /// `r == 0 && s == 0` (EIP-86 unsigned).
-    pub fn is_unsigned(&self) -> bool { self.r.is_zero() && self.s.is_zero() }
+    pub fn is_unsigned(&self) -> bool {
+        self.r.is_zero() && self.s.is_zero()
+    }
 
     /// Recovery id `v` mapped to its standard form (`0` or `1`).
-    pub fn standard_v(&self) -> u8 { check_replay_protection(self.v) }
+    pub fn standard_v(&self) -> u8 {
+        check_replay_protection(self.v)
+    }
 
     /// EIP-155 chain id encoded in `v`, or `None` for pre-EIP-155.
     pub fn chain_id(&self) -> Option<u64> {
@@ -291,7 +302,9 @@ impl UnverifiedTransaction {
         Signature::from_rsv(&H256::from(r_bytes), &H256::from(s_bytes), self.standard_v())
     }
 
-    pub fn hash(&self) -> H256 { self.hash }
+    pub fn hash(&self) -> H256 {
+        self.hash
+    }
 
     /// Recover the secp256k1 public key from the signature.
     pub fn recover_public(&self) -> Result<Public, EthKeyError> {
@@ -315,16 +328,24 @@ pub struct SignedTransaction {
 
 impl Deref for SignedTransaction {
     type Target = UnverifiedTransaction;
-    fn deref(&self) -> &Self::Target { &self.transaction }
+    fn deref(&self) -> &Self::Target {
+        &self.transaction
+    }
 }
 
 impl Encodable for SignedTransaction {
-    fn encode(&self, out: &mut dyn BufMut) { self.transaction.encode(out); }
-    fn length(&self) -> usize { self.transaction.length() }
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.transaction.encode(out);
+    }
+    fn length(&self) -> usize {
+        self.transaction.length()
+    }
 }
 
 impl From<SignedTransaction> for UnverifiedTransaction {
-    fn from(tx: SignedTransaction) -> Self { tx.transaction }
+    fn from(tx: SignedTransaction) -> Self {
+        tx.transaction
+    }
 }
 
 impl SignedTransaction {
@@ -346,14 +367,22 @@ impl SignedTransaction {
         }
     }
 
-    pub fn sender(&self) -> Address { self.sender }
+    pub fn sender(&self) -> Address {
+        self.sender
+    }
 
-    pub fn public_key(&self) -> Option<Public> { self.public }
+    pub fn public_key(&self) -> Option<Public> {
+        self.public
+    }
 
-    pub fn is_unsigned(&self) -> bool { self.transaction.is_unsigned() }
+    pub fn is_unsigned(&self) -> bool {
+        self.transaction.is_unsigned()
+    }
 
     /// Tx-hash as keccak256 of the RLP-encoded sealed transaction.
-    pub fn tx_hash(&self) -> H256 { self.transaction.hash }
+    pub fn tx_hash(&self) -> H256 {
+        self.transaction.hash
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -399,7 +428,9 @@ fn check_replay_protection(v: u64) -> u8 {
 /// by the existing call sites — preserves the `crate::eth::rlp::encode(...)`
 /// and `crate::eth::rlp::decode::<T>(...)` syntax.
 pub mod rlp {
-    pub fn encode<T: alloy::rlp::Encodable>(value: &T) -> Vec<u8> { alloy::rlp::encode(value) }
+    pub fn encode<T: alloy::rlp::Encodable>(value: &T) -> Vec<u8> {
+        alloy::rlp::encode(value)
+    }
     pub fn decode<T: alloy::rlp::Decodable>(bytes: &[u8]) -> Result<T, alloy::rlp::Error> {
         let mut buf = bytes;
         T::decode(&mut buf)

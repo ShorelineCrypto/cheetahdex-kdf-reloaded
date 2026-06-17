@@ -27,7 +27,9 @@ pub(crate) struct LoginDomain {
 }
 
 impl LoginDomain {
-    pub fn new(name: String) -> Self { LoginDomain { name } }
+    pub fn new(name: String) -> Self {
+        LoginDomain { name }
+    }
 }
 
 #[derive(Debug, serde::Serialize)]

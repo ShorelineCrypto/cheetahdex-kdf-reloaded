@@ -37,27 +37,49 @@ macro_rules! define_test_netid {
         pub struct $struct_name;
 
         impl NetConfig for $struct_name {
-            fn netid(&self) -> u16 { $id }
+            fn netid(&self) -> u16 {
+                $id
+            }
 
-            fn network_name(&self) -> &'static str { "Regtest" }
+            fn network_name(&self) -> &'static str {
+                "Regtest"
+            }
 
-            fn dex_fee_addr_pubkey(&self) -> &'static str { DEX_FEE_ADDR_PUBKEY }
+            fn dex_fee_addr_pubkey(&self) -> &'static str {
+                DEX_FEE_ADDR_PUBKEY
+            }
 
-            fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8] { &DEX_FEE_ADDR_RAW }
+            fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8] {
+                &DEX_FEE_ADDR_RAW
+            }
 
-            fn dex_fee_z_addr(&self) -> &'static str { DEX_FEE_Z_ADDR }
+            fn dex_fee_z_addr(&self) -> &'static str {
+                DEX_FEE_Z_ADDR
+            }
 
-            fn dex_fee_pubkey_ed25519(&self) -> &'static str { DEX_FEE_PUBKEY_ED25519 }
+            fn dex_fee_pubkey_ed25519(&self) -> &'static str {
+                DEX_FEE_PUBKEY_ED25519
+            }
 
-            fn dex_fee_rate(&self) -> BigRational { BigRational::new(1.into(), 777.into()) }
+            fn dex_fee_rate(&self) -> BigRational {
+                BigRational::new(1.into(), 777.into())
+            }
 
-            fn fee_discount_tickers(&self) -> &'static [&'static str] { &["KMD"] }
+            fn fee_discount_tickers(&self) -> &'static [&'static str] {
+                &["KMD"]
+            }
 
-            fn dex_fee_rate_discounted(&self) -> BigRational { BigRational::new(9.into(), 7770.into()) }
+            fn dex_fee_rate_discounted(&self) -> BigRational {
+                BigRational::new(9.into(), 7770.into())
+            }
 
-            fn dex_fee_min_threshold(&self) -> BigRational { BigRational::new(1.into(), 10000.into()) }
+            fn dex_fee_min_threshold(&self) -> BigRational {
+                BigRational::new(1.into(), 10000.into())
+            }
 
-            fn seed_nodes(&self) -> &'static [&'static str] { SEED_NODES }
+            fn seed_nodes(&self) -> &'static [&'static str] {
+                SEED_NODES
+            }
         }
     };
 }

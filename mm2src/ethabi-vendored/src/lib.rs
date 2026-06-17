@@ -7,9 +7,11 @@ extern crate serde;
 extern crate serde_json;
 extern crate tiny_keccak;
 
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
-#[macro_use] extern crate error_chain;
+#[macro_use]
+extern crate error_chain;
 
 #[cfg(test)]
 #[macro_use]

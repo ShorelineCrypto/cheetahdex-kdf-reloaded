@@ -24,6 +24,8 @@ pub mod url_helpers;
 pub use crawler::{update_chain, ChainCrawlReport, HttpCrawlProvider, NftCrawlProvider};
 pub use http::{fetch_json, FetchError};
 pub use refresh::{refresh_nft_metadata, HttpMetadataProvider, MetadataProvider, RefreshedMetadata};
-pub use spam::{apply_spam_protection_to_nft, apply_spam_protection_to_transfer, contains_url, is_token_uri_suspicious,
-               redact_text_if_spam, SpamScanError};
+pub use spam::{
+    apply_spam_protection_to_nft, apply_spam_protection_to_transfer, contains_url, is_token_uri_suspicious,
+    redact_text_if_spam, SpamScanError,
+};
 pub use url_helpers::{decamouflage_legacy_ipfs_url, domain_of, normalise_metadata_urls};

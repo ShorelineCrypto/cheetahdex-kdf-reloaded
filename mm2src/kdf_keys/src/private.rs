@@ -90,7 +90,9 @@ impl fmt::Debug for Private {
 }
 
 impl fmt::Display for Private {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { self.layout().to_base58().fmt(f) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.layout().to_base58().fmt(f)
+    }
 }
 
 impl FromStr for Private {
@@ -102,7 +104,9 @@ impl FromStr for Private {
 }
 
 impl From<&'static str> for Private {
-    fn from(s: &'static str) -> Self { s.parse().expect("valid WIF literal") }
+    fn from(s: &'static str) -> Self {
+        s.parse().expect("valid WIF literal")
+    }
 }
 
 #[cfg(test)]

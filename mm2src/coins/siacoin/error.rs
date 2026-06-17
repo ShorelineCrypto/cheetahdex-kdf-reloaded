@@ -26,11 +26,14 @@ use uuid::Uuid;
 
 use crypto::privkey::PrivKeyError;
 
-use crate::siacoin::client_error::{BroadcastTransactionError, ClientError, CurrentHeightError,
-                                   FindWhereUtxoSpentError, GetMedianTimestampError, GetUnconfirmedTransactionError,
-                                   UtxoFromTxidError};
-use crate::siacoin::{Address, Currency, Event, EventDataWrapper, Hash256, Hash256Error, KeypairError, PreimageError,
-                     PublicKeyError, SiaTransaction, SiacoinOutput, TransactionId, V2TransactionBuilderError};
+use crate::siacoin::client_error::{
+    BroadcastTransactionError, ClientError, CurrentHeightError, FindWhereUtxoSpentError, GetMedianTimestampError,
+    GetUnconfirmedTransactionError, UtxoFromTxidError,
+};
+use crate::siacoin::{
+    Address, Currency, Event, EventDataWrapper, Hash256, Hash256Error, KeypairError, PreimageError, PublicKeyError,
+    SiaTransaction, SiacoinOutput, TransactionId, V2TransactionBuilderError,
+};
 use crate::{DexFee, TransactionEnum};
 
 // =====================================================================

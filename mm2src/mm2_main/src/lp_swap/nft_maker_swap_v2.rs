@@ -13,8 +13,9 @@
 //! decision and the on-chain action testable in isolation.
 
 use crate::mm2::lp_swap::swap_versioning::{SwapVersion, NFT_SWAP_V2_VERSION};
-use coins::eth::nft_swap_v2::{EthCoinNftError, NftMakerPaymentArgs, NftRefundSecretArgs, NftRefundTimelockArgs,
-                              NftSpendMakerPaymentArgs};
+use coins::eth::nft_swap_v2::{
+    EthCoinNftError, NftMakerPaymentArgs, NftRefundSecretArgs, NftRefundTimelockArgs, NftSpendMakerPaymentArgs,
+};
 use coins::eth::{EthCoin, SignedEthTx};
 use futures::compat::Future01CompatExt;
 
@@ -80,7 +81,9 @@ impl std::fmt::Display for NftSwapV2DriverError {
 impl std::error::Error for NftSwapV2DriverError {}
 
 impl From<EthCoinNftError> for NftSwapV2DriverError {
-    fn from(e: EthCoinNftError) -> Self { NftSwapV2DriverError::Build(e) }
+    fn from(e: EthCoinNftError) -> Self {
+        NftSwapV2DriverError::Build(e)
+    }
 }
 
 async fn broadcast(
@@ -135,7 +138,9 @@ mod tests {
     use super::*;
     use crate::mm2::lp_swap::swap_versioning::{LEGACY_SWAP_VERSION, TPU_SWAP_VERSION};
 
-    fn v(n: u8) -> SwapVersion { SwapVersion { version: n } }
+    fn v(n: u8) -> SwapVersion {
+        SwapVersion { version: n }
+    }
 
     #[test]
     fn should_use_when_both_sides_advertise_nft_v2_and_contract_present() {

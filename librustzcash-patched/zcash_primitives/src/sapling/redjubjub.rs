@@ -16,8 +16,7 @@ fn read_scalar<R: Read>(mut reader: R) -> io::Result<jubjub::Fr> {
     let mut s_repr = [0u8; 32];
     reader.read_exact(s_repr.as_mut())?;
 
-    jubjub::Fr::from_repr(s_repr)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "scalar is not in field"))
+    jubjub::Fr::from_repr(s_repr).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "scalar is not in field"))
 }
 
 fn write_scalar<W: Write>(s: &jubjub::Fr, mut writer: W) -> io::Result<()> {
@@ -88,8 +87,7 @@ impl PrivateKey {
         s.mul_assign(&self.0);
         s.add_assign(&r);
         let mut sbar = [0u8; 32];
-        write_scalar::<&mut [u8]>(&s, &mut sbar[..])
-            .expect("Jubjub scalars should serialize to 32 bytes");
+        write_scalar::<&mut [u8]>(&s, &mut sbar[..]).expect("Jubjub scalars should serialize to 32 bytes");
 
         Signature { rbar, sbar }
     }
@@ -142,10 +140,7 @@ impl PublicKey {
             Err(_) => return false,
         };
         // 0 = h_G(-S . P_G + R + c . vk)
-        ((self.0 * c) + r - (p_g * s))
-            .mul_by_cofactor()
-            .is_identity()
-            .into()
+        ((self.0 * c) + r - (p_g * s)).mul_by_cofactor().is_identity().into()
     }
 }
 
@@ -157,11 +152,7 @@ pub struct BatchEntry<'a> {
 
 // TODO: #82: This is a naive implementation currently,
 // and doesn't use multiexp.
-pub fn batch_verify<'a, R: RngCore>(
-    mut rng: &mut R,
-    batch: &[BatchEntry<'a>],
-    p_g: SubgroupPoint,
-) -> bool {
+pub fn batch_verify<'a, R: RngCore>(mut rng: &mut R, batch: &[BatchEntry<'a>], p_g: SubgroupPoint) -> bool {
     let mut acc = ExtendedPoint::identity();
 
     for entry in batch {
@@ -206,8 +197,7 @@ mod tests {
     #[test]
     fn test_batch_verify() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
         let p_g = SPENDING_KEY_GENERATOR;
 
@@ -246,16 +236,14 @@ mod tests {
     #[test]
     fn cofactor_check() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
         let zero = jubjub::ExtendedPoint::identity();
         let p_g = SPENDING_KEY_GENERATOR;
 
         let jubjub_modulus_bytes = [
-            0xb7, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20,
-            0x68, 0xa6, 0x00, 0x3b, 0x34, 0x01, 0x01, 0x3b, 0x67, 0x06, 0xa9, 0xaf, 0x33, 0x65,
-            0xea, 0xb4, 0x7d, 0x0e,
+            0xb7, 0x2c, 0xf7, 0xd6, 0x5e, 0x0e, 0x97, 0xd0, 0x82, 0x10, 0xc8, 0xcc, 0x93, 0x20, 0x68, 0xa6, 0x00, 0x3b,
+            0x34, 0x01, 0x01, 0x3b, 0x67, 0x06, 0xa9, 0xaf, 0x33, 0x65, 0xea, 0xb4, 0x7d, 0x0e,
         ];
 
         // Get a point of order 8
@@ -288,8 +276,7 @@ mod tests {
     #[test]
     fn round_trip_serialization() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
         let p_g = SPENDING_KEY_GENERATOR;
 
@@ -323,8 +310,7 @@ mod tests {
     #[test]
     fn random_signatures() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
         let p_g = SPENDING_KEY_GENERATOR;
 

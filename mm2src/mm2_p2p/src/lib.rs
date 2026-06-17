@@ -1,4 +1,5 @@
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate lazy_static;
 
 mod adex_ping;
 pub mod atomicdex_behaviour;
@@ -11,8 +12,9 @@ pub mod request_response;
 mod runtime;
 
 use lazy_static::lazy_static;
-use secp256k1::{Message as SecpMessage, PublicKey as Secp256k1Pubkey, Secp256k1, SecretKey, SignOnly, Signature,
-                VerifyOnly};
+use secp256k1::{
+    Message as SecpMessage, PublicKey as Secp256k1Pubkey, Secp256k1, SecretKey, SignOnly, Signature, VerifyOnly,
+};
 use sha2::{Digest, Sha256};
 
 pub use atomicdex_behaviour::{spawn_gossipsub, AdexBehaviourError, NodeType, WssCerts};
@@ -39,7 +41,9 @@ pub enum NetworkInfo {
 }
 
 impl NetworkInfo {
-    pub fn in_memory(&self) -> bool { matches!(self, NetworkInfo::InMemory) }
+    pub fn in_memory(&self) -> bool {
+        matches!(self, NetworkInfo::InMemory)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -99,7 +103,9 @@ pub fn decode_signed<'de, T: de::Deserialize<'de>>(
     Ok((payload, signature, helper.pubkey))
 }
 
-fn sha256(input: impl AsRef<[u8]>) -> [u8; 32] { Sha256::new().chain(input).finalize().into() }
+fn sha256(input: impl AsRef<[u8]>) -> [u8; 32] {
+    Sha256::new().chain(input).finalize().into()
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Secp256k1PubkeySerialize(Secp256k1Pubkey);
@@ -151,7 +157,9 @@ impl PublicKey {
 }
 
 impl From<Secp256k1Pubkey> for PublicKey {
-    fn from(pubkey: Secp256k1Pubkey) -> Self { PublicKey::Secp256k1(Secp256k1PubkeySerialize(pubkey)) }
+    fn from(pubkey: Secp256k1Pubkey) -> Self {
+        PublicKey::Secp256k1(Secp256k1PubkeySerialize(pubkey))
+    }
 }
 
 pub type TopicPrefix = &'static str;

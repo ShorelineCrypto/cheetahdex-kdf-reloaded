@@ -84,7 +84,9 @@ impl Error400 {
             .unwrap_or_default()
     }
 
-    fn meta_entries(&self) -> impl Iterator<Item = &Meta> { self.meta.iter().flatten() }
+    fn meta_entries(&self) -> impl Iterator<Item = &Meta> {
+        self.meta.iter().flatten()
+    }
 }
 
 #[derive(Debug)]

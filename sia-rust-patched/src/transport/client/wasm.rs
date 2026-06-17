@@ -186,7 +186,9 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    async fn test_new_client() { let _api_client = init_client().await; }
+    async fn test_new_client() {
+        let _api_client = init_client().await;
+    }
 
     #[wasm_bindgen_test]
     async fn test_address_balance() {

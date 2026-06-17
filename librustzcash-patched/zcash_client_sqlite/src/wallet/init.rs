@@ -155,21 +155,14 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
     for (account, extfvk) in extfvks.iter().enumerate() {
-        let extfvk_str = encode_extended_full_viewing_key(
-            wdb.params.hrp_sapling_extended_full_viewing_key(),
-            extfvk,
-        );
+        let extfvk_str = encode_extended_full_viewing_key(wdb.params.hrp_sapling_extended_full_viewing_key(), extfvk);
 
         let address_str = address_from_extfvk(&wdb.params, extfvk);
 
         wdb.conn.execute(
             "INSERT INTO accounts (account, extfvk, address)
             VALUES (?, ?, ?)",
-            &[
-                (account as u32).to_sql()?,
-                extfvk_str.to_sql()?,
-                address_str.to_sql()?,
-            ],
+            &[(account as u32).to_sql()?, extfvk_str.to_sql()?, address_str.to_sql()?],
         )?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
@@ -260,9 +253,7 @@ mod tests {
         init_accounts_table(&db_data, &[]).unwrap();
 
         // First call with data should initialise the accounts table
-        let extfvks = [ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(
-            &[],
-        ))];
+        let extfvks = [ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[]))];
         init_accounts_table(&db_data, &extfvks).unwrap();
 
         // Subsequent calls should return an error
@@ -277,24 +268,10 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // First call with data should initialise the blocks table
-        init_blocks_table(
-            &db_data,
-            BlockHeight::from(1u32),
-            BlockHash([1; 32]),
-            1,
-            &[],
-        )
-        .unwrap();
+        init_blocks_table(&db_data, BlockHeight::from(1u32), BlockHash([1; 32]), 1, &[]).unwrap();
 
         // Subsequent calls should return an error
-        init_blocks_table(
-            &db_data,
-            BlockHeight::from(2u32),
-            BlockHash([2; 32]),
-            2,
-            &[],
-        )
-        .unwrap_err();
+        init_blocks_table(&db_data, BlockHeight::from(2u32), BlockHash([2; 32]), 2, &[]).unwrap_err();
     }
 
     #[test]

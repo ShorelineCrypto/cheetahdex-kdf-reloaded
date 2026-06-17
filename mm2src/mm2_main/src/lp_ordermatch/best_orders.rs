@@ -1,5 +1,7 @@
-use super::{addr_format_from_protocol_info, is_my_order, mm2_internal_pubkey_hex, BaseRelProtocolInfo,
-            OrderConfirmationsSettings, OrderbookP2PItemWithProof, OrdermatchContext, OrdermatchRequest};
+use super::{
+    addr_format_from_protocol_info, is_my_order, mm2_internal_pubkey_hex, BaseRelProtocolInfo,
+    OrderConfirmationsSettings, OrderbookP2PItemWithProof, OrdermatchContext, OrdermatchRequest,
+};
 use crate::mm2::lp_network::{request_any_relay, P2PRequest};
 use crate::mm2::lp_ordermatch::{orderbook_address, RpcOrderbookEntryV2};
 use coins::{address_by_coin_conf_and_pubkey_str, coin_conf, is_wallet_only_conf, is_wallet_only_ticker};
@@ -453,10 +455,13 @@ mod best_orders_test {
         let v1_serialized = rmp_serde::to_vec_named(&v1).unwrap();
 
         let mut new: BestOrdersP2PRes = rmp_serde::from_slice(&v1_serialized).unwrap();
-        new.protocol_infos.insert(Uuid::new_v4(), BaseRelProtocolInfo {
-            base: vec![1],
-            rel: vec![2],
-        });
+        new.protocol_infos.insert(
+            Uuid::new_v4(),
+            BaseRelProtocolInfo {
+                base: vec![1],
+                rel: vec![2],
+            },
+        );
         new.conf_infos
             .insert(Uuid::new_v4(), OrderConfirmationsSettings::default());
 
@@ -482,10 +487,13 @@ mod best_orders_test {
 
         let v2 = BestOrdersResV2 {
             orders: HashMap::from_iter(std::iter::once(("RICK".into(), v2_orders))),
-            protocol_infos: HashMap::from_iter(std::iter::once((Uuid::new_v4(), BaseRelProtocolInfo {
-                base: vec![1],
-                rel: vec![2],
-            }))),
+            protocol_infos: HashMap::from_iter(std::iter::once((
+                Uuid::new_v4(),
+                BaseRelProtocolInfo {
+                    base: vec![1],
+                    rel: vec![2],
+                },
+            ))),
         };
 
         let v2_serialized = rmp_serde::to_vec_named(&v2).unwrap();

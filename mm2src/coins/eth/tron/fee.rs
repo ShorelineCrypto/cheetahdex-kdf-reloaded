@@ -74,13 +74,19 @@ pub struct TronAccountResources {
 
 impl TronAccountResources {
     /// Remaining free bandwidth.
-    pub fn free_bandwidth_remaining(&self) -> i64 { (self.free_net_limit - self.free_net_used).max(0) }
+    pub fn free_bandwidth_remaining(&self) -> i64 {
+        (self.free_net_limit - self.free_net_used).max(0)
+    }
 
     /// Remaining staked bandwidth.
-    pub fn staked_bandwidth_remaining(&self) -> i64 { (self.net_limit - self.net_used).max(0) }
+    pub fn staked_bandwidth_remaining(&self) -> i64 {
+        (self.net_limit - self.net_used).max(0)
+    }
 
     /// Remaining energy.
-    pub fn energy_remaining(&self) -> i64 { (self.energy_limit - self.energy_used).max(0) }
+    pub fn energy_remaining(&self) -> i64 {
+        (self.energy_limit - self.energy_used).max(0)
+    }
 }
 
 // ---------------------------------------------------------------------------

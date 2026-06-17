@@ -31,15 +31,11 @@ struct PathFiller<Node: Hashable> {
 
 impl<Node: Hashable> PathFiller<Node> {
     fn empty() -> Self {
-        PathFiller {
-            queue: VecDeque::new(),
-        }
+        PathFiller { queue: VecDeque::new() }
     }
 
     fn next(&mut self, depth: usize) -> Node {
-        self.queue
-            .pop_front()
-            .unwrap_or_else(|| Node::empty_root(depth))
+        self.queue.pop_front().unwrap_or_else(|| Node::empty_root(depth))
     }
 }
 
@@ -71,11 +67,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
         let right = Optional::read(&mut reader, |r| Node::read(r))?;
         let parents = Vector::read(&mut reader, |r| Optional::read(r, |r| Node::read(r)))?;
 
-        Ok(CommitmentTree {
-            left,
-            right,
-            parents,
-        })
+        Ok(CommitmentTree { left, right, parents })
     }
 
     /// Serializes this tree as an array of bytes.
@@ -146,7 +138,7 @@ impl<Node: Hashable> CommitmentTree<Node> {
                         break;
                     }
                 }
-            }
+            },
         }
 
         Ok(())
@@ -170,18 +162,13 @@ impl<Node: Hashable> CommitmentTree<Node> {
 
         // 2) Hash in parents up to the currently-filled depth.
         //    - Roots of the empty subtrees are used as needed.
-        let mid_root = self
-            .parents
-            .iter()
-            .enumerate()
-            .fold(leaf_root, |root, (i, p)| match p {
-                Some(node) => Node::combine(i + 1, node, &root),
-                None => Node::combine(i + 1, &root, &filler.next(i + 1)),
-            });
+        let mid_root = self.parents.iter().enumerate().fold(leaf_root, |root, (i, p)| match p {
+            Some(node) => Node::combine(i + 1, node, &root),
+            None => Node::combine(i + 1, &root, &filler.next(i + 1)),
+        });
 
         // 3) Hash in roots of the empty subtrees up to the final depth.
-        ((self.parents.len() + 1)..depth)
-            .fold(mid_root, |root, d| Node::combine(d, &root, &filler.next(d)))
+        ((self.parents.len() + 1)..depth).fold(mid_root, |root, d| Node::combine(d, &root, &filler.next(d)))
     }
 }
 
@@ -322,9 +309,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
 
     fn append_inner(&mut self, node: Node, depth: usize) -> Result<(), ()> {
         if let Some(mut cursor) = self.cursor.take() {
-            cursor
-                .append_inner(node, depth)
-                .expect("cursor should not be full");
+            cursor.append_inner(node, depth).expect("cursor should not be full");
             if cursor.is_complete(self.cursor_depth) {
                 self.filled
                     .push(cursor.root_inner(self.cursor_depth, PathFiller::empty()));
@@ -342,9 +327,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
                 self.filled.push(node);
             } else {
                 let mut cursor = CommitmentTree::empty();
-                cursor
-                    .append_inner(node, depth)
-                    .expect("cursor should not be full");
+                cursor.append_inner(node, depth).expect("cursor should not be full");
                 self.cursor = Some(cursor);
             }
         }
@@ -407,10 +390,7 @@ pub struct MerklePath<Node: Hashable> {
 impl<Node: Hashable> MerklePath<Node> {
     /// Constructs a Merkle path directly from a path and position.
     pub fn from_path(auth_path: Vec<(Node, bool)>, position: u64) -> Self {
-        MerklePath {
-            auth_path,
-            position,
-        }
+        MerklePath { auth_path, position }
     }
 
     /// Reads a Merkle path from its serialized form.
@@ -469,10 +449,7 @@ impl<Node: Hashable> MerklePath<Node> {
         // have provided more information than they should have, indicating
         // a bug downstream
         if witness.is_empty() {
-            Ok(MerklePath {
-                auth_path,
-                position,
-            })
+            Ok(MerklePath { auth_path, position })
         } else {
             Err(())
         }
@@ -483,13 +460,10 @@ impl<Node: Hashable> MerklePath<Node> {
         self.auth_path
             .iter()
             .enumerate()
-            .fold(
-                leaf,
-                |root, (i, (p, leaf_is_on_right))| match leaf_is_on_right {
-                    false => Node::combine(i, &root, p),
-                    true => Node::combine(i, p, &root),
-                },
-            )
+            .fold(leaf, |root, (i, (p, leaf_is_on_right))| match leaf_is_on_right {
+                false => Node::combine(i, &root, p),
+                true => Node::combine(i, p, &root),
+            })
     }
 }
 
@@ -601,9 +575,7 @@ mod tests {
     fn empty_root_test_vectors() {
         let mut tmp = [0u8; 32];
         for (i, &expected) in HEX_EMPTY_ROOTS.iter().enumerate() {
-            Node::empty_root(i)
-                .write(&mut tmp[..])
-                .expect("length is 32 bytes");
+            Node::empty_root(i).write(&mut tmp[..]).expect("length is 32 bytes");
             assert_eq!(hex::encode(tmp), expected);
         }
     }
@@ -986,8 +958,7 @@ mod tests {
             assert_eq!(hex::encode(&tmp[..]), expected);
 
             // Check round-trip encoding
-            let decoded =
-                TestIncrementalWitness::read(&hex::decode(expected).unwrap()[..]).unwrap();
+            let decoded = TestIncrementalWitness::read(&hex::decode(expected).unwrap()[..]).unwrap();
             tmp.clear();
             decoded.write(&mut tmp).unwrap();
             assert_eq!(hex::encode(tmp), expected);
@@ -1026,11 +997,9 @@ mod tests {
 
                 if let Some(leaf) = leaf {
                     let path = witness.path().expect("should be able to create a path");
-                    let expected = MerklePath::from_slice_with_depth(
-                        &hex::decode(paths[paths_i]).unwrap(),
-                        TESTING_DEPTH,
-                    )
-                    .unwrap();
+                    let expected =
+                        MerklePath::from_slice_with_depth(&hex::decode(paths[paths_i]).unwrap(), TESTING_DEPTH)
+                            .unwrap();
                     assert_eq!(path, expected);
                     assert_eq!(path.root(*leaf), witness.root());
                     paths_i += 1;

@@ -49,8 +49,12 @@ pub struct TransactionOutputs {
 }
 
 impl TransactionOutputs {
-    pub fn len(&self) -> usize { self.outputs.len() }
-    pub fn is_empty(&self) -> bool { self.outputs.is_empty() }
+    pub fn len(&self) -> usize {
+        self.outputs.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
+    }
 }
 
 impl Serialize for TransactionOutputs {
@@ -126,7 +130,9 @@ pub struct TransactionOutputScript {
 }
 
 impl TransactionOutputScript {
-    pub fn is_empty(&self) -> bool { self.asm.is_empty() && self.hex.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.asm.is_empty() && self.hex.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -141,7 +147,9 @@ pub enum TransactionInputEnum {
 }
 
 impl TransactionInputEnum {
-    pub fn is_coinbase(&self) -> bool { matches!(self, TransactionInputEnum::Coinbase(_)) }
+    pub fn is_coinbase(&self) -> bool {
+        matches!(self, TransactionInputEnum::Coinbase(_))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -191,7 +199,9 @@ pub struct SignedTransactionOutput {
 }
 
 impl SignedTransactionOutput {
-    pub fn is_empty(&self) -> bool { self.value == Some(0.0) && self.script.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.value == Some(0.0) && self.script.is_empty()
+    }
 }
 
 /// Coerce JSON `null` into the type's `Default::default()` value during deserialization.
@@ -231,7 +241,9 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn is_coinbase(&self) -> bool { self.vin.iter().any(TransactionInputEnum::is_coinbase) }
+    pub fn is_coinbase(&self) -> bool {
+        self.vin.iter().any(TransactionInputEnum::is_coinbase)
+    }
 }
 
 /// Result of `getrawtransaction` — either the raw hex form or the verbose object.

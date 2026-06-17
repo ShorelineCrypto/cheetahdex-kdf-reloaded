@@ -39,7 +39,9 @@ pub(crate) struct WasmAccountStorage {
 }
 
 impl WasmAccountStorage {
-    pub fn new(ctx: &MmArc) -> Self { WasmAccountStorage { _ctx: ctx.clone() } }
+    pub fn new(ctx: &MmArc) -> Self {
+        WasmAccountStorage { _ctx: ctx.clone() }
+    }
 
     fn not_implemented<T>() -> AccountStorageResult<T> {
         MmError::err(AccountStorageError::Internal(STUB_MSG.to_string()))
@@ -59,7 +61,9 @@ impl AccountStorage for WasmAccountStorage {
         Self::not_implemented()
     }
 
-    async fn load_accounts(&self) -> AccountStorageResult<BTreeMap<AccountId, AccountInfo>> { Self::not_implemented() }
+    async fn load_accounts(&self) -> AccountStorageResult<BTreeMap<AccountId, AccountInfo>> {
+        Self::not_implemented()
+    }
 
     async fn load_accounts_with_enabled_flag(
         &self,
@@ -67,7 +71,9 @@ impl AccountStorage for WasmAccountStorage {
         Self::not_implemented()
     }
 
-    async fn load_enabled_account_id(&self) -> AccountStorageResult<EnabledAccountId> { Self::not_implemented() }
+    async fn load_enabled_account_id(&self) -> AccountStorageResult<EnabledAccountId> {
+        Self::not_implemented()
+    }
 
     async fn load_enabled_account_with_coins(&self) -> AccountStorageResult<AccountWithCoins> {
         Self::not_implemented()
@@ -77,9 +83,13 @@ impl AccountStorage for WasmAccountStorage {
         Self::not_implemented()
     }
 
-    async fn upload_account(&self, _account: AccountInfo) -> AccountStorageResult<()> { Self::not_implemented() }
+    async fn upload_account(&self, _account: AccountInfo) -> AccountStorageResult<()> {
+        Self::not_implemented()
+    }
 
-    async fn delete_account(&self, _account_id: AccountId) -> AccountStorageResult<()> { Self::not_implemented() }
+    async fn delete_account(&self, _account_id: AccountId) -> AccountStorageResult<()> {
+        Self::not_implemented()
+    }
 
     async fn set_name(&self, _account_id: AccountId, _name: String) -> AccountStorageResult<()> {
         Self::not_implemented()

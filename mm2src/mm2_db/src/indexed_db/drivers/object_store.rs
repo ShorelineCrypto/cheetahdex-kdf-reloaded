@@ -17,7 +17,9 @@ pub struct IdbObjectStoreImpl {
 }
 
 impl IdbObjectStoreImpl {
-    pub fn aborted(&self) -> bool { self.aborted.load(Ordering::Relaxed) }
+    pub fn aborted(&self) -> bool {
+        self.aborted.load(Ordering::Relaxed)
+    }
 
     pub async fn add_item(&self, item: &Json) -> DbTransactionResult<ItemId> {
         if self.aborted.load(Ordering::Relaxed) {

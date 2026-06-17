@@ -148,10 +148,7 @@ fn generate_pedersen_circuit_generators() -> Vec<Vec<Vec<(Scalar, Scalar)>>> {
 
                 // coeffs = g, g*2, g*3, g*4
                 for _ in 0..4 {
-                    coeffs.push(
-                        to_montgomery_coords(g.into())
-                            .expect("we never encounter the point at infinity"),
-                    );
+                    coeffs.push(to_montgomery_coords(g.into()).expect("we never encounter the point at infinity"));
                     g += gen;
                 }
                 windows.push(coeffs);
@@ -177,8 +174,7 @@ mod tests {
     fn edwards_d() {
         // d = -(10240/10241)
         assert_eq!(
-            -Scalar::from_str("10240").unwrap()
-                * Scalar::from_str("10241").unwrap().invert().unwrap(),
+            -Scalar::from_str("10240").unwrap() * Scalar::from_str("10241").unwrap().invert().unwrap(),
             EDWARDS_D
         );
     }

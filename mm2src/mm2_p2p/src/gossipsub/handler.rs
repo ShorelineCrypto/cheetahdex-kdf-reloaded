@@ -23,15 +23,18 @@ use super::protocol::{GossipsubCodec, ProtocolConfig};
 use futures::prelude::*;
 use futures_codec::Framed;
 use libp2p::core::upgrade::{InboundUpgrade, OutboundUpgrade};
-use libp2p::swarm::handler::{ConnectionHandler, ConnectionHandlerEvent, ConnectionHandlerUpgrErr, KeepAlive,
-                             SubstreamProtocol};
+use libp2p::swarm::handler::{
+    ConnectionHandler, ConnectionHandlerEvent, ConnectionHandlerUpgrErr, KeepAlive, SubstreamProtocol,
+};
 use libp2p::swarm::NegotiatedSubstream;
 use log::{debug, error, trace, warn};
 use smallvec::SmallVec;
-use std::{borrow::Cow,
-          io,
-          pin::Pin,
-          task::{Context, Poll}};
+use std::{
+    borrow::Cow,
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 /// Protocol Handler that manages a single long-lived substream with a peer.
 pub struct GossipsubHandler {
@@ -148,7 +151,9 @@ impl ConnectionHandler for GossipsubHandler {
         }
     }
 
-    fn inject_event(&mut self, message: GossipsubRpc) { self.send_queue.push(message); }
+    fn inject_event(&mut self, message: GossipsubRpc) {
+        self.send_queue.push(message);
+    }
 
     fn inject_dial_upgrade_error(
         &mut self,
@@ -161,7 +166,9 @@ impl ConnectionHandler for GossipsubHandler {
         // them.
     }
 
-    fn connection_keep_alive(&self) -> KeepAlive { self.keep_alive }
+    fn connection_keep_alive(&self) -> KeepAlive {
+        self.keep_alive
+    }
 
     #[allow(clippy::type_complexity)]
     fn poll(

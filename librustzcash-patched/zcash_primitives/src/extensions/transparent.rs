@@ -98,7 +98,7 @@ impl<E: fmt::Display> fmt::Display for Error<E> {
         match self {
             Error::InvalidExtensionId(extension_id) => {
                 write!(f, "Unrecognized program type id {}", extension_id)
-            }
+            },
 
             Error::ProgramError(err) => write!(f, "Program error: {}", err),
         }
@@ -134,12 +134,7 @@ pub trait Extension<C> {
     /// This is a convenience method intended for use by consensus nodes at the integration point
     /// to provide easy interoperation with the opaque, cross-extension `Precondition` and
     /// `Witness` types.
-    fn verify(
-        &self,
-        precondition: &Precondition,
-        witness: &Witness,
-        context: &C,
-    ) -> Result<(), Self::Error>
+    fn verify(&self, precondition: &Precondition, witness: &Witness, context: &C) -> Result<(), Self::Error>
     where
         Self::Precondition: FromPayload<Error = Self::Error>,
         Self::Witness: FromPayload<Error = Self::Error>,

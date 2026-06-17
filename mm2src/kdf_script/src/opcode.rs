@@ -247,12 +247,16 @@ impl Opcode {
     /// True for opcodes that count toward script-size limits in
     /// Bitcoin Core's interpreter (not used by us, kept for API
     /// parity with consumers that may inspect this).
-    pub fn is_countable(&self) -> bool { *self > Opcode::OP_16 }
+    pub fn is_countable(&self) -> bool {
+        *self > Opcode::OP_16
+    }
 
     /// True for opcodes that push raw bytes by length encoding alone
     /// (`OP_PUSHBYTES_1` through `OP_PUSHBYTES_75`); excludes
     /// `OP_PUSHDATA1/2/4`.
-    pub fn is_simple_push(&self) -> bool { *self < Opcode::OP_PUSHDATA1 }
+    pub fn is_simple_push(&self) -> bool {
+        *self < Opcode::OP_PUSHDATA1
+    }
 
     /// True for any opcode that pushes a numeric literal: -1, 0,
     /// 1..=16.
@@ -261,7 +265,9 @@ impl Opcode {
     }
 
     /// True for `OP_1`..=`OP_16`.
-    pub fn is_within_op_n(&self) -> bool { *self >= Opcode::OP_1 && *self <= Opcode::OP_16 }
+    pub fn is_within_op_n(&self) -> bool {
+        *self >= Opcode::OP_1 && *self <= Opcode::OP_16
+    }
 
     /// Decode `OP_1`..=`OP_16` to its numeric value 1..=16.
     /// Panics if called on any other opcode (caller must check
@@ -277,7 +283,9 @@ impl Opcode {
 }
 
 impl fmt::Display for Opcode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Debug::fmt(self, f) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
 mod bip32_child;
 mod bip44;
@@ -18,8 +19,10 @@ mod slip21;
 mod standard_hd_path;
 mod xpub;
 
-#[cfg(target_arch = "wasm32")] mod metamask_ctx;
-#[cfg(target_arch = "wasm32")] mod metamask_login;
+#[cfg(target_arch = "wasm32")]
+mod metamask_ctx;
+#[cfg(target_arch = "wasm32")]
+mod metamask_login;
 
 // Re-exports from bip32_child
 pub use bip32_child::{Bip32Child, Bip32DerPathError, Bip32DerPathOps, Bip44Tail};
@@ -28,8 +31,10 @@ pub use bip32_child::{Bip32Child, Bip32DerPathError, Bip32DerPathOps, Bip44Tail}
 pub use standard_hd_path::{Bip43Purpose, HDPathToAccount, HDPathToCoin, StandardHDPath, StandardHDPathError};
 
 // Backward-compatible re-exports from bip44 (old type names)
-pub use bip44::{Bip44Chain, Bip44DerPathError, Bip44DerivationPath, Bip44PathToAccount, Bip44PathToCoin,
-                UnkownBip44ChainError, BIP44_PURPOSE};
+pub use bip44::{
+    Bip44Chain, Bip44DerPathError, Bip44DerivationPath, Bip44PathToAccount, Bip44PathToCoin, UnkownBip44ChainError,
+    BIP44_PURPOSE,
+};
 
 // Re-exports from crypto_ctx
 #[cfg(target_arch = "wasm32")]
@@ -39,7 +44,8 @@ pub use crypto_ctx::{CryptoCtx, CryptoCtxError, CryptoInitError, CryptoInitResul
 // Re-exports from metamask_ctx (WASM only)
 #[cfg(target_arch = "wasm32")]
 pub use metamask_ctx::{MetamaskArc, MetamaskError, MetamaskResult, MetamaskWeak};
-#[cfg(target_arch = "wasm32")] pub use mm2_metamask as metamask;
+#[cfg(target_arch = "wasm32")]
+pub use mm2_metamask as metamask;
 
 // Re-exports from global_hd_ctx
 pub use global_hd_ctx::{derive_secp256k1_secret, GlobalHDAccountArc};
@@ -51,8 +57,9 @@ pub use mnemonic::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic, Encryp
 // Re-exports from hw_client
 pub use hw_client::TrezorConnectProcessor;
 pub use hw_client::{HwClient, HwError, HwProcessingError, HwResult, HwWalletType};
-pub use hw_common::primitives::{Bip32Error, ChildNumber, DerivationPath, EcdsaCurve, ExtendedPublicKey,
-                                Secp256k1ExtendedPublicKey, XPub};
+pub use hw_common::primitives::{
+    Bip32Error, ChildNumber, DerivationPath, EcdsaCurve, ExtendedPublicKey, Secp256k1ExtendedPublicKey, XPub,
+};
 pub use hw_ctx::{HardwareWalletArc, HardwareWalletCtx};
 
 // Re-exports from key_pair_ctx (backward compat — used by downstream crates)
@@ -83,11 +90,15 @@ pub(crate) fn mm2_internal_der_path() -> DerivationPath {
 pub struct RpcDerivationPath(pub DerivationPath);
 
 impl From<DerivationPath> for RpcDerivationPath {
-    fn from(der: DerivationPath) -> Self { RpcDerivationPath(der) }
+    fn from(der: DerivationPath) -> Self {
+        RpcDerivationPath(der)
+    }
 }
 
 impl From<RpcDerivationPath> for DerivationPath {
-    fn from(der: RpcDerivationPath) -> Self { der.0 }
+    fn from(der: RpcDerivationPath) -> Self {
+        der.0
+    }
 }
 
 impl Serialize for RpcDerivationPath {

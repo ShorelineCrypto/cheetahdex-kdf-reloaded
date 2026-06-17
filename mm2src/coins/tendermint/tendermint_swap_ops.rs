@@ -4,18 +4,23 @@
 //! Cosmos/Tendermint chains.  The `_for_denom` helpers are `pub(super)` so
 //! `TendermintToken` can reuse them with a different denom.
 
-use super::htlc::{ClaimHtlcMsg, ClaimHtlcProto, CreateHtlcMsg, CreateHtlcProto, HtlcType, HTLC_STATE_COMPLETED,
-                  HTLC_STATE_OPEN, HTLC_STATE_REFUNDED};
+use super::htlc::{
+    ClaimHtlcMsg, ClaimHtlcProto, CreateHtlcMsg, CreateHtlcProto, HtlcType, HTLC_STATE_COMPLETED, HTLC_STATE_OPEN,
+    HTLC_STATE_REFUNDED,
+};
 use super::rpc::*;
 use super::tendermint_helpers::TendermintCommons;
 use super::tendermint_types::*;
 use crate::utxo::sat_from_big_decimal;
-use crate::{DexFee, DexFeeBurnDestination, FoundSwapTxSpend, MarketCoinOps, NegotiateSwapContractAddrErr, SwapOps,
-            TransactionEnum, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput};
+use crate::{
+    DexFee, DexFeeBurnDestination, FoundSwapTxSpend, MarketCoinOps, NegotiateSwapContractAddrErr, SwapOps,
+    TransactionEnum, TransactionErr, TransactionFut, ValidateFeeArgs, ValidatePaymentInput,
+};
 use bigdecimal::BigDecimal;
 use common::{drop_mutability, now_ms};
-use cosmrs::proto::cosmos::bank::v1beta1::{Input as InputProto, MsgMultiSend as MsgMultiSendProto,
-                                           MsgSend as MsgSendProto, Output as OutputProto};
+use cosmrs::proto::cosmos::bank::v1beta1::{
+    Input as InputProto, MsgMultiSend as MsgMultiSendProto, MsgSend as MsgSendProto, Output as OutputProto,
+};
 use cosmrs::proto::cosmos::base::v1beta1::Coin as CoinProto;
 use cosmrs::proto::cosmos::tx::v1beta1::{TxBody, TxRaw};
 use cosmrs::proto::prost::Message;

@@ -33,7 +33,9 @@ fn from_inner_converts() {
 struct CustomError(String);
 
 impl fmt::Display for CustomError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "custom: {}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "custom: {}", self.0)
+    }
 }
 
 #[derive(Debug, PartialEq, EnumFromStringify)]

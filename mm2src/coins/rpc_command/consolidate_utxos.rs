@@ -6,11 +6,15 @@ use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use rpc::v1::types::ToTxHash;
 
-use crate::{lp_coinfind_or_err,
-            utxo::{output_script,
-                   utxo_common::{big_decimal_from_sat_unsigned, merge_utxos, MergeConditions, UtxoMergeError},
-                   UtxoCommonOps, UtxoFeeDetails},
-            CoinFindError, DerivationMethod, MmCoinEnum, Transaction, TransactionDetails};
+use crate::{
+    lp_coinfind_or_err,
+    utxo::{
+        output_script,
+        utxo_common::{big_decimal_from_sat_unsigned, merge_utxos, MergeConditions, UtxoMergeError},
+        UtxoCommonOps, UtxoFeeDetails,
+    },
+    CoinFindError, DerivationMethod, MmCoinEnum, Transaction, TransactionDetails,
+};
 use keys::Type as ScriptType;
 
 #[derive(Deserialize)]

@@ -1,11 +1,13 @@
 use crate::encoding::{Encodable, Encoder};
-use crate::transport::client::{error::ClientError, helpers::generic_errors::FundTxSingleSourceErrorGeneric,
-                               ApiClientHelpers, Client};
-use crate::types::{Address, ArbitraryData, Attestation, ChainIndex, Currency, CurrencyVersion, FileContractRevisionV2,
-                   Hash256, Keypair, Preimage, PublicKey, SatisfiedPolicy, SiacoinElement, SiacoinInputV2,
-                   SiacoinOutput, SiacoinOutputVersion, SiafundInputV2, SiafundOutput, SiafundOutputVersion,
-                   SpendPolicy, UnlockKey, UtxoWithBasis, V2FileContract, V2FileContractResolution, V2Transaction,
-                   V2_REPLAY_PREFIX};
+use crate::transport::client::{
+    error::ClientError, helpers::generic_errors::FundTxSingleSourceErrorGeneric, ApiClientHelpers, Client,
+};
+use crate::types::{
+    Address, ArbitraryData, Attestation, ChainIndex, Currency, CurrencyVersion, FileContractRevisionV2, Hash256,
+    Keypair, Preimage, PublicKey, SatisfiedPolicy, SiacoinElement, SiacoinInputV2, SiacoinOutput, SiacoinOutputVersion,
+    SiafundInputV2, SiafundOutput, SiafundOutputVersion, SpendPolicy, UnlockKey, UtxoWithBasis, V2FileContract,
+    V2FileContractResolution, V2Transaction, V2_REPLAY_PREFIX,
+};
 
 use thiserror::Error;
 
@@ -348,7 +350,9 @@ impl V2TransactionBuilder {
 }
 
 impl Default for V2TransactionBuilder {
-    fn default() -> Self { V2TransactionBuilder::new() }
+    fn default() -> Self {
+        V2TransactionBuilder::new()
+    }
 }
 
 /// FeePolicy is data optionally included in V2TransactionBuilder to allow easier fee calculation.

@@ -62,7 +62,9 @@ impl TryFrom<&NucleusCreateHtlcProto> for NucleusCreateHtlcMsg {
 }
 
 impl From<NucleusCreateHtlcMsg> for NucleusCreateHtlcProto {
-    fn from(coin: NucleusCreateHtlcMsg) -> NucleusCreateHtlcProto { NucleusCreateHtlcProto::from(&coin) }
+    fn from(coin: NucleusCreateHtlcMsg) -> NucleusCreateHtlcProto {
+        NucleusCreateHtlcProto::from(&coin)
+    }
 }
 
 impl From<&NucleusCreateHtlcMsg> for NucleusCreateHtlcProto {
@@ -118,7 +120,9 @@ impl TryFrom<&NucleusClaimHtlcProto> for NucleusClaimHtlcMsg {
 }
 
 impl From<NucleusClaimHtlcMsg> for NucleusClaimHtlcProto {
-    fn from(coin: NucleusClaimHtlcMsg) -> NucleusClaimHtlcProto { NucleusClaimHtlcProto::from(&coin) }
+    fn from(coin: NucleusClaimHtlcMsg) -> NucleusClaimHtlcProto {
+        NucleusClaimHtlcProto::from(&coin)
+    }
 }
 
 impl From<&NucleusClaimHtlcMsg> for NucleusClaimHtlcProto {

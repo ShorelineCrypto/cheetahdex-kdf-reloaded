@@ -49,15 +49,23 @@ impl Block {
         merkle_root(&hashes)
     }
 
-    pub fn transactions(&self) -> &[Transaction] { &self.transactions }
+    pub fn transactions(&self) -> &[Transaction] {
+        &self.transactions
+    }
 
-    pub fn header(&self) -> &BlockHeader { &self.block_header }
+    pub fn header(&self) -> &BlockHeader {
+        &self.block_header
+    }
 
-    pub fn hash(&self) -> H256 { self.block_header.hash() }
+    pub fn hash(&self) -> H256 {
+        self.block_header.hash()
+    }
 }
 
 impl RepresentH256 for Block {
-    fn h256(&self) -> H256 { self.hash() }
+    fn h256(&self) -> H256 {
+        self.hash()
+    }
 }
 
 impl From<&'static str> for Block {

@@ -29,10 +29,13 @@ mod tests {
 
         let deserialized: EventParam = serde_json::from_str(s).unwrap();
 
-        assert_eq!(deserialized, EventParam {
-            name: "foo".to_owned(),
-            kind: ParamType::Address,
-            indexed: true,
-        });
+        assert_eq!(
+            deserialized,
+            EventParam {
+                name: "foo".to_owned(),
+                kind: ParamType::Address,
+                indexed: true,
+            }
+        );
     }
 }

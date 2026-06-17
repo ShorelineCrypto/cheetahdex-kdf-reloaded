@@ -2,11 +2,17 @@
 use super::*;
 
 impl MarketCoinOps for LightningCoin {
-    fn ticker(&self) -> &str { &self.conf.ticker }
+    fn ticker(&self) -> &str {
+        &self.conf.ticker
+    }
 
-    fn my_address(&self) -> Result<String, String> { Ok(self.my_node_id()) }
+    fn my_address(&self) -> Result<String, String> {
+        Ok(self.my_node_id())
+    }
 
-    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> { unimplemented!() }
+    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
+        unimplemented!()
+    }
 
     fn sign_message_hash(&self, message: &str) -> Option<[u8; 32]> {
         let mut _message_prefix = self.conf.sign_message_prefix.clone()?;
@@ -56,7 +62,9 @@ impl MarketCoinOps for LightningCoin {
         Box::new(self.platform_coin().my_balance().map(|res| res.spendable))
     }
 
-    fn platform_ticker(&self) -> &str { self.platform_coin().ticker() }
+    fn platform_ticker(&self) -> &str {
+        self.platform_coin().ticker()
+    }
 
     fn send_raw_tx(&self, _tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
         Box::new(futures01::future::err(
@@ -100,9 +108,13 @@ impl MarketCoinOps for LightningCoin {
     }
 
     // Todo: Implement this when implementing swaps for lightning as it's is used mainly for swaps
-    fn tx_enum_from_bytes(&self, _bytes: &[u8]) -> Result<TransactionEnum, String> { unimplemented!() }
+    fn tx_enum_from_bytes(&self, _bytes: &[u8]) -> Result<TransactionEnum, String> {
+        unimplemented!()
+    }
 
-    fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> { Box::new(futures01::future::ok(0)) }
+    fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> {
+        Box::new(futures01::future::ok(0))
+    }
 
     fn display_priv_key(&self) -> Result<String, String> {
         Ok(self
@@ -113,8 +125,12 @@ impl MarketCoinOps for LightningCoin {
     }
 
     // Todo: Implement this when implementing swaps for lightning as it's is used only for swaps
-    fn min_tx_amount(&self) -> BigDecimal { unimplemented!() }
+    fn min_tx_amount(&self) -> BigDecimal {
+        unimplemented!()
+    }
 
     // Todo: Implement this when implementing swaps for lightning as it's is used only for order matching/swaps
-    fn min_trading_vol(&self) -> MmNumber { unimplemented!() }
+    fn min_trading_vol(&self) -> MmNumber {
+        unimplemented!()
+    }
 }

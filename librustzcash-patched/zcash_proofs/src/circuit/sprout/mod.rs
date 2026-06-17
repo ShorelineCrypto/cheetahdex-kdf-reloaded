@@ -81,11 +81,7 @@ impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
         let rt = witness_u256(cs.namespace(|| "rt"), self.rt.as_ref().map(|v| &v[..]))?;
 
         // Witness h_sig
-        let h_sig = witness_u256(
-            cs.namespace(|| "h_sig"),
-            self.h_sig.as_ref().map(|v| &v[..]),
-        )
-        .unwrap();
+        let h_sig = witness_u256(cs.namespace(|| "h_sig"), self.h_sig.as_ref().map(|v| &v[..])).unwrap();
 
         // Witness phi
         let phi = witness_u252(cs.namespace(|| "phi"), self.phi.as_ref().map(|v| &v[..]))?;
@@ -138,8 +134,7 @@ impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
         {
             // Expected sum of the left hand side of the balance
             // equation, expressed as a 64-bit unsigned integer
-            let lhs_total =
-                NoteValue::new(cs.namespace(|| "total value of left hand side"), lhs_total)?;
+            let lhs_total = NoteValue::new(cs.namespace(|| "total value of left hand side"), lhs_total)?;
 
             // Enforce that the left hand side can be expressed as a 64-bit
             // integer
@@ -184,12 +179,7 @@ impl<Scalar: PrimeField> Circuit<Scalar> for JoinSplit {
         }
 
         // Enforce that balance is equal
-        cs.enforce(
-            || "balance equation",
-            |_| lhs.clone(),
-            |lc| lc + CS::one(),
-            |_| rhs,
-        );
+        cs.enforce(|| "balance equation", |_| lhs.clone(), |lc| lc + CS::one(), |_| rhs);
 
         let mut public_inputs = vec![];
         public_inputs.extend(rt);
@@ -231,18 +221,15 @@ impl NoteValue {
                     values.push(Some(val & 1 == 1));
                     val >>= 1;
                 }
-            }
+            },
             None => {
                 values = vec![None; 64];
-            }
+            },
         }
 
         let mut bits = vec![];
         for (i, value) in values.into_iter().enumerate() {
-            bits.push(AllocatedBit::alloc(
-                cs.namespace(|| format!("bit {}", i)),
-                value,
-            )?);
+            bits.push(AllocatedBit::alloc(cs.namespace(|| format!("bit {}", i)), value)?);
         }
 
         Ok(NoteValue { value, bits })
@@ -453,12 +440,8 @@ fn test_sprout_constraints() {
         expected_inputs.extend(mac2.to_vec());
         expected_inputs.extend(cm1.to_vec());
         expected_inputs.extend(cm2.to_vec());
-        expected_inputs
-            .write_u64::<LittleEndian>(vpub_old.unwrap())
-            .unwrap();
-        expected_inputs
-            .write_u64::<LittleEndian>(vpub_new.unwrap())
-            .unwrap();
+        expected_inputs.write_u64::<LittleEndian>(vpub_old.unwrap()).unwrap();
+        expected_inputs.write_u64::<LittleEndian>(vpub_new.unwrap()).unwrap();
 
         use bellman::gadgets::multipack;
 

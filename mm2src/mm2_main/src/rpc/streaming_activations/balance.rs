@@ -27,7 +27,9 @@ pub struct EnableBalanceRequest {
     pub interval_secs: u64,
 }
 
-fn default_interval() -> u64 { 30 }
+fn default_interval() -> u64 {
+    30
+}
 
 /// The balance streamer for a single coin.
 pub struct BalanceEventStreamer {
@@ -50,7 +52,9 @@ impl BalanceEventStreamer {
 impl EventStreamer for BalanceEventStreamer {
     type DataInType = mm2_event_stream::NoDataIn;
 
-    fn streamer_id(&self) -> StreamerId { StreamerId::Balance(self.ticker.clone()) }
+    fn streamer_id(&self) -> StreamerId {
+        StreamerId::Balance(self.ticker.clone())
+    }
 
     async fn handle(
         self,

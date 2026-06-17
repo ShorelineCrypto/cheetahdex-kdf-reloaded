@@ -1,8 +1,12 @@
 use super::*;
 
-pub fn my_swaps_dir(ctx: &MmArc) -> PathBuf { ctx.dbdir().join("SWAPS").join("MY") }
+pub fn my_swaps_dir(ctx: &MmArc) -> PathBuf {
+    ctx.dbdir().join("SWAPS").join("MY")
+}
 
-pub fn my_swap_file_path(ctx: &MmArc, uuid: &Uuid) -> PathBuf { my_swaps_dir(ctx).join(format!("{}.json", uuid)) }
+pub fn my_swap_file_path(ctx: &MmArc, uuid: &Uuid) -> PathBuf {
+    my_swaps_dir(ctx).join(format!("{}.json", uuid))
+}
 
 pub async fn insert_new_swap_to_db(
     ctx: MmArc,
@@ -87,11 +91,15 @@ pub struct SwapError {
 }
 
 impl From<String> for SwapError {
-    fn from(error: String) -> Self { SwapError { error } }
+    fn from(error: String) -> Self {
+        SwapError { error }
+    }
 }
 
 impl From<&str> for SwapError {
-    fn from(e: &str) -> Self { SwapError { error: e.to_owned() } }
+    fn from(e: &str) -> Self {
+        SwapError { error: e.to_owned() }
+    }
 }
 
 #[derive(Serialize)]
@@ -619,7 +627,9 @@ mod lp_swap_tests {
     use super::*;
 
     /// Tests use the legacy mainnet netid 8762 fee parameters.
-    fn test_net_cfg() -> &'static dyn NetConfig { mm2_net_config::net_config_or_panic(8762) }
+    fn test_net_cfg() -> &'static dyn NetConfig {
+        mm2_net_config::net_config_or_panic(8762)
+    }
 
     #[test]
     fn test_dex_fee_amount() {

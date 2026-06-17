@@ -16,14 +16,18 @@ macro_rules! json_hash {
         pub struct $wire_name(pub [u8; $byte_count]);
 
         impl Default for $wire_name {
-            fn default() -> Self { Self([0u8; $byte_count]) }
+            fn default() -> Self {
+                Self([0u8; $byte_count])
+            }
         }
 
         impl<T> From<T> for $wire_name
         where
             $primitive: From<T>,
         {
-            fn from(value: T) -> Self { Self($primitive::from(value).take()) }
+            fn from(value: T) -> Self {
+                Self($primitive::from(value).take())
+            }
         }
 
         impl FromStr for $wire_name {
@@ -36,12 +40,16 @@ macro_rules! json_hash {
 
         #[allow(clippy::from_over_into)]
         impl Into<$primitive> for $wire_name {
-            fn into(self) -> $primitive { $primitive::from(self.0) }
+            fn into(self) -> $primitive {
+                $primitive::from(self.0)
+            }
         }
 
         #[allow(clippy::from_over_into)]
         impl Into<Vec<u8>> for $wire_name {
-            fn into(self) -> Vec<u8> { self.0.to_vec() }
+            fn into(self) -> Vec<u8> {
+                self.0.to_vec()
+            }
         }
 
         impl fmt::Debug for $wire_name {
@@ -61,17 +69,23 @@ macro_rules! json_hash {
         }
 
         impl PartialEq for $wire_name {
-            fn eq(&self, other: &Self) -> bool { self.0[..] == other.0[..] }
+            fn eq(&self, other: &Self) -> bool {
+                self.0[..] == other.0[..]
+            }
         }
 
         impl Eq for $wire_name {}
 
         impl Ord for $wire_name {
-            fn cmp(&self, other: &Self) -> Ordering { self.0[..].cmp(&other.0[..]) }
+            fn cmp(&self, other: &Self) -> Ordering {
+                self.0[..].cmp(&other.0[..])
+            }
         }
 
         impl PartialOrd for $wire_name {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
         }
 
         impl StdHash for $wire_name {

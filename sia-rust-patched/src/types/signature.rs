@@ -26,11 +26,15 @@ pub enum SignatureError {
 }
 
 impl Default for Signature {
-    fn default() -> Self { Signature(Ed25519Signature::try_from([0u8; 64]).expect("00'd signature is valid")) }
+    fn default() -> Self {
+        Signature(Ed25519Signature::try_from([0u8; 64]).expect("00'd signature is valid"))
+    }
 }
 
 impl fmt::Display for Signature {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", hex::encode(self.0.to_bytes())) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.0.to_bytes()))
+    }
 }
 
 impl Serialize for Signature {
@@ -62,7 +66,9 @@ impl SignatureTrait for Signature {
 
 // trait bound of signature_crate::Signature
 impl AsRef<[u8]> for Signature {
-    fn as_ref(&self) -> &[u8] { self.0.as_ref() }
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
 }
 
 impl TryFrom<&[u8]> for Signature {
@@ -83,11 +89,15 @@ impl TryFrom<&[u8]> for Signature {
 impl TryFrom<Vec<u8>> for Signature {
     type Error = SignatureError;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> { Signature::try_from(bytes.as_slice()) }
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        Signature::try_from(bytes.as_slice())
+    }
 }
 
 impl Signature {
-    pub fn to_bytes(&self) -> [u8; SIGNATURE_LENGTH] { self.0.to_bytes() }
+    pub fn to_bytes(&self) -> [u8; SIGNATURE_LENGTH] {
+        self.0.to_bytes()
+    }
 
     /// Check if R value is a valid point on the Ed25519 curve
     pub fn validate_r_point(&self) -> bool {
@@ -134,7 +144,9 @@ mod tests {
     const VALID_STR: &str = "f43380794a6384e3d24d9908143c05dd37aaac8959efb65d986feb70fe289a5e26b84e0ac712af01a2f85f8727da18aae13a599a51fb066d098591e40cb26902";
     const VALID_JSON_STR: &str = r#""f43380794a6384e3d24d9908143c05dd37aaac8959efb65d986feb70fe289a5e26b84e0ac712af01a2f85f8727da18aae13a599a51fb066d098591e40cb26902""#;
 
-    fn valid_signature() -> Signature { Signature::from_str(VALID_STR).unwrap() }
+    fn valid_signature() -> Signature {
+        Signature::from_str(VALID_STR).unwrap()
+    }
 
     cross_target_tests! {
         fn test_display() {

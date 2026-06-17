@@ -5,9 +5,10 @@
 
 use super::rpc::*;
 use super::tendermint_types::*;
-use crate::rpc_command::tendermint::staking::{ClaimRewardsPayload, Delegation, DelegationPayload,
-                                              DelegationsQueryResponse, Undelegation, UndelegationEntry,
-                                              UndelegationsQueryResponse, ValidatorStatus};
+use crate::rpc_command::tendermint::staking::{
+    ClaimRewardsPayload, Delegation, DelegationPayload, DelegationsQueryResponse, Undelegation, UndelegationEntry,
+    UndelegationsQueryResponse, ValidatorStatus,
+};
 use crate::utxo::sat_from_big_decimal;
 use crate::utxo::utxo_common::big_decimal_from_sat_unsigned;
 use crate::{DelegationError, MarketCoinOps, TransactionDetails, TransactionType, TxFeeDetails};
@@ -16,11 +17,12 @@ use common::PagingOptions;
 use cosmrs::distribution::MsgWithdrawDelegatorReward;
 use cosmrs::proto::cosmos::base::query::v1beta1::PageRequest;
 use cosmrs::proto::cosmos::distribution::v1beta1::{QueryDelegationRewardsRequest, QueryDelegationRewardsResponse};
-use cosmrs::proto::cosmos::staking::v1beta1::{QueryDelegationRequest, QueryDelegationResponse,
-                                              QueryDelegatorDelegationsRequest, QueryDelegatorDelegationsResponse,
-                                              QueryDelegatorUnbondingDelegationsRequest,
-                                              QueryDelegatorUnbondingDelegationsResponse, QueryValidatorsRequest,
-                                              QueryValidatorsResponse as QueryValidatorsResponseProto};
+use cosmrs::proto::cosmos::staking::v1beta1::{
+    QueryDelegationRequest, QueryDelegationResponse, QueryDelegatorDelegationsRequest,
+    QueryDelegatorDelegationsResponse, QueryDelegatorUnbondingDelegationsRequest,
+    QueryDelegatorUnbondingDelegationsResponse, QueryValidatorsRequest,
+    QueryValidatorsResponse as QueryValidatorsResponseProto,
+};
 use cosmrs::proto::prost::Message;
 use cosmrs::staking::{MsgDelegate, MsgUndelegate, QueryValidatorsResponse, Validator};
 use cosmrs::tx::Msg;

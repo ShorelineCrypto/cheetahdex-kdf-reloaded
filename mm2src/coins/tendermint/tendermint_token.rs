@@ -8,13 +8,15 @@ use super::tendermint_helpers::TendermintCommons;
 use super::tendermint_types::*;
 use crate::utxo::sat_from_big_decimal;
 use crate::utxo::utxo_common::{big_decimal_from_sat, big_decimal_from_sat_unsigned};
-use crate::{BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps,
-            MmCoin, NegotiateSwapContractAddrErr, RawTransactionError, RawTransactionFut, RawTransactionRequest,
-            RawTransactionRes, SignRawTransactionRequest, SignatureError, SignatureResult, SwapOps, TradeFee,
-            TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionDetails,
-            TransactionEnum, TransactionErr, TransactionFut, TransactionType, TxFeeDetails,
-            UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
-            VerificationError, VerificationResult, WatcherOps, WithdrawError, WithdrawFut, WithdrawRequest};
+use crate::{
+    BalanceFut, CoinBalance, DexFee, FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
+    NegotiateSwapContractAddrErr, RawTransactionError, RawTransactionFut, RawTransactionRequest, RawTransactionRes,
+    SignRawTransactionRequest, SignatureError, SignatureResult, SwapOps, TradeFee, TradePreimageError,
+    TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionDetails, TransactionEnum, TransactionErr,
+    TransactionFut, TransactionType, TxFeeDetails, UnexpectedDerivationMethod, ValidateAddressResult, ValidateFeeArgs,
+    ValidatePaymentInput, VerificationError, VerificationResult, WatcherOps, WithdrawError, WithdrawFut,
+    WithdrawRequest,
+};
 use bigdecimal::BigDecimal;
 use common::mm_number::MmNumber;
 use common::now_ms;
@@ -71,11 +73,15 @@ pub struct TendermintToken(pub Arc<TendermintTokenImpl>);
 
 impl Deref for TendermintToken {
     type Target = TendermintTokenImpl;
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl std::fmt::Debug for TendermintToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "TendermintToken({})", self.ticker) }
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "TendermintToken({})", self.ticker)
+    }
 }
 
 impl TendermintToken {
@@ -310,7 +316,9 @@ impl SwapOps for TendermintToken {
         self.platform_coin.negotiate_swap_contract_addr(other_side_address)
     }
 
-    fn get_htlc_key_pair(&self) -> Option<KeyPair> { self.platform_coin.get_htlc_key_pair() }
+    fn get_htlc_key_pair(&self) -> Option<KeyPair> {
+        self.platform_coin.get_htlc_key_pair()
+    }
 }
 
 // ————————————————————————————————————————————————————————————————
@@ -324,17 +332,25 @@ impl WatcherOps for TendermintToken {}
 // ————————————————————————————————————————————————————————————————
 
 impl MarketCoinOps for TendermintToken {
-    fn ticker(&self) -> &str { &self.ticker }
+    fn ticker(&self) -> &str {
+        &self.ticker
+    }
 
-    fn my_address(&self) -> Result<String, String> { self.platform_coin.my_address() }
+    fn my_address(&self) -> Result<String, String> {
+        self.platform_coin.my_address()
+    }
 
     fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
         self.platform_coin.get_public_key()
     }
 
-    fn sign_message_hash(&self, message: &str) -> Option<[u8; 32]> { self.platform_coin.sign_message_hash(message) }
+    fn sign_message_hash(&self, message: &str) -> Option<[u8; 32]> {
+        self.platform_coin.sign_message_hash(message)
+    }
 
-    fn sign_message(&self, message: &str) -> SignatureResult<String> { self.platform_coin.sign_message(message) }
+    fn sign_message(&self, message: &str) -> SignatureResult<String> {
+        self.platform_coin.sign_message(message)
+    }
 
     fn verify_message(&self, signature: &str, message: &str, address: &str) -> VerificationResult<bool> {
         self.platform_coin.verify_message(signature, message, address)
@@ -356,9 +372,13 @@ impl MarketCoinOps for TendermintToken {
         Box::new(fut.boxed().compat())
     }
 
-    fn base_coin_balance(&self) -> BalanceFut<BigDecimal> { self.platform_coin.base_coin_balance() }
+    fn base_coin_balance(&self) -> BalanceFut<BigDecimal> {
+        self.platform_coin.base_coin_balance()
+    }
 
-    fn platform_ticker(&self) -> &str { self.platform_coin.ticker() }
+    fn platform_ticker(&self) -> &str {
+        self.platform_coin.ticker()
+    }
 
     fn send_raw_tx(&self, tx: &str) -> Box<dyn futures01::Future<Item = String, Error = String> + Send> {
         self.platform_coin.send_raw_tx(tx)
@@ -399,13 +419,19 @@ impl MarketCoinOps for TendermintToken {
         self.platform_coin.current_block()
     }
 
-    fn display_priv_key(&self) -> Result<String, String> { self.platform_coin.display_priv_key() }
+    fn display_priv_key(&self) -> Result<String, String> {
+        self.platform_coin.display_priv_key()
+    }
 
     #[inline]
-    fn min_tx_amount(&self) -> BigDecimal { big_decimal_from_sat(MIN_TX_SATOSHIS, self.decimals) }
+    fn min_tx_amount(&self) -> BigDecimal {
+        big_decimal_from_sat(MIN_TX_SATOSHIS, self.decimals)
+    }
 
     #[inline]
-    fn min_trading_vol(&self) -> MmNumber { self.min_tx_amount().into() }
+    fn min_trading_vol(&self) -> MmNumber {
+        self.min_tx_amount().into()
+    }
 
     fn sign_raw_tx(&self, _args: &SignRawTransactionRequest) -> crate::RawTransactionFut {
         let coin = self.ticker().to_string();
@@ -422,7 +448,9 @@ impl MarketCoinOps for TendermintToken {
 #[async_trait::async_trait]
 #[allow(unused_variables)]
 impl MmCoin for TendermintToken {
-    fn is_asset_chain(&self) -> bool { false }
+    fn is_asset_chain(&self) -> bool {
+        false
+    }
 
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         // Token withdraw: constructs a MsgSend in the token's denom,
@@ -573,20 +601,26 @@ impl MmCoin for TendermintToken {
         self.platform_coin.get_raw_transaction(req)
     }
 
-    fn decimals(&self) -> u8 { self.decimals }
+    fn decimals(&self) -> u8 {
+        self.decimals
+    }
 
     fn convert_to_address(&self, from: &str, to_address_format: Json) -> Result<String, String> {
         self.platform_coin.convert_to_address(from, to_address_format)
     }
 
-    fn validate_address(&self, address: &str) -> ValidateAddressResult { self.platform_coin.validate_address(address) }
+    fn validate_address(&self, address: &str) -> ValidateAddressResult {
+        self.platform_coin.validate_address(address)
+    }
 
     fn process_history_loop(&self, _ctx: MmArc) -> Box<dyn futures01::Future<Item = (), Error = ()> + Send> {
         common::log::warn!("process_history_loop is deprecated for TendermintToken");
         Box::new(futures01::future::err(()))
     }
 
-    fn history_sync_status(&self) -> HistorySyncState { self.platform_coin.history_sync_status() }
+    fn history_sync_status(&self) -> HistorySyncState {
+        self.platform_coin.history_sync_status()
+    }
 
     fn get_trade_fee(&self) -> Box<dyn futures01::Future<Item = TradeFee, Error = String> + Send> {
         self.platform_coin.get_trade_fee()
@@ -619,9 +653,13 @@ impl MmCoin for TendermintToken {
             .await
     }
 
-    fn required_confirmations(&self) -> u64 { self.platform_coin.required_confirmations() }
+    fn required_confirmations(&self) -> u64 {
+        self.platform_coin.required_confirmations()
+    }
 
-    fn requires_notarization(&self) -> bool { self.platform_coin.requires_notarization() }
+    fn requires_notarization(&self) -> bool {
+        self.platform_coin.requires_notarization()
+    }
 
     fn set_required_confirmations(&self, _confirmations: u64) {
         common::log::warn!("set_required_confirmations is not supported for TendermintToken");
@@ -631,11 +669,19 @@ impl MmCoin for TendermintToken {
         self.platform_coin.set_requires_notarization(requires_nota)
     }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> { None }
+    fn swap_contract_address(&self) -> Option<BytesJson> {
+        None
+    }
 
-    fn mature_confirmations(&self) -> Option<u32> { None }
+    fn mature_confirmations(&self) -> Option<u32> {
+        None
+    }
 
-    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
+    fn coin_protocol_info(&self) -> Vec<u8> {
+        Vec::new()
+    }
 
-    fn is_coin_protocol_supported(&self, info: &Option<Vec<u8>>) -> bool { true }
+    fn is_coin_protocol_supported(&self, info: &Option<Vec<u8>>) -> bool {
+        true
+    }
 }

@@ -42,9 +42,13 @@ impl FeePerGasSimpleEstimator {
     const ADJUST_BASE_FEE: [f64; FEE_PRIORITY_LEVEL_N] = [1.1, 1.175, 1.25];
     const ADJUST_PRIORITY_FEE: [f64; FEE_PRIORITY_LEVEL_N] = [1.0, 1.0, 1.0];
 
-    pub fn history_depth() -> u64 { Self::FEE_PRIORITY_DEPTH }
+    pub fn history_depth() -> u64 {
+        Self::FEE_PRIORITY_DEPTH
+    }
 
-    pub fn history_percentiles() -> &'static [f64] { &Self::HISTORY_PERCENTILES }
+    pub fn history_percentiles() -> &'static [f64] {
+        &Self::HISTORY_PERCENTILES
+    }
 
     fn percentile_of(v: &[U256], percent: f64) -> U256 {
         let mut v_mut = v.to_owned();
@@ -71,7 +75,9 @@ impl FeePerGasSimpleEstimator {
         }
     }
 
-    fn predict_base_fee(base_fees: &[U256]) -> U256 { Self::percentile_of(base_fees, Self::BASE_FEE_PERCENTILE) }
+    fn predict_base_fee(base_fees: &[U256]) -> U256 {
+        Self::percentile_of(base_fees, Self::BASE_FEE_PERCENTILE)
+    }
 
     fn priority_fee_for_level(
         level: PriorityLevelId,

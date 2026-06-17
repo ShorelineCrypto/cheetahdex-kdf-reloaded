@@ -1,6 +1,8 @@
 // crd:pin-begin
-use crate::account::{AccountId, AccountInfo, AccountType, AccountWithCoins, AccountWithEnabledFlag, EnabledAccountId,
-                     EnabledAccountType, HwPubkey};
+use crate::account::{
+    AccountId, AccountInfo, AccountType, AccountWithCoins, AccountWithEnabledFlag, EnabledAccountId,
+    EnabledAccountType, HwPubkey,
+};
 // crd:pin-end
 use async_trait::async_trait;
 use derive_more::Display;
@@ -11,13 +13,16 @@ use rpc::v1::types::H160 as H160Json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error as StdError;
 
-#[cfg(test)] mod account_storage_tests;
+#[cfg(test)]
+mod account_storage_tests;
 // On the browser target the suite is meant to exercise the IndexedDB backend
 // via `wasm-bindgen-test`. That backend is still a stub (D2), so wiring the
 // tests into `wasm32` is postponed until the real port lands; for now they are
 // compiled for native only.
-#[cfg(not(target_arch = "wasm32"))] mod sqlite_storage;
-#[cfg(target_arch = "wasm32")] mod wasm_storage;
+#[cfg(not(target_arch = "wasm32"))]
+mod sqlite_storage;
+#[cfg(target_arch = "wasm32")]
+mod wasm_storage;
 
 /// Sentinel `account_idx` used by variants that do not carry an HD index.
 const DEFAULT_ACCOUNT_IDX: u32 = 0; // crd:pin
@@ -147,7 +152,9 @@ pub(crate) struct AccountStorageBuilder<'a> {
 }
 
 impl<'a> AccountStorageBuilder<'a> {
-    pub fn new(ctx: &'a MmArc) -> Self { AccountStorageBuilder { ctx } }
+    pub fn new(ctx: &'a MmArc) -> Self {
+        AccountStorageBuilder { ctx }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn build(self) -> AccountStorageResult<AccountStorageBoxed> {

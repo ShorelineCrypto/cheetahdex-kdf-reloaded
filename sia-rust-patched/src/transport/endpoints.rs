@@ -1,6 +1,8 @@
 use crate::transport::client::{Body, EndpointSchema, EndpointSchemaBuilder, SchemaMethod};
-use crate::types::{Address, ApiApplyUpdate, BlockId, ChainIndex, Currency, Event, Hash256, SiacoinElement,
-                   SiacoinOutputId, V1Transaction, V2Transaction};
+use crate::types::{
+    Address, ApiApplyUpdate, BlockId, ChainIndex, Currency, Event, Hash256, SiacoinElement, SiacoinOutputId,
+    V1Transaction, V2Transaction,
+};
 use crate::utils::deserialize_null_as_empty_vec;
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
@@ -31,7 +33,9 @@ pub trait SiaApiRequest: Send {
     type Response: DeserializeOwned;
 
     // Applicable for requests that return HTTP 204 No Content
-    fn is_empty_response() -> Option<Self::Response> { None }
+    fn is_empty_response() -> Option<Self::Response> {
+        None
+    }
 
     fn to_endpoint_schema(&self) -> Result<EndpointSchema, SiaApiRequestError>;
 }
@@ -599,7 +603,9 @@ pub struct DebugMineRequest {
 impl SiaApiRequest for DebugMineRequest {
     type Response = EmptyResponse;
 
-    fn is_empty_response() -> Option<Self::Response> { Some(EmptyResponse) }
+    fn is_empty_response() -> Option<Self::Response> {
+        Some(EmptyResponse)
+    }
 
     fn to_endpoint_schema(&self) -> Result<EndpointSchema, SiaApiRequestError> {
         // Serialize the request into a JSON string

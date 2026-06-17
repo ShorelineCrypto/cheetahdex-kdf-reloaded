@@ -7,9 +7,11 @@ use mm2_net::transport::SlurpError;
 use mm2_net::wasm_http::FetchRequest;
 use std::str::FromStr;
 use tendermint_rpc::endpoint::{abci_info, broadcast};
-pub use tendermint_rpc::endpoint::{abci_query::{AbciQuery, Request as AbciRequest},
-                                   health::Request as HealthRequest,
-                                   tx_search::Request as TxSearchRequest};
+pub use tendermint_rpc::endpoint::{
+    abci_query::{AbciQuery, Request as AbciRequest},
+    health::Request as HealthRequest,
+    tx_search::Request as TxSearchRequest,
+};
 use tendermint_rpc::error::Error as TendermintRpcError;
 use tendermint_rpc::request::SimpleRequest;
 pub use tendermint_rpc::Order;
@@ -29,7 +31,9 @@ pub(crate) enum HttpClientInitError {
 }
 
 impl From<InvalidUri> for HttpClientInitError {
-    fn from(err: InvalidUri) -> Self { HttpClientInitError::InvalidUri(err) }
+    fn from(err: InvalidUri) -> Self {
+        HttpClientInitError::InvalidUri(err)
+    }
 }
 
 #[derive(Debug, Display)]
@@ -45,11 +49,15 @@ pub enum PerformError {
 }
 
 impl From<SlurpError> for PerformError {
-    fn from(err: SlurpError) -> Self { PerformError::Slurp(err) }
+    fn from(err: SlurpError) -> Self {
+        PerformError::Slurp(err)
+    }
 }
 
 impl From<TendermintRpcError> for PerformError {
-    fn from(err: TendermintRpcError) -> Self { PerformError::TendermintRpc(err) }
+    fn from(err: TendermintRpcError) -> Self {
+        PerformError::TendermintRpc(err)
+    }
 }
 
 impl HttpClient {
@@ -59,7 +67,9 @@ impl HttpClient {
     }
 
     #[inline]
-    pub fn uri(&self) -> http::Uri { Uri::from_str(&self.uri).expect("This should never happen.") }
+    pub fn uri(&self) -> http::Uri {
+        Uri::from_str(&self.uri).expect("This should never happen.")
+    }
 
     pub(crate) async fn perform<R>(&self, request: R) -> Result<R::Output, PerformError>
     where

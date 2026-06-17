@@ -14,7 +14,9 @@ use std::str::FromStr;
 pub struct UnknownChain(pub String);
 
 impl fmt::Display for UnknownChain {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "unrecognised chain identifier: {}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unrecognised chain identifier: {}", self.0)
+    }
 }
 
 impl std::error::Error for UnknownChain {}
@@ -48,11 +50,15 @@ impl WcChain {
 }
 
 impl AsRef<str> for WcChain {
-    fn as_ref(&self) -> &str { self.token() }
+    fn as_ref(&self) -> &str {
+        self.token()
+    }
 }
 
 impl fmt::Display for WcChain {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.token()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.token())
+    }
 }
 
 impl FromStr for WcChain {
@@ -77,13 +83,19 @@ pub struct WcChainId {
 }
 
 impl WcChainId {
-    fn of(chain: WcChain, id: String) -> Self { Self { chain, id } }
+    fn of(chain: WcChain, id: String) -> Self {
+        Self { chain, id }
+    }
 
     /// Build an `eip155:<id>` identifier.
-    pub fn new_eip155(id: String) -> Self { Self::of(WcChain::Eip155, id) }
+    pub fn new_eip155(id: String) -> Self {
+        Self::of(WcChain::Eip155, id)
+    }
 
     /// Build a `cosmos:<id>` identifier.
-    pub fn new_cosmos(id: String) -> Self { Self::of(WcChain::Cosmos, id) }
+    pub fn new_cosmos(id: String) -> Self {
+        Self::of(WcChain::Cosmos, id)
+    }
 
     /// Parse a `<namespace>:<reference>` CAIP-2 string. The string must contain
     /// exactly one colon separating a recognised namespace from a non-empty
@@ -99,7 +111,9 @@ impl WcChainId {
 }
 
 impl fmt::Display for WcChainId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}:{}", self.chain.as_ref(), self.id) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.chain.as_ref(), self.id)
+    }
 }
 
 /// The JSON-RPC method names the subsystem may issue inside a session request,
@@ -149,9 +163,13 @@ impl WcRequestMethods {
 }
 
 impl AsRef<str> for WcRequestMethods {
-    fn as_ref(&self) -> &str { self.wire() }
+    fn as_ref(&self) -> &str {
+        self.wire()
+    }
 }
 
 impl fmt::Display for WcRequestMethods {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.wire()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.wire())
+    }
 }

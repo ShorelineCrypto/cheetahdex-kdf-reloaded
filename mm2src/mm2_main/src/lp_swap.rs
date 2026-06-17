@@ -57,14 +57,18 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee,
-            TransactionEnum};
+use coins::{
+    lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee,
+    TransactionEnum,
+};
 use common::log::{debug, warn};
-use common::{bits256, calc_total_pages,
-             executor::{spawn, Timer},
-             log::{error, info},
-             mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
-             now_ms, var, HttpStatusCode, PagingOptions};
+use common::{
+    bits256, calc_total_pages,
+    executor::{spawn, Timer},
+    log::{error, info},
+    mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
+    now_ms, var, HttpStatusCode, PagingOptions,
+};
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
 use http::{Response, StatusCode};
@@ -90,31 +94,49 @@ use uuid::Uuid;
 #[cfg(feature = "custom-swap-locktime")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[path = "lp_swap/check_balance.rs"] mod check_balance;
-#[path = "lp_swap/dex_fee.rs"] mod dex_fee;
+#[path = "lp_swap/check_balance.rs"]
+mod check_balance;
+#[path = "lp_swap/dex_fee.rs"]
+mod dex_fee;
 pub use dex_fee::{compute_dex_fee, dex_fee_amount, dex_fee_amount_from_taker_coin};
 pub(crate) use dex_fee::{dex_fee_rate, dex_fee_threshold};
-#[path = "lp_swap/maker_swap.rs"] mod maker_swap;
-#[path = "lp_swap/maker_swap_v2.rs"] pub mod maker_swap_v2;
-#[path = "lp_swap/max_maker_vol_rpc.rs"] mod max_maker_vol_rpc;
-#[path = "lp_swap/my_swaps_storage.rs"] mod my_swaps_storage;
-#[path = "lp_swap/pubkey_banning.rs"] mod pubkey_banning;
-#[path = "lp_swap/recreate_swap_data.rs"] mod recreate_swap_data;
-#[path = "lp_swap/saved_swap.rs"] mod saved_swap;
-#[path = "lp_swap/swap_events.rs"] pub(crate) mod swap_events;
-#[path = "lp_swap/swap_lock.rs"] mod swap_lock;
+#[path = "lp_swap/maker_swap.rs"]
+mod maker_swap;
+#[path = "lp_swap/maker_swap_v2.rs"]
+pub mod maker_swap_v2;
+#[path = "lp_swap/max_maker_vol_rpc.rs"]
+mod max_maker_vol_rpc;
+#[path = "lp_swap/my_swaps_storage.rs"]
+mod my_swaps_storage;
+#[path = "lp_swap/pubkey_banning.rs"]
+mod pubkey_banning;
+#[path = "lp_swap/recreate_swap_data.rs"]
+mod recreate_swap_data;
+#[path = "lp_swap/saved_swap.rs"]
+mod saved_swap;
+#[path = "lp_swap/swap_events.rs"]
+pub(crate) mod swap_events;
+#[path = "lp_swap/swap_lock.rs"]
+mod swap_lock;
 #[path = "lp_swap/mm2_swap_v2.pb.rs"]
 #[rustfmt::skip]
 mod swap_v2_pb;
 #[path = "lp_swap/nft_maker_swap_v2.rs"]
 pub mod nft_maker_swap_v2;
-#[path = "lp_swap/swap_v2_common.rs"] pub mod swap_v2_common;
-#[path = "lp_swap/swap_v2_rpcs.rs"] pub(crate) mod swap_v2_rpcs;
-#[path = "lp_swap/swap_versioning.rs"] pub mod swap_versioning;
-#[path = "lp_swap/swap_watcher.rs"] pub mod swap_watcher;
-#[path = "lp_swap/taker_swap.rs"] mod taker_swap;
-#[path = "lp_swap/taker_swap_v2.rs"] pub mod taker_swap_v2;
-#[path = "lp_swap/trade_preimage.rs"] mod trade_preimage;
+#[path = "lp_swap/swap_v2_common.rs"]
+pub mod swap_v2_common;
+#[path = "lp_swap/swap_v2_rpcs.rs"]
+pub(crate) mod swap_v2_rpcs;
+#[path = "lp_swap/swap_versioning.rs"]
+pub mod swap_versioning;
+#[path = "lp_swap/swap_watcher.rs"]
+pub mod swap_watcher;
+#[path = "lp_swap/taker_swap.rs"]
+mod taker_swap;
+#[path = "lp_swap/taker_swap_v2.rs"]
+pub mod taker_swap_v2;
+#[path = "lp_swap/trade_preimage.rs"]
+mod trade_preimage;
 
 #[cfg(target_arch = "wasm32")]
 #[path = "lp_swap/swap_wasm_db.rs"]
@@ -123,15 +145,18 @@ mod swap_wasm_db;
 #[allow(unused_imports)]
 pub use check_balance::{check_other_coin_balance_for_swap, CheckBalanceError};
 
-#[path = "lp_swap/swap_msg.rs"] mod swap_msg;
+#[path = "lp_swap/swap_msg.rs"]
+mod swap_msg;
 pub use swap_msg::*;
 
-#[path = "lp_swap/swap_rpc.rs"] mod swap_rpc;
+#[path = "lp_swap/swap_rpc.rs"]
+mod swap_rpc;
 use keys::{KeyPair, SECP_SIGN, SECP_VERIFY};
 use maker_swap::MakerSwapEvent;
-pub use maker_swap::{calc_max_maker_vol, check_balance_for_maker_swap, maker_swap_trade_preimage, run_maker_swap,
-                     MakerSavedEvent, MakerSavedSwap, MakerSwap, MakerSwapStatusChanged, MakerTradePreimage,
-                     RunMakerSwapInput};
+pub use maker_swap::{
+    calc_max_maker_vol, check_balance_for_maker_swap, maker_swap_trade_preimage, run_maker_swap, MakerSavedEvent,
+    MakerSavedSwap, MakerSwap, MakerSwapStatusChanged, MakerTradePreimage, RunMakerSwapInput,
+};
 pub use max_maker_vol_rpc::max_maker_vol;
 use my_swaps_storage::{MySwapsOps, MySwapsStorage};
 use pubkey_banning::BanReason;
@@ -145,9 +170,11 @@ pub use swap_rpc::*;
 pub use swap_watcher::{process_watcher_msg, watcher_topic, SwapWatcherMsg, TakerSwapWatcherData, WATCHER_PREFIX};
 use taker_swap::TakerSwapEvent;
 #[allow(unused_imports)]
-pub use taker_swap::{calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available,
-                     run_taker_swap, taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap,
-                     TakerSwapPreparedParams, TakerTradePreimage};
+pub use taker_swap::{
+    calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available, run_taker_swap,
+    taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap, TakerSwapPreparedParams,
+    TakerTradePreimage,
+};
 pub use trade_preimage::trade_preimage_rpc;
 
 pub const SWAP_PREFIX: TopicPrefix = "swap";
@@ -274,11 +301,15 @@ pub enum SwapEvent {
 }
 
 impl From<MakerSwapEvent> for SwapEvent {
-    fn from(maker_event: MakerSwapEvent) -> Self { SwapEvent::Maker(maker_event) }
+    fn from(maker_event: MakerSwapEvent) -> Self {
+        SwapEvent::Maker(maker_event)
+    }
 }
 
 impl From<TakerSwapEvent> for SwapEvent {
-    fn from(taker_event: TakerSwapEvent) -> Self { SwapEvent::Taker(taker_event) }
+    fn from(taker_event: TakerSwapEvent) -> Self {
+        SwapEvent::Taker(taker_event)
+    }
 }
 
 /// V2 swap locked amount information, keyed by coin ticker in SwapsContext.
@@ -385,10 +416,14 @@ impl SwapsContext {
     }
 
     /// Remove the V2 message store for a finished swap.
-    pub fn remove_v2_msg_store(&self, uuid: &Uuid) { self.swap_v2_msgs.lock().unwrap().remove(uuid); }
+    pub fn remove_v2_msg_store(&self, uuid: &Uuid) {
+        self.swap_v2_msgs.lock().unwrap().remove(uuid);
+    }
 
     /// Register an active V2 swap for RPC queries.
-    pub fn add_active_swap_v2(&self, info: ActiveSwapV2Info) { self.active_swaps_v2.lock().unwrap().push(info); }
+    pub fn add_active_swap_v2(&self, info: ActiveSwapV2Info) {
+        self.active_swaps_v2.lock().unwrap().push(info);
+    }
 
     /// Remove an active V2 swap by UUID.
     pub fn remove_active_swap_v2(&self, uuid: &Uuid) {
@@ -396,10 +431,14 @@ impl SwapsContext {
     }
 
     /// Return a snapshot of currently active V2 swaps.
-    pub fn active_swaps_v2_snapshot(&self) -> Vec<ActiveSwapV2Info> { self.active_swaps_v2.lock().unwrap().clone() }
+    pub fn active_swaps_v2_snapshot(&self) -> Vec<ActiveSwapV2Info> {
+        self.active_swaps_v2.lock().unwrap().clone()
+    }
 
     #[cfg(target_arch = "wasm32")]
-    pub async fn swap_db(&self) -> InitDbResult<SwapDbLocked<'_>> { Ok(self.swap_db.get_or_initialize().await?) }
+    pub async fn swap_db(&self) -> InitDbResult<SwapDbLocked<'_>> {
+        Ok(self.swap_db.get_or_initialize().await?)
+    }
 }
 
 /// Get total amount of selected coin locked by all currently ongoing swaps
@@ -567,10 +606,14 @@ pub struct SwapConfirmationsSettings {
 }
 
 impl SwapConfirmationsSettings {
-    pub fn requires_notarization(&self) -> bool { self.maker_coin_nota || self.taker_coin_nota }
+    pub fn requires_notarization(&self) -> bool {
+        self.maker_coin_nota || self.taker_coin_nota
+    }
 }
 
-fn coin_with_4x_locktime(ticker: &str) -> bool { matches!(ticker, "BCH" | "BTG" | "SBTC") }
+fn coin_with_4x_locktime(ticker: &str) -> bool {
+    matches!(ticker, "BCH" | "BTG" | "SBTC")
+}
 
 #[derive(Debug)]
 pub enum AtomicLocktimeVersion {

@@ -57,8 +57,7 @@ impl ExpandedSpendingKey {
         let ask = jubjub::Fr::from_bytes_wide(prf_expand(sk, &[0x00]).as_array());
         let nsk = jubjub::Fr::from_bytes_wide(prf_expand(sk, &[0x01]).as_array());
         let mut ovk = OutgoingViewingKey([0u8; 32]);
-        ovk.0
-            .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
+        ovk.0.copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
         ExpandedSpendingKey { ask, nsk, ovk }
     }
 
@@ -141,10 +140,7 @@ impl FullViewingKey {
             jubjub::SubgroupPoint::from_bytes(&buf)
         };
         if ak.is_none().into() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "ak not of prime order",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "ak not of prime order"));
         }
         if nk.is_none().into() {
             return Err(io::Error::new(

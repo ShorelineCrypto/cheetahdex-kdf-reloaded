@@ -52,16 +52,22 @@ impl SwapVersion {
     /// Used by `serde(skip_serializing_if = "SwapVersion::is_legacy")` on
     /// order-message fields to keep the legacy wire format unchanged for
     /// nodes that never upgrade.
-    pub fn is_legacy(&self) -> bool { self.version == LEGACY_SWAP_VERSION }
+    pub fn is_legacy(&self) -> bool {
+        self.version == LEGACY_SWAP_VERSION
+    }
 
     /// Returns `true` when this tag is V2 (TPU) or any later state-machine
     /// variant such as NFT V2.
     ///
     /// Use this predicate to gate dispatch into the state-machine swap path.
-    pub fn is_v2_or_higher(&self) -> bool { self.version >= TPU_SWAP_VERSION }
+    pub fn is_v2_or_higher(&self) -> bool {
+        self.version >= TPU_SWAP_VERSION
+    }
 
     /// Returns `true` when this tag is exactly the NFT swap V2 protocol.
-    pub fn is_nft_v2(&self) -> bool { self.version == NFT_SWAP_V2_VERSION }
+    pub fn is_nft_v2(&self) -> bool {
+        self.version == NFT_SWAP_V2_VERSION
+    }
 
     /// Returns the version actually executed by a maker/taker pair.
     ///
@@ -89,7 +95,9 @@ impl Default for SwapVersion {
 mod tests {
     use super::*;
 
-    fn version_tag(n: u8) -> SwapVersion { SwapVersion { version: n } }
+    fn version_tag(n: u8) -> SwapVersion {
+        SwapVersion { version: n }
+    }
 
     #[test]
     fn should_default_to_legacy_when_constructed_via_default() {

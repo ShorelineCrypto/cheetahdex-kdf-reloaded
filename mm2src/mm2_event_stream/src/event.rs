@@ -49,13 +49,19 @@ impl Event {
     }
 
     /// Returns true if this event was constructed via [`Event::err`].
-    pub fn is_error(&self) -> bool { self.error }
+    pub fn is_error(&self) -> bool {
+        self.error
+    }
 
     /// Returns the origin streamer identifier in its wire-string form.
-    pub fn origin(&self) -> String { self.streamer_id.to_string() }
+    pub fn origin(&self) -> String {
+        self.streamer_id.to_string()
+    }
 
     /// Returns the origin string paired with a borrow of the JSON payload.
-    pub fn get(&self) -> (String, &Json) { (self.origin(), &self.message) }
+    pub fn get(&self) -> (String, &Json) {
+        (self.origin(), &self.message)
+    }
 }
 
 impl fmt::Debug for Event {

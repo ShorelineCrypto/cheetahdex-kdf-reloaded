@@ -113,7 +113,9 @@ impl fmt::Display for SiaTransaction {
 }
 
 impl SiaTransaction {
-    pub fn txid(&self) -> Hash256 { self.0.txid() }
+    pub fn txid(&self) -> Hash256 {
+        self.0.txid()
+    }
 }
 
 impl TryFrom<SiaTransaction> for Vec<u8> {
@@ -141,9 +143,13 @@ impl TryFrom<Vec<u8>> for SiaTransaction {
 }
 
 impl Transaction for SiaTransaction {
-    fn tx_hex(&self) -> Vec<u8> { serde_json::ser::to_vec(self).unwrap_or_default() }
+    fn tx_hex(&self) -> Vec<u8> {
+        serde_json::ser::to_vec(self).unwrap_or_default()
+    }
 
-    fn tx_hash(&self) -> BytesJson { BytesJson(self.txid().0.to_vec()) }
+    fn tx_hash(&self) -> BytesJson {
+        BytesJson(self.txid().0.to_vec())
+    }
 }
 
 // ── SiaTransactionTypes ──────────────────────────────────────────────
@@ -318,5 +324,7 @@ impl TryFrom<ValidatePaymentInput> for SiaValidatePaymentInputArgs {
 // ── Debug impl ───────────────────────────────────────────────────────
 
 impl fmt::Debug for SiaCoinGeneric<SiaClient> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "SiaCoin({})", self.conf.ticker) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SiaCoin({})", self.conf.ticker)
+    }
 }

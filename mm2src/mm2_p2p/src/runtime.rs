@@ -22,7 +22,9 @@ pub trait SwarmRuntimeOps {
 
 #[cfg(target_arch = "wasm32")]
 impl SwarmRuntimeOps for SwarmRuntime {
-    fn new() -> Self { SwarmRuntime {} }
+    fn new() -> Self {
+        SwarmRuntime {}
+    }
 
     fn spawn<F>(&self, future: F)
     where
@@ -51,5 +53,7 @@ impl SwarmRuntimeOps for SwarmRuntime {
 }
 
 impl libp2p::core::Executor for &SwarmRuntime {
-    fn exec(&self, future: Pin<Box<dyn Future<Output = ()> + Send>>) { self.spawn(future) }
+    fn exec(&self, future: Pin<Box<dyn Future<Output = ()> + Send>>) {
+        self.spawn(future)
+    }
 }

@@ -50,20 +50,26 @@ struct EndpointHealth {
 }
 
 impl EndpointHealth {
-    fn is_healthy(&self) -> bool { self.unhealthy_until.load(Ordering::Relaxed) <= now_secs_i64() }
+    fn is_healthy(&self) -> bool {
+        self.unhealthy_until.load(Ordering::Relaxed) <= now_secs_i64()
+    }
 
     fn quarantine(&self, ttl_secs: i64) {
         let until = now_secs_i64() + ttl_secs;
         self.unhealthy_until.store(until, Ordering::Relaxed);
     }
 
-    fn clear(&self) { self.unhealthy_until.store(0, Ordering::Relaxed); }
+    fn clear(&self) {
+        self.unhealthy_until.store(0, Ordering::Relaxed);
+    }
 }
 
 /// Wall-clock seconds since the Unix epoch as `i64`. We use `i64` so
 /// `quarantine(-1)` (test fixture) yields a value that is unambiguously
 /// in the past on every platform.
-fn now_secs_i64() -> i64 { (now_ms() / 1000) as i64 }
+fn now_secs_i64() -> i64 {
+    (now_ms() / 1000) as i64
+}
 
 /// Failover-aware Solana RPC pool. Cloneable; cloning shares the
 /// underlying clients and health state.
@@ -132,20 +138,28 @@ impl SolanaRpcPool {
     }
 
     /// Number of endpoints in the pool.
-    pub fn len(&self) -> usize { self.inner.clients.len() }
+    pub fn len(&self) -> usize {
+        self.inner.clients.len()
+    }
 
     /// Snapshot of endpoint URLs in registration order.
-    pub fn urls(&self) -> Vec<&str> { self.inner.clients.iter().map(|c| c.url()).collect() }
+    pub fn urls(&self) -> Vec<&str> {
+        self.inner.clients.iter().map(|c| c.url()).collect()
+    }
 
     /// Returns `true` if **every** endpoint is currently quarantined.
     /// Useful for diagnostics; the call paths themselves do not branch
     /// on this — they just attempt the call and surface the last error
     /// if every endpoint failed.
-    pub fn all_quarantined(&self) -> bool { self.inner.health.iter().all(|h| !h.is_healthy()) }
+    pub fn all_quarantined(&self) -> bool {
+        self.inner.health.iter().all(|h| !h.is_healthy())
+    }
 
     /// Manually clear the quarantine on every endpoint (operator
     /// escape hatch; not used by the hot path).
-    pub fn clear_quarantines(&self) { self.inner.health.iter().for_each(EndpointHealth::clear); }
+    pub fn clear_quarantines(&self) {
+        self.inner.health.iter().for_each(EndpointHealth::clear);
+    }
 
     fn pick_healthy(&self) -> Vec<usize> {
         // Healthy endpoints first, then quarantined ones as a last

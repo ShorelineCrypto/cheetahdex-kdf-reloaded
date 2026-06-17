@@ -13,8 +13,7 @@ pub mod testnet;
 /// This is chosen to be some random string that we couldn't have anticipated when we designed
 /// the algorithm, for rigidity purposes.
 /// We deliberately use an ASCII hex string of 32 bytes here.
-pub const GH_FIRST_BLOCK: &[u8; 64] =
-    b"096b36a5804bfacef1691e173c366a47ff5ba84a44f26ddd7e8d9f79d5b42df0";
+pub const GH_FIRST_BLOCK: &[u8; 64] = b"096b36a5804bfacef1691e173c366a47ff5ba84a44f26ddd7e8d9f79d5b42df0";
 
 // BLAKE2s invocation personalizations
 /// BLAKE2s Personalization for CRH^ivk = BLAKE2s(ak | nk)
@@ -352,10 +351,7 @@ mod tests {
     fn pedersen_hash_generators() {
         for (m, actual) in PEDERSEN_HASH_GENERATORS.iter().enumerate() {
             assert_eq!(
-                &find_group_hash(
-                    &(m as u32).to_le_bytes(),
-                    PEDERSEN_HASH_GENERATORS_PERSONALIZATION
-                ),
+                &find_group_hash(&(m as u32).to_le_bytes(), PEDERSEN_HASH_GENERATORS_PERSONALIZATION),
                 actual
             );
         }
@@ -388,9 +384,7 @@ mod tests {
 
     /// Check for simple relations between the generators, that make finding collisions easy;
     /// far worse than spec inconsistencies!
-    fn check_consistency_of_pedersen_hash_generators(
-        pedersen_hash_generators: &[jubjub::SubgroupPoint],
-    ) {
+    fn check_consistency_of_pedersen_hash_generators(pedersen_hash_generators: &[jubjub::SubgroupPoint]) {
         for (i, p1) in pedersen_hash_generators.iter().enumerate() {
             if p1.is_identity().into() {
                 panic!("Neutral element!");

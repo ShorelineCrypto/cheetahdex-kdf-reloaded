@@ -257,22 +257,34 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Inserts or replaces a session.
-    pub fn insert(&self, session: Session) { self.sessions.lock().insert(session.topic.clone(), session); }
+    pub fn insert(&self, session: Session) {
+        self.sessions.lock().insert(session.topic.clone(), session);
+    }
 
     /// Removes the session with the given topic.
-    pub fn remove(&self, topic: &Topic) -> bool { self.sessions.lock().remove(topic).is_some() }
+    pub fn remove(&self, topic: &Topic) -> bool {
+        self.sessions.lock().remove(topic).is_some()
+    }
 
     /// Returns the number of live sessions.
-    pub fn len(&self) -> usize { self.sessions.lock().len() }
+    pub fn len(&self) -> usize {
+        self.sessions.lock().len()
+    }
 
     /// Whether there are no live sessions.
-    pub fn is_empty(&self) -> bool { self.sessions.lock().is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.sessions.lock().is_empty()
+    }
 
     /// The topics of all live sessions.
-    pub fn topics(&self) -> Vec<Topic> { self.sessions.lock().keys().cloned().collect() }
+    pub fn topics(&self) -> Vec<Topic> {
+        self.sessions.lock().keys().cloned().collect()
+    }
 
     /// The transport material needed to encrypt/decrypt traffic on a session:
     /// its symmetric key and the negotiated payload encoding. `None` when no

@@ -10,7 +10,9 @@ pub struct Constructor {
 
 impl Constructor {
     /// Returns all input params of given constructor.
-    fn param_types(&self) -> Vec<ParamType> { self.inputs.iter().map(|p| p.kind.clone()).collect() }
+    fn param_types(&self) -> Vec<ParamType> {
+        self.inputs.iter().map(|p| p.kind.clone()).collect()
+    }
 
     /// Prepares ABI constructor call with given input params.
     pub fn encode_input(&self, code: Bytes, tokens: &[Token]) -> Result<Bytes> {

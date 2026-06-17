@@ -10,7 +10,9 @@ mod test {
         }};
     }
     // Ensure the original value matches the value after round-trip (serialize -> deserialize -> serialize)
-    use crate::types::{Address, Event, Hash256, SiacoinElement, SiacoinOutput, StateElement, UnlockKey, V2Transaction};
+    use crate::types::{
+        Address, Event, Hash256, SiacoinElement, SiacoinOutput, StateElement, UnlockKey, V2Transaction,
+    };
 
     cross_target_tests! {
             fn test_serde_address() {

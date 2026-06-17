@@ -83,9 +83,15 @@ pub struct Script {
 }
 
 impl Script {
-    pub fn new(data: Bytes) -> Self { Self { data } }
-    pub fn to_bytes(&self) -> Bytes { self.data.clone() }
-    pub fn is_empty(&self) -> bool { self.data.is_empty() }
+    pub fn new(data: Bytes) -> Self {
+        Self { data }
+    }
+    pub fn to_bytes(&self) -> Bytes {
+        self.data.clone()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
 
     // --- Standard pattern predicates ---------------------------------
 
@@ -231,7 +237,9 @@ impl Script {
     }
 
     /// Slice from `from` to end, as a fresh `Script`.
-    pub fn subscript(&self, from: usize) -> Script { self.data[from..].to_vec().into() }
+    pub fn subscript(&self, from: usize) -> Script {
+        self.data[from..].to_vec().into()
+    }
 
     /// Strip every occurrence of `data` from the script bytes. Used by
     /// the legacy SIGHASH algorithm to splice out the matching
@@ -277,7 +285,9 @@ impl Script {
     }
 
     /// Decode the opcode byte at `pos` (no payload parsing).
-    pub fn get_opcode(&self, pos: usize) -> Result<Opcode, Error> { self.opcode_at(pos) }
+    pub fn get_opcode(&self, pos: usize) -> Result<Opcode, Error> {
+        self.opcode_at(pos)
+    }
     fn opcode_at(&self, pos: usize) -> Result<Opcode, Error> {
         self.data
             .get(pos)
@@ -287,7 +297,9 @@ impl Script {
     }
 
     /// Decode the instruction starting at `pos`.
-    pub fn get_instruction_at(&self, pos: usize) -> Result<Instruction<'_>, Error> { self.instruction_at(pos) }
+    pub fn get_instruction_at(&self, pos: usize) -> Result<Instruction<'_>, Error> {
+        self.instruction_at(pos)
+    }
     fn instruction_at(&self, pos: usize) -> Result<Instruction<'_>, Error> {
         let opcode = self.opcode_at(pos)?;
         match opcode {
@@ -328,14 +340,20 @@ impl Script {
     }
 
     /// nth instruction (0-indexed) by linear scan, or `None` if out of range.
-    pub fn get_instruction(&self, n: usize) -> Option<Result<Instruction<'_>, Error>> { self.iter().nth(n) }
+    pub fn get_instruction(&self, n: usize) -> Option<Result<Instruction<'_>, Error>> {
+        self.iter().nth(n)
+    }
 
     /// Iterator over decoded `(opcode, optional payload)` pairs. Stops
     /// after yielding the first error.
-    pub fn iter(&self) -> Instructions<'_> { Instructions { script: self, pos: 0 } }
+    pub fn iter(&self) -> Instructions<'_> {
+        Instructions { script: self, pos: 0 }
+    }
 
     /// Iterator over opcode bytes, ignoring payloads.
-    pub fn opcodes(&self) -> Opcodes<'_> { Opcodes { script: self, pos: 0 } }
+    pub fn opcodes(&self) -> Opcodes<'_> {
+        Opcodes { script: self, pos: 0 }
+    }
 
     /// Count signature operations for fee/policy purposes (Bitcoin
     /// Core compatibility — `accurate=true` is BIP-16's accurate count
@@ -442,20 +460,30 @@ impl Script {
 
 impl ops::Deref for Script {
     type Target = [u8];
-    fn deref(&self) -> &[u8] { &self.data }
+    fn deref(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 impl From<Bytes> for Script {
-    fn from(b: Bytes) -> Self { Self::new(b) }
+    fn from(b: Bytes) -> Self {
+        Self::new(b)
+    }
 }
 impl From<Vec<u8>> for Script {
-    fn from(v: Vec<u8>) -> Self { Self::new(v.into()) }
+    fn from(v: Vec<u8>) -> Self {
+        Self::new(v.into())
+    }
 }
 impl From<Script> for Bytes {
-    fn from(s: Script) -> Self { s.data }
+    fn from(s: Script) -> Self {
+        s.data
+    }
 }
 impl From<&'static str> for Script {
-    fn from(s: &'static str) -> Self { Self::new(s.into()) }
+    fn from(s: &'static str) -> Self {
+        Self::new(s.into())
+    }
 }
 
 impl fmt::Display for Script {

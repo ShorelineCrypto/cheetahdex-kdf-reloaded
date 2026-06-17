@@ -41,9 +41,7 @@ pub struct HashWriter {
 
 impl Default for HashWriter {
     fn default() -> Self {
-        HashWriter {
-            hasher: Sha256::new(),
-        }
+        HashWriter { hasher: Sha256::new() }
     }
 }
 

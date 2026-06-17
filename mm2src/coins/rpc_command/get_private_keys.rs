@@ -69,7 +69,9 @@ impl HttpStatusCode for GetPrivateKeysError {
 }
 
 impl From<CryptoCtxError> for GetPrivateKeysError {
-    fn from(e: CryptoCtxError) -> Self { GetPrivateKeysError::Internal(e.to_string()) }
+    fn from(e: CryptoCtxError) -> Self {
+        GetPrivateKeysError::Internal(e.to_string())
+    }
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────

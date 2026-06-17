@@ -43,7 +43,9 @@ struct MainParams {
 }
 
 impl From<MainParams> for LpMainParams {
-    fn from(orig: MainParams) -> Self { LpMainParams::with_conf(orig.conf).log_filter(Some(orig.log_level)) }
+    fn from(orig: MainParams) -> Self {
+        LpMainParams::with_conf(orig.conf).log_filter(Some(orig.log_level))
+    }
 }
 
 /// Run the MarketMaker2.
@@ -129,7 +131,9 @@ pub fn mm2_main(params: JsValue, log_cb: js_sys::Function) -> Result<(), JsValue
 
 /// Get the MarketMaker2 status.
 #[wasm_bindgen]
-pub fn mm2_main_status() -> MainStatus { mm2_status() }
+pub fn mm2_main_status() -> MainStatus {
+    mm2_status()
+}
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -236,4 +240,6 @@ pub async fn mm2_rpc(payload: JsValue) -> Result<JsValue, JsValue> {
 /// }
 /// ```
 #[wasm_bindgen]
-pub fn mm2_version() -> JsValue { serialize_to_js(&MmVersionResult::new()).expect("expected serialization to succeed") }
+pub fn mm2_version() -> JsValue {
+    serialize_to_js(&MmVersionResult::new()).expect("expected serialization to succeed")
+}

@@ -5,9 +5,11 @@ use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 
-use crate::{lp_coinfind_or_err,
-            utxo::{utxo_common::big_decimal_from_sat_unsigned, GetUtxoListOps},
-            CoinFindError, DerivationMethod, MmCoinEnum};
+use crate::{
+    lp_coinfind_or_err,
+    utxo::{utxo_common::big_decimal_from_sat_unsigned, GetUtxoListOps},
+    CoinFindError, DerivationMethod, MmCoinEnum,
+};
 
 #[derive(Deserialize)]
 pub struct FetchUtxosRequest {

@@ -12,22 +12,30 @@ pub use mm2_metamask::{MetamaskError, MetamaskResult};
 pub struct MetamaskArc(Arc<MetamaskCtx>);
 
 impl MetamaskArc {
-    pub fn new(ctx: MetamaskCtx) -> Self { MetamaskArc(Arc::new(ctx)) }
+    pub fn new(ctx: MetamaskCtx) -> Self {
+        MetamaskArc(Arc::new(ctx))
+    }
 
-    pub fn downgrade(&self) -> MetamaskWeak { MetamaskWeak(Arc::downgrade(&self.0)) }
+    pub fn downgrade(&self) -> MetamaskWeak {
+        MetamaskWeak(Arc::downgrade(&self.0))
+    }
 }
 
 impl Deref for MetamaskArc {
     type Target = MetamaskCtx;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[derive(Clone)]
 pub struct MetamaskWeak(Weak<MetamaskCtx>);
 
 impl MetamaskWeak {
-    pub fn upgrade(&self) -> Option<MetamaskArc> { self.0.upgrade().map(MetamaskArc) }
+    pub fn upgrade(&self) -> Option<MetamaskArc> {
+        self.0.upgrade().map(MetamaskArc)
+    }
 }
 
 pub struct MetamaskCtx {
@@ -86,17 +94,25 @@ impl MetamaskCtx {
     }
 
     #[inline]
-    pub fn eth_account(&self) -> Address { self.eth_account }
+    pub fn eth_account(&self) -> Address {
+        self.eth_account
+    }
 
     #[inline]
-    pub fn eth_account_str(&self) -> &str { &self.eth_account_str }
+    pub fn eth_account_str(&self) -> &str {
+        &self.eth_account_str
+    }
 
     #[inline]
-    pub fn eth_account_pubkey_uncompressed(&self) -> H520 { self.eth_account_pubkey }
+    pub fn eth_account_pubkey_uncompressed(&self) -> H520 {
+        self.eth_account_pubkey
+    }
 
     /// Returns a reference to the underlying EIP-1193 transport.
     #[inline]
-    pub fn eip_provider(&self) -> &Eip1193Provider { &self.eip_provider }
+    pub fn eip_provider(&self) -> &Eip1193Provider {
+        &self.eip_provider
+    }
 
     /// Verifies that `eth_account` is still the active MetaMask account.
     pub async fn check_active_eth_account(&self) -> MetamaskResult<&Address> {

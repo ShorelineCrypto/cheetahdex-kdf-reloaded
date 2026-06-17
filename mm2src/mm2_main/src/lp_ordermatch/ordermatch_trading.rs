@@ -85,7 +85,9 @@ pub struct BalanceUpdateOrdermatchHandler {
 }
 
 impl BalanceUpdateOrdermatchHandler {
-    pub fn new(ctx: MmArc) -> Self { BalanceUpdateOrdermatchHandler { ctx: ctx.weak() } }
+    pub fn new(ctx: MmArc) -> Self {
+        BalanceUpdateOrdermatchHandler { ctx: ctx.weak() }
+    }
 }
 
 #[async_trait]
@@ -2101,11 +2103,17 @@ pub async fn my_orders(ctx: MmArc) -> Result<Response<Vec<u8>>, String> {
         .map_err(|e| ERRL!("{}", e))
 }
 
-pub fn my_maker_orders_dir(ctx: &MmArc) -> PathBuf { ctx.dbdir().join("ORDERS").join("MY").join("MAKER") }
+pub fn my_maker_orders_dir(ctx: &MmArc) -> PathBuf {
+    ctx.dbdir().join("ORDERS").join("MY").join("MAKER")
+}
 
-pub(crate) fn my_taker_orders_dir(ctx: &MmArc) -> PathBuf { ctx.dbdir().join("ORDERS").join("MY").join("TAKER") }
+pub(crate) fn my_taker_orders_dir(ctx: &MmArc) -> PathBuf {
+    ctx.dbdir().join("ORDERS").join("MY").join("TAKER")
+}
 
-pub(crate) fn my_orders_history_dir(ctx: &MmArc) -> PathBuf { ctx.dbdir().join("ORDERS").join("MY").join("HISTORY") }
+pub(crate) fn my_orders_history_dir(ctx: &MmArc) -> PathBuf {
+    ctx.dbdir().join("ORDERS").join("MY").join("HISTORY")
+}
 
 pub fn my_maker_order_file_path(ctx: &MmArc, uuid: &Uuid) -> PathBuf {
     my_maker_orders_dir(ctx).join(format!("{}.json", uuid))

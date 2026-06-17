@@ -17,23 +17,33 @@ unsafe impl<T: Sync> Sync for DuplexMutexGuard<'_, T> {}
 
 impl<T> Deref for DuplexMutexGuard<'_, T> {
     type Target = T;
-    fn deref(&self) -> &T { unsafe { &*self.mutex.pimpl.data.get() } }
+    fn deref(&self) -> &T {
+        unsafe { &*self.mutex.pimpl.data.get() }
+    }
 }
 
 impl<T> DerefMut for DuplexMutexGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T { unsafe { &mut *self.mutex.pimpl.data.get() } }
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.mutex.pimpl.data.get() }
+    }
 }
 
 impl<T> Drop for DuplexMutexGuard<'_, T> {
-    fn drop(&mut self) { self.mutex.pimpl.unlock().unwrap(); }
+    fn drop(&mut self) {
+        self.mutex.pimpl.unlock().unwrap();
+    }
 }
 
 impl<T: fmt::Debug> fmt::Debug for DuplexMutexGuard<'_, T> {
-    fn fmt(&self, ft: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Debug::fmt(&**self, ft) }
+    fn fmt(&self, ft: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&**self, ft)
+    }
 }
 
 impl<T: fmt::Display> fmt::Display for DuplexMutexGuard<'_, T> {
-    fn fmt(&self, ft: &mut fmt::Formatter<'_>) -> fmt::Result { (**self).fmt(ft) }
+    fn fmt(&self, ft: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (**self).fmt(ft)
+    }
 }
 
 pub struct Impl<T> {

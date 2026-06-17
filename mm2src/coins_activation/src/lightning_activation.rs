@@ -1,6 +1,8 @@
 use crate::context::CoinsActivationContext;
-use crate::l2::{EnableL2Error, InitL2ActivationOps, L2ActivationError, L2ActivationOps, L2InitialStatus,
-                L2ProtocolParams, L2TaskManagerShared};
+use crate::l2::{
+    EnableL2Error, InitL2ActivationOps, L2ActivationError, L2ActivationOps, L2InitialStatus, L2ProtocolParams,
+    L2TaskManagerShared,
+};
 use crate::prelude::*;
 use async_trait::async_trait;
 use coins::lightning::ln_conf::{LightningCoinConf, LightningProtocolConf};
@@ -54,7 +56,9 @@ impl TryFromCoinProtocol for LightningProtocolConf {
 }
 
 impl L2ProtocolParams for LightningProtocolConf {
-    fn platform_coin_ticker(&self) -> &str { &self.platform_coin_ticker }
+    fn platform_coin_ticker(&self) -> &str {
+        &self.platform_coin_ticker
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -121,7 +125,9 @@ pub enum LightningTaskError {
 }
 
 impl From<RegisterCoinError> for LightningTaskError {
-    fn from(e: RegisterCoinError) -> Self { LightningTaskError::RegistrationError(e.to_string()) }
+    fn from(e: RegisterCoinError) -> Self {
+        LightningTaskError::RegistrationError(e.to_string())
+    }
 }
 
 impl From<LightningInitError> for LightningTaskError {
@@ -170,7 +176,9 @@ pub enum LightningActivationProgress {
 }
 
 impl L2InitialStatus for LightningActivationProgress {
-    fn initial_status() -> Self { LightningActivationProgress::Initializing }
+    fn initial_status() -> Self {
+        LightningActivationProgress::Initializing
+    }
 }
 
 /// Placeholder awaiting-action status (e.g. future hardware wallet confirmation).
@@ -204,11 +212,15 @@ impl From<LightningInitError> for EnableL2Error {
 }
 
 impl From<EnableLightningError> for LightningInitError {
-    fn from(err: EnableLightningError) -> Self { LightningInitError::EnableLightningError(err) }
+    fn from(err: EnableLightningError) -> Self {
+        LightningInitError::EnableLightningError(err)
+    }
 }
 
 impl From<LightningValidationErr> for LightningInitError {
-    fn from(err: LightningValidationErr) -> Self { LightningInitError::LightningValidationErr(err) }
+    fn from(err: LightningValidationErr) -> Self {
+        LightningInitError::LightningValidationErr(err)
+    }
 }
 
 #[async_trait]

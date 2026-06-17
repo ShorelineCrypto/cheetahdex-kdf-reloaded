@@ -18,7 +18,9 @@ pub struct ConstructibleDb<Db> {
 }
 
 impl<Db: DbInstance> ConstructibleDb<Db> {
-    pub fn new_shared(ctx: &MmArc) -> SharedDb<Db> { Arc::new(Self::new(ctx)) }
+    pub fn new_shared(ctx: &MmArc) -> SharedDb<Db> {
+        Arc::new(Self::new(ctx))
+    }
 
     pub fn new(ctx: &MmArc) -> Self {
         ConstructibleDb {

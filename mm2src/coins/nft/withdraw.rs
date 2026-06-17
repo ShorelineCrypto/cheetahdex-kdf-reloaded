@@ -12,9 +12,11 @@
 //! and hardware-wallet derivations will be wired in alongside the rest
 //! of the EVM HD integration.
 
-use crate::eth::{checksum_address, get_addr_nonce, u256_to_big_decimal, wei_from_big_decimal, Action, Address,
-                 BytesJson, CallRequest, Contract, EthCoin, EthCoinType, EthTxFeeDetails, Token, TransactionDetails,
-                 UnSignedEthTx, NONCE_LOCK, U256};
+use crate::eth::{
+    checksum_address, get_addr_nonce, u256_to_big_decimal, wei_from_big_decimal, Action, Address, BytesJson,
+    CallRequest, Contract, EthCoin, EthCoinType, EthTxFeeDetails, Token, TransactionDetails, UnSignedEthTx, NONCE_LOCK,
+    U256,
+};
 use crate::nft::errors::GetNftInfoError;
 use crate::nft::model::chain::ChainTicker;
 use crate::nft::model::{WithdrawErc1155, WithdrawErc721, WithdrawNftReq};
@@ -269,13 +271,16 @@ async fn withdraw_erc721(ctx: MmArc, req: WithdrawErc721) -> Result<TransactionD
     let to_addr = parse_eth_address(&req.to, "to")?;
     let token_id = biguint_to_u256(&req.token_id, "token_id")?;
     let data = encode_erc721_transfer_from(coin.my_address, to_addr, token_id)?;
-    build_signed_tx(&ctx, EvmTxRequest {
-        coin,
-        contract_address: contract,
-        to_address: to_addr,
-        data,
-        fee: req.fee,
-    })
+    build_signed_tx(
+        &ctx,
+        EvmTxRequest {
+            coin,
+            contract_address: contract,
+            to_address: to_addr,
+            data,
+            fee: req.fee,
+        },
+    )
     .await
 }
 
@@ -323,13 +328,16 @@ async fn withdraw_erc1155(ctx: MmArc, req: WithdrawErc1155) -> Result<Transactio
     };
 
     let data = encode_erc1155_safe_transfer_from(coin.my_address, to_addr, token_id, amount)?;
-    build_signed_tx(&ctx, EvmTxRequest {
-        coin,
-        contract_address: contract,
-        to_address: to_addr,
-        data,
-        fee: req.fee,
-    })
+    build_signed_tx(
+        &ctx,
+        EvmTxRequest {
+            coin,
+            contract_address: contract,
+            to_address: to_addr,
+            data,
+            fee: req.fee,
+        },
+    )
     .await
 }
 

@@ -47,7 +47,9 @@ pub enum Error {
 impl std::error::Error for Error {}
 
 impl From<io::Error> for Error {
-    fn from(_: io::Error) -> Self { Error::UnexpectedEnd }
+    fn from(_: io::Error) -> Self {
+        Error::UnexpectedEnd
+    }
 }
 
 /// Trait implemented by every type that can be parsed from the wire
@@ -70,7 +72,9 @@ pub enum CoinVariant {
 }
 
 impl CoinVariant {
-    pub fn is_qtum(&self) -> bool { matches!(self, CoinVariant::Qtum) }
+    pub fn is_qtum(&self) -> bool {
+        matches!(self, CoinVariant::Qtum)
+    }
 }
 
 /// Stateful reader over an arbitrary `io::Read`. Keeps a one-byte
@@ -213,7 +217,9 @@ where
     }
 
     /// Borrow the active coin variant.
-    pub fn coin_variant(&self) -> &CoinVariant { &self.coin_variant }
+    pub fn coin_variant(&self) -> &CoinVariant {
+        &self.coin_variant
+    }
 }
 
 /// Iterator that lazily decodes a homogeneous stream of `T` until the
@@ -246,7 +252,9 @@ struct Proxy<F, T> {
 }
 
 impl<F, T> Proxy<F, T> {
-    fn new(from: F, observe: T) -> Self { Proxy { from, observe } }
+    fn new(from: F, observe: T) -> Self {
+        Proxy { from, observe }
+    }
 }
 
 impl<F, T> io::Read for Proxy<F, T>

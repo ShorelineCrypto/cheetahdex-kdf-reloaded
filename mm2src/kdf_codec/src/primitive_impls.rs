@@ -16,8 +16,10 @@ use crate::{Deserializable, Error, Reader, Serializable, Stream};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use primitives::bytes::Bytes;
 use primitives::compact::Compact;
-use primitives::hash::{CipherText, EncCipherText, EquihashSolution, OutCipherText, ZkProof, ZkProofSapling, H128,
-                       H160, H256, H264, H32, H48, H512, H520, H64, H96};
+use primitives::hash::{
+    CipherText, EncCipherText, EquihashSolution, OutCipherText, ZkProof, ZkProofSapling, H128, H160, H256, H264, H32,
+    H48, H512, H520, H64, H96,
+};
 use std::io;
 
 // ── Booleans ─────────────────────────────────────────────────────────────
@@ -30,7 +32,9 @@ impl Serializable for bool {
     }
 
     #[inline]
-    fn serialized_size(&self) -> usize { 1 }
+    fn serialized_size(&self) -> usize {
+        1
+    }
 }
 
 impl Deserializable for bool {
@@ -52,10 +56,14 @@ macro_rules! impl_le_int {
     ($t:ty, $write:ident, $read:ident, $size:expr) => {
         impl Serializable for $t {
             #[inline]
-            fn serialize(&self, s: &mut Stream) { let _ = s.$write::<LittleEndian>(*self); }
+            fn serialize(&self, s: &mut Stream) {
+                let _ = s.$write::<LittleEndian>(*self);
+            }
 
             #[inline]
-            fn serialized_size(&self) -> usize { $size }
+            fn serialized_size(&self) -> usize {
+                $size
+            }
         }
 
         impl Deserializable for $t {
@@ -80,10 +88,14 @@ impl_le_int!(u64, write_u64, read_u64, 8);
 // generic parameter.
 impl Serializable for u8 {
     #[inline]
-    fn serialize(&self, s: &mut Stream) { let _ = s.write_u8(*self); }
+    fn serialize(&self, s: &mut Stream) {
+        let _ = s.write_u8(*self);
+    }
 
     #[inline]
-    fn serialized_size(&self) -> usize { 1 }
+    fn serialized_size(&self) -> usize {
+        1
+    }
 }
 
 impl Deserializable for u8 {
@@ -137,10 +149,14 @@ impl Deserializable for String {
 macro_rules! impl_hash_codec {
     ($t:ty, $size:expr) => {
         impl Serializable for $t {
-            fn serialize(&self, stream: &mut Stream) { stream.append_slice(&**self); }
+            fn serialize(&self, stream: &mut Stream) {
+                stream.append_slice(&**self);
+            }
 
             #[inline]
-            fn serialized_size(&self) -> usize { $size }
+            fn serialized_size(&self) -> usize {
+                $size
+            }
         }
 
         impl Deserializable for $t {
@@ -181,10 +197,14 @@ impl_hash_codec!(EquihashSolution, 1344);
 const BYTES_DECODE_LIMIT: u64 = 65_536;
 
 impl Serializable for Bytes {
-    fn serialize(&self, stream: &mut Stream) { stream.append(&CompactInteger::from(self.len())).append_slice(self); }
+    fn serialize(&self, stream: &mut Stream) {
+        stream.append(&CompactInteger::from(self.len())).append_slice(self);
+    }
 
     #[inline]
-    fn serialized_size(&self) -> usize { CompactInteger::from(self.len()).serialized_size() + self.len() }
+    fn serialized_size(&self) -> usize {
+        CompactInteger::from(self.len()).serialized_size() + self.len()
+    }
 }
 
 impl Deserializable for Bytes {
@@ -205,7 +225,9 @@ impl Deserializable for Bytes {
 // ── Compact target (nBits) ───────────────────────────────────────────────
 
 impl Serializable for Compact {
-    fn serialize(&self, stream: &mut Stream) { stream.append(&u32::from(*self)); }
+    fn serialize(&self, stream: &mut Stream) {
+        stream.append(&u32::from(*self));
+    }
 }
 
 impl Deserializable for Compact {

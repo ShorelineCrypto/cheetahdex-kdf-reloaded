@@ -4,9 +4,7 @@ use zcash_primitives::sapling::pedersen_hash::{pedersen_hash, Personalization};
 
 fn bench_pedersen_hash(c: &mut Criterion) {
     let rng = &mut OsRng;
-    let bits = (0..510)
-        .map(|_| (rng.next_u32() % 2) != 0)
-        .collect::<Vec<_>>();
+    let bits = (0..510).map(|_| (rng.next_u32() % 2) != 0).collect::<Vec<_>>();
     let personalization = Personalization::MerkleTree(31);
 
     c.bench_function("Pedersen hash", |b| {

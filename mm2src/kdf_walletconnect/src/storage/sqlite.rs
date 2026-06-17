@@ -7,7 +7,9 @@ use db_common::async_sql_conn::{AsyncConnError, AsyncConnection};
 use db_common::sqlite::rusqlite::{params, NO_PARAMS};
 
 impl From<AsyncConnError> for WalletConnectError {
-    fn from(e: AsyncConnError) -> Self { WalletConnectError::Storage(e.to_string()) }
+    fn from(e: AsyncConnError) -> Self {
+        WalletConnectError::Storage(e.to_string())
+    }
 }
 
 /// SQLite-backed session store.
@@ -17,7 +19,9 @@ pub struct SqliteSessionStorage {
 
 impl SqliteSessionStorage {
     /// Wraps an open async SQLite connection.
-    pub fn new(conn: AsyncConnection) -> Self { SqliteSessionStorage { conn } }
+    pub fn new(conn: AsyncConnection) -> Self {
+        SqliteSessionStorage { conn }
+    }
 }
 
 #[async_trait]

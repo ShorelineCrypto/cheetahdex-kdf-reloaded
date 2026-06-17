@@ -1,7 +1,8 @@
 //! `NftHistoryStore` implementation for [`SqliteNftStore`].
 
-use crate::nft::model::{Chain, NftTokenIdent, NftTransfer, NftTransferList, NftTransfersFilters, TransferMeta,
-                        TransferStatus};
+use crate::nft::model::{
+    Chain, NftTokenIdent, NftTransfer, NftTransferList, NftTransfersFilters, TransferMeta, TransferStatus,
+};
 use crate::nft::store::history::NftHistoryStore;
 use crate::nft::store::sqlite::list::paginate;
 use crate::nft::store::sqlite::schema::{create_transfers_sql, transfers_table, TABLE_EXISTS_SQL};

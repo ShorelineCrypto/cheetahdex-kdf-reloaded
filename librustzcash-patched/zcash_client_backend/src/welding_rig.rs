@@ -208,18 +208,17 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
             .into_iter()
             .enumerate()
             .map(|(index, spend)| {
-                let spend_nf = spend.nf().expect(
-                    "Could not deserialize nullifier for spend from protobuf representation.",
-                );
+                let spend_nf = spend
+                    .nf()
+                    .expect("Could not deserialize nullifier for spend from protobuf representation.");
                 // Find the first tracked nullifier that matches this spend, and produce
                 // a WalletShieldedSpend if there is a match, in constant time.
                 nullifiers
                     .iter()
                     .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
-                    .fold(
-                        CtOption::new(AccountId::default(), 0.into()),
-                        |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
-                    )
+                    .fold(CtOption::new(AccountId::default(), 0.into()), |first, next| {
+                        CtOption::conditional_select(&next, &first, first.is_some())
+                    })
                     .map(|account| WalletShieldedSpend {
                         index,
                         nf: spend_nf,
@@ -231,8 +230,7 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
             .collect();
 
         // Collect the set of accounts that were spent from in this transaction
-        let spent_from_accounts: HashSet<_> =
-            shielded_spends.iter().map(|spend| spend.account).collect();
+        let spent_from_accounts: HashSet<_> = shielded_spends.iter().map(|spend| spend.account).collect();
 
         // Check for incoming notes while incrementing tree and witnesses
         let mut shielded_outputs: Vec<WalletShieldedOutput<K::Nf>> = vec![];
@@ -242,21 +240,14 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
             // mutable references to wtxs for too long.
             let mut block_witnesses: Vec<_> = wtxs
                 .iter_mut()
-                .flat_map(|tx| {
-                    tx.shielded_outputs
-                        .iter_mut()
-                        .map(|output| &mut output.witness)
-                })
+                .flat_map(|tx| tx.shielded_outputs.iter_mut().map(|output| &mut output.witness))
                 .collect();
 
             for to_scan in tx.outputs.into_iter().enumerate() {
                 // Grab mutable references to new witnesses from previous outputs
                 // in this transaction so that we can update them. Scoped so we
                 // don't hold mutable references to shielded_outputs for too long.
-                let mut new_witnesses: Vec<_> = shielded_outputs
-                    .iter_mut()
-                    .map(|output| &mut output.witness)
-                    .collect();
+                let mut new_witnesses: Vec<_> = shielded_outputs.iter_mut().map(|output| &mut output.witness).collect();
 
                 if let Some(output) = scan_output(
                     params,
@@ -301,10 +292,7 @@ mod tests {
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
         merkle_tree::CommitmentTree,
-        sapling::{
-            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
-            SaplingIvk,
-        },
+        sapling::{note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier, SaplingIvk},
         transaction::components::Amount,
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
@@ -366,13 +354,8 @@ mod tests {
             value: value.into(),
             rseed,
         };
-        let encryptor = sapling_note_encryption::<_, Network>(
-            Some(extfvk.fvk.ovk),
-            note.clone(),
-            to,
-            MemoBytes::empty(),
-            &mut rng,
-        );
+        let encryptor =
+            sapling_note_encryption::<_, Network>(Some(extfvk.fvk.ovk), note.clone(), to, MemoBytes::empty(), &mut rng);
         let cmu = note.cmu().to_repr().as_ref().to_owned();
         let epk = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();

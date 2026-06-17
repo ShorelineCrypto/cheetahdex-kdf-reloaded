@@ -7,7 +7,7 @@ pub trait Docker
 where
     Self: Sized,
 {
-    fn run<I: Image>(&self, image: I) -> Container<Self, I>;
+    fn run<I: Image>(&self, image: I) -> Container<'_, Self, I>;
     fn logs(&self, id: &str) -> Logs;
     fn ports(&self, id: &str) -> Ports;
     fn rm(&self, id: &str);
@@ -29,7 +29,9 @@ impl Ports {
     }
 
     /// Returns the host port for the given internal port.
-    pub fn map_to_host_port(&self, internal_port: u32) -> Option<u32> { self.mapping.get(&internal_port).copied() }
+    pub fn map_to_host_port(&self, internal_port: u32) -> Option<u32> {
+        self.mapping.get(&internal_port).copied()
+    }
 }
 
 /// Log streams of running container (stdout & stderr).

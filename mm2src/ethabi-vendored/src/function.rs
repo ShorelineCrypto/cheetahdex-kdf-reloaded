@@ -19,10 +19,14 @@ pub struct Function {
 
 impl Function {
     /// Returns all input params of given function.
-    fn input_param_types(&self) -> Vec<ParamType> { self.inputs.iter().map(|p| p.kind.clone()).collect() }
+    fn input_param_types(&self) -> Vec<ParamType> {
+        self.inputs.iter().map(|p| p.kind.clone()).collect()
+    }
 
     /// Returns all output params of given function.
-    fn output_param_types(&self) -> Vec<ParamType> { self.outputs.iter().map(|p| p.kind.clone()).collect() }
+    fn output_param_types(&self) -> Vec<ParamType> {
+        self.outputs.iter().map(|p| p.kind.clone()).collect()
+    }
 
     /// Prepares ABI function call with given input params.
     pub fn encode_input(&self, tokens: &[Token]) -> Result<Bytes> {
@@ -38,13 +42,19 @@ impl Function {
     }
 
     /// Parses the ABI function output to list of tokens.
-    pub fn decode_output(&self, data: &[u8]) -> Result<Vec<Token>> { decode(&self.output_param_types(), &data) }
+    pub fn decode_output(&self, data: &[u8]) -> Result<Vec<Token>> {
+        decode(&self.output_param_types(), &data)
+    }
 
     /// Parses the ABI function call to list of tokens.
-    pub fn decode_input(&self, data: &[u8]) -> Result<Vec<Token>> { decode(&self.input_param_types(), &data[4..]) }
+    pub fn decode_input(&self, data: &[u8]) -> Result<Vec<Token>> {
+        decode(&self.input_param_types(), &data[4..])
+    }
 
     /// Returns short function signature
-    pub fn short_signature(&self) -> [u8; 4] { short_signature(&self.name, &self.input_param_types()) }
+    pub fn short_signature(&self) -> [u8; 4] {
+        short_signature(&self.name, &self.input_param_types())
+    }
 }
 
 #[cfg(test)]

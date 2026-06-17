@@ -5,9 +5,7 @@ use subtle::{Choice, ConditionallySelectable};
 
 use zcash_primitives::{
     merkle_tree::IncrementalWitness,
-    sapling::{
-        keys::OutgoingViewingKey, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
-    },
+    sapling::{keys::OutgoingViewingKey, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed},
     transaction::{components::Amount, TxId},
 };
 

@@ -25,9 +25,12 @@ mod tests {
 
         let deserialized: Param = serde_json::from_str(s).unwrap();
 
-        assert_eq!(deserialized, Param {
-            name: "foo".to_owned(),
-            kind: ParamType::Address,
-        });
+        assert_eq!(
+            deserialized,
+            Param {
+                name: "foo".to_owned(),
+                kind: ParamType::Address,
+            }
+        );
     }
 }

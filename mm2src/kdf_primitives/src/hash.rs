@@ -23,11 +23,15 @@ macro_rules! define_hash {
         impl $name {
             /// Consume the wrapper and return the inner array.
             #[inline]
-            pub fn take(self) -> [u8; $size] { self.0 }
+            pub fn take(self) -> [u8; $size] {
+                self.0
+            }
 
             /// View the value as a byte slice.
             #[inline]
-            pub fn as_slice(&self) -> &[u8] { &self.0 }
+            pub fn as_slice(&self) -> &[u8] {
+                &self.0
+            }
 
             /// Reverse-byte copy (Bitcoin-style "txid string" order).
             #[inline]
@@ -39,36 +43,50 @@ macro_rules! define_hash {
 
             /// Width in bytes.
             #[inline]
-            pub fn size() -> usize { $size }
+            pub fn size() -> usize {
+                $size
+            }
 
             /// Whether every byte is zero.
             #[inline]
-            pub fn is_zero(&self) -> bool { self.0.iter().all(|b| *b == 0) }
+            pub fn is_zero(&self) -> bool {
+                self.0.iter().all(|b| *b == 0)
+            }
         }
 
         impl Default for $name {
             #[inline]
-            fn default() -> Self { $name([0u8; $size]) }
+            fn default() -> Self {
+                $name([0u8; $size])
+            }
         }
 
         impl Clone for $name {
             #[inline]
-            fn clone(&self) -> Self { *self }
+            fn clone(&self) -> Self {
+                *self
+            }
         }
 
         impl AsRef<$name> for $name {
             #[inline]
-            fn as_ref(&self) -> &$name { self }
+            fn as_ref(&self) -> &$name {
+                self
+            }
         }
 
         impl From<[u8; $size]> for $name {
             #[inline]
-            fn from(arr: [u8; $size]) -> Self { $name(arr) }
+            fn from(arr: [u8; $size]) -> Self {
+                $name(arr)
+            }
         }
 
         impl From<$name> for [u8; $size] {
             #[inline]
-            fn from(h: $name) -> Self { h.0 }
+            fn from(h: $name) -> Self {
+                h.0
+            }
         }
 
         impl<'a> From<&'a [u8]> for $name {
@@ -82,7 +100,9 @@ macro_rules! define_hash {
 
         impl From<&'static str> for $name {
             #[inline]
-            fn from(s: &'static str) -> Self { s.parse().expect("static hex literal must parse") }
+            fn from(s: &'static str) -> Self {
+                s.parse().expect("static hex literal must parse")
+            }
         }
 
         impl From<u8> for $name {
@@ -109,55 +129,77 @@ macro_rules! define_hash {
         }
 
         impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { f.write_str(&self.0.to_hex::<String>()) }
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str(&self.0.to_hex::<String>())
+            }
         }
 
         impl fmt::Debug for $name {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { f.write_str(&self.0.to_hex::<String>()) }
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str(&self.0.to_hex::<String>())
+            }
         }
 
         impl ops::Deref for $name {
             type Target = [u8; $size];
 
             #[inline]
-            fn deref(&self) -> &Self::Target { &self.0 }
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
         }
 
         impl ops::DerefMut for $name {
             #[inline]
-            fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
         }
 
         impl AsRef<[u8]> for $name {
             #[inline]
-            fn as_ref(&self) -> &[u8] { &self.0 }
+            fn as_ref(&self) -> &[u8] {
+                &self.0
+            }
         }
 
         impl AsMut<[u8]> for $name {
             #[inline]
-            fn as_mut(&mut self) -> &mut [u8] { &mut self.0 }
+            fn as_mut(&mut self) -> &mut [u8] {
+                &mut self.0
+            }
         }
 
         impl cmp::PartialEq for $name {
-            fn eq(&self, other: &Self) -> bool { self.0[..] == other.0[..] }
+            fn eq(&self, other: &Self) -> bool {
+                self.0[..] == other.0[..]
+            }
         }
 
         impl cmp::PartialEq<&$name> for $name {
-            fn eq(&self, other: &&Self) -> bool { self.0[..] == other.0[..] }
+            fn eq(&self, other: &&Self) -> bool {
+                self.0[..] == other.0[..]
+            }
         }
 
         impl cmp::Eq for $name {}
 
         impl cmp::PartialOrd for $name {
-            fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> { Some(self.0[..].cmp(&other.0[..])) }
+            fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+                Some(self.0[..].cmp(&other.0[..]))
+            }
         }
 
         impl cmp::Ord for $name {
-            fn cmp(&self, other: &Self) -> cmp::Ordering { self.0[..].cmp(&other.0[..]) }
+            fn cmp(&self, other: &Self) -> cmp::Ordering {
+                self.0[..].cmp(&other.0[..])
+            }
         }
 
         impl Hash for $name {
-            fn hash<H: Hasher>(&self, state: &mut H) { state.write(&self.0); }
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                state.write(&self.0);
+            }
         }
     };
 }
@@ -188,9 +230,13 @@ impl H256 {
     /// Parse a hex literal as a Bitcoin-style "txid string" — bytes are
     /// taken in reverse order, matching the way explorers print txids.
     #[inline]
-    pub fn from_reversed_str(s: &'static str) -> Self { H256::from(s).reversed() }
+    pub fn from_reversed_str(s: &'static str) -> Self {
+        H256::from(s).reversed()
+    }
 
     /// Render as a Bitcoin-style "txid string" (reverse byte order).
     #[inline]
-    pub fn to_reversed_str(self) -> String { self.reversed().to_string() }
+    pub fn to_reversed_str(self) -> String {
+        self.reversed().to_string()
+    }
 }

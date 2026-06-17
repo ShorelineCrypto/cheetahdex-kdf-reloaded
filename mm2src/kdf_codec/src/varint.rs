@@ -26,7 +26,9 @@ pub struct CompactInteger(u64);
 
 impl CompactInteger {
     /// Underlying value as a `usize`.
-    pub fn as_usize(&self) -> usize { self.0 as usize }
+    pub fn as_usize(&self) -> usize {
+        self.0 as usize
+    }
 
     /// Number of bytes the value occupies on the wire.
     pub fn serialized_length(&self) -> usize {
@@ -74,39 +76,57 @@ pub fn parse_compact_int<T: AsRef<[u8]> + ?Sized>(buf: &T) -> Result<CompactInte
 }
 
 impl fmt::Display for CompactInteger {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.0.fmt(f) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 impl From<CompactInteger> for usize {
-    fn from(c: CompactInteger) -> Self { c.0 as usize }
+    fn from(c: CompactInteger) -> Self {
+        c.0 as usize
+    }
 }
 
 impl From<CompactInteger> for u64 {
-    fn from(c: CompactInteger) -> Self { c.0 }
+    fn from(c: CompactInteger) -> Self {
+        c.0
+    }
 }
 
 impl From<u8> for CompactInteger {
-    fn from(v: u8) -> Self { CompactInteger(v as u64) }
+    fn from(v: u8) -> Self {
+        CompactInteger(v as u64)
+    }
 }
 
 impl From<u16> for CompactInteger {
-    fn from(v: u16) -> Self { CompactInteger(v as u64) }
+    fn from(v: u16) -> Self {
+        CompactInteger(v as u64)
+    }
 }
 
 impl From<u32> for CompactInteger {
-    fn from(v: u32) -> Self { CompactInteger(v as u64) }
+    fn from(v: u32) -> Self {
+        CompactInteger(v as u64)
+    }
 }
 
 impl From<usize> for CompactInteger {
-    fn from(v: usize) -> Self { CompactInteger(v as u64) }
+    fn from(v: usize) -> Self {
+        CompactInteger(v as u64)
+    }
 }
 
 impl From<u64> for CompactInteger {
-    fn from(v: u64) -> Self { CompactInteger(v) }
+    fn from(v: u64) -> Self {
+        CompactInteger(v)
+    }
 }
 
 impl AsRef<u64> for CompactInteger {
-    fn as_ref(&self) -> &u64 { &self.0 }
+    fn as_ref(&self) -> &u64 {
+        &self.0
+    }
 }
 
 impl Serializable for CompactInteger {
@@ -127,7 +147,9 @@ impl Serializable for CompactInteger {
         }
     }
 
-    fn serialized_size(&self) -> usize { self.serialized_length() }
+    fn serialized_size(&self) -> usize {
+        self.serialized_length()
+    }
 }
 
 impl Deserializable for CompactInteger {

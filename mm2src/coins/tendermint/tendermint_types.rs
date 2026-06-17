@@ -241,12 +241,16 @@ pub struct TendermintCoinImpl {
 pub struct TendermintCoin(pub(super) Arc<TendermintCoinImpl>);
 
 impl std::fmt::Debug for TendermintCoin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "TendermintCoin({})", self.ticker) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TendermintCoin({})", self.ticker)
+    }
 }
 
 impl Deref for TendermintCoin {
     type Target = TendermintCoinImpl;
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 // ————————————————————————————————————————————————————————————————
@@ -259,7 +263,9 @@ pub struct CosmosTransaction {
 }
 
 impl crate::Transaction for CosmosTransaction {
-    fn tx_hex(&self) -> Vec<u8> { self.data.encode_to_vec() }
+    fn tx_hex(&self) -> Vec<u8> {
+        self.data.encode_to_vec()
+    }
 
     fn tx_hash(&self) -> BytesJson {
         let bytes = self.data.encode_to_vec();
@@ -269,7 +275,9 @@ impl crate::Transaction for CosmosTransaction {
 }
 
 impl From<cosmrs::tx::Raw> for CosmosTransaction {
-    fn from(raw: cosmrs::tx::Raw) -> Self { CosmosTransaction { data: raw.into() } }
+    fn from(raw: cosmrs::tx::Raw) -> Self {
+        CosmosTransaction { data: raw.into() }
+    }
 }
 
 // ————————————————————————————————————————————————————————————————
@@ -317,28 +325,40 @@ pub enum TendermintCoinRpcError {
 }
 
 impl From<DecodeError> for TendermintCoinRpcError {
-    fn from(e: DecodeError) -> Self { TendermintCoinRpcError::Prost(e.to_string()) }
+    fn from(e: DecodeError) -> Self {
+        TendermintCoinRpcError::Prost(e.to_string())
+    }
 }
 
 impl From<tendermint_rpc::Error> for TendermintCoinRpcError {
-    fn from(e: tendermint_rpc::Error) -> Self { TendermintCoinRpcError::RpcClientError(e.to_string()) }
+    fn from(e: tendermint_rpc::Error) -> Self {
+        TendermintCoinRpcError::RpcClientError(e.to_string())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<crate::tendermint::rpc::PerformError> for TendermintCoinRpcError {
-    fn from(e: crate::tendermint::rpc::PerformError) -> Self { TendermintCoinRpcError::RpcClientError(e.to_string()) }
+    fn from(e: crate::tendermint::rpc::PerformError) -> Self {
+        TendermintCoinRpcError::RpcClientError(e.to_string())
+    }
 }
 
 impl From<TendermintCoinRpcError> for crate::WithdrawError {
-    fn from(e: TendermintCoinRpcError) -> Self { crate::WithdrawError::Transport(e.to_string()) }
+    fn from(e: TendermintCoinRpcError) -> Self {
+        crate::WithdrawError::Transport(e.to_string())
+    }
 }
 
 impl From<TendermintCoinRpcError> for crate::BalanceError {
-    fn from(e: TendermintCoinRpcError) -> Self { crate::BalanceError::Transport(e.to_string()) }
+    fn from(e: TendermintCoinRpcError) -> Self {
+        crate::BalanceError::Transport(e.to_string())
+    }
 }
 
 impl From<TendermintCoinRpcError> for crate::RawTransactionError {
-    fn from(e: TendermintCoinRpcError) -> Self { crate::RawTransactionError::Transport(e.to_string()) }
+    fn from(e: TendermintCoinRpcError) -> Self {
+        crate::RawTransactionError::Transport(e.to_string())
+    }
 }
 
 #[derive(Display, Debug)]
@@ -360,15 +380,21 @@ pub(super) enum SearchForSwapTxSpendErr {
 }
 
 impl From<ErrorReport> for SearchForSwapTxSpendErr {
-    fn from(e: ErrorReport) -> Self { SearchForSwapTxSpendErr::Cosmrs(e) }
+    fn from(e: ErrorReport) -> Self {
+        SearchForSwapTxSpendErr::Cosmrs(e)
+    }
 }
 
 impl From<TendermintCoinRpcError> for SearchForSwapTxSpendErr {
-    fn from(e: TendermintCoinRpcError) -> Self { SearchForSwapTxSpendErr::Rpc(e) }
+    fn from(e: TendermintCoinRpcError) -> Self {
+        SearchForSwapTxSpendErr::Rpc(e)
+    }
 }
 
 impl From<DecodeError> for SearchForSwapTxSpendErr {
-    fn from(e: DecodeError) -> Self { SearchForSwapTxSpendErr::Proto(e) }
+    fn from(e: DecodeError) -> Self {
+        SearchForSwapTxSpendErr::Proto(e)
+    }
 }
 
 #[derive(Display, Debug)]
@@ -378,11 +404,15 @@ pub enum AccountIdFromPubkeyHexErr {
 }
 
 impl From<FromHexError> for AccountIdFromPubkeyHexErr {
-    fn from(err: FromHexError) -> Self { AccountIdFromPubkeyHexErr::InvalidHexString(err) }
+    fn from(err: FromHexError) -> Self {
+        AccountIdFromPubkeyHexErr::InvalidHexString(err)
+    }
 }
 
 impl From<ErrorReport> for AccountIdFromPubkeyHexErr {
-    fn from(err: ErrorReport) -> Self { AccountIdFromPubkeyHexErr::CouldNotCreateAccountId(err) }
+    fn from(err: ErrorReport) -> Self {
+        AccountIdFromPubkeyHexErr::CouldNotCreateAccountId(err)
+    }
 }
 
 /// Error type for HTLC message construction.

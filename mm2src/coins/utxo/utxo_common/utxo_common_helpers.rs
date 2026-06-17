@@ -67,7 +67,9 @@ where
     }
 }
 
-pub fn derivation_method(coin: &UtxoCoinFields) -> &DerivationMethod<Address, UtxoHDWallet> { &coin.derivation_method }
+pub fn derivation_method(coin: &UtxoCoinFields) -> &DerivationMethod<Address, UtxoHDWallet> {
+    &coin.derivation_method
+}
 
 pub fn addresses_from_script<T: UtxoCommonOps>(coin: &T, script: &Script) -> Result<Vec<Address>, String> {
     let destinations: Vec<ScriptAddress> = try_s!(script.extract_destinations());
@@ -314,7 +316,9 @@ pub fn min_trading_vol(coin: &UtxoCoinFields) -> MmNumber {
     dust_multiplier * min_tx_amount(coin).into()
 }
 
-pub fn is_asset_chain(coin: &UtxoCoinFields) -> bool { coin.conf.asset_chain }
+pub fn is_asset_chain(coin: &UtxoCoinFields) -> bool {
+    coin.conf.asset_chain
+}
 
 pub async fn get_raw_transaction(coin: &UtxoCoinFields, req: RawTransactionRequest) -> RawTransactionResult {
     let hash = H256Json::from_str(&req.tx_hash).map_to_mm(|e| RawTransactionError::InvalidHashError(e.to_string()))?;
@@ -384,7 +388,9 @@ pub fn get_withdraw_iguana_sender<T: UtxoCommonOps>(
     })
 }
 
-pub fn decimals(coin: &UtxoCoinFields) -> u8 { coin.decimals }
+pub fn decimals(coin: &UtxoCoinFields) -> u8 {
+    coin.decimals
+}
 
 pub fn convert_to_address<T: UtxoCommonOps>(coin: &T, from: &str, to_address_format: Json) -> Result<String, String> {
     let to_address_format: UtxoAddressFormat =
@@ -476,7 +482,9 @@ pub fn is_coin_protocol_supported<T: UtxoCommonOps>(coin: &T, info: &Option<Vec<
 }
 
 /// Swap contract address is not used by standard UTXO coins.
-pub fn swap_contract_address() -> Option<BytesJson> { None }
+pub fn swap_contract_address() -> Option<BytesJson> {
+    None
+}
 
 /// Convert satoshis to BigDecimal amount of coin units
 pub fn big_decimal_from_sat(satoshis: i64, decimals: u8) -> BigDecimal {

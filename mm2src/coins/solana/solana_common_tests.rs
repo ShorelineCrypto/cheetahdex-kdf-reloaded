@@ -70,9 +70,12 @@ pub fn spl_coin_for_test(
 
 pub fn solana_coin_for_test(seed: String, net_type: SolanaNet) -> (MmArc, SolanaCoin) {
     let url = solana_net_to_url(net_type);
-    let client = SolanaRpcPool::with_commitment(vec![url], CommitmentConfig {
-        commitment: CommitmentLevel::Finalized,
-    })
+    let client = SolanaRpcPool::with_commitment(
+        vec![url],
+        CommitmentConfig {
+            commitment: CommitmentLevel::Finalized,
+        },
+    )
     .expect("non-empty endpoint list");
     let conf = json!({
         "coins":[

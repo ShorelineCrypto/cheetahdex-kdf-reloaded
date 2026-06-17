@@ -16,10 +16,14 @@ pub trait StateMachineTrait: Send + Sized + 'static {
     type Error: Send;
 
     /// Called once before the first state is entered. Override for setup logic.
-    async fn on_start(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    async fn on_start(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 
     /// Called after a terminal state produces its result. Override for teardown logic.
-    async fn on_finished(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    async fn on_finished(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 
     /// Drives the state machine from `state` until completion or error.
     async fn run(&mut self, mut state: Box<dyn State<StateMachine = Self>>) -> Result<Self::Result, Self::Error> {
@@ -124,7 +128,9 @@ pub struct ResultGuard<T> {
 }
 
 impl<T> ResultGuard<T> {
-    fn new(result: T) -> Self { ResultGuard { result } }
+    fn new(result: T) -> Self {
+        ResultGuard { result }
+    }
 }
 
 /// Wraps an error that short-circuits execution. Can only be constructed inside this crate.
@@ -133,7 +139,9 @@ pub struct ErrorGuard<E> {
 }
 
 impl<E> ErrorGuard<E> {
-    pub(crate) fn new(error: E) -> Self { ErrorGuard { error } }
+    pub(crate) fn new(error: E) -> Self {
+        ErrorGuard { error }
+    }
 }
 
 #[cfg(test)]
@@ -201,13 +209,17 @@ mod tests {
     #[async_trait]
     impl LastState for Authenticated {
         type StateMachine = AuthMachine;
-        async fn on_changed(self: Box<Self>, _ctx: &mut AuthMachine) -> AuthResult { Ok(self.user_id) }
+        async fn on_changed(self: Box<Self>, _ctx: &mut AuthMachine) -> AuthResult {
+            Ok(self.user_id)
+        }
     }
 
     #[async_trait]
     impl LastState for Failed {
         type StateMachine = AuthMachine;
-        async fn on_changed(self: Box<Self>, _ctx: &mut AuthMachine) -> AuthResult { Err(self.error) }
+        async fn on_changed(self: Box<Self>, _ctx: &mut AuthMachine) -> AuthResult {
+            Err(self.error)
+        }
     }
 
     // State logic -------------------------------------------------------------

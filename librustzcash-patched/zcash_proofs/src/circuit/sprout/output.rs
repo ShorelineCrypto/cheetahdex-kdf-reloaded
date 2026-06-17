@@ -26,20 +26,11 @@ impl OutputNote {
     {
         let rho = prf_rho(cs.namespace(|| "rho"), phi, h_sig, nonce)?;
 
-        let a_pk = witness_u256(
-            cs.namespace(|| "a_pk"),
-            a_pk.as_ref().map(|a_pk| &a_pk.0[..]),
-        )?;
+        let a_pk = witness_u256(cs.namespace(|| "a_pk"), a_pk.as_ref().map(|a_pk| &a_pk.0[..]))?;
 
         let r = witness_u256(cs.namespace(|| "r"), r.as_ref().map(|r| &r.0[..]))?;
 
-        let cm = note_comm(
-            cs.namespace(|| "cm computation"),
-            &a_pk,
-            &value.bits_le(),
-            &rho,
-            &r,
-        )?;
+        let cm = note_comm(cs.namespace(|| "cm computation"), &a_pk, &value.bits_le(), &rho, &r)?;
 
         Ok(OutputNote { cm })
     }

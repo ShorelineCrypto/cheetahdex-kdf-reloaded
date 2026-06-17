@@ -39,9 +39,10 @@ use std::time::Duration;
 use crate::mm2::database::init_and_migrate_db;
 use crate::mm2::lp_message_service::{init_message_service, InitMessageServiceError};
 use crate::mm2::lp_network::{lp_network_ports, p2p_event_process_loop, NetIdError, P2PContext};
-use crate::mm2::lp_ordermatch::{broadcast_maker_orders_keep_alive_loop, clean_memory_loop, init_ordermatch_context,
-                                lp_ordermatch_loop, orders_kick_start, BalanceUpdateOrdermatchHandler,
-                                OrdermatchInitError};
+use crate::mm2::lp_ordermatch::{
+    broadcast_maker_orders_keep_alive_loop, clean_memory_loop, init_ordermatch_context, lp_ordermatch_loop,
+    orders_kick_start, BalanceUpdateOrdermatchHandler, OrdermatchInitError,
+};
 use crate::mm2::lp_swap::{running_swaps_num, swap_kick_starts};
 use crate::mm2::rpc::spawn_rpc;
 use crate::mm2::{MM_DATETIME, MM_VERSION};
@@ -52,8 +53,10 @@ cfg_native! {
     use db_common::sqlite::rusqlite::Error as SqlError;
 }
 
-#[path = "lp_init/init_context.rs"] mod init_context;
-#[path = "lp_init/init_hw.rs"] pub mod init_hw;
+#[path = "lp_init/init_context.rs"]
+mod init_context;
+#[path = "lp_init/init_hw.rs"]
+pub mod init_hw;
 
 pub type P2PResult<T> = Result<T, MmError<P2PInitError>>;
 pub type MmInitResult<T> = Result<T, MmError<MmInitError>>;
@@ -86,7 +89,9 @@ pub enum P2PInitError {
 }
 
 impl From<NetIdError> for P2PInitError {
-    fn from(e: NetIdError) -> Self { P2PInitError::InvalidNetId(e) }
+    fn from(e: NetIdError) -> Self {
+        P2PInitError::InvalidNetId(e)
+    }
 }
 
 impl From<AdexBehaviourError> for P2PInitError {
@@ -172,7 +177,9 @@ impl From<P2PInitError> for MmInitError {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SqlError> for MmInitError {
-    fn from(e: SqlError) -> Self { MmInitError::ErrorSqliteInitializing(e.to_string()) }
+    fn from(e: SqlError) -> Self {
+        MmInitError::ErrorSqliteInitializing(e.to_string())
+    }
 }
 
 impl From<OrdermatchInitError> for MmInitError {

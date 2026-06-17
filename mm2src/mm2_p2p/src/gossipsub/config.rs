@@ -131,7 +131,9 @@ pub struct GossipsubConfigBuilder {
 
 impl GossipsubConfigBuilder {
     // set default values
-    pub fn new() -> GossipsubConfigBuilder { GossipsubConfigBuilder::default() }
+    pub fn new() -> GossipsubConfigBuilder {
+        GossipsubConfigBuilder::default()
+    }
 
     pub fn protocol_id(&mut self, protocol_id: impl Into<Cow<'static, [u8]>>) -> &mut Self {
         self.config.protocol_id = protocol_id.into();
@@ -230,7 +232,9 @@ impl GossipsubConfigBuilder {
         self
     }
 
-    pub fn build(&self) -> GossipsubConfig { self.config.clone() }
+    pub fn build(&self) -> GossipsubConfig {
+        self.config.clone()
+    }
 }
 
 impl std::fmt::Debug for GossipsubConfig {

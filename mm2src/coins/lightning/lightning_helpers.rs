@@ -2,10 +2,14 @@
 use super::*;
 
 impl LightningCoin {
-    pub(crate) fn platform_coin(&self) -> &UtxoStandardCoin { &self.platform.coin }
+    pub(crate) fn platform_coin(&self) -> &UtxoStandardCoin {
+        &self.platform.coin
+    }
 
     #[inline]
-    pub(crate) fn my_node_id(&self) -> String { self.channel_manager.get_our_node_id().to_string() }
+    pub(crate) fn my_node_id(&self) -> String {
+        self.channel_manager.get_our_node_id().to_string()
+    }
 
     pub(crate) fn get_balance_msat(&self) -> (u64, u64) {
         self.channel_manager

@@ -23,10 +23,13 @@ pub enum BanReason {
 pub fn ban_pubkey_on_failed_swap(ctx: &MmArc, pubkey: H256, swap_uuid: &Uuid, event: SwapEvent) {
     let ctx = SwapsContext::from_ctx(ctx).unwrap();
     let mut banned = ctx.banned_pubkeys.lock().unwrap();
-    banned.insert(pubkey.into(), BanReason::FailedSwap {
-        caused_by_swap: *swap_uuid,
-        caused_by_event: event,
-    });
+    banned.insert(
+        pubkey.into(),
+        BanReason::FailedSwap {
+            caused_by_swap: *swap_uuid,
+            caused_by_event: event,
+        },
+    );
 }
 
 pub fn is_pubkey_banned(ctx: &MmArc, pubkey: &H256Json) -> bool {

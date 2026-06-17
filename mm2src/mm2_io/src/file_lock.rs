@@ -80,11 +80,15 @@ impl<T: AsRef<Path>> FileLock<T> {
         }
     }
 
-    pub fn touch(&self) -> FileLockResult<()> { touch(&self.lock_path, now_ms() / 1000) }
+    pub fn touch(&self) -> FileLockResult<()> {
+        touch(&self.lock_path, now_ms() / 1000)
+    }
 }
 
 impl<T: AsRef<Path>> Drop for FileLock<T> {
-    fn drop(&mut self) { let _ = std::fs::remove_file(&self.lock_path); }
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
 }
 
 #[cfg(test)]

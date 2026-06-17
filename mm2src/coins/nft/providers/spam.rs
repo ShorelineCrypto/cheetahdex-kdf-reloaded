@@ -28,11 +28,15 @@ pub enum SpamScanError {
 }
 
 impl From<regex::Error> for SpamScanError {
-    fn from(err: regex::Error) -> Self { SpamScanError::InvalidRegex(err.to_string()) }
+    fn from(err: regex::Error) -> Self {
+        SpamScanError::InvalidRegex(err.to_string())
+    }
 }
 
 impl From<serde_json::Error> for SpamScanError {
-    fn from(err: serde_json::Error) -> Self { SpamScanError::Serialize(err.to_string()) }
+    fn from(err: serde_json::Error) -> Self {
+        SpamScanError::Serialize(err.to_string())
+    }
 }
 
 /// Permissive URL detector. Matches anything that *looks* like a link

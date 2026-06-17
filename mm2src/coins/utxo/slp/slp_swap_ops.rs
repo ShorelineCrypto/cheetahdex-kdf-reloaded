@@ -311,7 +311,9 @@ impl SwapOps for SlpToken {
         Ok(None)
     }
 
-    fn get_htlc_key_pair(&self) -> Option<KeyPair> { utxo_common::get_htlc_key_pair(&self.platform_coin) }
+    fn get_htlc_key_pair(&self) -> Option<KeyPair> {
+        utxo_common::get_htlc_key_pair(&self.platform_coin)
+    }
 }
 
 #[async_trait]

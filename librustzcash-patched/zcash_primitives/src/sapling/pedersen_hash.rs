@@ -8,9 +8,7 @@ use ff::PrimeField;
 use group::Group;
 use std::ops::{AddAssign, Neg};
 
-use crate::constants::{
-    PEDERSEN_HASH_CHUNKS_PER_GENERATOR, PEDERSEN_HASH_EXP_TABLE, PEDERSEN_HASH_EXP_WINDOW_SIZE,
-};
+use crate::constants::{PEDERSEN_HASH_CHUNKS_PER_GENERATOR, PEDERSEN_HASH_EXP_TABLE, PEDERSEN_HASH_EXP_WINDOW_SIZE};
 
 #[derive(Copy, Clone)]
 pub enum Personalization {
@@ -26,7 +24,7 @@ impl Personalization {
                 assert!(num < 63);
 
                 (0..6).map(|i| (num >> i) & 1 == 1).collect()
-            }
+            },
         }
     }
 }
@@ -35,10 +33,7 @@ pub fn pedersen_hash<I>(personalization: Personalization, bits: I) -> jubjub::Su
 where
     I: IntoIterator<Item = bool>,
 {
-    let mut bits = personalization
-        .get_bits()
-        .into_iter()
-        .chain(bits.into_iter());
+    let mut bits = personalization.get_bits().into_iter().chain(bits.into_iter());
 
     let mut result = jubjub::SubgroupPoint::identity();
     let mut generators = PEDERSEN_HASH_EXP_TABLE.iter();
@@ -86,8 +81,7 @@ where
             break;
         }
 
-        let mut table: &[Vec<jubjub::SubgroupPoint>] =
-            &generators.next().expect("we don't have enough generators");
+        let mut table: &[Vec<jubjub::SubgroupPoint>] = &generators.next().expect("we don't have enough generators");
         let window = PEDERSEN_HASH_EXP_WINDOW_SIZE as usize;
         let window_mask = (1u64 << window) - 1;
 
@@ -147,11 +141,8 @@ pub mod test {
             // The 6 bits prefix is handled separately
             assert_eq!(v.personalization.get_bits(), &input_bools[..6]);
 
-            let p = jubjub::ExtendedPoint::from(pedersen_hash(
-                v.personalization,
-                input_bools.into_iter().skip(6),
-            ))
-            .to_affine();
+            let p = jubjub::ExtendedPoint::from(pedersen_hash(v.personalization, input_bools.into_iter().skip(6)))
+                .to_affine();
 
             assert_eq!(p.get_u().to_string(), v.hash_u);
             assert_eq!(p.get_v().to_string(), v.hash_v);

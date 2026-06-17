@@ -62,7 +62,9 @@ pub enum GasStationReqErr {
 }
 
 impl From<serde_json::Error> for GasStationReqErr {
-    fn from(e: serde_json::Error) -> Self { GasStationReqErr::InvalidResponse(e.to_string()) }
+    fn from(e: serde_json::Error) -> Self {
+        GasStationReqErr::InvalidResponse(e.to_string())
+    }
 }
 
 impl From<SlurpError> for GasStationReqErr {
@@ -99,7 +101,9 @@ impl From<GasStationReqErr> for Web3RpcError {
 }
 
 impl From<serde_json::Error> for Web3RpcError {
-    fn from(e: serde_json::Error) -> Self { Web3RpcError::InvalidResponse(e.to_string()) }
+    fn from(e: serde_json::Error) -> Self {
+        Web3RpcError::InvalidResponse(e.to_string())
+    }
 }
 
 impl From<ethabi::Error> for Web3RpcError {
@@ -467,23 +471,33 @@ pub type ValidatePaymentError = ValidateSwapV2TxError;
 pub type ValidatePaymentResult<T> = MmResult<T, ValidatePaymentError>;
 
 impl From<ethabi::Error> for FindPaymentSpendError {
-    fn from(e: ethabi::Error) -> Self { FindPaymentSpendError::ABIError(e.to_string()) }
+    fn from(e: ethabi::Error) -> Self {
+        FindPaymentSpendError::ABIError(e.to_string())
+    }
 }
 
 impl From<ethabi::Error> for ValidateSwapV2TxError {
-    fn from(e: ethabi::Error) -> Self { ValidateSwapV2TxError::ABIError(e.to_string()) }
+    fn from(e: ethabi::Error) -> Self {
+        ValidateSwapV2TxError::ABIError(e.to_string())
+    }
 }
 
 impl From<std::array::TryFromSliceError> for ValidateSwapV2TxError {
-    fn from(e: std::array::TryFromSliceError) -> Self { ValidateSwapV2TxError::InternalError(e.to_string()) }
+    fn from(e: std::array::TryFromSliceError) -> Self {
+        ValidateSwapV2TxError::InternalError(e.to_string())
+    }
 }
 
 impl From<std::array::TryFromSliceError> for FindPaymentSpendError {
-    fn from(e: std::array::TryFromSliceError) -> Self { FindPaymentSpendError::Internal(e.to_string()) }
+    fn from(e: std::array::TryFromSliceError) -> Self {
+        FindPaymentSpendError::Internal(e.to_string())
+    }
 }
 
 impl From<NumConversError> for ValidateSwapV2TxError {
-    fn from(e: NumConversError) -> Self { ValidateSwapV2TxError::InternalError(e.to_string()) }
+    fn from(e: NumConversError) -> Self {
+        ValidateSwapV2TxError::InternalError(e.to_string())
+    }
 }
 
 impl From<eth_swap_v2::ValidatePaymentV2Err> for ValidateSwapV2TxError {

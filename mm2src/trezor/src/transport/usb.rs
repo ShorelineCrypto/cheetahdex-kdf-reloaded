@@ -3,8 +3,9 @@ use crate::transport::protocol::{Link, Protocol, ProtocolV1};
 use crate::transport::{Transport, TREZOR_DEVICES};
 use crate::TrezorResult;
 use async_trait::async_trait;
-use hw_common::transport::libusb::{GetDevicesFilters, UsbAvailableDevice as UsbAvailableDeviceImpl, UsbContext,
-                                   UsbDevice};
+use hw_common::transport::libusb::{
+    GetDevicesFilters, UsbAvailableDevice as UsbAvailableDeviceImpl, UsbContext, UsbDevice,
+};
 use mm2_err_handle::prelude::*;
 use std::time::Duration;
 
@@ -27,13 +28,21 @@ pub struct UsbTransport {
 
 #[async_trait]
 impl Transport for UsbTransport {
-    async fn session_begin(&mut self) -> TrezorResult<()> { self.protocol.session_begin().await }
+    async fn session_begin(&mut self) -> TrezorResult<()> {
+        self.protocol.session_begin().await
+    }
 
-    async fn session_end(&mut self) -> TrezorResult<()> { self.protocol.session_end().await }
+    async fn session_end(&mut self) -> TrezorResult<()> {
+        self.protocol.session_end().await
+    }
 
-    async fn write_message(&mut self, message: ProtoMessage) -> TrezorResult<()> { self.protocol.write(message).await }
+    async fn write_message(&mut self, message: ProtoMessage) -> TrezorResult<()> {
+        self.protocol.write(message).await
+    }
 
-    async fn read_message(&mut self) -> TrezorResult<ProtoMessage> { self.protocol.read().await }
+    async fn read_message(&mut self) -> TrezorResult<ProtoMessage> {
+        self.protocol.read().await
+    }
 }
 
 struct UsbLink {
@@ -86,7 +95,9 @@ impl UsbAvailableDevice {
         })
     }
 
-    pub fn device_info(&self) -> &UsbDeviceInfo { self.0.device_info() }
+    pub fn device_info(&self) -> &UsbDeviceInfo {
+        self.0.device_info()
+    }
 }
 
 fn is_trezor(device: &UsbAvailableDeviceImpl) -> bool {

@@ -93,7 +93,9 @@ pub trait RegisterTokenInfo<T: TokenOf<PlatformCoin = Self>> {
 }
 
 impl From<std::convert::Infallible> for InitTokensAsMmCoinsError {
-    fn from(e: Infallible) -> Self { match e {} }
+    fn from(e: Infallible) -> Self {
+        match e {}
+    }
 }
 
 #[async_trait]

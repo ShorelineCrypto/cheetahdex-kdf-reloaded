@@ -7,17 +7,27 @@
 #![recursion_limit = "512"]
 #![cfg_attr(target_arch = "wasm32", allow(unused_imports))]
 
-#[macro_use] extern crate common;
-#[macro_use] extern crate enum_primitive_derive;
-#[macro_use] extern crate fomat_macros;
-#[macro_use] extern crate gstuff;
-#[macro_use] extern crate mm2_metrics;
-#[macro_use] extern crate serde_json;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate serialization_derive;
-#[macro_use] extern crate ser_error_derive;
+#[macro_use]
+extern crate common;
+#[macro_use]
+extern crate enum_primitive_derive;
+#[macro_use]
+extern crate fomat_macros;
+#[macro_use]
+extern crate gstuff;
+#[macro_use]
+extern crate mm2_metrics;
+#[macro_use]
+extern crate serde_json;
+#[macro_use]
+extern crate serde_derive;
+#[macro_use]
+extern crate serialization_derive;
+#[macro_use]
+extern crate ser_error_derive;
 
-#[path = "mm2.rs"] mod mm2;
+#[path = "mm2.rs"]
+mod mm2;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "mm2_lib/mm2_native_lib.rs"]
@@ -29,7 +39,8 @@ mod mm2_wasm_lib;
 
 use mm2_core::mm_ctx::MmArc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-#[cfg(target_arch = "wasm32")] use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
 // Re-export entry points for mm2_bin_lib.
 pub use mm2::lp_main;

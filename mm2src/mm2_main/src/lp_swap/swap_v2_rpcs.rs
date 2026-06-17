@@ -29,8 +29,10 @@ use super::maker_swap_v2::MakerSwapEvent;
 use super::my_swaps_storage::{MySwapsError, MySwapsOps, MySwapsStorage};
 use super::taker_swap::TakerSavedSwap;
 use super::taker_swap_v2::TakerSwapEvent;
-use super::{active_swaps, MySwapsFilter, SavedSwap, SavedSwapError, SavedSwapIo, LEGACY_SWAP_TYPE, MAKER_SWAP_V2_TYPE,
-            TAKER_SWAP_V2_TYPE};
+use super::{
+    active_swaps, MySwapsFilter, SavedSwap, SavedSwapError, SavedSwapIo, LEGACY_SWAP_TYPE, MAKER_SWAP_V2_TYPE,
+    TAKER_SWAP_V2_TYPE,
+};
 use common::log::{error, warn};
 use common::mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr};
 use common::{calc_total_pages, HttpStatusCode, PagingOptions};
@@ -118,17 +120,23 @@ pub enum SwapV2DbError {
 // change reviewable in isolation.
 #[cfg(target_arch = "wasm32")]
 impl From<DbTransactionError> for SwapV2DbError {
-    fn from(err: DbTransactionError) -> Self { SwapV2DbError::DbTransaction(err) }
+    fn from(err: DbTransactionError) -> Self {
+        SwapV2DbError::DbTransaction(err)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<InitDbError> for SwapV2DbError {
-    fn from(err: InitDbError) -> Self { SwapV2DbError::InitDb(err) }
+    fn from(err: InitDbError) -> Self {
+        SwapV2DbError::InitDb(err)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<serde_json::Error> for SwapV2DbError {
-    fn from(err: serde_json::Error) -> Self { SwapV2DbError::Serde(err) }
+    fn from(err: serde_json::Error) -> Self {
+        SwapV2DbError::Serde(err)
+    }
 }
 
 // V2 swap projection -------------------------------------------------------
@@ -360,17 +368,23 @@ enum FetchSwapErr {
 }
 
 impl From<SavedSwapError> for FetchSwapErr {
-    fn from(e: SavedSwapError) -> Self { FetchSwapErr::DbError(e.to_string()) }
+    fn from(e: SavedSwapError) -> Self {
+        FetchSwapErr::DbError(e.to_string())
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SqlError> for FetchSwapErr {
-    fn from(e: SqlError) -> Self { FetchSwapErr::DbError(e.to_string()) }
+    fn from(e: SqlError) -> Self {
+        FetchSwapErr::DbError(e.to_string())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<SwapV2DbError> for FetchSwapErr {
-    fn from(e: SwapV2DbError) -> Self { FetchSwapErr::DbError(e.to_string()) }
+    fn from(e: SwapV2DbError) -> Self {
+        FetchSwapErr::DbError(e.to_string())
+    }
 }
 
 /// Dispatches to the right backing store based on the persisted
@@ -415,12 +429,16 @@ pub(crate) enum MySwapStatusError {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SqlError> for MySwapStatusError {
-    fn from(e: SqlError) -> Self { MySwapStatusError::DbError(e.to_string()) }
+    fn from(e: SqlError) -> Self {
+        MySwapStatusError::DbError(e.to_string())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl From<SwapV2DbError> for MySwapStatusError {
-    fn from(e: SwapV2DbError) -> Self { MySwapStatusError::DbError(e.to_string()) }
+    fn from(e: SwapV2DbError) -> Self {
+        MySwapStatusError::DbError(e.to_string())
+    }
 }
 
 impl From<FetchSwapErr> for MySwapStatusError {

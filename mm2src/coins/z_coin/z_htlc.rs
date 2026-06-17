@@ -104,15 +104,21 @@ pub enum ZP2SHSpendError {
 }
 
 impl From<ZTxBuilderError> for ZP2SHSpendError {
-    fn from(tx_builder: ZTxBuilderError) -> ZP2SHSpendError { ZP2SHSpendError::ZTxBuilderError(tx_builder) }
+    fn from(tx_builder: ZTxBuilderError) -> ZP2SHSpendError {
+        ZP2SHSpendError::ZTxBuilderError(tx_builder)
+    }
 }
 
 impl From<PrivKeyNotAllowed> for ZP2SHSpendError {
-    fn from(err: PrivKeyNotAllowed) -> Self { ZP2SHSpendError::PrivKeyNotAllowed(err) }
+    fn from(err: PrivKeyNotAllowed) -> Self {
+        ZP2SHSpendError::PrivKeyNotAllowed(err)
+    }
 }
 
 impl From<UtxoRpcError> for ZP2SHSpendError {
-    fn from(rpc: UtxoRpcError) -> ZP2SHSpendError { ZP2SHSpendError::Rpc(rpc) }
+    fn from(rpc: UtxoRpcError) -> ZP2SHSpendError {
+        ZP2SHSpendError::Rpc(rpc)
+    }
 }
 
 impl ZP2SHSpendError {

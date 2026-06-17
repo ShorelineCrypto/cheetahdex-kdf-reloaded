@@ -110,7 +110,9 @@ impl RpcTaskTypes for WithdrawTask {
 
 #[async_trait]
 impl RpcTask for WithdrawTask {
-    fn initial_status(&self) -> Self::InProgressStatus { WithdrawInProgressStatus::Preparing }
+    fn initial_status(&self) -> Self::InProgressStatus {
+        WithdrawInProgressStatus::Preparing
+    }
 
     async fn run(self, task_handle: &WithdrawTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         match self.coin {

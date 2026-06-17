@@ -1,9 +1,13 @@
 use crate::rpc_command::init_withdraw::{WithdrawAwaitingStatus, WithdrawInProgressStatus, WithdrawTaskHandle};
 use crate::utxo::utxo_common::{big_decimal_from_sat, UtxoTxBuilder};
-use crate::utxo::{output_script, sat_from_big_decimal, ActualTxFee, Address, FeePolicy, GetUtxoListOps, PrivKeyPolicy,
-                  UtxoAddressFormat, UtxoCoinFields, UtxoCommonOps, UtxoFeeDetails, UtxoTx, UTXO_LOCK};
-use crate::{CoinWithDerivationMethod, GetWithdrawSenderAddress, MarketCoinOps, TransactionDetails, WithdrawError,
-            WithdrawFee, WithdrawRequest, WithdrawResult};
+use crate::utxo::{
+    output_script, sat_from_big_decimal, ActualTxFee, Address, FeePolicy, GetUtxoListOps, PrivKeyPolicy,
+    UtxoAddressFormat, UtxoCoinFields, UtxoCommonOps, UtxoFeeDetails, UtxoTx, UTXO_LOCK,
+};
+use crate::{
+    CoinWithDerivationMethod, GetWithdrawSenderAddress, MarketCoinOps, TransactionDetails, WithdrawError, WithdrawFee,
+    WithdrawRequest, WithdrawResult,
+};
 use async_trait::async_trait;
 use chain::TransactionOutput;
 use common::log::info;
@@ -69,15 +73,21 @@ impl From<HwError> for WithdrawError {
 }
 
 impl From<TrezorError> for WithdrawError {
-    fn from(e: TrezorError) -> Self { WithdrawError::HardwareWalletInternal(e.to_string()) }
+    fn from(e: TrezorError) -> Self {
+        WithdrawError::HardwareWalletInternal(e.to_string())
+    }
 }
 
 impl From<CryptoInitError> for WithdrawError {
-    fn from(e: CryptoInitError) -> Self { WithdrawError::InternalError(e.to_string()) }
+    fn from(e: CryptoInitError) -> Self {
+        WithdrawError::InternalError(e.to_string())
+    }
 }
 
 impl From<CryptoCtxError> for WithdrawError {
-    fn from(e: CryptoCtxError) -> Self { WithdrawError::InternalError(e.to_string()) }
+    fn from(e: CryptoCtxError) -> Self {
+        WithdrawError::InternalError(e.to_string())
+    }
 }
 
 impl From<RpcTaskError> for WithdrawError {
@@ -121,7 +131,9 @@ where
         }
     }
 
-    fn prev_script(&self) -> Script { Builder::build_p2pkh(&self.sender_address().hash) }
+    fn prev_script(&self) -> Script {
+        Builder::build_p2pkh(&self.sender_address().hash)
+    }
 
     fn on_generating_transaction(&self) -> Result<(), MmError<WithdrawError>>;
 
@@ -255,13 +267,21 @@ impl<'a, Coin> UtxoWithdraw<Coin> for InitUtxoWithdraw<'a, Coin>
 where
     Coin: UtxoCommonOps + GetUtxoListOps + UtxoSignerOps,
 {
-    fn coin(&self) -> &Coin { &self.coin }
+    fn coin(&self) -> &Coin {
+        &self.coin
+    }
 
-    fn sender_address(&self) -> Address { self.from_address.clone() }
+    fn sender_address(&self) -> Address {
+        self.from_address.clone()
+    }
 
-    fn sender_address_string(&self) -> String { self.from_address_string.clone() }
+    fn sender_address_string(&self) -> String {
+        self.from_address_string.clone()
+    }
 
-    fn request(&self) -> &WithdrawRequest { &self.req }
+    fn request(&self) -> &WithdrawRequest {
+        &self.req
+    }
 
     fn on_generating_transaction(&self) -> Result<(), MmError<WithdrawError>> {
         let amount_display = if self.req.max {
@@ -388,14 +408,17 @@ impl<'a, Coin> InitUtxoWithdraw<'a, Coin> {
             .hw_ctx()
             .or_mm_err(|| WithdrawError::NoTrezorDeviceAvailable)?;
 
-        let trezor_connect_processor = TrezorRpcTaskConnectProcessor::new(self.task_handle, HwConnectStatuses {
-            on_connect: WithdrawInProgressStatus::WaitingForTrezorToConnect,
-            on_connected: WithdrawInProgressStatus::Preparing,
-            on_connection_failed: WithdrawInProgressStatus::Finishing,
-            on_button_request: WithdrawInProgressStatus::WaitingForUserToConfirmPubkey,
-            on_pin_request: WithdrawAwaitingStatus::WaitForTrezorPin,
-            on_ready: WithdrawInProgressStatus::Preparing,
-        })
+        let trezor_connect_processor = TrezorRpcTaskConnectProcessor::new(
+            self.task_handle,
+            HwConnectStatuses {
+                on_connect: WithdrawInProgressStatus::WaitingForTrezorToConnect,
+                on_connected: WithdrawInProgressStatus::Preparing,
+                on_connection_failed: WithdrawInProgressStatus::Finishing,
+                on_button_request: WithdrawInProgressStatus::WaitingForUserToConfirmPubkey,
+                on_pin_request: WithdrawAwaitingStatus::WaitForTrezorPin,
+                on_ready: WithdrawInProgressStatus::Preparing,
+            },
+        )
         .with_connect_timeout(TREZOR_CONNECT_TIMEOUT)
         .with_pin_timeout(TREZOR_PIN_TIMEOUT);
 
@@ -418,17 +441,29 @@ impl<Coin> UtxoWithdraw<Coin> for StandardUtxoWithdraw<Coin>
 where
     Coin: UtxoCommonOps + GetUtxoListOps,
 {
-    fn coin(&self) -> &Coin { &self.coin }
+    fn coin(&self) -> &Coin {
+        &self.coin
+    }
 
-    fn sender_address(&self) -> Address { self.my_address.clone() }
+    fn sender_address(&self) -> Address {
+        self.my_address.clone()
+    }
 
-    fn sender_address_string(&self) -> String { self.my_address_string.clone() }
+    fn sender_address_string(&self) -> String {
+        self.my_address_string.clone()
+    }
 
-    fn request(&self) -> &WithdrawRequest { &self.req }
+    fn request(&self) -> &WithdrawRequest {
+        &self.req
+    }
 
-    fn on_generating_transaction(&self) -> Result<(), MmError<WithdrawError>> { Ok(()) }
+    fn on_generating_transaction(&self) -> Result<(), MmError<WithdrawError>> {
+        Ok(())
+    }
 
-    fn on_finishing(&self) -> Result<(), MmError<WithdrawError>> { Ok(()) }
+    fn on_finishing(&self) -> Result<(), MmError<WithdrawError>> {
+        Ok(())
+    }
 
     async fn sign_tx(&self, unsigned_tx: TransactionInputSigner) -> Result<UtxoTx, MmError<WithdrawError>> {
         let key_pair = self

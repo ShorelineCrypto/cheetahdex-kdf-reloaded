@@ -57,11 +57,7 @@ pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
         lhs.iter()
             .copied()
             .take(bls12_381::Scalar::NUM_BITS as usize)
-            .chain(
-                rhs.iter()
-                    .copied()
-                    .take(bls12_381::Scalar::NUM_BITS as usize),
-            ),
+            .chain(rhs.iter().copied().take(bls12_381::Scalar::NUM_BITS as usize)),
     ))
     .to_affine()
     .get_u()
@@ -279,10 +275,7 @@ impl PaymentAddress {
     ///
     /// Only for test code, as this explicitly bypasses the invariant.
     #[cfg(test)]
-    pub(crate) fn from_parts_unchecked(
-        diversifier: Diversifier,
-        pk_d: jubjub::SubgroupPoint,
-    ) -> Self {
+    pub(crate) fn from_parts_unchecked(diversifier: Diversifier, pk_d: jubjub::SubgroupPoint) -> Self {
         PaymentAddress { pk_d, diversifier }
     }
 
@@ -381,10 +374,7 @@ pub struct Note {
 
 impl PartialEq for Note {
     fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-            && self.g_d == other.g_d
-            && self.pk_d == other.pk_d
-            && self.rcm() == other.rcm()
+        self.value == other.value && self.g_d == other.g_d && self.pk_d == other.pk_d && self.rcm() == other.rcm()
     }
 }
 
@@ -401,9 +391,7 @@ impl Note {
         let mut note_contents = vec![];
 
         // Writing the value in little endian
-        (&mut note_contents)
-            .write_u64::<LittleEndian>(self.value)
-            .unwrap();
+        (&mut note_contents).write_u64::<LittleEndian>(self.value).unwrap();
 
         // Write g_d
         note_contents.extend_from_slice(&self.g_d.to_bytes());
@@ -429,8 +417,7 @@ impl Note {
     /// note position
     pub fn nf(&self, viewing_key: &ViewingKey, position: u64) -> Nullifier {
         // Compute rho = cm + position.G
-        let rho = self.cm_full_point()
-            + (constants::NULLIFIER_POSITION_GENERATOR * jubjub::Fr::from(position));
+        let rho = self.cm_full_point() + (constants::NULLIFIER_POSITION_GENERATOR * jubjub::Fr::from(position));
 
         // Compute nf = BLAKE2s(nk | rho)
         Nullifier::from_slice(
@@ -450,17 +437,13 @@ impl Note {
     pub fn cmu(&self) -> bls12_381::Scalar {
         // The commitment is in the prime order subgroup, so mapping the
         // commitment to the u-coordinate is an injective encoding.
-        jubjub::ExtendedPoint::from(self.cm_full_point())
-            .to_affine()
-            .get_u()
+        jubjub::ExtendedPoint::from(self.cm_full_point()).to_affine().get_u()
     }
 
     pub fn rcm(&self) -> jubjub::Fr {
         match self.rseed {
             Rseed::BeforeZip212(rcm) => rcm,
-            Rseed::AfterZip212(rseed) => {
-                jubjub::Fr::from_bytes_wide(prf_expand(&rseed, &[0x04]).as_array())
-            }
+            Rseed::AfterZip212(rseed) => jubjub::Fr::from_bytes_wide(prf_expand(&rseed, &[0x04]).as_array()),
         }
     }
 
@@ -479,9 +462,7 @@ impl Note {
     pub fn derive_esk(&self) -> Option<jubjub::Fr> {
         match self.rseed {
             Rseed::BeforeZip212(_) => None,
-            Rseed::AfterZip212(rseed) => Some(jubjub::Fr::from_bytes_wide(
-                prf_expand(&rseed, &[0x05]).as_array(),
-            )),
+            Rseed::AfterZip212(rseed) => Some(jubjub::Fr::from_bytes_wide(prf_expand(&rseed, &[0x05]).as_array())),
         }
     }
 }

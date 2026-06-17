@@ -3,8 +3,10 @@
 // `testcontainers::{clients::Cli, images::generic::{GenericImage, WaitFor}, Container, Docker, Image}`
 // public API consumed by `mm2_main/src/docker_tests/`. See Cargo.toml for provenance.
 
-#[macro_use] extern crate log;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate serde_derive;
 
 mod container;
 mod docker;

@@ -94,10 +94,14 @@ impl SessionKey {
     }
 
     /// The derived 32-byte symmetric key.
-    pub fn symmetric_key(&self) -> SymKey { self.symmetric_key }
+    pub fn symmetric_key(&self) -> SymKey {
+        self.symmetric_key
+    }
 
     /// Our advertised ephemeral public key.
-    pub fn diffie_public_key(&self) -> SymKey { self.diffie_public_key }
+    pub fn diffie_public_key(&self) -> SymKey {
+        self.diffie_public_key
+    }
 
     /// The relay topic: the hex-encoded SHA-256 digest of the symmetric key.
     pub fn generate_topic(&self) -> String {

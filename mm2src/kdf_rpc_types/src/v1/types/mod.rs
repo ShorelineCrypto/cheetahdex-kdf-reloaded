@@ -10,11 +10,12 @@ mod transaction;
 pub use self::bytes::Bytes;
 pub use self::hash::{H160, H256, H264};
 pub use self::script::ScriptType;
-pub use self::transaction::{CoinbaseTransactionInput, GetRawTransactionResponse, LelantusInput, RawTransaction,
-                            SigmaInput, SignedTransactionInput, SignedTransactionOutput, Transaction,
-                            TransactionInput, TransactionInputEnum, TransactionInputScript, TransactionOutput,
-                            TransactionOutputScript, TransactionOutputWithAddress, TransactionOutputWithScriptData,
-                            TransactionOutputs};
+pub use self::transaction::{
+    CoinbaseTransactionInput, GetRawTransactionResponse, LelantusInput, RawTransaction, SigmaInput,
+    SignedTransactionInput, SignedTransactionOutput, Transaction, TransactionInput, TransactionInputEnum,
+    TransactionInputScript, TransactionOutput, TransactionOutputScript, TransactionOutputWithAddress,
+    TransactionOutputWithScriptData, TransactionOutputs,
+};
 
 /// Canonical lowercase-hex tx-hash representation produced from a raw byte buffer.
 pub trait ToTxHash {
@@ -22,11 +23,15 @@ pub trait ToTxHash {
 }
 
 impl ToTxHash for Bytes {
-    fn to_tx_hash(&self) -> String { encode_lowercase_hex(self.as_slice()) }
+    fn to_tx_hash(&self) -> String {
+        encode_lowercase_hex(self.as_slice())
+    }
 }
 
 impl ToTxHash for Vec<u8> {
-    fn to_tx_hash(&self) -> String { encode_lowercase_hex(self.as_slice()) }
+    fn to_tx_hash(&self) -> String {
+        encode_lowercase_hex(self.as_slice())
+    }
 }
 
 #[inline]

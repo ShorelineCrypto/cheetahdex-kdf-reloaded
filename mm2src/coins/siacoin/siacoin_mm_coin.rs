@@ -6,7 +6,9 @@ impl WatcherOps for SiaCoin {}
 
 #[async_trait]
 impl MmCoin for SiaCoin {
-    fn is_asset_chain(&self) -> bool { false }
+    fn is_asset_chain(&self) -> bool {
+        false
+    }
 
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         let coin = self.clone();
@@ -25,7 +27,9 @@ impl MmCoin for SiaCoin {
         )))
     }
 
-    fn decimals(&self) -> u8 { 24 }
+    fn decimals(&self) -> u8 {
+        24
+    }
 
     fn convert_to_address(&self, from: &str, _to_address_format: Json) -> Result<String, String> {
         Ok(from.to_string())
@@ -49,7 +53,9 @@ impl MmCoin for SiaCoin {
         Box::new(futures01::future::ok(()))
     }
 
-    fn history_sync_status(&self) -> HistorySyncState { self.history_sync_state.lock().unwrap().clone() }
+    fn history_sync_status(&self) -> HistorySyncState {
+        self.history_sync_state.lock().unwrap().clone()
+    }
 
     fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
         Box::new(futures01::future::ok(TradeFee {
@@ -91,9 +97,13 @@ impl MmCoin for SiaCoin {
         })
     }
 
-    fn required_confirmations(&self) -> u64 { self.required_confirmations.load(AtomicOrdering::Relaxed) }
+    fn required_confirmations(&self) -> u64 {
+        self.required_confirmations.load(AtomicOrdering::Relaxed)
+    }
 
-    fn requires_notarization(&self) -> bool { false }
+    fn requires_notarization(&self) -> bool {
+        false
+    }
 
     fn set_required_confirmations(&self, confirmations: u64) {
         self.required_confirmations
@@ -102,11 +112,19 @@ impl MmCoin for SiaCoin {
 
     fn set_requires_notarization(&self, _requires_nota: bool) {}
 
-    fn swap_contract_address(&self) -> Option<BytesJson> { None }
+    fn swap_contract_address(&self) -> Option<BytesJson> {
+        None
+    }
 
-    fn mature_confirmations(&self) -> Option<u32> { None }
+    fn mature_confirmations(&self) -> Option<u32> {
+        None
+    }
 
-    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
+    fn coin_protocol_info(&self) -> Vec<u8> {
+        Vec::new()
+    }
 
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool { true }
+    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
+        true
+    }
 }

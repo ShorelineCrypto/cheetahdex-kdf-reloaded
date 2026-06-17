@@ -23,21 +23,27 @@ pub mod context;
 pub mod errors;
 pub mod model;
 pub mod providers;
-#[cfg(not(target_arch = "wasm32"))] pub mod rpc;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod rpc;
 pub mod serde_helpers;
 pub mod store;
-#[cfg(not(target_arch = "wasm32"))] pub mod withdraw;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod withdraw;
 
 pub use context::NftCtx;
 
-pub use errors::{ClearNftDbError, GetNftInfoError, LockDbError, MetadataFetchError, ParseChainError,
-                 ParseContractTypeError, ParseTransferStatusError, SpamFilterError, TransferConfirmationsError,
-                 UpdateNftError, UpdateSpamPhishingError};
-pub use model::{Chain, ChainTicker, ClearNftDbReq, ContractType, Nft, NftCommon, NftInfo, NftList, NftListFilters,
-                NftListReq, NftMetadataReq, NftTokenIdent, NftTransfer, NftTransferCommon, NftTransferList,
-                NftTransfersFilters, NftTransfersReq, RefreshMetadataReq, TransferMeta, TransferStatus, UpdateNftReq,
-                UriMeta, WithdrawErc1155, WithdrawErc721, WithdrawNftReq};
-pub use providers::{apply_spam_protection_to_nft, apply_spam_protection_to_transfer, decamouflage_legacy_ipfs_url,
-                    domain_of, fetch_json as fetch_provider_json, normalise_metadata_urls,
-                    FetchError as ProviderFetchError, SpamScanError};
+pub use errors::{
+    ClearNftDbError, GetNftInfoError, LockDbError, MetadataFetchError, ParseChainError, ParseContractTypeError,
+    ParseTransferStatusError, SpamFilterError, TransferConfirmationsError, UpdateNftError, UpdateSpamPhishingError,
+};
+pub use model::{
+    Chain, ChainTicker, ClearNftDbReq, ContractType, Nft, NftCommon, NftInfo, NftList, NftListFilters, NftListReq,
+    NftMetadataReq, NftTokenIdent, NftTransfer, NftTransferCommon, NftTransferList, NftTransfersFilters,
+    NftTransfersReq, RefreshMetadataReq, TransferMeta, TransferStatus, UpdateNftReq, UriMeta, WithdrawErc1155,
+    WithdrawErc721, WithdrawNftReq,
+};
+pub use providers::{
+    apply_spam_protection_to_nft, apply_spam_protection_to_transfer, decamouflage_legacy_ipfs_url, domain_of,
+    fetch_json as fetch_provider_json, normalise_metadata_urls, FetchError as ProviderFetchError, SpamScanError,
+};
 pub use store::{NftHistoryStore, NftListStore, NftStoreError, RemoveOutcome};

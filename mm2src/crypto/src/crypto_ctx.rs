@@ -36,7 +36,9 @@ pub enum CryptoInitError {
 }
 
 impl From<PrivKeyError> for CryptoInitError {
-    fn from(e: PrivKeyError) -> Self { CryptoInitError::InvalidPassphrase(e) }
+    fn from(e: PrivKeyError) -> Self {
+        CryptoInitError::InvalidPassphrase(e)
+    }
 }
 
 #[derive(Debug, Display)]
@@ -72,7 +74,9 @@ pub enum MetamaskCtxInitError {
 
 #[cfg(target_arch = "wasm32")]
 impl From<MetamaskError> for MetamaskCtxInitError {
-    fn from(e: MetamaskError) -> Self { MetamaskCtxInitError::MetamaskError(e) }
+    fn from(e: MetamaskError) -> Self {
+        MetamaskCtxInitError::MetamaskError(e)
+    }
 }
 
 /// Determines whether the user initialized with a legacy Iguana passphrase
@@ -116,7 +120,9 @@ impl CryptoCtx {
 
     /// Returns the key pair policy (Iguana or GlobalHDAccount).
     #[inline]
-    pub fn key_pair_policy(&self) -> &KeyPairPolicy { &self.key_pair_policy }
+    pub fn key_pair_policy(&self) -> &KeyPairPolicy {
+        &self.key_pair_policy
+    }
 
     /// This is our public ID, allowing us to be different from other peers.
     /// Also used for P2P message verification.
@@ -135,34 +141,48 @@ impl CryptoCtx {
     /// If `key_pair_policy` is `Iguana`, this key-pair is also used for coin activation.
     /// Use carefully — prefer matching on `key_pair_policy()` for coin operations.
     #[inline]
-    pub fn mm2_internal_key_pair(&self) -> &KeyPair { &self.secp256k1_key_pair }
+    pub fn mm2_internal_key_pair(&self) -> &KeyPair {
+        &self.secp256k1_key_pair
+    }
 
     /// Returns `secp256k1` public key for mm2 internal purposes.
     #[inline]
-    pub fn mm2_internal_pubkey(&self) -> PublicKey { *self.secp256k1_key_pair.public() }
+    pub fn mm2_internal_pubkey(&self) -> PublicKey {
+        *self.secp256k1_key_pair.public()
+    }
 
     /// Returns `secp256k1` public key as hex string.
     #[inline]
-    pub fn mm2_internal_pubkey_hex(&self) -> String { hex::encode(&*self.mm2_internal_pubkey()) }
+    pub fn mm2_internal_pubkey_hex(&self) -> String {
+        hex::encode(&*self.mm2_internal_pubkey())
+    }
 
     /// Returns `secp256k1` private key as `Secret` bytes.
     ///
     /// # Security
     /// If `key_pair_policy` is `Iguana`, this private key is used for coin activation.
     #[inline]
-    pub fn mm2_internal_privkey_secret(&self) -> Secp256k1Secret { self.secp256k1_key_pair.private().secret }
+    pub fn mm2_internal_privkey_secret(&self) -> Secp256k1Secret {
+        self.secp256k1_key_pair.private().secret
+    }
 
     /// Returns `secp256k1` private key as a byte slice.
     #[inline]
-    pub fn mm2_internal_privkey_slice(&self) -> &[u8] { self.secp256k1_key_pair.private().secret.as_slice() }
+    pub fn mm2_internal_privkey_slice(&self) -> &[u8] {
+        self.secp256k1_key_pair.private().secret.as_slice()
+    }
 
     #[inline]
-    pub fn hw_ctx(&self) -> Option<HardwareWalletArc> { self.hw_ctx.read().to_option().cloned() }
+    pub fn hw_ctx(&self) -> Option<HardwareWalletArc> {
+        self.hw_ctx.read().to_option().cloned()
+    }
 
     /// Returns an `RIPEMD160(SHA256(x))` where x is secp256k1 pubkey that identifies
     /// a Hardware Wallet device or an HD master private key.
     #[inline]
-    pub fn hw_wallet_rmd160(&self) -> Option<H160> { self.hw_ctx.read().to_option().map(|hw_ctx| hw_ctx.rmd160()) }
+    pub fn hw_wallet_rmd160(&self) -> Option<H160> {
+        self.hw_ctx.read().to_option().map(|hw_ctx| hw_ctx.rmd160())
+    }
 
     /// Initialize with a legacy Iguana passphrase (hashed to a single key pair).
     pub fn init_with_iguana_passphrase(ctx: MmArc, passphrase: &str) -> CryptoInitResult<Arc<CryptoCtx>> {
@@ -206,11 +226,15 @@ impl CryptoCtx {
     }
 
     /// Resets the hardware wallet context to uninitialized state.
-    pub fn reset_hw_ctx(&self) { *self.hw_ctx.write() = HardwareWalletCtxState::NotInitialized; }
+    pub fn reset_hw_ctx(&self) {
+        *self.hw_ctx.write() = HardwareWalletCtxState::NotInitialized;
+    }
 
     /// Returns the MetaMask context if initialized (WASM only).
     #[cfg(target_arch = "wasm32")]
-    pub fn metamask_ctx(&self) -> Option<MetamaskArc> { self.metamask_ctx.read().to_option().cloned() }
+    pub fn metamask_ctx(&self) -> Option<MetamaskArc> {
+        self.metamask_ctx.read().to_option().cloned()
+    }
 
     /// Initializes MetaMask: detects provider, requests account, signs
     /// login challenge and recovers the public key.
@@ -231,7 +255,9 @@ impl CryptoCtx {
 
     /// Resets the MetaMask context to uninitialized state (WASM only).
     #[cfg(target_arch = "wasm32")]
-    pub fn reset_metamask_ctx(&self) { *self.metamask_ctx.write() = MetamaskCtxState::NotInitialized; }
+    pub fn reset_metamask_ctx(&self) {
+        *self.metamask_ctx.write() = MetamaskCtxState::NotInitialized;
+    }
 
     /// Internal: builds the CryptoCtx using the chosen key pair policy.
     fn init_crypto_ctx_with_policy_builder(

@@ -36,18 +36,9 @@ where
     let mut result = None;
 
     for (i, (chunk, window)) in by.chunks(3).zip(base.iter()).enumerate() {
-        let chunk_a = chunk
-            .get(0)
-            .cloned()
-            .unwrap_or_else(|| Boolean::constant(false));
-        let chunk_b = chunk
-            .get(1)
-            .cloned()
-            .unwrap_or_else(|| Boolean::constant(false));
-        let chunk_c = chunk
-            .get(2)
-            .cloned()
-            .unwrap_or_else(|| Boolean::constant(false));
+        let chunk_a = chunk.get(0).cloned().unwrap_or_else(|| Boolean::constant(false));
+        let chunk_b = chunk.get(1).cloned().unwrap_or_else(|| Boolean::constant(false));
+        let chunk_c = chunk.get(2).cloned().unwrap_or_else(|| Boolean::constant(false));
 
         // TODO: rename to lookup3_uv
         let (u, v) = lookup3_xy(
@@ -61,11 +52,7 @@ where
         if result.is_none() {
             result = Some(p);
         } else {
-            result = Some(
-                result
-                    .unwrap()
-                    .add(cs.namespace(|| format!("addition {}", i)), &p)?,
-            );
+            result = Some(result.unwrap().add(cs.namespace(|| format!("addition {}", i)), &p)?);
         }
     }
 
@@ -144,11 +131,7 @@ impl EdwardsPoint {
 
     /// Returns `self` if condition is true, and the neutral
     /// element (0, 1) otherwise.
-    pub fn conditionally_select<CS>(
-        &self,
-        mut cs: CS,
-        condition: &Boolean,
-    ) -> Result<Self, SynthesisError>
+    pub fn conditionally_select<CS>(&self, mut cs: CS, condition: &Boolean) -> Result<Self, SynthesisError>
     where
         CS: ConstraintSystem<bls12_381::Scalar>,
     {
@@ -191,10 +174,7 @@ impl EdwardsPoint {
             |lc| lc + v_prime.get_variable() - &condition.not().lc(one, bls12_381::Scalar::one()),
         );
 
-        Ok(EdwardsPoint {
-            u: u_prime,
-            v: v_prime,
-        })
+        Ok(EdwardsPoint { u: u_prime, v: v_prime })
     }
 
     /// Performs a scalar multiplication of this twisted Edwards
@@ -217,11 +197,7 @@ impl EdwardsPoint {
                 curbase = Some(self.clone());
             } else {
                 // Double the previous value
-                curbase = Some(
-                    curbase
-                        .unwrap()
-                        .double(cs.namespace(|| format!("doubling {}", i)))?,
-                );
+                curbase = Some(curbase.unwrap().double(cs.namespace(|| format!("doubling {}", i)))?);
             }
 
             // Represents the select base. If the bit for this magnitude
@@ -635,8 +611,7 @@ mod test {
     #[allow(clippy::many_single_char_names)]
     fn test_into_edwards() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
@@ -673,8 +648,7 @@ mod test {
     #[test]
     fn test_interpret() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
@@ -723,8 +697,7 @@ mod test {
     #[test]
     fn test_edwards_fixed_base_multiplication() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
@@ -741,10 +714,7 @@ mod test {
                 .take(jubjub::Fr::NUM_BITS as usize)
                 .cloned()
                 .enumerate()
-                .map(|(i, b)| {
-                    AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))
-                        .unwrap()
-                })
+                .map(|(i, b)| AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b)).unwrap())
                 .map(Boolean::from)
                 .collect::<Vec<_>>();
 
@@ -763,8 +733,7 @@ mod test {
     #[test]
     fn test_edwards_multiplication() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
@@ -781,10 +750,7 @@ mod test {
             let num_u0 = AllocatedNum::alloc(cs.namespace(|| "u0"), || Ok(u0)).unwrap();
             let num_v0 = AllocatedNum::alloc(cs.namespace(|| "v0"), || Ok(v0)).unwrap();
 
-            let p = EdwardsPoint {
-                u: num_u0,
-                v: num_v0,
-            };
+            let p = EdwardsPoint { u: num_u0, v: num_v0 };
 
             let s_bits = s
                 .to_le_bits()
@@ -792,10 +758,7 @@ mod test {
                 .take(jubjub::Fr::NUM_BITS as usize)
                 .cloned()
                 .enumerate()
-                .map(|(i, b)| {
-                    AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b))
-                        .unwrap()
-                })
+                .map(|(i, b)| AllocatedBit::alloc(cs.namespace(|| format!("scalar bit {}", i)), Some(b)).unwrap())
                 .map(Boolean::from)
                 .collect::<Vec<_>>();
 
@@ -812,8 +775,7 @@ mod test {
     #[test]
     fn test_conditionally_select() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..1000 {
@@ -826,19 +788,13 @@ mod test {
             let num_u0 = AllocatedNum::alloc(cs.namespace(|| "u0"), || Ok(u0)).unwrap();
             let num_v0 = AllocatedNum::alloc(cs.namespace(|| "v0"), || Ok(v0)).unwrap();
 
-            let p = EdwardsPoint {
-                u: num_u0,
-                v: num_v0,
-            };
+            let p = EdwardsPoint { u: num_u0, v: num_v0 };
 
             let mut should_we_select = rng.next_u32() % 2 != 0;
 
             // Conditionally allocate
             let mut b = if rng.next_u32() % 2 != 0 {
-                Boolean::from(
-                    AllocatedBit::alloc(cs.namespace(|| "condition"), Some(should_we_select))
-                        .unwrap(),
-                )
+                Boolean::from(AllocatedBit::alloc(cs.namespace(|| "condition"), Some(should_we_select)).unwrap())
             } else {
                 Boolean::constant(should_we_select)
             };
@@ -849,9 +805,7 @@ mod test {
                 should_we_select = !should_we_select;
             }
 
-            let q = p
-                .conditionally_select(cs.namespace(|| "select"), &b)
-                .unwrap();
+            let q = p.conditionally_select(cs.namespace(|| "select"), &b).unwrap();
 
             assert!(cs.is_satisfied());
 
@@ -878,8 +832,7 @@ mod test {
     #[test]
     fn test_edwards_addition() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
@@ -904,15 +857,9 @@ mod test {
             let num_u1 = AllocatedNum::alloc(cs.namespace(|| "u1"), || Ok(u1)).unwrap();
             let num_v1 = AllocatedNum::alloc(cs.namespace(|| "v1"), || Ok(v1)).unwrap();
 
-            let p1 = EdwardsPoint {
-                u: num_u0,
-                v: num_v0,
-            };
+            let p1 = EdwardsPoint { u: num_u0, v: num_v0 };
 
-            let p2 = EdwardsPoint {
-                u: num_u1,
-                v: num_v1,
-            };
+            let p2 = EdwardsPoint { u: num_u1, v: num_v1 };
 
             let p3 = p1.add(cs.namespace(|| "addition"), &p2).unwrap();
 
@@ -944,8 +891,7 @@ mod test {
     #[test]
     fn test_edwards_doubling() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
@@ -963,10 +909,7 @@ mod test {
             let num_u0 = AllocatedNum::alloc(cs.namespace(|| "u0"), || Ok(u0)).unwrap();
             let num_v0 = AllocatedNum::alloc(cs.namespace(|| "v0"), || Ok(v0)).unwrap();
 
-            let p1 = EdwardsPoint {
-                u: num_u0,
-                v: num_v0,
-            };
+            let p1 = EdwardsPoint { u: num_u0, v: num_v0 };
 
             let p2 = p1.double(cs.namespace(|| "doubling")).unwrap();
 
@@ -980,8 +923,7 @@ mod test {
     #[test]
     fn test_montgomery_addition() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
         ]);
 
         for _ in 0..100 {
@@ -1057,10 +999,9 @@ mod test {
         check_small_order_from_strs("0", "1");
 
         // prime subgroup order
-        let prime_subgroup_order = jubjub::Fr::from_str(
-            "6554484396890773809930967563523245729705921265872317281365359162392183254199",
-        )
-        .unwrap();
+        let prime_subgroup_order =
+            jubjub::Fr::from_str("6554484396890773809930967563523245729705921265872317281365359162392183254199")
+                .unwrap();
         let largest_small_subgroup_order = jubjub::Fr::from_str("8").unwrap();
 
         let (zero_u, zero_v) = (bls12_381::Scalar::zero(), bls12_381::Scalar::one());

@@ -69,11 +69,15 @@ impl HttpStatusCode for EnableLightningError {
 }
 
 impl From<std::io::Error> for EnableLightningError {
-    fn from(err: std::io::Error) -> EnableLightningError { EnableLightningError::IOError(err.to_string()) }
+    fn from(err: std::io::Error) -> EnableLightningError {
+        EnableLightningError::IOError(err.to_string())
+    }
 }
 
 impl From<SqlError> for EnableLightningError {
-    fn from(err: SqlError) -> EnableLightningError { EnableLightningError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> EnableLightningError {
+        EnableLightningError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -118,7 +122,9 @@ impl From<CoinFindError> for ConnectToNodeError {
 }
 
 impl From<std::io::Error> for ConnectToNodeError {
-    fn from(err: std::io::Error) -> ConnectToNodeError { ConnectToNodeError::IOError(err.to_string()) }
+    fn from(err: std::io::Error) -> ConnectToNodeError {
+        ConnectToNodeError::IOError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -170,7 +176,9 @@ impl HttpStatusCode for OpenChannelError {
 }
 
 impl From<ConnectToNodeError> for OpenChannelError {
-    fn from(err: ConnectToNodeError) -> OpenChannelError { OpenChannelError::ConnectToNodeError(err.to_string()) }
+    fn from(err: ConnectToNodeError) -> OpenChannelError {
+        OpenChannelError::ConnectToNodeError(err.to_string())
+    }
 }
 
 impl From<CoinFindError> for OpenChannelError {
@@ -182,39 +190,57 @@ impl From<CoinFindError> for OpenChannelError {
 }
 
 impl From<BalanceError> for OpenChannelError {
-    fn from(e: BalanceError) -> Self { OpenChannelError::BalanceError(e.to_string()) }
+    fn from(e: BalanceError) -> Self {
+        OpenChannelError::BalanceError(e.to_string())
+    }
 }
 
 impl From<NumConversError> for OpenChannelError {
-    fn from(e: NumConversError) -> Self { OpenChannelError::InternalError(e.to_string()) }
+    fn from(e: NumConversError) -> Self {
+        OpenChannelError::InternalError(e.to_string())
+    }
 }
 
 impl From<GenerateTxError> for OpenChannelError {
-    fn from(e: GenerateTxError) -> Self { OpenChannelError::GenerateTxErr(e.to_string()) }
+    fn from(e: GenerateTxError) -> Self {
+        OpenChannelError::GenerateTxErr(e.to_string())
+    }
 }
 
 impl From<UtxoRpcError> for OpenChannelError {
-    fn from(e: UtxoRpcError) -> Self { OpenChannelError::RpcError(e.to_string()) }
+    fn from(e: UtxoRpcError) -> Self {
+        OpenChannelError::RpcError(e.to_string())
+    }
 }
 
 impl From<UnexpectedDerivationMethod> for OpenChannelError {
-    fn from(e: UnexpectedDerivationMethod) -> Self { OpenChannelError::InternalError(e.to_string()) }
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        OpenChannelError::InternalError(e.to_string())
+    }
 }
 
 impl From<UtxoSignWithKeyPairError> for OpenChannelError {
-    fn from(e: UtxoSignWithKeyPairError) -> Self { OpenChannelError::InternalError(e.to_string()) }
+    fn from(e: UtxoSignWithKeyPairError) -> Self {
+        OpenChannelError::InternalError(e.to_string())
+    }
 }
 
 impl From<PrivKeyNotAllowed> for OpenChannelError {
-    fn from(e: PrivKeyNotAllowed) -> Self { OpenChannelError::PrivKeyNotAllowed(e.to_string()) }
+    fn from(e: PrivKeyNotAllowed) -> Self {
+        OpenChannelError::PrivKeyNotAllowed(e.to_string())
+    }
 }
 
 impl From<std::io::Error> for OpenChannelError {
-    fn from(err: std::io::Error) -> OpenChannelError { OpenChannelError::IOError(err.to_string()) }
+    fn from(err: std::io::Error) -> OpenChannelError {
+        OpenChannelError::IOError(err.to_string())
+    }
 }
 
 impl From<SqlError> for OpenChannelError {
-    fn from(err: SqlError) -> OpenChannelError { OpenChannelError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> OpenChannelError {
+        OpenChannelError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -247,7 +273,9 @@ impl From<CoinFindError> for ListChannelsError {
 }
 
 impl From<SqlError> for ListChannelsError {
-    fn from(err: SqlError) -> ListChannelsError { ListChannelsError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> ListChannelsError {
+        ListChannelsError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -283,7 +311,9 @@ impl From<CoinFindError> for GetChannelDetailsError {
 }
 
 impl From<SqlError> for GetChannelDetailsError {
-    fn from(err: SqlError) -> GetChannelDetailsError { GetChannelDetailsError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> GetChannelDetailsError {
+        GetChannelDetailsError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -320,11 +350,15 @@ impl From<CoinFindError> for GenerateInvoiceError {
 }
 
 impl From<SignOrCreationError> for GenerateInvoiceError {
-    fn from(e: SignOrCreationError) -> Self { GenerateInvoiceError::SignOrCreationError(e.to_string()) }
+    fn from(e: SignOrCreationError) -> Self {
+        GenerateInvoiceError::SignOrCreationError(e.to_string())
+    }
 }
 
 impl From<SqlError> for GenerateInvoiceError {
-    fn from(err: SqlError) -> GenerateInvoiceError { GenerateInvoiceError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> GenerateInvoiceError {
+        GenerateInvoiceError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -366,7 +400,9 @@ impl From<CoinFindError> for SendPaymentError {
 }
 
 impl From<SqlError> for SendPaymentError {
-    fn from(err: SqlError) -> SendPaymentError { SendPaymentError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> SendPaymentError {
+        SendPaymentError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -399,7 +435,9 @@ impl From<CoinFindError> for ListPaymentsError {
 }
 
 impl From<SqlError> for ListPaymentsError {
-    fn from(err: SqlError) -> ListPaymentsError { ListPaymentsError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> ListPaymentsError {
+        ListPaymentsError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -435,7 +473,9 @@ impl From<CoinFindError> for GetPaymentDetailsError {
 }
 
 impl From<SqlError> for GetPaymentDetailsError {
-    fn from(err: SqlError) -> GetPaymentDetailsError { GetPaymentDetailsError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> GetPaymentDetailsError {
+        GetPaymentDetailsError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Display, Serialize, SerializeErrorType)]
@@ -510,7 +550,9 @@ pub enum SaveChannelClosingError {
 }
 
 impl From<SqlError> for SaveChannelClosingError {
-    fn from(err: SqlError) -> SaveChannelClosingError { SaveChannelClosingError::DbError(err.to_string()) }
+    fn from(err: SqlError) -> SaveChannelClosingError {
+        SaveChannelClosingError::DbError(err.to_string())
+    }
 }
 
 #[derive(Debug)]
@@ -521,11 +563,15 @@ pub enum GetTxError {
 }
 
 impl From<UtxoRpcError> for GetTxError {
-    fn from(err: UtxoRpcError) -> GetTxError { GetTxError::Rpc(err) }
+    fn from(err: UtxoRpcError) -> GetTxError {
+        GetTxError::Rpc(err)
+    }
 }
 
 impl From<encode::Error> for GetTxError {
-    fn from(err: encode::Error) -> GetTxError { GetTxError::TxDeserialization(err) }
+    fn from(err: encode::Error) -> GetTxError {
+        GetTxError::TxDeserialization(err)
+    }
 }
 
 #[derive(Debug)]
@@ -536,11 +582,15 @@ pub enum GetHeaderError {
 }
 
 impl From<JsonRpcError> for GetHeaderError {
-    fn from(err: JsonRpcError) -> GetHeaderError { GetHeaderError::Rpc(err) }
+    fn from(err: JsonRpcError) -> GetHeaderError {
+        GetHeaderError::Rpc(err)
+    }
 }
 
 impl From<encode::Error> for GetHeaderError {
-    fn from(err: encode::Error) -> GetHeaderError { GetHeaderError::HeaderDeserialization(err) }
+    fn from(err: encode::Error) -> GetHeaderError {
+        GetHeaderError::HeaderDeserialization(err)
+    }
 }
 
 #[derive(Debug)]
@@ -553,9 +603,13 @@ pub enum FindWatchedOutputSpendError {
 }
 
 impl From<JsonRpcError> for FindWatchedOutputSpendError {
-    fn from(err: JsonRpcError) -> Self { FindWatchedOutputSpendError::RpcError(err.to_string()) }
+    fn from(err: JsonRpcError) -> Self {
+        FindWatchedOutputSpendError::RpcError(err.to_string())
+    }
 }
 
 impl From<encode::Error> for FindWatchedOutputSpendError {
-    fn from(err: encode::Error) -> Self { FindWatchedOutputSpendError::DeserializationErr(err) }
+    fn from(err: encode::Error) -> Self {
+        FindWatchedOutputSpendError::DeserializationErr(err)
+    }
 }

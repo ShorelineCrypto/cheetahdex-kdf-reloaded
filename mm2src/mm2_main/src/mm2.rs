@@ -22,13 +22,15 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #![cfg_attr(target_arch = "wasm32", allow(unused_imports))]
 
-#[cfg(not(target_arch = "wasm32"))] use common::block_on;
+#[cfg(not(target_arch = "wasm32"))]
+use common::block_on;
 use common::crash_reports::init_crash_reports;
 use common::double_panic_crash;
 use common::log::LogLevel;
 use mm2_core::mm_ctx::MmCtxBuilder;
 
-#[cfg(feature = "custom-swap-locktime")] use common::log::warn;
+#[cfg(feature = "custom-swap-locktime")]
+use common::log::warn;
 #[cfg(feature = "custom-swap-locktime")]
 use lp_swap::PAYMENT_LOCKTIME;
 #[cfg(feature = "custom-swap-locktime")]
@@ -48,7 +50,8 @@ use std::process::exit;
 use std::ptr::null;
 use std::str;
 
-#[path = "lp_native_dex.rs"] mod lp_native_dex;
+#[path = "lp_native_dex.rs"]
+mod lp_native_dex;
 use self::lp_native_dex::lp_init;
 use coins::update_coins_config;
 use mm2_err_handle::prelude::*;
@@ -57,16 +60,23 @@ use mm2_err_handle::prelude::*;
 #[path = "database.rs"]
 pub mod database;
 
-#[path = "lp_dispatcher.rs"] pub mod lp_dispatcher;
-#[path = "lp_message_service.rs"] pub mod lp_message_service;
-#[path = "lp_network.rs"] pub mod lp_network;
-#[path = "lp_ordermatch.rs"] pub mod lp_ordermatch;
-#[path = "lp_stats.rs"] pub mod lp_stats;
-#[path = "lp_swap.rs"] pub mod lp_swap;
+#[path = "lp_dispatcher.rs"]
+pub mod lp_dispatcher;
+#[path = "lp_message_service.rs"]
+pub mod lp_message_service;
+#[path = "lp_network.rs"]
+pub mod lp_network;
+#[path = "lp_ordermatch.rs"]
+pub mod lp_ordermatch;
+#[path = "lp_stats.rs"]
+pub mod lp_stats;
+#[path = "lp_swap.rs"]
+pub mod lp_swap;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "lp_wallet.rs"]
 pub mod lp_wallet;
-#[path = "rpc.rs"] pub mod rpc;
+#[path = "rpc.rs"]
+pub mod rpc;
 
 #[cfg(any(test, target_arch = "wasm32"))]
 #[path = "mm2_tests.rs"]
@@ -93,7 +103,9 @@ impl MmVersionResult {
         }
     }
 
-    pub fn to_json(&self) -> Json { json::to_value(self).expect("expected valid JSON object") }
+    pub fn to_json(&self) -> Json {
+        json::to_value(self).expect("expected valid JSON object")
+    }
 }
 
 pub struct LpMainParams {
@@ -102,7 +114,9 @@ pub struct LpMainParams {
 }
 
 impl LpMainParams {
-    pub fn with_conf(conf: Json) -> LpMainParams { LpMainParams { conf, filter: None } }
+    pub fn with_conf(conf: Json) -> LpMainParams {
+        LpMainParams { conf, filter: None }
+    }
 
     pub fn log_filter(mut self, filter: Option<LogLevel>) -> LpMainParams {
         self.filter = filter;

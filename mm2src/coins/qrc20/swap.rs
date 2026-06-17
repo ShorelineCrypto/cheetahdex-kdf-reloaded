@@ -450,13 +450,17 @@ impl Qrc20Coin {
         let tokens = self
             .utxo
             .rpc_client
-            .rpc_contract_call(ViewContractCallType::Allowance, &self.contract_address, &[
-                Token::Address(
-                    qtum::contract_addr_from_utxo_addr(my_address.clone())
-                        .mm_err(|e| UtxoRpcError::Internal(e.to_string()))?,
-                ),
-                Token::Address(spender),
-            ])
+            .rpc_contract_call(
+                ViewContractCallType::Allowance,
+                &self.contract_address,
+                &[
+                    Token::Address(
+                        qtum::contract_addr_from_utxo_addr(my_address.clone())
+                            .mm_err(|e| UtxoRpcError::Internal(e.to_string()))?,
+                    ),
+                    Token::Address(spender),
+                ],
+            )
             .compat()
             .await?;
 
@@ -479,9 +483,11 @@ impl Qrc20Coin {
         let decoded = try_s!(
             self.utxo
                 .rpc_client
-                .rpc_contract_call(ViewContractCallType::Payments, swap_contract_address, &[
-                    Token::FixedBytes(swap_id)
-                ])
+                .rpc_contract_call(
+                    ViewContractCallType::Payments,
+                    swap_contract_address,
+                    &[Token::FixedBytes(swap_id)]
+                )
                 .compat()
                 .await
         );

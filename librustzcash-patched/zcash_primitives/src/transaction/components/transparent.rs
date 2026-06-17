@@ -93,10 +93,7 @@ impl TxOut {
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
         let script_pubkey = Script::read(&mut reader)?;
 
-        Ok(TxOut {
-            value,
-            script_pubkey,
-        })
+        Ok(TxOut { value, script_pubkey })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {

@@ -108,7 +108,9 @@ where
     U: Stream<Item = T::SinkItem>,
     T::SinkError: From<U::Error>,
 {
-    fn sink_mut(&mut self) -> &mut T { self.sink.as_mut().expect("Attempted to poll SendAll after completion") }
+    fn sink_mut(&mut self) -> &mut T {
+        self.sink.as_mut().expect("Attempted to poll SendAll after completion")
+    }
 
     pub fn new(sink: T, stream: U) -> SendAll<T, U> {
         SendAll {
@@ -198,7 +200,9 @@ pub struct TimedMutexGuard<'a, T>(#[allow(dead_code)] futures::lock::MutexGuard<
 /// allowing the application to implement timeouts, status updates and shutdowns.
 pub struct TimedAsyncMutex<T>(AsyncMutex<T>);
 impl<T> TimedAsyncMutex<T> {
-    pub fn new(v: T) -> TimedAsyncMutex<T> { TimedAsyncMutex(AsyncMutex::new(v)) }
+    pub fn new(v: T) -> TimedAsyncMutex<T> {
+        TimedAsyncMutex(AsyncMutex::new(v))
+    }
 
     /// Like `AsyncMutex::lock` but invokes the `tick` callback periodically.  
     /// `tick` returns a time till the next tick, or an error to abort the locking attempt.  

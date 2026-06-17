@@ -131,12 +131,16 @@ pub struct ButtonRequest<'a, 'b, T> {
 }
 
 impl<'a, 'b, T> fmt::Debug for ButtonRequest<'a, 'b, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{:?}", self.message) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.message)
+    }
 }
 
 impl<'a, 'b, T: 'static> ButtonRequest<'a, 'b, T> {
     /// The type of button request.
-    pub fn request_type(&self) -> Option<ButtonRequestType> { self.message.code.and_then(ButtonRequestType::from_i32) }
+    pub fn request_type(&self) -> Option<ButtonRequestType> {
+        self.message.code.and_then(ButtonRequestType::from_i32)
+    }
 
     /// Ack the request and get the next message from the device.
     pub async fn ack(self) -> TrezorResult<TrezorResponse<'a, 'b, T>> {
@@ -145,9 +149,13 @@ impl<'a, 'b, T: 'static> ButtonRequest<'a, 'b, T> {
     }
 
     /// TODO add an optional `timeout` param.
-    pub async fn ack_all(self) -> TrezorResult<T> { self.ack().await?.ack_all().await }
+    pub async fn ack_all(self) -> TrezorResult<T> {
+        self.ack().await?.ack_all().await
+    }
 
-    pub async fn cancel(self) { self.session.cancel_last_op().await }
+    pub async fn cancel(self) {
+        self.session.cancel_last_op().await
+    }
 }
 
 /// A PIN matrix request message sent by the device.
@@ -158,7 +166,9 @@ pub struct PinMatrixRequest<'a, 'b, T> {
 }
 
 impl<'a, 'b, T> fmt::Debug for PinMatrixRequest<'a, 'b, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{:?}", self.message) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.message)
+    }
 }
 
 impl<'a, 'b, T: 'static> PinMatrixRequest<'a, 'b, T> {
@@ -173,5 +183,7 @@ impl<'a, 'b, T: 'static> PinMatrixRequest<'a, 'b, T> {
         self.session.call(req, self.result_handler).await
     }
 
-    pub async fn cancel(self) { self.session.cancel_last_op().await }
+    pub async fn cancel(self) {
+        self.session.cancel_last_op().await
+    }
 }

@@ -1,7 +1,8 @@
 use crate::task::RpcTaskTypes;
-use crate::{AtomicTaskId, FinishedTaskResult, RpcTask, RpcTaskError, RpcTaskHandle, RpcTaskResult, RpcTaskStatus,
-            RpcTaskStatusAlias, TaskAbortHandle, TaskAbortHandler, TaskId, TaskStatus, TaskStatusError,
-            UserActionSender};
+use crate::{
+    AtomicTaskId, FinishedTaskResult, RpcTask, RpcTaskError, RpcTaskHandle, RpcTaskResult, RpcTaskStatus,
+    RpcTaskStatusAlias, TaskAbortHandle, TaskAbortHandler, TaskId, TaskStatus, TaskStatusError, UserActionSender,
+};
 use common::executor::spawn;
 use common::log::{debug, warn};
 use futures::channel::oneshot;
@@ -17,14 +18,18 @@ pub(crate) type RpcTaskManagerWeak<Task> = Weak<Mutex<RpcTaskManager<Task>>>;
 
 static NEXT_RPC_TASK_ID: AtomicTaskId = AtomicTaskId::new(0);
 
-fn next_rpc_task_id() -> TaskId { NEXT_RPC_TASK_ID.fetch_add(1, Ordering::Relaxed) }
+fn next_rpc_task_id() -> TaskId {
+    NEXT_RPC_TASK_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 pub struct RpcTaskManager<Task: RpcTask> {
     tasks: HashMap<TaskId, TaskStatusExt<Task>>,
 }
 
 impl<Task: RpcTask> Default for RpcTaskManager<Task> {
-    fn default() -> Self { RpcTaskManager { tasks: HashMap::new() } }
+    fn default() -> Self {
+        RpcTaskManager { tasks: HashMap::new() }
+    }
 }
 
 impl<Task: RpcTask> RpcTaskManager<Task> {
@@ -90,9 +95,13 @@ impl<Task: RpcTask> RpcTaskManager<Task> {
         Some(rpc_status)
     }
 
-    pub fn new_shared() -> RpcTaskManagerShared<Task> { Arc::new(Mutex::new(Self::default())) }
+    pub fn new_shared() -> RpcTaskManagerShared<Task> {
+        Arc::new(Mutex::new(Self::default()))
+    }
 
-    pub fn contains(&self, task_id: TaskId) -> bool { self.tasks.contains_key(&task_id) }
+    pub fn contains(&self, task_id: TaskId) -> bool {
+        self.tasks.contains_key(&task_id)
+    }
 
     /// Cancel task if it's in progress.
     pub fn cancel_task(&mut self, task_id: TaskId) -> RpcTaskResult<()> {
@@ -194,12 +203,15 @@ impl<Task: RpcTask> RpcTaskManager<Task> {
                 abort_handle,
             }) => {
                 // Insert new awaiting status to the tasks container.
-                self.tasks.insert(task_id, TaskStatusExt::Awaiting {
-                    status,
-                    abort_handle,
-                    action_sender,
-                    next_in_progress_status,
-                });
+                self.tasks.insert(
+                    task_id,
+                    TaskStatusExt::Awaiting {
+                        status,
+                        abort_handle,
+                        action_sender,
+                        next_in_progress_status,
+                    },
+                );
                 Ok(())
             },
             Some(unexpected) => {

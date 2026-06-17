@@ -12,7 +12,8 @@
 
 mod netid_6133;
 mod netid_8762;
-#[cfg(feature = "regtest-netid")] mod test_netids;
+#[cfg(feature = "regtest-netid")]
+mod test_netids;
 
 use num_rational::BigRational;
 
@@ -59,19 +60,27 @@ pub trait NetConfig: Send + Sync + 'static {
     // ── Burn ─────────────────────────────────────────────────────────
 
     /// Whether this network burns a portion of the DEX fee.
-    fn burn_enabled(&self) -> bool { false }
+    fn burn_enabled(&self) -> bool {
+        false
+    }
 
     /// Share of the DEX fee that goes to the fee address (1.0 = no burn).
     /// Only meaningful when `burn_enabled()` returns true.
-    fn dex_fee_share(&self) -> BigRational { BigRational::from_integer(1.into()) }
+    fn dex_fee_share(&self) -> BigRational {
+        BigRational::from_integer(1.into())
+    }
 
     /// Hex-encoded compressed public key for the burn address.
     /// Only meaningful when `burn_enabled()` returns true.
-    fn burn_addr_pubkey(&self) -> &'static str { "" }
+    fn burn_addr_pubkey(&self) -> &'static str {
+        ""
+    }
 
     /// Raw bytes of the burn address public key (decoded from hex at startup).
     /// Only meaningful when `burn_enabled()` returns true.
-    fn burn_addr_raw_pubkey(&self) -> &'static [u8] { &[] }
+    fn burn_addr_raw_pubkey(&self) -> &'static [u8] {
+        &[]
+    }
 
     // ── Seed Nodes ───────────────────────────────────────────────────
 

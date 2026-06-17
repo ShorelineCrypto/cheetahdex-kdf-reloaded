@@ -48,7 +48,9 @@ pub struct SwapStatusStreamer;
 impl EventStreamer for SwapStatusStreamer {
     type DataInType = SwapStatusEvent;
 
-    fn streamer_id(&self) -> StreamerId { StreamerId::SwapStatus }
+    fn streamer_id(&self) -> StreamerId {
+        StreamerId::SwapStatus
+    }
 
     async fn handle(
         self,

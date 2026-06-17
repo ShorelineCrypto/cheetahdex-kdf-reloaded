@@ -33,7 +33,9 @@ use std::fmt;
 pub struct Bytes(pub Vec<u8>);
 
 impl<T: Into<Vec<u8>>> From<T> for Bytes {
-    fn from(data: T) -> Self { Bytes(data.into()) }
+    fn from(data: T) -> Self {
+        Bytes(data.into())
+    }
 }
 
 impl Serialize for Bytes {
@@ -66,7 +68,9 @@ impl<'de> Deserialize<'de> for Bytes {
                     Err(E::custom("invalid format"))
                 }
             }
-            fn visit_string<E: DeError>(self, value: String) -> Result<Bytes, E> { self.visit_str(&value) }
+            fn visit_string<E: DeError>(self, value: String) -> Result<Bytes, E> {
+                self.visit_str(&value)
+            }
         }
         deserializer.deserialize_identifier(BytesVisitor)
     }
@@ -84,7 +88,9 @@ pub enum BlockNumber {
 }
 
 impl From<u64> for BlockNumber {
-    fn from(num: u64) -> Self { BlockNumber::Number(num) }
+    fn from(num: u64) -> Self {
+        BlockNumber::Number(num)
+    }
 }
 
 impl Serialize for BlockNumber {
@@ -222,7 +228,9 @@ impl FilterBuilder {
         self.filter.limit = Some(limit);
         self
     }
-    pub fn build(&self) -> Filter { self.filter.clone() }
+    pub fn build(&self) -> Filter {
+        self.filter.clone()
+    }
 }
 
 // ---------------------------------------------------------------- TraceFilter + Trace
@@ -274,7 +282,9 @@ impl TraceFilterBuilder {
         self.filter.count = Some(count);
         self
     }
-    pub fn build(&self) -> TraceFilter { self.filter.clone() }
+    pub fn build(&self) -> TraceFilter {
+        self.filter.clone()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
@@ -307,7 +317,9 @@ pub enum Res {
 }
 
 impl Default for Res {
-    fn default() -> Res { Res::None }
+    fn default() -> Res {
+        Res::None
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -369,7 +381,9 @@ pub enum CallType {
 }
 
 impl Default for CallType {
-    fn default() -> CallType { CallType::None }
+    fn default() -> CallType {
+        CallType::None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]

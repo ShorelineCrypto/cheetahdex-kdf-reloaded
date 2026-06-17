@@ -45,7 +45,9 @@ impl From<MmError<SlurpError>> for TronApiError {
 }
 
 /// Whether a TRON API error is retryable on the next node.
-fn is_retryable(e: &TronApiError) -> bool { matches!(e, TronApiError::Transport(_) | TronApiError::Timeout(_)) }
+fn is_retryable(e: &TronApiError) -> bool {
+    matches!(e, TronApiError::Transport(_) | TronApiError::Timeout(_))
+}
 
 // ---------------------------------------------------------------------------
 // Request / Response types

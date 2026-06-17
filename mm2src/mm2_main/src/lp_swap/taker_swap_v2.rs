@@ -26,10 +26,12 @@
 //!   `TakerPaymentRefundRequired → TakerPaymentRefunded`.
 //! - Abort path: any pre-funding state → `Aborted`.
 
-use coins::{CanRefundHtlc, DexFee, FeeApproxStage, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs,
-            MakerCoinSwapOpsV2, MmCoin, RefundFundingSecretArgs, RefundTakerPaymentArgs, SendTakerFundingArgs,
-            SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TakerCoinSwapOpsV2, ToBytes, TradePreimageValue,
-            Transaction, TxPreimageWithSig, ValidateMakerPaymentArgs};
+use coins::{
+    CanRefundHtlc, DexFee, FeeApproxStage, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2,
+    MmCoin, RefundFundingSecretArgs, RefundTakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs,
+    SwapTxTypeWithSecretHash, TakerCoinSwapOpsV2, ToBytes, TradePreimageValue, Transaction, TxPreimageWithSig,
+    ValidateMakerPaymentArgs,
+};
 use common::executor::Timer;
 use common::log::{error, info, warn};
 use common::mm_number::MmNumber;
@@ -197,21 +199,35 @@ where
     MakerCoin: MmCoin + MakerCoinSwapOpsV2,
     TakerCoin: MmCoin + TakerCoinSwapOpsV2,
 {
-    pub fn maker_payment_conf_timeout(&self) -> u64 { self.started_at + self.lock_duration / 3 }
-    pub fn taker_funding_locktime(&self) -> u64 { self.started_at + 3 * self.lock_duration }
-    pub fn taker_payment_locktime(&self) -> u64 { self.started_at + self.lock_duration }
-    pub fn unique_data(&self) -> Vec<u8> { self.uuid.as_bytes().to_vec() }
-    pub fn taker_secret_hash(&self) -> Vec<u8> { self.secret_hash_algo.hash_secret(self.taker_secret.as_slice()) }
+    pub fn maker_payment_conf_timeout(&self) -> u64 {
+        self.started_at + self.lock_duration / 3
+    }
+    pub fn taker_funding_locktime(&self) -> u64 {
+        self.started_at + 3 * self.lock_duration
+    }
+    pub fn taker_payment_locktime(&self) -> u64 {
+        self.started_at + self.lock_duration
+    }
+    pub fn unique_data(&self) -> Vec<u8> {
+        self.uuid.as_bytes().to_vec()
+    }
+    pub fn taker_secret_hash(&self) -> Vec<u8> {
+        self.secret_hash_algo.hash_secret(self.taker_secret.as_slice())
+    }
 }
 
 // States (PhantomData-bound to the generic state machine) --------------------
 
 pub struct Initialize<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>(PhantomData<(M, T)>);
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Default for Initialize<M, T> {
-    fn default() -> Self { Initialize(PhantomData) }
+    fn default() -> Self {
+        Initialize(PhantomData)
+    }
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> std::fmt::Debug for Initialize<M, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("Initialize").finish() }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Initialize").finish()
+    }
 }
 
 pub struct Initialized<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
@@ -489,7 +505,9 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymen
 
 pub struct Completed<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2>(PhantomData<(M, T)>);
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Completed<M, T> {
-    pub fn new() -> Self { Completed(PhantomData) }
+    pub fn new() -> Self {
+        Completed(PhantomData)
+    }
 }
 
 pub struct Aborted<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
@@ -687,8 +705,12 @@ where
         }
     }
 
-    fn storage(&mut self) -> &mut Self::Storage { &mut self.storage }
-    fn id(&self) -> <Self::Storage as StateMachineStorage>::MachineId { self.uuid }
+    fn storage(&mut self) -> &mut Self::Storage {
+        &mut self.storage
+    }
+    fn id(&self) -> <Self::Storage as StateMachineStorage>::MachineId {
+        self.uuid
+    }
 
     async fn recreate_machine(
         uuid: Uuid,
@@ -1211,7 +1233,9 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableSta
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for Completed<M, T> {
     type StateMachine = TakerSwapStateMachine<M, T>;
-    fn get_event(&self) -> TakerSwapEvent { TakerSwapEvent::Completed }
+    fn get_event(&self) -> TakerSwapEvent {
+        TakerSwapEvent::Completed
+    }
 }
 
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableState for Aborted<M, T> {

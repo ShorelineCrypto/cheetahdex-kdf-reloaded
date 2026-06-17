@@ -127,7 +127,9 @@ impl Eip1193Provider {
 }
 
 impl fmt::Debug for Eip1193Provider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("Eip1193Provider") }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Eip1193Provider")
+    }
 }
 
 enum ProviderCommand {
@@ -209,13 +211,19 @@ struct RequestArguments {
 #[wasm_bindgen]
 impl RequestArguments {
     #[wasm_bindgen(constructor)]
-    pub fn new(method: String, params: js_sys::Array) -> Self { Self { method, params } }
+    pub fn new(method: String, params: js_sys::Array) -> Self {
+        Self { method, params }
+    }
 
     #[wasm_bindgen(getter)]
-    pub fn method(&self) -> String { self.method.clone() }
+    pub fn method(&self) -> String {
+        self.method.clone()
+    }
 
     #[wasm_bindgen(getter)]
-    pub fn params(&self) -> js_sys::Array { self.params.clone() }
+    pub fn params(&self) -> js_sys::Array {
+        self.params.clone()
+    }
 }
 
 /// Inline JS shim that returns `window.ethereum` (or `undefined` when

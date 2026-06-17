@@ -191,7 +191,9 @@ impl std::fmt::Display for NftSwapV2Error {
 impl std::error::Error for NftSwapV2Error {}
 
 impl From<ethabi::Error> for NftSwapV2Error {
-    fn from(e: ethabi::Error) -> Self { NftSwapV2Error::Abi(e.to_string()) }
+    fn from(e: ethabi::Error) -> Self {
+        NftSwapV2Error::Abi(e.to_string())
+    }
 }
 
 /// Arguments that uniquely identify an NFT maker payment lock-up.
@@ -498,7 +500,9 @@ impl std::fmt::Display for EthCoinNftError {
 impl std::error::Error for EthCoinNftError {}
 
 impl From<NftSwapV2Error> for EthCoinNftError {
-    fn from(e: NftSwapV2Error) -> Self { EthCoinNftError::Build(e) }
+    fn from(e: NftSwapV2Error) -> Self {
+        EthCoinNftError::Build(e)
+    }
 }
 
 impl EthCoin {
@@ -636,9 +640,13 @@ fn expect_uint(decoded: &[Token], idx: &mut usize, field: &'static str, expected
 mod tests {
     use super::*;
 
-    fn addr(byte: u8) -> Address { Address::from([byte; 20]) }
+    fn addr(byte: u8) -> Address {
+        Address::from([byte; 20])
+    }
 
-    fn hash32(byte: u8) -> [u8; 32] { [byte; 32] }
+    fn hash32(byte: u8) -> [u8; 32] {
+        [byte; 32]
+    }
 
     fn sample_erc721_args() -> NftMakerPaymentArgs {
         NftMakerPaymentArgs {
@@ -904,7 +912,9 @@ mod tests {
     }
 
     // P10.3.7.c — call builder tests
-    fn contract() -> Address { Address::from([0xC0; 20]) }
+    fn contract() -> Address {
+        Address::from([0xC0; 20])
+    }
 
     #[test]
     fn build_maker_payment_call_carries_contract_value_and_gas() {

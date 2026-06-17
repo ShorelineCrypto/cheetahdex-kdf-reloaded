@@ -6,13 +6,21 @@ use util::{pad_i32, pad_u32};
 pub struct LenientTokenizer;
 
 impl Tokenizer for LenientTokenizer {
-    fn tokenize_address(value: &str) -> Result<[u8; 20], Error> { StrictTokenizer::tokenize_address(value) }
+    fn tokenize_address(value: &str) -> Result<[u8; 20], Error> {
+        StrictTokenizer::tokenize_address(value)
+    }
 
-    fn tokenize_string(value: &str) -> Result<String, Error> { StrictTokenizer::tokenize_string(value) }
+    fn tokenize_string(value: &str) -> Result<String, Error> {
+        StrictTokenizer::tokenize_string(value)
+    }
 
-    fn tokenize_bool(value: &str) -> Result<bool, Error> { StrictTokenizer::tokenize_bool(value) }
+    fn tokenize_bool(value: &str) -> Result<bool, Error> {
+        StrictTokenizer::tokenize_bool(value)
+    }
 
-    fn tokenize_bytes(value: &str) -> Result<Vec<u8>, Error> { StrictTokenizer::tokenize_bytes(value) }
+    fn tokenize_bytes(value: &str) -> Result<Vec<u8>, Error> {
+        StrictTokenizer::tokenize_bytes(value)
+    }
 
     fn tokenize_fixed_bytes(value: &str, len: usize) -> Result<Vec<u8>, Error> {
         StrictTokenizer::tokenize_fixed_bytes(value, len)

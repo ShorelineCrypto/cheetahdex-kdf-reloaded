@@ -1,5 +1,7 @@
-use super::{is_my_order, mm2_internal_pubkey_hex, orderbook_address, subscribe_to_orderbook_topic, OrdermatchContext,
-            RpcOrderbookEntry};
+use super::{
+    is_my_order, mm2_internal_pubkey_hex, orderbook_address, subscribe_to_orderbook_topic, OrdermatchContext,
+    RpcOrderbookEntry,
+};
 use crate::mm2::lp_ordermatch::{addr_format_from_protocol_info, RpcOrderbookEntryV2};
 use coins::{address_by_coin_conf_and_pubkey_str, coin_conf, is_wallet_only_conf};
 use common::log::warn;

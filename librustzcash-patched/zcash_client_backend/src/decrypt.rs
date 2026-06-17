@@ -49,14 +49,13 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
         let ovk = extfvk.fvk.ovk;
 
         for (index, output) in tx.shielded_outputs.iter().enumerate() {
-            let ((note, to, memo), outgoing) =
-                match try_sapling_note_decryption(params, height, &ivk, output) {
-                    Some(ret) => (ret, false),
-                    None => match try_sapling_output_recovery(params, height, &ovk, output) {
-                        Some(ret) => (ret, true),
-                        None => continue,
-                    },
-                };
+            let ((note, to, memo), outgoing) = match try_sapling_note_decryption(params, height, &ivk, output) {
+                Some(ret) => (ret, false),
+                None => match try_sapling_output_recovery(params, height, &ovk, output) {
+                    Some(ret) => (ret, true),
+                    None => continue,
+                },
+            };
             decrypted.push(DecryptedOutput {
                 index,
                 note,

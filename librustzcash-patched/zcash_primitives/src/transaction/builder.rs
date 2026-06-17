@@ -16,9 +16,8 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::OutgoingViewingKey, note_encryption::sapling_note_encryption, prover::TxProver,
-        redjubjub::PrivateKey, spend_sig_internal, util::generate_random_rseed_internal,
-        Diversifier, Node, Note, PaymentAddress,
+        keys::OutgoingViewingKey, note_encryption::sapling_note_encryption, prover::TxProver, redjubjub::PrivateKey,
+        spend_sig_internal, util::generate_random_rseed_internal, Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
         components::{
@@ -162,21 +161,9 @@ impl<P: consensus::Parameters> SaplingOutput<P> {
         ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription {
-        let encryptor = sapling_note_encryption::<R, P>(
-            self.ovk,
-            self.note.clone(),
-            self.to.clone(),
-            self.memo,
-            rng,
-        );
+        let encryptor = sapling_note_encryption::<R, P>(self.ovk, self.note.clone(), self.to.clone(), self.memo, rng);
 
-        let (zkproof, cv) = prover.output_proof(
-            ctx,
-            *encryptor.esk(),
-            self.to,
-            self.note.rcm(),
-            self.note.value,
-        );
+        let (zkproof, cv) = prover.output_proof(ctx, *encryptor.esk(), self.to, self.note.rcm(), self.note.value);
 
         let cmu = self.note.cmu();
 
@@ -230,7 +217,12 @@ impl TransparentInputs {
             return Err(Error::InvalidAmount);
         }
 
-        self.inputs.push(TransparentInputInfo { sk, script_data, redeem_script: coin.script_pubkey.clone(), coin });
+        self.inputs.push(TransparentInputInfo {
+            sk,
+            script_data,
+            redeem_script: coin.script_pubkey.clone(),
+            coin,
+        });
 
         Ok(())
     }
@@ -238,10 +230,7 @@ impl TransparentInputs {
     fn value_sum(&self) -> Amount {
         #[cfg(feature = "transparent-inputs")]
         {
-            self.inputs
-                .iter()
-                .map(|input| input.coin.value)
-                .sum::<Amount>()
+            self.inputs.iter().map(|input| input.coin.value).sum::<Amount>()
         }
 
         #[cfg(not(feature = "transparent-inputs"))]
@@ -251,11 +240,7 @@ impl TransparentInputs {
     }
 
     #[cfg(feature = "transparent-inputs")]
-    fn apply_signatures(
-        &self,
-        mtx: &mut TransactionData,
-        consensus_branch_id: consensus::BranchId,
-    ) {
+    fn apply_signatures(&self, mtx: &mut TransactionData, consensus_branch_id: consensus::BranchId) {
         let mut sighash = [0u8; 32];
         for (i, info) in self.inputs.iter().enumerate() {
             sighash.copy_from_slice(&signature_hash_data(
@@ -443,12 +428,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ///
     /// WARNING: THIS MUST REMAIN PRIVATE AS IT ALLOWS CONSTRUCTION
     /// OF BUILDERS WITH NON-CryptoRng RNGs
-    fn new_with_mtx(
-        params: P,
-        height: BlockHeight,
-        rng: R,
-        mut mtx: TransactionData,
-    ) -> Builder<'a, P, R> {
+    fn new_with_mtx(params: P, height: BlockHeight, rng: R, mut mtx: TransactionData) -> Builder<'a, P, R> {
         mtx.expiry_height = height + DEFAULT_TX_EXPIRY_DELTA;
 
         Builder {
@@ -513,15 +493,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         value: Amount,
         memo: Option<MemoBytes>,
     ) -> Result<(), Error> {
-        let output = SaplingOutput::new_internal(
-            &self.params,
-            self.height,
-            &mut self.rng,
-            ovk,
-            to,
-            value,
-            memo,
-        )?;
+        let output = SaplingOutput::new_internal(&self.params, self.height, &mut self.rng, ovk, to, value, memo)?;
 
         self.mtx.value_balance -= value;
 
@@ -547,11 +519,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     }
 
     /// Adds a transparent address to send funds to.
-    pub fn add_transparent_output(
-        &mut self,
-        to: &TransparentAddress,
-        value: Amount,
-    ) -> Result<(), Error> {
+    pub fn add_transparent_output(&mut self, to: &TransparentAddress, value: Amount) -> Result<(), Error> {
         if value.is_negative() {
             return Err(Error::InvalidAmount);
         }
@@ -565,10 +533,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     }
 
     /// Adds a TxOut
-    pub fn add_tx_out(
-        &mut self,
-        out: TxOut,
-    ) {
+    pub fn add_tx_out(&mut self, out: TxOut) {
         self.mtx.vout.push(out);
     }
 
@@ -612,12 +577,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 .iter()
                 .map(|ein| ein.prevout.value)
                 .sum::<Amount>()
-            - self
-                .mtx
-                .tze_outputs
-                .iter()
-                .map(|tzo| tzo.value)
-                .sum::<Amount>();
+            - self.mtx.tze_outputs.iter().map(|tzo| tzo.value).sum::<Amount>();
 
         if change.is_negative() {
             return Err(Error::ChangeIsNegative(change));
@@ -690,10 +650,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             for (i, (pos, spend)) in spends.iter().enumerate() {
                 let proof_generation_key = spend.extsk.expsk.proof_generation_key();
 
-                let nullifier = spend.note.nf(
-                    &proof_generation_key.to_viewing_key(),
-                    spend.merkle_path.position,
-                );
+                let nullifier = spend
+                    .note
+                    .nf(&proof_generation_key.to_viewing_key(), spend.merkle_path.position);
 
                 let (zkproof, cv, rk) = prover
                     .spend_proof(
@@ -755,8 +714,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                         }
                     };
 
-                    let rseed =
-                        generate_random_rseed_internal(&self.params, self.height, &mut self.rng);
+                    let rseed = generate_random_rseed_internal(&self.params, self.height, &mut self.rng);
 
                     (
                         payment_address,
@@ -772,13 +730,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 let esk = dummy_note.generate_or_derive_esk_internal(&mut self.rng);
                 let epk = dummy_note.g_d * esk;
 
-                let (zkproof, cv) = prover.output_proof(
-                    &mut ctx,
-                    esk,
-                    dummy_to,
-                    dummy_note.rcm(),
-                    dummy_note.value,
-                );
+                let (zkproof, cv) = prover.output_proof(&mut ctx, esk, dummy_to, dummy_note.rcm(), dummy_note.value);
 
                 let cmu = dummy_note.cmu();
 
@@ -852,10 +804,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         self.transparent_inputs
             .apply_signatures(&mut self.mtx, consensus_branch_id);
 
-        Ok((
-            self.mtx.freeze().expect("Transaction should be complete"),
-            tx_metadata,
-        ))
+        Ok((self.mtx.freeze().expect("Transaction should be complete"), tx_metadata))
     }
 
     pub fn set_lock_time(&mut self, lock_time: u32) {
@@ -864,9 +813,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
 }
 
 #[cfg(feature = "zfuture")]
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a>
-    for Builder<'a, P, R>
-{
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a> for Builder<'a, P, R> {
     type BuildCtx = TransactionData;
     type BuildError = Error;
 
@@ -880,9 +827,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
     where
         WBuilder: 'a + (FnOnce(&Self::BuildCtx) -> Result<W, Self::BuildError>),
     {
-        self.mtx
-            .tze_inputs
-            .push(TzeIn::new(outpoint, extension_id, mode));
+        self.mtx.tze_inputs.push(TzeIn::new(outpoint, extension_id, mode));
         self.tze_inputs.push(prevout, witness_builder);
         Ok(())
     }
@@ -945,11 +890,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ///
     /// WARNING: DO NOT USE IN PRODUCTION
     #[cfg(feature = "zfuture")]
-    pub fn test_only_new_with_rng_zfuture(
-        params: P,
-        height: BlockHeight,
-        rng: R,
-    ) -> Builder<'a, P, R> {
+    pub fn test_only_new_with_rng_zfuture(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
         Self::new_with_mtx(params, height, rng, TransactionData::zfuture())
     }
 
@@ -1003,9 +944,7 @@ mod tests {
             TransactionData,
         };
 
-        let sapling_activation_height = TEST_NETWORK
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap();
+        let sapling_activation_height = TEST_NETWORK.activation_height(NetworkUpgrade::Sapling).unwrap();
 
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
@@ -1029,9 +968,7 @@ mod tests {
             .add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::zero())
             .unwrap();
 
-        let (tx, _) = builder
-            .build(consensus::BranchId::Sapling, &MockTxProver)
-            .unwrap();
+        let (tx, _) = builder.build(consensus::BranchId::Sapling, &MockTxProver).unwrap();
         // No binding signature, because only t input and outputs
         assert!(tx.binding_sig.is_none());
     }
@@ -1075,10 +1012,7 @@ mod tests {
     fn fails_on_negative_transparent_output() {
         let mut builder = Builder::new(TEST_NETWORK, H0);
         assert_eq!(
-            builder.add_transparent_output(
-                &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_i64(-1).unwrap(),
-            ),
+            builder.add_transparent_output(&TransparentAddress::PublicKey([0; 20]), Amount::from_i64(-1).unwrap(),),
             Err(Error::InvalidAmount)
         );
     }
@@ -1113,9 +1047,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
-                Err(Error::ChangeIsNegative(
-                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
-                ))
+                Err(Error::ChangeIsNegative(Amount::from_i64(-50000).unwrap() - DEFAULT_FEE))
             );
         }
 
@@ -1131,9 +1063,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 builder.build(consensus::BranchId::Sapling, &MockTxProver),
-                Err(Error::ChangeIsNegative(
-                    Amount::from_i64(-50000).unwrap() - DEFAULT_FEE
-                ))
+                Err(Error::ChangeIsNegative(Amount::from_i64(-50000).unwrap() - DEFAULT_FEE))
             );
         }
 
@@ -1188,12 +1118,7 @@ mod tests {
         {
             let mut builder = Builder::new(TEST_NETWORK, H0);
             builder
-                .add_sapling_spend(
-                    extsk.clone(),
-                    *to.diversifier(),
-                    note1,
-                    witness1.path().unwrap(),
-                )
+                .add_sapling_spend(extsk.clone(), *to.diversifier(), note1, witness1.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_spend(extsk, *to.diversifier(), note2, witness2.path().unwrap())

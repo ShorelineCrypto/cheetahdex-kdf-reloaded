@@ -27,10 +27,7 @@ pub mod sapling;
 pub mod sprout;
 
 #[cfg(any(feature = "local-prover", feature = "bundled-prover"))]
-#[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "local-prover", feature = "bundled-prover")))
-)]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "local-prover", feature = "bundled-prover"))))]
 pub mod prover;
 
 // Circuit names
@@ -67,9 +64,8 @@ pub fn default_params_folder() -> Option<PathBuf> {
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_parameters() -> Result<(), minreq::Error> {
     // Ensure that the default Zcash parameters location exists.
-    let params_dir = default_params_folder().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "Could not load default params folder")
-    })?;
+    let params_dir = default_params_folder()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not load default params folder"))?;
     std::fs::create_dir_all(&params_dir)?;
 
     let fetch_params = |name: &str, expected_hash: &str| -> Result<(), minreq::Error> {
@@ -120,16 +116,11 @@ pub struct ZcashParameters {
     pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
 }
 
-pub fn load_parameters(
-    spend_path: &Path,
-    output_path: &Path,
-    sprout_path: Option<&Path>,
-) -> ZcashParameters {
+pub fn load_parameters(spend_path: &Path, output_path: &Path, sprout_path: Option<&Path>) -> ZcashParameters {
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
     let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
-    let sprout_fs =
-        sprout_path.map(|p| File::open(p).expect("couldn't load Sprout groth16 parameters file"));
+    let sprout_fs = sprout_path.map(|p| File::open(p).expect("couldn't load Sprout groth16 parameters file"));
 
     parse_parameters(
         BufReader::with_capacity(1024 * 1024, spend_fs),
@@ -141,41 +132,33 @@ pub fn load_parameters(
 /// Parse Bls12 keys from bytes as serialized by [`Parameters::write`].
 ///
 /// This function will panic if it encounters unparseable data.
-pub fn parse_parameters<R: io::Read>(
-    spend_fs: R,
-    output_fs: R,
-    sprout_fs: Option<R>,
-) -> ZcashParameters {
+pub fn parse_parameters<R: io::Read>(spend_fs: R, output_fs: R, sprout_fs: Option<R>) -> ZcashParameters {
     let mut spend_fs = hashreader::HashReader::new(spend_fs);
     let mut output_fs = hashreader::HashReader::new(output_fs);
     let mut sprout_fs = sprout_fs.map(hashreader::HashReader::new);
 
     // Deserialize params
-    let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
-    let output_params = Parameters::<Bls12>::read(&mut output_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
+    let spend_params =
+        Parameters::<Bls12>::read(&mut spend_fs, false).expect("couldn't deserialize Sapling spend parameters file");
+    let output_params =
+        Parameters::<Bls12>::read(&mut output_fs, false).expect("couldn't deserialize Sapling spend parameters file");
 
     // We only deserialize the verifying key for the Sprout parameters, which
     // appears at the beginning of the parameter file. The rest is loaded
     // during proving time.
-    let sprout_vk = sprout_fs.as_mut().map(|mut fs| {
-        VerifyingKey::<Bls12>::read(&mut fs)
-            .expect("couldn't deserialize Sprout Groth16 verifying key")
-    });
+    let sprout_vk = sprout_fs
+        .as_mut()
+        .map(|mut fs| VerifyingKey::<Bls12>::read(&mut fs).expect("couldn't deserialize Sprout Groth16 verifying key"));
 
     // There is extra stuff (the transcript) at the end of the parameter file which is
     // used to verify the parameter validity, but we're not interested in that. We do
     // want to read it, though, so that the BLAKE2b computed afterward is consistent
     // with `b2sum` on the files.
     let mut sink = io::sink();
-    io::copy(&mut spend_fs, &mut sink)
-        .expect("couldn't finish reading Sapling spend parameter file");
-    io::copy(&mut output_fs, &mut sink)
-        .expect("couldn't finish reading Sapling output parameter file");
+    io::copy(&mut spend_fs, &mut sink).expect("couldn't finish reading Sapling spend parameter file");
+    io::copy(&mut output_fs, &mut sink).expect("couldn't finish reading Sapling output parameter file");
     if let Some(mut sprout_fs) = sprout_fs.as_mut() {
-        io::copy(&mut sprout_fs, &mut sink)
-            .expect("couldn't finish reading Sprout groth16 parameter file");
+        io::copy(&mut sprout_fs, &mut sink).expect("couldn't finish reading Sprout groth16 parameter file");
     }
 
     if spend_fs.into_hash() != SAPLING_SPEND_HASH {
@@ -186,10 +169,7 @@ pub fn parse_parameters<R: io::Read>(
         panic!("Sapling output parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
     }
 
-    if sprout_fs
-        .map(|fs| fs.into_hash() != SPROUT_HASH)
-        .unwrap_or(false)
-    {
+    if sprout_fs.map(|fs| fs.into_hash() != SPROUT_HASH).unwrap_or(false) {
         panic!("Sprout groth16 parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
     }
 

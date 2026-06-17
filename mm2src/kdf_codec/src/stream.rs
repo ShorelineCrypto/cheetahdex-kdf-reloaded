@@ -127,7 +127,9 @@ impl Stream {
 
     /// Whether the witness section should be included by the
     /// `Transaction` `Serializable` impl.
-    pub fn include_transaction_witness(&self) -> bool { (self.flags & SERIALIZE_TRANSACTION_WITNESS) != 0 }
+    pub fn include_transaction_witness(&self) -> bool {
+        (self.flags & SERIALIZE_TRANSACTION_WITNESS) != 0
+    }
 
     /// Serialize `t` and append it.
     pub fn append<T>(&mut self, t: &T) -> &mut Self
@@ -160,13 +162,19 @@ impl Stream {
     }
 
     /// Consume the stream and return the accumulated bytes.
-    pub fn out(self) -> Bytes { self.buffer.into() }
+    pub fn out(self) -> Bytes {
+        self.buffer.into()
+    }
 }
 
 impl Write for Stream {
     #[inline]
-    fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> { self.buffer.write(buf) }
+    fn write(&mut self, buf: &[u8]) -> Result<usize, io::Error> {
+        self.buffer.write(buf)
+    }
 
     #[inline]
-    fn flush(&mut self) -> Result<(), io::Error> { self.buffer.flush() }
+    fn flush(&mut self) -> Result<(), io::Error> {
+        self.buffer.flush()
+    }
 }

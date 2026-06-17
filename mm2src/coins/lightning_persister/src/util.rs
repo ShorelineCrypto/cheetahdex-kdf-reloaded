@@ -1,4 +1,5 @@
-#[cfg(target_os = "windows")] extern crate winapi;
+#[cfg(target_os = "windows")]
+extern crate winapi;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,7 +101,9 @@ mod tests {
 
     struct TestWriteable {}
     impl DiskWriteable for TestWriteable {
-        fn write_to_file(&self, writer: &mut fs::File) -> Result<(), io::Error> { writer.write_all(&[42; 1]) }
+        fn write_to_file(&self, writer: &mut fs::File) -> Result<(), io::Error> {
+            writer.write_all(&[42; 1])
+        }
     }
 
     // Test that if the persister's path to channel data is read-only, writing

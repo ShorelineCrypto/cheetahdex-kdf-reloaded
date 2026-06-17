@@ -46,17 +46,11 @@ where
         false,
         false,
         a_sk,
-        &(0..256)
-            .map(|_| Boolean::constant(false))
-            .collect::<Vec<_>>(),
+        &(0..256).map(|_| Boolean::constant(false)).collect::<Vec<_>>(),
     )
 }
 
-pub fn prf_nf<Scalar, CS>(
-    cs: CS,
-    a_sk: &[Boolean],
-    rho: &[Boolean],
-) -> Result<Vec<Boolean>, SynthesisError>
+pub fn prf_nf<Scalar, CS>(cs: CS, a_sk: &[Boolean], rho: &[Boolean]) -> Result<Vec<Boolean>, SynthesisError>
 where
     Scalar: PrimeField,
     CS: ConstraintSystem<Scalar>,

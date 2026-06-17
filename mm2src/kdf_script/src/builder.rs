@@ -65,9 +65,13 @@ impl Builder {
         self
     }
 
-    pub fn push_bool(self, b: bool) -> Self { self.push_opcode(if b { Opcode::OP_1 } else { Opcode::OP_0 }) }
+    pub fn push_bool(self, b: bool) -> Self {
+        self.push_opcode(if b { Opcode::OP_1 } else { Opcode::OP_0 })
+    }
 
-    pub fn push_num(self, n: Num) -> Self { self.push_data(&n.to_bytes()) }
+    pub fn push_num(self, n: Num) -> Self {
+        self.push_data(&n.to_bytes())
+    }
 
     /// Append a single OP_PUSHBYTES_N push. Length must be in 1..=75.
     pub fn push_bytes(mut self, bytes: &[u8]) -> Self {
@@ -129,6 +133,10 @@ impl Builder {
         self
     }
 
-    pub fn into_script(self) -> Script { Script::new(self.data) }
-    pub fn into_bytes(self) -> Bytes { self.data }
+    pub fn into_script(self) -> Script {
+        Script::new(self.data)
+    }
+    pub fn into_bytes(self) -> Bytes {
+        self.data
+    }
 }

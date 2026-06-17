@@ -23,50 +23,78 @@ pub enum MmCoinEnum {
     Test(TestCoin),
 }
 impl From<UtxoStandardCoin> for MmCoinEnum {
-    fn from(c: UtxoStandardCoin) -> MmCoinEnum { MmCoinEnum::UtxoCoin(c) }
+    fn from(c: UtxoStandardCoin) -> MmCoinEnum {
+        MmCoinEnum::UtxoCoin(c)
+    }
 }
 impl From<EthCoin> for MmCoinEnum {
-    fn from(c: EthCoin) -> MmCoinEnum { MmCoinEnum::EthCoin(c) }
+    fn from(c: EthCoin) -> MmCoinEnum {
+        MmCoinEnum::EthCoin(c)
+    }
 }
 impl From<TestCoin> for MmCoinEnum {
-    fn from(c: TestCoin) -> MmCoinEnum { MmCoinEnum::Test(c) }
+    fn from(c: TestCoin) -> MmCoinEnum {
+        MmCoinEnum::Test(c)
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SolanaCoin> for MmCoinEnum {
-    fn from(c: SolanaCoin) -> MmCoinEnum { MmCoinEnum::SolanaCoin(c) }
+    fn from(c: SolanaCoin) -> MmCoinEnum {
+        MmCoinEnum::SolanaCoin(c)
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SplToken> for MmCoinEnum {
-    fn from(c: SplToken) -> MmCoinEnum { MmCoinEnum::SplToken(c) }
+    fn from(c: SplToken) -> MmCoinEnum {
+        MmCoinEnum::SplToken(c)
+    }
 }
 impl From<QtumCoin> for MmCoinEnum {
-    fn from(coin: QtumCoin) -> Self { MmCoinEnum::QtumCoin(coin) }
+    fn from(coin: QtumCoin) -> Self {
+        MmCoinEnum::QtumCoin(coin)
+    }
 }
 impl From<Qrc20Coin> for MmCoinEnum {
-    fn from(c: Qrc20Coin) -> MmCoinEnum { MmCoinEnum::Qrc20Coin(c) }
+    fn from(c: Qrc20Coin) -> MmCoinEnum {
+        MmCoinEnum::Qrc20Coin(c)
+    }
 }
 impl From<BchCoin> for MmCoinEnum {
-    fn from(c: BchCoin) -> MmCoinEnum { MmCoinEnum::Bch(c) }
+    fn from(c: BchCoin) -> MmCoinEnum {
+        MmCoinEnum::Bch(c)
+    }
 }
 impl From<SlpToken> for MmCoinEnum {
-    fn from(c: SlpToken) -> MmCoinEnum { MmCoinEnum::SlpToken(c) }
+    fn from(c: SlpToken) -> MmCoinEnum {
+        MmCoinEnum::SlpToken(c)
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl From<LightningCoin> for MmCoinEnum {
-    fn from(c: LightningCoin) -> MmCoinEnum { MmCoinEnum::LightningCoin(c) }
+    fn from(c: LightningCoin) -> MmCoinEnum {
+        MmCoinEnum::LightningCoin(c)
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl From<ZCoin> for MmCoinEnum {
-    fn from(c: ZCoin) -> MmCoinEnum { MmCoinEnum::ZCoin(c) }
+    fn from(c: ZCoin) -> MmCoinEnum {
+        MmCoinEnum::ZCoin(c)
+    }
 }
 impl From<siacoin::SiaCoin> for MmCoinEnum {
-    fn from(c: siacoin::SiaCoin) -> MmCoinEnum { MmCoinEnum::SiaCoin(c) }
+    fn from(c: siacoin::SiaCoin) -> MmCoinEnum {
+        MmCoinEnum::SiaCoin(c)
+    }
 }
 impl From<tendermint::TendermintCoin> for MmCoinEnum {
-    fn from(c: tendermint::TendermintCoin) -> MmCoinEnum { MmCoinEnum::TendermintCoin(c) }
+    fn from(c: tendermint::TendermintCoin) -> MmCoinEnum {
+        MmCoinEnum::TendermintCoin(c)
+    }
 }
 impl From<tendermint::TendermintToken> for MmCoinEnum {
-    fn from(c: tendermint::TendermintToken) -> MmCoinEnum { MmCoinEnum::TendermintToken(c) }
+    fn from(c: tendermint::TendermintToken) -> MmCoinEnum {
+        MmCoinEnum::TendermintToken(c)
+    }
 }
 impl Deref for MmCoinEnum {
     type Target = dyn MmCoin;
@@ -198,15 +226,21 @@ pub enum PrivKeyActivationPolicy {
 impl PrivKeyActivationPolicy {
     /// The function can be used as a default deserialization constructor:
     /// `#[serde(default = "PrivKeyActivationPolicy::context_priv_key")]`
-    pub fn context_priv_key() -> PrivKeyActivationPolicy { PrivKeyActivationPolicy::ContextPrivKey }
+    pub fn context_priv_key() -> PrivKeyActivationPolicy {
+        PrivKeyActivationPolicy::ContextPrivKey
+    }
 
     /// The function can be used as a default deserialization constructor:
     /// `#[serde(default = "PrivKeyActivationPolicy::iguana_priv_key")]`
-    pub fn iguana_priv_key() -> PrivKeyActivationPolicy { PrivKeyActivationPolicy::IguanaPrivKey }
+    pub fn iguana_priv_key() -> PrivKeyActivationPolicy {
+        PrivKeyActivationPolicy::IguanaPrivKey
+    }
 
     /// The function can be used as a default deserialization constructor:
     /// `#[serde(default = "PrivKeyActivationPolicy::trezor")]`
-    pub fn trezor() -> PrivKeyActivationPolicy { PrivKeyActivationPolicy::Trezor }
+    pub fn trezor() -> PrivKeyActivationPolicy {
+        PrivKeyActivationPolicy::Trezor
+    }
 }
 #[derive(Debug)]
 pub enum PrivKeyPolicy<T> {
@@ -237,7 +271,9 @@ impl<T> PrivKeyPolicy<T> {
     }
 
     /// Returns true if this is an HD wallet policy.
-    pub fn is_hd_wallet(&self) -> bool { matches!(self, PrivKeyPolicy::HDWallet { .. }) }
+    pub fn is_hd_wallet(&self) -> bool {
+        matches!(self, PrivKeyPolicy::HDWallet { .. })
+    }
 }
 #[derive(Clone)]
 pub enum PrivKeyBuildPolicy {
@@ -290,7 +326,9 @@ impl<Address, HDWallet> DerivationMethod<Address, HDWallet> {
     /// # Panic
     ///
     /// Panic if the address mode is [`DerivationMethod::HDWallet`].
-    pub fn unwrap_iguana(&self) -> &Address { self.iguana_or_err().unwrap() }
+    pub fn unwrap_iguana(&self) -> &Address {
+        self.iguana_or_err().unwrap()
+    }
 }
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -389,10 +427,14 @@ impl CoinTransportMetrics {
         }
     }
 
-    pub(crate) fn into_shared(self) -> RpcTransportEventHandlerShared { Arc::new(self) }
+    pub(crate) fn into_shared(self) -> RpcTransportEventHandlerShared {
+        Arc::new(self)
+    }
 }
 impl RpcTransportEventHandler for CoinTransportMetrics {
-    fn debug_info(&self) -> String { "CoinTransportMetrics".into() }
+    fn debug_info(&self) -> String {
+        "CoinTransportMetrics".into()
+    }
 
     fn on_outgoing_request(&self, data: &[u8]) {
         mm_counter!(self.metrics, "rpc_client.traffic.out", data.len() as u64,

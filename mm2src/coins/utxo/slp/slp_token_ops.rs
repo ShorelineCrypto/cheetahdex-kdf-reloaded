@@ -22,7 +22,9 @@ impl SlpToken {
         slp_send_output(&self.conf.token_id, amounts)
     }
 
-    pub(crate) fn rpc(&self) -> &UtxoRpcClientEnum { &self.platform_coin.as_ref().rpc_client }
+    pub(crate) fn rpc(&self) -> &UtxoRpcClientEnum {
+        &self.platform_coin.as_ref().rpc_client
+    }
 
     /// Returns unspents of the SLP token plus plain BCH UTXOs plus RecentlySpentOutPoints mutex guard
     pub(crate) async fn slp_unspents_for_spend(
@@ -466,19 +468,29 @@ impl SlpToken {
         Ok(())
     }
 
-    pub fn platform_dust(&self) -> u64 { self.platform_coin.as_ref().dust_amount }
+    pub fn platform_dust(&self) -> u64 {
+        self.platform_coin.as_ref().dust_amount
+    }
 
-    pub fn platform_decimals(&self) -> u8 { self.platform_coin.as_ref().decimals }
+    pub fn platform_decimals(&self) -> u8 {
+        self.platform_coin.as_ref().decimals
+    }
 
     pub fn platform_dust_dec(&self) -> BigDecimal {
         big_decimal_from_sat_unsigned(self.platform_dust(), self.platform_decimals())
     }
 
-    pub fn decimals(&self) -> u8 { self.conf.decimals }
+    pub fn decimals(&self) -> u8 {
+        self.conf.decimals
+    }
 
-    pub fn token_id(&self) -> &H256 { &self.conf.token_id }
+    pub fn token_id(&self) -> &H256 {
+        &self.conf.token_id
+    }
 
-    pub(crate) fn platform_conf(&self) -> &UtxoCoinConf { &self.platform_coin.as_ref().conf }
+    pub(crate) fn platform_conf(&self) -> &UtxoCoinConf {
+        &self.platform_coin.as_ref().conf
+    }
 
     pub(crate) async fn my_balance_sat(&self) -> UtxoRpcResult<u64> {
         let (slp_unspents, _) = self.slp_unspents_for_display().await?;
@@ -495,7 +507,9 @@ impl SlpToken {
         })
     }
 
-    pub(crate) fn slp_prefix(&self) -> &CashAddrPrefix { self.platform_coin.slp_prefix() }
+    pub(crate) fn slp_prefix(&self) -> &CashAddrPrefix {
+        self.platform_coin.slp_prefix()
+    }
 
     pub fn get_info(&self) -> SlpTokenInfo {
         SlpTokenInfo {

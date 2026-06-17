@@ -95,19 +95,27 @@ pub fn keccak256(input: &[u8]) -> H256 {
 
 /// Keccak-256 applied twice (KDF's `dkeccak256` helper).
 #[inline]
-pub fn dkeccak256(input: &[u8]) -> H256 { keccak256(keccak256(input).as_slice()) }
+pub fn dkeccak256(input: &[u8]) -> H256 {
+    keccak256(keccak256(input).as_slice())
+}
 
 /// `RIPEMD160(SHA256(input))` — Bitcoin's `HASH160`.
 #[inline]
-pub fn dhash160(input: &[u8]) -> H160 { ripemd160(sha256(input).as_slice()) }
+pub fn dhash160(input: &[u8]) -> H160 {
+    ripemd160(sha256(input).as_slice())
+}
 
 /// `SHA256(SHA256(input))` — Bitcoin's `HASH256`.
 #[inline]
-pub fn dhash256(input: &[u8]) -> H256 { sha256(sha256(input).as_slice()) }
+pub fn dhash256(input: &[u8]) -> H256 {
+    sha256(sha256(input).as_slice())
+}
 
 /// `Groestl512(Groestl512(input))` — Groestlcoin's address checksum primitive.
 #[inline]
-pub fn dgroestl512(input: &[u8]) -> H512 { groestl512(groestl512(input).as_slice()) }
+pub fn dgroestl512(input: &[u8]) -> H512 {
+    groestl512(groestl512(input).as_slice())
+}
 
 /// SipHash-2-4 keyed PRF.
 #[inline]

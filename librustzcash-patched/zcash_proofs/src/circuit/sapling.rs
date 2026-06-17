@@ -7,16 +7,13 @@ use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
 use zcash_primitives::constants;
 
-use zcash_primitives::sapling::{
-    PaymentAddress, ProofGenerationKey, ValueCommitment, SAPLING_COMMITMENT_TREE_DEPTH,
-};
+use zcash_primitives::sapling::{PaymentAddress, ProofGenerationKey, ValueCommitment, SAPLING_COMMITMENT_TREE_DEPTH};
 
 use super::ecc;
 use super::pedersen_hash;
 use crate::constants::{
-    NOTE_COMMITMENT_RANDOMNESS_GENERATOR, NULLIFIER_POSITION_GENERATOR,
-    PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
-    VALUE_COMMITMENT_VALUE_GENERATOR,
+    NOTE_COMMITMENT_RANDOMNESS_GENERATOR, NULLIFIER_POSITION_GENERATOR, PROOF_GENERATION_KEY_GENERATOR,
+    SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR, VALUE_COMMITMENT_VALUE_GENERATOR,
 };
 use bellman::gadgets::blake2s;
 use bellman::gadgets::boolean;
@@ -77,10 +74,8 @@ where
     CS: ConstraintSystem<bls12_381::Scalar>,
 {
     // Booleanize the value into little-endian bit order
-    let value_bits = boolean::u64_into_boolean_vec_le(
-        cs.namespace(|| "value"),
-        value_commitment.as_ref().map(|c| c.value),
-    )?;
+    let value_bits =
+        boolean::u64_into_boolean_vec_le(cs.namespace(|| "value"), value_commitment.as_ref().map(|c| c.value))?;
 
     // Compute the note value in the exponent
     let value = ecc::fixed_base_multiplication(
@@ -92,10 +87,8 @@ where
     // Booleanize the randomness. This does not ensure
     // the bit representation is "in the field" because
     // it doesn't matter for security.
-    let rcv = boolean::field_into_boolean_vec_le(
-        cs.namespace(|| "rcv"),
-        value_commitment.as_ref().map(|c| c.randomness),
-    )?;
+    let rcv =
+        boolean::field_into_boolean_vec_le(cs.namespace(|| "rcv"), value_commitment.as_ref().map(|c| c.randomness))?;
 
     // Compute the randomness in the exponent
     let rcv = ecc::fixed_base_multiplication(
@@ -114,10 +107,7 @@ where
 }
 
 impl Circuit<bls12_381::Scalar> for Spend {
-    fn synthesize<CS: ConstraintSystem<bls12_381::Scalar>>(
-        self,
-        cs: &mut CS,
-    ) -> Result<(), SynthesisError> {
+    fn synthesize<CS: ConstraintSystem<bls12_381::Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         // Prover witnesses ak (ensures that it's on the curve)
         let ak = ecc::EdwardsPoint::witness(
             cs.namespace(|| "ak"),
@@ -226,10 +216,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
         let mut value_num = num::Num::zero();
         {
             // Get the value in little-endian bit order
-            let value_bits = expose_value_commitment(
-                cs.namespace(|| "value commitment"),
-                self.value_commitment,
-            )?;
+            let value_bits = expose_value_commitment(cs.namespace(|| "value commitment"), self.value_commitment)?;
 
             // Compute the note's value as a linear combination
             // of the bits.
@@ -265,10 +252,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
 
         {
             // Booleanize the randomness for the note commitment
-            let rcm = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "rcm"),
-                self.commitment_randomness,
-            )?;
+            let rcm = boolean::field_into_boolean_vec_le(cs.namespace(|| "rcm"), self.commitment_randomness)?;
 
             // Compute the note commitment randomness in the exponent
             let rcm = ecc::fixed_base_multiplication(
@@ -307,8 +291,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
 
             // Witness the authentication path element adjacent
             // at this depth.
-            let path_element =
-                num::AllocatedNum::alloc(cs.namespace(|| "path element"), || Ok(e.get()?.0))?;
+            let path_element = num::AllocatedNum::alloc(cs.namespace(|| "path element"), || Ok(e.get()?.0))?;
 
             // Swap the two if the current subtree is on the right
             let (ul, ur) = num::AllocatedNum::conditionally_reverse(
@@ -340,9 +323,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
             let real_anchor_value = self.anchor;
 
             // Allocate the "real" anchor that will be exposed.
-            let rt = num::AllocatedNum::alloc(cs.namespace(|| "conditional anchor"), || {
-                Ok(*real_anchor_value.get()?)
-            })?;
+            let rt = num::AllocatedNum::alloc(cs.namespace(|| "conditional anchor"), || Ok(*real_anchor_value.get()?))?;
 
             // (cur - rt) * value = 0
             // if value is zero, cur and rt can be different
@@ -390,10 +371,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
 }
 
 impl Circuit<bls12_381::Scalar> for Output {
-    fn synthesize<CS: ConstraintSystem<bls12_381::Scalar>>(
-        self,
-        cs: &mut CS,
-    ) -> Result<(), SynthesisError> {
+    fn synthesize<CS: ConstraintSystem<bls12_381::Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
         // Let's start to construct our note, which contains
         // value (big endian)
         let mut note_contents = vec![];
@@ -453,10 +431,8 @@ impl Circuit<bls12_381::Scalar> for Output {
 
             // Witness the v-coordinate, encoded as little
             // endian bits (to match the representation)
-            let v_contents = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "pk_d bits of v"),
-                pk_d.map(|e| e.get_v()),
-            )?;
+            let v_contents =
+                boolean::field_into_boolean_vec_le(cs.namespace(|| "pk_d bits of v"), pk_d.map(|e| e.get_v()))?;
 
             // Witness the sign bit
             let sign_bit = boolean::Boolean::from(boolean::AllocatedBit::alloc(
@@ -485,10 +461,7 @@ impl Circuit<bls12_381::Scalar> for Output {
 
         {
             // Booleanize the randomness
-            let rcm = boolean::field_into_boolean_vec_le(
-                cs.namespace(|| "rcm"),
-                self.commitment_randomness,
-            )?;
+            let rcm = boolean::field_into_boolean_vec_le(cs.namespace(|| "rcm"), self.commitment_randomness)?;
 
             // Compute the note commitment randomness in the exponent
             let rcm = ecc::fixed_base_multiplication(
@@ -521,8 +494,7 @@ fn test_input_circuit_with_bls12_381() {
     use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
-        0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-        0xe5,
+        0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
     ]);
 
     let tree_depth = 32;
@@ -557,14 +529,12 @@ fn test_input_circuit_with_bls12_381() {
 
         let g_d = payment_address.diversifier().g_d().unwrap();
         let commitment_randomness = jubjub::Fr::random(&mut rng);
-        let auth_path =
-            vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
+        let auth_path = vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
         let ar = jubjub::Fr::random(&mut rng);
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
-            let expected_value_commitment =
-                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
+            let expected_value_commitment = jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             let note = Note {
                 value: value_commitment.value,
                 g_d,
@@ -661,8 +631,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
     use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
-        0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-        0xe5,
+        0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
     ]);
 
     let tree_depth = 32;
@@ -723,14 +692,12 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
         let g_d = payment_address.diversifier().g_d().unwrap();
         let commitment_randomness = jubjub::Fr::random(&mut rng);
-        let auth_path =
-            vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
+        let auth_path = vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
         let ar = jubjub::Fr::random(&mut rng);
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
-            let expected_value_commitment =
-                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
+            let expected_value_commitment = jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
             assert_eq!(
                 expected_value_commitment.get_u(),
                 bls12_381::Scalar::from_str(&expected_commitment_us[i as usize]).unwrap()
@@ -835,8 +802,7 @@ fn test_output_circuit_with_bls12_381() {
     use zcash_primitives::sapling::{Diversifier, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
-        0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
-        0xe5,
+        0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
     ]);
 
     for _ in 0..100 {
@@ -890,19 +856,14 @@ fn test_output_circuit_with_bls12_381() {
             );
 
             let expected_cmu = payment_address
-                .create_note(
-                    value_commitment.value,
-                    Rseed::BeforeZip212(commitment_randomness),
-                )
+                .create_note(value_commitment.value, Rseed::BeforeZip212(commitment_randomness))
                 .expect("should be valid")
                 .cmu();
 
-            let expected_value_commitment =
-                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
+            let expected_value_commitment = jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
 
             let expected_epk =
-                jubjub::ExtendedPoint::from(payment_address.g_d().expect("should be valid") * esk)
-                    .to_affine();
+                jubjub::ExtendedPoint::from(payment_address.g_d().expect("should be valid") * esk).to_affine();
 
             assert_eq!(cs.num_inputs(), 6);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
@@ -914,14 +875,8 @@ fn test_output_circuit_with_bls12_381() {
                 cs.get_input(2, "value commitment/commitment point/v/input variable"),
                 expected_value_commitment.get_v()
             );
-            assert_eq!(
-                cs.get_input(3, "epk/u/input variable"),
-                expected_epk.get_u()
-            );
-            assert_eq!(
-                cs.get_input(4, "epk/v/input variable"),
-                expected_epk.get_v()
-            );
+            assert_eq!(cs.get_input(3, "epk/u/input variable"), expected_epk.get_u());
+            assert_eq!(cs.get_input(4, "epk/v/input variable"), expected_epk.get_v());
             assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cmu);
         }
     }

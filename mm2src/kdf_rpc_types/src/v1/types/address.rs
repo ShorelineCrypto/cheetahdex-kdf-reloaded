@@ -20,7 +20,9 @@ pub struct AddressVisitor;
 impl<'de> Visitor<'de> for AddressVisitor {
     type Value = Address;
 
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result { formatter.write_str("an address") }
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("an address")
+    }
 
     fn visit_str<E: DeError>(self, value: &str) -> Result<Self::Value, E> {
         value
@@ -66,7 +68,9 @@ mod tests {
         addresses: Vec<Address>,
     }
 
-    fn container(value: &'static str) -> AddressContainer { AddressContainer { address: value.into() } }
+    fn container(value: &'static str) -> AddressContainer {
+        AddressContainer { address: value.into() }
+    }
 
     #[test]
     fn btc_address_serializes_and_deserializes() {

@@ -1,6 +1,7 @@
 use super::*;
-use crate::solana::solana_common_tests::{generate_key_pair_from_iguana_seed, generate_key_pair_from_seed,
-                                         solana_coin_for_test, SolanaNet};
+use crate::solana::solana_common_tests::{
+    generate_key_pair_from_iguana_seed, generate_key_pair_from_seed, solana_coin_for_test, SolanaNet,
+};
 use crate::MarketCoinOps;
 use base58::ToBase58;
 use common::{block_on, Future01CompatExt};

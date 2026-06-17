@@ -15,7 +15,9 @@ pub enum Public {
 }
 
 impl Default for Public {
-    fn default() -> Self { Public::Compressed(H264::default()) }
+    fn default() -> Self {
+        Public::Compressed(H264::default())
+    }
 }
 
 impl Public {
@@ -35,7 +37,9 @@ impl Public {
         }
     }
 
-    pub fn address_hash(&self) -> H160 { dhash160(self) }
+    pub fn address_hash(&self) -> H160 {
+        dhash160(self)
+    }
 
     pub fn verify(&self, message: &Message, signature: &Signature) -> Result<bool, Error> {
         let pk = match self {
@@ -65,7 +69,9 @@ impl Public {
         }
     }
 
-    pub fn to_vec(&self) -> Vec<u8> { (**self).to_vec() }
+    pub fn to_vec(&self) -> Vec<u8> {
+        (**self).to_vec()
+    }
 }
 
 impl ops::Deref for Public {
@@ -79,7 +85,9 @@ impl ops::Deref for Public {
 }
 
 impl AsRef<[u8]> for Public {
-    fn as_ref(&self) -> &[u8] { &**self }
+    fn as_ref(&self) -> &[u8] {
+        &**self
+    }
 }
 
 impl PartialEq for Public {
@@ -100,9 +108,13 @@ impl fmt::Debug for Public {
 }
 
 impl fmt::Display for Public {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&(**self).to_hex::<String>()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&(**self).to_hex::<String>())
+    }
 }
 
 impl From<Public> for AddressHashEnum {
-    fn from(p: Public) -> AddressHashEnum { AddressHashEnum::AddressHash(p.address_hash()) }
+    fn from(p: Public) -> AddressHashEnum {
+        AddressHashEnum::AddressHash(p.address_hash())
+    }
 }

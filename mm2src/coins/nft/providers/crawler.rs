@@ -83,7 +83,9 @@ pub struct HttpCrawlProvider {
 
 impl HttpCrawlProvider {
     /// Construct a new HTTP-backed crawler provider rooted at `base_url`.
-    pub fn new(base_url: Url, komodo_proxy: bool) -> Self { HttpCrawlProvider { base_url, komodo_proxy } }
+    pub fn new(base_url: Url, komodo_proxy: bool) -> Self {
+        HttpCrawlProvider { base_url, komodo_proxy }
+    }
 
     fn endpoint(&self, suffix: &str) -> String {
         format!(
@@ -145,7 +147,9 @@ impl NftCrawlProvider for HttpCrawlProvider {
     }
 }
 
-fn chain_label(chain: Chain) -> String { format!("{}", chain).to_ascii_lowercase() }
+fn chain_label(chain: Chain) -> String {
+    format!("{}", chain).to_ascii_lowercase()
+}
 
 /// Outcome of a single chain's crawl. Returned per-chain so callers can
 /// surface partial successes when one of the chains in a multi-chain
@@ -453,8 +457,12 @@ mod tests {
     #[async_trait]
     impl NftListStore for StubStore {
         type Error = StubError;
-        async fn ensure_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> { Ok(()) }
-        async fn chain_ready(&self, _chain: &Chain) -> MmResult<bool, Self::Error> { Ok(true) }
+        async fn ensure_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> {
+            Ok(())
+        }
+        async fn chain_ready(&self, _chain: &Chain) -> MmResult<bool, Self::Error> {
+            Ok(true)
+        }
         async fn list_owned(
             &self,
             _chains: Vec<Chain>,
@@ -512,8 +520,12 @@ mod tests {
         ) -> MmResult<Option<String>, Self::Error> {
             unimplemented!()
         }
-        async fn merge_metadata(&self, _chain: &Chain, _nft: Nft) -> MmResult<(), Self::Error> { unimplemented!() }
-        async fn latest_block_in_cache(&self, _chain: &Chain) -> MmResult<Option<u64>, Self::Error> { unimplemented!() }
+        async fn merge_metadata(&self, _chain: &Chain, _nft: Nft) -> MmResult<(), Self::Error> {
+            unimplemented!()
+        }
+        async fn latest_block_in_cache(&self, _chain: &Chain) -> MmResult<Option<u64>, Self::Error> {
+            unimplemented!()
+        }
         async fn latest_scanned_block(&self, chain: &Chain) -> MmResult<Option<u64>, Self::Error> {
             Ok(self.inner.lock().unwrap().last_scanned.get(chain).copied())
         }
@@ -545,15 +557,23 @@ mod tests {
         ) -> MmResult<(), Self::Error> {
             unimplemented!()
         }
-        async fn purge_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> { unimplemented!() }
-        async fn purge_all(&self) -> MmResult<(), Self::Error> { unimplemented!() }
+        async fn purge_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> {
+            unimplemented!()
+        }
+        async fn purge_all(&self) -> MmResult<(), Self::Error> {
+            unimplemented!()
+        }
     }
 
     #[async_trait]
     impl NftHistoryStore for StubStore {
         type Error = StubError;
-        async fn ensure_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> { Ok(()) }
-        async fn chain_ready(&self, _chain: &Chain) -> MmResult<bool, Self::Error> { Ok(true) }
+        async fn ensure_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> {
+            Ok(())
+        }
+        async fn chain_ready(&self, _chain: &Chain) -> MmResult<bool, Self::Error> {
+            Ok(true)
+        }
         async fn list_transfers(
             &self,
             _chains: Vec<Chain>,
@@ -628,7 +648,9 @@ mod tests {
         async fn contract_addresses(&self, _chain: Chain) -> MmResult<HashSet<Address>, Self::Error> {
             unimplemented!()
         }
-        async fn domain_set(&self, _chain: &Chain) -> MmResult<HashSet<String>, Self::Error> { unimplemented!() }
+        async fn domain_set(&self, _chain: &Chain) -> MmResult<HashSet<String>, Self::Error> {
+            unimplemented!()
+        }
         async fn mark_domain_phishing(
             &self,
             _chain: &Chain,
@@ -637,8 +659,12 @@ mod tests {
         ) -> MmResult<(), Self::Error> {
             unimplemented!()
         }
-        async fn purge_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> { unimplemented!() }
-        async fn purge_all(&self) -> MmResult<(), Self::Error> { unimplemented!() }
+        async fn purge_chain(&self, _chain: &Chain) -> MmResult<(), Self::Error> {
+            unimplemented!()
+        }
+        async fn purge_all(&self) -> MmResult<(), Self::Error> {
+            unimplemented!()
+        }
     }
 
     struct StubProvider {
@@ -649,7 +675,9 @@ mod tests {
 
     #[async_trait]
     impl NftCrawlProvider for StubProvider {
-        async fn current_block(&self, _chain: Chain) -> MmResult<u64, FetchError> { Ok(self.current_block) }
+        async fn current_block(&self, _chain: Chain) -> MmResult<u64, FetchError> {
+            Ok(self.current_block)
+        }
         async fn fetch_transfers_since(
             &self,
             _chain: Chain,
@@ -836,17 +864,20 @@ mod tests {
         let store = StubStore::default();
         // Simulate prior crawl: bookmark at block 10.
         store
-            .append_transfers(Chain::Eth, vec![make_transfer(
-                contract,
-                1,
-                addr(0xB),
-                owner,
-                10,
-                0,
-                TransferStatus::Receive,
-                1,
-                ContractType::Erc721,
-            )])
+            .append_transfers(
+                Chain::Eth,
+                vec![make_transfer(
+                    contract,
+                    1,
+                    addr(0xB),
+                    owner,
+                    10,
+                    0,
+                    TransferStatus::Receive,
+                    1,
+                    ContractType::Erc721,
+                )],
+            )
             .await
             .unwrap();
         let provider = StubProvider {

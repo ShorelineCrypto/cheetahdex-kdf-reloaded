@@ -29,7 +29,9 @@ impl EthTxFeeDetails {
 
 #[async_trait]
 impl MmCoin for EthCoin {
-    fn is_asset_chain(&self) -> bool { false }
+    fn is_asset_chain(&self) -> bool {
+        false
+    }
 
     fn get_raw_transaction(&self, req: RawTransactionRequest) -> RawTransactionFut {
         Box::new(get_raw_transaction_impl(self.clone(), req).boxed().compat())
@@ -40,7 +42,9 @@ impl MmCoin for EthCoin {
         Box::new(Box::pin(withdraw_impl(ctx, self.clone(), req)).compat())
     }
 
-    fn decimals(&self) -> u8 { self.decimals }
+    fn decimals(&self) -> u8 {
+        self.decimals
+    }
 
     fn convert_to_address(&self, from: &str, to_address_format: Json) -> Result<String, String> {
         let to_address_format: EthAddressFormat =
@@ -89,7 +93,9 @@ impl MmCoin for EthCoin {
         }
     }
 
-    fn history_sync_status(&self) -> HistorySyncState { self.history_sync_state.lock().unwrap().clone() }
+    fn history_sync_status(&self) -> HistorySyncState {
+        self.history_sync_state.lock().unwrap().clone()
+    }
 
     fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
         let coin = self.clone();
@@ -260,9 +266,13 @@ impl MmCoin for EthCoin {
         })
     }
 
-    fn required_confirmations(&self) -> u64 { self.required_confirmations.load(AtomicOrdering::Relaxed) }
+    fn required_confirmations(&self) -> u64 {
+        self.required_confirmations.load(AtomicOrdering::Relaxed)
+    }
 
-    fn requires_notarization(&self) -> bool { false }
+    fn requires_notarization(&self) -> bool {
+        false
+    }
 
     fn set_required_confirmations(&self, confirmations: u64) {
         self.required_confirmations
@@ -277,11 +287,17 @@ impl MmCoin for EthCoin {
         Some(BytesJson::from(self.swap_contract_address.0.as_ref()))
     }
 
-    fn mature_confirmations(&self) -> Option<u32> { None }
+    fn mature_confirmations(&self) -> Option<u32> {
+        None
+    }
 
-    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
+    fn coin_protocol_info(&self) -> Vec<u8> {
+        Vec::new()
+    }
 
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool { true }
+    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
+        true
+    }
 }
 
 #[async_trait]
@@ -297,7 +313,9 @@ impl ParseCoinAssocTypes for EthCoin {
     type Sig = Vec<u8>;
     type SigParseError = MmError<EthAssocTypesError>;
 
-    async fn my_addr(&self) -> Self::Address { self.my_address }
+    async fn my_addr(&self) -> Self::Address {
+        self.my_address
+    }
 
     fn parse_address(&self, address: &str) -> Result<Self::Address, Self::AddressParseError> {
         Address::from_str(address).map_to_mm(|e| EthAssocTypesError::InvalidHexString(e.to_string()))
@@ -321,14 +339,18 @@ impl ParseCoinAssocTypes for EthCoin {
         Ok(preimage.to_vec())
     }
 
-    fn parse_signature(&self, sig: &[u8]) -> Result<Self::Sig, Self::SigParseError> { Ok(sig.to_vec()) }
+    fn parse_signature(&self, sig: &[u8]) -> Result<Self::Sig, Self::SigParseError> {
+        Ok(sig.to_vec())
+    }
 }
 
 // ─── CommonSwapOpsV2 for EthCoin ────────────────────────────────────────────
 
 #[async_trait]
 impl CommonSwapOpsV2 for EthCoin {
-    fn derive_htlc_pubkey_v2(&self, _swap_unique_data: &[u8]) -> Public { self.key_pair.public().clone() }
+    fn derive_htlc_pubkey_v2(&self, _swap_unique_data: &[u8]) -> Public {
+        self.key_pair.public().clone()
+    }
 
     fn derive_htlc_pubkey_v2_bytes(&self, swap_unique_data: &[u8]) -> Vec<u8> {
         self.derive_htlc_pubkey_v2(swap_unique_data).to_vec()
@@ -444,7 +466,9 @@ impl TakerCoinSwapOpsV2 for EthCoin {
         self.refund_taker_payment_with_timelock_impl(args).await
     }
 
-    fn skip_taker_payment_spend_preimage(&self) -> bool { true }
+    fn skip_taker_payment_spend_preimage(&self) -> bool {
+        true
+    }
 
     async fn gen_taker_payment_spend_preimage(
         &self,

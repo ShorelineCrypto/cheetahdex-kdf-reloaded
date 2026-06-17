@@ -338,10 +338,13 @@ pub async fn tx_details_by_hash<T: UtxoCommonOps>(
     tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
     let my_address = try_s!(coin.as_ref().derivation_method.iguana_or_err());
 
-    input_transactions.insert(hash, HistoryUtxoTx {
-        tx: tx.clone(),
-        height: verbose_tx.height,
-    });
+    input_transactions.insert(
+        hash,
+        HistoryUtxoTx {
+            tx: tx.clone(),
+            height: verbose_tx.height,
+        },
+    );
 
     let mut input_amount = 0;
     let mut output_amount = 0;

@@ -30,7 +30,9 @@ pub struct LightningCoin {
 }
 
 impl fmt::Debug for LightningCoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "LightningCoin {{ conf: {:?} }}", self.conf) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LightningCoin {{ conf: {:?} }}", self.conf)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

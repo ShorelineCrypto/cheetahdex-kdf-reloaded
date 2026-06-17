@@ -1,11 +1,15 @@
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::{ping::{Ping, PingConfig, PingEvent},
-             swarm::{CloseConnection, NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters},
-             NetworkBehaviour};
+use libp2p::{
+    ping::{Ping, PingConfig, PingEvent},
+    swarm::{CloseConnection, NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters},
+    NetworkBehaviour,
+};
 use log::error;
-use std::{collections::VecDeque,
-          num::NonZeroU32,
-          task::{Context, Poll}};
+use std::{
+    collections::VecDeque,
+    num::NonZeroU32,
+    task::{Context, Poll},
+};
 use void::Void;
 
 /// Wrapper around libp2p Ping behaviour that forcefully disconnects a peer using NetworkBehaviourAction::DisconnectPeer

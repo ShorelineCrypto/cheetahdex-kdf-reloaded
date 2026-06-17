@@ -82,7 +82,9 @@ impl Service<RequestPacket> for AlloyTransport {
     type Error = TransportError;
     type Future = TransportFut<'static>;
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> { Poll::Ready(Ok(())) }
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
 
     fn call(&mut self, req: RequestPacket) -> Self::Future {
         let inner = self.inner.clone();

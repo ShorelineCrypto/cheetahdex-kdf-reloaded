@@ -1,17 +1,22 @@
 use crate::coin_balance::{AddressBalanceStatus, HDAddressBalance, HDAddressBalanceScanner, HDWalletBalanceOps};
 use crate::hd_pubkey::{ExtractExtendedPubkey, HDExtractPubkeyError, HDXPubExtractor};
-use crate::hd_wallet::{AccountUpdatingError, AddressDerivingError, AsyncMutexGuard, GetNewHDAddressParams,
-                       GetNewHDAddressResponse, HDAccountMut, HDAccountOps, HDAccountsMutex, HDAddress,
-                       HDWalletCoinOps, HDWalletOps, HDWalletRpcError, HDWalletRpcOps, InvalidBip44ChainError,
-                       NewAccountCreatingError, NewAddressDerivingError};
-use crate::hd_wallet_storage::{HDAccountStorageItem, HDWalletCoinStorage, HDWalletCoinWithStorageOps,
-                               HDWalletStorageResult};
-use crate::{coin_balance, hd_wallet, BalanceError, BalanceResult, CoinBalance, CoinWithDerivationMethod,
-            DerivationMethod};
+use crate::hd_wallet::{
+    AccountUpdatingError, AddressDerivingError, AsyncMutexGuard, GetNewHDAddressParams, GetNewHDAddressResponse,
+    HDAccountMut, HDAccountOps, HDAccountsMutex, HDAddress, HDWalletCoinOps, HDWalletOps, HDWalletRpcError,
+    HDWalletRpcOps, InvalidBip44ChainError, NewAccountCreatingError, NewAddressDerivingError,
+};
+use crate::hd_wallet_storage::{
+    HDAccountStorageItem, HDWalletCoinStorage, HDWalletCoinWithStorageOps, HDWalletStorageResult,
+};
+use crate::{
+    coin_balance, hd_wallet, BalanceError, BalanceResult, CoinBalance, CoinWithDerivationMethod, DerivationMethod,
+};
 use async_trait::async_trait;
 use bip32::ChildNumber;
-use crypto::{Bip32DerPathOps, Bip44Chain, Bip44PathToAccount, Bip44PathToCoin, CryptoCtx, DerivationPath,
-             KeyPairPolicy, RpcDerivationPath, Secp256k1ExtendedPublicKey};
+use crypto::{
+    Bip32DerPathOps, Bip44Chain, Bip44PathToAccount, Bip44PathToCoin, CryptoCtx, DerivationPath, KeyPairPolicy,
+    RpcDerivationPath, Secp256k1ExtendedPublicKey,
+};
 use ethereum_types::Address;
 use mm2_err_handle::prelude::*;
 use mm2_eth::keys::{public_to_address, Public};
@@ -51,9 +56,13 @@ impl HDAccountOps for EthHDAccount {
         }
     }
 
-    fn account_derivation_path(&self) -> DerivationPath { self.account_derivation_path.to_derivation_path() }
+    fn account_derivation_path(&self) -> DerivationPath {
+        self.account_derivation_path.to_derivation_path()
+    }
 
-    fn account_id(&self) -> u32 { self.account_id }
+    fn account_id(&self) -> u32 {
+        self.account_id
+    }
 }
 
 impl EthHDAccount {
@@ -102,9 +111,15 @@ pub struct EthHDWallet {
 impl HDWalletOps for EthHDWallet {
     type HDAccount = EthHDAccount;
 
-    fn coin_type(&self) -> u32 { self.derivation_path.coin_type() }
-    fn gap_limit(&self) -> u32 { self.gap_limit }
-    fn get_accounts_mutex(&self) -> &HDAccountsMutex<Self::HDAccount> { &self.accounts }
+    fn coin_type(&self) -> u32 {
+        self.derivation_path.coin_type()
+    }
+    fn gap_limit(&self) -> u32 {
+        self.gap_limit
+    }
+    fn get_accounts_mutex(&self) -> &HDAccountsMutex<Self::HDAccount> {
+        &self.accounts
+    }
 }
 
 // -------------------------------------------------------------------
@@ -344,7 +359,9 @@ impl CoinWithDerivationMethod for EthCoin {
     type Address = Address;
     type HDWallet = EthHDWallet;
 
-    fn derivation_method(&self) -> &DerivationMethod<Self::Address, Self::HDWallet> { &self.derivation_method }
+    fn derivation_method(&self) -> &DerivationMethod<Self::Address, Self::HDWallet> {
+        &self.derivation_method
+    }
 }
 
 // -------------------------------------------------------------------
@@ -553,8 +570,9 @@ impl AccountBalanceRpcOps for EthCoin {
 // -------------------------------------------------------------------
 
 use crate::coin_balance::HDAccountBalance;
-use crate::rpc_command::init_account_balance::{self as init_account_balance_mod, InitAccountBalanceParams,
-                                               InitAccountBalanceRpcOps};
+use crate::rpc_command::init_account_balance::{
+    self as init_account_balance_mod, InitAccountBalanceParams, InitAccountBalanceRpcOps,
+};
 use crate::rpc_command::init_create_account::{self, CreateNewAccountParams, InitCreateHDAccountRpcOps};
 
 #[async_trait]

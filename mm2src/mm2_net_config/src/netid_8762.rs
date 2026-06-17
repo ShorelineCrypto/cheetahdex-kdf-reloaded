@@ -31,24 +31,38 @@ lazy_static! {
 pub struct Netid8762;
 
 impl NetConfig for Netid8762 {
-    fn netid(&self) -> u16 { 8762 }
+    fn netid(&self) -> u16 {
+        8762
+    }
 
-    fn network_name(&self) -> &'static str { "AtomicDEX" }
+    fn network_name(&self) -> &'static str {
+        "AtomicDEX"
+    }
 
-    fn dex_fee_addr_pubkey(&self) -> &'static str { DEX_FEE_ADDR_PUBKEY }
+    fn dex_fee_addr_pubkey(&self) -> &'static str {
+        DEX_FEE_ADDR_PUBKEY
+    }
 
-    fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8] { &DEX_FEE_ADDR_RAW }
+    fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8] {
+        &DEX_FEE_ADDR_RAW
+    }
 
-    fn dex_fee_z_addr(&self) -> &'static str { DEX_FEE_Z_ADDR }
+    fn dex_fee_z_addr(&self) -> &'static str {
+        DEX_FEE_Z_ADDR
+    }
 
-    fn dex_fee_pubkey_ed25519(&self) -> &'static str { DEX_FEE_PUBKEY_ED25519 }
+    fn dex_fee_pubkey_ed25519(&self) -> &'static str {
+        DEX_FEE_PUBKEY_ED25519
+    }
 
     fn dex_fee_rate(&self) -> BigRational {
         // 1/777 ≈ 0.00129%
         BigRational::new(1.into(), 777.into())
     }
 
-    fn fee_discount_tickers(&self) -> &'static [&'static str] { &["KMD"] }
+    fn fee_discount_tickers(&self) -> &'static [&'static str] {
+        &["KMD"]
+    }
 
     fn dex_fee_rate_discounted(&self) -> BigRational {
         // 9/7770 ≈ 0.00116% (1/777 minus 10%)
@@ -60,5 +74,7 @@ impl NetConfig for Netid8762 {
         BigRational::new(1.into(), 10000.into())
     }
 
-    fn seed_nodes(&self) -> &'static [&'static str] { SEED_NODES }
+    fn seed_nodes(&self) -> &'static [&'static str] {
+        SEED_NODES
+    }
 }

@@ -20,8 +20,10 @@
 
 use super::rpc_proto;
 use super::topic::Topic;
-use futures::{io::{AsyncRead, AsyncWrite},
-              Future};
+use futures::{
+    io::{AsyncRead, AsyncWrite},
+    Future,
+};
 use libp2p::core::{upgrade, InboundUpgrade, OutboundUpgrade, PeerId, UpgradeInfo};
 use prost::Message;
 use std::{error, fmt, io, iter, pin::Pin};
@@ -32,14 +34,18 @@ pub struct FloodsubProtocol {}
 
 impl FloodsubProtocol {
     /// Builds a new `FloodsubProtocol`.
-    pub fn new() -> FloodsubProtocol { FloodsubProtocol {} }
+    pub fn new() -> FloodsubProtocol {
+        FloodsubProtocol {}
+    }
 }
 
 impl UpgradeInfo for FloodsubProtocol {
     type Info = &'static [u8];
     type InfoIter = iter::Once<Self::Info>;
 
-    fn protocol_info(&self) -> Self::InfoIter { iter::once(b"/floodsub/1.0.0") }
+    fn protocol_info(&self) -> Self::InfoIter {
+        iter::once(b"/floodsub/1.0.0")
+    }
 }
 
 type PinBoxTryFut<R, E> = Pin<Box<dyn Future<Output = Result<R, E>> + Send>>;
@@ -99,11 +105,15 @@ pub enum FloodsubDecodeError {
 }
 
 impl From<io::Error> for FloodsubDecodeError {
-    fn from(err: io::Error) -> Self { FloodsubDecodeError::ReadError(err) }
+    fn from(err: io::Error) -> Self {
+        FloodsubDecodeError::ReadError(err)
+    }
 }
 
 impl From<prost::DecodeError> for FloodsubDecodeError {
-    fn from(err: prost::DecodeError) -> Self { FloodsubDecodeError::ProtobufError(err) }
+    fn from(err: prost::DecodeError) -> Self {
+        FloodsubDecodeError::ProtobufError(err)
+    }
 }
 
 impl fmt::Display for FloodsubDecodeError {
@@ -139,7 +149,9 @@ impl UpgradeInfo for FloodsubRpc {
     type Info = &'static [u8];
     type InfoIter = iter::Once<Self::Info>;
 
-    fn protocol_info(&self) -> Self::InfoIter { iter::once(b"/floodsub/1.0.0") }
+    fn protocol_info(&self) -> Self::InfoIter {
+        iter::once(b"/floodsub/1.0.0")
+    }
 }
 
 impl<TSocket> OutboundUpgrade<TSocket> for FloodsubRpc
