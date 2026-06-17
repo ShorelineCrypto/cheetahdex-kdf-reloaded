@@ -13,6 +13,13 @@ KDF Reloaded is an open-source [atomic-swap](https://en.wikipedia.org/wiki/Atomi
 
 This project is a **continuation**, not a fork-of-current-upstream. It is anchored to the last commit of the upstream Komodo DeFi Framework that was unambiguously distributed under GPLv2-only (commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, dated 2022-06-03). Post-anchor development is **hybrid**: it includes independently authored (clean-room) work, code adapted from permissively-licensed upstreams, and — for some subsystems — **lineage-derived code from the upstream/GLEEC KDF work product carried under GPLv2 copyleft** (for example, post-anchor additions in the relocated `lp_ordermatch` modules under `mm2src/mm2_main/src/lp_ordermatch/`). The right to redistribute rests on GPLv2 copyleft (GPLv2 §2(b)/§6), not on a clean-room claim for every file. Per-file provenance and the license basis for each class are tracked in [`docs/reloaded-rewrite/34-provenance-ledger.md`](docs/reloaded-rewrite/34-provenance-ledger.md). The repository as a whole is distributed under GPLv2-only; two inherited third-party license tensions (a GPL-3.0 file and the Apache-2.0 WalletConnect SDK dependencies) are openly tracked as deferred items in [`LEGAL/LICENSING-POLICY.md`](LEGAL/LICENSING-POLICY.md) §4.
 
+For readers who want the shortest safe summary: this repository continues the
+last clearly GPLv2-only upstream baseline, keeps the combined work under
+GPLv2-only, records post-anchor original contributions as GPL-2.0-or-later,
+and documents provenance file-by-file instead of claiming that every file is a
+clean-room rewrite. For the full technical derivation record, read the CRD
+chapters linked below.
+
 For the relationship to other downstream projects (notably the GLEEC fork), see [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md).
 
 ## Alpha disclaimer
@@ -103,6 +110,21 @@ LEGAL/          License, contributor agreement, third-party notices
 ```
 
 Notable crates: [`mm2src/mm2_main/`](mm2src/mm2_main/) (entry, RPC, swaps, ordermatch), [`mm2src/coins/`](mm2src/coins/), [`mm2src/mm2_p2p/`](mm2src/mm2_p2p/), [`mm2src/crypto/`](mm2src/crypto/).
+
+## Documentation map
+
+These are the most important documents to read before building, integrating,
+auditing, or redistributing the project:
+
+- [`docs/reloaded-rewrite/00-overview.md`](docs/reloaded-rewrite/00-overview.md) — what the chapter set is, who it is for, and the recommended reading order.
+- [`docs/reloaded-rewrite/01-clean-room-rules.md`](docs/reloaded-rewrite/01-clean-room-rules.md) — the clean-room / provenance methodology and its explicit limits.
+- [`docs/reloaded-rewrite/30-provenance-attribution.md`](docs/reloaded-rewrite/30-provenance-attribution.md) — the index into the chapter set, cited inputs, and subsystem coverage map.
+- [`docs/reloaded-rewrite/34-provenance-ledger.md`](docs/reloaded-rewrite/34-provenance-ledger.md) — file-level provenance classifications, inherited exceptions, and open license items.
+- [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md) — operator-facing differences and compatibility posture relative to the GLEEC fork.
+- [`LEGAL/LICENSING-POLICY.md`](LEGAL/LICENSING-POLICY.md) — the repository-wide licensing posture: old combined work GPL-2.0-only, original post-anchor contributions GPL-2.0-or-later, plus disclosed inherited tensions.
+- [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — the gate used before any tagged release or public binary distribution.
+- [`SECURITY.md`](SECURITY.md) — disclosure policy and release-signing expectations.
+- [`docs/DEV_ENVIRONMENT.md`](docs/DEV_ENVIRONMENT.md) and [`docs/UNIT_TESTS.md`](docs/UNIT_TESTS.md) — build, test, and CI expectations.
 
 ## Contributing
 

@@ -63,7 +63,7 @@ Detail subsections will be added as features land. Each entry above expands here
 
 - **Joint history ends at:** `c1d46c0c1592faa0860f704008b2b2381bc3840f` (2022-06-03), GPLv2-only.
 - **GLEEC divergence point:** `d36369980a6c08f8689b64df56fbccf0097a0a6f` (GLEEC-side first commit under modified terms).
-- **KDF Reloaded baseline:** `c1d46c0c` verbatim, then independent commits squashed by feature phase.
+- **KDF Reloaded baseline:** `c1d46c0c` verbatim, then post-anchor development in this repository.
 
 ### Build and toolchain
 

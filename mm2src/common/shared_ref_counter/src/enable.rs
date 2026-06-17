@@ -1,4 +1,5 @@
-#[cfg(feature = "log")] use log::{log, Level};
+#[cfg(feature = "log")]
+use log::{log, Level};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::panic::Location;
@@ -21,7 +22,9 @@ unsafe impl<T> Sync for SharedRc<T> {}
 impl<T> Deref for SharedRc<T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { &self.inner }
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
 }
 
 impl<T> Drop for SharedRc<T> {
@@ -77,7 +80,7 @@ impl<T> SharedRc<T> {
         let existing_pointers = self.existing_pointers.read().expect(LOCKING_ERROR);
         log!(level, "{} exists at:", ident);
         for (_idx, location) in existing_pointers.iter() {
-            log!(level, "\t{}", stringify_location(*location));
+            log!(level, "\t{}", stringify_location(location));
         }
     }
 
@@ -87,7 +90,7 @@ impl<T> SharedRc<T> {
     /// This behavior is considered acceptable since the `enable` feature is expected to be used for **debug** purposes only.
     pub fn existing_pointers(&self) -> Vec<&'static Location<'static>> {
         let existing_pointers = self.existing_pointers.read().expect(LOCKING_ERROR);
-        let locations: Vec<_> = existing_pointers.iter().map(|(_index, location)| *location).collect();
+        let locations: Vec<_> = existing_pointers.values().copied().collect();
         locations
     }
 
@@ -137,10 +140,7 @@ impl<T> WeakRc<T> {
     /// This behavior is considered acceptable since the `enable` feature is expected to be used for **debug** purposes only.
     #[track_caller]
     pub fn upgrade(&self) -> Option<SharedRc<T>> {
-        let inner = match self.inner.upgrade() {
-            Some(ctx) => ctx,
-            None => return None,
-        };
+        let inner = self.inner.upgrade()?;
 
         let next_index = self.next_index.upgrade().expect(UPGRADING_ERROR);
         let index = next_index.fetch_add(1, Ordering::Relaxed);
@@ -158,7 +158,9 @@ impl<T> WeakRc<T> {
         })
     }
 
-    pub fn strong_count(&self) -> usize { self.inner.strong_count() }
+    pub fn strong_count(&self) -> usize {
+        self.inner.strong_count()
+    }
 }
 
 #[cfg(feature = "log")]

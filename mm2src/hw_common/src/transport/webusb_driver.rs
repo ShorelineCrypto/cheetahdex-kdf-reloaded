@@ -1,6 +1,6 @@
 use crate::transport::{send_event_recv_response, InternalError};
 use common::executor::spawn_local;
-use common::{deserialize_from_js, log::error, serialize_to_js, stringify_js_error};
+use common::{deserialize_from_js, log::error, stringify_js_error};
 use derive_more::Display;
 use futures::channel::{mpsc, oneshot};
 use futures::StreamExt;
@@ -10,7 +10,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Usb, UsbDevice, UsbDeviceRequestOptions, UsbInTransferResult};
+use web_sys::{Usb, UsbDevice, UsbDeviceFilter, UsbDeviceRequestOptions, UsbInTransferResult};
 
 pub type WebUsbResult<T> = Result<T, MmError<WebUsbError>>;
 type EventResultSender<T> = oneshot::Sender<WebUsbResult<T>>;
@@ -53,7 +53,9 @@ pub enum WebUsbError {
 }
 
 impl InternalError for WebUsbError {
-    fn internal(e: String) -> Self { WebUsbError::Internal(e) }
+    fn internal(e: String) -> Self {
+        WebUsbError::Internal(e)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -155,18 +157,29 @@ impl WebUsbWrapper {
     }
 
     async fn on_request_device(usb: &Usb, filters: Vec<DeviceFilter>) -> WebUsbResult<()> {
-        let filters_js_value = serialize_to_js(&filters)
-            .map_to_mm(|e| WebUsbError::Internal(format!("DeviceFilter::serialize should never fail: {}", e)))?;
+        let usb_filters: Vec<UsbDeviceFilter> = filters
+            .into_iter()
+            .map(|filter| {
+                let mut usb_filter = UsbDeviceFilter::new();
+                usb_filter.set_vendor_id(filter.vendor_id);
+                if let Some(product_id) = filter.product_id {
+                    usb_filter.set_product_id(product_id);
+                }
+                usb_filter
+            })
+            .collect();
 
-        let request_options = UsbDeviceRequestOptions::new(&filters_js_value);
-        if let Err(e) = JsFuture::from(usb.request_device(&request_options)).await {
+        let request_options = UsbDeviceRequestOptions::new(&usb_filters);
+        let request_promise: js_sys::Promise = usb.request_device(&request_options).unchecked_into();
+        if let Err(e) = JsFuture::from(request_promise).await {
             return MmError::err(WebUsbError::ErrorRequestingDevice(stringify_js_error(&e)));
         }
         Ok(())
     }
 
     async fn on_get_devices(usb: &Usb) -> WebUsbResult<Vec<WebUsbDevice>> {
-        let devices = JsFuture::from(usb.get_devices())
+        let devices_promise: js_sys::Promise = usb.get_devices().unchecked_into();
+        let devices = JsFuture::from(devices_promise)
             .await
             .map_to_mm(|e| WebUsbError::ErrorGettingDevices(stringify_js_error(&e)))?;
         let devices_array: Array = devices.dyn_into().map_to_mm(|found| WebUsbError::TypeMismatch {
@@ -304,7 +317,8 @@ impl WebUsbDevice {
     }
 
     async fn on_select_configuration(device: &UsbDevice, configuration_number: u8) -> WebUsbResult<()> {
-        JsFuture::from(device.select_configuration(configuration_number))
+        let select_promise: js_sys::Promise = device.select_configuration(configuration_number).unchecked_into();
+        JsFuture::from(select_promise)
             .await
             .map_to_mm(|e| WebUsbError::ErrorSettingConfiguration {
                 configuration_number,
@@ -314,7 +328,8 @@ impl WebUsbDevice {
     }
 
     async fn on_claim_interface(device: &UsbDevice, interface_number: u8) -> WebUsbResult<()> {
-        JsFuture::from(device.claim_interface(interface_number))
+        let claim_promise: js_sys::Promise = device.claim_interface(interface_number).unchecked_into();
+        JsFuture::from(claim_promise)
             .await
             .map_to_mm(|e| WebUsbError::ErrorClaimingInterface {
                 interface_number,
@@ -324,31 +339,40 @@ impl WebUsbDevice {
     }
 
     async fn on_open(device: &UsbDevice) -> WebUsbResult<()> {
-        JsFuture::from(device.open())
+        let open_promise: js_sys::Promise = device.open().unchecked_into();
+        JsFuture::from(open_promise)
             .await
             .map_to_mm(|e| WebUsbError::ErrorOpeningDevice(stringify_js_error(&e)))?;
         Ok(())
     }
 
-    fn on_is_open(device: &UsbDevice) -> WebUsbResult<bool> { Ok(device.opened()) }
+    fn on_is_open(device: &UsbDevice) -> WebUsbResult<bool> {
+        Ok(device.opened())
+    }
 
     async fn on_reset_device(device: &UsbDevice) -> WebUsbResult<()> {
-        JsFuture::from(device.reset())
+        let reset_promise: js_sys::Promise = device.reset().unchecked_into();
+        JsFuture::from(reset_promise)
             .await
             .map_to_mm(|e| WebUsbError::ErrorResettingDevice(stringify_js_error(&e)))?;
         Ok(())
     }
 
     async fn on_write_chunk(device: &UsbDevice, endpoint_number: u8, mut chunk: Vec<u8>) -> WebUsbResult<()> {
-        if let Err(e) = JsFuture::from(device.transfer_out_with_u8_array(endpoint_number, &mut chunk)).await {
-            return MmError::err(WebUsbError::ErrorWritingChunk(stringify_js_error(&e)));
-        }
+        let write_promise = device
+            .transfer_out_with_u8_slice(endpoint_number, &mut chunk)
+            .map_to_mm(|e| WebUsbError::ErrorWritingChunk(stringify_js_error(&e)))?;
+        let write_promise: js_sys::Promise = write_promise.unchecked_into();
+        JsFuture::from(write_promise)
+            .await
+            .map_to_mm(|e| WebUsbError::ErrorWritingChunk(stringify_js_error(&e)))?;
         Ok(())
     }
 
     async fn on_read_chunk(device: &UsbDevice, endpoint_number: u8, chunk_len: u32) -> WebUsbResult<Vec<u8>> {
         let buffer = loop {
-            let js_value = JsFuture::from(device.transfer_in(endpoint_number, chunk_len))
+            let read_promise: js_sys::Promise = device.transfer_in(endpoint_number, chunk_len).unchecked_into();
+            let js_value = JsFuture::from(read_promise)
                 .await
                 .map_to_mm(|e| WebUsbError::ErrorReadingChunk(stringify_js_error(&e)))?;
             let result: UsbInTransferResult = js_value.dyn_into().map_to_mm(|found| WebUsbError::TypeMismatch {

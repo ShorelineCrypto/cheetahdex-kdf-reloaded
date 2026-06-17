@@ -21,8 +21,11 @@ Promotion is one-way and explicit:
 When comparing against an ancestor, use:
 
 ```bash
-git merge-base HEAD origin/reloaded-gplv2-base origin/staging origin/main
+git merge-base HEAD origin/reloaded-gplv2-base
 ```
+
+If `origin/staging` and `origin/main` already exist in your clone, you may
+include them as additional candidates.
 
 The deprecated upstream `mm2.1` branch is not used in Reloaded.
 

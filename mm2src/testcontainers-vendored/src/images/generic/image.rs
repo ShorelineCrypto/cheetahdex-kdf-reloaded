@@ -1,20 +1,20 @@
 use crate::{Container, Docker, Image, WaitError, WaitForMessage};
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub enum WaitFor {
+    #[default]
     Nothing,
-    LogMessage { message: String, stream: Stream },
+    LogMessage {
+        message: String,
+        stream: Stream,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stream {
     StdOut,
     StdErr,
-}
-
-impl Default for WaitFor {
-    fn default() -> Self { WaitFor::Nothing }
 }
 
 impl WaitFor {
@@ -76,9 +76,19 @@ impl Image for GenericImage {
     type Args = Vec<String>;
     type EnvVars = HashMap<String, String>;
 
-    fn descriptor(&self) -> String { self.descriptor.clone() }
-    fn wait_until_ready<D: Docker>(&self, container: &Container<D, Self>) { self.wait_for.wait(container).unwrap(); }
-    fn args(&self) -> Self::Args { self.arguments.clone() }
-    fn env_vars(&self) -> Self::EnvVars { self.env_vars.clone() }
-    fn with_args(self, arguments: Self::Args) -> Self { Self { arguments, ..self } }
+    fn descriptor(&self) -> String {
+        self.descriptor.clone()
+    }
+    fn wait_until_ready<D: Docker>(&self, container: &Container<D, Self>) {
+        self.wait_for.wait(container).unwrap();
+    }
+    fn args(&self) -> Self::Args {
+        self.arguments.clone()
+    }
+    fn env_vars(&self) -> Self::EnvVars {
+        self.env_vars.clone()
+    }
+    fn with_args(self, arguments: Self::Args) -> Self {
+        Self { arguments, ..self }
+    }
 }

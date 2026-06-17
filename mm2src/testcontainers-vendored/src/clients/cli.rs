@@ -3,10 +3,12 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Instant;
-use std::{io::{BufRead, BufReader},
-          process::{Command, Stdio},
-          thread::sleep,
-          time::Duration};
+use std::{
+    io::{BufRead, BufReader},
+    process::{Command, Stdio},
+    thread::sleep,
+    time::Duration,
+};
 
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const ZERO: Duration = Duration::from_secs(0);
@@ -61,7 +63,8 @@ impl Cli {
 }
 
 impl Docker for Cli {
-    fn run<I: Image>(&self, image: I) -> Container<Cli, I> {
+    #[allow(clippy::zombie_processes)]
+    fn run<I: Image>(&self, image: I) -> Container<'_, Cli, I> {
         let mut docker = Command::new("docker");
         let command = Cli::build_run_command(&image, &mut docker);
         debug!("Executing command: {:?}", command);
@@ -73,6 +76,7 @@ impl Docker for Cli {
         Container::new(container_id, self, image)
     }
 
+    #[allow(clippy::zombie_processes)]
     fn logs(&self, id: &str) -> Logs {
         self.wait_at_least_one_second_after_container_was_started(id);
         let child = Command::new("docker")
@@ -89,6 +93,7 @@ impl Docker for Cli {
         }
     }
 
+    #[allow(clippy::zombie_processes)]
     fn ports(&self, id: &str) -> crate::Ports {
         let child = Command::new("docker")
             .arg("inspect")
@@ -104,7 +109,7 @@ impl Docker for Cli {
     }
 
     fn rm(&self, id: &str) {
-        Command::new("docker")
+        let mut child = Command::new("docker")
             .arg("rm")
             .arg("-f")
             .arg("-v")
@@ -112,15 +117,17 @@ impl Docker for Cli {
             .stdout(Stdio::piped())
             .spawn()
             .expect("Failed to execute docker command");
+        child.wait().expect("Failed to wait for docker rm command");
     }
 
     fn stop(&self, id: &str) {
-        Command::new("docker")
+        let mut child = Command::new("docker")
             .arg("stop")
             .arg(id)
             .stdout(Stdio::piped())
             .spawn()
             .expect("Failed to execute docker command");
+        child.wait().expect("Failed to wait for docker stop command");
     }
 }
 
