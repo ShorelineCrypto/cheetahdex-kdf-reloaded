@@ -30,12 +30,30 @@ fn eth_coin_for_test(
     urls: Vec<String>,
     fallback_swap_contract: Option<Address>,
 ) -> (MmArc, EthCoin) {
+    // Reloaded has no default operating network: a node only runs on a compiled
+    // netid (see docs/GLEEC_COMPATIBILITY.md). Tests therefore pick a supported
+    // netid explicitly instead of relying on the inherited default of 0.
+    eth_coin_for_test_with_netid(
+        coin_type,
+        urls,
+        fallback_swap_contract,
+        mm2_net_config::SUPPORTED_NETIDS[0],
+    )
+}
+
+fn eth_coin_for_test_with_netid(
+    coin_type: EthCoinType,
+    urls: Vec<String>,
+    fallback_swap_contract: Option<Address>,
+    netid: u16,
+) -> (MmArc, EthCoin) {
     let key_pair = KeyPair::from_secret_slice(
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
     )
     .unwrap();
     let web3 = crate::eth::alloy_compat::build_provider(urls, vec![]).unwrap();
     let conf = json!({
+        "netid": netid,
         "coins":[
            {"coin":"ETH","name":"ethereum","protocol":{"type":"ETH"},"rpcport":80,"mm2":1},
            {"coin":"JST","name":"jst","rpcport":80,"mm2":1,"protocol":{"type":"ERC20","protocol_data":{"platform":"ETH","contract_address":"0x2b294F029Fde858b2c62184e8390591755521d8E"}}}
@@ -970,22 +988,29 @@ fn test_get_fee_to_send_taker_fee() {
 
     let dex_fee_amount = u256_to_big_decimal(DEX_FEE_AMOUNT.into(), 18).expect("!u256_to_big_decimal");
 
-    let (_ctx, coin) = eth_coin_for_test(EthCoinType::Eth, vec!["http://dummy.dummy".into()], None);
-    let actual = block_on(coin.get_fee_to_send_taker_fee(dex_fee_amount.clone(), FeeApproxStage::WithoutApprox))
-        .expect("!get_fee_to_send_taker_fee");
-    assert_eq!(actual, expected_fee);
+    // Reloaded operates only on its compiled netids (no default network; see
+    // docs/GLEEC_COMPATIBILITY.md). Exercise every supported netid so each
+    // network's DEX-fee address stays valid; the fee itself is netid-independent.
+    for &netid in mm2_net_config::SUPPORTED_NETIDS {
+        let (_ctx, coin) =
+            eth_coin_for_test_with_netid(EthCoinType::Eth, vec!["http://dummy.dummy".into()], None, netid);
+        let actual = block_on(coin.get_fee_to_send_taker_fee(dex_fee_amount.clone(), FeeApproxStage::WithoutApprox))
+            .expect("!get_fee_to_send_taker_fee");
+        assert_eq!(actual, expected_fee, "netid {netid}");
 
-    let (_ctx, coin) = eth_coin_for_test(
-        EthCoinType::Erc20 {
-            platform: "ETH".to_string(),
-            token_addr: Address::from("0xaD22f63404f7305e4713CcBd4F296f34770513f4"),
-        },
-        vec!["http://dummy.dummy".into()],
-        None,
-    );
-    let actual = block_on(coin.get_fee_to_send_taker_fee(dex_fee_amount.clone(), FeeApproxStage::WithoutApprox))
-        .expect("!get_fee_to_send_taker_fee");
-    assert_eq!(actual, expected_fee);
+        let (_ctx, coin) = eth_coin_for_test_with_netid(
+            EthCoinType::Erc20 {
+                platform: "ETH".to_string(),
+                token_addr: Address::from("0xaD22f63404f7305e4713CcBd4F296f34770513f4"),
+            },
+            vec!["http://dummy.dummy".into()],
+            None,
+            netid,
+        );
+        let actual = block_on(coin.get_fee_to_send_taker_fee(dex_fee_amount.clone(), FeeApproxStage::WithoutApprox))
+            .expect("!get_fee_to_send_taker_fee");
+        assert_eq!(actual, expected_fee, "netid {netid}");
+    }
 }
 
 /// Some ERC20 tokens return the `error: -32016, message: \"The execution failed due to an exception.\"` error

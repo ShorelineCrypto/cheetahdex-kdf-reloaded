@@ -56,7 +56,8 @@ impl<'a> SiaCoinBuilder<'a> {
 
         // Resolve the DEX fee destination from the network configuration
         // (per-netid; see `mm2_net_config`).
-        let net_cfg = mm2_net_config::net_config_or_panic(ctx.netid());
+        let netid = ctx.netid();
+        let net_cfg = mm2_net_config::net_config_for(netid).ok_or(SiaCoinBuilderError::UnsupportedNetId(netid))?;
         let fee_pubkey_bytes = hex::decode(net_cfg.dex_fee_pubkey_ed25519())
             .map_err(|e| SiaCoinBuilderError::FeePubkeyHex(e.to_string()))?;
         let fee_public_key =

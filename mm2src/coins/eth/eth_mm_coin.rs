@@ -212,7 +212,9 @@ impl MmCoin for EthCoin {
         let netid = MmArc::from_weak(&self.ctx)
             .map(|c| c.netid())
             .unwrap_or(mm2_net_config::SUPPORTED_NETIDS[0]);
-        let net_cfg = mm2_net_config::net_config_or_panic(netid);
+        let net_cfg = mm2_net_config::net_config_for(netid).ok_or_else(|| {
+            TradePreimageError::InternalError(format!("no compiled network configuration for netid {netid}"))
+        })?;
         let to_addr = addr_from_raw_pubkey(net_cfg.dex_fee_addr_raw_pubkey())
             .expect("addr_from_raw_pubkey should never fail with NetConfig dex_fee raw pubkey");
         let (eth_value, data, call_addr, fee_coin) = match &self.coin_type {

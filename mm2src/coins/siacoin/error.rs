@@ -394,6 +394,8 @@ pub enum SiaCoinBuilderError {
     FeePubkeyHex(String),
     #[error("[builder] DEX fee pubkey decode failed: {0}")]
     FeePubkey(String),
+    #[error("[builder] no compiled network configuration for netid {0}")]
+    UnsupportedNetId(u16),
 }
 
 /// Errors raised by `SiaCoin::new` during coin activation.

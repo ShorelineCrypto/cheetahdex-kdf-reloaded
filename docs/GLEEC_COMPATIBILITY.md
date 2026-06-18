@@ -17,7 +17,32 @@ There is no global "GLEEC mode" switch and no shared JSON object — every setti
 
 | Area | Setting | GLEEC-compatible value | Acknowledgement-gated? | Per-setting docs |
 |------|---------|------------------------|------------------------|------------------|
+| Network selection | `netid` | `8762` or `6133` — GLEEC's default netid `0` is **not supported** | No | [see below](#netid) |
 | WalletConnect session storage | `wc_session_persistence` | `open` *(also the default)* | No | [CRD ch.22 §22.5](reloaded-rewrite/22-walletconnect-v2.md) |
+
+### `netid`
+
+KDF Reloaded compiles its per-network parameters at build time and recognises
+only the netids in its registry — currently `8762` and `6133`. Any other netid
+is **rejected at startup**: `lp_init` returns `MmInitError::UnsupportedNetId`
+listing the supported networks, and the node does not start.
+
+This includes the *inherited default*. Both KDF Reloaded and GLEEC KDF derive
+`netid` the same way — an unset `netid` resolves to `0` — but GLEEC KDF treats
+netid `0` as a live operating network, so a GLEEC node started without an
+explicit `netid` simply joins netid `0`. KDF Reloaded has no compiled
+configuration for netid `0` and therefore has **no equivalent to GLEEC's
+default network**: it operates only on its compiled netids.
+
+Consequences for operators and integrators:
+
+- A GLEEC deployment that ran on the default netid `0` has no direct reloaded
+  equivalent. Choose a supported network and set `netid` to `8762` or `6133`.
+- Always set `netid` explicitly. Relying on the default is a startup error on
+  KDF Reloaded, not a fallback to a public network.
+- Test fixtures and tooling that spin up a node (anything that initiates the
+  P2P network) must likewise set a supported `netid`; the inherited default of
+  `0` will fail the same startup check.
 
 **`wc_session_persistence`.** Controls whether and how WalletConnect v2
 sessions are written to durable storage. It governs *saving* only — existing
