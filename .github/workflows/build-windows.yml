@@ -22,14 +22,14 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: windows-latest
     timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
 
-      # Rust toolchain (stable + x86_64-pc-windows-msvc) is pre-installed on
-      # the self-hosted runner; see docs/CI_RUNNERS.md § Windows runner.
+      # Rust toolchain (stable + x86_64-pc-windows-msvc) is preinstalled on
+      # the GitHub-hosted windows-latest image.
 
       - name: Cache cargo registry
         uses: actions/cache@v4

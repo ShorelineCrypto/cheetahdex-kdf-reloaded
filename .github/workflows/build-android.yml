@@ -25,8 +25,10 @@ on:
 
 jobs:
   build:
-    # Pin to the dedicated Android NDK runner via its custom label.
-    runs-on: [self-hosted, Linux, android-ndk]
+    # GitHub-hosted Ubuntu runner; the image ships the Android NDK under
+    # $ANDROID_NDK_ROOT (the "Verify Android NDK" step also probes the
+    # standard install locations as a fallback).
+    runs-on: ubuntu-latest
     timeout-minutes: 90
 
     strategy:
@@ -50,11 +52,10 @@ jobs:
         run: cargo install cargo-ndk --locked
 
       - name: Verify Android NDK
-        # The runner's systemd service launches with a minimal environment
-        # and does not source the user's shell rc, so an NDK exported in
-        # ~/.bashrc is invisible here. If ANDROID_NDK_ROOT is not already
-        # set (via /etc/environment or ~/actions-runner/.env), probe the
-        # standard install locations as a fallback.
+        # On GitHub-hosted runners ANDROID_NDK_ROOT is normally exported by
+        # the image. If it is not set, probe the standard install locations
+        # (including the hosted image path under
+        # /usr/local/lib/android/sdk/ndk) as a fallback.
         run: |
           if [ -z "$ANDROID_NDK_ROOT" ]; then
             for cand in \

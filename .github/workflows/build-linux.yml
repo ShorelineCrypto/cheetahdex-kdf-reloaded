@@ -25,17 +25,13 @@ on:
 
 jobs:
   build:
-    # Pin to the bare-metal Linux runner (`kdf-runner`, label `docker`).
-    # Same pinning as `test.yml` so the on-disk `target/` cache is
-    # shared between the two workflows when both run on this host.
-    runs-on: [self-hosted, Linux, docker]
+    # GitHub-hosted Ubuntu runner; Rust stable (host target
+    # x86_64-unknown-linux-gnu) is preinstalled on the image.
+    runs-on: ubuntu-latest
     timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
-
-      # Rust toolchain (stable + x86_64-unknown-linux-gnu) is pre-installed
-      # on the self-hosted runner; see docs/CI_RUNNERS.md.
 
       - name: Check Rust toolchain
         run: rustc --version && cargo --version

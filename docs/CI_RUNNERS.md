@@ -1,5 +1,14 @@
 # Self-Hosted CI Runners
 
+> **SUPERSEDED (2026-06).** All workflows under `.github/workflows/` now run on
+> **GitHub-hosted** runners (`ubuntu-latest`, `windows-latest`, `macos-latest`)
+> — no self-hosted infrastructure is required. GitHub-hosted runners are free
+> for public repositories, and avoiding self-hosted runners removes the risk of
+> fork pull requests executing untrusted code on our own hardware. The
+> provisioning notes below are kept only as historical reference in case a
+> self-hosted runner is ever reintroduced for a specific need (e.g. a
+> faster/larger build host). They no longer describe the live CI setup.
+
 This document covers how to provision self-hosted GitHub Actions runners for
 the platform-build workflows under `.github/workflows/`:
 

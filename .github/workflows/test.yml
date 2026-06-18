@@ -6,10 +6,10 @@ on:
   pull_request:
     branches: [ reloaded-gplv2-base ]
 
-# Supersede in-flight runs of the same workflow on the same ref so the
-# single self-hosted runner doesn't queue stale work behind a fast
-# follow-up push. If a push to the base branch ever needs to complete
-# unconditionally, scope this group with `github.run_id` instead.
+# Supersede in-flight runs of the same workflow on the same ref so a fast
+# follow-up push cancels the now-stale run instead of queuing behind it.
+# If a push to the base branch ever needs to complete unconditionally,
+# scope this group with `github.run_id` instead.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,7 +18,7 @@ jobs:
   fmt:
     # Cheap fast-feedback job. Keeps a fmt-only failure from forcing a
     # full unit-test rebuild on "Re-run failed jobs".
-    runs-on: [self-hosted, Linux, docker]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -56,11 +56,11 @@ jobs:
 
   unit-tests:
     # One matrix cell per cargo invocation so "Re-run failed jobs" only
-    # re-queues the cells that actually failed. Cells share the on-disk
-    # `target/` cache on this self-hosted runner, so the incremental
-    # rebuild cost is small.
-    runs-on: [self-hosted, Linux, docker]
-    timeout-minutes: 30
+    # re-queues the cells that actually failed. Each cell is a fresh
+    # GitHub-hosted runner, so a cargo cache (keyed on Cargo.lock) is
+    # restored to keep the per-cell rebuild cost down.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: fmt
     strategy:
       fail-fast: false
@@ -83,20 +83,52 @@ jobs:
       - name: Check Rust toolchain
         run: rustc --version && cargo --version
 
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: test-unit-${{ matrix.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            test-unit-${{ matrix.name }}-
+
       - name: ${{ matrix.name }}
         run: ${{ matrix.cmd }}
 
   docker-tests:
-    # Pin to the bare-metal Linux runner that has Docker (the `docker` label
-    # is set on `kdf-runner`). Without it, the job could schedule onto any
-    # Linux runner — e.g. the Android NDK VM — which has no Docker daemon.
-    runs-on: [self-hosted, Linux, docker]
-    timeout-minutes: 60
+    # GitHub-hosted Ubuntu runners ship Docker, so the integration suite
+    # runs here without any self-hosted infrastructure. The standard runner
+    # only has ~14 GB free, so we reclaim space before the heavy build and
+    # container pulls (see "Free disk space" below).
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     needs: [fmt, unit-tests]
-
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space
+        # The standard hosted runner has limited free disk; the docker_tests
+        # build plus the testblockchain/qtumregtest images and the Rust
+        # target dir can exhaust it. Remove preinstalled toolchains we do
+        # not use to reclaim ~20 GB.
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-}" || true
+          df -h /
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: test-docker-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            test-docker-
 
       - name: Check Docker availability
         run: docker --version && docker info --format '{{.ServerVersion}}'
@@ -174,8 +206,8 @@ jobs:
     # otherwise be picked up by the `test_withdraw` libtest filter and
     # bring the whole pipeline down whenever the upstream services move
     # or go offline. Run them here on a best-effort basis.
-    runs-on: [self-hosted, Linux, docker]
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: fmt
     continue-on-error: true
 
@@ -184,6 +216,17 @@ jobs:
 
       - name: Check Rust toolchain
         run: rustc --version && cargo --version
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: test-extnet-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            test-extnet-
 
       - name: Run withdraw integration tests against DOC/MARTY
         # The two `test_withdraw_and_send` / `test_withdraw_legacy` tests
