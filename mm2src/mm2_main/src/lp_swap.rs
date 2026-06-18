@@ -57,21 +57,19 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, DexFee, DexFeeBurnDestination, MmCoinEnum, TradeFee,
-            TransactionEnum};
+use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, TradeFee, TransactionEnum};
 use common::log::{debug, warn};
 use common::{bits256, calc_total_pages,
              executor::{spawn, Timer},
              log::{error, info},
              mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
-             now_ms, var, HttpStatusCode, PagingOptions};
+             now_ms, HttpStatusCode, PagingOptions};
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
 use http::{Response, StatusCode};
 use kdf_crypto::sha256;
 use mm2_core::mm_ctx::{from_ctx, MmArc};
 use mm2_err_handle::prelude::*;
-use mm2_net_config::NetConfig;
 use mm2_p2p::{decode_signed, encode_and_sign, pub_sub_topic, TopicPrefix};
 use parking_lot::Mutex as PaMutex;
 use primitives::hash::{H160, H264};
