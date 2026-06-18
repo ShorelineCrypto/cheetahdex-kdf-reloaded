@@ -3,12 +3,10 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Instant;
-use std::{
-    io::{BufRead, BufReader},
-    process::{Command, Stdio},
-    thread::sleep,
-    time::Duration,
-};
+use std::{io::{BufRead, BufReader},
+          process::{Command, Stdio},
+          thread::sleep,
+          time::Duration};
 
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const ZERO: Duration = Duration::from_secs(0);
