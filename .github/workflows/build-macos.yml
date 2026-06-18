@@ -35,7 +35,7 @@ jobs:
           - aarch64-apple-darwin
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install protoc
         run: brew install protobuf
@@ -46,7 +46,7 @@ jobs:
           rustup target add ${{ matrix.target }}
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -58,7 +58,7 @@ jobs:
         run: cargo build --bin mm2 --target ${{ matrix.target }} --profile ${{ inputs.profile }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mm2-${{ matrix.target }}
           path: target/${{ matrix.target }}/${{ inputs.profile }}/mm2
@@ -69,12 +69,12 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mm2-x86_64-apple-darwin
           path: artifacts/x86_64
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mm2-aarch64-apple-darwin
           path: artifacts/aarch64
@@ -89,7 +89,7 @@ jobs:
           lipo -info dist/mm2-universal
 
       - name: Upload universal binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mm2-universal-apple-darwin
           path: dist/mm2-universal

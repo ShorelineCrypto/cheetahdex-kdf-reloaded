@@ -14,6 +14,16 @@ Still missing tons of error-handling. See GitHub issues for suggested projects i
 features = ["std"]
 rustdoc-args = ["--cfg", "docsrs"]
 
+# These bare custom cfgs are set by upstream's fuzz/bindings/test tooling and are
+# never enabled in this build. Declare them so rustc does not emit
+# `unexpected_cfgs` warnings for the many `#[cfg(...)]` uses in the sources.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(fuzzing)',
+    'cfg(c_bindings)',
+    'cfg(require_route_graph_test)',
+] }
+
 [features]
 # Internal test utilities exposed to other repo crates
 _test_utils = ["hex", "regex", "bitcoin/bitcoinconsensus"]

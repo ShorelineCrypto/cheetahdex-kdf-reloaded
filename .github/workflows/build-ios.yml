@@ -38,7 +38,7 @@ jobs:
           # - x86_64-apple-ios
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install protoc
         run: brew install protobuf
@@ -49,7 +49,7 @@ jobs:
           rustup target add ${{ matrix.target }}
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -72,7 +72,7 @@ jobs:
           cargo check -p coins --target ${{ matrix.target }}
 
       - name: Upload staticlib
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: libmm2-${{ matrix.target }}
           path: target/${{ matrix.target }}/${{ inputs.profile }}/libmm2_bin_lib.a

@@ -6,6 +6,14 @@ edition = "2021"
 [features]
 zhtlc-native-tests = []
 zhtlc = []
+# The lightning `log_*!` macros check `cfg(feature = "max_level_*")` at compile-time.
+# Declaring them avoids unexpected-cfg warnings without enabling any of them.
+max_level_off = []
+max_level_error = []
+max_level_warn = []
+max_level_info = []
+max_level_debug = []
+max_level_trace = []
 
 [lib]
 name = "coins"

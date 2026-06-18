@@ -612,7 +612,8 @@ pub async fn active_swaps_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>
 
 #[cfg(test)]
 mod lp_swap_tests {
-    use coins::{MarketCoinOps, MmCoinEnum, TestCoin};
+    use coins::{DexFee, DexFeeBurnDestination, MarketCoinOps, MmCoinEnum, TestCoin};
+    use mm2_net_config::NetConfig;
     use mocktopus::mocking::*;
     use serialization::{deserialize, serialize};
 

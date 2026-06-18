@@ -41,7 +41,7 @@ jobs:
             ndk-abi: armeabi-v7a
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -80,7 +80,7 @@ jobs:
           echo "NDK: $ANDROID_NDK_ROOT"
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -106,7 +106,7 @@ jobs:
             -- check -p coins
 
       - name: Upload shared library
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: libmm2-${{ matrix.ndk-abi }}
           path: target/${{ matrix.target }}/${{ inputs.profile }}/libmm2_bin_lib.so

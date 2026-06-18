@@ -16,6 +16,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["std"]
 no-std = ["hashbrown", "lightning/no-std", "core2/alloc"]
 std = ["bitcoin_hashes/std", "num-traits/std", "lightning/std", "bech32/std"]
+# The lightning `log_*!` macros check `cfg(feature = "max_level_*")` at compile-time.
+# Declaring them avoids unexpected-cfg warnings without enabling any of them.
+max_level_off = []
+max_level_error = []
+max_level_warn = []
+max_level_info = []
+max_level_debug = []
+max_level_trace = []
 
 [dependencies]
 bech32 = { version = "0.8", default-features = false }
