@@ -26,7 +26,10 @@ use testcontainers::clients::Cli;
 use testcontainers::images::generic::{GenericImage, WaitFor};
 use testcontainers::{Docker, Image};
 
-const QTUM_REGTEST_DOCKER_IMAGE_DEFAULT: &str = "docker.io/kdfreloaded/qtumregtest";
+// Public upstream QTUM regtest image (same provenance as the UTXO `testblockchain`
+// image used elsewhere in the docker tests). Override with the
+// `QTUM_REGTEST_DOCKER_IMAGE` env var to use a self-hosted image.
+const QTUM_REGTEST_DOCKER_IMAGE_DEFAULT: &str = "docker.io/sergeyboyko/qtumregtest";
 
 pub fn qtum_regtest_docker_image() -> String {
     std::env::var("QTUM_REGTEST_DOCKER_IMAGE").unwrap_or_else(|_| QTUM_REGTEST_DOCKER_IMAGE_DEFAULT.to_string())
