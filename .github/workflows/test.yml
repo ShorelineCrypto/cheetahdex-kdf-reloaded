@@ -91,6 +91,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Check Rust toolchain
         run: rustc --version && cargo --version
 
@@ -119,6 +122,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Free disk space
         # The standard hosted runner has limited free disk; the docker_tests
@@ -224,6 +230,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Check Rust toolchain
         run: rustc --version && cargo --version

@@ -28,6 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install protoc
+        shell: powershell
+        run: choco install protoc -y
+
       # Rust toolchain (stable + x86_64-pc-windows-msvc) is preinstalled on
       # the GitHub-hosted windows-latest image.
 

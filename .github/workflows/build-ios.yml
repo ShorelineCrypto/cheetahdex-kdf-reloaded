@@ -40,6 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install protoc
+        run: brew install protobuf
+
       - name: Install Rust toolchain for ${{ matrix.target }}
         run: |
           rustup toolchain install stable --profile minimal
