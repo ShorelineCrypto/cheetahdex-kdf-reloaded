@@ -1,13 +1,13 @@
 # KDF Reloaded
 
-> **GPLv2-only continuation of the Komodo DeFi Framework — peer-to-peer atomic swaps, no central authority.**
+> **GPLv2 continuation of the Komodo DeFi Framework — peer-to-peer atomic swaps, no central authority.**
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LEGAL/LICENSE)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#alpha-disclaimer)
 
 KDF Reloaded is an open-source [atomic-swap](https://en.wikipedia.org/wiki/Atomic_swap) engine for trustless peer-to-peer trading across blockchains, derived from the Komodo DeFi Framework / AtomicDEX-API codebase as it stood under the GPLv2 license.
 
-> **Release note:** This repository is published with a documented GPLv2-only continuation posture and an explicit pre-release checklist; see [`SECURITY.md`](SECURITY.md) and [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) for release controls and operator guidance.
+> **Release note:** This repository is published with a documented GPLv2 continuation posture and an explicit pre-release checklist; see [`SECURITY.md`](SECURITY.md) and [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) for release controls and operator guidance.
 
 ## Heritage
 
@@ -17,8 +17,8 @@ For readers who want the shortest safe summary: this repository continues the
 last clearly GPLv2-only upstream baseline, keeps the combined work under
 GPLv2-only, records post-anchor original contributions as GPL-2.0-or-later,
 and documents provenance file-by-file instead of claiming that every file is a
-clean-room rewrite. For the full technical derivation record, read the CRD
-chapters linked below.
+clean-room rewrite. For the full technical derivation record, read the 
+[Clean-Room Documentation (CRD)](docs/reloaded-rewrite/) chapters linked below.
 
 For the relationship to other downstream projects (notably the GLEEC fork), see [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md).
 
