@@ -1,6 +1,8 @@
 //! Helpers for creating Sapling proofs.
 
-use zcash_primitives::{constants::VALUE_COMMITMENT_VALUE_GENERATOR, transaction::components::Amount};
+use zcash_primitives::{
+    constants::VALUE_COMMITMENT_VALUE_GENERATOR, transaction::components::Amount,
+};
 
 mod prover;
 mod verifier;

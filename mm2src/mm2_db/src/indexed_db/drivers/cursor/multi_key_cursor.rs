@@ -45,9 +45,7 @@ impl IdbMultiKeyCursor {
 
 #[async_trait(?Send)]
 impl CursorOps for IdbMultiKeyCursor {
-    fn db_index(&self) -> &IdbIndex {
-        &self.db_index
-    }
+    fn db_index(&self) -> &IdbIndex { &self.db_index }
 
     fn key_range(&self) -> CursorResult<Option<IdbKeyRange>> {
         let only = Array::new();

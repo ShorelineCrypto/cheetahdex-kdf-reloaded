@@ -3,23 +3,20 @@ use crate::coin_balance::HDAddressBalance;
 use crate::hd_wallet::HDAccountsMap;
 use crate::hd_wallet_storage::{HDWalletMockStorage, HDWalletStorageInternalOps};
 use crate::rpc_command::account_balance::{AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
-use crate::rpc_command::init_scan_for_new_addresses::{
-    InitScanAddressesRpcOps, ScanAddressesParams, ScanAddressesResponse,
-};
+use crate::rpc_command::init_scan_for_new_addresses::{InitScanAddressesRpcOps, ScanAddressesParams,
+                                                      ScanAddressesResponse};
 use crate::utxo::qtum::{qtum_coin_with_priv_key, QtumCoin, QtumDelegationOps, QtumDelegationRequest};
-use crate::utxo::rpc_clients::{
-    BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl, GetAddressInfoRes, ListSinceBlockRes,
-    ListTransactionsItem, NativeClient, NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps,
-    ValidateAddressRes, VerboseBlock,
-};
+use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClient, ElectrumClientImpl,
+                               GetAddressInfoRes, ListSinceBlockRes, ListTransactionsItem, NativeClient,
+                               NativeClientImpl, NativeUnspent, NetworkInfo, UtxoRpcClientOps, ValidateAddressRes,
+                               VerboseBlock};
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
 use crate::utxo::utxo_common::UtxoTxBuilder;
 use crate::utxo::utxo_common_tests;
 use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::WithdrawFee;
+#[cfg(not(target_arch = "wasm32"))] use crate::WithdrawFee;
 use crate::{CoinBalance, PrivKeyBuildPolicy, StakingInfosDetails, SwapOps, TradePreimageValue, TxFeeDetails};
 use crate::{DexFee, ValidateFeeArgs};
 use bigdecimal::{BigDecimal, Signed};
@@ -85,9 +82,7 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
 
 /// Returned client won't work by default, requires some mocks to be usable
 #[cfg(not(target_arch = "wasm32"))]
-fn native_client_for_test() -> NativeClient {
-    NativeClient(Arc::new(NativeClientImpl::default()))
-}
+fn native_client_for_test() -> NativeClient { NativeClient(Arc::new(NativeClientImpl::default())) }
 
 fn utxo_coin_fields_for_test(
     rpc_client: UtxoRpcClientEnum,
@@ -3356,15 +3351,12 @@ fn test_account_balance_rpc() {
     macro_rules! known_address {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:literal) => {
             addresses_map.insert($address.to_string(), $balance);
-            balances_by_der_path.insert(
-                $der_path.to_string(),
-                HDAddressBalance {
-                    address: $address.to_string(),
-                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                    chain: $chain,
-                    balance: CoinBalance::new(BigDecimal::from($balance)),
-                },
-            )
+            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
+                address: $address.to_string(),
+                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                chain: $chain,
+                balance: CoinBalance::new(BigDecimal::from($balance)),
+            })
         };
     }
 
@@ -3696,15 +3688,12 @@ fn test_scan_for_new_addresses() {
         ($der_path:literal, $address:literal, $chain:expr, balance = $balance:expr) => {{
             let balance = $balance;
             checking_addresses.insert($address.to_string(), balance);
-            balances_by_der_path.insert(
-                $der_path.to_string(),
-                HDAddressBalance {
-                    address: $address.to_string(),
-                    derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
-                    chain: $chain,
-                    balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
-                },
-            );
+            balances_by_der_path.insert($der_path.to_string(), HDAddressBalance {
+                address: $address.to_string(),
+                derivation_path: RpcDerivationPath(DerivationPath::from_str($der_path).unwrap()),
+                chain: $chain,
+                balance: CoinBalance::new(BigDecimal::from(balance.unwrap_or(0))),
+            });
             if balance.is_some() {
                 non_empty_addresses.push($address.to_string());
             }
@@ -4068,12 +4057,8 @@ mod swap_proto_v2_script_tests {
     const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
     const LOCKTIME: u32 = 0x6800_0000; // future, fits in u32
 
-    fn taker_pub() -> Public {
-        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
-    }
-    fn maker_pub() -> Public {
-        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
-    }
+    fn taker_pub() -> Public { Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap() }
+    fn maker_pub() -> Public { Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap() }
 
     /// Collect every opcode in the script in order, ignoring push payloads.
     fn opcodes(script: &script::Script) -> Vec<Opcode> {
@@ -4231,12 +4216,8 @@ mod swap_v2_maker_tests {
     const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
     const LOCKTIME: u32 = 0x6800_0000;
 
-    fn taker_pub() -> Public {
-        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
-    }
-    fn maker_pub() -> Public {
-        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
-    }
+    fn taker_pub() -> Public { Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap() }
+    fn maker_pub() -> Public { Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap() }
 
     /// The dispatch table must produce the exact same bytes as the direct
     /// builder, so refund paths and validators agree on the redeem script.
@@ -4313,12 +4294,8 @@ mod swap_v2_taker_funding_tests {
     const TAKER_SECRET_HASH: [u8; 32] = [0xaa; 32];
     const LOCKTIME: u32 = 0x6800_0000;
 
-    fn taker_pub() -> Public {
-        Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap()
-    }
-    fn maker_pub() -> Public {
-        Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap()
-    }
+    fn taker_pub() -> Public { Public::from_slice(&hex::decode(TAKER_PUB_HEX).unwrap()).unwrap() }
+    fn maker_pub() -> Public { Public::from_slice(&hex::decode(MAKER_PUB_HEX).unwrap()).unwrap() }
 
     /// The dispatch table must produce the exact same bytes as the direct
     /// builder, so refund paths and validators agree on the redeem script.
@@ -4443,12 +4420,8 @@ mod swap_v2_funding_spend_tests {
     const FUNDING_VALUE: u64 = 1_000_000;
     const FEE: u64 = 1_000;
 
-    fn taker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 funding-spend taker").unwrap()
-    }
-    fn maker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 funding-spend maker").unwrap()
-    }
+    fn taker_kp() -> KeyPair { key_pair_from_seed("ch15 funding-spend taker").unwrap() }
+    fn maker_kp() -> KeyPair { key_pair_from_seed("ch15 funding-spend maker").unwrap() }
 
     fn synthetic_funding_tx() -> UtxoTx {
         let mut tx = UtxoTx::default();
@@ -4542,10 +4515,8 @@ mod swap_v2_funding_spend_tests {
 mod swap_v2_taker_payment_spend_tests {
     use crate::utxo::rpc_clients::UtxoRpcClientEnum;
     use crate::utxo::swap_proto_v2_scripts::taker_payment_script;
-    use crate::utxo::utxo_common::{
-        build_taker_payment_spend_cooperative_script_sig, build_taker_payment_spend_preimage_tx,
-        sign_taker_payment_spend_input,
-    };
+    use crate::utxo::utxo_common::{build_taker_payment_spend_cooperative_script_sig,
+                                   build_taker_payment_spend_preimage_tx, sign_taker_payment_spend_input};
     use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test};
     use crate::utxo::{output_script, ScriptType, UtxoTx};
     use chain::TransactionOutput;
@@ -4561,12 +4532,8 @@ mod swap_v2_taker_payment_spend_tests {
     const DEX_FEE_SAT: u64 = 10_000;
     const SPEND_FEE: u64 = 1_000;
 
-    fn taker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 payment-spend taker").unwrap()
-    }
-    fn maker_kp() -> KeyPair {
-        key_pair_from_seed("ch15 payment-spend maker").unwrap()
-    }
+    fn taker_kp() -> KeyPair { key_pair_from_seed("ch15 payment-spend taker").unwrap() }
+    fn maker_kp() -> KeyPair { key_pair_from_seed("ch15 payment-spend maker").unwrap() }
 
     fn maker_address() -> Address {
         Address {
@@ -4715,9 +4682,8 @@ mod swap_v2_pre_burn_tests {
     use crate::utxo::utxo_standard::UtxoStandardCoin;
     use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test, utxo_coin_from_fields};
     use crate::utxo::{output_script, ScriptType, UtxoTx};
-    use crate::{
-        DexFee, DexFeeBurnDestination, GenTakerPaymentSpendArgs, MmCoin, ValidateTakerPaymentSpendPreimageError,
-    };
+    use crate::{DexFee, DexFeeBurnDestination, GenTakerPaymentSpendArgs, MmCoin,
+                ValidateTakerPaymentSpendPreimageError};
     use chain::TransactionOutput;
     use common::block_on;
     use common::mm_number::MmNumber;

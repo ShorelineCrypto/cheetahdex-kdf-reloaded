@@ -47,28 +47,18 @@ macro_rules! mm_timing {
 pub struct Clock {}
 
 impl ClockOps for Clock {
-    fn now(&self) -> u64 {
-        now_ms()
-    }
+    fn now(&self) -> u64 { now_ms() }
 }
 
 #[derive(Default)]
 pub struct Metrics {}
 
 impl MetricsOps for Metrics {
-    fn init(&self) -> Result<(), String> {
-        Ok(())
-    }
+    fn init(&self) -> Result<(), String> { Ok(()) }
 
-    fn init_with_dashboard(&self, _log_state: LogWeak, _record_interval: f64) -> Result<(), String> {
-        Ok(())
-    }
+    fn init_with_dashboard(&self, _log_state: LogWeak, _record_interval: f64) -> Result<(), String> { Ok(()) }
 
-    fn clock(&self) -> Result<Clock, String> {
-        Ok(Clock::default())
-    }
+    fn clock(&self) -> Result<Clock, String> { Ok(Clock::default()) }
 
-    fn collect_json(&self) -> Result<Json, String> {
-        Ok(Json::Array(Vec::new()))
-    }
+    fn collect_json(&self) -> Result<Json, String> { Ok(Json::Array(Vec::new())) }
 }

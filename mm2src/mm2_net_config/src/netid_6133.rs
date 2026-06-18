@@ -52,38 +52,24 @@ lazy_static! {
 pub struct Netid6133;
 
 impl NetConfig for Netid6133 {
-    fn netid(&self) -> u16 {
-        6133
-    }
+    fn netid(&self) -> u16 { 6133 }
 
-    fn network_name(&self) -> &'static str {
-        "GLEEC"
-    }
+    fn network_name(&self) -> &'static str { "GLEEC" }
 
-    fn dex_fee_addr_pubkey(&self) -> &'static str {
-        DEX_FEE_ADDR_PUBKEY
-    }
+    fn dex_fee_addr_pubkey(&self) -> &'static str { DEX_FEE_ADDR_PUBKEY }
 
-    fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8] {
-        &DEX_FEE_ADDR_RAW
-    }
+    fn dex_fee_addr_raw_pubkey(&self) -> &'static [u8] { &DEX_FEE_ADDR_RAW }
 
-    fn dex_fee_z_addr(&self) -> &'static str {
-        DEX_FEE_Z_ADDR
-    }
+    fn dex_fee_z_addr(&self) -> &'static str { DEX_FEE_Z_ADDR }
 
-    fn dex_fee_pubkey_ed25519(&self) -> &'static str {
-        DEX_FEE_PUBKEY_ED25519
-    }
+    fn dex_fee_pubkey_ed25519(&self) -> &'static str { DEX_FEE_PUBKEY_ED25519 }
 
     fn dex_fee_rate(&self) -> BigRational {
         // 2/100 = 2%
         BigRational::new(2.into(), 100.into())
     }
 
-    fn fee_discount_tickers(&self) -> &'static [&'static str] {
-        &["GLEEC"]
-    }
+    fn fee_discount_tickers(&self) -> &'static [&'static str] { &["GLEEC"] }
 
     fn dex_fee_rate_discounted(&self) -> BigRational {
         // 1/100 = 1% (50% discount for GLEEC trades)
@@ -95,24 +81,16 @@ impl NetConfig for Netid6133 {
         BigRational::new(1.into(), 10000.into())
     }
 
-    fn burn_enabled(&self) -> bool {
-        true
-    }
+    fn burn_enabled(&self) -> bool { true }
 
     fn dex_fee_share(&self) -> BigRational {
         // 3/4 = 0.75 → 75% to fee address, 25% burned
         BigRational::new(3.into(), 4.into())
     }
 
-    fn burn_addr_pubkey(&self) -> &'static str {
-        BURN_ADDR_PUBKEY
-    }
+    fn burn_addr_pubkey(&self) -> &'static str { BURN_ADDR_PUBKEY }
 
-    fn burn_addr_raw_pubkey(&self) -> &'static [u8] {
-        &BURN_ADDR_RAW
-    }
+    fn burn_addr_raw_pubkey(&self) -> &'static [u8] { &BURN_ADDR_RAW }
 
-    fn seed_nodes(&self) -> &'static [&'static str] {
-        SEED_NODES
-    }
+    fn seed_nodes(&self) -> &'static [&'static str] { SEED_NODES }
 }

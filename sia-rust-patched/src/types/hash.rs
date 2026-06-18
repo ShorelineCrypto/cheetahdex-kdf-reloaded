@@ -28,9 +28,7 @@ pub enum Hash256Error {
 pub struct Hash256(pub [u8; 32]);
 
 impl Encodable for Hash256 {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.write_slice(&self.0);
-    }
+    fn encode(&self, encoder: &mut Encoder) { encoder.write_slice(&self.0); }
 }
 
 impl Serialize for Hash256 {
@@ -69,9 +67,7 @@ impl FromStr for Hash256 {
 }
 
 impl Display for Hash256 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.0))
-    }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{}", hex::encode(self.0)) }
 }
 
 impl TryFrom<&[u8]> for Hash256 {

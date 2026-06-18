@@ -79,9 +79,7 @@ impl From<BalanceError> for HDAccountBalanceRpcError {
 }
 
 impl From<InvalidBip44ChainError> for HDAccountBalanceRpcError {
-    fn from(e: InvalidBip44ChainError) -> Self {
-        HDAccountBalanceRpcError::InvalidBip44Chain { chain: e.chain }
-    }
+    fn from(e: InvalidBip44ChainError) -> Self { HDAccountBalanceRpcError::InvalidBip44Chain { chain: e.chain } }
 }
 
 impl From<AddressDerivingError> for HDAccountBalanceRpcError {

@@ -3,13 +3,11 @@ use crate::solana::rpc_client::TokenAccountsFilter;
 use crate::solana::rpc_pool::SolanaRpcPool;
 use crate::solana::solana_common::{ui_amount_to_amount, PrepareTransferData, SufficientBalanceError};
 use crate::solana::{solana_common, AccountError, SolanaCommonOps, SolanaFeeDetails};
-use crate::{
-    BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, RawTransactionFut,
-    RawTransactionRequest, SignatureResult, SolanaCoin, TradePreimageFut, TradePreimageResult, TradePreimageValue,
-    TransactionDetails, TransactionFut, TransactionType, UnexpectedDerivationMethod, ValidateAddressResult,
-    ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawError, WithdrawFut, WithdrawRequest,
-    WithdrawResult,
-};
+use crate::{BalanceFut, DexFee, FeeApproxStage, FoundSwapTxSpend, NegotiateSwapContractAddrErr, RawTransactionFut,
+            RawTransactionRequest, SignatureResult, SolanaCoin, TradePreimageFut, TradePreimageResult,
+            TradePreimageValue, TransactionDetails, TransactionFut, TransactionType, UnexpectedDerivationMethod,
+            ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult, WithdrawError,
+            WithdrawFut, WithdrawRequest, WithdrawResult};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use bincode::serialize;
@@ -27,11 +25,9 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use spl_associated_token_account_client::address::get_associated_token_address;
 use spl_associated_token_account_client::instruction::create_associated_token_account;
-use std::{
-    fmt::{Debug, Formatter, Result as FmtResult},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{fmt::{Debug, Formatter, Result as FmtResult},
+          str::FromStr,
+          sync::Arc};
 
 #[derive(Debug)]
 pub enum SplTokenCreationError {
@@ -65,9 +61,7 @@ pub struct SplToken {
 }
 
 impl Debug for SplToken {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.write_str(&*self.conf.ticker)
-    }
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult { f.write_str(&*self.conf.ticker) }
 }
 
 impl SplToken {
@@ -171,13 +165,9 @@ async fn withdraw_impl(coin: SplToken, req: WithdrawRequest) -> WithdrawResult {
 
 #[async_trait]
 impl SolanaCommonOps for SplToken {
-    fn rpc(&self) -> &SolanaRpcPool {
-        &self.platform_coin.client
-    }
+    fn rpc(&self) -> &SolanaRpcPool { &self.platform_coin.client }
 
-    fn is_token(&self) -> bool {
-        true
-    }
+    fn is_token(&self) -> bool { true }
 
     async fn check_balance_and_prepare_transfer(
         &self,
@@ -190,9 +180,7 @@ impl SolanaCommonOps for SplToken {
 }
 
 impl SplToken {
-    fn get_underlying_contract_pubkey(&self) -> Pubkey {
-        self.conf.token_contract_address
-    }
+    fn get_underlying_contract_pubkey(&self) -> Pubkey { self.conf.token_contract_address }
 
     async fn get_pubkey(&self) -> Result<Pubkey, MmError<AccountError>> {
         let token_accounts = self
@@ -223,21 +211,13 @@ impl SplToken {
 }
 
 impl MarketCoinOps for SplToken {
-    fn ticker(&self) -> &str {
-        &self.conf.ticker
-    }
+    fn ticker(&self) -> &str { &self.conf.ticker }
 
-    fn my_address(&self) -> Result<String, String> {
-        Ok(self.platform_coin.my_address.clone())
-    }
+    fn my_address(&self) -> Result<String, String> { Ok(self.platform_coin.my_address.clone()) }
 
-    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
-        unimplemented!()
-    }
+    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> { unimplemented!() }
 
-    fn sign_message_hash(&self, _message: &str) -> Option<[u8; 32]> {
-        unimplemented!()
-    }
+    fn sign_message_hash(&self, _message: &str) -> Option<[u8; 32]> { unimplemented!() }
 
     fn sign_message(&self, message: &str) -> SignatureResult<String> {
         solana_common::sign_message(&self.platform_coin, message)
@@ -252,13 +232,9 @@ impl MarketCoinOps for SplToken {
         Box::new(fut)
     }
 
-    fn base_coin_balance(&self) -> BalanceFut<BigDecimal> {
-        self.platform_coin.base_coin_balance()
-    }
+    fn base_coin_balance(&self) -> BalanceFut<BigDecimal> { self.platform_coin.base_coin_balance() }
 
-    fn platform_ticker(&self) -> &str {
-        self.platform_coin.ticker()
-    }
+    fn platform_ticker(&self) -> &str { self.platform_coin.ticker() }
 
     #[inline(always)]
     fn send_raw_tx(&self, tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
@@ -291,33 +267,21 @@ impl MarketCoinOps for SplToken {
         unimplemented!()
     }
 
-    fn tx_enum_from_bytes(&self, _bytes: &[u8]) -> Result<TransactionEnum, String> {
-        unimplemented!()
-    }
+    fn tx_enum_from_bytes(&self, _bytes: &[u8]) -> Result<TransactionEnum, String> { unimplemented!() }
 
-    fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> {
-        self.platform_coin.current_block()
-    }
+    fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> { self.platform_coin.current_block() }
 
-    fn display_priv_key(&self) -> Result<String, String> {
-        self.platform_coin.display_priv_key()
-    }
+    fn display_priv_key(&self) -> Result<String, String> { self.platform_coin.display_priv_key() }
 
-    fn min_tx_amount(&self) -> BigDecimal {
-        BigDecimal::from(0)
-    }
+    fn min_tx_amount(&self) -> BigDecimal { BigDecimal::from(0) }
 
-    fn min_trading_vol(&self) -> MmNumber {
-        MmNumber::from("0.00777")
-    }
+    fn min_trading_vol(&self) -> MmNumber { MmNumber::from("0.00777") }
 }
 
 #[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl SwapOps for SplToken {
-    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut {
-        unimplemented!()
-    }
+    fn send_taker_fee(&self, _dex_fee: &DexFee, _fee_addr: &[u8], _uuid: &[u8]) -> TransactionFut { unimplemented!() }
 
     fn send_maker_payment(
         &self,
@@ -439,9 +403,7 @@ impl SwapOps for SplToken {
         unimplemented!()
     }
 
-    fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
-        unimplemented!()
-    }
+    fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> { unimplemented!() }
 
     fn negotiate_swap_contract_addr(
         &self,
@@ -450,9 +412,7 @@ impl SwapOps for SplToken {
         unimplemented!()
     }
 
-    fn get_htlc_key_pair(&self) -> Option<KeyPair> {
-        todo!()
-    }
+    fn get_htlc_key_pair(&self) -> Option<KeyPair> { todo!() }
 }
 
 #[async_trait]
@@ -461,42 +421,26 @@ impl WatcherOps for SplToken {}
 #[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl MmCoin for SplToken {
-    fn is_asset_chain(&self) -> bool {
-        false
-    }
+    fn is_asset_chain(&self) -> bool { false }
 
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         Box::new(Box::pin(withdraw_impl(self.clone(), req)).compat())
     }
 
-    fn get_raw_transaction(&self, _req: RawTransactionRequest) -> RawTransactionFut {
-        unimplemented!()
-    }
+    fn get_raw_transaction(&self, _req: RawTransactionRequest) -> RawTransactionFut { unimplemented!() }
 
-    fn decimals(&self) -> u8 {
-        self.conf.decimals
-    }
+    fn decimals(&self) -> u8 { self.conf.decimals }
 
-    fn convert_to_address(&self, _from: &str, _to_address_format: Json) -> Result<String, String> {
-        unimplemented!()
-    }
+    fn convert_to_address(&self, _from: &str, _to_address_format: Json) -> Result<String, String> { unimplemented!() }
 
-    fn validate_address(&self, address: &str) -> ValidateAddressResult {
-        self.platform_coin.validate_address(address)
-    }
+    fn validate_address(&self, address: &str) -> ValidateAddressResult { self.platform_coin.validate_address(address) }
 
-    fn process_history_loop(&self, _ctx: MmArc) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-        unimplemented!()
-    }
+    fn process_history_loop(&self, _ctx: MmArc) -> Box<dyn Future<Item = (), Error = ()> + Send> { unimplemented!() }
 
-    fn history_sync_status(&self) -> HistorySyncState {
-        unimplemented!()
-    }
+    fn history_sync_status(&self) -> HistorySyncState { unimplemented!() }
 
     /// Get fee to be paid per 1 swap transaction
-    fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
-        unimplemented!()
-    }
+    fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> { unimplemented!() }
 
     async fn get_sender_trade_fee(
         &self,
@@ -506,9 +450,7 @@ impl MmCoin for SplToken {
         unimplemented!()
     }
 
-    fn get_receiver_trade_fee(&self, _stage: FeeApproxStage) -> TradePreimageFut<TradeFee> {
-        unimplemented!()
-    }
+    fn get_receiver_trade_fee(&self, _stage: FeeApproxStage) -> TradePreimageFut<TradeFee> { unimplemented!() }
 
     async fn get_fee_to_send_taker_fee(
         &self,
@@ -518,35 +460,19 @@ impl MmCoin for SplToken {
         unimplemented!()
     }
 
-    fn required_confirmations(&self) -> u64 {
-        1
-    }
+    fn required_confirmations(&self) -> u64 { 1 }
 
-    fn requires_notarization(&self) -> bool {
-        false
-    }
+    fn requires_notarization(&self) -> bool { false }
 
-    fn set_required_confirmations(&self, _confirmations: u64) {
-        unimplemented!()
-    }
+    fn set_required_confirmations(&self, _confirmations: u64) { unimplemented!() }
 
-    fn set_requires_notarization(&self, _requires_nota: bool) {
-        unimplemented!()
-    }
+    fn set_requires_notarization(&self, _requires_nota: bool) { unimplemented!() }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        unimplemented!()
-    }
+    fn swap_contract_address(&self) -> Option<BytesJson> { unimplemented!() }
 
-    fn mature_confirmations(&self) -> Option<u32> {
-        Some(1)
-    }
+    fn mature_confirmations(&self) -> Option<u32> { Some(1) }
 
-    fn coin_protocol_info(&self) -> Vec<u8> {
-        Vec::new()
-    }
+    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
 
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
-        true
-    }
+    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool { true }
 }

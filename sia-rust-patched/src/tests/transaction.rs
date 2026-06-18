@@ -1,12 +1,10 @@
 #[cfg(test)]
 mod test {
     use crate::encoding::Encoder;
-    use crate::types::{
-        Address, Attestation, AttestationValue, Currency, CurrencyVersion, FileContractRevisionV2, Hash256, Keypair,
-        Preimage, PublicKey, SatisfiedPolicy, SiacoinElement, SiacoinInputV1, SiacoinInputV2, SiacoinOutput,
-        SiacoinOutputId, SiacoinOutputVersion, Signature, SpendPolicy, StateElement, UnlockCondition, V2FileContract,
-        V2FileContractElement, V2Transaction,
-    };
+    use crate::types::{Address, Attestation, AttestationValue, Currency, CurrencyVersion, FileContractRevisionV2,
+                       Hash256, Keypair, Preimage, PublicKey, SatisfiedPolicy, SiacoinElement, SiacoinInputV1,
+                       SiacoinInputV2, SiacoinOutput, SiacoinOutputId, SiacoinOutputVersion, Signature, SpendPolicy,
+                       StateElement, UnlockCondition, V2FileContract, V2FileContractElement, V2Transaction};
     use std::convert::TryFrom;
     use std::str::FromStr;
 

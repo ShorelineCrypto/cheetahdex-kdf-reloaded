@@ -60,7 +60,9 @@ pub trait WalletRead {
     /// knows about.
     ///
     /// This will return `Ok(None)` if no block data is present in the database.
-    fn get_target_and_anchor_heights(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+    fn get_target_and_anchor_heights(
+        &self,
+    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         self.block_height_extrema().map(|heights| {
             heights.map(|(min_height, max_height)| {
                 let target_height = max_height + 1;
@@ -111,19 +113,28 @@ pub trait WalletRead {
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
 
     /// Returns all extended full viewing keys known about by this wallet.
-    fn get_extended_full_viewing_keys(&self) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error>;
+    fn get_extended_full_viewing_keys(
+        &self,
+    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error>;
 
     /// Checks whether the specified extended full viewing key is
     /// associated with the account.
-    fn is_valid_account_extfvk(&self, account: AccountId, extfvk: &ExtendedFullViewingKey)
-        -> Result<bool, Self::Error>;
+    fn is_valid_account_extfvk(
+        &self,
+        account: AccountId,
+        extfvk: &ExtendedFullViewingKey,
+    ) -> Result<bool, Self::Error>;
 
     /// Returns the wallet balance for an account as of the specified block
     /// height.
     ///
     /// This may be used to obtain a balance that ignores notes that have been
     /// received so recently that they are not yet deemed spendable.
-    fn get_balance_at(&self, account: AccountId, anchor_height: BlockHeight) -> Result<Amount, Self::Error>;
+    fn get_balance_at(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Amount, Self::Error>;
 
     /// Returns the memo for a note.
     ///
@@ -132,7 +143,10 @@ pub trait WalletRead {
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error>;
 
     /// Returns the note commitment tree at the specified block height.
-    fn get_commitment_tree(&self, block_height: BlockHeight) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
+    fn get_commitment_tree(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
 
     /// Returns the incremental witnesses as of the specified block height.
     #[allow(clippy::type_complexity)]
@@ -213,7 +227,10 @@ pub trait WalletWrite: WalletRead {
         updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
 
-    fn store_received_tx(&mut self, received_tx: &ReceivedTransaction) -> Result<Self::TxRef, Self::Error>;
+    fn store_received_tx(
+        &mut self,
+        received_tx: &ReceivedTransaction,
+    ) -> Result<Self::TxRef, Self::Error>;
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
 
@@ -240,7 +257,12 @@ pub trait BlockSource {
 
     /// Scan the specified `limit` number of blocks from the blockchain, starting at
     /// `from_height`, applying the provided callback to each block.
-    fn with_blocks<F>(&self, from_height: BlockHeight, limit: Option<u32>, with_row: F) -> Result<(), Self::Error>
+    fn with_blocks<F>(
+        &self,
+        from_height: BlockHeight,
+        limit: Option<u32>,
+        with_row: F,
+    ) -> Result<(), Self::Error>
     where
         F: FnMut(CompactBlock) -> Result<(), Self::Error>;
 }
@@ -265,7 +287,8 @@ pub mod testing {
     };
 
     use super::{
-        error::Error, BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead, WalletWrite,
+        error::Error, BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead,
+        WalletWrite,
     };
 
     pub struct MockBlockSource {}
@@ -297,7 +320,10 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_block_hash(&self, _block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        fn get_block_hash(
+            &self,
+            _block_height: BlockHeight,
+        ) -> Result<Option<BlockHash>, Self::Error> {
             Ok(None)
         }
 
@@ -309,7 +335,9 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_extended_full_viewing_keys(&self) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+        fn get_extended_full_viewing_keys(
+            &self,
+        ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
             Ok(HashMap::new())
         }
 
@@ -321,7 +349,11 @@ pub mod testing {
             Ok(false)
         }
 
-        fn get_balance_at(&self, _account: AccountId, _anchor_height: BlockHeight) -> Result<Amount, Self::Error> {
+        fn get_balance_at(
+            &self,
+            _account: AccountId,
+            _anchor_height: BlockHeight,
+        ) -> Result<Amount, Self::Error> {
             Ok(Amount::zero())
         }
 
@@ -329,7 +361,10 @@ pub mod testing {
             Ok(Memo::Empty)
         }
 
-        fn get_commitment_tree(&self, _block_height: BlockHeight) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+        fn get_commitment_tree(
+            &self,
+            _block_height: BlockHeight,
+        ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
             Ok(None)
         }
 
@@ -373,11 +408,17 @@ pub mod testing {
             Ok(vec![])
         }
 
-        fn store_received_tx(&mut self, _received_tx: &ReceivedTransaction) -> Result<Self::TxRef, Self::Error> {
+        fn store_received_tx(
+            &mut self,
+            _received_tx: &ReceivedTransaction,
+        ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId([0u8; 32]))
         }
 
-        fn store_sent_tx(&mut self, _sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error> {
+        fn store_sent_tx(
+            &mut self,
+            _sent_tx: &SentTransaction,
+        ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId([0u8; 32]))
         }
 

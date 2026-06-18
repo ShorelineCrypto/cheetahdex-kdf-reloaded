@@ -18,18 +18,12 @@
 //!   `EtomicSwapMakerV2` contract; reorder a `Token::*` and you break
 //!   real on-chain swaps.
 
-use super::{
-    validate_amount, validate_from_to_addresses, EthPaymentType, PaymentMethod, PrepareTxDataError, ZERO_VALUE,
-};
+use super::{validate_amount, validate_from_to_addresses, EthPaymentType, PaymentMethod, PrepareTxDataError, ZERO_VALUE};
 use crate::eth::legacy_tx::Action;
-use crate::eth::{
-    decode_contract_call, get_function_input_data, u256_from_big_decimal, EthCoin, EthCoinType, SignedEthTx,
-    ValidatePaymentError, ValidatePaymentResult, MAKER_SWAP_V2,
-};
-use crate::{
-    ParseCoinAssocTypes, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs, SendMakerPaymentArgs,
-    SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TransactionErr, ValidateMakerPaymentArgs,
-};
+use crate::eth::{decode_contract_call, get_function_input_data, u256_from_big_decimal, EthCoin, EthCoinType,
+                 SignedEthTx, ValidatePaymentError, ValidatePaymentResult, MAKER_SWAP_V2};
+use crate::{ParseCoinAssocTypes, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs, SendMakerPaymentArgs,
+            SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TransactionErr, ValidateMakerPaymentArgs};
 use ethabi::{Function, Token};
 use ethereum_types::{Address, Public, U256};
 use futures::compat::Future01CompatExt;

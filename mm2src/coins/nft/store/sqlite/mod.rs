@@ -17,8 +17,7 @@ mod history;
 mod list;
 mod schema;
 
-#[cfg(test)]
-mod tests;
+#[cfg(test)] mod tests;
 
 use crate::nft::store::errors::NftStoreError;
 use db_common::async_sql_conn::{AsyncConnError, AsyncConnection};
@@ -35,13 +34,9 @@ impl SqliteNftStore {
     /// Wrap a pre-opened async SQLite connection. The connection is
     /// expected to be exclusive to the NFT subsystem (or at least to use
     /// table names that do not clash with other modules).
-    pub fn new(conn: Arc<AsyncConnection>) -> Self {
-        Self { conn }
-    }
+    pub fn new(conn: Arc<AsyncConnection>) -> Self { Self { conn } }
 
-    pub(crate) fn conn(&self) -> &AsyncConnection {
-        self.conn.as_ref()
-    }
+    pub(crate) fn conn(&self) -> &AsyncConnection { self.conn.as_ref() }
 }
 
 impl NftStoreError for AsyncConnError {}

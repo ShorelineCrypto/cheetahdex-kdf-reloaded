@@ -62,13 +62,10 @@ impl fmt::Display for SqliteClientError {
         match &self {
             SqliteClientError::CorruptedData(reason) => {
                 write!(f, "Data DB is corrupted: {}", reason)
-            },
+            }
             SqliteClientError::IncorrectHrpExtFvk => write!(f, "Incorrect HRP for extfvk"),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
-            SqliteClientError::InvalidNoteId => write!(
-                f,
-                "The note ID associated with an inserted witness must correspond to a received note."
-            ),
+            SqliteClientError::InvalidNoteId => write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::Bech32(e) => write!(f, "{}", e),
             SqliteClientError::Base58(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),

@@ -11,14 +11,13 @@
 use crate::utxo::utxo_common;
 use crate::utxo::utxo_standard::UtxoStandardCoin;
 use crate::utxo::{UtxoCoinFields, UtxoTx};
-use crate::{
-    CommonSwapOpsV2, DerivationMethod, DexFee, FindPaymentSpendError, FundingTxSpend, GenPreimageResult,
-    GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2, ParseCoinAssocTypes, PrivKeyPolicy,
-    RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs, RefundTakerPaymentArgs,
-    SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs, TakerCoinSwapOpsV2,
-    ToBytes, TransactionErr, TxPreimageWithSig, ValidateMakerPaymentArgs, ValidateSwapV2TxResult,
-    ValidateTakerFundingArgs, ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult,
-};
+use crate::{CommonSwapOpsV2, DerivationMethod, DexFee, FindPaymentSpendError, FundingTxSpend, GenPreimageResult,
+            GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2, ParseCoinAssocTypes,
+            PrivKeyPolicy, RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs,
+            RefundTakerPaymentArgs, SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs,
+            SpendMakerPaymentArgs, TakerCoinSwapOpsV2, ToBytes, TransactionErr, TxPreimageWithSig,
+            ValidateMakerPaymentArgs, ValidateSwapV2TxResult, ValidateTakerFundingArgs,
+            ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult};
 use async_trait::async_trait;
 use keys::{Address, Error as KeysError, Public, Signature};
 use mm2_err_handle::prelude::*;
@@ -35,9 +34,7 @@ use std::str::FromStr;
 pub struct UtxoTxPreimage(pub TransactionInputSigner);
 
 impl From<TransactionInputSigner> for UtxoTxPreimage {
-    fn from(signer: TransactionInputSigner) -> Self {
-        UtxoTxPreimage(signer)
-    }
+    fn from(signer: TransactionInputSigner) -> Self { UtxoTxPreimage(signer) }
 }
 
 impl ToBytes for UtxoTxPreimage {
@@ -77,13 +74,9 @@ impl ParseCoinAssocTypes for UtxoStandardCoin {
         Address::from_str(address).map_err(|_| KeysError::InvalidAddress)
     }
 
-    fn parse_pubkey(&self, pubkey: &[u8]) -> Result<Self::Pubkey, Self::PubkeyParseError> {
-        Public::from_slice(pubkey)
-    }
+    fn parse_pubkey(&self, pubkey: &[u8]) -> Result<Self::Pubkey, Self::PubkeyParseError> { Public::from_slice(pubkey) }
 
-    fn parse_tx(&self, tx: &[u8]) -> Result<Self::Tx, Self::TxParseError> {
-        deserialize(tx)
-    }
+    fn parse_tx(&self, tx: &[u8]) -> Result<Self::Tx, Self::TxParseError> { deserialize(tx) }
 
     fn parse_preimage(&self, preimage: &[u8]) -> Result<Self::Preimage, Self::PreimageParseError> {
         let tx: UtxoTx = deserialize(preimage)?;
@@ -247,6 +240,4 @@ impl TakerCoinSwapOpsV2 for UtxoStandardCoin {
 // Silence "unused import" — `utxo_common` is imported for the ch15-phase-2
 // helpers that this module will eventually call into.
 #[allow(dead_code)]
-fn _ch15_imports_anchor() {
-    let _ = utxo_common::DEFAULT_SWAP_VOUT;
-}
+fn _ch15_imports_anchor() { let _ = utxo_common::DEFAULT_SWAP_VOUT; }

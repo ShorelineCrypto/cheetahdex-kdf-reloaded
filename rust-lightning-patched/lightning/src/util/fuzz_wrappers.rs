@@ -8,17 +8,19 @@
 // licenses.
 
 macro_rules! hash_to_message {
-    ($slice: expr) => {{
-        #[cfg(not(fuzzing))]
-        {
-            ::bitcoin::secp256k1::Message::from_slice($slice).unwrap()
-        }
-        #[cfg(fuzzing)]
-        {
-            match ::bitcoin::secp256k1::Message::from_slice($slice) {
-                Ok(msg) => msg,
-                Err(_) => ::bitcoin::secp256k1::Message::from_slice(&[1; 32]).unwrap(),
-            }
-        }
-    }};
+	($slice: expr) => {
+		{
+			#[cfg(not(fuzzing))]
+			{
+				::bitcoin::secp256k1::Message::from_slice($slice).unwrap()
+			}
+			#[cfg(fuzzing)]
+			{
+				match ::bitcoin::secp256k1::Message::from_slice($slice) {
+					Ok(msg) => msg,
+					Err(_) => ::bitcoin::secp256k1::Message::from_slice(&[1; 32]).unwrap()
+				}
+			}
+		}
+	}
 }

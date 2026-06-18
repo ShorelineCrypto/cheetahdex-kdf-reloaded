@@ -31,9 +31,7 @@ impl From<RpcError> for BalanceError {
 }
 
 impl From<ParsePubkeyError> for BalanceError {
-    fn from(e: ParsePubkeyError) -> Self {
-        BalanceError::Internal(format!("{:?}", e))
-    }
+    fn from(e: ParsePubkeyError) -> Self { BalanceError::Internal(format!("{:?}", e)) }
 }
 
 impl From<RpcError> for WithdrawError {
@@ -47,15 +45,11 @@ impl From<RpcError> for WithdrawError {
 }
 
 impl From<ParsePubkeyError> for WithdrawError {
-    fn from(e: ParsePubkeyError) -> Self {
-        WithdrawError::InvalidAddress(format!("{:?}", e))
-    }
+    fn from(e: ParsePubkeyError) -> Self { WithdrawError::InvalidAddress(format!("{:?}", e)) }
 }
 
 impl From<ProgramError> for WithdrawError {
-    fn from(e: ProgramError) -> Self {
-        WithdrawError::InternalError(format!("{:?}", e))
-    }
+    fn from(e: ProgramError) -> Self { WithdrawError::InternalError(format!("{:?}", e)) }
 }
 
 #[derive(Debug)]
@@ -66,15 +60,11 @@ pub enum AccountError {
 }
 
 impl From<RpcError> for AccountError {
-    fn from(e: RpcError) -> Self {
-        AccountError::ClientError(e.kind)
-    }
+    fn from(e: RpcError) -> Self { AccountError::ClientError(e.kind) }
 }
 
 impl From<ParsePubkeyError> for AccountError {
-    fn from(e: ParsePubkeyError) -> Self {
-        AccountError::ParsePubKeyError(format!("{:?}", e))
-    }
+    fn from(e: ParsePubkeyError) -> Self { AccountError::ParsePubKeyError(format!("{:?}", e)) }
 }
 
 impl From<AccountError> for WithdrawError {
@@ -131,9 +121,7 @@ pub enum KeyPairCreationError {
 }
 
 impl From<ed25519_dalek::SignatureError> for KeyPairCreationError {
-    fn from(e: ed25519_dalek::SignatureError) -> Self {
-        KeyPairCreationError::SignatureError(e)
-    }
+    fn from(e: ed25519_dalek::SignatureError) -> Self { KeyPairCreationError::SignatureError(e) }
 }
 
 fn generate_keypair_from_slice(priv_key: &[u8]) -> Result<Keypair, MmError<KeyPairCreationError>> {
@@ -157,12 +145,9 @@ pub async fn solana_coin_from_conf_and_params(
     if urls.is_empty() {
         return Err("Solana activation requires at least one RPC endpoint (client_url or client_urls)".to_owned());
     }
-    let client = SolanaRpcPool::with_commitment(
-        urls,
-        CommitmentConfig {
-            commitment: params.confirmation_commitment,
-        },
-    )
+    let client = SolanaRpcPool::with_commitment(urls, CommitmentConfig {
+        commitment: params.confirmation_commitment,
+    })
     .ok_or_else(|| "Solana RPC pool initialisation returned no clients".to_owned())?;
     let decimals = conf["decimals"].as_u64().unwrap_or(SOLANA_DEFAULT_DECIMALS) as u8;
     let key_pair = try_s!(generate_keypair_from_slice(priv_key));
@@ -190,18 +175,14 @@ pub struct SolanaCoinImpl {
 }
 
 impl Debug for SolanaCoinImpl {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.write_str(&*self.ticker)
-    }
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult { f.write_str(&*self.ticker) }
 }
 
 #[derive(Clone, Debug)]
 pub struct SolanaCoin(pub(crate) Arc<SolanaCoinImpl>);
 impl Deref for SolanaCoin {
     type Target = SolanaCoinImpl;
-    fn deref(&self) -> &SolanaCoinImpl {
-        &*self.0
-    }
+    fn deref(&self) -> &SolanaCoinImpl { &*self.0 }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

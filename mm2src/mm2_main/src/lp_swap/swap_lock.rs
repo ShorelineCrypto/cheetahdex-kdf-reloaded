@@ -6,8 +6,7 @@ use uuid::Uuid;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_lock::SwapLock;
-#[cfg(target_arch = "wasm32")]
-pub use wasm_lock::SwapLock;
+#[cfg(target_arch = "wasm32")] pub use wasm_lock::SwapLock;
 
 pub type SwapLockResult<T> = Result<T, MmError<SwapLockError>>;
 
@@ -65,9 +64,7 @@ mod native_lock {
             Ok(Some(SwapLock { file_lock }))
         }
 
-        async fn touch(&self) -> SwapLockResult<()> {
-            Ok(self.file_lock.touch().mm_err(Into::into)?)
-        }
+        async fn touch(&self) -> SwapLockResult<()> { Ok(self.file_lock.touch().mm_err(Into::into)?) }
     }
 }
 
@@ -104,9 +101,7 @@ mod wasm_lock {
     }
 
     impl From<InitDbError> for SwapLockError {
-        fn from(e: InitDbError) -> Self {
-            SwapLockError::InternalError(e.to_string())
-        }
+        fn from(e: InitDbError) -> Self { SwapLockError::InternalError(e.to_string()) }
     }
 
     pub struct SwapLock {

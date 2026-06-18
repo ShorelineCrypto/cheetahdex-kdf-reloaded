@@ -9,7 +9,5 @@ pub struct UtxoStandardActivationResult {
 }
 
 impl CurrentBlock for UtxoStandardActivationResult {
-    fn current_block(&self) -> u64 {
-        self.current_block
-    }
+    fn current_block(&self) -> u64 { self.current_block }
 }

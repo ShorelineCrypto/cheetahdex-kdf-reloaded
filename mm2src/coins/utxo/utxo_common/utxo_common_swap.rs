@@ -1129,15 +1129,13 @@ where
 
 use crate::utxo::swap_proto_v2_scripts::{maker_payment_script, taker_funding_script, taker_payment_script};
 use crate::utxo::utxo_standard_swap_v2::UtxoTxPreimage;
-use crate::{
-    FindPaymentSpendError, FundingTxSpend, GenPreimageResult, GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs,
-    RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs, RefundTakerPaymentArgs,
-    SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs,
-    SwapTxTypeWithSecretHash, TxGenError, TxPreimageWithSig, ValidateMakerPaymentArgs, ValidateSwapV2TxError,
-    ValidateSwapV2TxResult, ValidateTakerFundingArgs, ValidateTakerFundingSpendPreimageError,
-    ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageError,
-    ValidateTakerPaymentSpendPreimageResult,
-};
+use crate::{FindPaymentSpendError, FundingTxSpend, GenPreimageResult, GenTakerFundingSpendArgs,
+            GenTakerPaymentSpendArgs, RefundFundingSecretArgs, RefundMakerPaymentSecretArgs,
+            RefundMakerPaymentTimelockArgs, RefundTakerPaymentArgs, SearchForFundingSpendErr, SendMakerPaymentArgs,
+            SendTakerFundingArgs, SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TxGenError, TxPreimageWithSig,
+            ValidateMakerPaymentArgs, ValidateSwapV2TxError, ValidateSwapV2TxResult, ValidateTakerFundingArgs,
+            ValidateTakerFundingSpendPreimageError, ValidateTakerFundingSpendPreimageResult,
+            ValidateTakerPaymentSpendPreimageError, ValidateTakerPaymentSpendPreimageResult};
 
 /// Derives the maker/taker per-swap HTLC keypair for V2 swaps.
 ///

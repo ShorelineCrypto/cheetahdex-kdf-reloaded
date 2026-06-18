@@ -1,10 +1,8 @@
-use crate::mm2::lp_swap::maker_swap::{
-    MakerSwapData, MakerSwapEvent, TakerNegotiationData, MAKER_ERROR_EVENTS, MAKER_SUCCESS_EVENTS,
-};
-use crate::mm2::lp_swap::taker_swap::{
-    maker_payment_wait, MakerNegotiationData, TakerPaymentSpentData, TakerSavedEvent, TakerSwapData, TakerSwapEvent,
-    TAKER_ERROR_EVENTS, TAKER_SUCCESS_EVENTS,
-};
+use crate::mm2::lp_swap::maker_swap::{MakerSwapData, MakerSwapEvent, TakerNegotiationData, MAKER_ERROR_EVENTS,
+                                      MAKER_SUCCESS_EVENTS};
+use crate::mm2::lp_swap::taker_swap::{maker_payment_wait, MakerNegotiationData, TakerPaymentSpentData,
+                                      TakerSavedEvent, TakerSwapData, TakerSwapEvent, TAKER_ERROR_EVENTS,
+                                      TAKER_SUCCESS_EVENTS};
 use crate::mm2::lp_swap::{MakerSavedEvent, MakerSavedSwap, SavedSwap, SwapError, TakerSavedSwap};
 use coins::{lp_coinfind, MmCoinEnum};
 use common::{HttpStatusCode, StatusCode};
@@ -33,9 +31,7 @@ pub enum RecreateSwapError {
 }
 
 impl HttpStatusCode for RecreateSwapError {
-    fn status_code(&self) -> StatusCode {
-        StatusCode::BAD_REQUEST
-    }
+    fn status_code(&self) -> StatusCode { StatusCode::BAD_REQUEST }
 }
 
 impl RecreateSwapError {

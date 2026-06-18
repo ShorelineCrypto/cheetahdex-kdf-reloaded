@@ -29,9 +29,7 @@ impl Pairing {
     }
 
     /// The `wc:<topic>@2?...` URI to display to the user.
-    pub fn uri(&self) -> String {
-        build_pairing_uri(&self.topic, &self.sym_key, self.expiry)
-    }
+    pub fn uri(&self) -> String { build_pairing_uri(&self.topic, &self.sym_key, self.expiry) }
 }
 
 /// Formats a WalletConnect v2 pairing URI.
@@ -46,6 +44,4 @@ pub fn build_pairing_uri(topic: &Topic, sym_key: &SymKey, expiry: u64) -> String
 }
 
 /// Current unix timestamp in seconds.
-fn unix_now() -> u64 {
-    chrono::Utc::now().timestamp().max(0) as u64
-}
+fn unix_now() -> u64 { chrono::Utc::now().timestamp().max(0) as u64 }

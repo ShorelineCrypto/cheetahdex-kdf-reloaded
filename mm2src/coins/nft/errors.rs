@@ -59,39 +59,27 @@ pub enum GetNftInfoError {
 }
 
 impl From<NumConversError> for GetNftInfoError {
-    fn from(e: NumConversError) -> Self {
-        GetNftInfoError::Num(e.to_string())
-    }
+    fn from(e: NumConversError) -> Self { GetNftInfoError::Num(e.to_string()) }
 }
 
 impl From<UnexpectedDerivationMethod> for GetNftInfoError {
-    fn from(e: UnexpectedDerivationMethod) -> Self {
-        GetNftInfoError::Internal(e.to_string())
-    }
+    fn from(e: UnexpectedDerivationMethod) -> Self { GetNftInfoError::Internal(e.to_string()) }
 }
 
 impl From<SpamFilterError> for GetNftInfoError {
-    fn from(e: SpamFilterError) -> Self {
-        GetNftInfoError::SpamFilter(e.to_string())
-    }
+    fn from(e: SpamFilterError) -> Self { GetNftInfoError::SpamFilter(e.to_string()) }
 }
 
 impl From<TransferConfirmationsError> for GetNftInfoError {
-    fn from(e: TransferConfirmationsError) -> Self {
-        GetNftInfoError::Confirmations(e.to_string())
-    }
+    fn from(e: TransferConfirmationsError) -> Self { GetNftInfoError::Confirmations(e.to_string()) }
 }
 
 impl From<LockDbError> for GetNftInfoError {
-    fn from(e: LockDbError) -> Self {
-        GetNftInfoError::Storage(e.to_string())
-    }
+    fn from(e: LockDbError) -> Self { GetNftInfoError::Storage(e.to_string()) }
 }
 
 impl From<GetNftInfoError> for WithdrawError {
-    fn from(e: GetNftInfoError) -> Self {
-        WithdrawError::InternalError(e.to_string())
-    }
+    fn from(e: GetNftInfoError) -> Self { WithdrawError::InternalError(e.to_string()) }
 }
 
 impl HttpStatusCode for GetNftInfoError {
@@ -194,33 +182,23 @@ pub enum UpdateNftError {
 }
 
 impl From<GetNftInfoError> for UpdateNftError {
-    fn from(e: GetNftInfoError) -> Self {
-        UpdateNftError::GetNftInfoError(e)
-    }
+    fn from(e: GetNftInfoError) -> Self { UpdateNftError::GetNftInfoError(e) }
 }
 
 impl From<UpdateSpamPhishingError> for UpdateNftError {
-    fn from(e: UpdateSpamPhishingError) -> Self {
-        UpdateNftError::UpdateSpamPhishingError(e)
-    }
+    fn from(e: UpdateSpamPhishingError) -> Self { UpdateNftError::UpdateSpamPhishingError(e) }
 }
 
 impl From<SpamFilterError> for UpdateNftError {
-    fn from(e: SpamFilterError) -> Self {
-        UpdateNftError::SpamFilterError(e)
-    }
+    fn from(e: SpamFilterError) -> Self { UpdateNftError::SpamFilterError(e) }
 }
 
 impl From<UnexpectedDerivationMethod> for UpdateNftError {
-    fn from(e: UnexpectedDerivationMethod) -> Self {
-        UpdateNftError::UnexpectedDerivationMethod(e.to_string())
-    }
+    fn from(e: UnexpectedDerivationMethod) -> Self { UpdateNftError::UnexpectedDerivationMethod(e.to_string()) }
 }
 
 impl From<LockDbError> for UpdateNftError {
-    fn from(e: LockDbError) -> Self {
-        UpdateNftError::Storage(e.to_string())
-    }
+    fn from(e: LockDbError) -> Self { UpdateNftError::Storage(e.to_string()) }
 }
 
 impl HttpStatusCode for UpdateNftError {
@@ -349,9 +327,7 @@ pub enum ClearNftDbError {
 }
 
 impl From<LockDbError> for ClearNftDbError {
-    fn from(e: LockDbError) -> Self {
-        ClearNftDbError::Storage(e.to_string())
-    }
+    fn from(e: LockDbError) -> Self { ClearNftDbError::Storage(e.to_string()) }
 }
 
 impl HttpStatusCode for ClearNftDbError {

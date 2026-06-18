@@ -17,9 +17,8 @@
 //!    fallback if the node does not return one.
 
 use super::api::{TronApiClient, TronApiError};
-use super::fee::{
-    estimate_trc20_transfer_fee, estimate_trx_transfer_fee, TronAccountResources, TronChainPrices, TronTxFeeDetails,
-};
+use super::fee::{estimate_trc20_transfer_fee, estimate_trx_transfer_fee, TronAccountResources, TronChainPrices,
+                 TronTxFeeDetails};
 use super::proto;
 use super::sign::sign_transaction_raw;
 use super::tx_builder::{abi_encode_trc20_transfer, build_trc20_transfer, build_trx_transfer};

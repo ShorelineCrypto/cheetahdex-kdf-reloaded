@@ -1,16 +1,13 @@
 use async_trait::async_trait;
-use mm2_db::indexed_db::{
-    DbIdentifier, DbInstance, DbUpgrader, IndexedDb, IndexedDbBuilder, OnUpgradeResult, TableSignature,
-};
+use mm2_db::indexed_db::{DbIdentifier, DbInstance, DbUpgrader, IndexedDb, IndexedDbBuilder, OnUpgradeResult,
+                         TableSignature};
 use std::ops::Deref;
 use uuid::Uuid;
 
-pub use mm2_db::indexed_db::{
-    cursor_prelude, DbTransactionError, DbTransactionResult, InitDbError, InitDbResult, ItemId,
-};
-pub use tables::{
-    MyActiveMakerOrdersTable, MyActiveTakerOrdersTable, MyFilteringHistoryOrdersTable, MyHistoryOrdersTable,
-};
+pub use mm2_db::indexed_db::{cursor_prelude, DbTransactionError, DbTransactionResult, InitDbError, InitDbResult,
+                             ItemId};
+pub use tables::{MyActiveMakerOrdersTable, MyActiveTakerOrdersTable, MyFilteringHistoryOrdersTable,
+                 MyHistoryOrdersTable};
 
 const DB_NAME: &str = "ordermatch";
 const DB_VERSION: u32 = 1;
@@ -21,9 +18,7 @@ pub struct OrdermatchDb {
 
 #[async_trait]
 impl DbInstance for OrdermatchDb {
-    fn db_name() -> &'static str {
-        DB_NAME
-    }
+    fn db_name() -> &'static str { DB_NAME }
 
     async fn init(db_id: DbIdentifier) -> InitDbResult<Self> {
         let inner = IndexedDbBuilder::new(db_id)
@@ -41,9 +36,7 @@ impl DbInstance for OrdermatchDb {
 impl Deref for OrdermatchDb {
     type Target = IndexedDb;
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
+    fn deref(&self) -> &Self::Target { &self.inner }
 }
 
 pub mod tables {
@@ -58,9 +51,7 @@ pub mod tables {
     }
 
     impl TableSignature for MyActiveMakerOrdersTable {
-        fn table_name() -> &'static str {
-            "my_active_maker_orders"
-        }
+        fn table_name() -> &'static str { "my_active_maker_orders" }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
             on_upgrade_swap_table_by_uuid_v1(upgrader, old_version, new_version, Self::table_name())
@@ -74,9 +65,7 @@ pub mod tables {
     }
 
     impl TableSignature for MyActiveTakerOrdersTable {
-        fn table_name() -> &'static str {
-            "my_active_taker_orders"
-        }
+        fn table_name() -> &'static str { "my_active_taker_orders" }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
             on_upgrade_swap_table_by_uuid_v1(upgrader, old_version, new_version, Self::table_name())
@@ -90,9 +79,7 @@ pub mod tables {
     }
 
     impl TableSignature for MyHistoryOrdersTable {
-        fn table_name() -> &'static str {
-            "my_history_orders"
-        }
+        fn table_name() -> &'static str { "my_history_orders" }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
             on_upgrade_swap_table_by_uuid_v1(upgrader, old_version, new_version, Self::table_name())
@@ -115,9 +102,7 @@ pub mod tables {
     }
 
     impl TableSignature for MyFilteringHistoryOrdersTable {
-        fn table_name() -> &'static str {
-            "my_filtering_history_orders"
-        }
+        fn table_name() -> &'static str { "my_filtering_history_orders" }
 
         fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
             match (old_version, new_version) {

@@ -2,10 +2,8 @@ use crate::types::{Hash256, PublicKey, Specifier, UnlockKey};
 use blake2b_simd::Params;
 use std::default::Default;
 
-#[cfg(test)]
-use hex;
-#[cfg(test)]
-use std::convert::TryInto;
+#[cfg(test)] use hex;
+#[cfg(test)] use std::convert::TryInto;
 
 const LEAF_HASH_PREFIX: [u8; 1] = [0u8];
 const NODE_HASH_PREFIX: [u8; 1] = [1u8];
@@ -45,9 +43,7 @@ impl Default for Accumulator {
 
 impl Accumulator {
     // Check if there is a tree at the given height
-    fn has_tree_at_height(&self, height: u64) -> bool {
-        self.num_leaves & (1 << height) != 0
-    }
+    fn has_tree_at_height(&self, height: u64) -> bool { self.num_leaves & (1 << height) != 0 }
 
     // Add a leaf to the accumulator
     pub fn add_leaf(&mut self, h: Hash256) {

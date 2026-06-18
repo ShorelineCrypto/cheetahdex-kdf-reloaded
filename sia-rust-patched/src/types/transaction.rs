@@ -89,9 +89,7 @@ impl Serialize for Currency {
 }
 
 impl From<u64> for Currency {
-    fn from(value: u64) -> Self {
-        Currency(value.into())
-    }
+    fn from(value: u64) -> Self { Currency(value.into()) }
 }
 
 // Currency remains the same data structure between V1 and V2 however the encoding changes
@@ -134,9 +132,7 @@ impl<'a> Encodable for CurrencyVersion<'a> {
 pub struct Preimage(pub [u8; 32]);
 
 impl Encodable for Preimage {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.write_slice(&self.0);
-    }
+    fn encode(&self, encoder: &mut Encoder) { encoder.write_slice(&self.0); }
 }
 
 impl Serialize for Preimage {
@@ -193,9 +189,7 @@ pub enum PreimageError {
 }
 
 impl From<Preimage> for Vec<u8> {
-    fn from(preimage: Preimage) -> Self {
-        preimage.0.to_vec()
-    }
+    fn from(preimage: Preimage) -> Self { preimage.0.to_vec() }
 }
 
 impl TryFrom<&[u8]> for Preimage {
@@ -224,9 +218,7 @@ pub struct SatisfiedPolicy {
 }
 
 impl Encodable for Signature {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.write_slice(&self.to_bytes());
-    }
+    fn encode(&self, encoder: &mut Encoder) { encoder.write_slice(&self.to_bytes()); }
 }
 
 impl Encodable for SatisfiedPolicy {
@@ -410,9 +402,7 @@ pub type TransactionId = Hash256;
 pub struct SiacoinOutputId(pub Hash256);
 
 impl Encodable for SiacoinOutputId {
-    fn encode(&self, encoder: &mut Encoder) {
-        self.0.encode(encoder)
-    }
+    fn encode(&self, encoder: &mut Encoder) { self.0.encode(encoder) }
 }
 
 impl SiacoinOutputId {
@@ -430,9 +420,7 @@ impl SiacoinOutputId {
 pub struct SiafundOutputId(pub Hash256);
 
 impl Encodable for SiafundOutputId {
-    fn encode(&self, encoder: &mut Encoder) {
-        self.0.encode(encoder)
-    }
+    fn encode(&self, encoder: &mut Encoder) { self.0.encode(encoder) }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, From, Into, Deserialize, Serialize, Display)]
@@ -440,9 +428,7 @@ impl Encodable for SiafundOutputId {
 pub struct FileContractID(pub Hash256);
 
 impl Encodable for FileContractID {
-    fn encode(&self, encoder: &mut Encoder) {
-        self.0.encode(encoder)
-    }
+    fn encode(&self, encoder: &mut Encoder) { self.0.encode(encoder) }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -731,9 +717,7 @@ impl TryFrom<String> for Leaf {
 }
 
 impl From<Leaf> for String {
-    fn from(value: Leaf) -> Self {
-        hex::encode(value.0)
-    }
+    fn from(value: Leaf) -> Self { hex::encode(value.0) }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -804,6 +788,7 @@ pub enum ResolutionType {
     StorageProof,
     Expiration,
 }
+
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct V2FileContractResolution {
@@ -1058,9 +1043,7 @@ pub struct V1Transaction {
 }
 
 impl V1Transaction {
-    pub fn txid(&self) -> Hash256 {
-        Encoder::encode_and_hash(&V1TransactionSansSigs(self.clone()))
-    }
+    pub fn txid(&self) -> Hash256 { Encoder::encode_and_hash(&V1TransactionSansSigs(self.clone())) }
 }
 
 impl Encodable for SiafundInputV1 {
@@ -1223,15 +1206,11 @@ impl Encodable for V2Transaction {
 pub struct ArbitraryData(pub Vec<u8>);
 
 impl ArbitraryData {
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
 }
 
 impl Encodable for ArbitraryData {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.write_len_prefixed_bytes(&self.0);
-    }
+    fn encode(&self, encoder: &mut Encoder) { encoder.write_len_prefixed_bytes(&self.0); }
 }
 
 impl Serialize for ArbitraryData {

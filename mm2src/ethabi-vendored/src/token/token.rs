@@ -219,47 +219,42 @@ mod tests {
             assert!(!Token::types_check(&tokens, &param_types))
         }
 
-        assert_type_check(
-            vec![Token::Uint(0.into()), Token::Bool(false)],
-            vec![ParamType::Uint(256), ParamType::Bool],
-        );
-        assert_type_check(
-            vec![Token::Uint(0.into()), Token::Bool(false)],
-            vec![ParamType::Uint(32), ParamType::Bool],
-        );
+        assert_type_check(vec![Token::Uint(0.into()), Token::Bool(false)], vec![
+            ParamType::Uint(256),
+            ParamType::Bool,
+        ]);
+        assert_type_check(vec![Token::Uint(0.into()), Token::Bool(false)], vec![
+            ParamType::Uint(32),
+            ParamType::Bool,
+        ]);
 
         assert_not_type_check(vec![Token::Uint(0.into())], vec![ParamType::Uint(32), ParamType::Bool]);
-        assert_not_type_check(
-            vec![Token::Uint(0.into()), Token::Bool(false)],
-            vec![ParamType::Uint(32)],
-        );
-        assert_not_type_check(
-            vec![Token::Bool(false), Token::Uint(0.into())],
-            vec![ParamType::Uint(32), ParamType::Bool],
-        );
+        assert_not_type_check(vec![Token::Uint(0.into()), Token::Bool(false)], vec![ParamType::Uint(
+            32,
+        )]);
+        assert_not_type_check(vec![Token::Bool(false), Token::Uint(0.into())], vec![
+            ParamType::Uint(32),
+            ParamType::Bool,
+        ]);
 
-        assert_type_check(
-            vec![Token::FixedBytes(vec![0, 0, 0, 0])],
-            vec![ParamType::FixedBytes(4)],
-        );
+        assert_type_check(vec![Token::FixedBytes(vec![0, 0, 0, 0])], vec![ParamType::FixedBytes(
+            4,
+        )]);
         assert_type_check(vec![Token::FixedBytes(vec![0, 0, 0])], vec![ParamType::FixedBytes(4)]);
-        assert_not_type_check(
-            vec![Token::FixedBytes(vec![0, 0, 0, 0])],
-            vec![ParamType::FixedBytes(3)],
-        );
+        assert_not_type_check(vec![Token::FixedBytes(vec![0, 0, 0, 0])], vec![ParamType::FixedBytes(
+            3,
+        )]);
 
-        assert_type_check(
-            vec![Token::Array(vec![Token::Bool(false), Token::Bool(true)])],
-            vec![ParamType::Array(Box::new(ParamType::Bool))],
-        );
+        assert_type_check(vec![Token::Array(vec![Token::Bool(false), Token::Bool(true)])], vec![
+            ParamType::Array(Box::new(ParamType::Bool)),
+        ]);
         assert_not_type_check(
             vec![Token::Array(vec![Token::Bool(false), Token::Uint(0.into())])],
             vec![ParamType::Array(Box::new(ParamType::Bool))],
         );
-        assert_not_type_check(
-            vec![Token::Array(vec![Token::Bool(false), Token::Bool(true)])],
-            vec![ParamType::Array(Box::new(ParamType::Address))],
-        );
+        assert_not_type_check(vec![Token::Array(vec![Token::Bool(false), Token::Bool(true)])], vec![
+            ParamType::Array(Box::new(ParamType::Address)),
+        ]);
 
         assert_type_check(
             vec![Token::FixedArray(vec![Token::Bool(false), Token::Bool(true)])],

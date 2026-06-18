@@ -11,7 +11,7 @@ use std::convert::TryInto;
 use std::io::{self, Write};
 use zcash_primitives::{
     legacy::TransparentAddress,
-    sapling::{keys::OutgoingViewingKey, PaymentAddress},
+    sapling::{{keys::OutgoingViewingKey}, PaymentAddress},
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
@@ -31,7 +31,7 @@ where
     match bech32::decode(s)? {
         (decoded_hrp, data, Variant::Bech32) if decoded_hrp == hrp => {
             Vec::<u8>::from_base32(&data).map(|data| read(data))
-        },
+        }
         _ => Ok(None),
     }
 }
@@ -60,7 +60,10 @@ pub fn encode_extended_spending_key(hrp: &str, extsk: &ExtendedSpendingKey) -> S
 /// Decodes an [`ExtendedSpendingKey`] from a Bech32-encoded string.
 ///
 /// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
-pub fn decode_extended_spending_key(hrp: &str, s: &str) -> Result<Option<ExtendedSpendingKey>, Error> {
+pub fn decode_extended_spending_key(
+    hrp: &str,
+    s: &str,
+) -> Result<Option<ExtendedSpendingKey>, Error> {
     bech32_decode(hrp, s, |data| ExtendedSpendingKey::read(&data[..]).ok())
 }
 
@@ -90,17 +93,21 @@ pub fn encode_extended_full_viewing_key(hrp: &str, extfvk: &ExtendedFullViewingK
 /// Decodes an [`ExtendedFullViewingKey`] from a Bech32-encoded string.
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-pub fn decode_extended_full_viewing_key(hrp: &str, s: &str) -> Result<Option<ExtendedFullViewingKey>, Error> {
+pub fn decode_extended_full_viewing_key(
+    hrp: &str,
+    s: &str,
+) -> Result<Option<ExtendedFullViewingKey>, Error> {
     bech32_decode(hrp, s, |data| ExtendedFullViewingKey::read(&data[..]).ok())
 }
 
-pub fn decode_outgoing_viewing_key(hrp: &str, s: &str) -> Result<Option<OutgoingViewingKey>, Error> {
-    bech32_decode(hrp, s, |data| {
-        if data.len() == 32 {
-            Some(OutgoingViewingKey(data.try_into().expect("length is 32")))
-        } else {
-            None
-        }
+pub fn decode_outgoing_viewing_key(
+    hrp: &str,
+    s: &str,
+) -> Result<Option<OutgoingViewingKey>, Error> {
+    bech32_decode(hrp, s, |data| if data.len() == 32 {
+        Some(OutgoingViewingKey(data.try_into().expect("length is 32")))
+    } else {
+        None
     })
 }
 
@@ -223,20 +230,24 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddres
 /// );
 /// ```
 /// [`TransparentAddress`]: zcash_primitives::legacy::TransparentAddress
-pub fn encode_transparent_address(pubkey_version: &[u8], script_version: &[u8], addr: &TransparentAddress) -> String {
+pub fn encode_transparent_address(
+    pubkey_version: &[u8],
+    script_version: &[u8],
+    addr: &TransparentAddress,
+) -> String {
     let decoded = match addr {
         TransparentAddress::PublicKey(key_id) => {
             let mut decoded = vec![0; pubkey_version.len() + 20];
             decoded[..pubkey_version.len()].copy_from_slice(pubkey_version);
             decoded[pubkey_version.len()..].copy_from_slice(key_id);
             decoded
-        },
+        }
         TransparentAddress::Script(script_id) => {
             let mut decoded = vec![0; script_version.len() + 20];
             decoded[..script_version.len()].copy_from_slice(script_version);
             decoded[script_version.len()..].copy_from_slice(script_id);
             decoded
-        },
+        }
     };
     bs58::encode(decoded).with_check().into_string()
 }
@@ -320,20 +331,34 @@ mod tests {
         let encoded_test = "secret-extended-key-test1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qysqws3xh6qmha7gna72fs2n4clnc9zgyd22s658f65pex4exe56qjk5pqj9vfdq7dfdhjc2rs9jdwq0zl99uwycyrxzp86705rk687spn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjsvzyw8j";
 
         assert_eq!(
-            encode_extended_spending_key(constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk),
+            encode_extended_spending_key(
+                constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+                &extsk
+            ),
             encoded_main
         );
         assert_eq!(
-            decode_extended_spending_key(constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY, encoded_main).unwrap(),
+            decode_extended_spending_key(
+                constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+                encoded_main
+            )
+            .unwrap(),
             Some(extsk.clone())
         );
 
         assert_eq!(
-            encode_extended_spending_key(constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk),
+            encode_extended_spending_key(
+                constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+                &extsk
+            ),
             encoded_test
         );
         assert_eq!(
-            decode_extended_spending_key(constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY, encoded_test).unwrap(),
+            decode_extended_spending_key(
+                constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+                encoded_test
+            )
+            .unwrap(),
             Some(extsk)
         );
     }
@@ -346,22 +371,34 @@ mod tests {
         let encoded_test = "zxviewtestsapling1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjs8evfkz";
 
         assert_eq!(
-            encode_extended_full_viewing_key(constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk),
+            encode_extended_full_viewing_key(
+                constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                &extfvk
+            ),
             encoded_main
         );
         assert_eq!(
-            decode_extended_full_viewing_key(constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, encoded_main)
-                .unwrap(),
+            decode_extended_full_viewing_key(
+                constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                encoded_main
+            )
+            .unwrap(),
             Some(extfvk.clone())
         );
 
         assert_eq!(
-            encode_extended_full_viewing_key(constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk),
+            encode_extended_full_viewing_key(
+                constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                &extfvk
+            ),
             encoded_test
         );
         assert_eq!(
-            decode_extended_full_viewing_key(constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, encoded_test)
-                .unwrap(),
+            decode_extended_full_viewing_key(
+                constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                encoded_test
+            )
+            .unwrap(),
             Some(extfvk)
         );
     }
@@ -369,20 +406,29 @@ mod tests {
     #[test]
     fn payment_address() {
         let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
 
-        let addr = PaymentAddress::from_parts(Diversifier([0u8; 11]), jubjub::SubgroupPoint::random(rng)).unwrap();
+        let addr =
+            PaymentAddress::from_parts(Diversifier([0u8; 11]), jubjub::SubgroupPoint::random(rng))
+                .unwrap();
 
-        let encoded_main = "zs1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75c8v35z";
-        let encoded_test = "ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk";
+        let encoded_main =
+            "zs1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75c8v35z";
+        let encoded_test =
+            "ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk";
 
         assert_eq!(
             encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr),
             encoded_main
         );
         assert_eq!(
-            decode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, encoded_main).unwrap(),
+            decode_payment_address(
+                constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+                encoded_main
+            )
+            .unwrap(),
             Some(addr.clone())
         );
 
@@ -391,7 +437,11 @@ mod tests {
             encoded_test
         );
         assert_eq!(
-            decode_payment_address(constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS, encoded_test).unwrap(),
+            decode_payment_address(
+                constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+                encoded_test
+            )
+            .unwrap(),
             Some(addr)
         );
     }
@@ -399,15 +449,23 @@ mod tests {
     #[test]
     fn invalid_diversifier() {
         let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
 
-        let addr = PaymentAddress::from_parts(Diversifier([1u8; 11]), jubjub::SubgroupPoint::random(rng)).unwrap();
+        let addr =
+            PaymentAddress::from_parts(Diversifier([1u8; 11]), jubjub::SubgroupPoint::random(rng))
+                .unwrap();
 
-        let encoded_main = encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr);
+        let encoded_main =
+            encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr);
 
         assert_eq!(
-            decode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &encoded_main).unwrap(),
+            decode_payment_address(
+                constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
+                &encoded_main
+            )
+            .unwrap(),
             None
         );
     }

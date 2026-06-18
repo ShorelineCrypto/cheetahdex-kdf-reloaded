@@ -219,9 +219,7 @@ async fn test_error_source() -> AsyncConnResult<()> {
     Ok(())
 }
 
-fn failable_func(_: &rusqlite::Connection) -> std::result::Result<(), MyError> {
-    Err(MyError::MySpecificError)
-}
+fn failable_func(_: &rusqlite::Connection) -> std::result::Result<(), MyError> { Err(MyError::MySpecificError) }
 
 #[tokio::test]
 async fn test_ergonomic_errors() -> AsyncConnResult<()> {
@@ -248,13 +246,9 @@ enum MyError {
 }
 
 impl Display for MyError {
-    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { Ok(()) }
 }
 
 impl std::error::Error for MyError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
 }

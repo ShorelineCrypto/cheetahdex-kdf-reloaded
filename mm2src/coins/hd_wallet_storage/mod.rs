@@ -4,23 +4,18 @@ use crypto::{CryptoCtx, CryptoCtxError, CryptoInitError, XPub};
 use derive_more::Display;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
-#[cfg(test)]
-use mocktopus::macros::*;
+#[cfg(test)] use mocktopus::macros::*;
 use primitives::hash::H160;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::Deref;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod sqlite_storage;
-#[cfg(target_arch = "wasm32")]
-mod wasm_storage;
+#[cfg(not(target_arch = "wasm32"))] mod sqlite_storage;
+#[cfg(target_arch = "wasm32")] mod wasm_storage;
 
-#[cfg(test)]
-mod mock_storage;
-#[cfg(test)]
-pub use mock_storage::HDWalletMockStorage;
+#[cfg(test)] mod mock_storage;
+#[cfg(test)] pub use mock_storage::HDWalletMockStorage;
 
 cfg_wasm32! {
     use wasm_storage::HDWalletIndexedDbStorage as HDWalletStorageInstance;
@@ -54,21 +49,15 @@ pub enum HDWalletStorageError {
 }
 
 impl From<CryptoInitError> for HDWalletStorageError {
-    fn from(e: CryptoInitError) -> Self {
-        HDWalletStorageError::Internal(e.to_string())
-    }
+    fn from(e: CryptoInitError) -> Self { HDWalletStorageError::Internal(e.to_string()) }
 }
 
 impl From<CryptoCtxError> for HDWalletStorageError {
-    fn from(e: CryptoCtxError) -> Self {
-        HDWalletStorageError::Internal(e.to_string())
-    }
+    fn from(e: CryptoCtxError) -> Self { HDWalletStorageError::Internal(e.to_string()) }
 }
 
 impl HDWalletStorageError {
-    pub fn is_deserializing_err(&self) -> bool {
-        matches!(self, HDWalletStorageError::ErrorDeserializing(_))
-    }
+    pub fn is_deserializing_err(&self) -> bool { matches!(self, HDWalletStorageError::ErrorDeserializing(_)) }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -313,9 +302,7 @@ impl HDWalletCoinStorage {
     }
 }
 
-fn display_rmd160(rmd160: &H160) -> String {
-    hex::encode(rmd160.deref())
-}
+fn display_rmd160(rmd160: &H160) -> String { hex::encode(rmd160.deref()) }
 
 #[cfg(any(test, target_arch = "wasm32"))]
 mod tests {
@@ -339,9 +326,7 @@ mod tests {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn mm_ctx_with_custom_db() -> MmArc {
-        MmCtxBuilder::new().with_test_db_namespace().into_mm_arc()
-    }
+    fn mm_ctx_with_custom_db() -> MmArc { MmCtxBuilder::new().with_test_db_namespace().into_mm_arc() }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn mm_ctx_with_custom_db() -> MmArc {
@@ -434,16 +419,13 @@ mod tests {
             .into_iter()
             .sorted_by(|x, y| x.external_addresses_number.cmp(&y.external_addresses_number))
             .collect();
-        assert_eq!(
-            all_accounts,
-            vec![
-                rick_user0_device0_account0.clone(),
-                rick_user0_device0_account1.clone(),
-                rick_user0_device1_account0.clone(),
-                rick_user1_device0_account0.clone(),
-                morty_user0_device0_account0.clone()
-            ]
-        );
+        assert_eq!(all_accounts, vec![
+            rick_user0_device0_account0.clone(),
+            rick_user0_device0_account1.clone(),
+            rick_user0_device1_account0.clone(),
+            rick_user1_device0_account0.clone(),
+            morty_user0_device0_account0.clone()
+        ]);
 
         let mut actual = rick_user0_device0_db
             .load_all_accounts()
@@ -596,37 +578,25 @@ mod tests {
 
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
-    async fn test_unique_wallets() {
-        test_unique_wallets_impl().await
-    }
+    async fn test_unique_wallets() { test_unique_wallets_impl().await }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn test_unique_wallets() {
-        block_on(test_unique_wallets_impl())
-    }
+    fn test_unique_wallets() { block_on(test_unique_wallets_impl()) }
 
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
-    async fn test_delete_accounts() {
-        test_delete_accounts_impl().await
-    }
+    async fn test_delete_accounts() { test_delete_accounts_impl().await }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn test_delete_accounts() {
-        block_on(test_delete_accounts_impl())
-    }
+    fn test_delete_accounts() { block_on(test_delete_accounts_impl()) }
 
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
-    async fn test_update_account() {
-        test_update_account_impl().await
-    }
+    async fn test_update_account() { test_update_account_impl().await }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn test_update_account() {
-        block_on(test_update_account_impl())
-    }
+    fn test_update_account() { block_on(test_update_account_impl()) }
 }

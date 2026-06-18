@@ -9,10 +9,9 @@ use super::{StoredSession, WcStorageOps, WC_SESSION_TABLE};
 use crate::error::WalletConnectError;
 use async_trait::async_trait;
 use mm2_core::mm_ctx::MmArc;
-use mm2_db::indexed_db::{
-    ConstructibleDb, DbIdentifier, DbInstance, DbLocked, DbTransactionError, DbUpgrader, IndexedDb, IndexedDbBuilder,
-    InitDbError, InitDbResult, OnUpgradeResult, SharedDb, TableSignature,
-};
+use mm2_db::indexed_db::{ConstructibleDb, DbIdentifier, DbInstance, DbLocked, DbTransactionError, DbUpgrader,
+                         IndexedDb, IndexedDbBuilder, InitDbError, InitDbResult, OnUpgradeResult, SharedDb,
+                         TableSignature};
 use mm2_err_handle::mm_error::MmError;
 use serde::{Deserialize, Serialize};
 
@@ -24,15 +23,11 @@ const TOPIC_INDEX: &str = "topic";
 type WcSessionDbLocked<'a> = DbLocked<'a, WcSessionDb>;
 
 impl From<MmError<DbTransactionError>> for WalletConnectError {
-    fn from(e: MmError<DbTransactionError>) -> Self {
-        WalletConnectError::Storage(e.to_string())
-    }
+    fn from(e: MmError<DbTransactionError>) -> Self { WalletConnectError::Storage(e.to_string()) }
 }
 
 impl From<MmError<InitDbError>> for WalletConnectError {
-    fn from(e: MmError<InitDbError>) -> Self {
-        WalletConnectError::Storage(e.to_string())
-    }
+    fn from(e: MmError<InitDbError>) -> Self { WalletConnectError::Storage(e.to_string()) }
 }
 
 /// One persisted session row, shaped identically to [`StoredSession`].
@@ -64,9 +59,7 @@ impl From<WcSessionTable> for StoredSession {
 }
 
 impl TableSignature for WcSessionTable {
-    fn table_name() -> &'static str {
-        WC_SESSION_TABLE
-    }
+    fn table_name() -> &'static str { WC_SESSION_TABLE }
 
     fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
         if let (0, 1) = (old_version, new_version) {
@@ -84,9 +77,7 @@ pub struct WcSessionDb {
 
 #[async_trait]
 impl DbInstance for WcSessionDb {
-    fn db_name() -> &'static str {
-        DB_NAME
-    }
+    fn db_name() -> &'static str { DB_NAME }
 
     async fn init(db_id: DbIdentifier) -> InitDbResult<Self> {
         let inner = IndexedDbBuilder::new(db_id)

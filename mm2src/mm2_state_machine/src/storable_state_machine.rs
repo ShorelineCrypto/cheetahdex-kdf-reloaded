@@ -69,9 +69,7 @@ pub trait RestoredState: StorableState + Send {
 
 // Any StorableState that is also a State can trivially become a RestoredState.
 impl<T: StorableState + State<StateMachine = Self::StateMachine> + Send> RestoredState for T {
-    fn into_state(self: Box<Self>) -> Box<dyn State<StateMachine = Self::StateMachine>> {
-        self
-    }
+    fn into_state(self: Box<Self>) -> Box<dyn State<StateMachine = Self::StateMachine>> { self }
 }
 
 /// Wraps a machine that was recreated from stored events.
@@ -80,9 +78,7 @@ pub struct RestoredMachine<M: StorableStateMachine> {
 }
 
 impl<M: StorableStateMachine> RestoredMachine<M> {
-    pub fn new(machine: M) -> Self {
-        RestoredMachine { machine }
-    }
+    pub fn new(machine: M) -> Self { RestoredMachine { machine } }
 
     /// Resume execution from a recovered state.
     pub async fn kickstart(
@@ -300,15 +296,9 @@ mod tests {
         type DbRepr = TestRepr;
         type Error = Infallible;
 
-        async fn store_repr(&mut self, _id: usize, _repr: TestRepr) -> Result<(), Infallible> {
-            Ok(())
-        }
-        async fn get_repr(&self, _id: usize) -> Result<TestRepr, Infallible> {
-            Ok(TestRepr)
-        }
-        async fn has_record_for(&mut self, _id: &usize) -> Result<bool, Infallible> {
-            Ok(false)
-        }
+        async fn store_repr(&mut self, _id: usize, _repr: TestRepr) -> Result<(), Infallible> { Ok(()) }
+        async fn get_repr(&self, _id: usize) -> Result<TestRepr, Infallible> { Ok(TestRepr) }
+        async fn has_record_for(&mut self, _id: &usize) -> Result<bool, Infallible> { Ok(false) }
 
         async fn store_event(&mut self, id: usize, event: TestEvent) -> Result<(), Infallible> {
             self.unfinished.entry(id).or_default().push(event);
@@ -342,15 +332,9 @@ mod tests {
         type RecreateCtx = ();
         type RecreateError = Infallible;
 
-        fn to_db_repr(&self) -> TestRepr {
-            TestRepr
-        }
-        fn storage(&mut self) -> &mut MockStorage {
-            &mut self.storage
-        }
-        fn id(&self) -> usize {
-            self.id
-        }
+        fn to_db_repr(&self) -> TestRepr { TestRepr }
+        fn storage(&mut self) -> &mut MockStorage { &mut self.storage }
+        fn id(&self) -> usize { self.id }
 
         async fn recreate_machine(
             id: usize,
@@ -367,9 +351,7 @@ mod tests {
             Ok((RestoredMachine { machine }, state))
         }
 
-        async fn acquire_reentrancy_lock(&self) -> Result<(), Infallible> {
-            Ok(())
-        }
+        async fn acquire_reentrancy_lock(&self) -> Result<(), Infallible> { Ok(()) }
         fn spawn_reentrancy_lock_renew(&mut self, _guard: ()) {}
         fn init_additional_context(&mut self) {}
         fn clean_up_context(&mut self) {}
@@ -389,9 +371,7 @@ mod tests {
 
     impl StorableState for StateB {
         type StateMachine = TestMachine;
-        fn get_event(&self) -> TestEvent {
-            TestEvent::EnteredB
-        }
+        fn get_event(&self) -> TestEvent { TestEvent::EnteredB }
     }
 
     impl TransitionFrom<StateA> for StateB {}
@@ -400,9 +380,7 @@ mod tests {
 
     impl StorableState for StateC {
         type StateMachine = TestMachine;
-        fn get_event(&self) -> TestEvent {
-            TestEvent::EnteredC
-        }
+        fn get_event(&self) -> TestEvent { TestEvent::EnteredC }
     }
 
     impl TransitionFrom<StateB> for StateC {}
@@ -411,9 +389,7 @@ mod tests {
 
     impl StorableState for StateD {
         type StateMachine = TestMachine;
-        fn get_event(&self) -> TestEvent {
-            TestEvent::EnteredD
-        }
+        fn get_event(&self) -> TestEvent { TestEvent::EnteredD }
     }
 
     impl TransitionFrom<StateC> for StateD {}

@@ -194,41 +194,25 @@ impl SpendPolicy {
         Address(encoder.hash())
     }
 
-    pub fn above(height: u64) -> Self {
-        SpendPolicy::Above(height)
-    }
+    pub fn above(height: u64) -> Self { SpendPolicy::Above(height) }
 
-    pub fn after(time: u64) -> Self {
-        SpendPolicy::After(time)
-    }
+    pub fn after(time: u64) -> Self { SpendPolicy::After(time) }
 
-    pub fn public_key(pk: PublicKey) -> Self {
-        SpendPolicy::PublicKey(pk)
-    }
+    pub fn public_key(pk: PublicKey) -> Self { SpendPolicy::PublicKey(pk) }
 
-    pub fn hash(h: Hash256) -> Self {
-        SpendPolicy::Hash(h)
-    }
+    pub fn hash(h: Hash256) -> Self { SpendPolicy::Hash(h) }
 
-    pub fn threshold(n: u8, of: Vec<SpendPolicy>) -> Self {
-        SpendPolicy::Threshold { n, of }
-    }
+    pub fn threshold(n: u8, of: Vec<SpendPolicy>) -> Self { SpendPolicy::Threshold { n, of } }
 
-    pub fn opaque(p: &SpendPolicy) -> Self {
-        SpendPolicy::Opaque(p.address())
-    }
+    pub fn opaque(p: &SpendPolicy) -> Self { SpendPolicy::Opaque(p.address()) }
 
     pub fn unlock_condition(pubkeys: Vec<PublicKey>, timelock: u64, signatures_required: u64) -> Self {
         SpendPolicy::UnlockConditions(UnlockCondition::new(pubkeys, timelock, signatures_required))
     }
 
-    pub fn anyone_can_spend() -> Self {
-        SpendPolicy::threshold(0, vec![])
-    }
+    pub fn anyone_can_spend() -> Self { SpendPolicy::threshold(0, vec![]) }
 
-    pub fn opacify(&self) -> Self {
-        SpendPolicy::Opaque(self.address())
-    }
+    pub fn opacify(&self) -> Self { SpendPolicy::Opaque(self.address()) }
 }
 
 impl SpendPolicy {
@@ -367,13 +351,10 @@ fn parse_unlock_key(input: &str) -> IResult<&str, UnlockKey> {
                 all_consuming(map_res(take_while(|c: char| c.is_ascii_hexdigit()), |hex_str: &str| {
                     hex::decode(hex_str)
                 }))(input)?;
-            Ok((
-                input,
-                UnlockKey::NonStandard {
-                    algorithm: specifier,
-                    public_key,
-                },
-            ))
+            Ok((input, UnlockKey::NonStandard {
+                algorithm: specifier,
+                public_key,
+            }))
         },
     }
 }
@@ -404,9 +385,7 @@ impl fmt::Display for UnlockKey {
 }
 
 impl Encodable for PublicKey {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.write_slice(&self.to_bytes());
-    }
+    fn encode(&self, encoder: &mut Encoder) { encoder.write_slice(&self.to_bytes()); }
 }
 
 impl Encodable for UnlockKey {
@@ -484,7 +463,5 @@ impl UnlockCondition {
         accumulator.root()
     }
 
-    pub fn address(&self) -> Address {
-        Address(self.unlock_hash())
-    }
+    pub fn address(&self) -> Address { Address(self.unlock_hash()) }
 }

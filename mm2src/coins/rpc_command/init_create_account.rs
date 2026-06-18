@@ -4,9 +4,7 @@ use crate::hd_wallet::HDWalletRpcError;
 use crate::{lp_coinfind_or_err, CoinBalance, CoinWithDerivationMethod, CoinsContext, MmCoinEnum};
 use async_trait::async_trait;
 use common::{true_f, SuccessResponse};
-use crypto::hw_rpc_task::{
-    HwConnectStatuses, HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTaskUserActionRequest,
-};
+use crypto::hw_rpc_task::{HwConnectStatuses, HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTaskUserActionRequest};
 use crypto::RpcDerivationPath;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -75,9 +73,7 @@ impl RpcTaskTypes for InitCreateAccountTask {
 
 #[async_trait]
 impl RpcTask for InitCreateAccountTask {
-    fn initial_status(&self) -> Self::InProgressStatus {
-        CreateAccountInProgressStatus::Preparing
-    }
+    fn initial_status(&self) -> Self::InProgressStatus { CreateAccountInProgressStatus::Preparing }
 
     async fn run(self, task_handle: &CreateAccountTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         async fn create_new_account_helper<Coin>(

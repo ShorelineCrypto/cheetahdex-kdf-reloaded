@@ -2,9 +2,8 @@
 /// run as background RPC tasks with progress and cancellation support.
 use crate::context::CoinsActivationContext;
 use crate::l2::enable_l2::L2ProtocolParams;
-use crate::l2::l2_activation_errors::{
-    CancelL2ActivationError, L2ActivationError, L2ActivationStatusError, L2ActivationUserActionError,
-};
+use crate::l2::l2_activation_errors::{CancelL2ActivationError, L2ActivationError, L2ActivationStatusError,
+                                      L2ActivationUserActionError};
 use crate::prelude::*;
 use async_trait::async_trait;
 use coins::{lp_coinfind, lp_coinfind_or_err, CoinsContext, MmCoinEnum, RegisterCoinError};
@@ -88,9 +87,7 @@ impl<L2> RpcTask for L2ActivationTask<L2>
 where
     L2: InitL2ActivationOps,
 {
-    fn initial_status(&self) -> Self::InProgressStatus {
-        <L2::InProgressStatus as L2InitialStatus>::initial_status()
-    }
+    fn initial_status(&self) -> Self::InProgressStatus { <L2::InProgressStatus as L2InitialStatus>::initial_status() }
 
     async fn run(self, task_handle: &RpcTaskHandle<Self>) -> Result<Self::Item, MmError<Self::Error>> {
         let (coin, result) = L2::init_l2(

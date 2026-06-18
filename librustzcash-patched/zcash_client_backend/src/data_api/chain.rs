@@ -236,7 +236,12 @@ where
 /// # Ok(())
 /// # }
 /// ```
-pub fn scan_cached_blocks<E, N, P, C, D>(params: &P, cache: &C, data: &mut D, limit: Option<u32>) -> Result<(), E>
+pub fn scan_cached_blocks<E, N, P, C, D>(
+    params: &P,
+    cache: &C,
+    data: &mut D,
+    limit: Option<u32>,
+) -> Result<(), E>
 where
     P: consensus::Parameters,
     C: BlockSource<Error = E>,
@@ -250,9 +255,10 @@ where
 
     // Recall where we synced up to previously.
     // If we have never synced, use sapling activation height to select all cached CompactBlocks.
-    let mut last_height = data
-        .block_height_extrema()
-        .map(|opt| opt.map(|(_, max)| max).unwrap_or(sapling_activation_height - 1))?;
+    let mut last_height = data.block_height_extrema().map(|opt| {
+        opt.map(|(_, max)| max)
+            .unwrap_or(sapling_activation_height - 1)
+    })?;
 
     // Fetch the ExtendedFullViewingKeys we are tracking
     let extfvks = data.get_extended_full_viewing_keys()?;
@@ -274,7 +280,9 @@ where
 
         // Scanned blocks MUST be height-sequential.
         if current_height != (last_height + 1) {
-            return Err(ChainInvalid::block_height_discontinuity(last_height + 1, current_height).into());
+            return Err(
+                ChainInvalid::block_height_discontinuity(last_height + 1, current_height).into(),
+            );
         }
 
         let block_hash = BlockHash::from_slice(&block.hash);
@@ -283,7 +291,14 @@ where
         let txs: Vec<WalletTx<Nullifier>> = {
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
 
-            scan_block(params, block, &extfvks, &nullifiers, &mut tree, &mut witness_refs[..])
+            scan_block(
+                params,
+                block,
+                &extfvks,
+                &nullifiers,
+                &mut tree,
+                &mut witness_refs[..],
+            )
         };
 
         // Enforce that all roots match. This is slow, so only include in debug builds.

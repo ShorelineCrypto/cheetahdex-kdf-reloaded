@@ -15,10 +15,8 @@ use crypto::{dhash256, sha256};
 use hex::FromHex;
 use primitives::bytes::Bytes;
 use primitives::hash::{CipherText, EncCipherText, OutCipherText, ZkProof, ZkProofSapling, H256, H512, H64};
-use serialization::{
-    deserialize, serialize, serialize_with_flags, CompactInteger, Deserializable, Error, Reader, Serializable, Stream,
-    SERIALIZE_TRANSACTION_WITNESS,
-};
+use serialization::{deserialize, serialize, serialize_with_flags, CompactInteger, Deserializable, Error, Reader,
+                    Serializable, Stream, SERIALIZE_TRANSACTION_WITNESS};
 use std::io;
 use std::io::Read;
 
@@ -47,9 +45,7 @@ impl OutPoint {
         }
     }
 
-    pub fn is_null(&self) -> bool {
-        self.hash.is_zero() && self.index == u32::MAX
-    }
+    pub fn is_null(&self) -> bool { self.hash.is_zero() && self.index == u32::MAX }
 }
 
 #[derive(Debug, Default, PartialEq, Clone)]
@@ -72,13 +68,9 @@ impl TransactionInput {
         }
     }
 
-    pub fn is_final(&self) -> bool {
-        self.sequence == SEQUENCE_FINAL
-    }
+    pub fn is_final(&self) -> bool { self.sequence == SEQUENCE_FINAL }
 
-    pub fn has_witness(&self) -> bool {
-        !self.script_witness.is_empty()
-    }
+    pub fn has_witness(&self) -> bool { !self.script_witness.is_empty() }
 }
 
 impl Serializable for TransactionInput {
@@ -272,29 +264,17 @@ impl Transaction {
     }
 
     /// Computes the wtxid (DSHA-256 of the SegWit-with-witness serialization).
-    pub fn witness_hash(&self) -> H256 {
-        dhash256(&serialize_with_flags(self, SERIALIZE_TRANSACTION_WITNESS))
-    }
+    pub fn witness_hash(&self) -> H256 { dhash256(&serialize_with_flags(self, SERIALIZE_TRANSACTION_WITNESS)) }
 
-    pub fn inputs(&self) -> &[TransactionInput] {
-        &self.inputs
-    }
+    pub fn inputs(&self) -> &[TransactionInput] { &self.inputs }
 
-    pub fn outputs(&self) -> &[TransactionOutput] {
-        &self.outputs
-    }
+    pub fn outputs(&self) -> &[TransactionOutput] { &self.outputs }
 
-    pub fn is_empty(&self) -> bool {
-        self.inputs.is_empty() || self.outputs.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.inputs.is_empty() || self.outputs.is_empty() }
 
-    pub fn is_null(&self) -> bool {
-        self.inputs.iter().any(|input| input.previous_output.is_null())
-    }
+    pub fn is_null(&self) -> bool { self.inputs.iter().any(|input| input.previous_output.is_null()) }
 
-    pub fn is_coinbase(&self) -> bool {
-        self.inputs.len() == 1 && self.inputs[0].previous_output.is_null()
-    }
+    pub fn is_coinbase(&self) -> bool { self.inputs.len() == 1 && self.inputs[0].previous_output.is_null() }
 
     pub fn is_final(&self) -> bool {
         // Locktime of 0 means always final; otherwise at least one input must
@@ -317,9 +297,7 @@ impl Transaction {
         self.inputs.iter().all(TransactionInput::is_final)
     }
 
-    pub fn has_witness(&self) -> bool {
-        self.inputs.iter().any(TransactionInput::has_witness)
-    }
+    pub fn has_witness(&self) -> bool { self.inputs.iter().any(TransactionInput::has_witness) }
 
     /// Saturating sum of all output amounts.
     pub fn total_spends(&self) -> u64 {

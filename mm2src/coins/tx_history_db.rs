@@ -1,9 +1,7 @@
 use crate::{TransactionDetails, TxHistoryError, TxHistoryResult};
 use async_trait::async_trait;
-use mm2_db::indexed_db::{
-    DbIdentifier, DbInstance, DbTransactionError, DbUpgrader, IndexedDb, IndexedDbBuilder, InitDbError, InitDbResult,
-    OnUpgradeResult, TableSignature,
-};
+use mm2_db::indexed_db::{DbIdentifier, DbInstance, DbTransactionError, DbUpgrader, IndexedDb, IndexedDbBuilder,
+                         InitDbError, InitDbResult, OnUpgradeResult, TableSignature};
 use mm2_err_handle::prelude::*;
 
 const DB_NAME: &str = "tx_history";
@@ -51,9 +49,7 @@ pub struct TxHistoryDb {
 
 #[async_trait]
 impl DbInstance for TxHistoryDb {
-    fn db_name() -> &'static str {
-        DB_NAME
-    }
+    fn db_name() -> &'static str { DB_NAME }
 
     async fn init(db_id: DbIdentifier) -> InitDbResult<Self> {
         let inner = IndexedDbBuilder::new(db_id)
@@ -122,17 +118,11 @@ impl TxHistoryDb {
 struct HistoryId(String);
 
 impl HistoryId {
-    fn new(ticker: &str, wallet_address: &str) -> HistoryId {
-        HistoryId(format!("{}_{}", ticker, wallet_address))
-    }
+    fn new(ticker: &str, wallet_address: &str) -> HistoryId { HistoryId(format!("{}_{}", ticker, wallet_address)) }
 
-    fn as_str(&self) -> &str {
-        &self.0
-    }
+    fn as_str(&self) -> &str { &self.0 }
 
-    fn to_string(&self) -> String {
-        self.0.clone()
-    }
+    fn to_string(&self) -> String { self.0.clone() }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -142,9 +132,7 @@ struct TxHistoryTable {
 }
 
 impl TableSignature for TxHistoryTable {
-    fn table_name() -> &'static str {
-        "tx_history"
-    }
+    fn table_name() -> &'static str { "tx_history" }
 
     fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
         match (old_version, new_version) {

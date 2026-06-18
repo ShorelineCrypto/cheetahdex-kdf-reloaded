@@ -24,7 +24,11 @@ pub const ANCHOR_OFFSET: u32 = 10;
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
-pub fn decrypt_and_store_transaction<N, E, P, D>(params: &P, data: &mut D, tx: &Transaction) -> Result<(), E>
+pub fn decrypt_and_store_transaction<N, E, P, D>(
+    params: &P,
+    data: &mut D,
+    tx: &Transaction,
+) -> Result<(), E>
 where
     E: From<Error<N>>,
     P: consensus::Parameters,
@@ -37,7 +41,9 @@ where
     // for mempool transactions.
     let height = data
         .get_tx_height(tx.txid())?
-        .or(data.block_height_extrema()?.map(|(_, max_height)| max_height + 1))
+        .or(data
+            .block_height_extrema()?
+            .map(|(_, max_height)| max_height + 1))
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .ok_or(Error::SaplingNotActive)?;
 
@@ -45,7 +51,10 @@ where
     if outputs.is_empty() {
         Ok(())
     } else {
-        data.store_received_tx(&ReceivedTransaction { tx, outputs: &outputs })?;
+        data.store_received_tx(&ReceivedTransaction {
+            tx,
+            outputs: &outputs,
+        })?;
 
         Ok(())
     }
@@ -180,15 +189,24 @@ where
     // Confirm we were able to select sufficient value
     let selected_value = spendable_notes.iter().map(|n| n.note_value).sum();
     if selected_value < target_value {
-        return Err(E::from(Error::InsufficientBalance(selected_value, target_value)));
+        return Err(E::from(Error::InsufficientBalance(
+            selected_value,
+            target_value,
+        )));
     }
 
     // Create the transaction
     let mut builder = Builder::new(params.clone(), height);
     for selected in spendable_notes {
-        let from = extfvk.fvk.vk.to_payment_address(selected.diversifier).unwrap(); //DiversifyHash would have to unexpectedly return the zero point for this to be None
+        let from = extfvk
+            .fvk
+            .vk
+            .to_payment_address(selected.diversifier)
+            .unwrap(); //DiversifyHash would have to unexpectedly return the zero point for this to be None
 
-        let note = from.create_note(selected.note_value.into(), selected.rseed).unwrap();
+        let note = from
+            .create_note(selected.note_value.into(), selected.rseed)
+            .unwrap();
 
         let merkle_path = selected.witness.path().expect("the tree is not empty");
 
@@ -198,14 +216,18 @@ where
     }
 
     match to {
-        RecipientAddress::Shielded(to) => builder.add_sapling_output(ovk, to.clone(), value, memo.clone()),
+        RecipientAddress::Shielded(to) => {
+            builder.add_sapling_output(ovk, to.clone(), value, memo.clone())
+        }
 
         RecipientAddress::Transparent(to) => builder.add_transparent_output(&to, value),
     }
     .map_err(Error::Builder)?;
 
     let consensus_branch_id = BranchId::for_height(params, height);
-    let (tx, tx_metadata) = builder.build(consensus_branch_id, &prover).map_err(Error::Builder)?;
+    let (tx, tx_metadata) = builder
+        .build(consensus_branch_id, &prover)
+        .map_err(Error::Builder)?;
 
     let output_index = match to {
         // Sapling outputs are shuffled, so we need to look up where the output ended up.
@@ -221,7 +243,7 @@ where
                 .find(|(_, tx_out)| tx_out.script_pubkey == script)
                 .map(|(index, _)| index)
                 .expect("we sent to this address")
-        },
+        }
     };
 
     wallet_db.store_sent_tx(&SentTransaction {

@@ -18,9 +18,7 @@ impl Tokenizer for StrictTokenizer {
         }
     }
 
-    fn tokenize_string(value: &str) -> Result<String, Error> {
-        Ok(value.to_owned())
-    }
+    fn tokenize_string(value: &str) -> Result<String, Error> { Ok(value.to_owned()) }
 
     fn tokenize_bool(value: &str) -> Result<bool, Error> {
         match value {

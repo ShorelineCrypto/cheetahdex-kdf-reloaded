@@ -40,25 +40,17 @@ pub enum WalletConnectError {
 impl std::error::Error for WalletConnectError {}
 
 impl From<serde_json::Error> for WalletConnectError {
-    fn from(e: serde_json::Error) -> Self {
-        WalletConnectError::Serde(e.to_string())
-    }
+    fn from(e: serde_json::Error) -> Self { WalletConnectError::Serde(e.to_string()) }
 }
 
 impl From<hkdf::InvalidLength> for WalletConnectError {
-    fn from(e: hkdf::InvalidLength) -> Self {
-        WalletConnectError::KeyDerivation(e.to_string())
-    }
+    fn from(e: hkdf::InvalidLength) -> Self { WalletConnectError::KeyDerivation(e.to_string()) }
 }
 
 impl From<crate::chain::UnknownChain> for WalletConnectError {
-    fn from(e: crate::chain::UnknownChain) -> Self {
-        WalletConnectError::UnsupportedChain(e.0)
-    }
+    fn from(e: crate::chain::UnknownChain) -> Self { WalletConnectError::UnsupportedChain(e.0) }
 }
 
 impl From<relay_client::error::ClientError> for WalletConnectError {
-    fn from(e: relay_client::error::ClientError) -> Self {
-        WalletConnectError::Relay(e.to_string())
-    }
+    fn from(e: relay_client::error::ClientError) -> Self { WalletConnectError::Relay(e.to_string()) }
 }

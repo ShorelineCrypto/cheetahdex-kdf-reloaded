@@ -23,9 +23,7 @@ use best_orders::BestOrdersAction;
 use blake2::digest::{Update, VariableOutput};
 use blake2::Blake2bVar;
 use coins::utxo::{compressed_pub_key_from_priv_raw, ChecksumType, UtxoAddressFormat};
-use coins::{
-    coin_conf, find_pair, lp_coinfind, BalanceTradeFeeUpdatedHandler, CoinProtocol, FeeApproxStage, MmCoinEnum,
-};
+use coins::{coin_conf, find_pair, lp_coinfind, BalanceTradeFeeUpdatedHandler, CoinProtocol, FeeApproxStage, MmCoinEnum};
 use common::executor::{spawn, Timer};
 use common::log::{error, LogOnError};
 use common::mm_number::{BigDecimal, BigRational, Fraction, MmNumber, MmNumberMultiRepr};
@@ -35,8 +33,7 @@ use crypto::privkey::SerializableSecp256k1Keypair;
 use crypto::CryptoCtx;
 use derive_more::Display;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
-#[cfg(test)]
-use futures::channel::oneshot;
+#[cfg(test)] use futures::channel::oneshot;
 use futures::{compat::Future01CompatExt, lock::Mutex as AsyncMutex, StreamExt, TryFutureExt};
 use hash256_std_hasher::Hash256StdHasher;
 use hash_db::Hasher;
@@ -46,8 +43,7 @@ use mm2_core::mm_ctx::{from_ctx, MmArc, MmWeak};
 use mm2_err_handle::prelude::*;
 use mm2_event_stream::StreamerId;
 use mm2_p2p::{decode_signed, encode_and_sign, encode_message, pub_sub_topic, TopicPrefix, TOPIC_SEPARATOR};
-#[cfg(test)]
-use mocktopus::macros::*;
+#[cfg(test)] use mocktopus::macros::*;
 use num_traits::identities::Zero;
 use parking_lot::{Mutex as PaMutex, RwLock as PaRwLock};
 use rpc::v1::types::H256 as H256Json;
@@ -64,21 +60,18 @@ use timed_map::TimedMap;
 use trie_db::NodeCodec as NodeCodecT;
 use uuid::Uuid;
 
-use crate::mm2::lp_network::{
-    broadcast_p2p_msg, request_any_relay, request_one_peer, subscribe_to_topic, Libp2pPeerId, P2PRequest,
-};
-use crate::mm2::lp_swap::{
-    calc_max_maker_vol, check_balance_for_maker_swap, check_balance_for_taker_swap, check_other_coin_balance_for_swap,
-    insert_new_swap_to_db, is_pubkey_banned, lp_atomic_locktime, run_maker_swap, run_taker_swap,
-    swap_versioning::SwapVersion, AtomicLocktimeVersion, MakerSwap, RunMakerSwapInput, RunTakerSwapInput,
-    SwapConfirmationsSettings, TakerSwap,
-};
+use crate::mm2::lp_network::{broadcast_p2p_msg, request_any_relay, request_one_peer, subscribe_to_topic, Libp2pPeerId,
+                             P2PRequest};
+use crate::mm2::lp_swap::{calc_max_maker_vol, check_balance_for_maker_swap, check_balance_for_taker_swap,
+                          check_other_coin_balance_for_swap, insert_new_swap_to_db, is_pubkey_banned,
+                          lp_atomic_locktime, run_maker_swap, run_taker_swap, swap_versioning::SwapVersion,
+                          AtomicLocktimeVersion, MakerSwap, RunMakerSwapInput, RunTakerSwapInput,
+                          SwapConfirmationsSettings, TakerSwap};
 
 pub use best_orders::{best_orders_rpc, best_orders_rpc_v2};
-use my_orders_storage::{
-    delete_my_maker_order, delete_my_taker_order, save_maker_order_on_update, save_my_new_maker_order,
-    save_my_new_taker_order, MyActiveOrders, MyOrdersFilteringHistory, MyOrdersHistory, MyOrdersStorage,
-};
+use my_orders_storage::{delete_my_maker_order, delete_my_taker_order, save_maker_order_on_update,
+                        save_my_new_maker_order, save_my_new_taker_order, MyActiveOrders, MyOrdersFilteringHistory,
+                        MyOrdersHistory, MyOrdersStorage};
 pub use orderbook_depth::orderbook_depth_rpc;
 pub use orderbook_rpc::{orderbook_rpc, orderbook_rpc_v2};
 
@@ -89,28 +82,23 @@ cfg_wasm32! {
     pub type OrdermatchDbLocked<'a> = DbLocked<'a, OrdermatchDb>;
 }
 
-#[path = "lp_ordermatch/best_orders.rs"]
-mod best_orders;
-#[path = "lp_ordermatch/lp_bot.rs"]
-mod lp_bot;
+#[path = "lp_ordermatch/best_orders.rs"] mod best_orders;
+#[path = "lp_ordermatch/lp_bot.rs"] mod lp_bot;
 #[cfg(test)]
 pub use lp_bot::{process_price_request, StartSimpleMakerBotRequest, KMD_PRICE_ENDPOINT};
 pub use lp_bot::{start_simple_market_maker_bot, stop_simple_market_maker_bot, TradingBotEvent};
 
 #[path = "lp_ordermatch/my_orders_storage.rs"]
 mod my_orders_storage;
-#[path = "lp_ordermatch/new_protocol.rs"]
-mod new_protocol;
+#[path = "lp_ordermatch/new_protocol.rs"] mod new_protocol;
 #[path = "lp_ordermatch/order_events.rs"]
 pub(crate) mod order_events;
 #[path = "lp_ordermatch/order_requests_tracker.rs"]
 mod order_requests_tracker;
-#[path = "lp_ordermatch/orderbook_depth.rs"]
-mod orderbook_depth;
+#[path = "lp_ordermatch/orderbook_depth.rs"] mod orderbook_depth;
 #[path = "lp_ordermatch/orderbook_events.rs"]
 pub(crate) mod orderbook_events;
-#[path = "lp_ordermatch/orderbook_rpc.rs"]
-mod orderbook_rpc;
+#[path = "lp_ordermatch/orderbook_rpc.rs"] mod orderbook_rpc;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "ordermatch_tests.rs"]
 pub mod ordermatch_tests;
@@ -238,14 +226,10 @@ impl MakerOrdersContext {
     }
 
     /// Get an order by UUID (returns a clone of the `Arc`).
-    pub fn get_order(&self, uuid: &Uuid) -> Option<Arc<AsyncMutex<MakerOrder>>> {
-        self.orders.get(uuid).cloned()
-    }
+    pub fn get_order(&self, uuid: &Uuid) -> Option<Arc<AsyncMutex<MakerOrder>>> { self.orders.get(uuid).cloned() }
 
     /// Check whether an order is present.
-    pub fn contains_key(&self, uuid: &Uuid) -> bool {
-        self.orders.contains_key(uuid)
-    }
+    pub fn contains_key(&self, uuid: &Uuid) -> bool { self.orders.contains_key(uuid) }
 
     /// Returns true if there is at least one active maker order for `ticker`.
     pub fn coin_has_active_maker_orders(&self, ticker: &str) -> bool {
@@ -293,25 +277,17 @@ impl MakerOrdersContext {
     }
 
     /// Iterate over all order UUIDs.
-    pub fn keys(&self) -> Vec<Uuid> {
-        self.orders.keys()
-    }
+    pub fn keys(&self) -> Vec<Uuid> { self.orders.keys() }
 
     /// Number of active orders.
-    pub fn len(&self) -> usize {
-        self.orders.len()
-    }
+    pub fn len(&self) -> usize { self.orders.len() }
 
     /// Iterate over all (uuid, order_arc) pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (&Uuid, &Arc<AsyncMutex<MakerOrder>>)> {
-        self.orders.iter()
-    }
+    pub fn iter(&self) -> impl Iterator<Item = (&Uuid, &Arc<AsyncMutex<MakerOrder>>)> { self.orders.iter() }
 }
 
 impl Default for MakerOrdersContext {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 pub(crate) struct OrdermatchContext {
@@ -467,9 +443,7 @@ impl OrdermatchContext {
         Self::from_ctx(&ctx)
     }
 
-    fn orderbook_ticker(&self, ticker: &str) -> Option<String> {
-        self.orderbook_tickers.get(ticker).cloned()
-    }
+    fn orderbook_ticker(&self, ticker: &str) -> Option<String> { self.orderbook_tickers.get(ticker).cloned() }
 
     /// Block until the background trie worker has applied all previously enqueued ops.
     #[cfg(test)]

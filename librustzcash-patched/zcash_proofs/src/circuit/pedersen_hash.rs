@@ -9,7 +9,11 @@ pub use zcash_primitives::sapling::pedersen_hash::Personalization;
 use crate::constants::PEDERSEN_CIRCUIT_GENERATORS;
 
 fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
-    person.get_bits().into_iter().map(Boolean::constant).collect()
+    person
+        .get_bits()
+        .into_iter()
+        .map(Boolean::constant)
+        .collect()
 }
 
 pub fn pedersen_hash<CS>(
@@ -49,13 +53,15 @@ where
             match segment_result {
                 None => {
                     segment_result = Some(tmp);
-                },
+                }
                 Some(ref mut segment_result) => {
                     *segment_result = tmp.add(
-                        cs.namespace(|| format!("addition of segment {}, window {}", segment_i, window_i)),
+                        cs.namespace(|| {
+                            format!("addition of segment {}, window {}", segment_i, window_i)
+                        }),
                         segment_result,
                     )?;
-                },
+                }
             }
 
             segment_windows = &segment_windows[1..];
@@ -74,8 +80,9 @@ where
         );
 
         // Convert this segment into twisted Edwards form.
-        let segment_result = segment_result
-            .into_edwards(cs.namespace(|| format!("conversion of segment {} into edwards", segment_i)))?;
+        let segment_result = segment_result.into_edwards(
+            cs.namespace(|| format!("conversion of segment {} into edwards", segment_i)),
+        )?;
 
         match edwards_result {
             Some(ref mut edwards_result) => {
@@ -83,10 +90,10 @@ where
                     cs.namespace(|| format!("addition of segment {} to accumulator", segment_i)),
                     edwards_result,
                 )?;
-            },
+            }
             None => {
                 edwards_result = Some(segment_result);
-            },
+            }
         }
 
         segment_i += 1;
@@ -134,13 +141,23 @@ mod test {
     #[test]
     fn test_pedersen_hash_constraints() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
 
         let leaves_len = 2 * 255;
         let note_len = 64 + 256 + 256;
 
-        for &n_bits in [0, 3 * 63 - 6, 3 * 63 - 6 + 1, 3 * 63 - 6 + 2, leaves_len, note_len].iter() {
+        for &n_bits in [
+            0,
+            3 * 63 - 6,
+            3 * 63 - 6 + 1,
+            3 * 63 - 6 + 2,
+            leaves_len,
+            note_len,
+        ]
+        .iter()
+        {
             let mut cs = TestConstraintSystem::new();
 
             let input: Vec<bool> = (0..n_bits).map(|_| rng.next_u32() % 2 != 0).collect();
@@ -149,7 +166,10 @@ mod test {
                 .iter()
                 .enumerate()
                 .map(|(i, b)| {
-                    Boolean::from(AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap())
+                    Boolean::from(
+                        AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b))
+                            .unwrap(),
+                    )
                 })
                 .collect();
 
@@ -178,7 +198,8 @@ mod test {
     #[test]
     fn test_pedersen_hash() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
 
         for length in 0..751 {
@@ -191,7 +212,10 @@ mod test {
                     .iter()
                     .enumerate()
                     .map(|(i, b)| {
-                        Boolean::from(AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap())
+                        Boolean::from(
+                            AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b))
+                                .unwrap(),
+                        )
                     })
                     .collect();
 
@@ -229,7 +253,8 @@ mod test {
     #[test]
     fn test_pedersen_hash_external_test_vectors() {
         let mut rng = XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
+            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
         ]);
 
         let expected_us = [
@@ -249,7 +274,10 @@ mod test {
                 .iter()
                 .enumerate()
                 .map(|(i, b)| {
-                    Boolean::from(AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b)).unwrap())
+                    Boolean::from(
+                        AllocatedBit::alloc(cs.namespace(|| format!("input {}", i)), Some(*b))
+                            .unwrap(),
+                    )
                 })
                 .collect();
 

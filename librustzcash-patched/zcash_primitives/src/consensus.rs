@@ -490,7 +490,9 @@ impl BranchId {
 mod tests {
     use std::convert::TryFrom;
 
-    use super::{BlockHeight, BranchId, NetworkUpgrade, Parameters, MAIN_NETWORK, UPGRADES_IN_ORDER};
+    use super::{
+        BlockHeight, BranchId, NetworkUpgrade, Parameters, MAIN_NETWORK, UPGRADES_IN_ORDER,
+    };
 
     #[test]
     fn nu_ordering() {
@@ -502,7 +504,10 @@ mod tests {
                 MAIN_NETWORK.activation_height(nu_b),
             ) {
                 (a, b) if a < b => (),
-                _ => panic!("{} should not be before {} in UPGRADES_IN_ORDER", nu_a, nu_b),
+                _ => panic!(
+                    "{} should not be before {} in UPGRADES_IN_ORDER",
+                    nu_a, nu_b
+                ),
             }
         }
     }
@@ -522,7 +527,10 @@ mod tests {
 
     #[test]
     fn branch_id_for_height() {
-        assert_eq!(BranchId::for_height(&MAIN_NETWORK, BlockHeight(0)), BranchId::Sprout,);
+        assert_eq!(
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(0)),
+            BranchId::Sprout,
+        );
         assert_eq!(
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(419_199)),
             BranchId::Overwinter,

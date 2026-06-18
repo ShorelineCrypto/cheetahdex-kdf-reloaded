@@ -90,7 +90,9 @@ fn prevout_hash(vin: &[TxIn]) -> Blake2bHash {
 fn sequence_hash(vin: &[TxIn]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 4);
     for t_in in vin {
-        (&mut data).write_u32::<LittleEndian>(t_in.sequence).unwrap();
+        (&mut data)
+            .write_u32::<LittleEndian>(t_in.sequence)
+            .unwrap();
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -118,7 +120,11 @@ fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
         .hash(&data)
 }
 
-fn joinsplits_hash(txversion: TxVersion, joinsplits: &[JsDescription], joinsplit_pubkey: &[u8; 32]) -> Blake2bHash {
+fn joinsplits_hash(
+    txversion: TxVersion,
+    joinsplits: &[JsDescription],
+    joinsplit_pubkey: &[u8; 32],
+) -> Blake2bHash {
     let mut data = Vec::with_capacity(
         joinsplits.len()
             * if txversion.uses_groth_proofs() {
@@ -234,12 +240,19 @@ pub fn signature_hash_data(
             .write_u32::<LittleEndian>(consensus_branch_id.into())
             .unwrap();
 
-        let mut h = Blake2bParams::new().hash_length(32).personal(&personal).to_state();
+        let mut h = Blake2bParams::new()
+            .hash_length(32)
+            .personal(&personal)
+            .to_state();
         let mut tmp = [0; 8];
 
         update_u32!(h, tx.version.header(), tmp);
         update_u32!(h, tx.version.version_group_id(), tmp);
-        update_hash!(h, hash_type & SIGHASH_ANYONECANPAY == 0, prevout_hash(&tx.vin));
+        update_hash!(
+            h,
+            hash_type & SIGHASH_ANYONECANPAY == 0,
+            prevout_hash(&tx.vin)
+        );
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0
@@ -248,13 +261,15 @@ pub fn signature_hash_data(
             sequence_hash(&tx.vin)
         );
 
-        if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE && (hash_type & SIGHASH_MASK) != SIGHASH_NONE {
+        if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
+            && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
+        {
             h.update(outputs_hash(&tx.vout).as_ref());
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
             match signable_input {
                 SignableInput::Transparent { index, .. } if index < tx.vout.len() => {
                     h.update(single_output_hash(&tx.vout[index]).as_ref())
-                },
+                }
                 _ => h.update(&[0; 32]),
             };
         } else {
@@ -262,8 +277,16 @@ pub fn signature_hash_data(
         };
         #[cfg(feature = "zfuture")]
         if has_tze_components(&tx.version) {
-            update_hash!(h, !tx.tze_inputs.is_empty(), tze_inputs_hash(&tx.tze_inputs));
-            update_hash!(h, !tx.tze_outputs.is_empty(), tze_outputs_hash(&tx.tze_outputs));
+            update_hash!(
+                h,
+                !tx.tze_inputs.is_empty(),
+                tze_inputs_hash(&tx.tze_inputs)
+            );
+            update_hash!(
+                h,
+                !tx.tze_outputs.is_empty(),
+                tze_outputs_hash(&tx.tze_outputs)
+            );
         }
         update_hash!(
             h,
@@ -310,9 +333,11 @@ pub fn signature_hash_data(
                 tx.vin[index].prevout.write(&mut data).unwrap();
                 script_code.write(&mut data).unwrap();
                 data.extend_from_slice(&value.to_i64_le_bytes());
-                (&mut data).write_u32::<LittleEndian>(tx.vin[index].sequence).unwrap();
+                (&mut data)
+                    .write_u32::<LittleEndian>(tx.vin[index].sequence)
+                    .unwrap();
                 h.update(&data);
-            },
+            }
 
             #[cfg(feature = "zfuture")]
             SignableInput::Tze {
@@ -325,17 +350,18 @@ pub fn signature_hash_data(
                 let mut data = ZCASH_TZE_SIGNED_INPUT_TAG.to_vec();
 
                 tx.tze_inputs[index].prevout.write(&mut data).unwrap();
-                CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap()).unwrap();
+                CompactSize::write(&mut data, precondition.extension_id.try_into().unwrap())
+                    .unwrap();
                 CompactSize::write(&mut data, precondition.mode.try_into().unwrap()).unwrap();
                 Vector::write(&mut data, &precondition.payload, |w, e| w.write_u8(*e)).unwrap();
                 data.extend_from_slice(&value.to_i64_le_bytes());
                 h.update(&data);
-            },
+            }
 
             #[cfg(feature = "zfuture")]
             SignableInput::Tze { .. } => {
                 panic!("A request has been made to sign a TZE input, but the signature hash version is not ZFuture");
-            },
+            }
 
             _ => (),
         }

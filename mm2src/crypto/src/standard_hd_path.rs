@@ -47,25 +47,15 @@ pub type HDPathToAccount =
     Bip44Tail>>>;
 
 impl StandardHDPath {
-    pub fn purpose(&self) -> Bip43Purpose {
-        self.value()
-    }
+    pub fn purpose(&self) -> Bip43Purpose { self.value() }
 
-    pub fn coin_type(&self) -> u32 {
-        self.child().value()
-    }
+    pub fn coin_type(&self) -> u32 { self.child().value() }
 
-    pub fn account_id(&self) -> u32 {
-        self.child().child().value()
-    }
+    pub fn account_id(&self) -> u32 { self.child().child().value() }
 
-    pub fn chain(&self) -> Bip44Chain {
-        self.child().child().child().value()
-    }
+    pub fn chain(&self) -> Bip44Chain { self.child().child().child().value() }
 
-    pub fn address_id(&self) -> u32 {
-        self.child().child().child().child().value()
-    }
+    pub fn address_id(&self) -> u32 { self.child().child().child().child().value() }
 
     /// Derive `HDPathToCoin` from `StandardHDPath` by taking just the first two levels.
     pub fn path_to_coin(&self) -> HDPathToCoin {
@@ -86,27 +76,17 @@ impl StandardHDPath {
 }
 
 impl HDPathToCoin {
-    pub fn purpose(&self) -> Bip43Purpose {
-        self.value()
-    }
+    pub fn purpose(&self) -> Bip43Purpose { self.value() }
 
-    pub fn coin_type(&self) -> u32 {
-        self.child().value()
-    }
+    pub fn coin_type(&self) -> u32 { self.child().value() }
 }
 
 impl HDPathToAccount {
-    pub fn purpose(&self) -> Bip43Purpose {
-        self.value()
-    }
+    pub fn purpose(&self) -> Bip43Purpose { self.value() }
 
-    pub fn coin_type(&self) -> u32 {
-        self.child().value()
-    }
+    pub fn coin_type(&self) -> u32 { self.child().value() }
 
-    pub fn account_id(&self) -> u32 {
-        self.child().child().value()
-    }
+    pub fn account_id(&self) -> u32 { self.child().child().value() }
 }
 
 /// Errors when parsing or constructing a standard HD path.
@@ -198,17 +178,11 @@ impl Bip32ChildValue for Bip32PurposeValue {
     type Value = Bip43Purpose;
 
     /// `purpose` is always a hardened child as described in the BIP44/BIP49/BIP84 standards.
-    fn hardened() -> bool {
-        true
-    }
+    fn hardened() -> bool { true }
 
-    fn number(&self) -> u32 {
-        self.purpose as u32
-    }
+    fn number(&self) -> u32 { self.purpose as u32 }
 
-    fn value(&self) -> Bip43Purpose {
-        self.purpose
-    }
+    fn value(&self) -> Bip43Purpose { self.purpose }
 
     fn from_bip32_number(child_number: ChildNumber, child_at: usize) -> Result<Self, Bip32DerPathError> {
         if !child_number.is_hardened() {
@@ -269,10 +243,10 @@ mod tests {
     #[test]
     fn test_from_invalid_length() {
         let error = StandardHDPath::from_str("m/44'/141'/0'").expect_err("derivation path is too short");
-        assert_eq!(
-            error,
-            Bip32DerPathError::InvalidDerivationPathLength { expected: 5, found: 3 }
-        );
+        assert_eq!(error, Bip32DerPathError::InvalidDerivationPathLength {
+            expected: 5,
+            found: 3
+        });
     }
 
     #[test]

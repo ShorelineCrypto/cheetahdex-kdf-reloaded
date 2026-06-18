@@ -10,9 +10,7 @@ pub enum TrezorProcessingError<E> {
 }
 
 impl<E> From<TrezorError> for TrezorProcessingError<E> {
-    fn from(e: TrezorError) -> Self {
-        TrezorProcessingError::TrezorError(e)
-    }
+    fn from(e: TrezorError) -> Self { TrezorProcessingError::TrezorError(e) }
 }
 
 #[async_trait]

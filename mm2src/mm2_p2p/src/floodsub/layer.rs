@@ -18,16 +18,13 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use super::protocol::{
-    FloodsubMessage, FloodsubProtocol, FloodsubRpc, FloodsubSubscription, FloodsubSubscriptionAction,
-};
+use super::protocol::{FloodsubMessage, FloodsubProtocol, FloodsubRpc, FloodsubSubscription, FloodsubSubscriptionAction};
 use super::topic::Topic;
 use super::FloodsubConfig;
 use cuckoofilter::CuckooFilter;
 use libp2p::core::{connection::ConnectionId, ConnectedPoint, Multiaddr, PeerId};
-use libp2p::swarm::{
-    IntoConnectionHandler, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, OneShotHandler, PollParameters,
-};
+use libp2p::swarm::{IntoConnectionHandler, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, OneShotHandler,
+                    PollParameters};
 use smallvec::SmallVec;
 use std::collections::hash_map::{DefaultHasher, HashMap};
 use std::task::{Context, Poll};
@@ -208,13 +205,9 @@ impl NetworkBehaviour for Floodsub {
     type ConnectionHandler = OneShotHandler<FloodsubProtocol, FloodsubRpc, InnerMessage>;
     type OutEvent = FloodsubEvent;
 
-    fn new_handler(&mut self) -> Self::ConnectionHandler {
-        Default::default()
-    }
+    fn new_handler(&mut self) -> Self::ConnectionHandler { Default::default() }
 
-    fn addresses_of_peer(&mut self, _: &PeerId) -> Vec<Multiaddr> {
-        Vec::new()
-    }
+    fn addresses_of_peer(&mut self, _: &PeerId) -> Vec<Multiaddr> { Vec::new() }
 
     fn inject_connection_established(
         &mut self,
@@ -334,13 +327,10 @@ impl NetworkBehaviour for Floodsub {
                     if let Some(pos) = rpcs_to_dispatch.iter().position(|(p, _)| p == peer_id) {
                         rpcs_to_dispatch[pos].1.messages.push(message.clone());
                     } else {
-                        rpcs_to_dispatch.push((
-                            *peer_id,
-                            FloodsubRpc {
-                                subscriptions: Vec::new(),
-                                messages: vec![message.clone()],
-                            },
-                        ));
+                        rpcs_to_dispatch.push((*peer_id, FloodsubRpc {
+                            subscriptions: Vec::new(),
+                            messages: vec![message.clone()],
+                        }));
                     }
                 }
             }
@@ -379,16 +369,12 @@ pub enum InnerMessage {
 
 impl From<FloodsubRpc> for InnerMessage {
     #[inline]
-    fn from(rpc: FloodsubRpc) -> InnerMessage {
-        InnerMessage::Rx(rpc)
-    }
+    fn from(rpc: FloodsubRpc) -> InnerMessage { InnerMessage::Rx(rpc) }
 }
 
 impl From<()> for InnerMessage {
     #[inline]
-    fn from(_: ()) -> InnerMessage {
-        InnerMessage::Sent
-    }
+    fn from(_: ()) -> InnerMessage { InnerMessage::Sent }
 }
 
 /// Event that can happen on the floodsub behaviour.

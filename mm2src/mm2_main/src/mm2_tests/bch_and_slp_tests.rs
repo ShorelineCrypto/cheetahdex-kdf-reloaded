@@ -1,7 +1,6 @@
 use super::*;
-use mm2_test_helpers::for_tests::{
-    enable_bch_with_tokens, enable_slp, my_tx_history_v2, sign_message, verify_message, UtxoRpcMode,
-};
+use mm2_test_helpers::for_tests::{enable_bch_with_tokens, enable_slp, my_tx_history_v2, sign_message, verify_message,
+                                  UtxoRpcMode};
 
 const T_BCH_ELECTRUMS: &[&str] = &[
     "electroncash.de:50003",
@@ -11,9 +10,7 @@ const T_BCH_ELECTRUMS: &[&str] = &[
     "testnet.imaginary.cash:50001",
 ];
 
-fn t_bch_electrums_legacy_json() -> Vec<Json> {
-    T_BCH_ELECTRUMS.into_iter().map(|url| json!({ "url": url })).collect()
-}
+fn t_bch_electrums_legacy_json() -> Vec<Json> { T_BCH_ELECTRUMS.into_iter().map(|url| json!({ "url": url })).collect() }
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]

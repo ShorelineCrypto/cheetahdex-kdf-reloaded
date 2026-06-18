@@ -1,8 +1,7 @@
 use crate::context::CoinsActivationContext;
 use crate::prelude::*;
-use crate::standalone_coin::init_standalone_coin_error::{
-    InitStandaloneCoinError, InitStandaloneCoinStatusError, InitStandaloneCoinUserActionError,
-};
+use crate::standalone_coin::init_standalone_coin_error::{InitStandaloneCoinError, InitStandaloneCoinStatusError,
+                                                         InitStandaloneCoinUserActionError};
 use async_trait::async_trait;
 use coins::{lp_coinfind, lp_register_coin, MmCoinEnum, RegisterCoinError, RegisterCoinParams};
 use common::{log, SuccessResponse};

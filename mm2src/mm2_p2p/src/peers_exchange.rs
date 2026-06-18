@@ -2,25 +2,19 @@ use crate::request_response::Codec;
 use crate::NetworkInfo;
 use futures::StreamExt;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::{
-    multiaddr::{Multiaddr, Protocol},
-    request_response::{
-        ProtocolName, ProtocolSupport, RequestResponse, RequestResponseConfig, RequestResponseEvent,
-        RequestResponseMessage,
-    },
-    swarm::{NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters},
-    NetworkBehaviour, PeerId,
-};
+use libp2p::{multiaddr::{Multiaddr, Protocol},
+             request_response::{ProtocolName, ProtocolSupport, RequestResponse, RequestResponseConfig,
+                                RequestResponseEvent, RequestResponseMessage},
+             swarm::{NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters},
+             NetworkBehaviour, PeerId};
 use log::{error, info, warn};
 use rand::seq::SliceRandom;
 use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
 use std::collections::HashSet;
-use std::{
-    collections::{HashMap, VecDeque},
-    iter,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{collections::{HashMap, VecDeque},
+          iter,
+          task::{Context, Poll},
+          time::Duration};
 use wasm_timer::{Instant, Interval};
 
 pub type PeerAddresses = HashSet<Multiaddr>;
@@ -49,9 +43,7 @@ const MAX_PEERS: usize = 100;
 pub struct PeerIdSerde(PeerId);
 
 impl From<PeerId> for PeerIdSerde {
-    fn from(peer_id: PeerId) -> PeerIdSerde {
-        PeerIdSerde(peer_id)
-    }
+    fn from(peer_id: PeerId) -> PeerIdSerde { PeerIdSerde(peer_id) }
 }
 
 impl Serialize for PeerIdSerde {
@@ -220,13 +212,9 @@ impl PeersExchange {
         result
     }
 
-    pub fn is_known_peer(&self, peer: &PeerId) -> bool {
-        self.known_peers.contains(peer)
-    }
+    pub fn is_known_peer(&self, peer: &PeerId) -> bool { self.known_peers.contains(peer) }
 
-    pub fn is_reserved_peer(&self, peer: &PeerId) -> bool {
-        self.reserved_peers.contains(peer)
-    }
+    pub fn is_reserved_peer(&self, peer: &PeerId) -> bool { self.reserved_peers.contains(peer) }
 
     pub fn add_known_peer(&mut self, peer: PeerId) {
         if !self.is_known_peer(&peer) {

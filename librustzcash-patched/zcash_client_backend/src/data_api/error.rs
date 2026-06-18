@@ -75,20 +75,14 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::InsufficientBalance(have, need) => write!(
                 f,
                 "Insufficient balance (have {}, need {} including fee)",
-                i64::from(*have),
-                i64::from(*need)
+                i64::from(*have), i64::from(*need)
             ),
             Error::InvalidChain(upper_bound, cause) => {
-                write!(
-                    f,
-                    "Invalid chain (upper bound: {}): {:?}",
-                    u32::from(*upper_bound),
-                    cause
-                )
-            },
+                write!(f, "Invalid chain (upper bound: {}): {:?}", u32::from(*upper_bound), cause)
+            }
             Error::InvalidExtSk(account) => {
                 write!(f, "Incorrect ExtendedSpendingKey for account {}", account.0)
-            },
+            }
             Error::InvalidNewWitnessAnchor(output, txid, last_height, anchor) => write!(
                 f,
                 "New witness for output {} in tx {} has incorrect anchor after scanning block {}: {:?}",

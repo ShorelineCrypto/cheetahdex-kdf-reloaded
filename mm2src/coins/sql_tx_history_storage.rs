@@ -1,6 +1,5 @@
-use crate::my_tx_history_v2::{
-    GetHistoryResult, HistoryCoinType, RemoveTxResult, TxHistoryStorage, TxHistoryStorageError,
-};
+use crate::my_tx_history_v2::{GetHistoryResult, HistoryCoinType, RemoveTxResult, TxHistoryStorage,
+                              TxHistoryStorageError};
 use crate::{TransactionDetails, TransactionType};
 use async_trait::async_trait;
 use common::{async_blocking, PagingOptionsEnum};
@@ -14,13 +13,9 @@ use serde_json::{self as json};
 use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
 
-fn tx_history_table(ticker: &str) -> String {
-    ticker.to_owned() + "_tx_history"
-}
+fn tx_history_table(ticker: &str) -> String { ticker.to_owned() + "_tx_history" }
 
-fn tx_cache_table(ticker: &str) -> String {
-    ticker.to_owned() + "_tx_cache"
-}
+fn tx_cache_table(ticker: &str) -> String { ticker.to_owned() + "_tx_cache" }
 
 fn create_tx_history_table_sql(for_coin: &str) -> Result<String, MmError<SqlError>> {
     let table_name = tx_history_table(for_coin);
@@ -194,9 +189,7 @@ pub struct SqliteTxHistoryStorage(pub Arc<Mutex<Connection>>);
 
 #[cfg(test)]
 impl SqliteTxHistoryStorage {
-    pub fn in_memory() -> Self {
-        SqliteTxHistoryStorage(Arc::new(Mutex::new(Connection::open_in_memory().unwrap())))
-    }
+    pub fn in_memory() -> Self { SqliteTxHistoryStorage(Arc::new(Mutex::new(Connection::open_in_memory().unwrap()))) }
 
     fn is_table_empty(&self, table_name: &str) -> bool {
         validate_table_name(table_name).unwrap();

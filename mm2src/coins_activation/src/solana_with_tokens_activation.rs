@@ -1,18 +1,15 @@
-use crate::platform_coin_with_tokens::{
-    EnablePlatformCoinWithTokensError, GetPlatformBalance, InitTokensAsMmCoinsError, PlatformWithTokensActivationOps,
-    RegisterTokenInfo, TokenActivationParams, TokenActivationRequest, TokenAsMmCoinInitializer, TokenInitializer,
-    TokenOf,
-};
+use crate::platform_coin_with_tokens::{EnablePlatformCoinWithTokensError, GetPlatformBalance,
+                                       InitTokensAsMmCoinsError, PlatformWithTokensActivationOps, RegisterTokenInfo,
+                                       TokenActivationParams, TokenActivationRequest, TokenAsMmCoinInitializer,
+                                       TokenInitializer, TokenOf};
 use crate::prelude::*;
 use crate::prelude::{CoinAddressInfo, TokenBalances, TryFromCoinProtocol, TxHistory};
 use crate::spl_token_activation::SplActivationRequest;
 use async_trait::async_trait;
 use coins::my_tx_history_v2::TxHistoryStorage;
 use coins::solana::spl::{SplProtocolConf, SplTokenCreationError};
-use coins::{
-    solana_coin_from_conf_and_params, BalanceError, CoinBalance, CoinProtocol, MarketCoinOps, SolanaActivationParams,
-    SolanaCoin, SplToken,
-};
+use coins::{solana_coin_from_conf_and_params, BalanceError, CoinBalance, CoinProtocol, MarketCoinOps,
+            SolanaActivationParams, SolanaCoin, SplToken};
 use common::mm_number::BigDecimal;
 use common::Future01CompatExt;
 use futures::future::AbortHandle;
@@ -62,15 +59,11 @@ impl TokenInitializer for SplTokenInitializer {
         Ok(tokens)
     }
 
-    fn platform_coin(&self) -> &SolanaCoin {
-        &self.platform_coin
-    }
+    fn platform_coin(&self) -> &SolanaCoin { &self.platform_coin }
 }
 
 impl RegisterTokenInfo<SplToken> for SolanaCoin {
-    fn register_token_info(&self, token: &SplToken) {
-        self.add_spl_token_info(token.ticker().into(), token.get_info())
-    }
+    fn register_token_info(&self, token: &SplToken) { self.add_spl_token_info(token.ticker().into(), token.get_info()) }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -81,9 +74,7 @@ pub struct SolanaWithTokensActivationRequest {
 }
 
 impl TxHistory for SolanaWithTokensActivationRequest {
-    fn tx_history(&self) -> bool {
-        false
-    }
+    fn tx_history(&self) -> bool { false }
 }
 
 #[derive(Debug, Serialize)]
@@ -104,9 +95,7 @@ impl GetPlatformBalance for SolanaWithTokensActivationResult {
 }
 
 impl CurrentBlock for SolanaWithTokensActivationResult {
-    fn current_block(&self) -> u64 {
-        self.current_block
-    }
+    fn current_block(&self) -> u64 { self.current_block }
 }
 
 #[derive(Debug)]
@@ -137,9 +126,7 @@ impl From<SolanaWithTokensActivationError> for EnablePlatformCoinWithTokensError
 }
 
 impl From<BalanceError> for SolanaWithTokensActivationError {
-    fn from(e: BalanceError) -> Self {
-        SolanaWithTokensActivationError::GetBalanceError(e)
-    }
+    fn from(e: BalanceError) -> Self { SolanaWithTokensActivationError::GetBalanceError(e) }
 }
 
 pub struct SolanaProtocolInfo {}
@@ -219,23 +206,19 @@ impl PlatformWithTokensActivationOps for SolanaCoin {
             solana_addresses_infos: HashMap::new(),
             spl_addresses_infos: HashMap::new(),
         };
-        result.solana_addresses_infos.insert(
-            my_address.clone(),
-            CoinAddressInfo {
+        result
+            .solana_addresses_infos
+            .insert(my_address.clone(), CoinAddressInfo {
                 derivation_method: DerivationMethod::Iguana,
                 pubkey: my_address.clone(),
                 balances: solana_balance,
-            },
-        );
+            });
 
-        result.spl_addresses_infos.insert(
-            my_address.clone(),
-            CoinAddressInfo {
-                derivation_method: DerivationMethod::Iguana,
-                pubkey: my_address,
-                balances: token_balances,
-            },
-        );
+        result.spl_addresses_infos.insert(my_address.clone(), CoinAddressInfo {
+            derivation_method: DerivationMethod::Iguana,
+            pubkey: my_address,
+            balances: token_balances,
+        });
         Ok(result)
     }
 

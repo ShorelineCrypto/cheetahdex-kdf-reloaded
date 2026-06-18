@@ -1,9 +1,6 @@
-#[macro_use]
-extern crate common;
-#[macro_use]
-extern crate fomat_macros;
-#[macro_use]
-extern crate gstuff;
+#[macro_use] extern crate common;
+#[macro_use] extern crate fomat_macros;
+#[macro_use] extern crate gstuff;
 
 use common::log::LogWeak;
 use serde::{Deserialize, Serialize};
@@ -11,18 +8,15 @@ use serde_json::{Value as Json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
+#[cfg(not(target_arch = "wasm32"))] mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{prometheus, Clock, Metrics, TrySink};
 // Re-export Label so macros can reference it via $crate::MetricLabel.
 #[cfg(not(target_arch = "wasm32"))]
 pub use metrics_core::Label as MetricLabel;
 
-#[cfg(target_arch = "wasm32")]
-mod wasm;
-#[cfg(target_arch = "wasm32")]
-pub use wasm::{Clock, Metrics};
+#[cfg(target_arch = "wasm32")] mod wasm;
+#[cfg(target_arch = "wasm32")] pub use wasm::{Clock, Metrics};
 
 pub trait MetricsOps {
     /// If the instance was not initialized yet, create the `receiver` else return an error.
@@ -46,38 +40,26 @@ pub trait ClockOps {
 pub struct MetricsArc(pub Arc<Metrics>);
 
 impl MetricsOps for MetricsArc {
-    fn init(&self) -> Result<(), String> {
-        self.0.init()
-    }
+    fn init(&self) -> Result<(), String> { self.0.init() }
 
     fn init_with_dashboard(&self, log_state: LogWeak, record_interval: f64) -> Result<(), String> {
         self.0.init_with_dashboard(log_state, record_interval)
     }
 
-    fn clock(&self) -> Result<Clock, String> {
-        self.0.clock()
-    }
+    fn clock(&self) -> Result<Clock, String> { self.0.clock() }
 
-    fn collect_json(&self) -> Result<Value, String> {
-        self.0.collect_json()
-    }
+    fn collect_json(&self) -> Result<Value, String> { self.0.collect_json() }
 }
 
 impl MetricsArc {
     /// Create new `Metrics` instance
-    pub fn new() -> MetricsArc {
-        MetricsArc(Arc::new(Default::default()))
-    }
+    pub fn new() -> MetricsArc { MetricsArc(Arc::new(Default::default())) }
 
     /// Try to obtain the `Metrics` from the weak pointer.
-    pub fn from_weak(weak: &MetricsWeak) -> Option<MetricsArc> {
-        weak.0.upgrade().map(MetricsArc)
-    }
+    pub fn from_weak(weak: &MetricsWeak) -> Option<MetricsArc> { weak.0.upgrade().map(MetricsArc) }
 
     /// Create a weak pointer from `MetricsWeak`.
-    pub fn weak(&self) -> MetricsWeak {
-        MetricsWeak(Arc::downgrade(&self.0))
-    }
+    pub fn weak(&self) -> MetricsWeak { MetricsWeak(Arc::downgrade(&self.0)) }
 }
 
 #[derive(Clone, Default)]
@@ -85,13 +67,9 @@ pub struct MetricsWeak(pub Weak<Metrics>);
 
 impl MetricsWeak {
     /// Create a default MmWeak without allocating any memory.
-    pub fn new() -> MetricsWeak {
-        MetricsWeak::default()
-    }
+    pub fn new() -> MetricsWeak { MetricsWeak::default() }
 
-    pub fn dropped(&self) -> bool {
-        self.0.strong_count() == 0
-    }
+    pub fn dropped(&self) -> bool { self.0.strong_count() == 0 }
 }
 
 #[derive(Serialize, Debug, Default, Deserialize)]

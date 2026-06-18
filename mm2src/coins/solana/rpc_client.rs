@@ -108,9 +108,7 @@ struct ClientInner {
 }
 
 impl SolanaRpcClient {
-    pub fn new(url: impl Into<String>) -> Self {
-        Self::with_commitment(url, CommitmentConfig::default())
-    }
+    pub fn new(url: impl Into<String>) -> Self { Self::with_commitment(url, CommitmentConfig::default()) }
 
     pub fn with_commitment(url: impl Into<String>, commitment: CommitmentConfig) -> Self {
         Self {
@@ -122,17 +120,11 @@ impl SolanaRpcClient {
         }
     }
 
-    pub fn url(&self) -> &str {
-        &self.inner.url
-    }
+    pub fn url(&self) -> &str { &self.inner.url }
 
-    pub fn commitment(&self) -> CommitmentConfig {
-        self.inner.commitment
-    }
+    pub fn commitment(&self) -> CommitmentConfig { self.inner.commitment }
 
-    fn next_id(&self) -> u64 {
-        self.inner.next_id.fetch_add(1, Ordering::Relaxed)
-    }
+    fn next_id(&self) -> u64 { self.inner.next_id.fetch_add(1, Ordering::Relaxed) }
 
     async fn call<T: DeserializeOwned>(&self, method: &str, params: Json) -> Result<T, RpcError> {
         let id = self.next_id();
@@ -300,9 +292,7 @@ impl SolanaRpcClient {
         Ok(resp.value.is_some())
     }
 
-    fn commitment_param(&self) -> Json {
-        json!({ "commitment": self.commitment_str() })
-    }
+    fn commitment_param(&self) -> Json { json!({ "commitment": self.commitment_str() }) }
 
     fn commitment_str(&self) -> &'static str {
         // CommitmentConfig in the modular crate exposes `commitment` as

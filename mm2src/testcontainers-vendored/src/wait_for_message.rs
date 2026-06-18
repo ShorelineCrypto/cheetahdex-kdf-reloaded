@@ -8,9 +8,7 @@ pub enum WaitError {
 }
 
 impl From<io::Error> for WaitError {
-    fn from(e: io::Error) -> Self {
-        WaitError::IO(e)
-    }
+    fn from(e: io::Error) -> Self { WaitError::IO(e) }
 }
 
 /// Extension trait for io::Read to wait for a message to appear in the given stream.

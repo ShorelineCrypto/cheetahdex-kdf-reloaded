@@ -8,12 +8,10 @@ use super::tendermint_helpers::TendermintCommons;
 use super::tendermint_types::*;
 use crate::utxo::sat_from_big_decimal;
 use crate::utxo::utxo_common::{big_decimal_from_sat, big_decimal_from_sat_unsigned};
-use crate::{
-    BalanceError, FeeApproxStage, HistorySyncState, MarketCoinOps, MmCoin, RawTransactionError, RawTransactionFut,
-    RawTransactionRequest, RawTransactionRes, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult,
-    TradePreimageValue, TransactionDetails, TransactionType, TxFeeDetails, ValidateAddressResult, WithdrawError,
-    WithdrawFee, WithdrawFut, WithdrawRequest,
-};
+use crate::{BalanceError, FeeApproxStage, HistorySyncState, MarketCoinOps, MmCoin, RawTransactionError,
+            RawTransactionFut, RawTransactionRequest, RawTransactionRes, TradeFee, TradePreimageError,
+            TradePreimageFut, TradePreimageResult, TradePreimageValue, TransactionDetails, TransactionType,
+            TxFeeDetails, ValidateAddressResult, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest};
 use bigdecimal::BigDecimal;
 use common::mm_number::MmNumber;
 use common::now_ms;
@@ -168,9 +166,7 @@ impl TendermintCoin {
 #[async_trait::async_trait]
 #[allow(unused_variables)]
 impl MmCoin for TendermintCoin {
-    fn is_asset_chain(&self) -> bool {
-        false
-    }
+    fn is_asset_chain(&self) -> bool { false }
 
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         let coin = self.clone();
@@ -348,9 +344,7 @@ impl MmCoin for TendermintCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn decimals(&self) -> u8 {
-        self.protocol_info.decimals
-    }
+    fn decimals(&self) -> u8 { self.protocol_info.decimals }
 
     fn convert_to_address(&self, _from: &str, _to_address_format: Json) -> Result<String, String> {
         Err("Not implemented".into())
@@ -374,9 +368,7 @@ impl MmCoin for TendermintCoin {
         Box::new(futures01::future::err(()))
     }
 
-    fn history_sync_status(&self) -> HistorySyncState {
-        self.history_sync_state.lock().unwrap().clone()
-    }
+    fn history_sync_status(&self) -> HistorySyncState { self.history_sync_state.lock().unwrap().clone() }
 
     fn get_trade_fee(&self) -> Box<dyn futures01::Future<Item = TradeFee, Error = String> + Send> {
         let coin = self.clone();
@@ -444,13 +436,9 @@ impl MmCoin for TendermintCoin {
         .await
     }
 
-    fn required_confirmations(&self) -> u64 {
-        0
-    }
+    fn required_confirmations(&self) -> u64 { 0 }
 
-    fn requires_notarization(&self) -> bool {
-        false
-    }
+    fn requires_notarization(&self) -> bool { false }
 
     fn set_required_confirmations(&self, _confirmations: u64) {
         common::log::warn!("set_required_confirmations is not supported for Tendermint");
@@ -460,21 +448,13 @@ impl MmCoin for TendermintCoin {
         common::log::warn!("Tendermint doesn't support notarization");
     }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        None
-    }
+    fn swap_contract_address(&self) -> Option<BytesJson> { None }
 
-    fn mature_confirmations(&self) -> Option<u32> {
-        None
-    }
+    fn mature_confirmations(&self) -> Option<u32> { None }
 
-    fn coin_protocol_info(&self) -> Vec<u8> {
-        Vec::new()
-    }
+    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
 
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
-        true
-    }
+    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool { true }
 }
 
 // ————————————————————————————————————————————————————————————————
@@ -482,6 +462,4 @@ impl MmCoin for TendermintCoin {
 // ————————————————————————————————————————————————————————————————
 
 /// Generate an internal transaction id from a tx hash string.
-fn tx_hash_to_internal_id(tx_hash: &str) -> BytesJson {
-    tx_hash.as_bytes().to_vec().into()
-}
+fn tx_hash_to_internal_id(tx_hash: &str) -> BytesJson { tx_hash.as_bytes().to_vec().into() }

@@ -45,15 +45,11 @@ macro_rules! compile_err {
 }
 
 impl From<CompileError> for TokenStream2 {
-    fn from(e: CompileError) -> Self {
-        Error::new(Span::call_site(), e.0).to_compile_error()
-    }
+    fn from(e: CompileError) -> Self { Error::new(Span::call_site(), e.0).to_compile_error() }
 }
 
 impl From<CompileError> for TokenStream {
-    fn from(e: CompileError) -> Self {
-        TokenStream2::from(e).into()
-    }
+    fn from(e: CompileError) -> Self { TokenStream2::from(e).into() }
 }
 
 // ---------------------------------------------------------------------------

@@ -239,17 +239,13 @@ pub fn spawn_reentrancy_lock_renew(lock: SwapLock, interval_sec: f64) {
 impl StateMachineDbRepr for MakerSwapDbRepr {
     type Event = MakerSwapEvent;
 
-    fn add_event(&mut self, event: Self::Event) {
-        self.events.push(event);
-    }
+    fn add_event(&mut self, event: Self::Event) { self.events.push(event); }
 }
 
 impl StateMachineDbRepr for TakerSwapDbRepr {
     type Event = TakerSwapEvent;
 
-    fn add_event(&mut self, event: Self::Event) {
-        self.events.push(event);
-    }
+    fn add_event(&mut self, event: Self::Event) { self.events.push(event); }
 }
 
 // V2 Swap Storage — Native (SQLite) ------------------------------------------
@@ -802,21 +798,13 @@ pub(super) trait GetSwapCoins {
 }
 
 impl GetSwapCoins for MakerSwapDbRepr {
-    fn maker_coin(&self) -> &str {
-        &self.maker_coin
-    }
-    fn taker_coin(&self) -> &str {
-        &self.taker_coin
-    }
+    fn maker_coin(&self) -> &str { &self.maker_coin }
+    fn taker_coin(&self) -> &str { &self.taker_coin }
 }
 
 impl GetSwapCoins for TakerSwapDbRepr {
-    fn maker_coin(&self) -> &str {
-        &self.maker_coin
-    }
-    fn taker_coin(&self) -> &str {
-        &self.taker_coin
-    }
+    fn maker_coin(&self) -> &str { &self.maker_coin }
+    fn taker_coin(&self) -> &str { &self.taker_coin }
 }
 
 /// Waits until both maker and taker coins are activated, then returns them.
@@ -1994,15 +1982,12 @@ mod tests {
             block_on(storage.store_repr(uuid, sample_maker_repr(uuid))).unwrap();
 
             // Store events
-            block_on(storage.store_event(
-                uuid,
-                MakerSwapEvent::Initialized {
-                    maker_coin_start_block: 42,
-                    taker_coin_start_block: 84,
-                    maker_payment_trade_fee: MmNumber::from("0.001"),
-                    taker_payment_spend_trade_fee: MmNumber::from("0.002"),
-                },
-            ))
+            block_on(storage.store_event(uuid, MakerSwapEvent::Initialized {
+                maker_coin_start_block: 42,
+                taker_coin_start_block: 84,
+                maker_payment_trade_fee: MmNumber::from("0.001"),
+                taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+            }))
             .unwrap();
 
             // get_repr should include the events
@@ -2031,15 +2016,12 @@ mod tests {
 
             block_on(storage.store_repr(uuid, sample_taker_repr(uuid))).unwrap();
 
-            block_on(storage.store_event(
-                uuid,
-                TakerSwapEvent::Initialized {
-                    maker_coin_start_block: 42,
-                    taker_coin_start_block: 84,
-                    taker_payment_fee: MmNumber::from("0.001"),
-                    maker_payment_spend_fee: MmNumber::from("0.002"),
-                },
-            ))
+            block_on(storage.store_event(uuid, TakerSwapEvent::Initialized {
+                maker_coin_start_block: 42,
+                taker_coin_start_block: 84,
+                taker_payment_fee: MmNumber::from("0.001"),
+                maker_payment_spend_fee: MmNumber::from("0.002"),
+            }))
             .unwrap();
 
             let loaded: TakerSwapDbRepr = block_on(storage.get_repr(uuid)).unwrap();

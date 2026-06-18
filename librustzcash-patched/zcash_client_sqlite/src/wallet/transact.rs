@@ -37,8 +37,12 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
         // We store rcm directly in the data DB, regardless of whether the note
         // used a v1 or v2 note plaintext, so for the purposes of spending let's
         // pretend this is a pre-ZIP 212 note.
-        let rcm = jubjub::Fr::from_repr(rcm_bytes[..].try_into().map_err(|_| SqliteClientError::InvalidNote)?)
-            .ok_or(SqliteClientError::InvalidNote)?;
+        let rcm = jubjub::Fr::from_repr(
+            rcm_bytes[..]
+                .try_into()
+                .map_err(|_| SqliteClientError::InvalidNote)?,
+        )
+        .ok_or(SqliteClientError::InvalidNote)?;
         Rseed::BeforeZip212(rcm)
     };
 
@@ -178,7 +182,7 @@ mod tests {
             Some(tx_prover) => tx_prover,
             None => {
                 panic!("Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.");
-            },
+            }
         }
     }
 
@@ -266,7 +270,14 @@ mod tests {
         let data_file = NamedTempFile::new().unwrap();
         let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
-        init_blocks_table(&db_data, BlockHeight::from(1u32), BlockHash([1; 32]), 1, &[]).unwrap();
+        init_blocks_table(
+            &db_data,
+            BlockHeight::from(1u32),
+            BlockHash([1; 32]),
+            1,
+            &[],
+        )
+        .unwrap();
 
         // Add an account to the wallet
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -291,7 +302,10 @@ mod tests {
             OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
-            Err(e) => assert_eq!(e.to_string(), "Insufficient balance (have 0, need 1001 including fee)"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                "Insufficient balance (have 0, need 1001 including fee)"
+            ),
         }
     }
 
@@ -312,7 +326,12 @@ mod tests {
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (cb, _) = fake_compact_block(sapling_activation_height(), BlockHash([0; 32]), extfvk.clone(), value);
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            extfvk.clone(),
+            value,
+        );
         insert_into_cache(&db_cache, &cb);
         let mut db_write = db_data.get_update_ops().unwrap();
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
@@ -320,17 +339,28 @@ mod tests {
         // Verified balance matches total balance
         let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
-        assert_eq!(get_balance_at(&db_data, AccountId(0), anchor_height).unwrap(), value);
+        assert_eq!(
+            get_balance_at(&db_data, AccountId(0), anchor_height).unwrap(),
+            value
+        );
 
         // Add more funds to the wallet in a second note
-        let (cb, _) = fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk.clone(), value);
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height() + 1,
+            cb.hash(),
+            extfvk.clone(),
+            value,
+        );
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Verified balance does not include the second note
         let (_, anchor_height2) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value + value);
-        assert_eq!(get_balance_at(&db_data, AccountId(0), anchor_height2).unwrap(), value);
+        assert_eq!(
+            get_balance_at(&db_data, AccountId(0), anchor_height2).unwrap(),
+            value
+        );
 
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
@@ -356,7 +386,12 @@ mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
         for i in 2..10 {
-            let (cb, _) = fake_compact_block(sapling_activation_height() + i, cb.hash(), extfvk.clone(), value);
+            let (cb, _) = fake_compact_block(
+                sapling_activation_height() + i,
+                cb.hash(),
+                extfvk.clone(),
+                value,
+            );
             insert_into_cache(&db_cache, &cb);
         }
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
@@ -381,7 +416,8 @@ mod tests {
         }
 
         // Mine block 11 so that the second note becomes verified
-        let (cb, _) = fake_compact_block(sapling_activation_height() + 10, cb.hash(), extfvk, value);
+        let (cb, _) =
+            fake_compact_block(sapling_activation_height() + 10, cb.hash(), extfvk, value);
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
@@ -417,7 +453,12 @@ mod tests {
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (cb, _) = fake_compact_block(sapling_activation_height(), BlockHash([0; 32]), extfvk, value);
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            extfvk,
+            value,
+        );
         insert_into_cache(&db_cache, &cb);
         let mut db_write = db_data.get_update_ops().unwrap();
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
@@ -452,7 +493,10 @@ mod tests {
             OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
-            Err(e) => assert_eq!(e.to_string(), "Insufficient balance (have 0, need 3000 including fee)"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                "Insufficient balance (have 0, need 3000 including fee)"
+            ),
         }
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 21 (that don't send us funds)
@@ -481,7 +525,10 @@ mod tests {
             OvkPolicy::Sender,
         ) {
             Ok(_) => panic!("Should have failed"),
-            Err(e) => assert_eq!(e.to_string(), "Insufficient balance (have 0, need 3000 including fee)"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                "Insufficient balance (have 0, need 3000 including fee)"
+            ),
         }
 
         // Mine block SAPLING_ACTIVATION_HEIGHT + 22 so that the first transaction expires
@@ -527,7 +574,12 @@ mod tests {
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (cb, _) = fake_compact_block(sapling_activation_height(), BlockHash([0; 32]), extfvk.clone(), value);
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            extfvk.clone(),
+            value,
+        );
         insert_into_cache(&db_cache, &cb);
         let mut db_write = db_data.get_update_ops().unwrap();
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
@@ -578,12 +630,18 @@ mod tests {
 
             let output = &tx.shielded_outputs[output_index as usize];
 
-            try_sapling_output_recovery(&network, sapling_activation_height(), &extfvk.fvk.ovk, output)
+            try_sapling_output_recovery(
+                &network,
+                sapling_activation_height(),
+                &extfvk.fvk.ovk,
+                output,
+            )
         };
 
         // Send some of the funds to another address, keeping history.
         // The recipient output is decryptable by the sender.
-        let (_, recovered_to, _) = send_and_recover_with_policy(&mut db_write, OvkPolicy::Sender).unwrap();
+        let (_, recovered_to, _) =
+            send_and_recover_with_policy(&mut db_write, OvkPolicy::Sender).unwrap();
         assert_eq!(&recovered_to, &addr2);
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 22 (that don't send us funds)
@@ -621,7 +679,12 @@ mod tests {
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(51000).unwrap();
-        let (cb, _) = fake_compact_block(sapling_activation_height(), BlockHash([0; 32]), extfvk, value);
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            extfvk,
+            value,
+        );
         insert_into_cache(&db_cache, &cb);
         let mut db_write = db_data.get_update_ops().unwrap();
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
@@ -629,7 +692,10 @@ mod tests {
         // Verified balance matches total balance
         let (_, anchor_height) = (&db_data).get_target_and_anchor_heights().unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId(0)).unwrap(), value);
-        assert_eq!(get_balance_at(&db_data, AccountId(0), anchor_height).unwrap(), value);
+        assert_eq!(
+            get_balance_at(&db_data, AccountId(0), anchor_height).unwrap(),
+            value
+        );
 
         let to = TransparentAddress::PublicKey([7; 20]).into();
         create_spend_to_address(

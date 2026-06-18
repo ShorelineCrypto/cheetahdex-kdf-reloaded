@@ -33,11 +33,7 @@ impl<T> ResultHandler<T> {
         }
     }
 
-    pub fn message_type(&self) -> MessageType {
-        self.result_message_type
-    }
+    pub fn message_type(&self) -> MessageType { self.result_message_type }
 
-    pub fn handle_raw(self, proto: ProtoMessage) -> TrezorResult<T> {
-        (self.handler)(proto)
-    }
+    pub fn handle_raw(self, proto: ProtoMessage) -> TrezorResult<T> { (self.handler)(proto) }
 }

@@ -55,25 +55,17 @@ async fn withdraw_impl(coin: SolanaCoin, req: WithdrawRequest) -> WithdrawResult
 #[allow(forgetting_references, forgetting_copy_types, invalid_reference_casting)]
 #[async_trait]
 impl MmCoin for SolanaCoin {
-    fn is_asset_chain(&self) -> bool {
-        false
-    }
+    fn is_asset_chain(&self) -> bool { false }
 
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         Box::new(Box::pin(withdraw_impl(self.clone(), req)).compat())
     }
 
-    fn get_raw_transaction(&self, _req: RawTransactionRequest) -> RawTransactionFut {
-        unimplemented!()
-    }
+    fn get_raw_transaction(&self, _req: RawTransactionRequest) -> RawTransactionFut { unimplemented!() }
 
-    fn decimals(&self) -> u8 {
-        self.decimals
-    }
+    fn decimals(&self) -> u8 { self.decimals }
 
-    fn convert_to_address(&self, _from: &str, _to_address_format: Json) -> Result<String, String> {
-        unimplemented!()
-    }
+    fn convert_to_address(&self, _from: &str, _to_address_format: Json) -> Result<String, String> { unimplemented!() }
 
     fn validate_address(&self, address: &str) -> ValidateAddressResult {
         if address.len() != 44 {
@@ -104,18 +96,12 @@ impl MmCoin for SolanaCoin {
         }
     }
 
-    fn process_history_loop(&self, _ctx: MmArc) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-        unimplemented!()
-    }
+    fn process_history_loop(&self, _ctx: MmArc) -> Box<dyn Future<Item = (), Error = ()> + Send> { unimplemented!() }
 
-    fn history_sync_status(&self) -> HistorySyncState {
-        unimplemented!()
-    }
+    fn history_sync_status(&self) -> HistorySyncState { unimplemented!() }
 
     /// Get fee to be paid per 1 swap transaction
-    fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
-        unimplemented!()
-    }
+    fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> { unimplemented!() }
 
     async fn get_sender_trade_fee(
         &self,
@@ -125,9 +111,7 @@ impl MmCoin for SolanaCoin {
         unimplemented!()
     }
 
-    fn get_receiver_trade_fee(&self, _stage: FeeApproxStage) -> TradePreimageFut<TradeFee> {
-        unimplemented!()
-    }
+    fn get_receiver_trade_fee(&self, _stage: FeeApproxStage) -> TradePreimageFut<TradeFee> { unimplemented!() }
 
     async fn get_fee_to_send_taker_fee(
         &self,
@@ -137,35 +121,19 @@ impl MmCoin for SolanaCoin {
         unimplemented!()
     }
 
-    fn required_confirmations(&self) -> u64 {
-        1
-    }
+    fn required_confirmations(&self) -> u64 { 1 }
 
-    fn requires_notarization(&self) -> bool {
-        false
-    }
+    fn requires_notarization(&self) -> bool { false }
 
-    fn set_required_confirmations(&self, _confirmations: u64) {
-        unimplemented!()
-    }
+    fn set_required_confirmations(&self, _confirmations: u64) { unimplemented!() }
 
-    fn set_requires_notarization(&self, _requires_nota: bool) {
-        unimplemented!()
-    }
+    fn set_requires_notarization(&self, _requires_nota: bool) { unimplemented!() }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        unimplemented!()
-    }
+    fn swap_contract_address(&self) -> Option<BytesJson> { unimplemented!() }
 
-    fn mature_confirmations(&self) -> Option<u32> {
-        None
-    }
+    fn mature_confirmations(&self) -> Option<u32> { None }
 
-    fn coin_protocol_info(&self) -> Vec<u8> {
-        Vec::new()
-    }
+    fn coin_protocol_info(&self) -> Vec<u8> { Vec::new() }
 
-    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool {
-        true
-    }
+    fn is_coin_protocol_supported(&self, _info: &Option<Vec<u8>>) -> bool { true }
 }

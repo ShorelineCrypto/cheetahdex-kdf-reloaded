@@ -71,9 +71,7 @@ impl<T> Topic<T> {
 }
 
 impl<T> Default for Topic<T> {
-    fn default() -> Self {
-        Topic::Any
-    }
+    fn default() -> Self { Topic::Any }
 }
 
 impl<T> From<Option<T>> for Topic<T> {
@@ -86,15 +84,11 @@ impl<T> From<Option<T>> for Topic<T> {
 }
 
 impl<T> From<T> for Topic<T> {
-    fn from(topic: T) -> Self {
-        Topic::This(topic)
-    }
+    fn from(topic: T) -> Self { Topic::This(topic) }
 }
 
 impl<T> From<Vec<T>> for Topic<T> {
-    fn from(topics: Vec<T>) -> Self {
-        Topic::OneOf(topics)
-    }
+    fn from(topics: Vec<T>) -> Self { Topic::OneOf(topics) }
 }
 
 impl<T> Into<Vec<T>> for Topic<T> {
@@ -151,9 +145,7 @@ mod tests {
     use serde_json;
     use Hash;
 
-    fn hash(s: &'static str) -> Hash {
-        s.into()
-    }
+    fn hash(s: &'static str) -> Hash { s.into() }
 
     #[test]
     fn test_topic_filter_serialization() {
@@ -209,9 +201,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Topic unavailable")]
-    fn test_topic_index_panic() {
-        let _ = (Topic::Any as Topic<u8>)[0];
-    }
+    fn test_topic_index_panic() { let _ = (Topic::Any as Topic<u8>)[0]; }
 
     #[test]
     #[should_panic(expected = "Topic unavailable")]

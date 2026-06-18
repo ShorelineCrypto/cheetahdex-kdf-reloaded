@@ -3,9 +3,8 @@
 use crate::nft::model::{Chain, Nft, NftList, NftListFilters};
 use crate::nft::store::errors::RemoveOutcome;
 use crate::nft::store::list::NftListStore;
-use crate::nft::store::sqlite::schema::{
-    create_inventory_sql, create_scan_progress_sql, inventory_table, SCAN_PROGRESS_TABLE, TABLE_EXISTS_SQL,
-};
+use crate::nft::store::sqlite::schema::{create_inventory_sql, create_scan_progress_sql, inventory_table,
+                                        SCAN_PROGRESS_TABLE, TABLE_EXISTS_SQL};
 use crate::nft::store::sqlite::SqliteNftStore;
 use async_trait::async_trait;
 use db_common::async_sql_conn::AsyncConnError;
@@ -18,9 +17,7 @@ use std::num::NonZeroUsize;
 
 /// Map [`Chain`] to its UPPERCASE serde label (the same encoding used by
 /// the wire model and JSON payloads).
-fn chain_label(chain: &Chain) -> String {
-    format!("{}", chain)
-}
+fn chain_label(chain: &Chain) -> String { format!("{}", chain) }
 
 /// Compute the inclusive 0-based offset and limit from optional pagination
 /// inputs. Returns `(0, total)` when `take_all` is true.

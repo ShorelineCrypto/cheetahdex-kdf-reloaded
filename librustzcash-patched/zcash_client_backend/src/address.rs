@@ -3,7 +3,8 @@
 use zcash_primitives::{consensus, legacy::TransparentAddress, sapling::PaymentAddress};
 
 use crate::encoding::{
-    decode_payment_address, decode_transparent_address, encode_payment_address, encode_transparent_address,
+    decode_payment_address, decode_transparent_address, encode_payment_address,
+    encode_transparent_address,
 };
 
 /// An address that funds can be sent to.
@@ -42,7 +43,9 @@ impl RecipientAddress {
 
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
         match self {
-            RecipientAddress::Shielded(pa) => encode_payment_address(params.hrp_sapling_payment_address(), pa),
+            RecipientAddress::Shielded(pa) => {
+                encode_payment_address(params.hrp_sapling_payment_address(), pa)
+            }
             RecipientAddress::Transparent(addr) => encode_transparent_address(
                 &params.b58_pubkey_address_prefix(),
                 &params.b58_script_address_prefix(),

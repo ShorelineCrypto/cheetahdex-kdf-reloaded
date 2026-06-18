@@ -9,8 +9,7 @@
 
 #![allow(uncommon_codepoints)]
 
-#[macro_use]
-extern crate fomat_macros;
+#[macro_use] extern crate fomat_macros;
 
 use gstuff::{last_modified_sec, slurp};
 use std::env::{self};

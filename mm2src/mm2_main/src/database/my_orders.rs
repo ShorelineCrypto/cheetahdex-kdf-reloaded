@@ -1,6 +1,5 @@
-use crate::mm2::lp_ordermatch::{
-    FilteringOrder, MakerOrder, MyOrdersFilter, RecentOrdersSelectResult, TakerAction, TakerOrder,
-};
+use crate::mm2::lp_ordermatch::{FilteringOrder, MakerOrder, MyOrdersFilter, RecentOrdersSelectResult, TakerAction,
+                                TakerOrder};
 /// This module contains code to work with my_orders table in MM2 SQLite DB
 use common::log::debug;
 use common::{now_ms, PagingOptions};
@@ -184,21 +183,15 @@ pub enum SelectRecentOrdersUuidsErr {
 }
 
 impl std::fmt::Display for SelectRecentOrdersUuidsErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{:?}", self) }
 }
 
 impl From<SqlError> for SelectRecentOrdersUuidsErr {
-    fn from(err: SqlError) -> Self {
-        SelectRecentOrdersUuidsErr::Sql(err)
-    }
+    fn from(err: SqlError) -> Self { SelectRecentOrdersUuidsErr::Sql(err) }
 }
 
 impl From<uuid::parser::ParseError> for SelectRecentOrdersUuidsErr {
-    fn from(err: uuid::parser::ParseError) -> Self {
-        SelectRecentOrdersUuidsErr::Parse(err)
-    }
+    fn from(err: uuid::parser::ParseError) -> Self { SelectRecentOrdersUuidsErr::Parse(err) }
 }
 
 pub fn select_orders_by_filter(

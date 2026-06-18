@@ -23,10 +23,8 @@ mod tests;
 use crate::nft::model::Chain;
 use crate::nft::store::errors::NftStoreError;
 use derive_more::Display;
-use mm2_db::indexed_db::{
-    DbIdentifier, DbInstance, DbLocked, DbTransactionError, IndexedDb, IndexedDbBuilder, InitDbError, InitDbResult,
-    SharedDb, WeakDb,
-};
+use mm2_db::indexed_db::{DbIdentifier, DbInstance, DbLocked, DbTransactionError, IndexedDb, IndexedDbBuilder,
+                         InitDbError, InitDbResult, SharedDb, WeakDb};
 use mm2_err_handle::prelude::*;
 
 pub(crate) use schema::{InventoryRow, ScanProgressRow, TransferRow};
@@ -46,16 +44,12 @@ impl IndexedDbNftStore {
     /// Wrap a pre-initialised [`SharedDb`] handle. Construction is
     /// deferred to the caller so the database lifetime can be tied to
     /// `MmCtx`.
-    pub fn new(db: SharedDb<NftIndexedDb>) -> Self {
-        Self { db }
-    }
+    pub fn new(db: SharedDb<NftIndexedDb>) -> Self { Self { db } }
 
     /// Returns a weak handle that the trait impls can stash for
     /// asynchronous spawn-style use.
     #[allow(dead_code)]
-    pub(crate) fn weak(&self) -> WeakDb<NftIndexedDb> {
-        SharedDb::downgrade(&self.db)
-    }
+    pub(crate) fn weak(&self) -> WeakDb<NftIndexedDb> { SharedDb::downgrade(&self.db) }
 
     /// Lock the shared DB, lazily constructing it on first call.
     pub(crate) async fn lock_db(&self) -> MmResult<DbLocked<'_, NftIndexedDb>, IndexedDbStoreError> {
@@ -65,9 +59,7 @@ impl IndexedDbNftStore {
 
 /// Map [`Chain`] to its UPPERCASE serde label (the same encoding used
 /// by the SQLite backend and the wire model).
-pub(crate) fn chain_label(chain: &Chain) -> String {
-    format!("{}", chain)
-}
+pub(crate) fn chain_label(chain: &Chain) -> String { format!("{}", chain) }
 
 /// Concrete `DbInstance` registered with `mm2_db::indexed_db`.
 pub struct NftIndexedDb {
@@ -76,9 +68,7 @@ pub struct NftIndexedDb {
 
 #[async_trait::async_trait]
 impl DbInstance for NftIndexedDb {
-    fn db_name() -> &'static str {
-        DB_NAME
-    }
+    fn db_name() -> &'static str { DB_NAME }
 
     async fn init(db_id: DbIdentifier) -> InitDbResult<Self> {
         let inner = IndexedDbBuilder::new(db_id)
@@ -124,21 +114,15 @@ impl NotMmError for IndexedDbStoreError {}
 impl NftStoreError for IndexedDbStoreError {}
 
 impl From<DbTransactionError> for IndexedDbStoreError {
-    fn from(e: DbTransactionError) -> Self {
-        IndexedDbStoreError::Transaction(e.to_string())
-    }
+    fn from(e: DbTransactionError) -> Self { IndexedDbStoreError::Transaction(e.to_string()) }
 }
 
 impl From<InitDbError> for IndexedDbStoreError {
-    fn from(e: InitDbError) -> Self {
-        IndexedDbStoreError::Init(e.to_string())
-    }
+    fn from(e: InitDbError) -> Self { IndexedDbStoreError::Init(e.to_string()) }
 }
 
 impl From<serde_json::Error> for IndexedDbStoreError {
-    fn from(e: serde_json::Error) -> Self {
-        IndexedDbStoreError::Payload(e.to_string())
-    }
+    fn from(e: serde_json::Error) -> Self { IndexedDbStoreError::Payload(e.to_string()) }
 }
 
 /// Marker helper used by the trait impls when a method is intentionally

@@ -24,15 +24,11 @@ pub struct HardwareWalletArc(Arc<HardwareWalletCtx>);
 impl Deref for HardwareWalletArc {
     type Target = HardwareWalletCtx;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl HardwareWalletArc {
-    pub fn new(ctx: HardwareWalletCtx) -> HardwareWalletArc {
-        HardwareWalletArc(Arc::new(ctx))
-    }
+    pub fn new(ctx: HardwareWalletCtx) -> HardwareWalletArc { HardwareWalletArc(Arc::new(ctx)) }
 }
 
 pub struct HardwareWalletCtx {
@@ -66,9 +62,7 @@ impl HardwareWalletCtx {
         }))
     }
 
-    pub fn hw_wallet_type(&self) -> HwWalletType {
-        self.hw_wallet_type
-    }
+    pub fn hw_wallet_type(&self) -> HwWalletType { self.hw_wallet_type }
 
     /// Connects to a Trezor device and checks if MM was initialized from this particular device.
     pub async fn trezor<Processor>(
@@ -98,13 +92,9 @@ impl HardwareWalletCtx {
         Ok(trezor)
     }
 
-    pub fn secp256k1_pubkey(&self) -> PublicKey {
-        PublicKey::Compressed(self.hw_internal_pubkey)
-    }
+    pub fn secp256k1_pubkey(&self) -> PublicKey { PublicKey::Compressed(self.hw_internal_pubkey) }
 
-    pub fn rmd160(&self) -> H160 {
-        dhash160(self.hw_internal_pubkey.as_slice())
-    }
+    pub fn rmd160(&self) -> H160 { dhash160(self.hw_internal_pubkey.as_slice()) }
 
     pub(crate) async fn trezor_mm_internal_pubkey<Processor>(
         trezor: &mut TrezorSession<'_>,

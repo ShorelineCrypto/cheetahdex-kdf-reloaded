@@ -6,15 +6,11 @@ use std::collections::HashMap;
 use thiserror::Error;
 use url::Url;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
-#[cfg(not(target_arch = "wasm32"))]
-pub use native::*;
+#[cfg(not(target_arch = "wasm32"))] mod native;
+#[cfg(not(target_arch = "wasm32"))] pub use native::*;
 
-#[cfg(target_arch = "wasm32")]
-mod wasm;
-#[cfg(target_arch = "wasm32")]
-pub use wasm::*;
+#[cfg(target_arch = "wasm32")] mod wasm;
+#[cfg(target_arch = "wasm32")] pub use wasm::*;
 
 pub(crate) mod helpers;
 pub use helpers::ApiClientHelpers;

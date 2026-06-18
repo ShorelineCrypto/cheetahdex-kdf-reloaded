@@ -26,22 +26,14 @@
 // These will be gradually addressed as the code is refactored.
 #![allow(clippy::all)]
 
-#[macro_use]
-extern crate common;
-#[macro_use]
-extern crate fomat_macros;
-#[macro_use]
-extern crate gstuff;
-#[macro_use]
-extern crate mm2_metrics;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate serde_json;
-#[macro_use]
-extern crate ser_error_derive;
+#[macro_use] extern crate common;
+#[macro_use] extern crate fomat_macros;
+#[macro_use] extern crate gstuff;
+#[macro_use] extern crate mm2_metrics;
+#[macro_use] extern crate lazy_static;
+#[macro_use] extern crate serde_derive;
+#[macro_use] extern crate serde_json;
+#[macro_use] extern crate ser_error_derive;
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use base58::FromBase58Error;
@@ -229,8 +221,7 @@ pub mod eth;
 pub mod hd_pubkey;
 pub mod hd_wallet;
 pub mod hd_wallet_storage;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod lightning;
+#[cfg(not(target_arch = "wasm32"))] pub mod lightning;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
 pub mod my_tx_history_v2;
 pub mod nft;
@@ -257,11 +248,9 @@ pub use solana::{solana_coin_from_conf_and_params, SolanaActivationParams, Solan
 
 pub mod siacoin;
 pub mod tendermint;
-#[cfg(target_arch = "wasm32")]
-pub mod tx_history_db;
+#[cfg(target_arch = "wasm32")] pub mod tx_history_db;
 pub mod utxo;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod z_coin;
+#[cfg(not(target_arch = "wasm32"))] pub mod z_coin;
 
 pub(crate) use eth::{eth_coin_from_conf_and_request, EthCoin, EthTxFeeDetails, SignedEthTx};
 pub(crate) use hd_wallet::{HDAddress, HDAddressId};
@@ -282,8 +271,7 @@ pub(crate) use utxo::utxo_common::big_decimal_from_sat_unsigned;
 pub(crate) use utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
 pub(crate) use utxo::UtxoActivationParams;
 pub(crate) use utxo::{BlockchainNetwork, GenerateTxError, UtxoFeeDetails, UtxoTx};
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use z_coin::ZCoin;
+#[cfg(not(target_arch = "wasm32"))] pub(crate) use z_coin::ZCoin;
 
 // ---- Split sub-modules (extracted from monolithic lp_coins.rs) ----
 mod lp_coins_context;

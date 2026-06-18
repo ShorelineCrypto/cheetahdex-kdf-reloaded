@@ -25,9 +25,7 @@ pub enum OrderStatusEvent {
 impl EventStreamer for OrderStatusStreamer {
     type DataInType = OrderStatusEvent;
 
-    fn streamer_id(&self) -> StreamerId {
-        StreamerId::OrderStatus
-    }
+    fn streamer_id(&self) -> StreamerId { StreamerId::OrderStatus }
 
     async fn handle(
         self,

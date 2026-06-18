@@ -128,7 +128,8 @@ pub fn get_address<P: consensus::Parameters>(
         |row| row.get(0),
     )?;
 
-    decode_payment_address(wdb.params.hrp_sapling_payment_address(), &addr).map_err(SqliteClientError::Bech32)
+    decode_payment_address(wdb.params.hrp_sapling_payment_address(), &addr)
+        .map_err(SqliteClientError::Bech32)
 }
 
 /// Returns the [`ExtendedFullViewingKey`]s for the wallet.
@@ -146,9 +147,12 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
         .query_map(NO_PARAMS, |row| {
             let acct = row.get(0).map(AccountId)?;
             let extfvk = row.get(1).map(|extfvk: String| {
-                decode_extended_full_viewing_key(wdb.params.hrp_sapling_extended_full_viewing_key(), &extfvk)
-                    .map_err(SqliteClientError::Bech32)
-                    .and_then(|k| k.ok_or(SqliteClientError::IncorrectHrpExtFvk))
+                decode_extended_full_viewing_key(
+                    wdb.params.hrp_sapling_extended_full_viewing_key(),
+                    &extfvk,
+                )
+                .map_err(SqliteClientError::Bech32)
+                .and_then(|k| k.ok_or(SqliteClientError::IncorrectHrpExtFvk))
             })?;
 
             Ok((acct, extfvk))
@@ -177,7 +181,11 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
         .prepare("SELECT * FROM accounts WHERE account = ? AND extfvk = ?")?
         .exists(&[
             account.0.to_sql()?,
-            encode_extended_full_viewing_key(wdb.params.hrp_sapling_extended_full_viewing_key(), extfvk).to_sql()?,
+            encode_extended_full_viewing_key(
+                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                extfvk,
+            )
+            .to_sql()?,
         ])
         .map_err(SqliteClientError::from)
 }
@@ -344,13 +352,22 @@ pub fn get_sent_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteC
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let bounds = block_height_extrema(&db);
 /// ```
-pub fn block_height_extrema<P>(wdb: &WalletDb<P>) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+pub fn block_height_extrema<P>(
+    wdb: &WalletDb<P>,
+) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
     wdb.conn
-        .query_row("SELECT MIN(height), MAX(height) FROM blocks", NO_PARAMS, |row| {
-            let min_height: u32 = row.get(0)?;
-            let max_height: u32 = row.get(1)?;
-            Ok(Some((BlockHeight::from(min_height), BlockHeight::from(max_height))))
-        })
+        .query_row(
+            "SELECT MIN(height), MAX(height) FROM blocks",
+            NO_PARAMS,
+            |row| {
+                let min_height: u32 = row.get(0)?;
+                let max_height: u32 = row.get(1)?;
+                Ok(Some((
+                    BlockHeight::from(min_height),
+                    BlockHeight::from(max_height),
+                )))
+            },
+        )
         //.optional() doesn't work here because a failed aggregate function
         //produces a runtime error, not an empty set of rows.
         .or(Ok(None))
@@ -374,7 +391,10 @@ pub fn block_height_extrema<P>(wdb: &WalletDb<P>) -> Result<Option<(BlockHeight,
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let height = get_tx_height(&db, TxId([0u8; 32]));
 /// ```
-pub fn get_tx_height<P>(wdb: &WalletDb<P>, txid: TxId) -> Result<Option<BlockHeight>, rusqlite::Error> {
+pub fn get_tx_height<P>(
+    wdb: &WalletDb<P>,
+    txid: TxId,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
     wdb.conn
         .query_row(
             "SELECT block FROM transactions WHERE txid = ?",
@@ -401,7 +421,10 @@ pub fn get_tx_height<P>(wdb: &WalletDb<P>, txid: TxId) -> Result<Option<BlockHei
 /// let db = WalletDb::for_path(data_file, Network::TestNetwork).unwrap();
 /// let hash = get_block_hash(&db, H0);
 /// ```
-pub fn get_block_hash<P>(wdb: &WalletDb<P>, block_height: BlockHeight) -> Result<Option<BlockHash>, rusqlite::Error> {
+pub fn get_block_hash<P>(
+    wdb: &WalletDb<P>,
+    block_height: BlockHeight,
+) -> Result<Option<BlockHash>, rusqlite::Error> {
     wdb.conn
         .query_row(
             "SELECT hash FROM blocks WHERE height = ?",
@@ -430,9 +453,13 @@ pub fn rewind_to_height<P: consensus::Parameters>(
         .ok_or(SqliteClientError::BackendError(Error::SaplingNotActive))?;
 
     // Recall where we synced up to previously.
-    let last_scanned_height = wdb.conn.query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-        row.get(0).map(|h: u32| h.into()).or(Ok(sapling_activation_height - 1))
-    })?;
+    let last_scanned_height =
+        wdb.conn
+            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
+                row.get(0)
+                    .map(|h: u32| h.into())
+                    .or(Ok(sapling_activation_height - 1))
+            })?;
 
     // nothing to do if we're deleting back down to the max height
     if block_height >= last_scanned_height {
@@ -451,8 +478,10 @@ pub fn rewind_to_height<P: consensus::Parameters>(
         )?;
 
         // Now that they aren't depended on, delete scanned blocks.
-        wdb.conn
-            .execute("DELETE FROM blocks WHERE height > ?", &[u32::from(block_height)])?;
+        wdb.conn.execute(
+            "DELETE FROM blocks WHERE height > ?",
+            &[u32::from(block_height)],
+        )?;
 
         Ok(())
     }
@@ -486,7 +515,11 @@ pub fn get_commitment_tree<P>(
             |row| {
                 let row_data: Vec<u8> = row.get(0)?;
                 CommitmentTree::read(&row_data[..]).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(row_data.len(), rusqlite::types::Type::Blob, Box::new(e))
+                    rusqlite::Error::FromSqlConversionFailure(
+                        row_data.len(),
+                        rusqlite::types::Type::Blob,
+                        Box::new(e),
+                    )
                 })
             },
         )
@@ -534,7 +567,9 @@ pub fn get_witnesses<P>(
 /// Retrieve the nullifiers for notes that the wallet is tracking
 /// that have not yet been confirmed as a consequence of the spending
 /// transaction being included in a block.
-pub fn get_nullifiers<P>(wdb: &WalletDb<P>) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
+pub fn get_nullifiers<P>(
+    wdb: &WalletDb<P>,
+) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = wdb.conn.prepare(
         "SELECT rn.id_note, rn.account, rn.nf, tx.block as block
@@ -619,9 +654,12 @@ pub fn put_tx_data<'a, P>(
         == 0
     {
         // It isn't there, so insert our transaction into the database.
-        stmts
-            .stmt_insert_tx_data
-            .execute(params![txid, created_at, u32::from(tx.expiry_height), raw_tx])?;
+        stmts.stmt_insert_tx_data.execute(params![
+            txid,
+            created_at,
+            u32::from(tx.expiry_height),
+            raw_tx
+        ])?;
 
         Ok(stmts.wallet_db.conn.last_insert_rowid())
     } else {
@@ -686,7 +724,9 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
         // It isn't there, so insert our note into the database.
         stmts.stmt_insert_received_note.execute_named(&sql_args)?;
 
-        Ok(NoteId::ReceivedNoteId(stmts.wallet_db.conn.last_insert_rowid()))
+        Ok(NoteId::ReceivedNoteId(
+            stmts.wallet_db.conn.last_insert_rowid(),
+        ))
     } else {
         // It was there, so grab its row number.
         stmts
@@ -721,7 +761,9 @@ pub fn prune_witnesses<P>(
     stmts: &mut DataConnStmtCache<'_, P>,
     below_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    stmts.stmt_prune_witnesses.execute(&[u32::from(below_height)])?;
+    stmts
+        .stmt_prune_witnesses
+        .execute(&[u32::from(below_height)])?;
     Ok(())
 }
 
@@ -744,7 +786,10 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     let output_index = output.index as i64;
     let account = output.account.0 as i64;
     let value = output.note.value as i64;
-    let to_str = encode_payment_address(stmts.wallet_db.params.hrp_sapling_payment_address(), &output.to);
+    let to_str = encode_payment_address(
+        stmts.wallet_db.params.hrp_sapling_payment_address(),
+        &output.to,
+    );
 
     // Try updating an existing sent note.
     if stmts.stmt_update_sent_note.execute(params![

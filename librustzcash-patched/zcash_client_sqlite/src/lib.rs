@@ -49,7 +49,9 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    data_api::{BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead, WalletWrite},
+    data_api::{
+        BlockSource, PrunedBlock, ReceivedTransaction, SentTransaction, WalletRead, WalletWrite,
+    },
     encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
     wallet::{AccountId, SpendableNote},
@@ -94,36 +96,41 @@ impl<P: consensus::Parameters> WalletDb<P> {
     /// for that database. This operation may eagerly initialize and cache sqlite
     /// prepared statements that are used in write operations.
     pub fn get_update_ops(&self) -> Result<DataConnStmtCache<'_, P>, SqliteClientError> {
-        Ok(DataConnStmtCache {
-            wallet_db: self,
-            stmt_insert_block: self.conn.prepare(
-                "INSERT INTO blocks (height, hash, time, sapling_tree)
+        Ok(
+            DataConnStmtCache {
+                wallet_db: self,
+                stmt_insert_block: self.conn.prepare(
+                    "INSERT INTO blocks (height, hash, time, sapling_tree)
                     VALUES (?, ?, ?, ?)",
-            )?,
-            stmt_insert_tx_meta: self.conn.prepare(
-                "INSERT INTO transactions (txid, block, tx_index)
+                )?,
+                stmt_insert_tx_meta: self.conn.prepare(
+                    "INSERT INTO transactions (txid, block, tx_index)
                     VALUES (?, ?, ?)",
-            )?,
-            stmt_update_tx_meta: self.conn.prepare(
-                "UPDATE transactions
+                )?,
+                stmt_update_tx_meta: self.conn.prepare(
+                    "UPDATE transactions
                     SET block = ?, tx_index = ? WHERE txid = ?",
-            )?,
-            stmt_insert_tx_data: self.conn.prepare(
-                "INSERT INTO transactions (txid, created, expiry_height, raw)
+                )?,
+                stmt_insert_tx_data: self.conn.prepare(
+                    "INSERT INTO transactions (txid, created, expiry_height, raw)
                     VALUES (?, ?, ?, ?)",
-            )?,
-            stmt_update_tx_data: self.conn.prepare(
-                "UPDATE transactions
+                )?,
+                stmt_update_tx_data: self.conn.prepare(
+                    "UPDATE transactions
                     SET expiry_height = ?, raw = ? WHERE txid = ?",
-            )?,
-            stmt_select_tx_ref: self.conn.prepare("SELECT id_tx FROM transactions WHERE txid = ?")?,
-            stmt_mark_recived_note_spent: self.conn.prepare("UPDATE received_notes SET spent = ? WHERE nf = ?")?,
-            stmt_insert_received_note: self.conn.prepare(
-                "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
+                )?,
+                stmt_select_tx_ref: self.conn.prepare(
+                    "SELECT id_tx FROM transactions WHERE txid = ?",
+                )?,
+                stmt_mark_recived_note_spent: self.conn.prepare(
+                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
+                )?,
+                stmt_insert_received_note: self.conn.prepare(
+                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
                     VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
-            )?,
-            stmt_update_received_note: self.conn.prepare(
-                "UPDATE received_notes
+                )?,
+                stmt_update_received_note: self.conn.prepare(
+                    "UPDATE received_notes
                     SET account = :account,
                         diversifier = :diversifier,
                         value = :value,
@@ -132,31 +139,34 @@ impl<P: consensus::Parameters> WalletDb<P> {
                         memo = IFNULL(:memo, memo),
                         is_change = IFNULL(:is_change, is_change)
                     WHERE tx = :tx AND output_index = :output_index",
-            )?,
-            stmt_select_received_note: self
-                .conn
-                .prepare("SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?")?,
-            stmt_update_sent_note: self.conn.prepare(
-                "UPDATE sent_notes
+                )?,
+                stmt_select_received_note: self.conn.prepare(
+                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
+                )?,
+                stmt_update_sent_note: self.conn.prepare(
+                    "UPDATE sent_notes
                     SET from_account = ?, address = ?, value = ?, memo = ?
                     WHERE tx = ? AND output_index = ?",
-            )?,
-            stmt_insert_sent_note: self.conn.prepare(
-                "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
+                )?,
+                stmt_insert_sent_note: self.conn.prepare(
+                    "INSERT INTO sent_notes (tx, output_index, from_account, address, value, memo)
                     VALUES (?, ?, ?, ?, ?, ?)",
-            )?,
-            stmt_insert_witness: self.conn.prepare(
-                "INSERT INTO sapling_witnesses (note, block, witness)
+                )?,
+                stmt_insert_witness: self.conn.prepare(
+                    "INSERT INTO sapling_witnesses (note, block, witness)
                     VALUES (?, ?, ?)",
-            )?,
-            stmt_prune_witnesses: self.conn.prepare("DELETE FROM sapling_witnesses WHERE block < ?")?,
-            stmt_update_expired: self.conn.prepare(
-                "UPDATE received_notes SET spent = NULL WHERE EXISTS (
+                )?,
+                stmt_prune_witnesses: self.conn.prepare(
+                    "DELETE FROM sapling_witnesses WHERE block < ?"
+                )?,
+                stmt_update_expired: self.conn.prepare(
+                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
                         SELECT id_tx FROM transactions
                         WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
-            )?,
-        })
+                )?,
+            }
+        )
     }
 }
 
@@ -177,7 +187,9 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
-    fn get_extended_full_viewing_keys(&self) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+    fn get_extended_full_viewing_keys(
+        &self,
+    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
         wallet::get_extended_full_viewing_keys(self)
     }
 
@@ -193,7 +205,11 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::is_valid_account_extfvk(self, account, extfvk)
     }
 
-    fn get_balance_at(&self, account: AccountId, anchor_height: BlockHeight) -> Result<Amount, Self::Error> {
+    fn get_balance_at(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Amount, Self::Error> {
         wallet::get_balance_at(self, account, anchor_height)
     }
 
@@ -204,7 +220,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         }
     }
 
-    fn get_commitment_tree(&self, block_height: BlockHeight) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+    fn get_commitment_tree(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
         wallet::get_commitment_tree(self, block_height)
     }
 
@@ -287,7 +306,9 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_tx_height(txid)
     }
 
-    fn get_extended_full_viewing_keys(&self) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+    fn get_extended_full_viewing_keys(
+        &self,
+    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
         self.wallet_db.get_extended_full_viewing_keys()
     }
 
@@ -303,7 +324,11 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.is_valid_account_extfvk(account, extfvk)
     }
 
-    fn get_balance_at(&self, account: AccountId, anchor_height: BlockHeight) -> Result<Amount, Self::Error> {
+    fn get_balance_at(
+        &self,
+        account: AccountId,
+        anchor_height: BlockHeight,
+    ) -> Result<Amount, Self::Error> {
         self.wallet_db.get_balance_at(account, anchor_height)
     }
 
@@ -311,7 +336,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_memo(id_note)
     }
 
-    fn get_commitment_tree(&self, block_height: BlockHeight) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+    fn get_commitment_tree(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
         self.wallet_db.get_commitment_tree(block_height)
     }
 
@@ -356,7 +384,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
             Ok(result) => {
                 self.wallet_db.conn.execute("COMMIT", NO_PARAMS)?;
                 Ok(result)
-            },
+            }
             Err(error) => {
                 match self.wallet_db.conn.execute("ROLLBACK", NO_PARAMS) {
                     Ok(_) => Err(error),
@@ -369,7 +397,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
                             error
                         )
                 }
-            },
+            }
         }
     }
 }
@@ -410,7 +438,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             // Insert current new_witnesses into the database.
-            for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter()) {
+            for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter())
+            {
                 if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
                     wallet::insert_witness(up, rnid, witness, block.block_height)?;
                 } else {
@@ -428,7 +457,10 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         })
     }
 
-    fn store_received_tx(&mut self, received_tx: &ReceivedTransaction) -> Result<Self::TxRef, Self::Error> {
+    fn store_received_tx(
+        &mut self,
+        received_tx: &ReceivedTransaction,
+    ) -> Result<Self::TxRef, Self::Error> {
         self.transactionally(|up| {
             let tx_ref = wallet::put_tx_data(up, received_tx.tx, None)?;
 
@@ -494,7 +526,12 @@ impl BlockDb {
 impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
-    fn with_blocks<F>(&self, from_height: BlockHeight, limit: Option<u32>, with_row: F) -> Result<(), Self::Error>
+    fn with_blocks<F>(
+        &self,
+        from_height: BlockHeight,
+        limit: Option<u32>,
+        with_row: F,
+    ) -> Result<(), Self::Error>
     where
         F: FnMut(CompactBlock) -> Result<(), Self::Error>,
     {
@@ -502,7 +539,10 @@ impl BlockSource for BlockDb {
     }
 }
 
-fn address_from_extfvk<P: consensus::Parameters>(params: &P, extfvk: &ExtendedFullViewingKey) -> String {
+fn address_from_extfvk<P: consensus::Parameters>(
+    params: &P,
+    extfvk: &ExtendedFullViewingKey,
+) -> String {
     let addr = extfvk.default_address().unwrap().1;
     encode_payment_address(params.hrp_sapling_payment_address(), &addr)
 }
@@ -515,14 +555,17 @@ mod tests {
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
 
-    use zcash_client_backend::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
+    use zcash_client_backend::proto::compact_formats::{
+        CompactBlock, CompactOutput, CompactSpend, CompactTx,
+    };
 
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         memo::MemoBytes,
         sapling::{
-            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier, PaymentAddress,
+            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
+            PaymentAddress,
         },
         transaction::components::Amount,
         zip32::ExtendedFullViewingKey,
@@ -542,12 +585,16 @@ mod tests {
 
     #[cfg(feature = "mainnet")]
     pub(crate) fn sapling_activation_height() -> BlockHeight {
-        Network::MainNetwork.activation_height(NetworkUpgrade::Sapling).unwrap()
+        Network::MainNetwork
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap()
     }
 
     #[cfg(not(feature = "mainnet"))]
     pub(crate) fn sapling_activation_height() -> BlockHeight {
-        Network::TestNetwork.activation_height(NetworkUpgrade::Sapling).unwrap()
+        Network::TestNetwork
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap()
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying
@@ -569,8 +616,13 @@ mod tests {
             value: value.into(),
             rseed,
         };
-        let encryptor =
-            sapling_note_encryption::<_, Network>(Some(extfvk.fvk.ovk), note.clone(), to, MemoBytes::empty(), &mut rng);
+        let encryptor = sapling_note_encryption::<_, Network>(
+            Some(extfvk.fvk.ovk),
+            note.clone(),
+            to,
+            MemoBytes::empty(),
+            &mut rng,
+        );
         let cmu = note.cmu().to_repr().as_ref().to_vec();
         let epk = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();

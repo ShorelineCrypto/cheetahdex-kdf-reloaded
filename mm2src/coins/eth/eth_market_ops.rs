@@ -4,17 +4,11 @@ use super::*;
 
 #[cfg_attr(test, mockable)]
 impl MarketCoinOps for EthCoin {
-    fn ticker(&self) -> &str {
-        &self.ticker[..]
-    }
+    fn ticker(&self) -> &str { &self.ticker[..] }
 
-    fn my_address(&self) -> Result<String, String> {
-        Ok(checksum_address(&format!("{:#02x}", self.my_address)))
-    }
+    fn my_address(&self) -> Result<String, String> { Ok(checksum_address(&format!("{:#02x}", self.my_address))) }
 
-    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
-        unimplemented!()
-    }
+    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> { unimplemented!() }
 
     /// Hash message for signature using Ethereum's message signing format.
     /// keccak256(PREFIX_LENGTH + PREFIX + MESSAGE_LENGTH + MESSAGE)
@@ -322,13 +316,9 @@ impl MarketCoinOps for EthCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn display_priv_key(&self) -> Result<String, String> {
-        Ok(format!("{:#02x}", self.key_pair.secret()))
-    }
+    fn display_priv_key(&self) -> Result<String, String> { Ok(format!("{:#02x}", self.key_pair.secret())) }
 
-    fn min_tx_amount(&self) -> BigDecimal {
-        BigDecimal::from(0)
-    }
+    fn min_tx_amount(&self) -> BigDecimal { BigDecimal::from(0) }
 
     fn min_trading_vol(&self) -> MmNumber {
         let pow = self.decimals / 3;

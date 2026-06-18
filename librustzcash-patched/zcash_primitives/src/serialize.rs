@@ -12,21 +12,33 @@ impl CompactSize {
             Ok(flag as usize)
         } else if flag == 253 {
             match reader.read_u16::<LittleEndian>()? {
-                n if n < 253 => Err(io::Error::new(io::ErrorKind::InvalidInput, "non-canonical CompactSize")),
+                n if n < 253 => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "non-canonical CompactSize",
+                )),
                 n => Ok(n as usize),
             }
         } else if flag == 254 {
             match reader.read_u32::<LittleEndian>()? {
-                n if n < 0x10000 => Err(io::Error::new(io::ErrorKind::InvalidInput, "non-canonical CompactSize")),
+                n if n < 0x10000 => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "non-canonical CompactSize",
+                )),
                 n => Ok(n as usize),
             }
         } else {
             match reader.read_u64::<LittleEndian>()? {
-                n if n < 0x100000000 => Err(io::Error::new(io::ErrorKind::InvalidInput, "non-canonical CompactSize")),
+                n if n < 0x100000000 => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "non-canonical CompactSize",
+                )),
                 n => Ok(n as usize),
             }
         }? {
-            s if s > MAX_SIZE => Err(io::Error::new(io::ErrorKind::InvalidInput, "CompactSize too large")),
+            s if s > MAX_SIZE => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CompactSize too large",
+            )),
             s => Ok(s),
         }
     }
@@ -37,15 +49,15 @@ impl CompactSize {
             s if s <= 0xFFFF => {
                 writer.write_u8(253)?;
                 writer.write_u16::<LittleEndian>(s as u16)
-            },
+            }
             s if s <= 0xFFFFFFFF => {
                 writer.write_u8(254)?;
                 writer.write_u32::<LittleEndian>(s as u32)
-            },
+            }
             s => {
                 writer.write_u8(255)?;
                 writer.write_u64::<LittleEndian>(s as u64)
-            },
+            }
         }
     }
 }
@@ -80,7 +92,10 @@ impl Optional {
         match reader.read_u8()? {
             0 => Ok(None),
             1 => Ok(Some(func(&mut reader)?)),
-            _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "non-canonical Option<T>")),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "non-canonical Option<T>",
+            )),
         }
     }
 
@@ -93,7 +108,7 @@ impl Optional {
             Some(e) => {
                 writer.write_u8(1)?;
                 func(&mut writer, e)
-            },
+            }
         }
     }
 }

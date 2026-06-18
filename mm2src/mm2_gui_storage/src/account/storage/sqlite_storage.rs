@@ -1,8 +1,6 @@
 use crate::account::storage::{AccountStorage, AccountStorageError, AccountStorageResult};
-use crate::account::{
-    AccountId, AccountInfo, AccountType, AccountWithCoins, AccountWithEnabledFlag, EnabledAccountType, HwPubkey,
-    MAX_ACCOUNT_DESCRIPTION_LENGTH, MAX_ACCOUNT_NAME_LENGTH,
-};
+use crate::account::{AccountId, AccountInfo, AccountType, AccountWithCoins, AccountWithEnabledFlag,
+                     EnabledAccountType, HwPubkey, MAX_ACCOUNT_DESCRIPTION_LENGTH, MAX_ACCOUNT_NAME_LENGTH};
 // crd:pin-begin
 use crate::account::{EnabledAccountId, MAX_TICKER_LENGTH};
 // crd:pin-end
@@ -174,14 +172,11 @@ impl SqliteAccountStorage {
         ));
         builder.column(SqlColumn::new(account_table::BALANCE_USD, SqlType::Varchar(BALANCE_MAX_LENGTH)).not_null());
         // The three identity columns together are the primary key.
-        builder.constraint(PrimaryKey::new(
-            account_table::ACCOUNT_ID_PRIMARY_KEY,
-            [
-                account_table::ACCOUNT_TYPE,
-                account_table::ACCOUNT_IDX,
-                account_table::DEVICE_PUBKEY,
-            ],
-        )?);
+        builder.constraint(PrimaryKey::new(account_table::ACCOUNT_ID_PRIMARY_KEY, [
+            account_table::ACCOUNT_TYPE,
+            account_table::ACCOUNT_IDX,
+            account_table::DEVICE_PUBKEY,
+        ])?);
         builder.create().map_to_mm(AccountStorageError::from)
         // crd:pin-end
     }
@@ -203,27 +198,21 @@ impl SqliteAccountStorage {
 
         // The identity columns mirror the accounts-table primary key; a cascade
         // drops the activated tickers when the parent account is removed.
-        let parent_fk = ForeignKey::new(
-            foreign_key::ParentTable(account_table::TABLE_NAME),
-            foreign_columns![
-                account_coins_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
-                account_coins_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
-                account_coins_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY
-            ],
-        )?
+        let parent_fk = ForeignKey::new(foreign_key::ParentTable(account_table::TABLE_NAME), foreign_columns![
+            account_coins_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
+            account_coins_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
+            account_coins_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY
+        ])?
         .on_event(foreign_key::Event::OnDelete, foreign_key::Action::Cascade);
         builder.constraint(parent_fk);
 
         // No account may list the same ticker twice.
-        builder.constraint(Unique::new(
-            account_coins_table::ACCOUNT_ID_COIN_CONSTRAINT,
-            [
-                account_coins_table::ACCOUNT_TYPE,
-                account_coins_table::ACCOUNT_IDX,
-                account_coins_table::DEVICE_PUBKEY,
-                account_coins_table::COIN,
-            ],
-        )?);
+        builder.constraint(Unique::new(account_coins_table::ACCOUNT_ID_COIN_CONSTRAINT, [
+            account_coins_table::ACCOUNT_TYPE,
+            account_coins_table::ACCOUNT_IDX,
+            account_coins_table::DEVICE_PUBKEY,
+            account_coins_table::COIN,
+        ])?);
         builder.create().map_to_mm(AccountStorageError::from)
         // crd:pin-end
     }
@@ -244,14 +233,11 @@ impl SqliteAccountStorage {
         );
 
         // Clearing the parent account clears its enabled marker too.
-        let parent_fk = ForeignKey::new(
-            foreign_key::ParentTable(account_table::TABLE_NAME),
-            foreign_columns![
-                enabled_account_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
-                enabled_account_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
-                enabled_account_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY,
-            ],
-        )?
+        let parent_fk = ForeignKey::new(foreign_key::ParentTable(account_table::TABLE_NAME), foreign_columns![
+            enabled_account_table::ACCOUNT_TYPE => account_table::ACCOUNT_TYPE,
+            enabled_account_table::ACCOUNT_IDX => account_table::ACCOUNT_IDX,
+            enabled_account_table::DEVICE_PUBKEY => account_table::DEVICE_PUBKEY,
+        ])?
         .on_event(foreign_key::Event::OnDelete, foreign_key::Action::Cascade);
         builder.constraint(parent_fk);
 
@@ -263,10 +249,10 @@ impl SqliteAccountStorage {
     /// when none has been set.
     fn load_enabled_account_id_or_err(conn: &Connection) -> AccountStorageResult<EnabledAccountId> {
         let mut select = SqlQuery::select_from(conn, enabled_account_table::TABLE_NAME)?;
-        add_select_fields(
-            &mut select,
-            &[enabled_account_table::ACCOUNT_TYPE, enabled_account_table::ACCOUNT_IDX],
-        )?;
+        add_select_fields(&mut select, &[
+            enabled_account_table::ACCOUNT_TYPE,
+            enabled_account_table::ACCOUNT_IDX,
+        ])?;
         match select.query_single_row(enabled_account_id_from_row)? {
             Some(enabled_id) => Ok(enabled_id),
             None => MmError::err(AccountStorageError::NoEnabledAccount),
@@ -599,9 +585,7 @@ fn account_from_row(row: &Row<'_>) -> Result<AccountInfo, SqlError> {
     // crd:pin-end
 }
 
-fn count_from_row(row: &Row<'_>) -> Result<i64, SqlError> {
-    row.get(0)
-}
+fn count_from_row(row: &Row<'_>) -> Result<i64, SqlError> { row.get(0) }
 
 fn bigdecimal_from_row(row: &Row<'_>, idx: usize) -> Result<BigDecimal, SqlError> {
     let raw: String = row.get(idx)?;

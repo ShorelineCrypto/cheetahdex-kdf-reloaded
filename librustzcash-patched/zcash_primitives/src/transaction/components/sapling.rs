@@ -174,7 +174,10 @@ impl OutputDescription {
             reader.read_exact(&mut bytes)?;
             let ephemeral_key = jubjub::ExtendedPoint::from_bytes(&bytes);
             if ephemeral_key.is_none().into() {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid ephemeral_key"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid ephemeral_key",
+                ));
             }
             ephemeral_key.unwrap()
         };

@@ -66,7 +66,10 @@ fn main() {
     };
 
     let (diversifier_index, address) = extfvk.address(opts.diversifier_index).unwrap();
-    println!("# Diversifier index: {}", encode_diversifier_index(&diversifier_index));
+    println!(
+        "# Diversifier index: {}",
+        encode_diversifier_index(&diversifier_index)
+    );
     println!(
         "{}",
         encode_payment_address(

@@ -437,9 +437,7 @@ impl SwapOps for EthCoin {
         }
     }
 
-    fn get_htlc_key_pair(&self) -> Option<keys::KeyPair> {
-        None
-    }
+    fn get_htlc_key_pair(&self) -> Option<keys::KeyPair> { None }
 }
 
 #[async_trait]

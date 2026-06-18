@@ -251,13 +251,9 @@ impl MmCtx {
         netid as u16
     }
 
-    pub fn p2p_in_memory(&self) -> bool {
-        self.conf["p2p_in_memory"].as_bool().unwrap_or(false)
-    }
+    pub fn p2p_in_memory(&self) -> bool { self.conf["p2p_in_memory"].as_bool().unwrap_or(false) }
 
-    pub fn p2p_in_memory_port(&self) -> Option<u64> {
-        self.conf["p2p_in_memory_port"].as_u64()
-    }
+    pub fn p2p_in_memory_port(&self) -> Option<u64> { self.conf["p2p_in_memory_port"].as_u64() }
 
     /// Access-Control-Allow-Origin for the SSE endpoint.
     /// Falls back to the `rpccors` config value, then `http://localhost:3000`.
@@ -270,9 +266,7 @@ impl MmCtx {
     }
 
     /// True if the MarketMaker instance needs to stop.
-    pub fn is_stopping(&self) -> bool {
-        self.stop.copy_or(false)
-    }
+    pub fn is_stopping(&self) -> bool { self.stop.copy_or(false) }
 
     /// Register a callback to be invoked when the MM receives the "stop" request.  
     /// The callback is invoked immediately if the MM is stopped already.
@@ -310,13 +304,9 @@ impl MmCtx {
             })
     }
 
-    pub fn gui(&self) -> Option<&str> {
-        self.conf["gui"].as_str()
-    }
+    pub fn gui(&self) -> Option<&str> { self.conf["gui"].as_str() }
 
-    pub fn mm_version(&self) -> &str {
-        &self.mm_version
-    }
+    pub fn mm_version(&self) -> &str { &self.mm_version }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn init_sqlite_connection(&self) -> Result<(), String> {
@@ -352,9 +342,7 @@ impl MmCtx {
 }
 
 impl Default for MmCtx {
-    fn default() -> Self {
-        Self::with_log_state(LogState::in_memory())
-    }
+    fn default() -> Self { Self::with_log_state(LogState::in_memory()) }
 }
 
 impl Drop for MmCtx {
@@ -385,16 +373,12 @@ unsafe impl Sync for MmArc {}
 
 impl Clone for MmArc {
     #[track_caller]
-    fn clone(&self) -> MmArc {
-        MmArc(self.0.clone())
-    }
+    fn clone(&self) -> MmArc { MmArc(self.0.clone()) }
 }
 
 impl Deref for MmArc {
     type Target = MmCtx;
-    fn deref(&self) -> &MmCtx {
-        &self.0
-    }
+    fn deref(&self) -> &MmCtx { &self.0 }
 }
 
 #[derive(Clone, Default)]
@@ -407,13 +391,9 @@ unsafe impl Sync for MmWeak {}
 
 impl MmWeak {
     /// Create a default MmWeak without allocating any memory.
-    pub fn new() -> MmWeak {
-        MmWeak::default()
-    }
+    pub fn new() -> MmWeak { MmWeak::default() }
 
-    pub fn dropped(&self) -> bool {
-        self.0.strong_count() == 0
-    }
+    pub fn dropped(&self) -> bool { self.0.strong_count() == 0 }
 }
 
 impl fmt::Debug for MmWeak {
@@ -455,9 +435,7 @@ struct NativeCtx {
 }
 
 impl MmArc {
-    pub fn new(ctx: MmCtx) -> MmArc {
-        MmArc(SharedRc::new(ctx))
-    }
+    pub fn new(ctx: MmCtx) -> MmArc { MmArc(SharedRc::new(ctx)) }
 
     pub fn stop(&self) -> Result<(), String> {
         try_s!(self.stop.pin(true));
@@ -500,9 +478,7 @@ impl MmArc {
     }
 
     #[cfg(feature = "track-ctx-pointer")]
-    pub fn log_existing_pointers(&self, level: log::log_crate::Level) {
-        self.0.log_existing_pointers(level, "MmArc")
-    }
+    pub fn log_existing_pointers(&self, level: log::log_crate::Level) { self.0.log_existing_pointers(level, "MmArc") }
 
     /// Unique context identifier, allowing us to more easily pass the context through the FFI boundaries.
     pub fn ffi_handle(&self) -> Result<u32, String> {
@@ -551,15 +527,11 @@ impl MmArc {
     }
 
     /// Generates a weak pointer, to track the allocated data without prolonging its life.
-    pub fn weak(&self) -> MmWeak {
-        MmWeak(SharedRc::downgrade(&self.0))
-    }
+    pub fn weak(&self) -> MmWeak { MmWeak(SharedRc::downgrade(&self.0)) }
 
     /// Tries to obtain the MM context from the weak pointer.
     #[track_caller]
-    pub fn from_weak(weak: &MmWeak) -> Option<MmArc> {
-        weak.0.upgrade().map(MmArc)
-    }
+    pub fn from_weak(weak: &MmWeak) -> Option<MmArc> { weak.0.upgrade().map(MmArc) }
 
     /// Init metrics with dashboard.
     pub fn init_metrics(&self) -> Result<(), String> {
@@ -644,9 +616,7 @@ pub struct MmCtxBuilder {
 }
 
 impl MmCtxBuilder {
-    pub fn new() -> Self {
-        MmCtxBuilder::default()
-    }
+    pub fn new() -> Self { MmCtxBuilder::default() }
 
     pub fn with_conf(mut self, conf: Json) -> Self {
         self.conf = Some(conf);

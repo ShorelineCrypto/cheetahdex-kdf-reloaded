@@ -9,9 +9,7 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    pub fn reset(&mut self) {
-        self.buffer.clear();
-    }
+    pub fn reset(&mut self) { self.buffer.clear(); }
 
     /// writes a length-prefixed []byte to the underlying stream.
     pub fn write_len_prefixed_bytes(&mut self, data: &[u8]) {
@@ -27,37 +25,21 @@ impl Encoder {
         }
     }
 
-    pub fn write_slice(&mut self, data: &[u8]) {
-        self.buffer.extend_from_slice(data);
-    }
+    pub fn write_slice(&mut self, data: &[u8]) { self.buffer.extend_from_slice(data); }
 
-    pub fn write_u8(&mut self, u: u8) {
-        self.buffer.extend_from_slice(&[u])
-    }
+    pub fn write_u8(&mut self, u: u8) { self.buffer.extend_from_slice(&[u]) }
 
-    pub fn write_u64(&mut self, u: u64) {
-        self.buffer.extend_from_slice(&u.to_le_bytes());
-    }
+    pub fn write_u64(&mut self, u: u64) { self.buffer.extend_from_slice(&u.to_le_bytes()); }
 
-    pub fn write_u128(&mut self, u: u128) {
-        self.buffer.extend_from_slice(&u.to_le_bytes());
-    }
+    pub fn write_u128(&mut self, u: u128) { self.buffer.extend_from_slice(&u.to_le_bytes()); }
 
-    pub fn write_string(&mut self, p: &str) {
-        self.write_len_prefixed_bytes(p.to_string().as_bytes());
-    }
+    pub fn write_string(&mut self, p: &str) { self.write_len_prefixed_bytes(p.to_string().as_bytes()); }
 
-    pub fn write_distinguisher(&mut self, p: &str) {
-        self.buffer.extend_from_slice(format!("sia/{}|", p).as_bytes());
-    }
+    pub fn write_distinguisher(&mut self, p: &str) { self.buffer.extend_from_slice(format!("sia/{}|", p).as_bytes()); }
 
-    pub fn write_bool(&mut self, b: bool) {
-        self.buffer.push(b as u8)
-    }
+    pub fn write_bool(&mut self, b: bool) { self.buffer.push(b as u8) }
 
-    pub fn hash(&self) -> Hash256 {
-        hash_blake2b_single(&self.buffer)
-    }
+    pub fn hash(&self) -> Hash256 { hash_blake2b_single(&self.buffer) }
 
     // Utility method to create, encode, and hash
     pub fn encode_and_hash<T: Encodable>(item: &T) -> Hash256 {

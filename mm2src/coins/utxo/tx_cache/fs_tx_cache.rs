@@ -86,9 +86,7 @@ impl UtxoVerboseCacheOps for FsVerboseCache {
 
 impl FsVerboseCache {
     #[inline]
-    pub fn new(ticker: String, tx_cache_path: PathBuf) -> FsVerboseCache {
-        FsVerboseCache { ticker, tx_cache_path }
-    }
+    pub fn new(ticker: String, tx_cache_path: PathBuf) -> FsVerboseCache { FsVerboseCache { ticker, tx_cache_path } }
 
     /// Tries to load transaction from cache.
     /// Note: `tx.confirmations` can be out-of-date.
@@ -106,7 +104,5 @@ impl FsVerboseCache {
     }
 
     #[inline]
-    fn cached_transaction_path(&self, txid: &H256Json) -> PathBuf {
-        self.tx_cache_path.join(format!("{:?}", txid))
-    }
+    fn cached_transaction_path(&self, txid: &H256Json) -> PathBuf { self.tx_cache_path.join(format!("{:?}", txid)) }
 }

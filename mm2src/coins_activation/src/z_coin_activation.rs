@@ -1,9 +1,8 @@
 use crate::context::CoinsActivationContext;
 use crate::prelude::*;
-use crate::standalone_coin::{
-    InitStandaloneCoinActivationOps, InitStandaloneCoinError, InitStandaloneCoinInitialStatus,
-    InitStandaloneCoinTaskHandle, InitStandaloneCoinTaskManagerShared,
-};
+use crate::standalone_coin::{InitStandaloneCoinActivationOps, InitStandaloneCoinError,
+                             InitStandaloneCoinInitialStatus, InitStandaloneCoinTaskHandle,
+                             InitStandaloneCoinTaskManagerShared};
 use async_trait::async_trait;
 use coins::coin_balance::{EnableCoinBalance, IguanaWalletBalance};
 use coins::utxo::rpc_clients::ElectrumRpcRequest;
@@ -35,9 +34,7 @@ pub struct ZcoinActivationResult {
 }
 
 impl CurrentBlock for ZcoinActivationResult {
-    fn current_block(&self) -> u64 {
-        self.current_block
-    }
+    fn current_block(&self) -> u64 { self.current_block }
 }
 
 #[derive(Clone, Serialize)]
@@ -54,9 +51,7 @@ pub enum ZcoinInProgressStatus {
 }
 
 impl InitStandaloneCoinInitialStatus for ZcoinInProgressStatus {
-    fn initial_status() -> Self {
-        ZcoinInProgressStatus::ActivatingCoin
-    }
+    fn initial_status() -> Self { ZcoinInProgressStatus::ActivatingCoin }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -77,9 +72,7 @@ pub struct ZcoinActivationParams {
 }
 
 impl TxHistory for ZcoinActivationParams {
-    fn tx_history(&self) -> bool {
-        false
-    }
+    fn tx_history(&self) -> bool { false }
 }
 
 #[derive(Clone, Display, Serialize, SerializeErrorType)]
@@ -113,9 +106,7 @@ impl ZcoinInitError {
 }
 
 impl From<BalanceError> for ZcoinInitError {
-    fn from(err: BalanceError) -> Self {
-        ZcoinInitError::CouldNotGetBalance(err.to_string())
-    }
+    fn from(err: BalanceError) -> Self { ZcoinInitError::CouldNotGetBalance(err.to_string()) }
 }
 
 impl From<RegisterCoinError> for ZcoinInitError {
@@ -139,21 +130,15 @@ impl From<RpcTaskError> for ZcoinInitError {
 }
 
 impl From<CryptoInitError> for ZcoinInitError {
-    fn from(err: CryptoInitError) -> Self {
-        ZcoinInitError::Internal(err.to_string())
-    }
+    fn from(err: CryptoInitError) -> Self { ZcoinInitError::Internal(err.to_string()) }
 }
 
 impl From<CryptoCtxError> for ZcoinInitError {
-    fn from(err: CryptoCtxError) -> Self {
-        ZcoinInitError::Internal(err.to_string())
-    }
+    fn from(err: CryptoCtxError) -> Self { ZcoinInitError::Internal(err.to_string()) }
 }
 
 impl From<ZcoinInitError> for InitStandaloneCoinError {
-    fn from(_: ZcoinInitError) -> Self {
-        todo!()
-    }
+    fn from(_: ZcoinInitError) -> Self { todo!() }
 }
 
 pub struct ZcoinProtocolInfo;

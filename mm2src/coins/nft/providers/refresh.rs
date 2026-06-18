@@ -94,9 +94,7 @@ pub struct HttpMetadataProvider {
 
 impl HttpMetadataProvider {
     /// Construct a new HTTP-backed provider rooted at `base_url`.
-    pub fn new(base_url: Url, komodo_proxy: bool) -> Self {
-        HttpMetadataProvider { base_url, komodo_proxy }
-    }
+    pub fn new(base_url: Url, komodo_proxy: bool) -> Self { HttpMetadataProvider { base_url, komodo_proxy } }
 }
 
 #[async_trait]

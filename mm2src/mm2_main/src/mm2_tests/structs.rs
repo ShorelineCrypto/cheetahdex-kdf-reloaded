@@ -509,9 +509,7 @@ pub struct TradePreimageResponse {
 }
 
 impl TradePreimageResponse {
-    pub fn sort_total_fees(&mut self) {
-        self.result.sort_total_fees()
-    }
+    pub fn sort_total_fees(&mut self) { self.result.sort_total_fees() }
 }
 
 #[derive(Debug, Deserialize)]

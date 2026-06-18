@@ -1,9 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use crate::sql_tx_history_storage::SqliteTxHistoryStorage;
-use crate::{
-    lp_coinfind_or_err, BlockHeightAndTime, CoinFindError, HistorySyncState, MarketCoinOps, MmCoinEnum, Transaction,
-    TransactionDetails, TransactionType, TxFeeDetails,
-};
+use crate::{lp_coinfind_or_err, BlockHeightAndTime, CoinFindError, HistorySyncState, MarketCoinOps, MmCoinEnum,
+            Transaction, TransactionDetails, TransactionType, TxFeeDetails};
 use async_trait::async_trait;
 use common::mm_number::BigDecimal;
 use common::{calc_total_pages, ten, HttpStatusCode, PagingOptionsEnum, StatusCode};
@@ -23,9 +21,7 @@ pub enum RemoveTxResult {
 }
 
 impl RemoveTxResult {
-    pub fn tx_existed(&self) -> bool {
-        matches!(self, RemoveTxResult::TxRemoved)
-    }
+    pub fn tx_existed(&self) -> bool { matches!(self, RemoveTxResult::TxRemoved) }
 }
 
 pub struct GetHistoryResult {
@@ -109,15 +105,11 @@ pub trait DisplayAddress {
 }
 
 impl DisplayAddress for Address {
-    fn display_address(&self) -> String {
-        self.to_string()
-    }
+    fn display_address(&self) -> String { self.to_string() }
 }
 
 impl DisplayAddress for CashAddress {
-    fn display_address(&self) -> String {
-        self.encode().expect("A valid cash address")
-    }
+    fn display_address(&self) -> String { self.encode().expect("A valid cash address") }
 }
 
 pub struct TxDetailsBuilder<'a, Addr: DisplayAddress, Tx: Transaction> {
@@ -156,13 +148,9 @@ impl<'a, Addr: Clone + DisplayAddress + Eq + std::hash::Hash, Tx: Transaction> T
         }
     }
 
-    pub fn set_tx_fee(&mut self, tx_fee: Option<TxFeeDetails>) {
-        self.tx_fee = tx_fee;
-    }
+    pub fn set_tx_fee(&mut self, tx_fee: Option<TxFeeDetails>) { self.tx_fee = tx_fee; }
 
-    pub fn set_transaction_type(&mut self, tx_type: TransactionType) {
-        self.transaction_type = tx_type;
-    }
+    pub fn set_transaction_type(&mut self, tx_type: TransactionType) { self.transaction_type = tx_type; }
 
     pub fn transferred_to(&mut self, address: Addr, amount: &BigDecimal) {
         if self.my_addresses.contains(&address) {

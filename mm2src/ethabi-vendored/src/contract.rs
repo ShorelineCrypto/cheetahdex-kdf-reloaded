@@ -34,9 +34,7 @@ struct ContractVisitor;
 impl<'a> Visitor<'a> for ContractVisitor {
     type Value = Contract;
 
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("valid abi spec file")
-    }
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result { formatter.write_str("valid abi spec file") }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
@@ -72,14 +70,10 @@ impl<'a> Visitor<'a> for ContractVisitor {
 
 impl Contract {
     /// Loads contract from json.
-    pub fn load<T: io::Read>(reader: T) -> errors::Result<Self> {
-        serde_json::from_reader(reader).map_err(From::from)
-    }
+    pub fn load<T: io::Read>(reader: T) -> errors::Result<Self> { serde_json::from_reader(reader).map_err(From::from) }
 
     /// Creates constructor call builder.
-    pub fn constructor(&self) -> Option<&Constructor> {
-        self.constructor.as_ref()
-    }
+    pub fn constructor(&self) -> Option<&Constructor> { self.constructor.as_ref() }
 
     /// Creates function call builder.
     pub fn function(&self, name: &str) -> errors::Result<&Function> {
@@ -96,19 +90,13 @@ impl Contract {
     }
 
     /// Iterate over all functions of the contract in arbitrary order.
-    pub fn functions(&self) -> Functions {
-        Functions(self.functions.values())
-    }
+    pub fn functions(&self) -> Functions { Functions(self.functions.values()) }
 
     /// Iterate over all events of the contract in arbitrary order.
-    pub fn events(&self) -> Events {
-        Events(self.events.values())
-    }
+    pub fn events(&self) -> Events { Events(self.events.values()) }
 
     /// Returns true if contract has fallback
-    pub fn fallback(&self) -> bool {
-        self.fallback
-    }
+    pub fn fallback(&self) -> bool { self.fallback }
 }
 
 /// Contract functions interator.
@@ -117,9 +105,7 @@ pub struct Functions<'a>(Values<'a, String, Function>);
 impl<'a> Iterator for Functions<'a> {
     type Item = &'a Function;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
+    fn next(&mut self) -> Option<Self::Item> { self.0.next() }
 }
 
 /// Contract events interator.
@@ -128,7 +114,5 @@ pub struct Events<'a>(Values<'a, String, Event>);
 impl<'a> Iterator for Events<'a> {
     type Item = &'a Event;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
+    fn next(&mut self) -> Option<Self::Item> { self.0.next() }
 }

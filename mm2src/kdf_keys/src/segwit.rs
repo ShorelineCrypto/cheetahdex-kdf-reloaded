@@ -46,9 +46,7 @@ impl fmt::Display for Error {
 }
 
 impl From<bech32::Error> for Error {
-    fn from(e: bech32::Error) -> Self {
-        Error::Bech32(e)
-    }
+    fn from(e: bech32::Error) -> Self { Error::Bech32(e) }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -84,9 +82,7 @@ impl SegwitAddress {
         }
     }
 
-    pub fn is_standard(&self) -> bool {
-        self.address_type().is_some()
-    }
+    pub fn is_standard(&self) -> bool { self.address_type().is_some() }
 }
 
 /// Wraps a `fmt::Write` and forwards every char in uppercase. Used for

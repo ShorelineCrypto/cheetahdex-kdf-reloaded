@@ -15,7 +15,8 @@ const TREE_DEPTH: usize = 32;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = XorShiftRng::from_seed([
-        0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
+        0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+        0xe5,
     ]);
 
     let groth_params = generate_random_parameters::<Bls12, _, _>(
@@ -61,7 +62,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         }
 
         let commitment_randomness = jubjub::Fr::random(&mut rng);
-        let auth_path = vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); TREE_DEPTH];
+        let auth_path =
+            vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); TREE_DEPTH];
         let ar = jubjub::Fr::random(&mut rng);
         let anchor = bls12_381::Scalar::random(&mut rng);
 

@@ -82,15 +82,11 @@ impl Address {
         Address(hash)
     }
 
-    pub fn from_public_key(pubkey: &PublicKey) -> Self {
-        SpendPolicy::PublicKey(pubkey.clone()).address()
-    }
+    pub fn from_public_key(pubkey: &PublicKey) -> Self { SpendPolicy::PublicKey(pubkey.clone()).address() }
 }
 
 impl Encodable for Address {
-    fn encode(&self, encoder: &mut Encoder) {
-        self.0.encode(encoder)
-    }
+    fn encode(&self, encoder: &mut Encoder) { self.0.encode(encoder) }
 }
 
 impl fmt::Display for Address {
@@ -148,9 +144,7 @@ fn blake2b_checksum(preimage: &[u8]) -> [u8; 6] {
 pub struct BlockId(pub Hash256);
 
 impl Encodable for BlockId {
-    fn encode(&self, encoder: &mut Encoder) {
-        self.0.encode(encoder);
-    }
+    fn encode(&self, encoder: &mut Encoder) { self.0.encode(encoder); }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

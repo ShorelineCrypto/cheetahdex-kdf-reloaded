@@ -19,9 +19,7 @@
 //!   the NFT swap_v2 module; renaming requires updating all call sites.
 
 use crate::eth::legacy_tx::{Action, SignedTransaction as SignedEthTx};
-use crate::eth::{
-    decode_contract_call, signed_tx_from_alloy_tx, EthCoin, EthCoinType, Log, Transaction, TransactionErr,
-};
+use crate::eth::{decode_contract_call, signed_tx_from_alloy_tx, EthCoin, EthCoinType, Log, Transaction, TransactionErr};
 use crate::{FindPaymentSpendError, MarketCoinOps};
 use bigdecimal::BigDecimal;
 use common::executor::Timer;
@@ -97,9 +95,7 @@ pub(crate) enum PrepareTxDataError {
 }
 
 impl From<ethabi::Error> for PrepareTxDataError {
-    fn from(err: ethabi::Error) -> Self {
-        PrepareTxDataError::ABIError(err.to_string())
-    }
+    fn from(err: ethabi::Error) -> Self { PrepareTxDataError::ABIError(err.to_string()) }
 }
 
 // On-chain polling helpers -------------------------------------------------

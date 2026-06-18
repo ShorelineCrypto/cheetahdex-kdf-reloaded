@@ -137,7 +137,12 @@ impl SaplingVerificationContext {
     /// Perform consensus checks on the valueBalance and bindingSig parts of a
     /// Sapling transaction. All SpendDescriptions and OutputDescriptions must
     /// have been checked before calling this function.
-    pub fn final_check(&self, value_balance: Amount, sighash_value: &[u8; 32], binding_sig: Signature) -> bool {
+    pub fn final_check(
+        &self,
+        value_balance: Amount,
+        sighash_value: &[u8; 32],
+        binding_sig: Signature,
+    ) -> bool {
         // Obtain current cv_sum from the context
         let mut bvk = PublicKey(self.cv_sum);
 
@@ -156,6 +161,10 @@ impl SaplingVerificationContext {
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
         // Verify the binding_sig
-        bvk.verify(&data_to_be_signed, &binding_sig, VALUE_COMMITMENT_RANDOMNESS_GENERATOR)
+        bvk.verify(
+            &data_to_be_signed,
+            &binding_sig,
+            VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+        )
     }
 }

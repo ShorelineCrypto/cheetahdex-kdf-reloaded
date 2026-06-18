@@ -31,13 +31,9 @@ where
         container
     }
 
-    pub fn id(&self) -> &str {
-        &self.id
-    }
+    pub fn id(&self) -> &str { &self.id }
 
-    pub fn logs(&self) -> Logs {
-        self.docker_client.logs(&self.id)
-    }
+    pub fn logs(&self) -> Logs { self.docker_client.logs(&self.id) }
 
     pub fn get_host_port(&self, internal_port: u32) -> Option<u32> {
         let resolved_port = self.docker_client.ports(&self.id).map_to_host_port(internal_port);
@@ -48,9 +44,7 @@ where
         resolved_port
     }
 
-    pub fn image(&self) -> &I {
-        &self.image
-    }
+    pub fn image(&self) -> &I { &self.image }
 
     fn block_until_ready(&self) {
         debug!("Waiting for container {} to be ready", self.id);

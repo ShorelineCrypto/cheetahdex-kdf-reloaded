@@ -29,7 +29,10 @@ impl InputNote {
         Scalar: PrimeField,
         CS: ConstraintSystem<Scalar>,
     {
-        let a_sk = witness_u252(cs.namespace(|| "a_sk"), a_sk.as_ref().map(|a_sk| &a_sk.0[..]))?;
+        let a_sk = witness_u252(
+            cs.namespace(|| "a_sk"),
+            a_sk.as_ref().map(|a_sk| &a_sk.0[..]),
+        )?;
 
         let rho = witness_u256(cs.namespace(|| "rho"), rho.as_ref().map(|rho| &rho.0[..]))?;
 
@@ -41,7 +44,13 @@ impl InputNote {
 
         let mac = prf_pk(cs.namespace(|| "mac computation"), &a_sk, h_sig, nonce)?;
 
-        let cm = note_comm(cs.namespace(|| "cm computation"), &a_pk, &value.bits_le(), &rho, &r)?;
+        let cm = note_comm(
+            cs.namespace(|| "cm computation"),
+            &a_pk,
+            &value.bits_le(),
+            &rho,
+            &r,
+        )?;
 
         // Witness into the merkle tree
         let mut cur = cm;
@@ -49,7 +58,10 @@ impl InputNote {
         for (i, layer) in auth_path.iter().enumerate() {
             let cs = &mut cs.namespace(|| format!("layer {}", i));
 
-            let cur_is_right = AllocatedBit::alloc(cs.namespace(|| "cur is right"), layer.as_ref().map(|&(_, p)| p))?;
+            let cur_is_right = AllocatedBit::alloc(
+                cs.namespace(|| "cur is right"),
+                layer.as_ref().map(|&(_, p)| p),
+            )?;
 
             let lhs = cur;
             let rhs = witness_u256(
@@ -58,14 +70,21 @@ impl InputNote {
             )?;
 
             // Conditionally swap if cur is right
-            let preimage =
-                conditionally_swap_u256(cs.namespace(|| "conditional swap"), &lhs[..], &rhs[..], &cur_is_right)?;
+            let preimage = conditionally_swap_u256(
+                cs.namespace(|| "conditional swap"),
+                &lhs[..],
+                &rhs[..],
+                &cur_is_right,
+            )?;
 
             cur = sha256_block_no_padding(cs.namespace(|| "hash of this layer"), &preimage)?;
         }
 
         // enforce must be true if the value is nonzero
-        let enforce = AllocatedBit::alloc(cs.namespace(|| "enforce"), value.get_value().map(|n| n != 0))?;
+        let enforce = AllocatedBit::alloc(
+            cs.namespace(|| "enforce"),
+            value.get_value().map(|n| n != 0),
+        )?;
 
         // value * (1 - enforce) = 0
         // If `value` is zero, `enforce` _can_ be zero.

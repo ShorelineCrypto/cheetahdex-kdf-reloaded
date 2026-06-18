@@ -660,10 +660,9 @@ mod tests {
         let (mut gs, peers, topic_hashes) =
             build_and_inject_nodes(20, vec![String::from("topic1")], GossipsubConfig::default(), true);
 
-        gs.handle_ihave(
-            &peers[7],
-            vec![(topic_hashes[0].clone(), vec![MessageId(String::from("unknown id"))])],
-        );
+        gs.handle_ihave(&peers[7], vec![(topic_hashes[0].clone(), vec![MessageId(
+            String::from("unknown id"),
+        )])]);
 
         // check that we sent an IWANT request for `unknown id`
         let iwant_exists = match gs.control_pool.get(&peers[7]) {
@@ -706,13 +705,10 @@ mod tests {
         let (mut gs, peers, _) = build_and_inject_nodes(20, vec![], GossipsubConfig::default(), true);
 
         let events_before = gs.events.len();
-        gs.handle_ihave(
-            &peers[7],
-            vec![(
-                TopicHash::from_raw(String::from("unsubscribed topic")),
-                vec![MessageId(String::from("irrelevant id"))],
-            )],
-        );
+        gs.handle_ihave(&peers[7], vec![(
+            TopicHash::from_raw(String::from("unsubscribed topic")),
+            vec![MessageId(String::from("irrelevant id"))],
+        )]);
         let events_after = gs.events.len();
 
         assert_eq!(events_before, events_after, "Expected event count to stay the same")
@@ -818,13 +814,10 @@ mod tests {
         for event in gs.events {
             match event {
                 NetworkBehaviourAction::NotifyHandler { event, .. } => {
-                    assert_eq!(
-                        event.control_msgs,
-                        vec![GossipsubControlAction::IncludedToRelaysMesh {
-                            included: false,
-                            mesh_size: gs.relays_mesh.len(),
-                        }]
-                    );
+                    assert_eq!(event.control_msgs, vec![GossipsubControlAction::IncludedToRelaysMesh {
+                        included: false,
+                        mesh_size: gs.relays_mesh.len(),
+                    }]);
                 },
                 _ => panic!("Invalid NetworkBehaviourAction variant"),
             }
@@ -853,13 +846,10 @@ mod tests {
         for event in gs.events {
             match event {
                 NetworkBehaviourAction::NotifyHandler { event, .. } => {
-                    assert_eq!(
-                        event.control_msgs,
-                        vec![GossipsubControlAction::IncludedToRelaysMesh {
-                            included: true,
-                            mesh_size: gs.relays_mesh.len(),
-                        }]
-                    );
+                    assert_eq!(event.control_msgs, vec![GossipsubControlAction::IncludedToRelaysMesh {
+                        included: true,
+                        mesh_size: gs.relays_mesh.len(),
+                    }]);
                 },
                 _ => panic!("Invalid NetworkBehaviourAction variant"),
             }
@@ -899,13 +889,10 @@ mod tests {
 
         match gs.events.pop_back().unwrap() {
             NetworkBehaviourAction::NotifyHandler { event, peer_id, .. } => {
-                assert_eq!(
-                    event.control_msgs,
-                    vec![GossipsubControlAction::IncludedToRelaysMesh {
-                        included: false,
-                        mesh_size: gs.relay_mesh_len(),
-                    }]
-                );
+                assert_eq!(event.control_msgs, vec![GossipsubControlAction::IncludedToRelaysMesh {
+                    included: false,
+                    mesh_size: gs.relay_mesh_len(),
+                }]);
                 assert_eq!(peer_id, peers[13]);
             },
             _ => panic!("Invalid NetworkBehaviourAction variant"),

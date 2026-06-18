@@ -157,9 +157,7 @@ impl WcSessionPersistence {
     }
 
     /// Whether session rows may be written under this setting.
-    fn should_write(self) -> bool {
-        matches!(self, WcSessionPersistence::Open)
-    }
+    fn should_write(self) -> bool { matches!(self, WcSessionPersistence::Open) }
 }
 
 /// Writes `session` to `storage` only when `persistence` permits it.
@@ -234,19 +232,13 @@ impl WalletConnectCtx {
     }
 
     /// The live session index.
-    pub fn sessions(&self) -> &SessionManager {
-        &self.sessions
-    }
+    pub fn sessions(&self) -> &SessionManager { &self.sessions }
 
     /// The pending-request registry.
-    pub fn pending(&self) -> &PendingRequests {
-        &self.pending
-    }
+    pub fn pending(&self) -> &PendingRequests { &self.pending }
 
     /// Allocates the next outbound JSON-RPC message id.
-    pub fn next_message_id(&self) -> MessageId {
-        self.message_ids.next()
-    }
+    pub fn next_message_id(&self) -> MessageId { self.message_ids.next() }
 
     /// Generates a new pairing, retains its symmetric material and returns its
     /// topic and the `wc:` URI to show to the user.
@@ -274,9 +266,7 @@ impl WalletConnectCtx {
     }
 
     /// Applies the negotiated transport encoding to already-enveloped bytes.
-    pub fn apply_transport_encoding(&self, algo: EncodingAlgo, envelope: &[u8]) -> String {
-        algo.encode(envelope)
-    }
+    pub fn apply_transport_encoding(&self, algo: EncodingAlgo, envelope: &[u8]) -> String { algo.encode(envelope) }
 
     /// Sends a `wc_sessionRequest` over the relay and awaits the wallet's
     /// response.
@@ -536,9 +526,7 @@ impl WalletConnectCtx {
 
 /// The `attestation` argument the relay client expects; the dApp role never
 /// attaches one.
-fn no_attestation() -> Option<std::sync::Arc<str>> {
-    None
-}
+fn no_attestation() -> Option<std::sync::Arc<str>> { None }
 
 /// Builds the short-lived ed25519 JWT the relay requires for the connection.
 fn relay_auth_token(relay_address: &str) -> Result<relay_rpc::auth::SerializedAuthToken, WalletConnectError> {
@@ -579,9 +567,7 @@ async fn run_inbound_loop(handle: Weak<WalletConnectCtx>, mut inbound_rx: Unboun
 }
 
 /// Current unix timestamp in seconds.
-fn unix_now() -> u64 {
-    chrono::Utc::now().timestamp().max(0) as u64
-}
+fn unix_now() -> u64 { chrono::Utc::now().timestamp().max(0) as u64 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod persistence_tests {

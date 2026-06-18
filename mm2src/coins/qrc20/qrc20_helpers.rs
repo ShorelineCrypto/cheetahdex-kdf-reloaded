@@ -36,21 +36,13 @@ impl<'a> Qrc20CoinBuilder<'a> {
 
 #[async_trait]
 impl<'a> UtxoCoinBuilderCommonOps for Qrc20CoinBuilder<'a> {
-    fn ctx(&self) -> &MmArc {
-        self.ctx
-    }
+    fn ctx(&self) -> &MmArc { self.ctx }
 
-    fn conf(&self) -> &Json {
-        self.conf
-    }
+    fn conf(&self) -> &Json { self.conf }
 
-    fn activation_params(&self) -> &UtxoActivationParams {
-        &self.activation_params.utxo_params
-    }
+    fn activation_params(&self) -> &UtxoActivationParams { &self.activation_params.utxo_params }
 
-    fn ticker(&self) -> &str {
-        self.ticker
-    }
+    fn ticker(&self) -> &str { self.ticker }
 
     async fn decimals(&self, rpc_client: &UtxoRpcClientEnum) -> UtxoCoinBuildResult<u8> {
         if let Some(d) = self.conf()["decimals"].as_u64() {
@@ -64,9 +56,7 @@ impl<'a> UtxoCoinBuilderCommonOps for Qrc20CoinBuilder<'a> {
             .map_to_mm(UtxoCoinBuildError::ErrorDetectingDecimals)
     }
 
-    fn dust_amount(&self) -> u64 {
-        QRC20_DUST
-    }
+    fn dust_amount(&self) -> u64 { QRC20_DUST }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn confpath(&self) -> UtxoCoinBuildResult<PathBuf> {
@@ -127,9 +117,7 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for Qrc20CoinBuilder<'a> {
     type ResultCoin = Qrc20Coin;
     type Error = UtxoCoinBuildError;
 
-    fn priv_key(&self) -> &[u8] {
-        self.priv_key
-    }
+    fn priv_key(&self) -> &[u8] { self.priv_key }
 
     async fn build(self) -> MmResult<Self::ResultCoin, Self::Error> {
         let utxo = self.build_utxo_fields_with_iguana_priv_key(self.priv_key()).await?;
@@ -292,9 +280,7 @@ impl UtxoTxBroadcastOps for Qrc20Coin {
 #[cfg_attr(test, mockable)]
 impl UtxoTxGenerationOps for Qrc20Coin {
     /// Get only QTUM transaction fee.
-    async fn get_tx_fee(&self) -> UtxoRpcResult<ActualTxFee> {
-        utxo_common::get_tx_fee(&self.utxo).await
-    }
+    async fn get_tx_fee(&self) -> UtxoRpcResult<ActualTxFee> { utxo_common::get_tx_fee(&self.utxo).await }
 
     async fn calc_interest_if_required(
         &self,
@@ -342,9 +328,7 @@ impl UtxoCommonOps for Qrc20Coin {
         utxo_common::addresses_from_script(self, script)
     }
 
-    fn denominate_satoshis(&self, satoshi: i64) -> f64 {
-        utxo_common::denominate_satoshis(&self.utxo, satoshi)
-    }
+    fn denominate_satoshis(&self, satoshi: i64) -> f64 { utxo_common::denominate_satoshis(&self.utxo, satoshi) }
 
     fn my_public_key(&self) -> Result<&Public, MmError<UnexpectedDerivationMethod>> {
         utxo_common::my_public_key(self.as_ref())
@@ -358,9 +342,7 @@ impl UtxoCommonOps for Qrc20Coin {
         utxo_common::get_current_mtp(&self.utxo, CoinVariant::Qtum).await
     }
 
-    fn is_unspent_mature(&self, output: &RpcTransaction) -> bool {
-        self.is_qtum_unspent_mature(output)
-    }
+    fn is_unspent_mature(&self, output: &RpcTransaction) -> bool { self.is_qtum_unspent_mature(output) }
 
     async fn calc_interest_of_tx(
         &self,
@@ -431,9 +413,7 @@ impl UtxoCommonOps for Qrc20Coin {
         utxo_common::p2sh_tx_locktime(self, &self.utxo.conf.ticker, htlc_locktime).await
     }
 
-    fn addr_format(&self) -> &UtxoAddressFormat {
-        utxo_common::addr_format(self)
-    }
+    fn addr_format(&self) -> &UtxoAddressFormat { utxo_common::addr_format(self) }
 
     fn addr_format_for_standard_scripts(&self) -> UtxoAddressFormat {
         utxo_common::addr_format_for_standard_scripts(self)

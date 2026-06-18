@@ -205,9 +205,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_new_client() {
-        let _api_client = init_client().await;
-    }
+    async fn test_new_client() { let _api_client = init_client().await; }
 
     #[tokio::test]
     async fn test_api_consensus_tip() {

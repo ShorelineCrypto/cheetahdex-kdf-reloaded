@@ -105,7 +105,10 @@ impl TzeIn {
             usize::try_from(self.witness.extension_id).map_err(to_io_error)?,
         )?;
 
-        CompactSize::write(&mut writer, usize::try_from(self.witness.mode).map_err(to_io_error)?)
+        CompactSize::write(
+            &mut writer,
+            usize::try_from(self.witness.mode).map_err(to_io_error)?,
+        )
     }
 
     /// Write prevout, extension, and mode followed by witness data.
@@ -161,6 +164,8 @@ impl TzeOut {
             &mut writer,
             usize::try_from(self.precondition.mode).map_err(to_io_error)?,
         )?;
-        Vector::write(&mut writer, &self.precondition.payload, |w, b| w.write_u8(*b))
+        Vector::write(&mut writer, &self.precondition.payload, |w, b| {
+            w.write_u8(*b)
+        })
     }
 }

@@ -58,9 +58,7 @@ pub struct IdbTransactionImpl {
 }
 
 impl IdbTransactionImpl {
-    pub fn aborted(&self) -> bool {
-        self.aborted.load(Ordering::Relaxed)
-    }
+    pub fn aborted(&self) -> bool { self.aborted.load(Ordering::Relaxed) }
 
     pub fn open_table(&self, table_name: &str) -> DbTransactionResult<IdbObjectStoreImpl> {
         if self.aborted.load(Ordering::Relaxed) {

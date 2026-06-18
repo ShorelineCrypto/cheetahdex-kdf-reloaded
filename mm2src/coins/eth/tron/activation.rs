@@ -15,9 +15,8 @@
 use super::api::TronApiClient;
 use super::{Network, TronAddress, TRX_DECIMALS};
 
-use crate::eth::{
-    rpc_event_handlers_for_eth_transport, EthCoin, EthCoinImpl, EthCoinType, EthGasLimitV2, ETH_GAS_STATION_DECIMALS,
-};
+use crate::eth::{rpc_event_handlers_for_eth_transport, EthCoin, EthCoinImpl, EthCoinType, EthGasLimitV2,
+                 ETH_GAS_STATION_DECIMALS};
 use crate::{CoinProtocol, DerivationMethod, HistorySyncState};
 
 use common::log::warn;
@@ -221,16 +220,9 @@ mod tests {
         let ctx = mm2_core::mm_ctx::MmCtxBuilder::new().into_mm_arc();
         let conf = json::json!({});
         let req = json::json!({"urls": []});
-        let err = tron_coin_from_conf_and_request(
-            &ctx,
-            "TRX",
-            &conf,
-            &req,
-            &priv_key(),
-            CoinProtocol::TRX {
-                network: Network::Mainnet,
-            },
-        )
+        let err = tron_coin_from_conf_and_request(&ctx, "TRX", &conf, &req, &priv_key(), CoinProtocol::TRX {
+            network: Network::Mainnet,
+        })
         .await
         .unwrap_err();
         assert!(err.contains("at least 1 node URL"));
@@ -241,16 +233,9 @@ mod tests {
         let ctx = mm2_core::mm_ctx::MmCtxBuilder::new().into_mm_arc();
         let conf = json::json!({});
         let req = json::json!({"urls": ["not a url"]});
-        let err = tron_coin_from_conf_and_request(
-            &ctx,
-            "TRX",
-            &conf,
-            &req,
-            &priv_key(),
-            CoinProtocol::TRX {
-                network: Network::Mainnet,
-            },
-        )
+        let err = tron_coin_from_conf_and_request(&ctx, "TRX", &conf, &req, &priv_key(), CoinProtocol::TRX {
+            network: Network::Mainnet,
+        })
         .await
         .unwrap_err();
         assert!(err.contains("not a valid URI"));
@@ -261,16 +246,9 @@ mod tests {
         let ctx = mm2_core::mm_ctx::MmCtxBuilder::new().into_mm_arc();
         let conf = json::json!({});
         let req = json::json!({"urls": ["https://api.trongrid.io"]});
-        let coin = tron_coin_from_conf_and_request(
-            &ctx,
-            "TRX",
-            &conf,
-            &req,
-            &priv_key(),
-            CoinProtocol::TRX {
-                network: Network::Mainnet,
-            },
-        )
+        let coin = tron_coin_from_conf_and_request(&ctx, "TRX", &conf, &req, &priv_key(), CoinProtocol::TRX {
+            network: Network::Mainnet,
+        })
         .await
         .expect("build");
         assert!(matches!(coin.coin_type, EthCoinType::Tron));
@@ -286,17 +264,10 @@ mod tests {
         let ctx = mm2_core::mm_ctx::MmCtxBuilder::new().into_mm_arc();
         let conf = json::json!({"decimals": 6});
         let req = json::json!({"urls": ["https://api.trongrid.io"]});
-        let coin = tron_coin_from_conf_and_request(
-            &ctx,
-            "USDT-TRC20",
-            &conf,
-            &req,
-            &priv_key(),
-            CoinProtocol::TRC20 {
-                platform: "TRX".to_owned(),
-                contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t".to_owned(),
-            },
-        )
+        let coin = tron_coin_from_conf_and_request(&ctx, "USDT-TRC20", &conf, &req, &priv_key(), CoinProtocol::TRC20 {
+            platform: "TRX".to_owned(),
+            contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t".to_owned(),
+        })
         .await
         .expect("build");
         match &coin.coin_type {
@@ -315,17 +286,10 @@ mod tests {
         let ctx = mm2_core::mm_ctx::MmCtxBuilder::new().into_mm_arc();
         let conf = json::json!({});
         let req = json::json!({"urls": ["https://api.trongrid.io"]});
-        let err = tron_coin_from_conf_and_request(
-            &ctx,
-            "USDT-TRC20",
-            &conf,
-            &req,
-            &priv_key(),
-            CoinProtocol::TRC20 {
-                platform: "TRX".to_owned(),
-                contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t".to_owned(),
-            },
-        )
+        let err = tron_coin_from_conf_and_request(&ctx, "USDT-TRC20", &conf, &req, &priv_key(), CoinProtocol::TRC20 {
+            platform: "TRX".to_owned(),
+            contract_address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t".to_owned(),
+        })
         .await
         .unwrap_err();
         assert!(err.contains("decimals"));

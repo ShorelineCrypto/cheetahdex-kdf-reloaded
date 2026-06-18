@@ -56,21 +56,15 @@ pub type RpcRes<T> = Box<dyn Future<Item = T, Error = JsonRpcError> + Send + 'st
 pub struct JsonRpcRemoteAddr(pub String);
 
 impl fmt::Debug for JsonRpcRemoteAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
 }
 
 impl From<JsonRpcRemoteAddr> for String {
-    fn from(addr: JsonRpcRemoteAddr) -> Self {
-        addr.0
-    }
+    fn from(addr: JsonRpcRemoteAddr) -> Self { addr.0 }
 }
 
 impl From<String> for JsonRpcRemoteAddr {
-    fn from(addr: String) -> Self {
-        JsonRpcRemoteAddr(addr)
-    }
+    fn from(addr: String) -> Self { JsonRpcRemoteAddr(addr) }
 }
 
 /// The identifier is designed to uniquely match outgoing requests and incoming responses.
@@ -128,21 +122,15 @@ pub struct JsonRpcRequest {
 impl JsonRpcRequest {
     // Returns [`JsonRpcRequest::id`].
     #[inline]
-    pub fn get_id(&self) -> &str {
-        &self.id
-    }
+    pub fn get_id(&self) -> &str { &self.id }
 
     /// Returns a `JsonRpcId` identifier of the request.
     #[inline]
-    pub fn rpc_id(&self) -> JsonRpcId {
-        JsonRpcId::Single(self.id.clone())
-    }
+    pub fn rpc_id(&self) -> JsonRpcId { JsonRpcId::Single(self.id.clone()) }
 }
 
 impl From<JsonRpcRequest> for JsonRpcRequestEnum {
-    fn from(single: JsonRpcRequest) -> Self {
-        JsonRpcRequestEnum::Single(single)
-    }
+    fn from(single: JsonRpcRequest) -> Self { JsonRpcRequestEnum::Single(single) }
 }
 
 /// Serializable RPC batch request.
@@ -152,34 +140,24 @@ pub struct JsonRpcBatchRequest(Vec<JsonRpcRequest>);
 impl JsonRpcBatchRequest {
     /// Returns a `JsonRpcId` identifier of the request.
     #[inline]
-    pub fn rpc_id(&self) -> JsonRpcId {
-        JsonRpcId::Batch(self.orig_sequence_ids().collect())
-    }
+    pub fn rpc_id(&self) -> JsonRpcId { JsonRpcId::Batch(self.orig_sequence_ids().collect()) }
 
     /// Returns the number of the requests in the batch.
     #[inline]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
+    pub fn len(&self) -> usize { self.0.len() }
 
     /// Whether the batch is empty.
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
 
     /// Returns original sequence of identifiers.
     /// The method is used to process batch responses in the same order in which the requests were sent.
     #[inline]
-    fn orig_sequence_ids(&self) -> impl Iterator<Item = String> + '_ {
-        self.0.iter().map(|req| req.id.clone())
-    }
+    fn orig_sequence_ids(&self) -> impl Iterator<Item = String> + '_ { self.0.iter().map(|req| req.id.clone()) }
 }
 
 impl From<JsonRpcBatchRequest> for JsonRpcRequestEnum {
-    fn from(batch: JsonRpcBatchRequest) -> Self {
-        JsonRpcRequestEnum::Batch(batch)
-    }
+    fn from(batch: JsonRpcBatchRequest) -> Self { JsonRpcRequestEnum::Batch(batch) }
 }
 
 /// Deserializable RPC response that is either single or batch.
@@ -217,9 +195,7 @@ pub struct JsonRpcResponse {
 impl JsonRpcResponse {
     /// Returns a `JsonRpcId` identifier of the response.
     #[inline]
-    pub fn rpc_id(&self) -> JsonRpcId {
-        JsonRpcId::Single(self.id.clone())
-    }
+    pub fn rpc_id(&self) -> JsonRpcId { JsonRpcId::Single(self.id.clone()) }
 }
 
 /// Deserializable RPC batch response.
@@ -228,30 +204,22 @@ pub struct JsonRpcBatchResponse(Vec<JsonRpcResponse>);
 
 impl JsonRpcBatchResponse {
     /// Returns a `JsonRpcId` identifier of the response.
-    pub fn rpc_id(&self) -> JsonRpcId {
-        JsonRpcId::Batch(self.0.iter().map(|res| res.id.clone()).collect())
-    }
+    pub fn rpc_id(&self) -> JsonRpcId { JsonRpcId::Batch(self.0.iter().map(|res| res.id.clone()).collect()) }
 
     /// Returns the number of the requests in the batch.
     #[inline]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
+    pub fn len(&self) -> usize { self.0.len() }
 
     /// Whether the batch is empty.
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
 }
 
 impl IntoIterator for JsonRpcBatchResponse {
     type Item = JsonRpcResponse;
     type IntoIter = std::vec::IntoIter<JsonRpcResponse>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.0.into_iter() }
 }
 
 #[derive(Clone, Debug)]
@@ -266,9 +234,7 @@ pub struct JsonRpcError {
 }
 
 impl fmt::Display for JsonRpcError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{:?}", self) }
 }
 
 #[derive(Clone, Debug)]
@@ -286,9 +252,7 @@ pub enum JsonRpcErrorType {
 impl JsonRpcErrorType {
     /// Whether the error type is [`JsonRpcErrorType::Transport`].
     #[inline]
-    pub fn is_transport(&self) -> bool {
-        matches!(self, JsonRpcErrorType::Transport(_))
-    }
+    pub fn is_transport(&self) -> bool { matches!(self, JsonRpcErrorType::Transport(_)) }
 }
 
 pub trait JsonRpcClient {

@@ -403,14 +403,11 @@ mod tests {
         let password = "test_password_123";
 
         // Create wallet
-        let resp = block_on(create_wallet_rpc(
-            ctx.clone(),
-            CreateWalletRequest {
-                wallet_name: "test-wallet".to_string(),
-                password: password.to_string(),
-                mnemonic: mnemonic.to_string(),
-            },
-        ))
+        let resp = block_on(create_wallet_rpc(ctx.clone(), CreateWalletRequest {
+            wallet_name: "test-wallet".to_string(),
+            password: password.to_string(),
+            mnemonic: mnemonic.to_string(),
+        }))
         .unwrap();
         assert_eq!(resp.wallet_name, "test-wallet");
 
@@ -420,24 +417,18 @@ mod tests {
         assert_eq!(list.active_wallet, None); // no active wallet set
 
         // Delete with wrong password — should fail
-        let err = block_on(delete_wallet_rpc(
-            ctx.clone(),
-            DeleteWalletRequest {
-                wallet_name: "test-wallet".to_string(),
-                password: "wrong_password".to_string(),
-            },
-        ))
+        let err = block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {
+            wallet_name: "test-wallet".to_string(),
+            password: "wrong_password".to_string(),
+        }))
         .unwrap_err();
         assert_eq!(err.get_inner().status_code(), StatusCode::BAD_REQUEST);
 
         // Delete with correct password
-        let resp = block_on(delete_wallet_rpc(
-            ctx.clone(),
-            DeleteWalletRequest {
-                wallet_name: "test-wallet".to_string(),
-                password: password.to_string(),
-            },
-        ))
+        let resp = block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {
+            wallet_name: "test-wallet".to_string(),
+            password: password.to_string(),
+        }))
         .unwrap();
         assert_eq!(resp.wallet_name, "test-wallet");
 
@@ -452,25 +443,19 @@ mod tests {
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let password = "pw123";
 
-        block_on(create_wallet_rpc(
-            ctx.clone(),
-            CreateWalletRequest {
-                wallet_name: "dup-wallet".to_string(),
-                password: password.to_string(),
-                mnemonic: mnemonic.to_string(),
-            },
-        ))
+        block_on(create_wallet_rpc(ctx.clone(), CreateWalletRequest {
+            wallet_name: "dup-wallet".to_string(),
+            password: password.to_string(),
+            mnemonic: mnemonic.to_string(),
+        }))
         .unwrap();
 
         // Second create should fail with Conflict
-        let err = block_on(create_wallet_rpc(
-            ctx.clone(),
-            CreateWalletRequest {
-                wallet_name: "dup-wallet".to_string(),
-                password: password.to_string(),
-                mnemonic: mnemonic.to_string(),
-            },
-        ))
+        let err = block_on(create_wallet_rpc(ctx.clone(), CreateWalletRequest {
+            wallet_name: "dup-wallet".to_string(),
+            password: password.to_string(),
+            mnemonic: mnemonic.to_string(),
+        }))
         .unwrap_err();
         assert_eq!(err.get_inner().status_code(), StatusCode::CONFLICT);
     }
@@ -479,13 +464,10 @@ mod tests {
     fn test_delete_nonexistent_wallet_fails() {
         let ctx = test_ctx();
 
-        let err = block_on(delete_wallet_rpc(
-            ctx.clone(),
-            DeleteWalletRequest {
-                wallet_name: "ghost-wallet".to_string(),
-                password: "any".to_string(),
-            },
-        ))
+        let err = block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {
+            wallet_name: "ghost-wallet".to_string(),
+            password: "any".to_string(),
+        }))
         .unwrap_err();
         assert_eq!(err.get_inner().status_code(), StatusCode::NOT_FOUND);
     }
@@ -497,27 +479,21 @@ mod tests {
         let password = "pw123";
 
         // Create wallet
-        block_on(create_wallet_rpc(
-            ctx.clone(),
-            CreateWalletRequest {
-                wallet_name: "active-wallet".to_string(),
-                password: password.to_string(),
-                mnemonic: mnemonic.to_string(),
-            },
-        ))
+        block_on(create_wallet_rpc(ctx.clone(), CreateWalletRequest {
+            wallet_name: "active-wallet".to_string(),
+            password: password.to_string(),
+            mnemonic: mnemonic.to_string(),
+        }))
         .unwrap();
 
         // Set it as active
         let _ = ctx.wallet_name.pin(Some("active-wallet".to_string()));
 
         // Delete should be blocked
-        let err = block_on(delete_wallet_rpc(
-            ctx.clone(),
-            DeleteWalletRequest {
-                wallet_name: "active-wallet".to_string(),
-                password: password.to_string(),
-            },
-        ))
+        let err = block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {
+            wallet_name: "active-wallet".to_string(),
+            password: password.to_string(),
+        }))
         .unwrap_err();
         assert_eq!(err.get_inner().status_code(), StatusCode::BAD_REQUEST);
     }

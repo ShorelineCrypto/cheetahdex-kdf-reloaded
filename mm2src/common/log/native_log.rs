@@ -32,9 +32,7 @@ impl LogLevel {
 }
 
 impl Default for LogLevel {
-    fn default() -> Self {
-        DEFAULT_LEVEL_FILTER
-    }
+    fn default() -> Self { DEFAULT_LEVEL_FILTER }
 }
 
 pub struct FfiCallback {
@@ -73,9 +71,7 @@ impl Default for UnifiedLoggerBuilder {
 }
 
 impl UnifiedLoggerBuilder {
-    pub fn new() -> UnifiedLoggerBuilder {
-        UnifiedLoggerBuilder::default()
-    }
+    pub fn new() -> UnifiedLoggerBuilder { UnifiedLoggerBuilder::default() }
 
     pub fn console_format(mut self, console_format: &str) -> UnifiedLoggerBuilder {
         self.console_format = console_format.to_owned();

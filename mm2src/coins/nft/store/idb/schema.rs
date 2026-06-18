@@ -47,9 +47,7 @@ pub(crate) struct InventoryRow {
 }
 
 impl TableSignature for InventoryRow {
-    fn table_name() -> &'static str {
-        INVENTORY_TABLE
-    }
+    fn table_name() -> &'static str { INVENTORY_TABLE }
 
     fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
         if old_version == 0 && new_version >= 1 {
@@ -102,9 +100,7 @@ pub(crate) struct TransferRow {
 }
 
 impl TableSignature for TransferRow {
-    fn table_name() -> &'static str {
-        TRANSFERS_TABLE
-    }
+    fn table_name() -> &'static str { TRANSFERS_TABLE }
 
     fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
         if old_version == 0 && new_version >= 1 {
@@ -144,9 +140,7 @@ pub(crate) struct ScanProgressRow {
 }
 
 impl TableSignature for ScanProgressRow {
-    fn table_name() -> &'static str {
-        SCAN_PROGRESS_TABLE
-    }
+    fn table_name() -> &'static str { SCAN_PROGRESS_TABLE }
 
     fn on_upgrade_needed(upgrader: &DbUpgrader, old_version: u32, new_version: u32) -> OnUpgradeResult<()> {
         if old_version == 0 && new_version >= 1 {

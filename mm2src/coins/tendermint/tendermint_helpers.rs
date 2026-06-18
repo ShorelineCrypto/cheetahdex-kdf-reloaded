@@ -41,9 +41,7 @@ pub trait TendermintCommons {
 
 #[async_trait]
 impl TendermintCommons for TendermintCoin {
-    fn platform_denom(&self) -> &Denom {
-        &self.protocol_info.denom
-    }
+    fn platform_denom(&self) -> &Denom { &self.protocol_info.denom }
 
     fn set_history_sync_state(&self, new_state: HistorySyncState) {
         *self.history_sync_state.lock().unwrap() = new_state;
@@ -73,9 +71,7 @@ impl TendermintCommons for TendermintCoin {
 // ————————————————————————————————————————————————————————————————
 
 impl TendermintCoin {
-    pub fn decimals(&self) -> u8 {
-        self.protocol_info.decimals
-    }
+    pub fn decimals(&self) -> u8 { self.protocol_info.decimals }
 
     pub fn supports_htlc(&self) -> bool {
         matches!(
@@ -85,9 +81,7 @@ impl TendermintCoin {
     }
 
     #[inline(always)]
-    pub(super) fn gas_price(&self) -> f64 {
-        self.protocol_info.gas_price.unwrap_or(DEFAULT_GAS_PRICE)
-    }
+    pub(super) fn gas_price(&self) -> f64 { self.protocol_info.gas_price.unwrap_or(DEFAULT_GAS_PRICE) }
 
     pub(super) fn estimate_blocks_from_duration(&self, duration: u64) -> i64 {
         let estimated = (duration / self.avg_blocktime as u64) as i64;

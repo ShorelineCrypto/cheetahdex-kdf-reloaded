@@ -42,14 +42,10 @@ pub const CONTENT: &str = "error_data";
 /// attributes at compile time).
 pub trait SerializeErrorType: Serialize + __private::SerializeErrorTypeImpl {
     /// `serde(tag = "...")` value the derive expects. Always [`TAG`].
-    fn tag() -> &'static str {
-        TAG
-    }
+    fn tag() -> &'static str { TAG }
 
     /// `serde(content = "...")` value the derive expects. Always [`CONTENT`].
-    fn content() -> &'static str {
-        CONTENT
-    }
+    fn content() -> &'static str { CONTENT }
 }
 
 impl<T> SerializeErrorType for T where T: Serialize + __private::SerializeErrorTypeImpl {}

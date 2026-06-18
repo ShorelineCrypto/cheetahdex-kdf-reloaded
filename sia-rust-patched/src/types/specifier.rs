@@ -45,9 +45,7 @@ pub enum Specifier {
 }
 
 impl Encodable for Specifier {
-    fn encode(&self, encoder: &mut Encoder) {
-        encoder.write_slice(self.as_bytes());
-    }
+    fn encode(&self, encoder: &mut Encoder) { encoder.write_slice(self.as_bytes()); }
 }
 
 impl Specifier {
@@ -64,9 +62,7 @@ impl Specifier {
         }
     }
 
-    pub fn from_str_expect(s: &str) -> Self {
-        Specifier::from_str(s).expect("from_str cannot return Err")
-    }
+    pub fn from_str_expect(s: &str) -> Self { Specifier::from_str(s).expect("from_str cannot return Err") }
 
     pub fn to_str(&self) -> &'static str {
         match self {
@@ -104,7 +100,5 @@ impl FromStr for Specifier {
 }
 
 impl Display for Specifier {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.to_str())
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "{}", self.to_str()) }
 }

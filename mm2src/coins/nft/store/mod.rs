@@ -10,11 +10,9 @@ pub mod errors;
 pub mod history;
 pub mod list;
 
-#[cfg(target_arch = "wasm32")]
-pub mod idb;
+#[cfg(target_arch = "wasm32")] pub mod idb;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod sqlite;
+#[cfg(not(target_arch = "wasm32"))] pub mod sqlite;
 
 pub use errors::{NftStoreError, RemoveOutcome};
 pub use history::NftHistoryStore;

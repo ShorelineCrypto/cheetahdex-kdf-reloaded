@@ -74,7 +74,10 @@ impl SaplingProvingContext {
         }
 
         // Construct the value commitment
-        let value_commitment = ValueCommitment { value, randomness: rcv };
+        let value_commitment = ValueCommitment {
+            value,
+            randomness: rcv,
+        };
 
         // Construct the viewing key
         let viewing_key = proof_generation_key.to_viewing_key();
@@ -83,7 +86,8 @@ impl SaplingProvingContext {
         let payment_address = viewing_key.to_payment_address(diversifier).ok_or(())?;
 
         // This is the result of the re-randomization, we compute it for the caller
-        let rk = PublicKey(proof_generation_key.ak.clone().into()).randomize(ar, SPENDING_KEY_GENERATOR);
+        let rk =
+            PublicKey(proof_generation_key.ak.clone().into()).randomize(ar, SPENDING_KEY_GENERATOR);
 
         // Let's compute the nullifier while we have the position
         let note = Note {
@@ -111,7 +115,8 @@ impl SaplingProvingContext {
         };
 
         // Create proof
-        let proof = create_random_proof(instance, proving_key, &mut rng).expect("proving should not fail");
+        let proof =
+            create_random_proof(instance, proving_key, &mut rng).expect("proving should not fail");
 
         // Try to verify the proof:
         // Construct public input for circuit
@@ -182,7 +187,10 @@ impl SaplingProvingContext {
         }
 
         // Construct the value commitment for the proof instance
-        let value_commitment = ValueCommitment { value, randomness: rcv };
+        let value_commitment = ValueCommitment {
+            value,
+            randomness: rcv,
+        };
 
         // We now have a full witness for the output proof.
         let instance = Output {
@@ -193,7 +201,8 @@ impl SaplingProvingContext {
         };
 
         // Create proof
-        let proof = create_random_proof(instance, proving_key, &mut rng).expect("proving should not fail");
+        let proof =
+            create_random_proof(instance, proving_key, &mut rng).expect("proving should not fail");
 
         // Compute the actual value commitment
         let value_commitment: jubjub::ExtendedPoint = value_commitment.commitment().into();
@@ -238,6 +247,10 @@ impl SaplingProvingContext {
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash[..]);
 
         // Sign
-        Ok(bsk.sign(&data_to_be_signed, &mut rng, VALUE_COMMITMENT_RANDOMNESS_GENERATOR))
+        Ok(bsk.sign(
+            &data_to_be_signed,
+            &mut rng,
+            VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+        ))
     }
 }

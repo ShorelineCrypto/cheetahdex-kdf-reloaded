@@ -254,9 +254,7 @@ pub enum TopicFilter {
 }
 
 impl From<&str> for TopicFilter {
-    fn from(topic: &str) -> Self {
-        TopicFilter::Match(topic.to_string())
-    }
+    fn from(topic: &str) -> Self { TopicFilter::Match(topic.to_string()) }
 }
 
 /// Qrc20 specific RPC ops

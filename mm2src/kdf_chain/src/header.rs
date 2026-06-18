@@ -141,17 +141,11 @@ pub struct BlockHeader {
 
 impl BlockHeader {
     /// Block hash = DSHA-256 over the canonical serialization.
-    pub fn hash(&self) -> H256 {
-        dhash256(&serialize(self))
-    }
+    pub fn hash(&self) -> H256 { dhash256(&serialize(self)) }
 
-    pub fn is_prog_pow(&self) -> bool {
-        self.version == MTP_POW_VERSION && self.time >= PROG_POW_SWITCH_TIME
-    }
+    pub fn is_prog_pow(&self) -> bool { self.version == MTP_POW_VERSION && self.time >= PROG_POW_SWITCH_TIME }
 
-    pub fn raw(&self) -> Bytes {
-        serialize(self)
-    }
+    pub fn raw(&self) -> Bytes { serialize(self) }
 
     /// Decodes the difficulty target. The compact form may contain a value
     /// that overflows 256 bits; in that case `Err(target)` carries the raw

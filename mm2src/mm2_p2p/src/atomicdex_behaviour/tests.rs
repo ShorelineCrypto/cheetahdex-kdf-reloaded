@@ -10,13 +10,9 @@ use std::time::Duration;
 
 static TEST_LISTEN_PORT: AtomicU64 = AtomicU64::new(1);
 
-fn next_port() -> u64 {
-    TEST_LISTEN_PORT.fetch_add(1, Ordering::Relaxed)
-}
+fn next_port() -> u64 { TEST_LISTEN_PORT.fetch_add(1, Ordering::Relaxed) }
 
-fn spawn_boxed(fut: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) {
-    spawn(fut);
-}
+fn spawn_boxed(fut: Box<dyn Future<Output = ()> + Send + Unpin + 'static>) { spawn(fut); }
 
 struct Node {
     peer_id: PeerId,
@@ -71,15 +67,11 @@ impl Node {
         }
     }
 
-    async fn send_cmd(&mut self, cmd: AdexBehaviourCmd) {
-        self.cmd_tx.send(cmd).await.unwrap();
-    }
+    async fn send_cmd(&mut self, cmd: AdexBehaviourCmd) { self.cmd_tx.send(cmd).await.unwrap(); }
 
     /// Stops the underlying libp2p swarm driver. The in-memory transport
     /// observes the aborted future as a disconnect on the peer side.
-    fn abort(&self) {
-        self.abort_handle.abort();
-    }
+    fn abort(&self) { self.abort_handle.abort(); }
 
     /// Poll `GetPeersInfo` until the connected peer count reaches exactly
     /// `number`. Panics after `attempts` 500 ms retries.
@@ -396,18 +388,12 @@ async fn test_request_peers_ok_three_peers() {
 
     let mut expected = vec![
         (receiver1.peer_id, AdexResponse::None),
-        (
-            receiver2.peer_id,
-            AdexResponse::Err {
-                error: "test error".into(),
-            },
-        ),
-        (
-            receiver3.peer_id,
-            AdexResponse::Ok {
-                response: b"test response".to_vec(),
-            },
-        ),
+        (receiver2.peer_id, AdexResponse::Err {
+            error: "test error".into(),
+        }),
+        (receiver3.peer_id, AdexResponse::Ok {
+            response: b"test response".to_vec(),
+        }),
     ];
     expected.sort_by(|x, y| x.0.cmp(&y.0));
 

@@ -2,24 +2,16 @@ use super::*;
 
 impl ZCoin {
     #[inline(always)]
-    pub fn z_rpc(&self) -> &(dyn ZRpcOps + Send + Sync) {
-        self.utxo_arc.rpc_client.as_ref()
-    }
+    pub fn z_rpc(&self) -> &(dyn ZRpcOps + Send + Sync) { self.utxo_arc.rpc_client.as_ref() }
 
     #[inline(always)]
-    pub fn rpc_client(&self) -> &UtxoRpcClientEnum {
-        &self.utxo_arc.rpc_client
-    }
+    pub fn rpc_client(&self) -> &UtxoRpcClientEnum { &self.utxo_arc.rpc_client }
 
     #[inline(always)]
-    pub fn is_sapling_state_synced(&self) -> bool {
-        self.z_fields.sapling_state_synced.load(AtomicOrdering::Relaxed)
-    }
+    pub fn is_sapling_state_synced(&self) -> bool { self.z_fields.sapling_state_synced.load(AtomicOrdering::Relaxed) }
 
     #[inline(always)]
-    pub fn my_z_address_encoded(&self) -> String {
-        self.z_fields.my_z_addr_encoded.clone()
-    }
+    pub fn my_z_address_encoded(&self) -> String { self.z_fields.my_z_addr_encoded.clone() }
 
     /// Returns all unspents included currently unspendable (not confirmed)
     pub(crate) async fn my_z_unspents_ordered(&self) -> UtxoRpcResult<Vec<ZUnspent>> {
@@ -232,9 +224,7 @@ impl ZCoin {
     }
 
     #[inline(always)]
-    pub(crate) fn sqlite_conn(&self) -> MutexGuard<'_, Connection> {
-        self.z_fields.sqlite.lock().unwrap()
-    }
+    pub(crate) fn sqlite_conn(&self) -> MutexGuard<'_, Connection> { self.z_fields.sqlite.lock().unwrap() }
 
     pub async fn get_unspent_witness(
         &self,

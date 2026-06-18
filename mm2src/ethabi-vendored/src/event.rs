@@ -3,10 +3,8 @@
 use signature::long_signature;
 use std::collections::HashMap;
 use tiny_keccak::keccak256;
-use {
-    decode, encode, ErrorKind, EventParam, Hash, Log, LogParam, ParamType, RawLog, RawTopicFilter, Result, Token,
-    Topic, TopicFilter,
-};
+use {decode, encode, ErrorKind, EventParam, Hash, Log, LogParam, ParamType, RawLog, RawTopicFilter, Result, Token,
+     Topic, TopicFilter};
 
 /// Contract event.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -21,14 +19,10 @@ pub struct Event {
 
 impl Event {
     /// Returns names of all params.
-    fn params_names(&self) -> Vec<String> {
-        self.inputs.iter().map(|p| p.name.clone()).collect()
-    }
+    fn params_names(&self) -> Vec<String> { self.inputs.iter().map(|p| p.name.clone()).collect() }
 
     /// Returns types of all params.
-    fn param_types(&self) -> Vec<ParamType> {
-        self.inputs.iter().map(|p| p.kind.clone()).collect()
-    }
+    fn param_types(&self) -> Vec<ParamType> { self.inputs.iter().map(|p| p.kind.clone()).collect() }
 
     /// Returns all params of the event.
     fn indexed_params(&self, indexed: bool) -> Vec<EventParam> {
@@ -36,9 +30,7 @@ impl Event {
     }
 
     /// Event signature
-    pub fn signature(&self) -> Hash {
-        long_signature(&self.name, &self.param_types())
-    }
+    pub fn signature(&self) -> Hash { long_signature(&self.name, &self.param_types()) }
 
     /// Creates topic filter
     pub fn filter(&self, raw: RawTopicFilter) -> Result<TopicFilter> {
@@ -197,15 +189,12 @@ mod tests {
 
         let log = RawLog {
             topics: vec![
-                long_signature(
-                    "foo",
-                    &[
-                        ParamType::Int(256),
-                        ParamType::Int(256),
-                        ParamType::Address,
-                        ParamType::Address,
-                    ],
-                ),
+                long_signature("foo", &[
+                    ParamType::Int(256),
+                    ParamType::Int(256),
+                    ParamType::Address,
+                    ParamType::Address,
+                ]),
                 "0000000000000000000000000000000000000000000000000000000000000002".into(),
                 "0000000000000000000000001111111111111111111111111111111111111111".into(),
             ],
@@ -217,31 +206,28 @@ mod tests {
         };
         let result = event.parse_log(log).unwrap();
 
-        assert_eq!(
-            result,
-            Log {
-                params: vec![
-                    (
-                        "a".to_owned(),
-                        Token::Int("0000000000000000000000000000000000000000000000000000000000000003".into())
-                    ),
-                    (
-                        "b".to_owned(),
-                        Token::Int("0000000000000000000000000000000000000000000000000000000000000002".into())
-                    ),
-                    (
-                        "c".to_owned(),
-                        Token::Address("2222222222222222222222222222222222222222".into())
-                    ),
-                    (
-                        "d".to_owned(),
-                        Token::Address("1111111111111111111111111111111111111111".into())
-                    ),
-                ]
-                .into_iter()
-                .map(|(name, value)| LogParam { name, value })
-                .collect::<Vec<_>>()
-            }
-        );
+        assert_eq!(result, Log {
+            params: vec![
+                (
+                    "a".to_owned(),
+                    Token::Int("0000000000000000000000000000000000000000000000000000000000000003".into())
+                ),
+                (
+                    "b".to_owned(),
+                    Token::Int("0000000000000000000000000000000000000000000000000000000000000002".into())
+                ),
+                (
+                    "c".to_owned(),
+                    Token::Address("2222222222222222222222222222222222222222".into())
+                ),
+                (
+                    "d".to_owned(),
+                    Token::Address("1111111111111111111111111111111111111111".into())
+                ),
+            ]
+            .into_iter()
+            .map(|(name, value)| LogParam { name, value })
+            .collect::<Vec<_>>()
+        });
     }
 }

@@ -14,9 +14,7 @@ pub struct WcConnectionHandler {
 
 impl WcConnectionHandler {
     /// Creates a handler that forwards inbound messages onto `inbound_tx`.
-    pub fn new(inbound_tx: UnboundedSender<PublishedMessage>) -> Self {
-        WcConnectionHandler { inbound_tx }
-    }
+    pub fn new(inbound_tx: UnboundedSender<PublishedMessage>) -> Self { WcConnectionHandler { inbound_tx } }
 }
 
 impl ConnectionHandler for WcConnectionHandler {

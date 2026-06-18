@@ -3,17 +3,11 @@
 use super::*;
 
 impl MarketCoinOps for Qrc20Coin {
-    fn ticker(&self) -> &str {
-        &self.utxo.conf.ticker
-    }
+    fn ticker(&self) -> &str { &self.utxo.conf.ticker }
 
-    fn my_address(&self) -> Result<String, String> {
-        utxo_common::my_address(self)
-    }
+    fn my_address(&self) -> Result<String, String> { utxo_common::my_address(self) }
 
-    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
-        unimplemented!()
-    }
+    fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> { unimplemented!() }
 
     fn sign_message_hash(&self, message: &str) -> Option<[u8; 32]> {
         utxo_common::sign_message_hash(self.as_ref(), message)
@@ -64,9 +58,7 @@ impl MarketCoinOps for Qrc20Coin {
         Box::new(utxo_common::my_balance(self.clone()).map(|CoinBalance { spendable, .. }| spendable))
     }
 
-    fn platform_ticker(&self) -> &str {
-        &self.0.platform
-    }
+    fn platform_ticker(&self) -> &str { &self.0.platform }
 
     #[inline(always)]
     fn send_raw_tx(&self, tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
@@ -123,13 +115,9 @@ impl MarketCoinOps for Qrc20Coin {
         utxo_common::current_block(&self.utxo)
     }
 
-    fn display_priv_key(&self) -> Result<String, String> {
-        utxo_common::display_priv_key(&self.utxo)
-    }
+    fn display_priv_key(&self) -> Result<String, String> { utxo_common::display_priv_key(&self.utxo) }
 
-    fn min_tx_amount(&self) -> BigDecimal {
-        BigDecimal::from(0)
-    }
+    fn min_tx_amount(&self) -> BigDecimal { BigDecimal::from(0) }
 
     fn min_trading_vol(&self) -> MmNumber {
         let pow = self.utxo.decimals / 3;

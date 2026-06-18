@@ -59,9 +59,7 @@ pub struct ListTransactionsItem {
 impl ListTransactionsItem {
     /// Checks if the transaction is conflicting.
     /// It means the transaction has conflicts or has negative confirmations.
-    pub fn is_conflicting(&self) -> bool {
-        self.confirmations < 0 || !self.walletconflicts.is_empty()
-    }
+    pub fn is_conflicting(&self) -> bool { self.confirmations < 0 || !self.walletconflicts.is_empty() }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -240,9 +238,7 @@ impl Default for NativeClientImpl {
 pub struct NativeClient(pub Arc<NativeClientImpl>);
 impl Deref for NativeClient {
     type Target = NativeClientImpl;
-    fn deref(&self) -> &NativeClientImpl {
-        &*self.0
-    }
+    fn deref(&self) -> &NativeClientImpl { &*self.0 }
 }
 
 /// The trait provides methods to generate the JsonRpcClient instance info such as name of coin.
@@ -251,29 +247,19 @@ pub trait UtxoJsonRpcClientInfo: JsonRpcClient {
     fn coin_name(&self) -> &str;
 
     /// Generate client info from coin name
-    fn client_info(&self) -> String {
-        format!("coin: {}", self.coin_name())
-    }
+    fn client_info(&self) -> String { format!("coin: {}", self.coin_name()) }
 }
 
 impl UtxoJsonRpcClientInfo for NativeClientImpl {
-    fn coin_name(&self) -> &str {
-        self.coin_ticker.as_str()
-    }
+    fn coin_name(&self) -> &str { self.coin_ticker.as_str() }
 }
 
 impl JsonRpcClient for NativeClientImpl {
-    fn version(&self) -> &'static str {
-        "1.0"
-    }
+    fn version(&self) -> &'static str { "1.0" }
 
-    fn next_id(&self) -> String {
-        self.request_id.fetch_add(1, AtomicOrdering::Relaxed).to_string()
-    }
+    fn next_id(&self) -> String { self.request_id.fetch_add(1, AtomicOrdering::Relaxed).to_string() }
 
-    fn client_info(&self) -> String {
-        UtxoJsonRpcClientInfo::client_info(self)
-    }
+    fn client_info(&self) -> String { UtxoJsonRpcClientInfo::client_info(self) }
 
     #[cfg(target_arch = "wasm32")]
     fn transport(&self, _request: JsonRpcRequestEnum) -> JsonRpcResponseFut {
@@ -476,9 +462,7 @@ impl UtxoRpcClientOps for NativeClient {
         }
     }
 
-    fn get_relay_fee(&self) -> RpcRes<BigDecimal> {
-        Box::new(self.get_network_info().map(|info| info.relay_fee))
-    }
+    fn get_relay_fee(&self) -> RpcRes<BigDecimal> { Box::new(self.get_network_info().map(|info| info.relay_fee)) }
 
     fn find_output_spend(
         &self,
@@ -643,9 +627,7 @@ impl NativeClientImpl {
     }
 
     /// https://developer.bitcoin.org/reference/rpc/getblockcount.html
-    pub fn get_block_count(&self) -> RpcRes<u64> {
-        rpc_func!(self, "getblockcount")
-    }
+    pub fn get_block_count(&self) -> RpcRes<u64> { rpc_func!(self, "getblockcount") }
 
     /// https://developer.bitcoin.org/reference/rpc/getrawtransaction.html
     /// Always returns verbose transaction
@@ -765,9 +747,7 @@ impl NativeClientImpl {
     }
 
     /// https://developer.bitcoin.org/reference/rpc/getnetworkinfo.html
-    pub fn get_network_info(&self) -> RpcRes<NetworkInfo> {
-        rpc_func!(self, "getnetworkinfo")
-    }
+    pub fn get_network_info(&self) -> RpcRes<NetworkInfo> { rpc_func!(self, "getnetworkinfo") }
 
     /// https://developer.bitcoin.org/reference/rpc/getaddressinfo.html
     pub fn get_address_info(&self, address: &str) -> RpcRes<GetAddressInfoRes> {

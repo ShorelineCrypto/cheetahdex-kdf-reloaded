@@ -16,9 +16,7 @@ pub struct PendingRequests {
 }
 
 impl PendingRequests {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Registers a waiter for `id`, returning the receiver the caller awaits.
     pub fn register(&self, id: MessageId) -> oneshot::Receiver<serde_json::Value> {
@@ -38,7 +36,5 @@ impl PendingRequests {
     }
 
     /// Drops the waiter for `id` without resolving it (e.g. on timeout).
-    pub fn cancel(&self, id: MessageId) {
-        self.waiters.lock().remove(&id);
-    }
+    pub fn cancel(&self, id: MessageId) { self.waiters.lock().remove(&id); }
 }

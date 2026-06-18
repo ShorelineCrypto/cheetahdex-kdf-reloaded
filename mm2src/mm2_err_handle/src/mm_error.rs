@@ -149,9 +149,7 @@ where
     E2: From<E1> + NotMmError,
 {
     #[track_caller]
-    fn from(e1: E1) -> Self {
-        MmError::new(E2::from(e1))
-    }
+    fn from(e1: E1) -> Self { MmError::new(E2::from(e1)) }
 }
 
 impl<E> Serialize for MmError<E>
@@ -187,9 +185,7 @@ impl<E> HttpStatusCode for MmError<E>
 where
     E: HttpStatusCode + NotMmError,
 {
-    fn status_code(&self) -> StatusCode {
-        self.etype.status_code()
-    }
+    fn status_code(&self) -> StatusCode { self.etype.status_code() }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,9 +200,7 @@ pub struct MmErrorTrace {
 }
 
 impl MmErrorTrace {
-    pub fn new(trace: Vec<TraceLocation>) -> MmErrorTrace {
-        MmErrorTrace { trace }
-    }
+    pub fn new(trace: Vec<TraceLocation>) -> MmErrorTrace { MmErrorTrace { trace } }
 }
 
 impl<E: NotMmError> MmError<E> {
@@ -233,9 +227,7 @@ impl<E: NotMmError> MmError<E> {
 
     /// Decompose into the inner error and its trace; the inverse of
     /// [`MmError::new_with_trace`].
-    pub fn split(self) -> (E, MmErrorTrace) {
-        (self.etype, MmErrorTrace::new(self.trace))
-    }
+    pub fn split(self) -> (E, MmErrorTrace) { (self.etype, MmErrorTrace::new(self.trace)) }
 
     /// Replace the inner error in place via `f`, appending the caller's
     /// source location to the trace. Trace history is preserved.
@@ -254,9 +246,7 @@ impl<E: NotMmError> MmError<E> {
 
     /// Shorthand for `Err(MmError::new(etype))`.
     #[track_caller]
-    pub fn err<T>(etype: E) -> Result<T, MmError<E>> {
-        Err(MmError::new(etype))
-    }
+    pub fn err<T>(etype: E) -> Result<T, MmError<E>> { Err(MmError::new(etype)) }
 
     /// Shorthand for `Err(MmError::new_with_trace(etype, trace))`.
     #[track_caller]
@@ -265,14 +255,10 @@ impl<E: NotMmError> MmError<E> {
     }
 
     /// Borrow the inner error.
-    pub fn get_inner(&self) -> &E {
-        &self.etype
-    }
+    pub fn get_inner(&self) -> &E { &self.etype }
 
     /// Move out the inner error, dropping the trace.
-    pub fn into_inner(self) -> E {
-        self.etype
-    }
+    pub fn into_inner(self) -> E { self.etype }
 
     /// Render the trace as a deduplicated dot-separated file path
     /// (root-first), e.g. `mm2.lp_swap.utxo.rpc_client`.
@@ -323,23 +309,15 @@ impl From<&'static Location<'static>> for TraceLocation {
 }
 
 impl FormattedTrace for TraceLocation {
-    fn formatted(&self) -> String {
-        self.to_string()
-    }
+    fn formatted(&self) -> String { self.to_string() }
 }
 
 impl TraceLocation {
-    pub fn new(file: &'static str, line: u32) -> TraceLocation {
-        TraceLocation { file, line }
-    }
+    pub fn new(file: &'static str, line: u32) -> TraceLocation { TraceLocation { file, line } }
 
-    pub fn file(&self) -> &'static str {
-        self.file
-    }
+    pub fn file(&self) -> &'static str { self.file }
 
-    pub fn line(&self) -> u32 {
-        self.line
-    }
+    pub fn line(&self) -> u32 { self.line }
 }
 
 impl<T: FormattedTrace> FormattedTrace for Vec<T> {

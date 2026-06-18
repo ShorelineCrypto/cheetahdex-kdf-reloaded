@@ -44,8 +44,7 @@ pub(crate) use mm2_core::mm_ctx::{MmArc, MmWeak};
 pub(crate) use mm2_err_handle::prelude::*;
 pub(crate) use mm2_eth::keys::{public_to_address, KeyPair, Public, Signature};
 pub(crate) use mm2_net::transport::{slurp_url, SlurpError};
-#[cfg(test)]
-pub(crate) use mocktopus::macros::*;
+#[cfg(test)] pub(crate) use mocktopus::macros::*;
 pub(crate) use rand::seq::SliceRandom;
 pub(crate) use rpc::v1::types::Bytes as BytesJson;
 pub(crate) use secp256k1::PublicKey;
@@ -59,20 +58,19 @@ pub(crate) use std::path::PathBuf;
 pub(crate) use std::str::FromStr;
 pub(crate) use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 pub(crate) use std::sync::{Arc, Mutex};
-pub(crate) use wire_types::{
-    Action as TraceAction, BlockNumber, Bytes, CallRequest, FilterBuilder, Log, Trace, TraceFilterBuilder,
-};
+pub(crate) use wire_types::{Action as TraceAction, BlockNumber, Bytes, CallRequest, FilterBuilder, Log, Trace,
+                            TraceFilterBuilder};
 
-pub(crate) use super::{
-    BalanceError, BalanceFut, CoinBalance, CoinProtocol, CoinTransportMetrics, CoinsContext, FeeApproxStage,
-    FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin, NegotiateSwapContractAddrErr, NumConversError,
-    NumConversResult, RawTransactionError, RawTransactionFut, RawTransactionRequest, RawTransactionRes,
-    RawTransactionResult, RpcClientType, RpcTransportEventHandler, RpcTransportEventHandlerShared,
-    SignEthTransactionParams, SignRawTransactionEnum, SignRawTransactionRequest, SignatureError, SignatureResult,
-    SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult, TradePreimageValue, Transaction,
-    TransactionDetails, TransactionEnum, UnexpectedDerivationMethod, ValidateAddressResult, VerificationError,
-    VerificationResult, WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult,
-};
+pub(crate) use super::{BalanceError, BalanceFut, CoinBalance, CoinProtocol, CoinTransportMetrics, CoinsContext,
+                       FeeApproxStage, FoundSwapTxSpend, HistorySyncState, MarketCoinOps, MmCoin,
+                       NegotiateSwapContractAddrErr, NumConversError, NumConversResult, RawTransactionError,
+                       RawTransactionFut, RawTransactionRequest, RawTransactionRes, RawTransactionResult,
+                       RpcClientType, RpcTransportEventHandler, RpcTransportEventHandlerShared,
+                       SignEthTransactionParams, SignRawTransactionEnum, SignRawTransactionRequest, SignatureError,
+                       SignatureResult, SwapOps, TradeFee, TradePreimageError, TradePreimageFut, TradePreimageResult,
+                       TradePreimageValue, Transaction, TransactionDetails, TransactionEnum,
+                       UnexpectedDerivationMethod, ValidateAddressResult, VerificationError, VerificationResult,
+                       WithdrawError, WithdrawFee, WithdrawFut, WithdrawRequest, WithdrawResult};
 
 pub use legacy_tx::rlp;
 pub use legacy_tx::SignedTransaction as SignedEthTx;
@@ -106,24 +104,21 @@ pub use eth_mm_coin::EthTxFeeDetails;
 pub use eth_types::*;
 
 pub(crate) use crate::DerivationMethod;
-pub(crate) use crate::{
-    CommonSwapOpsV2, DexFee, FindPaymentSpendError, FundingTxSpend, GenPreimageResult, GenTakerFundingSpendArgs,
-    GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2, ParseCoinAssocTypes, RefundFundingSecretArgs,
-    RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs, RefundTakerPaymentArgs, SearchForFundingSpendErr,
-    SendMakerPaymentArgs, SendTakerFundingArgs, SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TakerCoinSwapOpsV2,
-    ToBytes, TransactionErr, TransactionFut, TxGenError, TxPreimageWithSig, ValidateFeeArgs, ValidateMakerPaymentArgs,
-    ValidatePaymentInput, ValidateSwapV2TxError, ValidateSwapV2TxResult, ValidateTakerFundingArgs,
-    ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult, WatcherOps,
-};
+pub(crate) use crate::{CommonSwapOpsV2, DexFee, FindPaymentSpendError, FundingTxSpend, GenPreimageResult,
+                       GenTakerFundingSpendArgs, GenTakerPaymentSpendArgs, MakerCoinSwapOpsV2, ParseCoinAssocTypes,
+                       RefundFundingSecretArgs, RefundMakerPaymentSecretArgs, RefundMakerPaymentTimelockArgs,
+                       RefundTakerPaymentArgs, SearchForFundingSpendErr, SendMakerPaymentArgs, SendTakerFundingArgs,
+                       SpendMakerPaymentArgs, SwapTxTypeWithSecretHash, TakerCoinSwapOpsV2, ToBytes, TransactionErr,
+                       TransactionFut, TxGenError, TxPreimageWithSig, ValidateFeeArgs, ValidateMakerPaymentArgs,
+                       ValidatePaymentInput, ValidateSwapV2TxError, ValidateSwapV2TxResult, ValidateTakerFundingArgs,
+                       ValidateTakerFundingSpendPreimageResult, ValidateTakerPaymentSpendPreimageResult, WatcherOps};
 pub(crate) use common::mm_number::MmNumber;
 pub(crate) use eth_hd_wallet::EthHDWallet;
 pub(crate) use mm2_eth::keys::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
 
-#[cfg(test)]
-mod eth_tests;
-#[cfg(target_arch = "wasm32")]
-mod eth_wasm_tests;
+#[cfg(test)] mod eth_tests;
+#[cfg(target_arch = "wasm32")] mod eth_wasm_tests;
 
 // ─── EthCoin newtype ────────────────────────────────────────────────────────
 
@@ -131,7 +126,5 @@ mod eth_wasm_tests;
 pub struct EthCoin(Arc<EthCoinImpl>);
 impl Deref for EthCoin {
     type Target = EthCoinImpl;
-    fn deref(&self) -> &EthCoinImpl {
-        &*self.0
-    }
+    fn deref(&self) -> &EthCoinImpl { &*self.0 }
 }

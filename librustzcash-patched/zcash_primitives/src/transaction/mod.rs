@@ -348,7 +348,9 @@ impl Transaction {
         };
 
         let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version.has_sprout() {
-            let jss = Vector::read(&mut reader, |r| JsDescription::read(r, version.uses_groth_proofs()))?;
+            let jss = Vector::read(&mut reader, |r| {
+                JsDescription::read(r, version.uses_groth_proofs())
+            })?;
             let (pubkey, sig) = if !jss.is_empty() {
                 let mut joinsplit_pubkey = [0; 32];
                 let mut joinsplit_sig = [0; 64];
@@ -363,7 +365,8 @@ impl Transaction {
             (vec![], None, None)
         };
 
-        let binding_sig = if (is_sapling_v4 || has_tze) && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
+        let binding_sig = if (is_sapling_v4 || has_tze)
+            && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
         {
             Some(Signature::read(&mut reader)?)
         } else {
@@ -430,8 +433,11 @@ impl Transaction {
                 match self.joinsplit_pubkey {
                     Some(pubkey) => writer.write_all(&pubkey)?,
                     None => {
-                        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Missing JoinSplit pubkey"));
-                    },
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "Missing JoinSplit pubkey",
+                        ));
+                    }
                 }
                 match self.joinsplit_sig {
                     Some(sig) => writer.write_all(&sig)?,
@@ -440,7 +446,7 @@ impl Transaction {
                             io::ErrorKind::InvalidInput,
                             "Missing JoinSplit signature",
                         ));
-                    },
+                    }
                 }
             }
         }
@@ -460,12 +466,17 @@ impl Transaction {
             }
         }
 
-        if (is_sapling_v4 || has_tze) && !(self.shielded_spends.is_empty() && self.shielded_outputs.is_empty()) {
+        if (is_sapling_v4 || has_tze)
+            && !(self.shielded_spends.is_empty() && self.shielded_outputs.is_empty())
+        {
             match self.binding_sig {
                 Some(sig) => sig.write(&mut writer)?,
                 None => {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "Missing binding signature"));
-                },
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Missing binding signature",
+                    ));
+                }
             }
         } else if self.binding_sig.is_some() {
             return Err(io::Error::new(

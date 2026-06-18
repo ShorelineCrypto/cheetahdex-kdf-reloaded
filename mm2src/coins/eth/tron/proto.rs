@@ -65,9 +65,7 @@ pub enum ContractType {
 }
 
 impl Default for ContractType {
-    fn default() -> Self {
-        ContractType::TransferContract
-    }
+    fn default() -> Self { ContractType::TransferContract }
 }
 
 impl TryFrom<i32> for ContractType {

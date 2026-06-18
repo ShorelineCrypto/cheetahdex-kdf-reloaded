@@ -1,8 +1,7 @@
 use crate::hd_pubkey::HDXPubExtractor;
 use crate::hd_wallet::{HDWalletCoinOps, NewAccountCreatingError};
-use crate::{
-    BalanceError, BalanceResult, CoinBalance, CoinWithDerivationMethod, DerivationMethod, HDAddress, MarketCoinOps,
-};
+use crate::{BalanceError, BalanceResult, CoinBalance, CoinWithDerivationMethod, DerivationMethod, HDAddress,
+            MarketCoinOps};
 use async_trait::async_trait;
 use common::custom_iter::TryUnzip;
 use common::log::{debug, info};
@@ -22,15 +21,11 @@ pub enum EnableCoinBalanceError {
 }
 
 impl From<NewAccountCreatingError> for EnableCoinBalanceError {
-    fn from(e: NewAccountCreatingError) -> Self {
-        EnableCoinBalanceError::NewAccountCreatingError(e)
-    }
+    fn from(e: NewAccountCreatingError) -> Self { EnableCoinBalanceError::NewAccountCreatingError(e) }
 }
 
 impl From<BalanceError> for EnableCoinBalanceError {
-    fn from(e: BalanceError) -> Self {
-        EnableCoinBalanceError::BalanceError(e)
-    }
+    fn from(e: BalanceError) -> Self { EnableCoinBalanceError::BalanceError(e) }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -80,9 +75,7 @@ pub enum EnableCoinScanPolicy {
 }
 
 impl Default for EnableCoinScanPolicy {
-    fn default() -> Self {
-        EnableCoinScanPolicy::ScanIfNewWallet
-    }
+    fn default() -> Self { EnableCoinScanPolicy::ScanIfNewWallet }
 }
 
 #[async_trait]

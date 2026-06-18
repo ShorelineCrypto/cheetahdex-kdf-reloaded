@@ -38,9 +38,7 @@ pub struct BlockHeaderStorage {
 }
 
 impl Debug for BlockHeaderStorage {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result { Ok(()) }
 }
 
 pub trait InitBlockHeaderStorageOps: Send + Sync + 'static {

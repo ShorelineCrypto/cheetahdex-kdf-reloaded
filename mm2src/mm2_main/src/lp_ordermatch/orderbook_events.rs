@@ -19,9 +19,7 @@ pub struct OrderbookStreamer {
 }
 
 impl OrderbookStreamer {
-    pub fn new(ctx: MmArc, base: String, rel: String) -> Self {
-        Self { ctx, base, rel }
-    }
+    pub fn new(ctx: MmArc, base: String, rel: String) -> Self { Self { ctx, base, rel } }
 }
 
 /// Events emitted when orderbook items change.

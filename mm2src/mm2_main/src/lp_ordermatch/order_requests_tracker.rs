@@ -1,9 +1,7 @@
 #![allow(dead_code)]
-use std::{
-    collections::hash_map::{Entry, HashMap},
-    num::NonZeroUsize,
-    time::Duration,
-};
+use std::{collections::hash_map::{Entry, HashMap},
+          num::NonZeroUsize,
+          time::Duration};
 use wasm_timer::Instant;
 
 const ONE_SECOND: Duration = Duration::from_secs(1);
@@ -15,9 +13,7 @@ pub struct OrderRequestsTracker {
 }
 
 impl Default for OrderRequestsTracker {
-    fn default() -> OrderRequestsTracker {
-        OrderRequestsTracker::new(NonZeroUsize::new(5).unwrap())
-    }
+    fn default() -> OrderRequestsTracker { OrderRequestsTracker::new(NonZeroUsize::new(5).unwrap()) }
 }
 
 impl OrderRequestsTracker {

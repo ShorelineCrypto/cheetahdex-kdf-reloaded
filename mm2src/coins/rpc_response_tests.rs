@@ -12,9 +12,8 @@ use serde_json as json;
 
 mod native_rpc_responses {
     use super::*;
-    use crate::utxo::rpc_clients::{
-        EstimateSmartFeeRes, ListSinceBlockRes, NativeUnspent, NetworkInfo, ValidateAddressRes, VerboseBlock,
-    };
+    use crate::utxo::rpc_clients::{EstimateSmartFeeRes, ListSinceBlockRes, NativeUnspent, NetworkInfo,
+                                   ValidateAddressRes, VerboseBlock};
 
     #[test]
     fn test_native_unspent_btc() {
@@ -275,10 +274,9 @@ mod native_rpc_responses {
 
 mod electrum_responses {
     use super::*;
-    use crate::utxo::rpc_clients::{
-        ElectrumBalance, ElectrumBlockHeader, ElectrumBlockHeaderV12, ElectrumBlockHeaderV14, ElectrumBlockHeadersRes,
-        ElectrumTxHistoryItem, ElectrumUnspent, TxMerkleBranch,
-    };
+    use crate::utxo::rpc_clients::{ElectrumBalance, ElectrumBlockHeader, ElectrumBlockHeaderV12,
+                                   ElectrumBlockHeaderV14, ElectrumBlockHeadersRes, ElectrumTxHistoryItem,
+                                   ElectrumUnspent, TxMerkleBranch};
 
     #[test]
     fn test_electrum_unspent_confirmed() {

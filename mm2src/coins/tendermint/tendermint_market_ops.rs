@@ -8,11 +8,9 @@ use super::rpc::*;
 use super::tendermint_helpers::TendermintCommons;
 use super::tendermint_types::*;
 use crate::utxo::utxo_common::{big_decimal_from_sat, big_decimal_from_sat_unsigned};
-use crate::{
-    BalanceFut, CoinBalance, MarketCoinOps, RawTransactionError, RawTransactionFut, SignRawTransactionRequest,
-    SignatureError, SignatureResult, TransactionEnum, TransactionErr, TransactionFut, UnexpectedDerivationMethod,
-    VerificationError, VerificationResult,
-};
+use crate::{BalanceFut, CoinBalance, MarketCoinOps, RawTransactionError, RawTransactionFut, SignRawTransactionRequest,
+            SignatureError, SignatureResult, TransactionEnum, TransactionErr, TransactionFut,
+            UnexpectedDerivationMethod, VerificationError, VerificationResult};
 use bigdecimal::BigDecimal;
 use common::executor::Timer;
 use common::mm_number::MmNumber;
@@ -28,13 +26,9 @@ use rpc::v1::types::Bytes as BytesJson;
 use std::str::FromStr;
 
 impl MarketCoinOps for TendermintCoin {
-    fn ticker(&self) -> &str {
-        &self.ticker
-    }
+    fn ticker(&self) -> &str { &self.ticker }
 
-    fn my_address(&self) -> Result<String, String> {
-        Ok(self.account_id.to_string())
-    }
+    fn my_address(&self) -> Result<String, String> { Ok(self.account_id.to_string()) }
 
     fn get_public_key(&self) -> Result<String, MmError<UnexpectedDerivationMethod>> {
         let key = cosmrs::crypto::secp256k1::SigningKey::from_slice(
@@ -47,9 +41,7 @@ impl MarketCoinOps for TendermintCoin {
         Ok(key.public_key().to_string())
     }
 
-    fn sign_message_hash(&self, _message: &str) -> Option<[u8; 32]> {
-        None
-    }
+    fn sign_message_hash(&self, _message: &str) -> Option<[u8; 32]> { None }
 
     fn sign_message(&self, _message: &str) -> SignatureResult<String> {
         MmError::err(SignatureError::InternalError("Not implemented".into()))
@@ -83,9 +75,7 @@ impl MarketCoinOps for TendermintCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn platform_ticker(&self) -> &str {
-        &self.ticker
-    }
+    fn platform_ticker(&self) -> &str { &self.ticker }
 
     fn send_raw_tx(&self, tx: &str) -> Box<dyn futures01::Future<Item = String, Error = String> + Send> {
         let tx_bytes = try_fus!(hex::decode(tx));
@@ -252,14 +242,10 @@ impl MarketCoinOps for TendermintCoin {
     }
 
     #[inline]
-    fn min_tx_amount(&self) -> BigDecimal {
-        big_decimal_from_sat(MIN_TX_SATOSHIS, self.protocol_info.decimals)
-    }
+    fn min_tx_amount(&self) -> BigDecimal { big_decimal_from_sat(MIN_TX_SATOSHIS, self.protocol_info.decimals) }
 
     #[inline]
-    fn min_trading_vol(&self) -> MmNumber {
-        self.min_tx_amount().into()
-    }
+    fn min_trading_vol(&self) -> MmNumber { self.min_tx_amount().into() }
 
     fn sign_raw_tx(&self, _args: &SignRawTransactionRequest) -> RawTransactionFut {
         let coin = self.ticker().to_string();
