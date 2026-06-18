@@ -28,7 +28,7 @@ KDF Reloaded is currently in **public alpha**. APIs, on-disk formats, and the ne
 
 - The `mm2` binary is provided for evaluation, testing, and review.
 - Mainnet swaps function on netid `8762` (AtomicDEX network) and netid `6133` (GLEEC network), but you are running unaudited pre-release software.
-- GPG/minisign signatures on release artifacts are planned for the alpha cycle; verify provenance from this repository directly until signatures are published. See [`SECURITY.md`](SECURITY.md).
+- Git commits and release tags are GPG-signed by the maintainer (`Takologi <takologi@proton.me>`, fingerprint `FEE1ACA52C65FF3EBF31818CB5595E1752BC2A82`); the public key is at [`docs/keys/takologi.asc`](docs/keys/takologi.asc). Signatures on release **binaries** are planned for the alpha cycle. See [`SECURITY.md`](SECURITY.md).
 
 ## What it does
 

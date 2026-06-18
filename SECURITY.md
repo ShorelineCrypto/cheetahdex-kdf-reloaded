@@ -13,7 +13,7 @@ KDF Reloaded is in public alpha. Only the latest tagged alpha release receives s
 
 If you believe you have found a security vulnerability in KDF Reloaded — particularly anything affecting swap atomicity, key handling, networking, or RPC authorisation — **please do not open a public issue**.
 
-> A dedicated vulnerability mailbox and PGP key may be added in a future release cycle. Until then, contact maintainers via the channels listed in [`CONTRIBUTING.md`](CONTRIBUTING.md) and explicitly mark the message as a security report.
+> Contact maintainers via the channels listed in [`CONTRIBUTING.md`](CONTRIBUTING.md) and explicitly mark the message as a security report. Sensitive reports may be encrypted to the maintainer PGP key (see [Maintainer signing key](#maintainer-signing-key) below). A dedicated vulnerability mailbox may be added in a future release cycle.
 
 When reporting, please include:
 
@@ -32,11 +32,34 @@ We follow coordinated disclosure. Once a fix is available we will:
 2. Issue a security advisory in this repository.
 3. Credit the reporter (unless they request otherwise).
 
+## Maintainer signing key
+
+From June 2026 onward, Git commits and release tags are GPG-signed by the project maintainer. The public key is committed to this repository at [`docs/keys/takologi.asc`](docs/keys/takologi.asc).
+
+- **Identity:** `Takologi <takologi@proton.me>`
+- **Key type:** RSA 4096
+- **Fingerprint:** `FEE1 ACA5 2C65 FF3E BF31  818C B559 5E17 52BC 2A82`
+
+Import the key and verify provenance:
+
+```sh
+# Import from the in-repo copy...
+gpg --import docs/keys/takologi.asc
+# ...or from a keyserver:
+gpg --recv-keys FEE1ACA52C65FF3EBF31818CB5595E1752BC2A82
+
+# Verify the current commit and a release tag:
+git verify-commit HEAD
+git verify-tag <tag>
+```
+
+A *Good signature* from fingerprint `FEE1ACA52C65FF3EBF31818CB5595E1752BC2A82` confirms maintainer provenance. Treat any release commit or tag that is **not** signed by this key as unverified.
+
 ## Release artifact verification
 
-> GPG and/or minisign signatures on release binaries are planned for the alpha cycle. Signing key fingerprints and a verification procedure will be published alongside signed artifacts.
+> GPG and/or minisign signatures on release **binaries** are planned for the alpha cycle and will be produced with the [maintainer signing key](#maintainer-signing-key) above; a per-artifact verification procedure will be published alongside the first signed release.
 >
-> Until then, the only authoritative source of KDF Reloaded code is this repository. Do not trust binaries received through any other channel.
+> Until then, the authoritative provenance signal is the maintainer's commit/tag signature (above), and the only authoritative source of KDF Reloaded code is this repository. Do not trust binaries received through any other channel.
 
 DEX fee receiver addresses are inherited from the upstream Komodo DeFi Framework configuration by design and are not under the control of the KDF Reloaded maintainers.
 
