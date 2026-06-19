@@ -363,6 +363,35 @@ pub struct SessionManager {
             .find(|session| session_grants_chain(&session.namespaces, chain_id))
             .map(|session| session.topic.clone())
     }
+
+    /// Resolves, for the session on `topic`, the wallet's WC2 app-metadata `name`
+    /// and the `sessionProperties.keys` entry matching the signing account
+    /// `address` (matched against the entry's `bech32Address` or raw `address`).
+    ///
+    /// Both outputs are dictated wire signals consumed by a coin integration: the
+    /// metadata `name` drives the Cosmos binary-field encoding rule (chapter 22
+    /// §22.8.1.2 — `Keplr` ⇒ base64, otherwise hex) and the matched entry's
+    /// `isNanoLedger` flag drives the amino-vs-direct selection (§22.8.1.7). The
+    /// return is intentionally the generic WC types ([`KeyInfo`]), never a
+    /// chain-family type, so this stays coin-agnostic.
+    ///
+    /// Returns `None` only when no session is registered for `topic`; a session
+    /// without a matching keys entry yields `(name, None)`.
+    pub fn signing_account_details(&self, topic: &Topic, address: &str) -> Option<(String, Option<KeyInfo>)> {
+        let guard = self.sessions.lock();
+        let session = guard.get(topic)?;
+        let name = session.metadata.name.clone();
+        let entry = session
+            .properties
+            .as_ref()
+            .and_then(|props| props.keys.as_ref())
+            .and_then(|keys| {
+                keys.iter()
+                    .find(|key| key.bech32_address == address || key.address == address)
+                    .cloned()
+            });
+        Some((name, entry))
+    }
 }
 
 /// Whether a session's agreed namespaces grant the given CAIP-2 chain id.

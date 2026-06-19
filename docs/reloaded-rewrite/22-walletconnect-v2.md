@@ -635,6 +635,25 @@ all other wallets the bytes are **hex**-encoded. This selection
 is keyed solely on the dictated metadata `name` value and applies
 uniformly to the binary fields above.
 
+**Broadcast assembly across both sign modes.** Whichever sign
+mode is used, the broadcast transaction is the protobuf `TxRaw`
+(`bodyBytes`, `authInfoBytes`, `signatures`) — the WC2 sign
+methods return a signature, never a broadcastable transaction,
+because no Cosmos wallet-broadcast method exists (the integration
+broadcasts through the coin's own node RPC, §22.3 sign-and-send).
+For `cosmos_signDirect` the broadcast `bodyBytes` / `authInfoBytes`
+are taken from the result's `signed` echo (which the wallet may
+have normalised). For `cosmos_signAmino` the signature is computed
+over the Amino `StdSignDoc`, but the broadcast envelope is still
+protobuf: the integration reuses the protobuf `bodyBytes` and
+re-derives `authInfoBytes` with SignMode
+`SIGN_MODE_LEGACY_AMINO_JSON`. Consequently the `cosmos_signAmino`
+`msgs` array is the Amino-JSON representation of the same messages
+carried in the protobuf `bodyBytes`; supplying that Amino-JSON
+representation is the dApp's responsibility (the protobuf `Any`
+form does not self-describe its Amino-JSON encoding), and it is
+required only on the Ledger amino path selected by §22.8.1.7.
+
 ### 22.8.1.3 UTXO family (`bip122`)
 
 The UTXO methods follow the Reown Bitcoin multichain RPC
