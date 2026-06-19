@@ -47,6 +47,9 @@ use futures::Future as Future03;
 use http::Response;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+use mm2_gui_storage::rpc_commands::{activate_coins, add_account, deactivate_coins, delete_account, enable_account,
+                                    get_account_coins, get_accounts, get_enabled_account, set_account_balance,
+                                    set_account_description, set_account_name};
 use mm2_rpc::mm_protocol::{MmRpcBuilder, MmRpcRequest, MmRpcVersion};
 use serde::de::DeserializeOwned;
 use serde_json::{self as json, Value as Json};
@@ -148,6 +151,12 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
     if let Some(staking_method) = request.method.strip_prefix("experimental::staking::") {
         let staking_method = staking_method.to_owned();
         return staking_dispatcher(request, ctx, &staking_method).await;
+    }
+
+    // Route gui_storage:: namespace methods to the GUI account-state dispatcher.
+    if let Some(gui_storage_method) = request.method.strip_prefix("gui_storage::") {
+        let gui_storage_method = gui_storage_method.to_owned();
+        return gui_storage_dispatcher(request, ctx, &gui_storage_method).await;
     }
 
     match request.method.as_str() {
@@ -280,6 +289,28 @@ async fn staking_dispatcher(
         "query::delegations" => handle_mmrpc(ctx, request, delegations_info).await,
         "query::ongoing_undelegations" => handle_mmrpc(ctx, request, ongoing_undelegations_info).await,
         "query::validators" => handle_mmrpc(ctx, request, validators_info).await,
+        _ => MmError::err(DispatcherError::NoSuchMethod),
+    }
+}
+
+/// Routes `gui_storage::*` RPC methods to the GUI account-state handlers.
+async fn gui_storage_dispatcher(
+    request: MmRpcRequest,
+    ctx: MmArc,
+    gui_storage_method: &str,
+) -> DispatcherResult<Response<Vec<u8>>> {
+    match gui_storage_method {
+        "enable_account" => handle_mmrpc(ctx, request, enable_account).await,
+        "add_account" => handle_mmrpc(ctx, request, add_account).await,
+        "delete_account" => handle_mmrpc(ctx, request, delete_account).await,
+        "get_accounts" => handle_mmrpc(ctx, request, get_accounts).await,
+        "get_account_coins" => handle_mmrpc(ctx, request, get_account_coins).await,
+        "get_enabled_account" => handle_mmrpc(ctx, request, get_enabled_account).await,
+        "set_account_name" => handle_mmrpc(ctx, request, set_account_name).await,
+        "set_account_description" => handle_mmrpc(ctx, request, set_account_description).await,
+        "set_account_balance" => handle_mmrpc(ctx, request, set_account_balance).await,
+        "activate_coins" => handle_mmrpc(ctx, request, activate_coins).await,
+        "deactivate_coins" => handle_mmrpc(ctx, request, deactivate_coins).await,
         _ => MmError::err(DispatcherError::NoSuchMethod),
     }
 }
