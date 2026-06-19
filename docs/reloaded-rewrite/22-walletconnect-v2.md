@@ -712,6 +712,18 @@ string>, "address": <string> }`.
 > conforming UTXO integration MUST emit `signMessage`. The §22.8
 > label is a descriptive grouping, not the wire string.
 
+**Integration notes (informative).** For `signMessage` the
+integration supplies the coin's own enabled signing address as the
+`address` selector. For `signPsbt` the `txid` field is treated as
+optional on the sign-only path (`broadcast = false`) and required
+on the sign-and-broadcast path (`broadcast = true`); a stray
+`txid` returned on the sign-only path is accepted and ignored. For
+`getAccountAddresses` the "filter to the purposes the coin
+enabled" step is a post-parse selection over the returned entries
+(keyed on the optional `path` / `intention` hints when present);
+an integration MAY return all entries unfiltered when the coin
+imposes no purpose restriction.
+
 ### 22.8.1.4 CAIP-2 chain-reference formats
 
 CAIP-2 chain ids take the form `<namespace>:<reference>`. The
@@ -728,6 +740,14 @@ block hash in its conventional (big-endian) display order and
 truncating to the leading 32 hex characters (16 bytes); the
 truncation length is fixed by CAIP-2 and is not implementation
 discretion.
+
+A UTXO coin need not store its genesis hash: the integration MAY
+derive it at call time from the active RPC backend — the native
+backend returns the genesis block hash already in display order,
+while the Electrum backend yields the genesis header whose
+double-SHA256 (internal order) is reversed for display — and then
+apply the fixed 16-byte truncation above. A cached/stored genesis
+hash is an optional optimisation, not a requirement.
 
 CAIP-10 account ids extend this as
 `<namespace>:<reference>:<address>` and populate the WC2

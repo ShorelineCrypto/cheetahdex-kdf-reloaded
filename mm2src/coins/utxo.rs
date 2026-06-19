@@ -36,6 +36,7 @@ pub mod utxo_common;
 pub mod utxo_standard;
 pub mod utxo_standard_swap_v2;
 pub mod utxo_withdraw;
+pub mod wc_integration;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
