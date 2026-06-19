@@ -178,6 +178,36 @@ There is no inbound-session settlement and no signing on behalf
 of external dApps. Adding the wallet role would be a substantial
 new feature and is not in scope for this subsystem.
 
+### 22.4.1 Establishment-handshake mechanics
+
+The propose → settle handshake follows the WC2 standard; the
+following points are fixed by that standard and are stated here to
+remove implementer guesswork:
+
+- The proposer publishes `wc_sessionPropose` **on the pairing
+  topic**, encrypted with the pairing symmetric key, with the
+  standard `relays: [{ "protocol": "irn" }]` array and a
+  `proposer` advertising the dApp metadata and the ephemeral
+  x25519 public key. The dApp retains the matching ephemeral
+  secret until the response arrives.
+- The wallet's reply is a JSON-RPC **response** (it carries
+  `result`/`error`, **no** `method`) delivered **on the pairing
+  topic**, whose `result` carries the responder public key. The
+  dApp completes the x25519/HKDF exchange of §22.6 against that
+  key, derives the session topic, and subscribes to it.
+- `wc_sessionSettle` then arrives **on the session topic** and is
+  the point at which the settled `Session` is built and persisted.
+- **Transport encoding** (the `encoding_algo` of §22.5.3 /
+  §22.7) defaults to **hex**; base64 is selected only for wallets
+  that require it (§22.7). This transport-envelope encoding is
+  distinct from the Cosmos binary-**field** encoding of §22.8.1.2
+  (which independently selects base64 vs hex for `pubKey` /
+  `address` bytes by wallet type).
+- The originating `pairing` record MAY be retained after settle;
+  no teardown is required, and `wc_get_session` with
+  `with_pairing_topic` resolves the session via its
+  `pairing_topic` field regardless.
+
 ## 22.5 Session Storage
 
 Sessions persist across process restarts. A single trait

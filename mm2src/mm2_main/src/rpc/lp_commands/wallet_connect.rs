@@ -178,10 +178,10 @@ fn map_session_err(e: WalletConnectError) -> MmError<WalletConnectRpcError> {
 /// pairing topic (chapter 22 §22.9A.2 RP5).
 pub async fn wc_new_connection(ctx: MmArc, req: NewConnectionRequest) -> WcRpcResult<NewConnectionResponse> {
     let wc = wc_ctx(&ctx).await?;
-    let (pairing_topic, url) = wc.new_connection(
-        Json::Object(req.required_namespaces),
-        req.optional_namespaces.map(Json::Object),
-    );
+    let (pairing_topic, url) = wc
+        .new_connection(Json::Object(req.required_namespaces), req.optional_namespaces.map(Json::Object))
+        .await
+        .map_err(map_session_err)?;
     Ok(NewConnectionResponse {
         url,
         pairing_topic: pairing_topic.to_string(),
