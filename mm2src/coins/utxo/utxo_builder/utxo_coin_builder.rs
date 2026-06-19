@@ -70,10 +70,6 @@ pub enum UtxoCoinBuildError {
     HwContextNotInitialized,
     HDWalletStorageError(HDWalletStorageError),
     #[display(
-        fmt = "Coin should be activated with Hardware Wallet. Please consider using `\"priv_key_policy\": \"Trezor\"` in the activation request"
-    )]
-    CoinShouldBeActivatedWithHw,
-    #[display(
         fmt = "Coin doesn't support Trezor hardware wallet. Please consider adding the 'trezor_coin' field to the coins config"
     )]
     CoinDoesntSupportTrezor,
@@ -142,10 +138,6 @@ pub trait UtxoFieldsWithIguanaPrivKeyBuilder: UtxoCoinBuilderCommonOps {
         let conf = UtxoConfBuilder::new(self.conf(), self.activation_params(), self.ticker())
             .build()
             .mm_err(Into::into)?;
-
-        if self.is_hw_coin(&conf) {
-            return MmError::err(UtxoCoinBuildError::CoinShouldBeActivatedWithHw);
-        }
 
         let private = Private {
             prefix: conf.wif_prefix,
@@ -699,9 +691,6 @@ pub trait UtxoCoinBuilderCommonOps {
 
     #[inline]
     fn check_utxo_maturity(&self) -> bool { self.activation_params().check_utxo_maturity.unwrap_or_default() }
-
-    #[inline]
-    fn is_hw_coin(&self, conf: &UtxoCoinConf) -> bool { conf.trezor_coin.is_some() }
 
     #[inline]
     #[cfg(target_arch = "wasm32")]

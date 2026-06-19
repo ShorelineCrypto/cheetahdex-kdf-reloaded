@@ -268,6 +268,7 @@ fn convert_taker_to_maker_events(
             | TakerSwapEvent::TakerPaymentWaitRefundStarted { .. }
             | TakerSwapEvent::TakerPaymentRefunded(_)
             | TakerSwapEvent::TakerPaymentRefundFailed(_)
+            | TakerSwapEvent::TakerPaymentInstructionsReceived(_)
             | TakerSwapEvent::Finished => {}
         }
     }
@@ -475,6 +476,7 @@ fn convert_maker_to_taker_events(
             | MakerSwapEvent::MakerPaymentWaitRefundStarted { .. }
             | MakerSwapEvent::MakerPaymentRefunded(_)
             | MakerSwapEvent::MakerPaymentRefundFailed(_)
+            | MakerSwapEvent::MakerPaymentInstructionsReceived(_)
             | MakerSwapEvent::Finished => {}
         }
     }

@@ -302,7 +302,14 @@ pub enum CoinProtocol {
         platform: String,
         contract_address: String,
     },
-    ETH,
+    ETH {
+        /// Optional EVM chain id carried under `protocol_data` in newer coins
+        /// configs. The coin builder reads the authoritative `chain_id` from the
+        /// top-level coin config, so this field is accepted for
+        /// forward-compatibility and is otherwise unused.
+        #[serde(default)]
+        chain_id: Option<u64>,
+    },
     ERC20 {
         platform: String,
         contract_address: String,
