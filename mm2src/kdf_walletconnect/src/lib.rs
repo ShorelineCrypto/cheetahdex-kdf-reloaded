@@ -22,7 +22,10 @@ use relay_client::websocket::{Client, PublishedMessage};
 use relay_client::{ConnectionOptions, MessageIdGenerator};
 use relay_rpc::auth::ed25519_dalek::SigningKey;
 use relay_rpc::auth::AuthToken;
-use relay_rpc::domain::{MessageId, Topic};
+use relay_rpc::domain::MessageId;
+/// The relay topic type is re-exported so consumers of the public handle can
+/// name it without depending on `relay_rpc` directly.
+pub use relay_rpc::domain::Topic;
 use session::{EncodingAlgo, Session, SessionManager};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -40,6 +43,7 @@ pub mod session;
 pub mod storage;
 
 pub use session::key::SessionKey;
+pub use session::SessionInfo;
 
 /// Default time-to-live for a pairing before it expires (seconds).
 pub const PAIRING_TTL_SECS: u64 = 5 * 60;
@@ -250,6 +254,25 @@ impl WalletConnectCtx {
         (topic, uri)
     }
 
+    /// Initiates a new connection (chapter 22 §22.9A.2 RP5): generates a fresh
+    /// pairing carrying the caller-supplied namespace requirements and returns
+    /// its topic together with the `wc:` URI to present to a wallet. The
+    /// namespaces are retained on the pairing so the session proposal it drives
+    /// can use them.
+    pub fn new_connection(
+        &self,
+        required_namespaces: serde_json::Value,
+        optional_namespaces: Option<serde_json::Value>,
+    ) -> (Topic, String) {
+        let mut pairing = Pairing::generate(PAIRING_TTL_SECS);
+        pairing.required_namespaces = required_namespaces;
+        pairing.optional_namespaces = optional_namespaces;
+        let topic = pairing.topic.clone();
+        let uri = pairing.uri();
+        self.pairings.lock().insert(topic.clone(), pairing);
+        (topic, uri)
+    }
+
     /// Encrypts and encodes a JSON-RPC payload into a WalletConnect Type 0
     /// envelope using the session symmetric key.
     pub fn encode_payload(&self, sym_key: &SymKey, payload: &serde_json::Value) -> Result<String, WalletConnectError> {
@@ -311,6 +334,55 @@ impl WalletConnectCtx {
         let deadline = common::executor::Timer::sleep(REQUEST_RESPONSE_TTL.as_secs_f64());
         match futures::future::select(response_rx, deadline).await {
             futures::future::Either::Left((Ok(value), _)) => Ok(value),
+            futures::future::Either::Left((Err(_), _)) => {
+                Err(WalletConnectError::Internal("response channel closed".to_string()))
+            },
+            futures::future::Either::Right(((), _)) => {
+                self.pending.cancel(id);
+                Err(WalletConnectError::Timeout)
+            },
+        }
+    }
+
+    /// Issues a `wc_sessionPing` over the relay and awaits the wallet's reply
+    /// (chapter 22 §22.9A.2 RP5). Mirrors [`send_session_request`] but carries
+    /// no signing payload: a successful reply maps to `Ok(())`, and a relay
+    /// failure, a closed channel or an elapsed [`REQUEST_RESPONSE_TTL`] each map
+    /// to a distinct error.
+    pub async fn ping_session(&self, topic: &Topic) -> Result<(), WalletConnectError> {
+        let (sym_key, _encoding) = self
+            .sessions
+            .transport_for(topic)
+            .ok_or_else(|| WalletConnectError::SessionNotFound(topic.to_string()))?;
+        let id = self.next_message_id();
+        let request = serde_json::json!({
+            "id": id,
+            "jsonrpc": "2.0",
+            "method": session::rpc::ping::METHOD,
+            "params": serde_json::json!({}),
+        });
+        let encoded = self.encode_payload(&sym_key, &request)?;
+
+        let response_rx = self.pending.register(id);
+
+        self.client
+            .publish(
+                topic.clone(),
+                encoded,
+                no_attestation(),
+                session::rpc::ping::TAG.request,
+                REQUEST_RESPONSE_TTL,
+                true,
+            )
+            .await
+            .map_err(|e| {
+                self.pending.cancel(id);
+                WalletConnectError::Relay(e.to_string())
+            })?;
+
+        let deadline = common::executor::Timer::sleep(REQUEST_RESPONSE_TTL.as_secs_f64());
+        match futures::future::select(response_rx, deadline).await {
+            futures::future::Either::Left((Ok(_), _)) => Ok(()),
             futures::future::Either::Left((Err(_), _)) => {
                 Err(WalletConnectError::Internal("response channel closed".to_string()))
             },
@@ -737,5 +809,55 @@ mod persistence_tests {
                 session.session_key.symmetric_key(),
             );
         });
+    }
+
+    #[test]
+    fn session_info_serialises_rp6_field_spellings() {
+        use session::{KeyInfo, SessionInfo, SessionProperties};
+
+        let mut session = sample_session("topicRP6", 0x44);
+        session.properties = Some(SessionProperties {
+            keys: Some(vec![KeyInfo {
+                chain_id: "cosmos:cosmoshub-4".to_string(),
+                name: "account-0".to_string(),
+                algo: "secp256k1".to_string(),
+                pub_key: "02abcdef".to_string(),
+                address: "ABCDEF".to_string(),
+                bech32_address: "cosmos1examplexyz".to_string(),
+                ethereum_hex_address: "0x0123".to_string(),
+                is_nano_ledger: true,
+                is_keystone: false,
+            }]),
+        });
+
+        let info = SessionInfo::from(&session);
+        let value = serde_json::to_value(&info).expect("serialize session-info");
+        let object = value.as_object().expect("session-info is a JSON object");
+
+        // §22.8.1.5: the `session-info` record serialises with exactly these
+        // five field spellings — no more.
+        let mut fields: Vec<&str> = object.keys().map(String::as_str).collect();
+        fields.sort_unstable();
+        assert_eq!(fields, ["expiry", "metadata", "namespaces", "pairing_topic", "topic"]);
+        assert_eq!(object["topic"], "topicRP6");
+        assert_eq!(object["pairing_topic"], "pairing-topicRP6");
+        assert!(object["expiry"].is_number(), "expiry must be a number");
+
+        // §22.8.1.6 per-account detail is delivered at session-settle and
+        // consumed internally — it is NOT emitted in `session-info`.
+        assert!(
+            !object.contains_key("session_properties"),
+            "session-info must not carry per-account detail (§22.8.1.5)"
+        );
+
+        // The §22.8.1.6 `sessionProperties.keys` record itself still serialises
+        // with the dictated camelCase spellings (used by the signing slices).
+        let props = serde_json::to_value(session.properties.as_ref().unwrap())
+            .expect("serialize session properties");
+        let entry = props["keys"][0].as_object().expect("key entry is an object");
+        for field in ["chainId", "algo", "pubKey", "address", "isNanoLedger"] {
+            assert!(entry.contains_key(field), "key entry missing `{field}`");
+        }
+        assert_eq!(entry["isNanoLedger"], true);
     }
 }

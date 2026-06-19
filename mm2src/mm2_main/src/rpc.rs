@@ -45,6 +45,7 @@ mod dispatcher_legacy;
 #[path = "rpc/lp_commands/lp_commands_legacy.rs"]
 pub mod lp_commands_legacy;
 #[path = "rpc/lp_commands/one_inch/mod.rs"] pub mod one_inch;
+#[path = "rpc/lp_commands/wallet_connect.rs"] pub mod wallet_connect;
 #[path = "rpc/rate_limiter.rs"] mod rate_limiter;
 #[path = "rpc/sse_handler.rs"] mod sse_handler;
 #[path = "rpc/streaming_activations/mod.rs"]

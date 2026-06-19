@@ -6,6 +6,8 @@ use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
 use crate::mm2::rpc::streaming_activations;
 use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
                                 classic_swap_quote, classic_swap_tokens};
+use crate::mm2::rpc::wallet_connect::{wc_delete_session, wc_get_session, wc_get_sessions, wc_new_connection,
+                                      wc_ping_session};
 use crate::{mm2::lp_stats::{add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,
                             stop_version_stat_collection, update_version_stat_collection},
             mm2::lp_swap::swap_v2_rpcs::{active_swaps_rpc as active_swaps_rpc_v2,
@@ -226,6 +228,11 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "trade_preimage" => handle_mmrpc(ctx, request, trade_preimage_rpc).await,
         "update_version_stat_collection" => handle_mmrpc(ctx, request, update_version_stat_collection).await,
         "verify_message" => handle_mmrpc(ctx, request, verify_message).await,
+        "wc_delete_session" => handle_mmrpc(ctx, request, wc_delete_session).await,
+        "wc_get_session" => handle_mmrpc(ctx, request, wc_get_session).await,
+        "wc_get_sessions" => handle_mmrpc(ctx, request, wc_get_sessions).await,
+        "wc_new_connection" => handle_mmrpc(ctx, request, wc_new_connection).await,
+        "wc_ping_session" => handle_mmrpc(ctx, request, wc_ping_session).await,
         "withdraw" => handle_mmrpc(ctx, request, withdraw).await,
         "withdraw_status" => handle_mmrpc(ctx, request, withdraw_status).await,
         "withdraw_user_action" => handle_mmrpc(ctx, request, withdraw_user_action).await,

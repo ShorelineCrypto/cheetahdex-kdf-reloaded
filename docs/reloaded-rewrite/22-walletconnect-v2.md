@@ -34,12 +34,20 @@ The subsystem is divided cleanly between:
    they own. The trait is intentionally minimal and chain-family
    agnostic.
 
-At the time this chapter is written the trait exists in the tree
-and the protocol/persistence layers are functionally complete;
-no coin support module yet implements the trait, and the public
-RPC dispatcher does not yet register WalletConnect handlers. The
-trait surface and persistence shape are binding; the integration
-gap is the explicit work named in §22.9.
+**Port status.** The protocol and persistence layers are present
+in reloaded as a **library crate** and are functionally complete.
+The integration trait of §22.3 is **NOT yet present in reloaded**
+and MUST be created as part of the port. Three integration
+obligations remain: (a) the §22.3 integration trait must be added
+to the WalletConnect library crate, (b) at least one coin support
+module per chain family must implement that trait, and (c) the
+public RPC dispatcher does not yet register the WalletConnect
+methods. Per the project's PORT decision these are not optional
+"deferred" items — they are **binding driving-spec requirements**
+that an implementer MUST satisfy. The trait surface (§22.3), the
+required coin-integration set, the public RPC surface, and the
+clean-channel wire payloads are specified normatively in §22.8.1
+and §22.9A; the persistence shape (§22.5) is already binding.
 
 ## 22.1 Subsystem Shape
 
@@ -466,6 +474,269 @@ time of writing; it is a common EVM method and is expected to
 be added when the first integrator needs it. Adding it is an
 additive enum + match-arm change.
 
+## 22.8.1 Request-method wire payloads and session-info field spellings (Interop / wire-format, R29/R33)
+
+This subsection pins the **clean-channel wire payload shapes** for
+the ten §22.8 request methods, the CAIP-2 reference formats per
+chain family, and the per-account field spellings of the
+`session-info` record (RP6, §22.9A.2). Every field name, JSON
+type, and optionality below is **externally dictated** by a
+public standard — WalletConnect v2, the CAIP family, the Reown
+multichain RPC reference, the Ethereum/EIP standards, the Cosmos
+SDK signing schemes, and the BIP-174 PSBT format — and is binding
+on a conforming integration **as a wire contract (R29/R33)**.
+
+The internal Rust realisation of these payloads (the concrete
+type names, field identifiers, helper decomposition, and module
+placement chosen by the implementor) is **informative (R36)**: a
+re-derivation that emits the *same wire shapes* under *different*
+internal naming is fully conformant. The associated parameter and
+return types of the §22.3 trait (RP2) are the natural home for
+the chain-family payloads, but their internal spelling is not
+constrained here.
+
+All ten methods are carried inside the WC2 `wc_sessionRequest`
+envelope: the method string (§22.8) goes in the request
+`method` field and the param shape below goes in the request
+`params` field; the response shape below is the JSON-RPC
+`result`.
+
+### 22.8.1.1 EVM family (`eip155`)
+
+**`eth_signTransaction` / `eth_sendTransaction`** — `params` is a
+JSON array containing exactly one transaction object. Field
+spellings (Ethereum JSON-RPC / EIP-1559 dictated):
+
+| Field                  | JSON type     | Req/Opt | Meaning                                                 |
+|------------------------|---------------|---------|---------------------------------------------------------|
+| `from`                 | string (hex)  | required| sender 20-byte address, `0x`-prefixed                   |
+| `to`                   | string (hex)  | optional| recipient address; omitted for contract creation        |
+| `data`                 | string (hex)  | optional| call data / contract input (`input` accepted as alias)  |
+| `value`                | string (hex)  | optional| wei amount as `0x` quantity                             |
+| `gas`                  | string (hex)  | optional| gas limit as `0x` quantity (`gasLimit` accepted alias)  |
+| `gasPrice`             | string (hex)  | optional| legacy gas price; mutually exclusive with the 1559 pair |
+| `maxFeePerGas`         | string (hex)  | optional| EIP-1559 max fee per gas                                |
+| `maxPriorityFeePerGas` | string (hex)  | optional| EIP-1559 priority fee per gas                           |
+| `nonce`                | string (hex)  | optional| account nonce as `0x` quantity                          |
+| `chainId`              | string (hex)  | optional| target chain id as `0x` quantity                        |
+
+Response: `eth_signTransaction` returns the signed raw
+transaction as a `0x`-prefixed hex string (RLP-encoded);
+`eth_sendTransaction` returns the broadcast transaction hash as a
+`0x`-prefixed 32-byte hex string.
+
+**`personal_sign`** (EIP-191) — `params` is a JSON array of two
+strings in the order `[challenge, address]`, where `challenge`
+is the message hex-encoded with a `0x` prefix and `address` is
+the signer's `0x`-prefixed address. Response: a `0x`-prefixed
+65-byte signature hex string (`r ‖ s ‖ v`).
+
+### 22.8.1.2 Cosmos family (`cosmos`)
+
+**`cosmos_signDirect`** (SignMode `SIGN_MODE_DIRECT`) — `params`
+is a JSON object. Field spellings (Cosmos SDK / protobuf
+SignDoc dictated):
+
+| Field                   | JSON type | Req/Opt | Meaning                                                 |
+|-------------------------|-----------|---------|---------------------------------------------------------|
+| `signerAddress`         | string    | required| bech32 signer address                                   |
+| `signDoc`               | object    | required| the protobuf SignDoc, fields below                      |
+| `signDoc.chainId`       | string    | required| chain id (e.g. `cosmoshub-4`)                           |
+| `signDoc.accountNumber` | string    | required| on-chain account number, decimal as string             |
+| `signDoc.authInfoBytes` | string    | required| serialized `AuthInfo` protobuf, binary-encoded (below)  |
+| `signDoc.bodyBytes`     | string    | required| serialized `TxBody` protobuf, binary-encoded (below)    |
+
+Response: a JSON object `{ "signature": { "pub_key": { "type",
+"value" }, "signature": <base64> }, "signed": { "chainId",
+"accountNumber", "authInfoBytes", "bodyBytes" } }` — the `signed`
+object echoes the (possibly wallet-normalised) SignDoc that was
+actually signed and MUST be used for broadcast.
+
+**`cosmos_signAmino`** (SignMode `SIGN_MODE_LEGACY_AMINO_JSON`,
+Ledger-compatible) — `params` is a JSON object. Field spellings
+(Cosmos Amino `StdSignDoc` / ADR-036 dictated):
+
+| Field                     | JSON type | Req/Opt | Meaning                                              |
+|---------------------------|-----------|---------|------------------------------------------------------|
+| `signerAddress`           | string    | required| bech32 signer address                                |
+| `signDoc`                 | object    | required| the Amino `StdSignDoc`, fields below                 |
+| `signDoc.chain_id`        | string    | required| chain id (note snake_case, Amino dictated)           |
+| `signDoc.account_number`  | string    | required| account number, decimal as string                    |
+| `signDoc.sequence`        | string    | required| account sequence, decimal as string                  |
+| `signDoc.fee`             | object    | required| `{ "amount": [{ "denom", "amount" }], "gas": <str> }`|
+| `signDoc.msgs`            | array     | required| Amino-encoded message array                          |
+| `signDoc.memo`            | string    | required| memo (may be empty string)                           |
+
+Response: a JSON object `{ "signature": { "pub_key", "signature"
+(base64) }, "signed": <StdSignDoc> }`; the `signed` field echoes
+the canonicalised Amino doc actually signed.
+
+**`cosmos_getAccounts`** — `params` is an empty object (or
+omitted). Response: a JSON array of account entries, each
+`{ "address": <bech32 string>, "algo": <string, e.g.
+"secp256k1">, "pubkey": <base64 string> }`.
+
+**Binary-field encoding rule (dictated by wallet metadata).** For
+Cosmos byte-valued fields (`authInfoBytes`, `bodyBytes`,
+public-key bytes, signature bytes) the encoding is selected by
+the paired wallet's WC2 app-metadata `name`: when the metadata
+`name` is the value `Keplr` the bytes are **base64**-encoded; for
+all other wallets the bytes are **hex**-encoded. This selection
+is keyed solely on the dictated metadata `name` value and applies
+uniformly to the binary fields above.
+
+### 22.8.1.3 UTXO family (`bip122`)
+
+The UTXO methods follow the Reown Bitcoin multichain RPC
+reference.
+
+**`getAccountAddresses`** — `params` is an empty/selector object.
+Response: a JSON array of address entries:
+
+| Field        | JSON type | Req/Opt | Meaning                                          |
+|--------------|-----------|---------|--------------------------------------------------|
+| `address`    | string    | required| the address                                      |
+| `publicKey`  | string    | optional| compressed public key, hex                       |
+| `path`       | string    | optional| BIP-32 derivation path (e.g. `m/84'/0'/0'/0/0`)  |
+| `intention`  | string    | optional| address purpose hint (e.g. `payment`)            |
+
+A wallet typically returns addresses across BIP-44/49/84/86
+derivation purposes; the integration filters to the purposes the
+coin enabled. The companion `bip122_addressesChanged` session
+event carries the same entry shape.
+
+**`sendTransfer`** — `params` is a JSON object:
+
+| Field              | JSON type | Req/Opt | Meaning                                |
+|--------------------|-----------|---------|----------------------------------------|
+| `account`          | string    | optional| source account selector                |
+| `recipientAddress` | string    | required| destination address                    |
+| `amount`           | string    | required| amount in the chain's base unit string |
+| `changeAddress`    | string    | optional| explicit change address                |
+| `memo`             | string    | optional| memo / op-return payload               |
+
+Response: a JSON object `{ "txid": <string> }` carrying the
+broadcast transaction id.
+
+**`signPsbt`** (BIP-174) — `params` is a JSON object:
+
+| Field         | JSON type | Req/Opt | Meaning                                                    |
+|---------------|-----------|---------|------------------------------------------------------------|
+| `account`     | string    | optional| account selector                                           |
+| `psbt`        | string    | required| the PSBT, base64-encoded (BIP-174)                         |
+| `signInputs`  | array     | optional| inputs to sign: `[{ "address", "index", "sighashTypes"? }]`|
+| `broadcast`   | bool      | optional| if true the wallet also broadcasts                         |
+
+Response: a JSON object `{ "psbt": <signed PSBT base64>, "txid":
+<string, present only when broadcast> }`.
+
+**UTXO message signing** — the bip122 message-signing wire method
+name is **`signMessage`** (Reown Bitcoin RPC reference);
+`params` is a JSON object `{ "account"|"address": <string>,
+"message": <string> }`; response `{ "signature": <base64
+string>, "address": <string> }`.
+
+> **Upstream divergence (informative).** The §22.8 taxonomy table
+> labels this method `personal_sign (UTXO route)`. The actual
+> on-wire bip122 method string is `signMessage`, not
+> `personal_sign` (the latter is the EVM/`eip155` method). A
+> conforming UTXO integration MUST emit `signMessage`. The §22.8
+> label is a descriptive grouping, not the wire string.
+
+### 22.8.1.4 CAIP-2 chain-reference formats
+
+CAIP-2 chain ids take the form `<namespace>:<reference>`. The
+reference segment per family:
+
+| Namespace | Reference rule (CAIP-2 dictated)                                                                              | Example                                   |
+|-----------|--------------------------------------------------------------------------------------------------------------|-------------------------------------------|
+| `eip155`  | the EVM chain id in **decimal**                                                                               | `eip155:1`                                |
+| `cosmos`  | the Cosmos chain id / chain-name string                                                                       | `cosmos:cosmoshub-4`                      |
+| `bip122`  | the **first 32 hex characters (16 bytes)** of the genesis block hash, in conventional big-endian hex display | `bip122:000000000019d6689c085ae165831e93`|
+
+For `bip122` the reference is derived by hex-encoding the genesis
+block hash in its conventional (big-endian) display order and
+truncating to the leading 32 hex characters (16 bytes); the
+truncation length is fixed by CAIP-2 and is not implementation
+discretion.
+
+CAIP-10 account ids extend this as
+`<namespace>:<reference>:<address>` and populate the WC2
+namespace `accounts` arrays described next.
+
+### 22.8.1.5 `session-info` record field spellings (RP6)
+
+The top-level `session-info` record (RP6) serialises with exactly
+these field spellings (they match the RP6 tokens verbatim):
+
+| Field           | JSON type | Meaning                                              |
+|-----------------|-----------|------------------------------------------------------|
+| `topic`         | string    | session topic                                        |
+| `metadata`      | object    | wallet-reported WC2 app metadata (below)             |
+| `pairing_topic` | string    | originating pairing topic                            |
+| `namespaces`    | object    | map: agreed CAIP namespace → WC2 namespace record    |
+| `expiry`        | number    | session expiry, Unix epoch **seconds**               |
+
+`metadata` is the WC2 `Metadata` object with fields `name`
+(string), `description` (string), `url` (string), and `icons`
+(array of strings).
+
+Each value in `namespaces` is the WC2 standard namespace record:
+
+| Field      | JSON type | Req/Opt | Meaning                                           |
+|------------|-----------|---------|---------------------------------------------------|
+| `accounts` | array     | required| CAIP-10 account ids agreed for this namespace     |
+| `methods`  | array     | required| request method strings agreed for this namespace  |
+| `events`   | array     | required| event strings agreed for this namespace           |
+| `chains`   | array     | optional| CAIP-2 chain ids covered by this namespace        |
+
+### 22.8.1.6 Per-account detail record (`sessionProperties.keys`)
+
+Richer per-account detail (signing algorithm, public key, and the
+advisory hardware-wallet flags referenced by RP6) is carried by
+the WC2 `sessionProperties` object delivered at session-settle,
+under a `keys` field. The `keys` value is an **array** of
+account-detail records (some wallets, notably Keplr, encode this
+array as a JSON-**string**; a conforming reader MUST accept both a
+JSON array and a JSON-string-encoded array). Each entry uses the
+following dictated field spellings (Keplr `Key` wire shape):
+
+| Field                | JSON type | Req/Opt | Meaning                                                  |
+|----------------------|-----------|---------|----------------------------------------------------------|
+| `chainId`            | string    | required| CAIP chain id the account is bound to                    |
+| `name`               | string    | optional| wallet-assigned account label                            |
+| `algo`               | string    | required| signing algorithm (e.g. `secp256k1`)                     |
+| `pubKey`             | string    | required| account public key (encoding per §22.8.1.2 rule)         |
+| `address`            | string    | required| raw account address bytes (encoding per §22.8.1.2 rule)  |
+| `bech32Address`      | string    | optional| bech32-formatted address                                 |
+| `ethereumHexAddress` | string    | optional| EVM-style `0x` hex address (EVM-compatible Cosmos chains)|
+| `isNanoLedger`       | bool      | required| advisory: account is on a Ledger Nano hardware device    |
+| `isKeystone`         | bool      | optional| advisory: account is on a Keystone hardware device       |
+
+The `isNanoLedger` and `isKeystone` flags are the advisory
+hardware-wallet indicators named in RP6. (There is no separate
+"Keplr" boolean: the Keplr wallet is identified by the metadata
+`name` value `Keplr`, per the §22.8.1.2 encoding rule.)
+
+### 22.8.1.7 Cosmos amino-vs-direct selection rule (RP3)
+
+The Cosmos integration selects between `cosmos_signAmino` and
+`cosmos_signDirect` from a **dictated wire signal**, not an
+internal heuristic:
+
+- **Signal source.** The per-account `isNanoLedger` flag of the
+  matching `sessionProperties.keys` entry (§22.8.1.6), surfaced
+  from the session-settle metadata.
+- **Rule.** When `isNanoLedger` is `true` for the signing account,
+  the integration MUST use **`cosmos_signAmino`** — the Cosmos
+  Ledger application supports only the Amino-JSON sign mode and
+  rejects protobuf `SIGN_MODE_DIRECT`. Otherwise the integration
+  uses **`cosmos_signDirect`**.
+
+This rule is stated behaviourally; it is satisfied by emitting the
+correct method string for the dictated flag value, independent of
+any internal Rust naming.
+
 ## 22.9 Binding Requirements and Deferred Work
 
 The following are **binding rules** for this subsystem and any
@@ -528,15 +799,18 @@ R10. **`open`-format byte-interop.** The `open` on-disk record is
     byte-interchangeable with GLEEC KDF in both directions. Schema
     changes must be additive and must not break that interop.
 
-The following items are **deferred work** required to reach a
-"first integration shipped" milestone:
+The following items are **required ports** (binding driving-spec,
+specified normatively in §22.9A) plus genuinely-optional
+follow-on work; the required-port items are flagged as such:
 
-D1. At least one coin support module shall implement the
-    integration trait. The EVM and Cosmos families are the
-    natural first integrators given the trait surface and the
-    request-method enum.
+D1. **[REQUIRED PORT — §22.9A.1]** At least one coin support
+    module per the EVM, Cosmos, and UTXO families shall implement
+    the integration trait. This is a binding requirement, not
+    optional.
 
-D2. Public RPC handlers shall be registered (see R6).
+D2. **[REQUIRED PORT — §22.9A.2]** The five public RPC handlers
+    of §22.9A.2 (see R6) shall be registered in the public
+    dispatcher. This is a binding requirement, not optional.
 
 D3. The session-key type shall acquire `Zeroize` /
     `ZeroizeOnDrop` (see R5).
@@ -575,6 +849,135 @@ D9. When the encrypted format of D8 ships and a stronger-security
     be acknowledgement-gated. This warning is intentionally **not**
     added now (nothing better is yet offered); it is recorded here
     as future work only.
+
+## 22.9A Required Port — Coin Integration and Public RPC Surface (driving-spec)
+
+**STATUS.** The capabilities in this section are **required but
+NOT yet implemented in reloaded**. The WalletConnect library crate
+is present for the **transport cryptography, JSON-RPC payload
+types, and persistence** layers; however the **session-
+establishment handshake is only stubbed** — the inbound
+`wc_sessionPropose` response and `wc_sessionSettle` handlers log
+and acknowledge but do not derive the session key, build, or store
+a `Session`, and no `wc_sessionPropose` is published over the
+relay. Completing that handshake (propose-publish on the pairing
+topic, deriving the session key from the responder public key per
+§22.6, and building/persisting the settled session) is part of
+this required port, since AC1 depends on it. The **§22.3
+integration trait is NOT present and MUST be created** as part of
+this port. Per the PORT decision these are binding requirements,
+not optional deferred work. An implementer MUST land the session-
+establishment handshake, the §22.3 integration trait, the
+per-family coin integration (§22.9A.1), and the public RPC
+dispatcher surface (§22.9A.2), all emitting the clean-channel wire
+payloads pinned in §22.8.1.
+
+### 22.9A.1 Coin-integration requirement
+
+**RP1.** At least the following chain families MUST implement the
+§22.3 integration trait so that coins of each family can sign and
+broadcast through a WalletConnect-paired external wallet:
+
+| Chain family            | CAIP-2 namespace | Request methods (§22.8) it drives                                   |
+|-------------------------|------------------|---------------------------------------------------------------------|
+| EVM (Ethereum & EVM)    | `eip155`         | `eth_signTransaction`, `eth_sendTransaction`, `personal_sign`       |
+| Cosmos / Tendermint     | `cosmos`         | `cosmos_signDirect`, `cosmos_signAmino`, `cosmos_getAccounts`       |
+| UTXO (Bitcoin family)   | `bip122`         | `getAccountAddresses`, `sendTransfer`, `signPsbt`, `personal_sign`  |
+
+**RP2.** Each integration MUST remain in its own coin support
+module and MUST NOT add chain-family knowledge to the
+WalletConnect subsystem (R1, R2). The associated-type choices of
+§22.3 carry the chain-specific transaction/sign-payload shapes
+(EVM transaction objects, Cosmos sign-direct / amino payloads,
+UTXO PSBTs).
+
+**RP3.** The Cosmos integration MUST select `cosmos_signAmino`
+when the paired wallet is the Cosmos hardware-wallet (Ledger) app
+and `cosmos_signDirect` otherwise, consistent with the §22.8
+taxonomy; the wallet-type signal comes from the session/pairing
+metadata surfaced by §22.2.
+
+### 22.9A.2 Public RPC dispatcher surface
+
+**RP4.** The following **five top-level JSON-RPC v2 methods** MUST
+be registered in the public dispatcher. These method strings are
+the wire contract:
+
+| Method               | Request fields                                                       | Response shape                              |
+|----------------------|---------------------------------------------------------------------|---------------------------------------------|
+| `wc_new_connection`  | `required_namespaces` (JSON object), `optional_namespaces` (JSON object, optional) | `{ "url": <wc: URI string>, "pairing_topic": <topic string> }` |
+| `wc_get_sessions`    | none (optional empty object accepted)                               | `{ "sessions": [ <session-info>, … ] }`     |
+| `wc_get_session`     | `topic` (string), `with_pairing_topic` (bool, optional, default false) | `{ "session": <session-info> \| null }` |
+| `wc_delete_session`  | `topic` (string)                                                    | empty object `{}`                           |
+| `wc_ping_session`    | `topic` (string)                                                    | `{ "result": <status string> }`             |
+
+**RP5.** `wc_new_connection` MUST initiate a new pairing using the
+caller-supplied namespace requirements, returning the `wc:` URI
+(§22.2) for the caller to present to a wallet and the pairing
+topic. `wc_delete_session` MUST perform the WC2 session delete
+(§22.2), remove the persisted record subject to
+`wc_session_persistence` (§22.5), and unsubscribe.
+`wc_ping_session` MUST issue a WC2 session ping and report
+success/failure; the `result` string is a human-readable status
+whose exact wording is NOT part of the contract.
+
+**RP6 — `session-info` wire shape.** The session record returned
+by `wc_get_session` / `wc_get_sessions` MUST serialise with at
+least these fields:
+
+| Field           | Type                                              |
+|-----------------|---------------------------------------------------|
+| `topic`         | session topic string                              |
+| `metadata`      | wallet-reported app-metadata object               |
+| `pairing_topic` | pairing topic string                              |
+| `namespaces`    | object: agreed CAIP namespace → namespace record  |
+| `expiry`        | session expiry, Unix epoch seconds                |
+
+The precise serialisation is pinned by §22.8.1.5: the
+`session-info` record carries **exactly** the five top-level
+fields above, and each `namespaces` value is the standard WC2
+namespace record (`accounts` / `methods` / `events` / `chains`).
+The richer per-account detail (chain id, address, signing
+algorithm, public key, and the advisory hardware-wallet flags) is
+**not** a field of `session-info`: it is delivered separately at
+session-settle as the WC2 `sessionProperties.keys` structure
+(§22.8.1.6) and is consumed internally by the signing
+integrations (for example the amino-vs-direct selection of
+§22.8.1.7). Where this paragraph's looser "at least" wording and
+the earlier prose about namespace records diverge from §22.8.1.5,
+§22.8.1.5/.6 govern.
+
+**RP7 — Error envelope.** The WalletConnect RPC handlers MUST
+report failures through the project's typed-error envelope
+(`error_type` / `error_data`) with three wire `error_type`
+tokens distinguishing: an initialisation/precondition failure (a
+client-error / 400 condition), a session-request failure, and a
+generic internal failure (both server-error / 500 conditions).
+The human-readable messages each token carries are diagnostic and
+NOT part of the contract. A request that names an unknown session
+topic (for example `wc_get_session`, `wc_ping_session`, or
+`wc_delete_session` for a topic with no live session) is an
+initialisation/precondition condition and maps to the
+client-error / 400 token.
+
+### 22.9A.3 Acceptance criteria
+
+- AC1. With the WalletConnect subsystem enabled, a caller can
+  drive a full pair → sign → disconnect cycle for at least one
+  coin in each of the three chain families of RP1 using only the
+  RP4 method surface.
+- AC2. `wc_new_connection` returns a spec-conformant `wc:` URI
+  (§22.2) and a pairing topic; the URI is delivered verbatim.
+- AC3. `wc_get_sessions` enumerates every live session and
+  `wc_get_session` resolves a single session by topic (and, when
+  `with_pairing_topic` is set, by pairing topic), each with the
+  RP6 wire shape.
+- AC4. `wc_delete_session` tears down the session, deletes its
+  persisted record subject to `wc_session_persistence`, and
+  subsequent `wc_get_session` for that topic returns
+  `{ "session": null }`.
+- AC5. The coin integrations add no chain-family knowledge to the
+  WalletConnect subsystem (RP2 / R1 / R2 hold after the port).
 
 ## 22.10 External References
 
@@ -631,25 +1034,42 @@ V3. The third-party Cargo dependencies that provide the relay
   Ethereum JSON-RPC method definitions; the Cosmos SDK signing
   schemes (Amino and SignDirect); BIP-174 (PSBT); RFC 5869
   (HKDF), RFC 7539 (ChaCha20-Poly1305), RFC 7748 (x25519); the
+  Reown multichain RPC reference (eip155 / cosmos / bip122 method
+  payloads) and the Keplr public account (`Key`) wire shape; the
   relicensed historical record, consulted under R31 solely as the
   Interop / wire-format source for the §22.5.3 `open` on-disk
-  session-record names (see *Forbidden corpus* below).
+  session-record names and, for §22.8.1, the externally-dictated
+  request/response wire field spellings, the CAIP-2 reference
+  formats, the `session-info` / namespace-record field spellings,
+  and the dictated wallet-metadata signals (see *Forbidden corpus*
+  below).
 - *Permitted-input classes used:* baseline source; external public
   specifications (WalletConnect v2; CAIP-2; CAIP-10; Ethereum
-  JSON-RPC; Cosmos SDK signing schemes; BIP-174; RFC 5869, RFC 7539,
-  RFC 7748); cross-chapter contracts (Chapter 31); Interop /
-  wire-format reuse (R29) for the `open` on-disk session-record
-  names embedded in §22.5.3, with the relicensed historical record
-  cited as the R31 source (see *Forbidden corpus* below).
+  JSON-RPC; EIP-191/EIP-1559; Cosmos SDK signing schemes / ADR-036;
+  BIP-174; the Reown multichain RPC reference; the Keplr public
+  account wire shape; RFC 5869, RFC 7539, RFC 7748); cross-chapter
+  contracts (Chapter 31); Interop / wire-format reuse (R29/R33) for
+  the `open` on-disk session-record names embedded in §22.5.3 and
+  for the §22.8.1 request/response wire payloads, CAIP-2 reference
+  formats, `session-info` / namespace-record field spellings, and
+  dictated wallet-metadata signals, with the relicensed historical
+  record cited as the R31 source (see *Forbidden corpus* below).
 - *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* not consulted for clean-room derivation. The
-  single exception is the §22.5.3 `open` on-disk session-record
-  format, an Interop / wire-format reuse fragment (R29) whose only
-  authoritative source is the relicensed historical record: the
-  corpus was consulted under R31 **solely** to transcribe the
-  externally-required on-disk and JSON field names needed for
-  byte-interop with GLEEC KDF (`wc_session`/`topic`/`data`/`expiry`
-  and the `data`-payload keys, including `session_key`/`sym_key`).
+- *Forbidden corpus:* not consulted for clean-room derivation of
+  protected expression. There are two Interop / wire-format
+  exceptions, both consulted under R31 **solely** to transcribe
+  externally-required wire facts:
+  1. the §22.5.3 `open` on-disk session-record format, whose only
+     authoritative source is the relicensed historical record
+     (`wc_session`/`topic`/`data`/`expiry` and the `data`-payload
+     keys, including `session_key`/`sym_key`);
+  2. the §22.8.1 request/response wire payloads, CAIP-2 reference
+     formats, `session-info` / namespace-record JSON field
+     spellings, and the dictated wallet-metadata signal values —
+     all of which are fixed by public WC2 / CAIP / Reown / EIP /
+     Cosmos / BIP-174 / Keplr standards, with the corpus consulted
+     only to confirm which standard-dictated method set and field
+     spellings reloaded must emit.
   No discretionary expression — no bodies, private identifiers,
   comments, or diagnostics — was taken from the corpus; the
   surrounding prose is authored fresh per the R31 sanitization

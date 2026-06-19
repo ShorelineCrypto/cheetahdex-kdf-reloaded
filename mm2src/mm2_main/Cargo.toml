@@ -47,6 +47,7 @@ bench = false
 async-std = { version = "1.5", features = ["unstable"] }
 async-trait = "0.1"
 kdf_crypto = { path = "../kdf_crypto" }
+kdf_walletconnect = { path = "../kdf_walletconnect" }
 blake2 = "0.10"
 bytes = "0.4"
 chain = { package = "kdf_chain", path = "../kdf_chain" }

@@ -250,13 +250,44 @@ impl Session {
     }
 }
 
+/// The public `session-info` wire record (chapter 22 §22.8.1.5 / §22.9A.2 RP6).
+///
+/// Returned by the `wc_get_session` / `wc_get_sessions` RPC handlers. The five
+/// top-level field spellings are dictated by §22.8.1.5 and are exhaustive: the
+/// per-account `sessionProperties.keys` detail (§22.8.1.6) is delivered at
+/// session-settle and consumed internally by the signing integrations, not
+/// emitted in this record.
+#[derive(Clone, Serialize)]
+pub struct SessionInfo {
+    /// Session topic.
+    pub topic: String,
+    /// Wallet-reported WC2 app metadata.
+    pub metadata: Metadata,
+    /// Originating pairing topic.
+    pub pairing_topic: String,
+    /// Map: agreed CAIP namespace → WC2 namespace record.
+    pub namespaces: SettleNamespaces,
+    /// Session expiry, Unix epoch seconds.
+    pub expiry: u64,
+}
+
+impl From<&Session> for SessionInfo {
+    fn from(session: &Session) -> Self {
+        SessionInfo {
+            topic: session.topic.to_string(),
+            metadata: session.metadata.clone(),
+            pairing_topic: session.pairing_topic.to_string(),
+            namespaces: session.namespaces.clone(),
+            expiry: session.expiry,
+        }
+    }
+}
+
 /// In-memory index of live sessions, keyed by topic.
 #[derive(Default)]
 pub struct SessionManager {
     sessions: Mutex<HashMap<Topic, Session>>,
-}
-
-impl SessionManager {
+}impl SessionManager {
     pub fn new() -> Self { Self::default() }
 
     /// Inserts or replaces a session.
@@ -273,6 +304,26 @@ impl SessionManager {
 
     /// The topics of all live sessions.
     pub fn topics(&self) -> Vec<Topic> { self.sessions.lock().keys().cloned().collect() }
+
+    /// Builds the [`SessionInfo`] wire record for a single session, looked up by
+    /// its topic. When `include_pairing` is set, a session is also matched if
+    /// `topic` equals its pairing topic (chapter 22 §22.9A.2 AC3).
+    pub fn session_info(&self, topic: &Topic, include_pairing: bool) -> Option<SessionInfo> {
+        let guard = self.sessions.lock();
+        let session = guard.get(topic).or_else(|| {
+            if include_pairing {
+                guard.values().find(|session| &session.pairing_topic == topic)
+            } else {
+                None
+            }
+        })?;
+        Some(SessionInfo::from(session))
+    }
+
+    /// Builds the [`SessionInfo`] wire records for every live session.
+    pub fn all_session_info(&self) -> Vec<SessionInfo> {
+        self.sessions.lock().values().map(SessionInfo::from).collect()
+    }
 
     /// The transport material needed to encrypt/decrypt traffic on a session:
     /// its symmetric key and the negotiated payload encoding. `None` when no
