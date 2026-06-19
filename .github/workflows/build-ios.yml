@@ -59,10 +59,14 @@ jobs:
           key: ios-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build mm2_bin_lib staticlib (${{ matrix.target }})
+        # Override the manifest crate-type (cdylib/rlib) with `staticlib` at
+        # build time so cargo emits `libmm2_bin_lib.a` for the iOS host app to
+        # link (mirrors upstream's `cargo rustc --crate-type=staticlib`).
         run: |
-          cargo build -p mm2_bin_lib \
+          cargo rustc -p mm2_bin_lib --lib \
             --target ${{ matrix.target }} \
-            --profile ${{ inputs.profile }}
+            --profile ${{ inputs.profile }} \
+            --crate-type=staticlib
 
       - name: Verify coins crate compiles for ${{ matrix.target }} (P14)
         # P14 modernised the Solana stack to the modular `solana-*` 2.x
