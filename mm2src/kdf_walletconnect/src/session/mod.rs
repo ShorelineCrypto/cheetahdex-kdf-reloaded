@@ -346,4 +346,77 @@ pub struct SessionManager {
             None => false,
         }
     }
+
+    /// Resolves the topic of a settled session whose negotiated namespaces grant
+    /// the given CAIP-2 chain id (e.g. `eip155:1`).
+    ///
+    /// This is the lookup behind the §22.3 integration trait's session-pointer
+    /// method: a coin support module knows only its own CAIP-2 chain id and asks
+    /// the subsystem which settled session may carry signing requests for it. A
+    /// session grants a chain when any of its agreed namespace entries lists the
+    /// chain in its `chains` set or carries a CAIP-10 account under that chain
+    /// (§22.8.1.4). The first matching session (by topic order) is returned.
+    pub fn session_topic_for_chain(&self, chain_id: &str) -> Option<Topic> {
+        self.sessions
+            .lock()
+            .values()
+            .find(|session| session_grants_chain(&session.namespaces, chain_id))
+            .map(|session| session.topic.clone())
+    }
 }
+
+/// Whether a session's agreed namespaces grant the given CAIP-2 chain id.
+///
+/// A chain is granted when any namespace entry lists it in `chains`, or carries
+/// a CAIP-10 account (`<namespace>:<reference>:<address>`) under it.
+fn session_grants_chain(namespaces: &SettleNamespaces, chain_id: &str) -> bool {
+    let account_prefix = format!("{chain_id}:");
+    namespaces.values().any(|namespace| {
+        let in_chains = namespace
+            .chains
+            .as_ref()
+            .map_or(false, |chains| chains.contains(chain_id));
+        let in_accounts = namespace
+            .accounts
+            .as_ref()
+            .map_or(false, |accounts| accounts.iter().any(|account| account.starts_with(&account_prefix)));
+        in_chains || in_accounts
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_grants_chain;
+    use relay_rpc::rpc::params::session::{Namespace, SettleNamespaces};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn namespaces_with(chains: &[&str], accounts: &[&str]) -> SettleNamespaces {
+        let namespace = Namespace {
+            chains: Some(chains.iter().map(|c| c.to_string()).collect::<BTreeSet<_>>()),
+            accounts: Some(accounts.iter().map(|a| a.to_string()).collect::<BTreeSet<_>>()),
+            methods: BTreeSet::new(),
+            events: BTreeSet::new(),
+        };
+        let mut map = BTreeMap::new();
+        map.insert("eip155".to_string(), namespace);
+        SettleNamespaces(map)
+    }
+
+    #[test]
+    fn grants_chain_via_chains_set() {
+        let namespaces = namespaces_with(&["eip155:1", "eip155:137"], &[]);
+        assert!(session_grants_chain(&namespaces, "eip155:1"));
+        assert!(session_grants_chain(&namespaces, "eip155:137"));
+        assert!(!session_grants_chain(&namespaces, "eip155:56"));
+        assert!(!session_grants_chain(&namespaces, "cosmos:cosmoshub-4"));
+    }
+
+    #[test]
+    fn grants_chain_via_caip10_account() {
+        let namespaces = namespaces_with(&[], &["eip155:1:0x1111111111111111111111111111111111111111"]);
+        assert!(session_grants_chain(&namespaces, "eip155:1"));
+        // A prefix that is not a CAIP-10 chain boundary must not match.
+        assert!(!session_grants_chain(&namespaces, "eip155:11"));
+    }
+}
+

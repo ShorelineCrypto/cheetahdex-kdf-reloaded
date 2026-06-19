@@ -160,6 +160,16 @@ knowledge of EVM, Cosmos, or UTXO transaction structures.
 Chain-specific logic belongs in the coin support module that
 implements the trait.
 
+The "session pointer" the trait exposes resolves to the **session
+topic** — the settled-session topic that carries the
+`wc_sessionRequest` signing traffic (§22.8.1), not the
+establishment-phase pairing topic. (The two are linked: a settled
+session records its originating pairing in its `pairing_topic`
+field, §22.8.1.5.) An implementor resolves the session to use
+from the coin's CAIP-2 chain id by selecting the settled session
+whose agreed namespaces grant that chain (its `chains` list or a
+matching CAIP-10 `accounts` entry, §22.8.1.4).
+
 ## 22.4 Protocol Role
 
 The codebase fills the **relay-client / dApp** role of WC2 in
@@ -560,6 +570,16 @@ strings in the order `[challenge, address]`, where `challenge`
 is the message hex-encoded with a `0x` prefix and `address` is
 the signer's `0x`-prefixed address. Response: a `0x`-prefixed
 65-byte signature hex string (`r ‖ s ‖ v`).
+
+The optionality column above is the WC2/Ethereum wire contract
+seen by the wallet, not a constraint on the dApp: a conforming
+integration MAY populate unconditionally any optional field whose
+value it already knows (for example emitting `value` as `0x0`
+when zero, and always emitting `gas`), and MAY omit an optional
+field to defer it to the wallet (for example omitting `gasPrice`
+or the EIP-1559 pair so the wallet prices the transaction). The
+legacy `gasPrice` and the `maxFeePerGas` / `maxPriorityFeePerGas`
+pair remain mutually exclusive in any single request.
 
 ### 22.8.1.2 Cosmos family (`cosmos`)
 

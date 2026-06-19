@@ -1864,6 +1864,7 @@ dependencies = [
  "kdf_rpc_types",
  "kdf_script",
  "kdf_spv_validation",
+ "kdf_walletconnect",
  "lazy_static",
  "libc",
  "lightning",

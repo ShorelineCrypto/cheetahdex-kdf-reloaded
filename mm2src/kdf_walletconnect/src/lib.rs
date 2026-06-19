@@ -41,6 +41,7 @@ pub mod chain;
 pub mod connection_handler;
 pub mod error;
 pub mod inbound_message;
+pub mod integration;
 pub mod metadata;
 pub mod pairing;
 pub mod session;

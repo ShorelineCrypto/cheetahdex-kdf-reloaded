@@ -67,6 +67,7 @@ hex = "0.4.2"
 http = "0.2"
 itertools = { version = "0.10", features = ["use_std"] }
 jsonrpc-core = "8.0.1"
+kdf_walletconnect = { path = "../kdf_walletconnect" }
 keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
 libc = "0.2"
