@@ -132,7 +132,7 @@ pub use maker_swap::{calc_max_maker_vol, check_balance_for_maker_swap, maker_swa
                      RunMakerSwapInput};
 pub use max_maker_vol_rpc::max_maker_vol;
 use my_swaps_storage::{MySwapsOps, MySwapsStorage};
-use pubkey_banning::BanReason;
+use pubkey_banning::BannedPubkey;
 pub use pubkey_banning::{ban_pubkey_rpc, is_pubkey_banned, list_banned_pubkeys_rpc, unban_pubkeys_rpc};
 pub use recreate_swap_data::recreate_swap_data;
 #[allow(unused_imports)]
@@ -316,7 +316,7 @@ impl SwapV2MsgStore {
 
 struct SwapsContext {
     running_swaps: Mutex<Vec<Weak<dyn AtomicSwap>>>,
-    banned_pubkeys: Mutex<HashMap<H256Json, BanReason>>,
+    banned_pubkeys: Mutex<HashMap<H256Json, BannedPubkey>>,
     /// The cloneable receiver of multi-consumer async channel awaiting for shutdown_tx.send() to be
     /// invoked to stop all running swaps.
     /// MM2 is used as static lib on some platforms e.g. iOS so it doesn't run as separate process.
