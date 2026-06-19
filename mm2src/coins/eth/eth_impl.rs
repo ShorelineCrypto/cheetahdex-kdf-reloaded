@@ -205,9 +205,12 @@ impl EthCoinImpl {
         sha256(&input).to_vec()
     }
 
+    /// The EVM chain id this coin was activated on, when configured.
+    pub fn chain_id(&self) -> Option<u64> { self.chain_id }
+
     /// Returns the token address for contract calls.
     /// ETH → zero address, ERC20 → token contract address.
-    pub(crate) fn get_token_address(&self) -> Result<Address, String> {
+    pub fn get_token_address(&self) -> Result<Address, String> {
         match &self.coin_type {
             EthCoinType::Eth => Ok(Address::default()),
             EthCoinType::Erc20 { token_addr, .. } => Ok(*token_addr),

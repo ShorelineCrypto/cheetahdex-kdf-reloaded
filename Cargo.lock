@@ -5699,6 +5699,7 @@ dependencies = [
  "testcontainers",
  "timed-map",
  "tokio",
+ "trading_api",
  "trie-db",
  "trie-root 0.16.0",
  "uuid 0.7.4",

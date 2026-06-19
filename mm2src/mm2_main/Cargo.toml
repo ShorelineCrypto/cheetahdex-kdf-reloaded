@@ -116,6 +116,7 @@ serialization_derive = { package = "kdf_codec_derive", path = "../kdf_codec_deri
 spv_validation = { package = "kdf_spv_validation", path = "../kdf_spv_validation" }
 sp-runtime-interface = { version = "6.0.0", default-features = false, features = ["disable_target_static_assertions"] }
 sp-trie = { version = "6.0", default-features = false }
+trading_api = { path = "../trading_api" }
 
 timed-map = { version = "1.6", features = ["rustc-hash"] }
 trie-db = { version = "0.23.1", default-features = false }

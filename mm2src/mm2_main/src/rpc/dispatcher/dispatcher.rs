@@ -4,6 +4,8 @@ use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simp
                                 stop_simple_market_maker_bot};
 use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
 use crate::mm2::rpc::streaming_activations;
+use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
+                                classic_swap_quote, classic_swap_tokens};
 use crate::{mm2::lp_stats::{add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,
                             stop_version_stat_collection, update_version_stat_collection},
             mm2::lp_swap::swap_v2_rpcs::{active_swaps_rpc as active_swaps_rpc_v2,
@@ -31,6 +33,7 @@ use coins::rpc_command::init_create_account::{init_create_new_account, init_crea
                                               init_create_new_account_user_action};
 use coins::rpc_command::init_scan_for_new_addresses::{init_scan_for_new_addresses, init_scan_for_new_addresses_status};
 use coins::rpc_command::init_withdraw::{init_withdraw, withdraw_status, withdraw_user_action};
+use coins::rpc_command::token_allowance::{approve_token, get_token_allowance};
 use coins::utxo::bch::BchCoin;
 use coins::utxo::qtum::QtumCoin;
 use coins::utxo::slp::SlpToken;
@@ -153,6 +156,12 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         return staking_dispatcher(request, ctx, &staking_method).await;
     }
 
+    // Route experimental::1inch_v6_0:: namespace methods to the 1inch dispatcher.
+    if let Some(one_inch_method) = request.method.strip_prefix("experimental::1inch_v6_0::") {
+        let one_inch_method = one_inch_method.to_owned();
+        return one_inch_dispatcher(request, ctx, &one_inch_method).await;
+    }
+
     // Route gui_storage:: namespace methods to the GUI account-state dispatcher.
     if let Some(gui_storage_method) = request.method.strip_prefix("gui_storage::") {
         let gui_storage_method = gui_storage_method.to_owned();
@@ -164,6 +173,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "active_swaps" => handle_mmrpc(ctx, request, active_swaps_rpc_v2).await,
         "add_delegation" => handle_mmrpc(ctx, request, add_delegation).await,
         "add_node_to_version_stat" => handle_mmrpc(ctx, request, add_node_to_version_stat).await,
+        "approve_token" => handle_mmrpc(ctx, request, approve_token).await,
         "best_orders" => handle_mmrpc(ctx, request, best_orders_rpc_v2).await,
         "consolidate_utxos" => handle_mmrpc(ctx, request, consolidate_utxos_rpc).await,
         "enable_bch_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<BchCoin>).await,
@@ -178,6 +188,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_public_key_hash" => handle_mmrpc(ctx, request, get_public_key_hash).await,
         "get_raw_transaction" => handle_mmrpc(ctx, request, get_raw_transaction).await,
         "get_staking_infos" => handle_mmrpc(ctx, request, get_staking_infos).await,
+        "get_token_allowance" => handle_mmrpc(ctx, request, get_token_allowance).await,
         "sign_raw_transaction" => handle_mmrpc(ctx, request, sign_raw_transaction).await,
         "get_locked_amount" => handle_mmrpc(ctx, request, get_locked_amount_rpc).await,
         "init_account_balance" => handle_mmrpc(ctx, request, init_account_balance).await,
@@ -289,6 +300,22 @@ async fn staking_dispatcher(
         "query::delegations" => handle_mmrpc(ctx, request, delegations_info).await,
         "query::ongoing_undelegations" => handle_mmrpc(ctx, request, ongoing_undelegations_info).await,
         "query::validators" => handle_mmrpc(ctx, request, validators_info).await,
+        _ => MmError::err(DispatcherError::NoSuchMethod),
+    }
+}
+
+/// Routes `experimental::1inch_v6_0::*` RPC methods to the 1inch classic-swap handlers.
+async fn one_inch_dispatcher(
+    request: MmRpcRequest,
+    ctx: MmArc,
+    one_inch_method: &str,
+) -> DispatcherResult<Response<Vec<u8>>> {
+    match one_inch_method {
+        "classic_swap_contract" => handle_mmrpc(ctx, request, classic_swap_contract).await,
+        "classic_swap_quote" => handle_mmrpc(ctx, request, classic_swap_quote).await,
+        "classic_swap_create" => handle_mmrpc(ctx, request, classic_swap_create).await,
+        "classic_swap_liquidity_sources" => handle_mmrpc(ctx, request, classic_swap_liquidity_sources).await,
+        "classic_swap_tokens" => handle_mmrpc(ctx, request, classic_swap_tokens).await,
         _ => MmError::err(DispatcherError::NoSuchMethod),
     }
 }
