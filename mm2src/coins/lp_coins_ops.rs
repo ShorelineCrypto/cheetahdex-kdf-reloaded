@@ -66,7 +66,7 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
             let params = try_s!(UtxoActivationParams::from_legacy_req(req));
             try_s!(qtum_coin_with_priv_key(ctx, ticker, &coins_en, &params, &secret).await).into()
         },
-        CoinProtocol::ETH | CoinProtocol::ERC20 { .. } => {
+        CoinProtocol::ETH { .. } | CoinProtocol::ERC20 { .. } => {
             try_s!(eth_coin_from_conf_and_request(ctx, ticker, &coins_en, req, &secret, protocol).await).into()
         },
         CoinProtocol::QRC20 {
@@ -681,7 +681,7 @@ pub fn update_coins_config(mut config: Json) -> Result<Json, String> {
                     .as_str()
                     .ok_or(ERRL!("Expected etomic as string, found {:?}", etomic))?;
                 if etomic == "0x0000000000000000000000000000000000000000" {
-                    CoinProtocol::ETH
+                    CoinProtocol::ETH { chain_id: None }
                 } else {
                     let contract_address = etomic.to_owned();
                     CoinProtocol::ERC20 {
@@ -733,7 +733,7 @@ pub fn address_by_coin_conf_and_pubkey_str(
 ) -> Result<String, String> {
     let protocol: CoinProtocol = try_s!(json::from_value(conf["protocol"].clone()));
     match protocol {
-        CoinProtocol::ERC20 { .. } | CoinProtocol::ETH => eth::addr_from_pubkey_str(pubkey),
+        CoinProtocol::ERC20 { .. } | CoinProtocol::ETH { .. } => eth::addr_from_pubkey_str(pubkey),
         CoinProtocol::UTXO | CoinProtocol::QTUM | CoinProtocol::QRC20 { .. } | CoinProtocol::BCH { .. } => {
             utxo::address_by_conf_and_pubkey_str(coin, conf, pubkey, addr_format)
         },

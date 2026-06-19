@@ -1290,7 +1290,7 @@ fn polygon_check_if_my_payment_sent() {
         &conf,
         &request,
         &priv_key,
-        CoinProtocol::ETH,
+        CoinProtocol::ETH { chain_id: None },
     ))
     .unwrap();
 

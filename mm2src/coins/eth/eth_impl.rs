@@ -2708,7 +2708,7 @@ pub async fn eth_coin_from_conf_and_request(
     let web3 = try_s!(super::alloy_compat::build_provider(urls, event_handlers));
 
     let (coin_type, decimals) = match protocol {
-        CoinProtocol::ETH => (EthCoinType::Eth, 18),
+        CoinProtocol::ETH { .. } => (EthCoinType::Eth, 18),
         CoinProtocol::ERC20 {
             platform,
             contract_address,

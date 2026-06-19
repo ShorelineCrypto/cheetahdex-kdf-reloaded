@@ -13,8 +13,8 @@ use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MatchBy, OrderConfirmationsSettings, TakerAction, TakerOrderBuilder};
 use crate::mm2::lp_swap::{broadcast_p2p_tx_msg, tx_helper_topic};
 use crate::mm2::MM_VERSION;
-use coins::{lp_coinfind, CanRefundHtlc, FeeApproxStage, FoundSwapTxSpend, MmCoinEnum, TradeFee, TradePreimageValue,
-            ValidatePaymentInput};
+use coins::{lp_coinfind, CanRefundHtlc, FeeApproxStage, FoundSwapTxSpend, MmCoinEnum, PaymentInstructions, TradeFee,
+            TradePreimageValue, ValidatePaymentInput};
 use common::executor::Timer;
 use common::log::{debug, error, warn};
 use common::mm_number::{BigDecimal, MmNumber};
@@ -35,10 +35,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use uuid::Uuid;
 
-pub const TAKER_SUCCESS_EVENTS: [&str; 10] = [
+pub const TAKER_SUCCESS_EVENTS: [&str; 11] = [
     "Started",
     "Negotiated",
     "TakerFeeSent",
+    "TakerPaymentInstructionsReceived",
     "MakerPaymentReceived",
     "MakerPaymentWaitConfirmStarted",
     "MakerPaymentValidatedAndConfirmed",
@@ -115,6 +116,7 @@ impl TakerSavedEvent {
             TakerSwapEvent::NegotiateFailed(_) => Some(TakerSwapCommand::Finish),
             TakerSwapEvent::TakerFeeSent(_) => Some(TakerSwapCommand::WaitForMakerPayment),
             TakerSwapEvent::TakerFeeSendFailed(_) => Some(TakerSwapCommand::Finish),
+            TakerSwapEvent::TakerPaymentInstructionsReceived(_) => Some(TakerSwapCommand::ValidateMakerPayment),
             TakerSwapEvent::MakerPaymentReceived(_) => Some(TakerSwapCommand::ValidateMakerPayment),
             TakerSwapEvent::MakerPaymentWaitConfirmStarted => Some(TakerSwapCommand::ValidateMakerPayment),
             TakerSwapEvent::MakerPaymentValidatedAndConfirmed => Some(TakerSwapCommand::SendTakerPayment),
@@ -515,6 +517,7 @@ pub enum TakerSwapEvent {
     NegotiateFailed(SwapError),
     TakerFeeSent(TransactionIdentifier),
     TakerFeeSendFailed(SwapError),
+    TakerPaymentInstructionsReceived(Option<PaymentInstructions>),
     MakerPaymentReceived(TransactionIdentifier),
     MakerPaymentWaitConfirmStarted,
     MakerPaymentValidatedAndConfirmed,
@@ -543,6 +546,7 @@ impl TakerSwapEvent {
             TakerSwapEvent::NegotiateFailed(_) => "Negotiate failed...".to_owned(),
             TakerSwapEvent::TakerFeeSent(_) => "Taker fee sent...".to_owned(),
             TakerSwapEvent::TakerFeeSendFailed(_) => "Taker fee send failed...".to_owned(),
+            TakerSwapEvent::TakerPaymentInstructionsReceived(_) => "Taker payment instructions obtained...".to_owned(),
             TakerSwapEvent::MakerPaymentReceived(_) => "Maker payment received...".to_owned(),
             TakerSwapEvent::MakerPaymentWaitConfirmStarted => "Maker payment wait confirm started...".to_owned(),
             TakerSwapEvent::MakerPaymentValidatedAndConfirmed => "Maker payment validated and confirmed...".to_owned(),
@@ -582,6 +586,7 @@ impl TakerSwapEvent {
             TakerSwapEvent::Started(_)
                 | TakerSwapEvent::Negotiated(_)
                 | TakerSwapEvent::TakerFeeSent(_)
+                | TakerSwapEvent::TakerPaymentInstructionsReceived(_)
                 | TakerSwapEvent::MakerPaymentReceived(_)
                 | TakerSwapEvent::MakerPaymentWaitConfirmStarted
                 | TakerSwapEvent::MakerPaymentValidatedAndConfirmed
@@ -647,6 +652,8 @@ impl TakerSwap {
             TakerSwapEvent::NegotiateFailed(err) => self.errors.lock().push(err),
             TakerSwapEvent::TakerFeeSent(tx) => self.w().taker_fee = Some(tx),
             TakerSwapEvent::TakerFeeSendFailed(err) => self.errors.lock().push(err),
+            // Journal-compat only: this node never emits payment instructions, so there is nothing to apply.
+            TakerSwapEvent::TakerPaymentInstructionsReceived(_) => (),
             TakerSwapEvent::MakerPaymentReceived(tx) => self.w().maker_payment = Some(tx),
             TakerSwapEvent::MakerPaymentWaitConfirmStarted => (),
             TakerSwapEvent::MakerPaymentValidatedAndConfirmed => {

@@ -111,7 +111,7 @@ fn test_enable_token_error_from_coin_conf_error() {
 
     let e: EnableTokenError = CoinConfWithProtocolError::UnexpectedProtocol {
         ticker: "BTC".into(),
-        protocol: CoinProtocol::ETH,
+        protocol: CoinProtocol::ETH { chain_id: None },
     }
     .into();
     assert!(matches!(e, EnableTokenError::UnexpectedTokenProtocol { ref ticker, .. } if ticker == "BTC"));
@@ -222,7 +222,7 @@ fn test_enable_l2_error_http_status_codes() {
     assert_eq!(
         EnableL2Error::UnexpectedL2Protocol {
             ticker: "X".into(),
-            protocol: CoinProtocol::ETH,
+            protocol: CoinProtocol::ETH { chain_id: None },
         }
         .status_code(),
         StatusCode::BAD_REQUEST
@@ -335,7 +335,7 @@ fn test_platform_error_http_status_codes() {
     assert_eq!(
         EnablePlatformCoinWithTokensError::UnexpectedPlatformProtocol {
             ticker: "X".into(),
-            protocol: CoinProtocol::ETH,
+            protocol: CoinProtocol::ETH { chain_id: None },
         }
         .status_code(),
         StatusCode::BAD_REQUEST
@@ -413,7 +413,7 @@ fn test_platform_error_from_coin_conf_error() {
 
     let e: EnablePlatformCoinWithTokensError = CoinConfWithProtocolError::UnexpectedProtocol {
         ticker: "BTC".into(),
-        protocol: CoinProtocol::ETH,
+        protocol: CoinProtocol::ETH { chain_id: None },
     }
     .into();
     assert!(matches!(
@@ -562,7 +562,7 @@ fn test_standalone_error_http_status_codes() {
     assert_eq!(
         InitStandaloneCoinError::UnexpectedCoinProtocol {
             ticker: "X".into(),
-            protocol: CoinProtocol::ETH,
+            protocol: CoinProtocol::ETH { chain_id: None },
         }
         .status_code(),
         StatusCode::BAD_REQUEST
