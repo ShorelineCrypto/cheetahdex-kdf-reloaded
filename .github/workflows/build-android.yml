@@ -2,9 +2,9 @@ name: Build Android
 
 # P7.5 — Android (aarch64, armv7) shared library builds.
 #
-# Produces `libmm2_bin_lib.so` for each ABI via cargo-ndk. Requires the
-# Android NDK. Host runner is Linux (GitHub-hosted `ubuntu-latest` ships
-# the NDK under `$ANDROID_NDK_ROOT`).
+# Produces `libkdf.so` (renamed from the raw `libmm2_bin_lib.so`) for each
+# ABI via cargo-ndk. Requires the Android NDK. Host runner is Linux
+# (GitHub-hosted `ubuntu-latest` ships the NDK under `$ANDROID_NDK_ROOT`).
 #
 # Manually dispatched until verified against a downstream Android project.
 
@@ -105,8 +105,13 @@ jobs:
             --platform 24 \
             -- check -p coins
 
+      - name: Rename shared library to libkdf.so
+        run: |
+          mv target/${{ matrix.target }}/${{ inputs.profile }}/libmm2_bin_lib.so \
+             target/${{ matrix.target }}/${{ inputs.profile }}/libkdf.so
+
       - name: Upload shared library
         uses: actions/upload-artifact@v7
         with:
-          name: libmm2-${{ matrix.ndk-abi }}
-          path: target/${{ matrix.target }}/${{ inputs.profile }}/libmm2_bin_lib.so
+          name: libkdf-${{ matrix.ndk-abi }}
+          path: target/${{ matrix.target }}/${{ inputs.profile }}/libkdf.so

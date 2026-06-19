@@ -7,7 +7,7 @@
 name = "mm2_main"
 version = "0.1.0"
 edition = "2021"
-default-run = "mm2"
+default-run = "kdf"
 
 # wasm-opt reduces the size from 17 Mb to 14. But it runs for few minutes, which is not good for CI.
 # For production builds, it's recommended to run wasm-opt separately.
@@ -21,11 +21,11 @@ track-ctx-pointer = ["common/track-ctx-pointer"]
 custom-swap-locktime = [] # only for testing purposes, should never be activated on release builds.
 zhtlc-native-tests = ["coins/zhtlc-native-tests"]
 # Compiles in netid 9000 (regtest) for the docker_tests harness.
-# Never enable on the production `mm2` binary.
+# Never enable on the production `kdf` binary.
 regtest-netid = ["mm2_net_config/regtest-netid"]
 
 [[bin]]
-name = "mm2"
+name = "kdf"
 path = "src/mm2_bin.rs"
 test = false
 doctest = false
@@ -36,7 +36,7 @@ name = "docker_tests"
 path = "src/docker_tests.rs"
 
 [lib]
-name = "mm2"
+name = "kdflib"
 path = "src/mm2_lib.rs"
 crate-type = ["lib", "cdylib", "staticlib"]
 test = false

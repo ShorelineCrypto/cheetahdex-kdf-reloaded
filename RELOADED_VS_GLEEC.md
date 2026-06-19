@@ -73,7 +73,7 @@ Detail subsections will be added as features land. Each entry above expands here
 ### Networks
 
 - Production netids supported: **8762** (AtomicDEX), **6133** (GLEEC).
-- Test netids (8100/8999/9000/9998): only available with `--features regtest-netid` and never compiled into production `mm2` binaries.
+- Test netids (8100/8999/9000/9998): only available with `--features regtest-netid` and never compiled into production `kdf` binaries.
 
 ## Forward-compatibility commitment
 

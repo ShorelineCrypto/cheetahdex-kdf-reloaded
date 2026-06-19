@@ -3,8 +3,9 @@ name: Build iOS
 # P7.4 — iOS aarch64 static library build.
 #
 # `mm2_bin_lib` is `crate-type = ["cdylib", "rlib"]`. For iOS we build the
-# static library (`libmm2_bin_lib.a`) which the host Swift/Obj-C app links
-# against. Requires a macOS runner and the iOS target toolchain.
+# static library (raw `libmm2_bin_lib.a`, shipped as `libkdf.a`) which the
+# host Swift/Obj-C app links against. Requires a macOS runner and the iOS
+# target toolchain.
 #
 # Manually dispatched until a runner is provisioned.
 
@@ -71,8 +72,13 @@ jobs:
         run: |
           cargo check -p coins --target ${{ matrix.target }}
 
+      - name: Rename staticlib to libkdf.a
+        run: |
+          mv target/${{ matrix.target }}/${{ inputs.profile }}/libmm2_bin_lib.a \
+             target/${{ matrix.target }}/${{ inputs.profile }}/libkdf.a
+
       - name: Upload staticlib
         uses: actions/upload-artifact@v7
         with:
-          name: libmm2-${{ matrix.target }}
-          path: target/${{ matrix.target }}/${{ inputs.profile }}/libmm2_bin_lib.a
+          name: libkdf-${{ matrix.target }}
+          path: target/${{ matrix.target }}/${{ inputs.profile }}/libkdf.a
