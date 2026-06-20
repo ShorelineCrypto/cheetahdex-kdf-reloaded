@@ -49,8 +49,12 @@ pub struct TransactionOutputs {
 }
 
 impl TransactionOutputs {
-    pub fn len(&self) -> usize { self.outputs.len() }
-    pub fn is_empty(&self) -> bool { self.outputs.is_empty() }
+    pub fn len(&self) -> usize {
+        self.outputs.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
+    }
 }
 
 impl Serialize for TransactionOutputs {
@@ -126,7 +130,9 @@ pub struct TransactionOutputScript {
 }
 
 impl TransactionOutputScript {
-    pub fn is_empty(&self) -> bool { self.asm.is_empty() && self.hex.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.asm.is_empty() && self.hex.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -141,7 +147,9 @@ pub enum TransactionInputEnum {
 }
 
 impl TransactionInputEnum {
-    pub fn is_coinbase(&self) -> bool { matches!(self, TransactionInputEnum::Coinbase(_)) }
+    pub fn is_coinbase(&self) -> bool {
+        matches!(self, TransactionInputEnum::Coinbase(_))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -191,7 +199,9 @@ pub struct SignedTransactionOutput {
 }
 
 impl SignedTransactionOutput {
-    pub fn is_empty(&self) -> bool { self.value == Some(0.0) && self.script.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.value == Some(0.0) && self.script.is_empty()
+    }
 }
 
 /// Coerce JSON `null` into the type's `Default::default()` value during deserialization.
@@ -231,7 +241,9 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn is_coinbase(&self) -> bool { self.vin.iter().any(TransactionInputEnum::is_coinbase) }
+    pub fn is_coinbase(&self) -> bool {
+        self.vin.iter().any(TransactionInputEnum::is_coinbase)
+    }
 }
 
 /// Result of `getrawtransaction` — either the raw hex form or the verbose object.
@@ -487,5 +499,43 @@ mod tests {
         }"#;
         let parsed: Transaction = serde_json::from_str(json).unwrap();
         assert!(matches!(parsed.vin[0], TransactionInputEnum::Sigma(_)));
+    }
+
+    #[test]
+    fn parses_firo_lelantus_jmint_output() {
+        let json = r#"{
+            "hex":"01",
+            "txid":"06ed4b75010edcf404a315be70903473f44050c978bc37fbcee90e0b49114ba8",
+            "version":1,
+            "locktime":368918,
+            "vin":[],
+            "vout":[{"value":0.0,"n":1,"scriptPubKey":{"asm":"OP_LELANTUSJMINT","hex":"c6","type":"lelantusjmint","addresses":["Lelantusjmint"]}}],
+            "blockhash":"0000000000000000000000000000000000000000000000000000000000000000",
+            "confirmations":1,
+            "time":1,
+            "blocktime":1
+        }"#;
+
+        let parsed: Transaction = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.vout[0].script.script_type, ScriptType::LelantusJMint);
+    }
+
+    #[test]
+    fn parses_firo_sparkmint_output() {
+        let json = r#"{
+            "hex":"01",
+            "txid":"06ed4b75010edcf404a315be70903473f44050c978bc37fbcee90e0b49114ba1",
+            "version":1,
+            "locktime":368919,
+            "vin":[],
+            "vout":[{"value":0.0,"n":1,"scriptPubKey":{"asm":"OP_SPARKMINT","hex":"c7","type":"sparkmint","addresses":["Sparkmint"]}}],
+            "blockhash":"0000000000000000000000000000000000000000000000000000000000000000",
+            "confirmations":1,
+            "time":1,
+            "blocktime":1
+        }"#;
+
+        let parsed: Transaction = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.vout[0].script.script_type, ScriptType::SparkMint);
     }
 }

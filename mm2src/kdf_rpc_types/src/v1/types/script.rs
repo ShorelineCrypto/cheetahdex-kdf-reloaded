@@ -24,6 +24,9 @@ pub enum ScriptType {
     Create,
     // FIRO specific
     LelantusMint,
+    LelantusJMint,
+    SparkMint,
+    SparkSpend,
 }
 
 impl ScriptType {
@@ -43,6 +46,9 @@ impl ScriptType {
             ScriptType::Call => "call",
             ScriptType::Create => "create",
             ScriptType::LelantusMint => "lelantusmint",
+            ScriptType::LelantusJMint => "lelantusjmint",
+            ScriptType::SparkMint => "sparkmint",
+            ScriptType::SparkSpend => "sparkspend",
         }
     }
 
@@ -62,6 +68,9 @@ impl ScriptType {
             "call" => ScriptType::Call,
             "create" => ScriptType::Create,
             "lelantusmint" => ScriptType::LelantusMint,
+            "lelantusjmint" => ScriptType::LelantusJMint,
+            "sparkmint" => ScriptType::SparkMint,
+            "sparkspend" => ScriptType::SparkSpend,
             _ => return None,
         })
     }
@@ -135,6 +144,9 @@ mod tests {
             (ScriptType::Call, r#""call""#),
             (ScriptType::Create, r#""create""#),
             (ScriptType::LelantusMint, r#""lelantusmint""#),
+            (ScriptType::LelantusJMint, r#""lelantusjmint""#),
+            (ScriptType::SparkMint, r#""sparkmint""#),
+            (ScriptType::SparkSpend, r#""sparkspend""#),
         ];
         for (variant, encoded) in cases {
             assert_eq!(serde_json::to_string(&variant).unwrap(), encoded);
