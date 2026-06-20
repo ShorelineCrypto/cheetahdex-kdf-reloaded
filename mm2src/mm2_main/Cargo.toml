@@ -19,6 +19,7 @@ wasm-opt = false
 native = []
 track-ctx-pointer = ["common/track-ctx-pointer"]
 custom-swap-locktime = [] # only for testing purposes, should never be activated on release builds.
+ibc-routing-for-swaps = []
 zhtlc-native-tests = ["coins/zhtlc-native-tests"]
 # Compiles in netid 9000 (regtest) for the docker_tests harness.
 # Never enable on the production `kdf` binary.
