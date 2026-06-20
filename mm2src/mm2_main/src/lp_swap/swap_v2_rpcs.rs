@@ -156,6 +156,8 @@ pub(crate) struct MySwapForRpc<T> {
     taker_coin_confs: i64,
     taker_coin_nota: bool,
     swap_version: u8,
+    maker_coin_usd_price: String,
+    taker_coin_usd_price: String,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -194,6 +196,8 @@ impl<T: DeserializeOwned> MySwapForRpc<T> {
             taker_coin_confs: row.get(13)?,
             taker_coin_nota: row.get(14)?,
             swap_version: row.get(15)?,
+            maker_coin_usd_price: row.get(16)?,
+            taker_coin_usd_price: row.get(17)?,
         })
     }
 }
@@ -265,6 +269,8 @@ pub(super) async fn get_maker_swap_data_for_rpc(
         taker_coin_confs: repr.conf_settings.taker_coin_confs as i64,
         taker_coin_nota: repr.conf_settings.taker_coin_nota,
         swap_version: repr.swap_version,
+        maker_coin_usd_price: String::new(),
+        taker_coin_usd_price: String::new(),
     }))
 }
 
@@ -295,6 +301,8 @@ pub(super) async fn get_taker_swap_data_for_rpc(
         taker_coin_confs: repr.conf_settings.taker_coin_confs as i64,
         taker_coin_nota: repr.conf_settings.taker_coin_nota,
         swap_version: repr.swap_version,
+        maker_coin_usd_price: String::new(),
+        taker_coin_usd_price: String::new(),
     }))
 }
 
