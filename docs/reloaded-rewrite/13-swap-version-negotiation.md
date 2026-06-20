@@ -163,6 +163,20 @@ R13. **Single dispatch predicate.** The dispatch decision
      value (the `is_v2_or_higher` predicate of R3). The
      dispatcher shall not switch on the underlying byte.
 
+> **Reloaded implementation status (informative).** This
+> negotiation substrate ships in the reloaded baseline
+> (placement: the swap-versioning module within the main swap
+> crate). The negotiated value is the exact numeric minimum of
+> the two advertised single-byte versions per R11 — a true
+> pairwise minimum, not an approximation over independent
+> sub-fields — and the legacy fall-back described in R11 is the
+> direct consequence of taking that minimum, requiring no
+> separate code path. The dispatch predicates `is_legacy`,
+> `is_v2_or_higher`, and `is_nft_v2` (R3) and the
+> legacy-returning default constructor (R5) are present as
+> specified. The single-byte values bound by R4 are 1 (legacy),
+> 2 (V2), and 3 (non-fungible-token-extended).
+
 ## 13.6 Tests
 
 The version-negotiation substrate shall be covered by
