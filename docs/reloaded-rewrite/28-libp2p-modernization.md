@@ -259,13 +259,11 @@ applied to listener announcements.
 
 **STATUS.** The three behaviours in this section are post-baseline
 upstream additions that hang off the consolidated substrate. They
-are **required but NOT yet implemented in reloaded** — RP1 and RP2
-are **absent**, and RP3 is **partially present** (the ban store
-and its RPCs exist in reloaded but bans never expire). Per the
-PORT decision these are binding requirements, not optional
-deferred work.
+are **required ports in reloaded**. RP1 and RP2 are implemented,
+and RP3 is implemented with expirable bans. Per the PORT decision
+these are binding requirements, not optional deferred work.
 
-### 28.9A.1 RP1 — Peer connection health-check RPC (absent in reloaded)
+### 28.9A.1 RP1 — Peer connection health-check RPC (implemented in reloaded)
 
 **RP1.** A public top-level JSON-RPC v2 method
 `peer_connection_healthcheck` MUST be added. It answers whether a
@@ -303,7 +301,7 @@ for a connected peer and get `true`, for an unreachable/unknown
 peer get `false` after the timeout, and for its own peer id get
 `true` immediately.
 
-### 28.9A.2 RP2 — Network time-synchronisation peer admission (absent in reloaded)
+### 28.9A.2 RP2 — Network time-synchronisation peer admission (implemented in reloaded)
 
 **RP2.** Immediately after a connection to a peer is established,
 the node MUST validate that peer's clock and disconnect peers

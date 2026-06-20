@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Unified P2P networking for AtomicDEX — gossipsub, floodsub, peer exchange, request-response"
 
+[features]
+default = []
+application = []
+
 [dependencies]
 async-trait = { workspace = true }
 async-std = { version = "1.6.2", features = ["unstable"] }
