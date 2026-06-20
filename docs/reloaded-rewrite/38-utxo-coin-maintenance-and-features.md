@@ -91,16 +91,25 @@ chain-variant model defined in §37.5 (shared contract).
 
 ## Part B -- Required, NOT yet in reloaded (T-PORT)
 
-> **Status of Part B:** required, NOT yet in reloaded. Each item below was
-> verified absent from the reloaded UTXO tree and must be implemented in step 7.
+> **Status of Part B:** required ports. Each item below was checked against the
+> reloaded UTXO tree during step 7; unless an item is marked inline as already
+> as-built, it was found absent and implemented in step 7.
 
 ## 38.6 Required UTXO feature ports
 
 ### 38.6.1 PoSV (proof-of-stake-velocity) coins
-R38.6.1 The project shall support PoSV-style UTXO coins: serialize/deserialize
-and sign transactions that carry an `n_time` field, gated by a coins-config flag
-declaring the coin as PoSV. Acceptance: a PoSV coin's withdraw produces a
-transaction whose `n_time` is present and accepted by the network.
+R38.6.1 The project shall support PoSV/PoS-style UTXO coins: serialize,
+deserialize and sign transactions that carry an `n_time` field, gated by a
+coins-config flag (`isPoS`) declaring the coin as PoS/PoSV. Acceptance: such a
+coin's withdraw produces a transaction whose `n_time` is present and accepted by
+the network.
+>
+> **Status: as-built (T-DOC).** Verified present in the reloaded UTXO tree during
+> step 7. The `isPoS` coins-config flag drives an optional `n_time` field on the
+> transaction primitive: it is written by the witness-stripped serializer and
+> recovered by the PoS deserialization path (auto-detected by the multi-format
+> transaction decoder). A serialize/deserialize round-trip regression test locks
+> the contract. No further feature code was required.
 
 ### 38.6.2 Taproot output handling
 R38.6.2 Until full Taproot spending is supported, a withdraw whose destination is
