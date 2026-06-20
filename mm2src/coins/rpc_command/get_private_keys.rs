@@ -25,6 +25,16 @@ use crate::utxo::{Address as UtxoAddress, AddressHashEnum, KeyPair as UtxoKeyPai
                   UtxoActivationParams};
 use crate::{coin_conf, lp_coinfind, CoinProtocol, MarketCoinOps};
 
+// ZHTLC shielded-key export (R-K4) relies on the native-only `z_coin` / librustzcash
+// stack, so these imports and the matching derivation path are gated off WASM.
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_client_backend::encoding::{encode_extended_full_viewing_key, encode_extended_spending_key,
+                                     encode_payment_address};
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_primitives::constants::mainnet as z_mainnet_constants;
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_primitives::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey};
+
 /// Maximum number of HD addresses derivable in a single `get_private_keys`
 /// call (R-K4). A request whose `[start_index, end_index]` range exceeds this
 /// bound is refused with a typed error.
@@ -469,10 +479,8 @@ fn derive_for_protocol(
         CoinProtocol::UTXO | CoinProtocol::QTUM | CoinProtocol::BCH { .. } => derive_utxo(ticker, conf, secret),
         CoinProtocol::ETH { .. } | CoinProtocol::ERC20 { .. } => derive_evm(ticker, secret),
         CoinProtocol::TENDERMINT { account_prefix, .. } => derive_tendermint(ticker, account_prefix, secret),
-        CoinProtocol::ZHTLC { .. } => MmError::err(GetPrivateKeysError::KeyDerivationFailed {
-            ticker: ticker.to_owned(),
-            reason: "ZHTLC shielded key export is implemented in a later slice".to_owned(),
-        }),
+        #[cfg(not(target_arch = "wasm32"))]
+        CoinProtocol::ZHTLC { .. } => derive_zhtlc(ticker, secret),
         other => MmError::err(GetPrivateKeysError::KeyDerivationFailed {
             ticker: ticker.to_owned(),
             reason: format!("key export is not supported for protocol {:?}", other),
@@ -588,6 +596,48 @@ fn derive_tendermint(
         address: account_id.to_string(),
         priv_key: hex::encode(secret.as_slice()),
         viewing_key: None,
+    })
+}
+
+/// ZHTLC shielded formatting (R-K4): the Sapling spending key is master-derived
+/// (ZIP-32 master node) from the same secp256k1 secret that backs the
+/// transparent key for this entry, on the fixed mainnet Sapling parameters.
+/// `priv_key` carries the encoded extended spending key, `viewing_key` the
+/// encoded extended full viewing key, and `address` the default shielded
+/// payment address. No shielded derivation path is produced (master node), so
+/// `z_derivation_path` is left unpopulated by the caller.
+#[cfg(not(target_arch = "wasm32"))]
+fn derive_zhtlc(ticker: &str, secret: &Secp256k1Secret) -> Result<DerivedKey, MmError<GetPrivateKeysError>> {
+    // Transparent compressed secp256k1 public key of the backing secret. This is
+    // the same key that master-derives the shielded material and keeps the
+    // `pubkey` field meaningful and consistent with the other protocols.
+    let secp = secp256k1::Secp256k1::new();
+    let secret_key =
+        secp256k1::SecretKey::from_slice(secret.as_slice()).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        })?;
+    let pubkey_compressed = secp256k1::PublicKey::from_secret_key(&secp, &secret_key).serialize();
+
+    let z_spending_key = ExtendedSpendingKey::master(secret.as_slice());
+    let priv_key = encode_extended_spending_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY, &z_spending_key);
+    let efvk = ExtendedFullViewingKey::from(&z_spending_key);
+    let viewing_key =
+        encode_extended_full_viewing_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &efvk);
+    let (_, payment_address) =
+        z_spending_key
+            .default_address()
+            .map_to_mm(|_| GetPrivateKeysError::KeyDerivationFailed {
+                ticker: ticker.to_owned(),
+                reason: "failed to derive default shielded payment address".to_owned(),
+            })?;
+    let address = encode_payment_address(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS, &payment_address);
+
+    Ok(DerivedKey {
+        pubkey: hex::encode(pubkey_compressed),
+        address,
+        priv_key,
+        viewing_key: Some(viewing_key),
     })
 }
 
@@ -796,5 +846,34 @@ mod tests {
         // Hex-encoded 33-byte compressed secp256k1 public key.
         assert_eq!(d.pubkey.len(), 66);
         assert!(d.viewing_key.is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_derive_zhtlc_format_and_pubkey_invariant() {
+        let z = unwrap_derived(derive_zhtlc("ARRR", &sample_secret()));
+        // Encoded extended spending key, full viewing key and shielded payment
+        // address carry their bound mainnet Sapling HRPs (R-K4).
+        assert!(
+            z.priv_key.starts_with(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY),
+            "got {}",
+            z.priv_key
+        );
+        let viewing_key = z.viewing_key.as_ref().expect("ZHTLC carries a viewing_key");
+        assert!(
+            viewing_key.starts_with(z_mainnet_constants::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY),
+            "got {}",
+            viewing_key
+        );
+        assert!(
+            z.address.starts_with(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS),
+            "got {}",
+            z.address
+        );
+
+        // The `pubkey` is the transparent compressed secp256k1 key of the backing
+        // secret, identical to the other protocols' derivation of the same secret.
+        let evm = unwrap_derived(derive_evm("ETH", &sample_secret()));
+        assert_eq!(z.pubkey, evm.pubkey);
     }
 }

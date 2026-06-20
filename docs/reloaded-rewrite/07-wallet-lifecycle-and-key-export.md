@@ -153,8 +153,14 @@ with the upstream capability:
   `hd` mode.
 - **Protocol-specific formatting.** Address and key formats are produced per
   protocol: UTXO (WIF), EVM (hex), Tendermint, and ZHTLC. For ZHTLC shielded
-  coins the response additionally carries the shielded `viewing_key` and both a
-  transparent `derivation_path` and a shielded `z_derivation_path`.
+  coins the shielded spending key is master-derived (the ZIP-32 master node) from
+  the same secp256k1 secret that backs the transparent key for that entry; the
+  response therefore carries the encoded shielded `viewing_key`, the shielded
+  payment `address` and the encoded shielded spending key as `priv_key`, all on
+  the fixed mainnet Sapling parameters. Because the shielded key is master-derived
+  rather than walked down a shielded path, no separate `z_derivation_path` is
+  produced and the field is omitted; in `hd` mode the entry still carries the
+  transparent `derivation_path` of the secret the shielded key was derived from.
 - **Response shape (interop).** The response is an untagged union: in `iguana`
   mode an array of per-coin objects `{coin, pubkey, address, priv_key,
   viewing_key?}`; in `hd` mode an array of per-coin objects
@@ -444,9 +450,11 @@ single-tenant.
 - *BIP-32 / BIP-44 — Hierarchical deterministic wallets and the
   multi-account/derivation-path hierarchy.* Define the derivation-path model
   bound for the HD export mode in R-K4.
-- *ZIP-32 — Shielded hierarchical deterministic wallets.* Defines the shielded
-  derivation-path model (`z_derivation_path`) and viewing-key derivation bound
-  for ZHTLC export in R-K4.
+- *ZIP-32 — Shielded hierarchical deterministic wallets.* Defines the Sapling
+  extended-spending-key / extended-full-viewing-key model that backs the ZHTLC
+  viewing-key export in R-K4. Reloaded master-derives the shielded key from the
+  per-entry secp256k1 secret, so the optional `z_derivation_path` of the response
+  union is not populated.
 - *SLIP-0021 — Symmetric key derivation.* Referenced as the
   non-password-derived variant of the bound key-derivation enum.
 - *RFC 9106 — Argon2 Memory-Hard Function for Password Hashing and Proof-
