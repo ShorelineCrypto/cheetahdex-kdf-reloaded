@@ -110,6 +110,41 @@ impl EventStreamer for BalanceEventStreamer {
         let mut prev_unspendable: Option<String> = None;
         let mut watched_address: Option<String> = electrum_utxo_watch_address(&coin);
 
+        // Emit an initial snapshot right away so clients don't wait for the first interval tick.
+        match coin.my_balance().compat().await {
+            Ok(balance) => {
+                let spendable = balance.spendable.to_string();
+                let unspendable = balance.unspendable.to_string();
+
+                prev_spendable = Some(spendable.clone());
+                prev_unspendable = Some(unspendable.clone());
+
+                let event = Event::new(
+                    sid.clone(),
+                    json!({
+                        "coin": self.ticker,
+                        "watched_address": watched_address,
+                        "spendable": spendable,
+                        "unspendable": unspendable,
+                        "timestamp": common::now_ms(),
+                    }),
+                );
+                broadcaster.broadcast(event);
+            },
+            Err(e) => {
+                log::error!("Initial balance poll error for {}: {}", self.ticker, e);
+                let event = Event::err(
+                    sid.clone(),
+                    json!({
+                        "coin": self.ticker,
+                        "error": e.to_string(),
+                        "timestamp": common::now_ms(),
+                    }),
+                );
+                broadcaster.broadcast(event);
+            },
+        }
+
         loop {
             // Re-register watch target for Electrum-backed UTXO coins if the active address changes.
             // This is relevant when address state is rotated externally (e.g. account/address updates).
