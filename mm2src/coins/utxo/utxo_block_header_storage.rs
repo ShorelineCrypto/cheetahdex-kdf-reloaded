@@ -3,7 +3,7 @@ use crate::utxo::rpc_clients::ElectrumBlockHeader;
 use crate::utxo::utxo_indexedb_block_header_storage::IndexedDBBlockHeadersStorage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::utxo::utxo_sql_block_header_storage::SqliteBlockHeadersStorage;
-use crate::utxo::UtxoBlockHeaderVerificationParams;
+use crate::utxo::SPVConf;
 use async_trait::async_trait;
 use chain::BlockHeader;
 use derive_more::Display;
@@ -37,7 +37,7 @@ pub enum BlockHeaderStorageError {
 
 pub struct BlockHeaderStorage {
     pub inner: Box<dyn BlockHeaderStorageOps>,
-    pub params: UtxoBlockHeaderVerificationParams,
+    pub conf: SPVConf,
 }
 
 impl Debug for BlockHeaderStorage {
@@ -45,7 +45,7 @@ impl Debug for BlockHeaderStorage {
 }
 
 pub trait InitBlockHeaderStorageOps: Send + Sync + 'static {
-    fn new_from_ctx(ctx: MmArc, params: UtxoBlockHeaderVerificationParams) -> Option<BlockHeaderStorage>
+    fn new_from_ctx(ctx: MmArc, conf: SPVConf) -> Option<BlockHeaderStorage>
     where
         Self: Sized;
 }
@@ -123,19 +123,19 @@ pub trait BlockHeaderStorageOps: Send + Sync + 'static {
 
 impl InitBlockHeaderStorageOps for BlockHeaderStorage {
     #[cfg(not(target_arch = "wasm32"))]
-    fn new_from_ctx(ctx: MmArc, params: UtxoBlockHeaderVerificationParams) -> Option<BlockHeaderStorage> {
+    fn new_from_ctx(ctx: MmArc, conf: SPVConf) -> Option<BlockHeaderStorage> {
         ctx.sqlite_connection.as_option().map(|connection| BlockHeaderStorage {
             inner: Box::new(SqliteBlockHeadersStorage(connection.clone())),
-            params,
+            conf,
         })
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn new_from_ctx(ctx: MmArc, params: UtxoBlockHeaderVerificationParams) -> Option<BlockHeaderStorage> {
+    fn new_from_ctx(ctx: MmArc, conf: SPVConf) -> Option<BlockHeaderStorage> {
         let storage = IndexedDBBlockHeadersStorage::new(&ctx).ok()?;
         Some(BlockHeaderStorage {
             inner: Box::new(storage),
-            params,
+            conf,
         })
     }
 }

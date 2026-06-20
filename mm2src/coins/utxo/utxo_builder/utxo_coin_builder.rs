@@ -6,8 +6,8 @@ use crate::utxo::tx_cache::{UtxoVerboseCacheOps, UtxoVerboseCacheShared};
 use crate::utxo::utxo_block_header_storage::{BlockHeaderStorage, InitBlockHeaderStorageOps};
 use crate::utxo::utxo_builder::utxo_conf_builder::{UtxoConfBuilder, UtxoConfError, UtxoConfResult};
 use crate::utxo::{output_script, utxo_common, ElectrumBuilderArgs, ElectrumProtoVerifier, RecentlySpentOutPoints,
-                  TxFee, UtxoCoinConf, UtxoCoinFields, UtxoHDAccount, UtxoHDWallet, UtxoRpcMode, DEFAULT_GAP_LIMIT,
-                  UTXO_DUST_AMOUNT};
+                  SPVConf, TxFee, UtxoCoinConf, UtxoCoinFields, UtxoHDAccount, UtxoHDWallet, UtxoRpcMode,
+                  DEFAULT_GAP_LIMIT, UTXO_DUST_AMOUNT};
 use crate::{BlockchainNetwork, CoinTransportMetrics, DerivationMethod, HistorySyncState, PrivKeyBuildPolicy,
             PrivKeyPolicy, RpcClientType, UtxoActivationParams};
 use async_trait::async_trait;
@@ -410,12 +410,17 @@ pub trait UtxoCoinBuilderCommonOps {
 
     #[inline]
     fn block_headers_storage(&self) -> UtxoCoinBuildResult<Option<BlockHeaderStorage>> {
-        let params: Option<_> = json::from_value(self.conf()["block_header_params"].clone())
-            .map_to_mm(|e| UtxoConfError::InvalidBlockHeaderParams(e.to_string()))
+        let conf: Option<SPVConf> = json::from_value(self.conf()["spv_conf"].clone())
+            .map_to_mm(|e| UtxoConfError::InvalidSpvConf(e.to_string()))
             .mm_err(Into::into)?;
-        match params {
+        match conf {
             None => Ok(None),
-            Some(params) => Ok(BlockHeaderStorage::new_from_ctx(self.ctx().clone(), params)),
+            Some(conf) => {
+                conf.validate()
+                    .map_to_mm(UtxoConfError::InvalidSpvConf)
+                    .mm_err(Into::into)?;
+                Ok(BlockHeaderStorage::new_from_ctx(self.ctx().clone(), conf))
+            },
         }
     }
 

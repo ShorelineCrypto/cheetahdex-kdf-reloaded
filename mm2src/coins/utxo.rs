@@ -1209,12 +1209,110 @@ pub struct UtxoMergeParams {
     pub max_merge_at_once: usize,
 }
 
+/// The Bitcoin difficulty-retarget interval, in blocks. It is also the maximum
+/// number of headers fetched per sync request (a single fetch never spans more
+/// than one retarget window) and the lower bound a configured
+/// `max_stored_block_headers` must exceed on a retargeting chain.
+pub const DIFFICULTY_RETARGET_INTERVAL: u64 = 2016;
+
+/// Chain difficulty-algorithm / header chain-variant selector accepted in the
+/// `spv_conf.validation_params.difficulty_algorithm` field. The string values
+/// are dictated interop and must be accepted verbatim.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum DifficultyAlgorithm {
+    #[serde(rename = "Bitcoin Mainnet")]
+    BitcoinMainnet,
+    #[serde(rename = "Bitcoin Testnet")]
+    BitcoinTestnet,
+}
+
+/// The trusted anchor (`spv_conf.starting_block_header`): the height/header from
+/// which header sync and validation begin. Field names are dictated interop.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct UtxoBlockHeaderVerificationParams {
+pub struct SPVBlockHeader {
+    pub height: u64,
+    /// Block hash in the usual displayed (big-endian) hex form.
+    pub hash: String,
+    pub time: u32,
+    pub bits: u32,
+}
+
+/// How fetched headers are validated (`spv_conf.validation_params`). When the
+/// whole object is omitted, headers are stored without proof-of-work /
+/// difficulty validation (trusted-RPC mode).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SPVValidationParams {
     pub difficulty_check: bool,
     pub constant_difficulty: bool,
-    pub blocks_limit_to_check: NonZeroU64,
-    pub check_every: f64,
+    #[serde(default)]
+    pub difficulty_algorithm: Option<DifficultyAlgorithm>,
+}
+
+/// The optional SPV configuration object supplied at coin-activation time under
+/// the coin's `conf` at the key `spv_conf`. Field names are dictated interop and
+/// are accepted verbatim from third-party coin-config files.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SPVConf {
+    pub starting_block_header: SPVBlockHeader,
+    #[serde(default)]
+    pub max_stored_block_headers: Option<NonZeroU64>,
+    #[serde(default)]
+    pub validation_params: Option<SPVValidationParams>,
+}
+
+impl SPVConf {
+    /// Static activation-time validation of the SPV configuration (R37.1.3).
+    /// The RPC-anchor match is performed separately at sync start.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(SPVValidationParams {
+            difficulty_algorithm: Some(algorithm),
+            ..
+        }) = &self.validation_params
+        {
+            match algorithm {
+                DifficultyAlgorithm::BitcoinMainnet => {
+                    if self.starting_block_header.height % DIFFICULTY_RETARGET_INTERVAL != 0 {
+                        return Err(format!(
+                            "starting_block_header height '{}' must be a multiple of the difficulty-retarget \
+                             interval ({})",
+                            self.starting_block_header.height, DIFFICULTY_RETARGET_INTERVAL
+                        ));
+                    }
+                    if let Some(max_stored) = self.max_stored_block_headers {
+                        if max_stored.get() <= DIFFICULTY_RETARGET_INTERVAL {
+                            return Err(format!(
+                                "max_stored_block_headers '{}' must be greater than the difficulty-retarget \
+                                 interval ({})",
+                                max_stored.get(),
+                                DIFFICULTY_RETARGET_INTERVAL
+                            ));
+                        }
+                    }
+                },
+                DifficultyAlgorithm::BitcoinTestnet => {
+                    return Err("'Bitcoin Testnet' difficulty algorithm is not currently supported".to_string());
+                },
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether each header's proof-of-work / difficulty is validated. False in
+    /// trusted-RPC mode (no `validation_params`).
+    pub fn difficulty_check(&self) -> bool {
+        self.validation_params
+            .as_ref()
+            .map(|params| params.difficulty_check)
+            .unwrap_or(false)
+    }
+
+    /// Whether the chain uses a fixed (non-retargeting) difficulty.
+    pub fn constant_difficulty(&self) -> bool {
+        self.validation_params
+            .as_ref()
+            .map(|params| params.constant_difficulty)
+            .unwrap_or(false)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
