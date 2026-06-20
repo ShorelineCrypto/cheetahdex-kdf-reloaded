@@ -13,9 +13,36 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::{EnableStreamingRequest, EnableStreamingResponse, StreamingError};
-use coins::lp_coinfind;
+use coins::{lp_coinfind, MarketCoinOps, MmCoinEnum};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+
+fn electrum_utxo_watch_address(coin: &MmCoinEnum) -> Option<String> {
+    match coin {
+        MmCoinEnum::UtxoCoin(c) => {
+            if c.as_ref().rpc_client.is_native() {
+                None
+            } else {
+                c.my_address().ok()
+            }
+        },
+        MmCoinEnum::QtumCoin(c) => {
+            if c.as_ref().rpc_client.is_native() {
+                None
+            } else {
+                c.my_address().ok()
+            }
+        },
+        MmCoinEnum::Bch(c) => {
+            if c.as_ref().rpc_client.is_native() {
+                None
+            } else {
+                c.my_address().ok()
+            }
+        },
+        _ => None,
+    }
+}
 
 /// Per-coin configuration for the balance streamer.
 #[derive(Deserialize)]
@@ -81,8 +108,16 @@ impl EventStreamer for BalanceEventStreamer {
         // Track previous balance to only emit on change.
         let mut prev_spendable: Option<String> = None;
         let mut prev_unspendable: Option<String> = None;
+        let mut watched_address: Option<String> = electrum_utxo_watch_address(&coin);
 
         loop {
+            // Re-register watch target for Electrum-backed UTXO coins if the active address changes.
+            // This is relevant when address state is rotated externally (e.g. account/address updates).
+            let current_watch_address = electrum_utxo_watch_address(&coin);
+            if current_watch_address != watched_address {
+                watched_address = current_watch_address;
+            }
+
             let sleep = Timer::sleep(interval_secs);
             let sleep = core::pin::pin!(sleep);
             match select(sleep, &mut shutdown).await {
@@ -104,6 +139,7 @@ impl EventStreamer for BalanceEventStreamer {
                                     sid.clone(),
                                     json!({
                                         "coin": self.ticker,
+                                        "watched_address": watched_address,
                                         "spendable": spendable,
                                         "unspendable": unspendable,
                                         "timestamp": common::now_ms(),
