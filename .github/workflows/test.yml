@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [ reloaded-gplv2-base ]
+    branches: [ reloaded-gplv2-base, dev ]
   pull_request:
-    branches: [ reloaded-gplv2-base ]
+    branches: [ reloaded-gplv2-base, dev ]
 
 # Supersede in-flight runs of the same workflow on the same ref so a fast
 # follow-up push cancels the now-stale run instead of queuing behind it.
