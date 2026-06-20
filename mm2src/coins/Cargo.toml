@@ -29,6 +29,7 @@ bigdecimal = { version = "0.3", features = ["serde"] }
 bip32 = { version = "0.2.2", default-features = false, features = ["alloc", "secp256k1-ffi"] }
 bitcoin = "0.27.1"
 bitcoin_hashes = "0.10.0"
+blake2b_simd = "1"
 kdf_crypto = { path = "../kdf_crypto" }
 bincode = "1.3.3"
 byteorder = "1.3"
@@ -67,6 +68,7 @@ hex = "0.4.2"
 http = "0.2"
 itertools = { version = "0.10", features = ["use_std"] }
 jsonrpc-core = "8.0.1"
+kdf_walletconnect = { path = "../kdf_walletconnect" }
 keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
 libc = "0.2"

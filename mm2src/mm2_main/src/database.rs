@@ -115,6 +115,15 @@ fn migration_7() -> Vec<(&'static str, Vec<String>)> {
     ]
 }
 
+fn migration_8() -> Vec<(&'static str, Vec<String>)> {
+    let mut statements = vec![
+        ("ALTER TABLE my_swaps ADD COLUMN maker_coin_usd_price TEXT NOT NULL DEFAULT '';", vec![]),
+        ("ALTER TABLE my_swaps ADD COLUMN taker_coin_usd_price TEXT NOT NULL DEFAULT '';", vec![]),
+    ];
+    statements.extend(stats_swaps::add_fiat_snapshot_columns());
+    statements
+}
+
 async fn statements_for_migration(ctx: &MmArc, current_migration: i64) -> Option<Vec<(&'static str, Vec<String>)>> {
     match current_migration {
         1 => Some(migration_1(ctx).await),
@@ -124,6 +133,7 @@ async fn statements_for_migration(ctx: &MmArc, current_migration: i64) -> Option
         5 => Some(migration_5()),
         6 => Some(migration_6()),
         7 => Some(migration_7()),
+        8 => Some(migration_8()),
         _ => None,
     }
 }

@@ -4,12 +4,16 @@ use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simp
                                 stop_simple_market_maker_bot};
 use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
 use crate::mm2::rpc::streaming_activations;
+use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
+                                classic_swap_quote, classic_swap_tokens};
+use crate::mm2::rpc::wallet_connect::{wc_delete_session, wc_get_session, wc_get_sessions, wc_new_connection,
+                                      wc_ping_session};
 use crate::{mm2::lp_stats::{add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,
                             stop_version_stat_collection, update_version_stat_collection},
             mm2::lp_swap::swap_v2_rpcs::{active_swaps_rpc as active_swaps_rpc_v2,
                                          my_recent_swaps_rpc as my_recent_swaps_rpc_v2, my_swap_status_rpc},
             mm2::lp_swap::{get_locked_amount_rpc, max_maker_vol, recreate_swap_data, trade_preimage_rpc},
-            mm2::rpc::lp_commands::{get_public_key, get_public_key_hash}};
+            mm2::rpc::lp_commands::{get_public_key, get_public_key_hash, peer_connection_healthcheck}};
 use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
@@ -31,6 +35,7 @@ use coins::rpc_command::init_create_account::{init_create_new_account, init_crea
                                               init_create_new_account_user_action};
 use coins::rpc_command::init_scan_for_new_addresses::{init_scan_for_new_addresses, init_scan_for_new_addresses_status};
 use coins::rpc_command::init_withdraw::{init_withdraw, withdraw_status, withdraw_user_action};
+use coins::rpc_command::token_allowance::{approve_token, get_token_allowance};
 use coins::utxo::bch::BchCoin;
 use coins::utxo::qtum::QtumCoin;
 use coins::utxo::slp::SlpToken;
@@ -47,6 +52,9 @@ use futures::Future as Future03;
 use http::Response;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+use mm2_gui_storage::rpc_commands::{activate_coins, add_account, deactivate_coins, delete_account, enable_account,
+                                    get_account_coins, get_accounts, get_enabled_account, set_account_balance,
+                                    set_account_description, set_account_name};
 use mm2_rpc::mm_protocol::{MmRpcBuilder, MmRpcRequest, MmRpcVersion};
 use serde::de::DeserializeOwned;
 use serde_json::{self as json, Value as Json};
@@ -150,11 +158,24 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         return staking_dispatcher(request, ctx, &staking_method).await;
     }
 
+    // Route experimental::1inch_v6_0:: namespace methods to the 1inch dispatcher.
+    if let Some(one_inch_method) = request.method.strip_prefix("experimental::1inch_v6_0::") {
+        let one_inch_method = one_inch_method.to_owned();
+        return one_inch_dispatcher(request, ctx, &one_inch_method).await;
+    }
+
+    // Route gui_storage:: namespace methods to the GUI account-state dispatcher.
+    if let Some(gui_storage_method) = request.method.strip_prefix("gui_storage::") {
+        let gui_storage_method = gui_storage_method.to_owned();
+        return gui_storage_dispatcher(request, ctx, &gui_storage_method).await;
+    }
+
     match request.method.as_str() {
         "account_balance" => handle_mmrpc(ctx, request, account_balance).await,
         "active_swaps" => handle_mmrpc(ctx, request, active_swaps_rpc_v2).await,
         "add_delegation" => handle_mmrpc(ctx, request, add_delegation).await,
         "add_node_to_version_stat" => handle_mmrpc(ctx, request, add_node_to_version_stat).await,
+        "approve_token" => handle_mmrpc(ctx, request, approve_token).await,
         "best_orders" => handle_mmrpc(ctx, request, best_orders_rpc_v2).await,
         "consolidate_utxos" => handle_mmrpc(ctx, request, consolidate_utxos_rpc).await,
         "enable_bch_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<BchCoin>).await,
@@ -169,6 +190,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_public_key_hash" => handle_mmrpc(ctx, request, get_public_key_hash).await,
         "get_raw_transaction" => handle_mmrpc(ctx, request, get_raw_transaction).await,
         "get_staking_infos" => handle_mmrpc(ctx, request, get_staking_infos).await,
+        "get_token_allowance" => handle_mmrpc(ctx, request, get_token_allowance).await,
         "sign_raw_transaction" => handle_mmrpc(ctx, request, sign_raw_transaction).await,
         "get_locked_amount" => handle_mmrpc(ctx, request, get_locked_amount_rpc).await,
         "init_account_balance" => handle_mmrpc(ctx, request, init_account_balance).await,
@@ -195,6 +217,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "my_swap_status" => handle_mmrpc(ctx, request, my_swap_status_rpc).await,
         "my_tx_history" => handle_mmrpc(ctx, request, my_tx_history_v2_rpc).await,
         "orderbook" => handle_mmrpc(ctx, request, orderbook_rpc_v2).await,
+        "peer_connection_healthcheck" => handle_mmrpc(ctx, request, peer_connection_healthcheck).await,
         "recreate_swap_data" => handle_mmrpc(ctx, request, recreate_swap_data).await,
         "remove_delegation" => handle_mmrpc(ctx, request, remove_delegation).await,
         "remove_node_from_version_stat" => handle_mmrpc(ctx, request, remove_node_from_version_stat).await,
@@ -206,6 +229,11 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "trade_preimage" => handle_mmrpc(ctx, request, trade_preimage_rpc).await,
         "update_version_stat_collection" => handle_mmrpc(ctx, request, update_version_stat_collection).await,
         "verify_message" => handle_mmrpc(ctx, request, verify_message).await,
+        "wc_delete_session" => handle_mmrpc(ctx, request, wc_delete_session).await,
+        "wc_get_session" => handle_mmrpc(ctx, request, wc_get_session).await,
+        "wc_get_sessions" => handle_mmrpc(ctx, request, wc_get_sessions).await,
+        "wc_new_connection" => handle_mmrpc(ctx, request, wc_new_connection).await,
+        "wc_ping_session" => handle_mmrpc(ctx, request, wc_ping_session).await,
         "withdraw" => handle_mmrpc(ctx, request, withdraw).await,
         "withdraw_status" => handle_mmrpc(ctx, request, withdraw_status).await,
         "withdraw_user_action" => handle_mmrpc(ctx, request, withdraw_user_action).await,
@@ -280,6 +308,44 @@ async fn staking_dispatcher(
         "query::delegations" => handle_mmrpc(ctx, request, delegations_info).await,
         "query::ongoing_undelegations" => handle_mmrpc(ctx, request, ongoing_undelegations_info).await,
         "query::validators" => handle_mmrpc(ctx, request, validators_info).await,
+        _ => MmError::err(DispatcherError::NoSuchMethod),
+    }
+}
+
+/// Routes `experimental::1inch_v6_0::*` RPC methods to the 1inch classic-swap handlers.
+async fn one_inch_dispatcher(
+    request: MmRpcRequest,
+    ctx: MmArc,
+    one_inch_method: &str,
+) -> DispatcherResult<Response<Vec<u8>>> {
+    match one_inch_method {
+        "classic_swap_contract" => handle_mmrpc(ctx, request, classic_swap_contract).await,
+        "classic_swap_quote" => handle_mmrpc(ctx, request, classic_swap_quote).await,
+        "classic_swap_create" => handle_mmrpc(ctx, request, classic_swap_create).await,
+        "classic_swap_liquidity_sources" => handle_mmrpc(ctx, request, classic_swap_liquidity_sources).await,
+        "classic_swap_tokens" => handle_mmrpc(ctx, request, classic_swap_tokens).await,
+        _ => MmError::err(DispatcherError::NoSuchMethod),
+    }
+}
+
+/// Routes `gui_storage::*` RPC methods to the GUI account-state handlers.
+async fn gui_storage_dispatcher(
+    request: MmRpcRequest,
+    ctx: MmArc,
+    gui_storage_method: &str,
+) -> DispatcherResult<Response<Vec<u8>>> {
+    match gui_storage_method {
+        "enable_account" => handle_mmrpc(ctx, request, enable_account).await,
+        "add_account" => handle_mmrpc(ctx, request, add_account).await,
+        "delete_account" => handle_mmrpc(ctx, request, delete_account).await,
+        "get_accounts" => handle_mmrpc(ctx, request, get_accounts).await,
+        "get_account_coins" => handle_mmrpc(ctx, request, get_account_coins).await,
+        "get_enabled_account" => handle_mmrpc(ctx, request, get_enabled_account).await,
+        "set_account_name" => handle_mmrpc(ctx, request, set_account_name).await,
+        "set_account_description" => handle_mmrpc(ctx, request, set_account_description).await,
+        "set_account_balance" => handle_mmrpc(ctx, request, set_account_balance).await,
+        "activate_coins" => handle_mmrpc(ctx, request, activate_coins).await,
+        "deactivate_coins" => handle_mmrpc(ctx, request, deactivate_coins).await,
         _ => MmError::err(DispatcherError::NoSuchMethod),
     }
 }

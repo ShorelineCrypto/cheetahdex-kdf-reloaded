@@ -38,7 +38,8 @@ use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::mm2::database::init_and_migrate_db;
 use crate::mm2::lp_message_service::{init_message_service, InitMessageServiceError};
-use crate::mm2::lp_network::{lp_network_ports, p2p_event_process_loop, NetIdError, P2PContext};
+use crate::mm2::lp_network::{lp_network_ports, p2p_event_process_loop, subscribe_to_own_peer_healthcheck_topic,
+                             NetIdError, P2PContext};
 use crate::mm2::lp_ordermatch::{broadcast_maker_orders_keep_alive_loop, clean_memory_loop, init_ordermatch_context,
                                 lp_ordermatch_loop, orders_kick_start, BalanceUpdateOrdermatchHandler,
                                 OrdermatchInitError};
@@ -558,6 +559,7 @@ async fn init_p2p(ctx: MmArc) -> P2PResult<()> {
     ctx.peer_id.pin(peer_id.to_string()).map_to_mm(P2PInitError::Internal)?;
     let p2p_context = P2PContext::new(cmd_tx);
     p2p_context.store_to_mm_arc(&ctx);
+    subscribe_to_own_peer_healthcheck_topic(&ctx, &peer_id.to_string());
     spawn(p2p_event_process_loop(ctx.weak(), event_rx, i_am_seed));
 
     Ok(())

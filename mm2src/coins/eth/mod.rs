@@ -96,8 +96,8 @@ mod eth_market_ops;
 mod eth_mm_coin;
 mod eth_swap_ops;
 mod eth_types;
+pub mod wc_integration;
 mod wire_types;
-
 // Re-export split module contents for backward-compatible access paths
 pub use eth_impl::*;
 pub use eth_mm_coin::EthTxFeeDetails;

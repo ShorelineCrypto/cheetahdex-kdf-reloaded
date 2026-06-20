@@ -7,7 +7,11 @@ crate boundary, the composed network behaviour and its deliberately
 constrained sub-behaviour set, the vendored relay-mesh-aware gossipsub
 extension, the bound topic-naming and application-payload-signing surface,
 the transport stack per build target, and the discovery / bootstrap /
-mesh-maintenance discipline.
+mesh-maintenance discipline. It also binds, as **required ports**
+(§28.9A), three post-baseline application-level P2P behaviours
+reloaded must gain: the peer-connection health-check RPC, the
+network time-synchronisation peer-admission rule, and expirable
+pubkey bans.
 
 ## 28.1 Executive Summary
 
@@ -251,6 +255,126 @@ relay. The substrate MUST NOT advertise non-routable listener
 addresses to peers; the bound `ip_helpers::is_global` predicate is
 applied to listener announcements.
 
+## 28.9A Required Port — Peer Health-check, Time-sync Admission, Expirable Bans (driving-spec)
+
+**STATUS.** The three behaviours in this section are post-baseline
+upstream additions that hang off the consolidated substrate. They
+are **required ports in reloaded**. RP1 and RP2 are implemented,
+and RP3 is implemented with expirable bans. Per the PORT decision
+these are binding requirements, not optional deferred work.
+
+### 28.9A.1 RP1 — Peer connection health-check RPC (implemented in reloaded)
+
+**RP1.** A public top-level JSON-RPC v2 method
+`peer_connection_healthcheck` MUST be added. It answers whether a
+named peer is currently reachable on the mesh.
+
+- **Request:** an object with a single field `peer_address` — the
+  string rendering of the target peer's libp2p peer id.
+- **Response:** a bare JSON boolean — `true` if the peer
+  acknowledged within the timeout (or is the local node itself),
+  `false` otherwise.
+- **Behaviour:** if `peer_address` equals the local node's own
+  peer id, return `true` immediately. Otherwise the node MUST
+  build a signed health-check probe (signed with the §28.7
+  application-payload signing surface), register an **expirable**
+  one-shot waiter keyed by the target peer address (the record
+  self-clears on expiry), publish the probe on a dedicated
+  per-peer health-check pub/sub topic derived from the peer
+  address via the §28.7 `pub_sub_topic` helper, and await an
+  acknowledgement. The call returns `true` if an ack arrives
+  before a bound timeout (the health-check message expiry) and
+  `false` on timeout.
+- **Responder side:** a node receiving a health-check probe on the
+  health-check topic MUST verify the signed envelope and, when the
+  probe targets it, reply on the same topic so the originator's
+  waiter is woken.
+- **Errors:** failures MUST surface through the project's typed-
+  error envelope (`error_type` / `error_data`) with wire tokens
+  distinguishing a probe-generation failure, a probe-encoding
+  failure, and a generic internal failure; all map to server-error
+  (500). The human-readable message wording is NOT part of the
+  contract.
+
+**RP1 acceptance:** a caller can ask `peer_connection_healthcheck`
+for a connected peer and get `true`, for an unreachable/unknown
+peer get `false` after the timeout, and for its own peer id get
+`true` immediately.
+
+### 28.9A.2 RP2 — Network time-synchronisation peer admission (implemented in reloaded)
+
+**RP2.** Immediately after a connection to a peer is established,
+the node MUST validate that peer's clock and disconnect peers
+whose clock is too far from local time. This guards swap timing
+assumptions that depend on near-synchronised clocks.
+
+- **Mechanism:** the node issues a request-response query over the
+  substrate's request-response sub-behaviour (§28.5 R6) asking the
+  newly-connected peer for its current UTC timestamp (Unix epoch
+  seconds). The peer replies with a msgpack-encoded unsigned
+  epoch-seconds value.
+- **Admission rule:** the node compares the reported timestamp to
+  its own UTC time. If the absolute difference is within the bound
+  maximum gap, the peer is admitted. If the difference exceeds the
+  gap — or the peer fails to return a well-formed timestamp — the
+  node MUST disconnect that peer.
+- **Bound threshold:** the maximum acceptable gap is **20
+  seconds**, exposed as a single named constant in the P2P layer.
+  This value is depended on by swap-timing defaults and MUST NOT be
+  changed casually.
+- **Gating:** the admission check is gated behind the substrate's
+  `application` build feature (it is part of the application-level
+  P2P behaviour, not the bare transport).
+
+**RP2 acceptance:** a peer whose reported UTC differs from local
+by ≤ 20 s stays connected; a peer reporting a timestamp outside
+that gap is disconnected shortly after connection establishment.
+
+### 28.9A.3 RP3 — Expirable pubkey bans (partially present; expiry missing)
+
+**RP3.** The pubkey-ban store MUST become **expirable**: a ban
+entry MAY carry a time-to-live and, when it does, MUST auto-clear
+once the TTL elapses without requiring an explicit unban. In
+reloaded today the ban store is a plain map and every ban is
+permanent until manually unbanned; the port adds expiry semantics
+and a duration knob.
+
+- **Manual ban — `ban_pubkey`.** The existing legacy RPC request
+  `{ "pubkey": <pubkey hash>, "reason": <string> }` MUST gain an
+  optional field `duration_min` (unsigned minutes). When
+  `duration_min` is present, the ban is inserted with that expiry
+  and auto-clears afterwards; when absent, the ban is **constant**
+  (persists until an explicit unban). Banning an already-banned
+  pubkey MUST be rejected. The response is the existing success
+  acknowledgement (`{ "result": "success" }`).
+- **Failed-swap auto-ban.** The automatic ban applied when a swap
+  fails MUST become **time-limited** with a bound penalty of **one
+  hour (3600 seconds)**, expiring automatically, rather than
+  permanent.
+- **List — `list_banned_pubkeys`.** Returns the current,
+  non-expired ban set as `{ "result": <map of pubkey hash → ban
+  reason> }`. The ban-reason wire shape is a `type`-tagged object:
+  `{ "type": "Manual", "reason": <string> }` or
+  `{ "type": "FailedSwap", "caused_by_swap": <uuid>,
+  "caused_by_event": <swap-event> }`.
+- **Unban — `unban_pubkeys`.** Request
+  `{ "unban_by": { "type": "All" } }` or
+  `{ "unban_by": { "type": "Few", "data": [ <pubkey hash>, … ] } }`.
+- **Difference from the existing swap-failure ban:** in reloaded
+  every ban is currently permanent; the port makes failed-swap
+  bans self-expire after one hour and lets manual bans opt into a
+  TTL via `duration_min`, while a manual ban with no `duration_min`
+  remains permanent. Expired entries disappear from
+  `list_banned_pubkeys` and stop being enforced without an explicit
+  unban.
+
+**RP3 acceptance:** a manual ban with `duration_min = N` disappears
+from `list_banned_pubkeys` and stops being enforced after N
+minutes; a manual ban with no `duration_min` persists until
+unbanned; a failed-swap ban self-expires after one hour; the
+`ban_pubkey` / `list_banned_pubkeys` / `unban_pubkeys` wire shapes
+above are preserved.
+
 ## 28.10 Tests (test invariants)
 
 **T1.** *Composed-behaviour shape.* A reflection-style test (or a
@@ -294,6 +418,12 @@ no more than 100 addresses in its response, regardless of how many
 peers the responder is connected to.
 
 ## 28.11 Deferred Work
+
+> **Note.** The §28.9A items (peer health-check RPC, time-sync
+> peer admission, expirable pubkey bans) are **required ports**,
+> NOT deferred work — they are binding driving-spec requirements
+> an implementer MUST land. The items below are genuine
+> deferrals.
 
 **D1.** A libp2p version bump (and the accompanying touch on every
 sub-behaviour and the swarm-builder code) is deferred. The substrate

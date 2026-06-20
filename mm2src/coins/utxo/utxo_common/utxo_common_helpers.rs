@@ -3,6 +3,7 @@
 use super::*;
 
 const MIN_BTC_TRADING_VOL: &str = "0.00777";
+const FIXED_FEE_MIN_VOL_TX_SIZE_BYTES: u64 = 496;
 
 /// Requests balance of the given `address`.
 pub async fn address_balance<T>(coin: &T, address: &Address) -> BalanceResult<CoinBalance>
@@ -21,8 +22,19 @@ where
         .compat()
         .await?;
 
+    // Electrum `display_balance` tracks the address script-hash (P2PKH/P2SH)
+    // and doesn't include legacy pay-to-pubkey outputs. Add P2PK script-level
+    // unspents for this address when applicable.
+    let p2pk_extra = crate::utxo::electrum_p2pk_unspents_for_address(coin.as_ref(), address)
+        .await
+        .mm_err(Into::into)?
+        .into_iter()
+        .fold(BigDecimal::default(), |acc, unspent| {
+            acc + big_decimal_from_sat_unsigned(unspent.value, coin.as_ref().decimals)
+        });
+
     Ok(CoinBalance {
-        spendable: balance,
+        spendable: balance + p2pk_extra,
         unspendable: BigDecimal::from(0),
     })
 }
@@ -310,8 +322,28 @@ pub fn min_trading_vol(coin: &UtxoCoinFields) -> MmNumber {
     if coin.conf.ticker == "BTC" {
         return MmNumber::from(MIN_BTC_TRADING_VOL);
     }
-    let dust_multiplier = MmNumber::from(10);
-    dust_multiplier * min_tx_amount(coin).into()
+
+    let min_vol_sat = non_btc_min_trading_vol_sat(coin.dust_amount, &coin.tx_fee);
+    big_decimal_from_sat_unsigned(min_vol_sat, coin.decimals).into()
+}
+
+fn non_btc_min_trading_vol_sat(dust_amount: u64, tx_fee: &TxFee) -> u64 {
+    let dust_based = dust_amount.saturating_mul(10);
+
+    let fee_based = match tx_fee {
+        TxFee::Dynamic(_) => 0,
+        // Fixed-fee policy uses a representative tx size (~496 bytes) and
+        // rounds up to avoid underestimating required trading volume.
+        TxFee::FixedPerKb(fee_per_kb) => {
+            let fee_for_repr_tx = fee_per_kb
+                .saturating_mul(FIXED_FEE_MIN_VOL_TX_SIZE_BYTES)
+                .saturating_add(KILO_BYTE - 1)
+                / KILO_BYTE;
+            fee_for_repr_tx.saturating_mul(10)
+        },
+    };
+
+    std::cmp::max(dust_based, fee_based)
 }
 
 pub fn is_asset_chain(coin: &UtxoCoinFields) -> bool { coin.conf.asset_chain }
@@ -581,5 +613,27 @@ where
                 })
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_btc_min_trading_vol_dynamic_is_dust_based() {
+        let min_sat = non_btc_min_trading_vol_sat(1000, &TxFee::Dynamic(EstimateFeeMethod::Standard));
+        assert_eq!(min_sat, 10_000);
+    }
+
+    #[test]
+    fn non_btc_min_trading_vol_fixed_uses_max_of_dust_and_fee_based() {
+        // fee_per_kb=1000 -> ceil(1000*496/1000)=496, then *10=4960 < dust-based 10000
+        let min_sat = non_btc_min_trading_vol_sat(1000, &TxFee::FixedPerKb(1000));
+        assert_eq!(min_sat, 10_000);
+
+        // fee_per_kb=5000 -> ceil(5000*496/1000)=2480, then *10=24800 > dust-based 10000
+        let min_sat = non_btc_min_trading_vol_sat(1000, &TxFee::FixedPerKb(5000));
+        assert_eq!(min_sat, 24_800);
     }
 }

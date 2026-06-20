@@ -14,7 +14,8 @@ use uuid::Uuid;
 pub const SELECT_MY_SWAP_V2_FOR_RPC_BY_UUID: &str =
     "SELECT my_coin, other_coin, uuid, started_at, is_finished, events_json, \
      maker_volume, taker_volume, premium, dex_fee, lock_duration, \
-     maker_coin_confs, maker_coin_nota, taker_coin_confs, taker_coin_nota, swap_version \
+    maker_coin_confs, maker_coin_nota, taker_coin_confs, taker_coin_nota, swap_version, \
+    maker_coin_usd_price, taker_coin_usd_price \
      FROM my_swaps WHERE uuid = ?1;";
 
 const MY_SWAPS_TABLE: &str = "my_swaps";
@@ -35,6 +36,8 @@ macro_rules! CREATE_MY_SWAPS_TABLE {
 }
 const INSERT_MY_SWAP: &str =
     "INSERT INTO my_swaps (my_coin, other_coin, uuid, started_at, swap_type) VALUES (?1, ?2, ?3, ?4, ?5)";
+const UPDATE_MY_SWAP_FIAT_SNAPSHOT: &str =
+    "UPDATE my_swaps SET maker_coin_usd_price = ?1, taker_coin_usd_price = ?2 WHERE uuid = ?3";
 
 pub fn insert_new_swap(
     ctx: &MmArc,
@@ -53,6 +56,20 @@ pub fn insert_new_swap(
         started_at,
         &swap_type.to_string(),
     ])
+    .map(|_| ())
+}
+
+pub fn update_my_swap_fiat_snapshot(
+    ctx: &MmArc,
+    uuid: &str,
+    maker_coin_usd_price: &str,
+    taker_coin_usd_price: &str,
+) -> SqlResult<()> {
+    let conn = ctx.sqlite_connection();
+    conn.execute(
+        UPDATE_MY_SWAP_FIAT_SNAPSHOT,
+        &[maker_coin_usd_price, taker_coin_usd_price, uuid],
+    )
     .map(|_| ())
 }
 

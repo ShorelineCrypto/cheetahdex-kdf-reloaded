@@ -10,3 +10,4 @@ pub mod init_create_account;
 pub mod init_scan_for_new_addresses;
 pub mod init_withdraw;
 pub mod tendermint;
+pub mod token_allowance;

@@ -79,6 +79,7 @@ cfg_wasm32! {
     pub(crate) use mm2_db::indexed_db::{ConstructibleDb, DbLocked, SharedDb};
     pub(crate) use hd_wallet_storage::HDWalletDb;
     pub(crate) use tx_history_db::TxHistoryDb;
+    pub(crate) use utxo::utxo_indexedb_block_header_storage::BlockHeaderStorageDb;
 
     pub type TxHistoryDbLocked<'a> = DbLocked<'a, TxHistoryDb>;
 }

@@ -1,6 +1,7 @@
 // utxo_common_tx — transaction building, signing, fee estimation, UTXO management
 
 use super::*;
+use utxo_signer::with_key_pair::sign_tx;
 
 pub const DEFAULT_FEE_VOUT: usize = 0;
 
@@ -948,12 +949,18 @@ pub async fn get_all_unspent_ordered_list<'a, T: UtxoCommonOps>(
     address: &Address,
 ) -> UtxoRpcResult<(Vec<UnspentInfo>, RecentlySpentOutPointsGuard<'a>)> {
     let decimals = coin.as_ref().decimals;
-    let unspents = coin
+    let mut unspents = coin
         .as_ref()
         .rpc_client
         .list_unspent(address, decimals)
         .compat()
         .await?;
+
+    // For Electrum legacy addresses also query `<pubkey> OP_CHECKSIG` (P2PK)
+    // script-hash unspents so they are available for selection and spending.
+    let mut p2pk_unspents = crate::utxo::electrum_p2pk_unspents_for_address(coin.as_ref(), address).await?;
+    unspents.append(&mut p2pk_unspents);
+
     let recently_spent = coin.as_ref().recently_spent_outpoints.lock().await;
     let unordered_unspents = recently_spent.replace_spent_outputs_with_cache(unspents.into_iter().collect());
     let ordered_unspents = sort_dedup_unspents(unordered_unspents);

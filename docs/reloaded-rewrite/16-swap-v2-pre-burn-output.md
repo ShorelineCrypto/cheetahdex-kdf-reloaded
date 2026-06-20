@@ -50,6 +50,50 @@ cover the version-two UTXO helper updates and signature-hash
 strategy; R21–R24 cover the activation surface and parallel
 chains.
 
+### 16.1.1 Reloaded policy state (informative)
+
+The data and split substrate of this chapter ships in full in the
+reloaded baseline; the per-network numeric policy that drives it
+is supplied by the dedicated network-configuration crate
+(`mm2_net_config`), with one `NetConfig` implementation per
+network identifier, replacing the hard-coded constants of the
+upstream baseline. The bound policy values exposed through the
+public `NetConfig` accessors are:
+
+- **Network identifier 8762** (original AtomicDEX network): base
+  `dex_fee_rate` = 1/777 (~0.129%); `dex_fee_rate_discounted` =
+  9/7770 (~0.116%, a 10% discount applied to the KMD ticker);
+  `burn_enabled` = false — no pre-burn output is produced on this
+  network.
+- **Network identifier 6133** (GLEEC network): base `dex_fee_rate`
+  = 2/100 (2%); `dex_fee_rate_discounted` = 1/100 (1%, a 50%
+  discount whose `fee_discount_tickers` set is `["GLEEC"]`);
+  `dex_fee_min_threshold` = 1/10000; `burn_enabled` = true with
+  `dex_fee_share` = 3/4 (75% to the fee address, 25% to the burn
+  destination, per the canonical split of §16.1).
+
+> **GLEEC-conformance note (informative).** On network identifier
+> 6133 the burn-destination public key returned by
+> `burn_addr_pubkey` is **deliberately equal** to the
+> fee-collection key returned by `dex_fee_addr_pubkey`. Both are
+> the single compressed secp256k1 key
+> `03a778d9bd346fa704cf3e2508cd074d93a1bbc1e504fbecbb0a8d48e7cccbbf5c`.
+> This is **not a reloaded divergence or a defect**: it reproduces
+> the GLEEC upstream configuration exactly, where the burn key is
+> set equal to the fee key so that the burn is effectively
+> neutralised at the address level — the 75/25 split still
+> executes structurally (a two-output transaction is built per
+> R6/R20), but the burned 25% lands in the same account as the
+> fee. The shared value is retained intentionally as a guard:
+> should the burn path ever be exercised unexpectedly, value is
+> directed to the network's own fee account rather than being
+> destroyed, and a genuinely distinct burn key can be substituted
+> later (here and in upstream) without a code change.
+> Implementations MUST keep these two keys equal on this network
+> to match GLEEC and MUST NOT assume the burn key differs from the
+> fee key. This equality is a required configuration invariant for
+> netid-6133 conformance, not a gap to be closed.
+
 ## 16.2 Subsystem Shape
 
 The substrate occupies a structural seam between four chapters:

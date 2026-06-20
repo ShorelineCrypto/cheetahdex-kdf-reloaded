@@ -1,5 +1,92 @@
 use super::*;
 
+#[cfg(feature = "ibc-routing-for-swaps")]
+fn tendermint_chain_id_from_conf(conf: &Json, platform_conf: Option<&Json>) -> Option<String> {
+    let protocol: CoinProtocol = json::from_value(conf["protocol"].clone()).ok()?;
+
+    match protocol {
+        CoinProtocol::TENDERMINT { chain_id, .. } => Some(chain_id),
+        CoinProtocol::TENDERMINTTOKEN { .. } => {
+            let platform_protocol: CoinProtocol = json::from_value(platform_conf?["protocol"].clone()).ok()?;
+            match platform_protocol {
+                CoinProtocol::TENDERMINT { chain_id, .. } => Some(chain_id),
+                _ => None,
+            }
+        },
+        _ => None,
+    }
+}
+
+#[cfg(feature = "ibc-routing-for-swaps")]
+fn tendermint_chain_id(ctx: &MmArc, coin: &MmCoinEnum) -> Option<String> {
+    let conf = coin_conf(ctx, coin.ticker());
+    let platform_conf = match json::from_value::<CoinProtocol>(conf["protocol"].clone()).ok()? {
+        CoinProtocol::TENDERMINTTOKEN { platform, .. } => Some(coin_conf(ctx, &platform)),
+        _ => None,
+    };
+
+    tendermint_chain_id_from_conf(&conf, platform_conf.as_ref())
+}
+
+#[cfg(feature = "ibc-routing-for-swaps")]
+fn min_balance_for_ibc_routing_from_conf(conf: &Json) -> MmNumber {
+    if let Some(amount) = conf["min_balance_for_ibc_routing"].as_str() {
+        if let Ok(parsed) = amount.parse::<BigDecimal>() {
+            return MmNumber::from(parsed);
+        }
+    }
+    if conf["min_balance_for_ibc_routing"].is_number() {
+        let amount = conf["min_balance_for_ibc_routing"].to_string();
+        if let Ok(parsed) = amount.parse::<BigDecimal>() {
+            return MmNumber::from(parsed);
+        }
+    }
+
+    MmNumber::from(2i32)
+}
+
+#[cfg(feature = "ibc-routing-for-swaps")]
+fn min_balance_for_ibc_routing(ctx: &MmArc, coin: &MmCoinEnum) -> MmNumber {
+    let conf = coin_conf(ctx, coin.ticker());
+    min_balance_for_ibc_routing_from_conf(&conf)
+}
+
+#[cfg(feature = "ibc-routing-for-swaps")]
+async fn ensure_ibc_routing_min_balance(
+    ctx: &MmArc,
+    base_coin: &MmCoinEnum,
+    rel_coin: &MmCoinEnum,
+) -> Result<(), String> {
+    let Some(base_chain_id) = tendermint_chain_id(ctx, base_coin) else {
+        return Ok(());
+    };
+    let Some(rel_chain_id) = tendermint_chain_id(ctx, rel_coin) else {
+        return Ok(());
+    };
+
+    if base_chain_id == rel_chain_id {
+        return Ok(());
+    }
+
+    let required_min_balance = min_balance_for_ibc_routing(ctx, base_coin);
+    let current_balance: MmNumber = base_coin
+        .my_spendable_balance()
+        .compat()
+        .await
+        .map_err(|e| e.to_string())?
+        .into();
+    if current_balance < required_min_balance {
+        return ERR!(
+            "IBC routing requires minimum balance on HTLC coin {}: required {}, current {}",
+            base_coin.ticker(),
+            required_min_balance.to_decimal(),
+            current_balance.to_decimal()
+        );
+    }
+
+    Ok(())
+}
+
 pub(crate) fn maker_order_created_p2p_notify(
     ctx: MmArc,
     order: &MakerOrder,
@@ -32,6 +119,98 @@ pub(crate) fn maker_order_created_p2p_notify(
     let orderbook_item: OrderbookItem = (message, hex::encode(key_pair.public_slice())).into();
     insert_or_update_my_order(&ctx, orderbook_item, order);
     broadcast_p2p_msg(&ctx, vec![topic], encoded_msg, peer_id);
+}
+
+#[cfg(all(test, feature = "ibc-routing-for-swaps"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tendermint_chain_id_from_conf_tendermint() {
+        let conf = json::json!({
+            "protocol": {
+                "type": "TENDERMINT",
+                "protocol_data": {
+                    "account_prefix": "cosmos",
+                    "chain_id": "cosmoshub-4"
+                }
+            }
+        });
+
+        let chain_id = tendermint_chain_id_from_conf(&conf, None);
+        assert_eq!(chain_id.as_deref(), Some("cosmoshub-4"));
+    }
+
+    #[test]
+    fn test_tendermint_chain_id_from_conf_tendermint_token_uses_platform() {
+        let token_conf = json::json!({
+            "protocol": {
+                "type": "TENDERMINTTOKEN",
+                "protocol_data": {
+                    "platform": "ATOM",
+                    "denom": "uatom",
+                    "decimals": 6
+                }
+            }
+        });
+        let platform_conf = json::json!({
+            "protocol": {
+                "type": "TENDERMINT",
+                "protocol_data": {
+                    "account_prefix": "cosmos",
+                    "chain_id": "cosmoshub-4"
+                }
+            }
+        });
+
+        let chain_id = tendermint_chain_id_from_conf(&token_conf, Some(&platform_conf));
+        assert_eq!(chain_id.as_deref(), Some("cosmoshub-4"));
+    }
+
+    #[test]
+    fn test_tendermint_chain_id_from_conf_tendermint_token_without_platform_conf_returns_none() {
+        let token_conf = json::json!({
+            "protocol": {
+                "type": "TENDERMINTTOKEN",
+                "protocol_data": {
+                    "platform": "ATOM",
+                    "denom": "uatom",
+                    "decimals": 6
+                }
+            }
+        });
+
+        let chain_id = tendermint_chain_id_from_conf(&token_conf, None);
+        assert!(chain_id.is_none());
+    }
+
+    #[test]
+    fn test_min_balance_for_ibc_routing_from_conf_string() {
+        let conf = json::json!({ "min_balance_for_ibc_routing": "2.75" });
+        let min = min_balance_for_ibc_routing_from_conf(&conf);
+        assert_eq!(min.to_decimal(), "2.75".parse::<BigDecimal>().unwrap());
+    }
+
+    #[test]
+    fn test_min_balance_for_ibc_routing_from_conf_numeric() {
+        let conf = json::json!({ "min_balance_for_ibc_routing": 3.5 });
+        let min = min_balance_for_ibc_routing_from_conf(&conf);
+        assert_eq!(min.to_decimal(), "3.5".parse::<BigDecimal>().unwrap());
+    }
+
+    #[test]
+    fn test_min_balance_for_ibc_routing_from_conf_invalid_falls_back_to_default() {
+        let conf = json::json!({ "min_balance_for_ibc_routing": "not-a-number" });
+        let min = min_balance_for_ibc_routing_from_conf(&conf);
+        assert_eq!(min.to_decimal(), BigDecimal::from(2));
+    }
+
+    #[test]
+    fn test_min_balance_for_ibc_routing_from_conf_missing_falls_back_to_default() {
+        let conf = json::json!({});
+        let min = min_balance_for_ibc_routing_from_conf(&conf);
+        assert_eq!(min.to_decimal(), BigDecimal::from(2));
+    }
 }
 
 pub(crate) fn process_my_maker_order_updated(ctx: &MmArc, message: &new_protocol::MakerOrderUpdated) {
@@ -1410,6 +1589,15 @@ pub async fn create_maker_order(ctx: &MmArc, req: SetPriceReq) -> Result<MakerOr
     }
     if rel_coin.wallet_only(ctx) {
         return ERR!("Rel coin {} is wallet only", req.rel);
+    }
+
+    #[cfg(feature = "ibc-routing-for-swaps")]
+    {
+        try_s!(
+            ensure_ibc_routing_min_balance(ctx, &base_coin, &rel_coin)
+                .or_else(|e| cancel_orders_on_error(ctx, &req, e))
+                .await
+        );
     }
 
     let volume = if req.max {

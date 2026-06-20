@@ -32,6 +32,15 @@ use std::{collections::hash_map::{DefaultHasher, HashMap},
 use void::Void;
 use wasm_timer::{Instant, Interval};
 
+#[cfg(feature = "application")]
+use crate::{decode_message, encode_message};
+#[cfg(feature = "application")]
+use futures::FutureExt;
+#[cfg(feature = "application")]
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "application")]
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub type AdexCmdTx = Sender<AdexBehaviourCmd>;
 pub type AdexEventRx = Receiver<AdexBehaviourEvent>;
 
@@ -42,6 +51,14 @@ const CONNECTED_RELAYS_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(600);
 const ANNOUNCE_INITIAL_DELAY: Duration = Duration::from_secs(60);
 const CHANNEL_BUF_SIZE: usize = 1024 * 8;
+#[cfg(feature = "application")]
+const MAX_ALLOWED_CLOCK_SKEW_SECS: u64 = 20;
+
+#[cfg(feature = "application")]
+#[derive(Deserialize, Serialize)]
+enum ApplicationRequest {
+    CurrentTimestamp,
+}
 
 /// Returns info about connected peers
 pub async fn get_peers_info(mut cmd_tx: AdexCmdTx) -> HashMap<String, Vec<String>> {
@@ -243,11 +260,96 @@ pub struct AtomicDexBehaviour {
     cmd_rx: Receiver<AdexBehaviourCmd>,
     gossipsub: Gossipsub,
     request_response: RequestResponseBehaviour,
+    #[cfg(feature = "application")]
+    #[behaviour(ignore)]
+    pending_clock_checks: HashMap<PeerId, oneshot::Receiver<PeerResponse>>,
     peers_exchange: PeersExchange,
     ping: AdexPing,
 }
 
 impl AtomicDexBehaviour {
+    #[cfg(feature = "application")]
+    fn request_peer_clock_check(&mut self, peer_id: PeerId) {
+        let request = match encode_message(&ApplicationRequest::CurrentTimestamp) {
+            Ok(req) => req,
+            Err(e) => {
+                error!("Error serializing clock-check request for peer {}: {}", peer_id, e);
+                return;
+            },
+        };
+
+        let (response_tx, response_rx) = oneshot::channel();
+        let request = PeerRequest { req: request };
+        self.request_response.send_request(&peer_id, request, response_tx);
+        self.pending_clock_checks.insert(peer_id, response_rx);
+    }
+
+    #[cfg(feature = "application")]
+    fn current_utc_timestamp_secs() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("SystemTime must be greater than unix epoch")
+            .as_secs()
+    }
+
+    #[cfg(feature = "application")]
+    fn is_peer_clock_check_passed(response: PeerResponse) -> bool {
+        let peer_timestamp = match response {
+            PeerResponse::Ok { res } => match decode_message::<u64>(&res) {
+                Ok(timestamp) => timestamp,
+                Err(e) => {
+                    error!("Malformed peer timestamp response: {}", e);
+                    return false;
+                },
+            },
+            PeerResponse::None => return false,
+            PeerResponse::Err { err } => {
+                error!("Error receiving peer timestamp response: {}", err);
+                return false;
+            },
+        };
+
+        let now = Self::current_utc_timestamp_secs();
+        let diff = now.abs_diff(peer_timestamp);
+        if diff > MAX_ALLOWED_CLOCK_SKEW_SECS {
+            error!(
+                "Peer clock skew {}s exceeds allowed {}s",
+                diff, MAX_ALLOWED_CLOCK_SKEW_SECS
+            );
+            return false;
+        }
+
+        true
+    }
+
+    #[cfg(feature = "application")]
+    fn process_pending_clock_checks(swarm: &mut AtomicDexSwarm, cx: &mut Context) {
+        let pending_checks = std::mem::take(&mut swarm.behaviour_mut().pending_clock_checks);
+        let mut still_pending = HashMap::new();
+
+        for (peer_id, mut response_rx) in pending_checks {
+            match response_rx.poll_unpin(cx) {
+                Poll::Ready(Ok(response)) => {
+                    if !Self::is_peer_clock_check_passed(response)
+                        && Swarm::disconnect_peer_id(swarm, peer_id).is_err()
+                    {
+                        error!("Peer {} disconnect error after failed clock check", peer_id);
+                    }
+                },
+                Poll::Ready(Err(_)) => {
+                    if Swarm::disconnect_peer_id(swarm, peer_id).is_err() {
+                        error!("Peer {} disconnect error after missing clock response", peer_id);
+                    }
+                },
+                Poll::Pending => {
+                    still_pending.insert(peer_id, response_rx);
+                },
+            }
+        }
+
+        swarm.behaviour_mut().pending_clock_checks = still_pending;
+    }
+
     fn notify_on_adex_event(&mut self, event: AdexBehaviourEvent) {
         if let Err(e) = self.event_tx.try_send(event) {
             error!("notify_on_adex_event error {}", e);
@@ -445,6 +547,21 @@ impl NetworkBehaviourEventProcess<RequestResponseBehaviourEvent> for AtomicDexBe
                 request,
                 response_channel,
             } => {
+                #[cfg(feature = "application")]
+                if matches!(decode_message::<ApplicationRequest>(&request.req), Ok(ApplicationRequest::CurrentTimestamp)) {
+                    let response = match encode_message(&Self::current_utc_timestamp_secs()) {
+                        Ok(now) => PeerResponse::Ok { res: now },
+                        Err(e) => PeerResponse::Err {
+                            err: format!("Error serializing current timestamp: {}", e),
+                        },
+                    };
+
+                    if let Err(response) = self.request_response.send_response(response_channel, response) {
+                        error!("Error sending timestamp response: {:?}", response);
+                    }
+                    return;
+                }
+
                 let event = AdexBehaviourEvent::PeerRequest {
                     peer_id,
                     request: request.req,
@@ -703,6 +820,8 @@ fn start_gossipsub(
             cmd_rx,
             gossipsub,
             request_response,
+            #[cfg(feature = "application")]
+            pending_clock_checks: HashMap::new(),
             peers_exchange,
             ping,
         };
@@ -759,11 +878,20 @@ fn start_gossipsub(
 
         loop {
             match swarm.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => debug!("Swarm event {:?}", event),
+                Poll::Ready(Some(event)) => {
+                    if let libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, .. } = event {
+                        #[cfg(feature = "application")]
+                        swarm.behaviour_mut().request_peer_clock_check(peer_id);
+                    }
+                    debug!("Swarm event {:?}", event)
+                },
                 Poll::Ready(None) => return Poll::Ready(()),
                 Poll::Pending => break,
             }
         }
+
+        #[cfg(feature = "application")]
+        AtomicDexBehaviour::process_pending_clock_checks(&mut swarm, cx);
 
         if swarm.behaviour().gossipsub.is_relay() {
             while let Poll::Ready(Some(())) = announce_interval.poll_next_unpin(cx) {
@@ -948,5 +1076,34 @@ async fn request_one_peer(peer: PeerId, req: Vec<u8>, mut request_response_tx: R
         Err(e) => PeerResponse::Err {
             err: format!("Error on request the peer {:?}: \"{:?}\". Request next peer", peer, e),
         },
+    }
+}
+
+#[cfg(all(test, feature = "application"))]
+mod application_tests {
+    use super::{ApplicationRequest, AtomicDexBehaviour, PeerResponse};
+    use crate::encode_message;
+
+    #[test]
+    fn is_peer_clock_check_passed_accepts_small_diff() {
+        let now = AtomicDexBehaviour::current_utc_timestamp_secs();
+        let encoded = encode_message(&(now.saturating_sub(1))).unwrap();
+        let response = PeerResponse::Ok { res: encoded };
+        assert!(AtomicDexBehaviour::is_peer_clock_check_passed(response));
+    }
+
+    #[test]
+    fn is_peer_clock_check_passed_rejects_malformed_payload() {
+        let response = PeerResponse::Ok {
+            res: vec![1_u8, 2_u8, 3_u8],
+        };
+        assert!(!AtomicDexBehaviour::is_peer_clock_check_passed(response));
+    }
+
+    #[test]
+    fn application_request_roundtrip() {
+        let encoded = encode_message(&ApplicationRequest::CurrentTimestamp).unwrap();
+        let decoded: ApplicationRequest = crate::decode_message(&encoded).unwrap();
+        assert!(matches!(decoded, ApplicationRequest::CurrentTimestamp));
     }
 }
