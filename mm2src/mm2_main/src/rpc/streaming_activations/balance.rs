@@ -63,6 +63,19 @@ async fn watched_balance(coin: &MmCoinEnum, watched_address: &Option<String>) ->
     }
 }
 
+fn should_emit_balance_event(
+    prev_spendable: Option<&String>,
+    prev_unspendable: Option<&String>,
+    prev_watched_address: Option<&String>,
+    spendable: &String,
+    unspendable: &String,
+    watched_address: Option<&String>,
+) -> bool {
+    prev_spendable != Some(spendable)
+        || prev_unspendable != Some(unspendable)
+        || prev_watched_address != watched_address
+}
+
 /// Per-coin configuration for the balance streamer.
 #[derive(Deserialize)]
 pub struct EnableBalanceRequest {
@@ -128,6 +141,7 @@ impl EventStreamer for BalanceEventStreamer {
         let mut prev_spendable: Option<String> = None;
         let mut prev_unspendable: Option<String> = None;
         let mut watched_address: Option<String> = electrum_utxo_watch_address(&coin);
+        let mut prev_watched_address: Option<String> = None;
 
         // Emit an initial snapshot right away so clients don't wait for the first interval tick.
         match watched_balance(&coin, &watched_address).await {
@@ -137,6 +151,7 @@ impl EventStreamer for BalanceEventStreamer {
 
                 prev_spendable = Some(spendable.clone());
                 prev_unspendable = Some(unspendable.clone());
+                prev_watched_address = watched_address.clone();
 
                 let event = Event::new(
                     sid.clone(),
@@ -181,13 +196,20 @@ impl EventStreamer for BalanceEventStreamer {
                             let spendable = balance.spendable.to_string();
                             let unspendable = balance.unspendable.to_string();
 
-                            // Emit only when balance has changed.
-                            let changed = prev_spendable.as_ref() != Some(&spendable)
-                                || prev_unspendable.as_ref() != Some(&unspendable);
+                            // Emit when the balance or the watched Electrum UTXO address changes.
+                            let changed = should_emit_balance_event(
+                                prev_spendable.as_ref(),
+                                prev_unspendable.as_ref(),
+                                prev_watched_address.as_ref(),
+                                &spendable,
+                                &unspendable,
+                                watched_address.as_ref(),
+                            );
 
                             if changed {
                                 prev_spendable = Some(spendable.clone());
                                 prev_unspendable = Some(unspendable.clone());
+                                prev_watched_address = watched_address.clone();
 
                                 let event = Event::new(
                                     sid.clone(),
@@ -240,4 +262,47 @@ pub async fn enable_balance(
         .map_err(|e| MmError::new(StreamingError::InitFailed(e)))?;
 
     Ok(EnableStreamingResponse::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_emit_balance_event;
+
+    #[test]
+    fn emits_when_watched_address_changes() {
+        let prev_spendable = Some("1".to_string());
+        let prev_unspendable = Some("0".to_string());
+        let prev_watched_address = Some("RoldAddress".to_string());
+        let spendable = "1".to_string();
+        let unspendable = "0".to_string();
+        let watched_address = Some("RnewAddress".to_string());
+
+        assert!(should_emit_balance_event(
+            prev_spendable.as_ref(),
+            prev_unspendable.as_ref(),
+            prev_watched_address.as_ref(),
+            &spendable,
+            &unspendable,
+            watched_address.as_ref(),
+        ));
+    }
+
+    #[test]
+    fn skips_when_balance_and_watched_address_are_unchanged() {
+        let prev_spendable = Some("1".to_string());
+        let prev_unspendable = Some("0".to_string());
+        let prev_watched_address = Some("RsameAddress".to_string());
+        let spendable = "1".to_string();
+        let unspendable = "0".to_string();
+        let watched_address = Some("RsameAddress".to_string());
+
+        assert!(!should_emit_balance_event(
+            prev_spendable.as_ref(),
+            prev_unspendable.as_ref(),
+            prev_watched_address.as_ref(),
+            &spendable,
+            &unspendable,
+            watched_address.as_ref(),
+        ));
+    }
 }
