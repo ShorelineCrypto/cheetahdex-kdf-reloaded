@@ -318,6 +318,16 @@ impl ElectrumClientImpl {
 
     pub async fn count_connections(&self) -> usize { self.connections.lock().await.len() }
 
+    pub async fn count_connected(&self) -> usize {
+        let mut connected = 0;
+        for connection in self.connections.lock().await.iter() {
+            if connection.is_connected().await {
+                connected += 1;
+            }
+        }
+        connected
+    }
+
     /// Check if the protocol version was checked for one of the spawned connections.
     pub async fn is_protocol_version_checked(&self) -> bool {
         for connection in self.connections.lock().await.iter() {

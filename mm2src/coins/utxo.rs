@@ -1355,7 +1355,11 @@ impl UtxoActivationParams {
             Some("electrum") => {
                 let servers =
                     json::from_value(req["servers"].clone()).map_to_mm(UtxoFromLegacyReqErr::InvalidElectrumServers)?;
-                UtxoRpcMode::Electrum { servers }
+                UtxoRpcMode::Electrum {
+                    servers,
+                    min_connected: None,
+                    max_connected: None,
+                }
             },
             _ => return MmError::err(UtxoFromLegacyReqErr::UnexpectedMethod),
         };
@@ -1397,7 +1401,13 @@ impl UtxoActivationParams {
 #[serde(tag = "rpc", content = "rpc_data")]
 pub enum UtxoRpcMode {
     Native,
-    Electrum { servers: Vec<ElectrumRpcRequest> },
+    Electrum {
+        servers: Vec<ElectrumRpcRequest>,
+        #[serde(default)]
+        min_connected: Option<usize>,
+        #[serde(default)]
+        max_connected: Option<usize>,
+    },
 }
 
 #[derive(Debug)]

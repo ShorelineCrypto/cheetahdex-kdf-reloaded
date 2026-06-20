@@ -13,7 +13,6 @@ use crate::{BlockchainNetwork, CoinTransportMetrics, DerivationMethod, HistorySy
 use async_trait::async_trait;
 use chain::TxHashAlgo;
 use common::executor::{spawn, Timer};
-use common::small_rng;
 use crypto::GlobalHDAccountArc;
 use crypto::{Bip32DerPathError, Bip32DerPathOps, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoCtxError,
              CryptoInitError, HwWalletType};
@@ -28,7 +27,6 @@ pub use keys::{Address, AddressFormat as UtxoAddressFormat, AddressHashEnum, Key
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use primitives::hash::H256;
-use rand::seq::SliceRandom;
 use serde_json::{self as json, Value as Json};
 use std::sync::{Arc, Mutex, Weak};
 
@@ -539,8 +537,14 @@ pub trait UtxoCoinBuilderCommonOps {
                     Ok(UtxoRpcClientEnum::Native(native))
                 }
             },
-            UtxoRpcMode::Electrum { servers } => {
-                let electrum = self.electrum_client(ElectrumBuilderArgs::default(), servers).await?;
+            UtxoRpcMode::Electrum {
+                servers,
+                min_connected,
+                max_connected,
+            } => {
+                let electrum = self
+                    .electrum_client(ElectrumBuilderArgs::default(), servers, min_connected, max_connected)
+                    .await?;
                 Ok(UtxoRpcClientEnum::Electrum(electrum))
             },
         }
@@ -550,6 +554,8 @@ pub trait UtxoCoinBuilderCommonOps {
         &self,
         args: ElectrumBuilderArgs,
         mut servers: Vec<ElectrumRpcRequest>,
+        min_connected: Option<usize>,
+        max_connected: Option<usize>,
     ) -> UtxoCoinBuildResult<ElectrumClient> {
         let (on_connect_tx, on_connect_rx) = mpsc::unbounded();
         let ticker = self.ticker().to_owned();
@@ -565,8 +571,12 @@ pub trait UtxoCoinBuilderCommonOps {
             event_handlers.push(ElectrumProtoVerifier { on_connect_tx }.into_shared());
         }
 
-        let mut rng = small_rng();
-        servers.as_mut_slice().shuffle(&mut rng);
+        let max_connected = max_connected.unwrap_or(servers.len()).max(1);
+        let min_connected = min_connected.unwrap_or(1).max(1).min(max_connected);
+        if servers.len() > max_connected {
+            servers.truncate(max_connected);
+        }
+
         let client = ElectrumClientImpl::new(ticker, event_handlers);
         for server in servers.iter() {
             match client.add_server(server).await {
@@ -576,7 +586,7 @@ pub trait UtxoCoinBuilderCommonOps {
         }
 
         let mut attempts = 0i32;
-        while !client.is_connected().await {
+        while client.count_connected().await < min_connected {
             if attempts >= 10 {
                 return MmError::err(UtxoCoinBuildError::FailedToConnectToElectrums {
                     electrum_servers: servers.clone(),
