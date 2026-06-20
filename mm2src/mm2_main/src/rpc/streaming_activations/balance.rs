@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use common::executor::Timer;
 use common::log;
+use coins::utxo::utxo_common::{address_balance as utxo_address_balance, address_from_str_unchecked};
 use futures::compat::Future01CompatExt;
 use futures::future::{select, Either};
 use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
@@ -41,6 +42,24 @@ fn electrum_utxo_watch_address(coin: &MmCoinEnum) -> Option<String> {
             }
         },
         _ => None,
+    }
+}
+
+async fn watched_balance(coin: &MmCoinEnum, watched_address: &Option<String>) -> Result<coins::CoinBalance, String> {
+    match (coin, watched_address.as_deref()) {
+        (MmCoinEnum::UtxoCoin(c), Some(address)) if !c.as_ref().rpc_client.is_native() => {
+            let address = address_from_str_unchecked(c.as_ref(), address)?;
+            utxo_address_balance(c, &address).await.map_err(|e| e.to_string())
+        },
+        (MmCoinEnum::QtumCoin(c), Some(address)) if !c.as_ref().rpc_client.is_native() => {
+            let address = address_from_str_unchecked(c.as_ref(), address)?;
+            utxo_address_balance(c, &address).await.map_err(|e| e.to_string())
+        },
+        (MmCoinEnum::Bch(c), Some(address)) if !c.as_ref().rpc_client.is_native() => {
+            let address = address_from_str_unchecked(c.as_ref(), address)?;
+            utxo_address_balance(c, &address).await.map_err(|e| e.to_string())
+        },
+        _ => coin.my_balance().compat().await.map_err(|e| e.to_string()),
     }
 }
 
@@ -111,7 +130,7 @@ impl EventStreamer for BalanceEventStreamer {
         let mut watched_address: Option<String> = electrum_utxo_watch_address(&coin);
 
         // Emit an initial snapshot right away so clients don't wait for the first interval tick.
-        match coin.my_balance().compat().await {
+        match watched_balance(&coin, &watched_address).await {
             Ok(balance) => {
                 let spendable = balance.spendable.to_string();
                 let unspendable = balance.unspendable.to_string();
@@ -157,7 +176,7 @@ impl EventStreamer for BalanceEventStreamer {
             let sleep = core::pin::pin!(sleep);
             match select(sleep, &mut shutdown).await {
                 Either::Left(_) => {
-                    match coin.my_balance().compat().await {
+                    match watched_balance(&coin, &watched_address).await {
                         Ok(balance) => {
                             let spendable = balance.spendable.to_string();
                             let unspendable = balance.unspendable.to_string();
