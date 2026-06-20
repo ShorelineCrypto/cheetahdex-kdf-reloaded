@@ -85,7 +85,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, Weak};
 use utxo_builder::UtxoConfBuilder;
 use utxo_common::{big_decimal_from_sat, UtxoTxBuilder};
-use utxo_signer::with_key_pair::sign_tx;
+use utxo_signer::with_key_pair::sign_tx_with_p2pk;
 use utxo_signer::{TxProvider, TxProviderError, UtxoSignTxError, UtxoSignTxResult};
 
 use self::rpc_clients::{electrum_script_hash, ElectrumClient, ElectrumRpcRequest, EstimateFeeMethod, EstimateFeeMode,
@@ -1709,6 +1709,8 @@ where
     let my_address = try_tx_s!(coin.as_ref().derivation_method.iguana_or_err());
     let key_pair = try_tx_s!(coin.as_ref().priv_key_policy.key_pair_or_err());
 
+    let p2pk_outpoints: HashSet<OutPoint> = HashSet::new();
+
     let mut builder = UtxoTxBuilder::new(coin)
         .add_available_inputs(unspents)
         .add_outputs(outputs)
@@ -1734,12 +1736,13 @@ where
     };
 
     let prev_script = Builder::build_p2pkh(&my_address.hash);
-    let signed = try_tx_s!(sign_tx(
+    let signed = try_tx_s!(sign_tx_with_p2pk(
         unsigned,
         key_pair,
         prev_script,
         signature_version,
-        coin.as_ref().conf.fork_id
+        coin.as_ref().conf.fork_id,
+        &p2pk_outpoints,
     ));
 
     try_tx_s!(coin.broadcast_tx(&signed).await, signed);

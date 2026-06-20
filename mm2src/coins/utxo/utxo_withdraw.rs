@@ -5,7 +5,8 @@ use crate::utxo::{output_script, sat_from_big_decimal, ActualTxFee, Address, Fee
 use crate::{CoinWithDerivationMethod, GetWithdrawSenderAddress, MarketCoinOps, TransactionDetails, WithdrawError,
             WithdrawFee, WithdrawRequest, WithdrawResult};
 use async_trait::async_trait;
-use chain::TransactionOutput;
+use chain::{OutPoint, TransactionOutput};
+use std::collections::HashSet;
 use common::log::info;
 use common::now_ms;
 use crypto::hw_rpc_task::{HwConnectStatuses, TrezorRpcTaskConnectProcessor};
@@ -127,7 +128,11 @@ where
 
     fn on_finishing(&self) -> Result<(), MmError<WithdrawError>>;
 
-    async fn sign_tx(&self, unsigned_tx: TransactionInputSigner) -> Result<UtxoTx, MmError<WithdrawError>>;
+    async fn sign_tx(
+        &self,
+        unsigned_tx: TransactionInputSigner,
+        p2pk_outpoints: &HashSet<OutPoint>,
+    ) -> Result<UtxoTx, MmError<WithdrawError>>;
 
     async fn build(self) -> WithdrawResult {
         let coin = self.coin();
@@ -161,6 +166,7 @@ where
             .get_unspent_ordered_list(&self.sender_address())
             .await
             .mm_err(Into::into)?;
+        let p2pk_outpoints: HashSet<OutPoint> = HashSet::new();
         let (value, fee_policy) = if req.max {
             (
                 unspents.iter().fold(0, |sum, unspent| sum + unspent.value),
@@ -202,7 +208,7 @@ where
             .mm_err(|gen_tx_error| WithdrawError::from_generate_tx_error(gen_tx_error, ticker.clone(), decimals))?;
 
         // Sign the `unsigned` transaction.
-        let signed = self.sign_tx(unsigned).await?;
+        let signed = self.sign_tx(unsigned, &p2pk_outpoints).await?;
 
         // Finish by generating `TransactionDetails` from the signed transaction.
         self.on_finishing()?;
@@ -289,7 +295,11 @@ where
             .mm_err(Into::into)?)
     }
 
-    async fn sign_tx(&self, unsigned_tx: TransactionInputSigner) -> Result<UtxoTx, MmError<WithdrawError>> {
+    async fn sign_tx(
+        &self,
+        unsigned_tx: TransactionInputSigner,
+        _p2pk_outpoints: &HashSet<OutPoint>,
+    ) -> Result<UtxoTx, MmError<WithdrawError>> {
         self.task_handle
             .update_in_progress_status(WithdrawInProgressStatus::SigningTransaction)
             .mm_err(Into::into)?;
@@ -430,19 +440,24 @@ where
 
     fn on_finishing(&self) -> Result<(), MmError<WithdrawError>> { Ok(()) }
 
-    async fn sign_tx(&self, unsigned_tx: TransactionInputSigner) -> Result<UtxoTx, MmError<WithdrawError>> {
+    async fn sign_tx(
+        &self,
+        unsigned_tx: TransactionInputSigner,
+        p2pk_outpoints: &HashSet<OutPoint>,
+    ) -> Result<UtxoTx, MmError<WithdrawError>> {
         let key_pair = self
             .coin
             .as_ref()
             .priv_key_policy
             .key_pair_or_err()
             .mm_err(Into::into)?;
-        Ok(with_key_pair::sign_tx(
+        Ok(with_key_pair::sign_tx_with_p2pk(
             unsigned_tx,
             key_pair,
             self.prev_script(),
             self.signature_version(),
             self.coin.as_ref().conf.fork_id,
+            p2pk_outpoints,
         )
         .mm_err(Into::into)?)
     }

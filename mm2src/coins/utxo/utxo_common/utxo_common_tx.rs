@@ -1,6 +1,7 @@
 // utxo_common_tx — transaction building, signing, fee estimation, UTXO management
 
 use super::*;
+use utxo_signer::with_key_pair::sign_tx;
 
 pub const DEFAULT_FEE_VOUT: usize = 0;
 
@@ -954,6 +955,7 @@ pub async fn get_all_unspent_ordered_list<'a, T: UtxoCommonOps>(
         .list_unspent(address, decimals)
         .compat()
         .await?;
+
     let recently_spent = coin.as_ref().recently_spent_outpoints.lock().await;
     let unordered_unspents = recently_spent.replace_spent_outputs_with_cache(unspents.into_iter().collect());
     let ordered_unspents = sort_dedup_unspents(unordered_unspents);

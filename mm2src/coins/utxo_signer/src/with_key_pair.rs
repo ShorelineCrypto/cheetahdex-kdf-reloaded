@@ -1,13 +1,14 @@
 use crate::sign_common::{complete_tx, p2pk_spend_with_signature, p2pkh_spend_with_signature,
                          p2sh_spend_with_signature, p2wpkh_spend_with_signature};
 use crate::Signature;
-use chain::{Transaction as UtxoTx, TransactionInput};
+use chain::{OutPoint, Transaction as UtxoTx, TransactionInput};
 use derive_more::Display;
 use keys::bytes::Bytes;
 use keys::KeyPair;
 use mm2_err_handle::prelude::*;
 use primitives::hash::H256;
 use script::{Builder, Script, SignatureVersion, TransactionInputSigner, UnsignedTransactionInput};
+use std::collections::HashSet;
 
 pub type UtxoSignWithKeyPairResult<T> = Result<T, MmError<UtxoSignWithKeyPairError>>;
 
@@ -41,32 +42,55 @@ pub fn sign_tx(
     signature_version: SignatureVersion,
     fork_id: u32,
 ) -> UtxoSignWithKeyPairResult<UtxoTx> {
+    sign_tx_with_p2pk(
+        unsigned,
+        key_pair,
+        prev_script,
+        signature_version,
+        fork_id,
+        &HashSet::new(),
+    )
+}
+
+/// Like [`sign_tx`], but the inputs whose previous outpoint is listed in `p2pk_outpoints`
+/// are treated as pay-to-pubkey (P2PK) outputs and signed with a signature-only scriptSig.
+///
+/// This is the entry point used by the withdraw/selection path: P2PK unspents discovered for
+/// the wallet's legacy address are spendable alongside ordinary P2PKH/P2WPKH inputs. When the
+/// `p2pk_outpoints` set is empty this behaves exactly like [`sign_tx`], keeping the existing
+/// callers unaffected.
+pub fn sign_tx_with_p2pk(
+    unsigned: TransactionInputSigner,
+    key_pair: &KeyPair,
+    prev_script: Script,
+    signature_version: SignatureVersion,
+    fork_id: u32,
+    p2pk_outpoints: &HashSet<OutPoint>,
+) -> UtxoSignWithKeyPairResult<UtxoTx> {
     let mut signed_inputs = vec![];
-    match signature_version {
-        SignatureVersion::WitnessV0 => {
-            for (i, _) in unsigned.inputs.iter().enumerate() {
-                signed_inputs.push(p2wpkh_spend(
-                    &unsigned,
-                    i,
-                    key_pair,
-                    prev_script.clone(),
-                    signature_version,
-                    fork_id,
-                )?);
-            }
-        },
-        _ => {
-            for (i, _) in unsigned.inputs.iter().enumerate() {
-                signed_inputs.push(p2pkh_spend(
-                    &unsigned,
-                    i,
-                    key_pair,
-                    prev_script.clone(),
-                    signature_version,
-                    fork_id,
-                )?);
-            }
-        },
+    for (i, input) in unsigned.inputs.iter().enumerate() {
+        if p2pk_outpoints.contains(&input.previous_output) {
+            signed_inputs.push(p2pk_spend(&unsigned, i, key_pair, signature_version, fork_id)?);
+            continue;
+        }
+        match signature_version {
+            SignatureVersion::WitnessV0 => signed_inputs.push(p2wpkh_spend(
+                &unsigned,
+                i,
+                key_pair,
+                prev_script.clone(),
+                signature_version,
+                fork_id,
+            )?),
+            _ => signed_inputs.push(p2pkh_spend(
+                &unsigned,
+                i,
+                key_pair,
+                prev_script.clone(),
+                signature_version,
+                fork_id,
+            )?),
+        }
     }
     Ok(complete_tx(unsigned, signed_inputs))
 }
