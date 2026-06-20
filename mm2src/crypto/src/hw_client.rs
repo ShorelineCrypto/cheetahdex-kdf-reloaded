@@ -153,7 +153,7 @@ impl HwClient {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
     pub(crate) async fn trezor<Processor: TrezorConnectProcessor>(
         processor: &Processor,
     ) -> MmResult<TrezorClient, HwProcessingError<Processor::Error>> {
@@ -199,5 +199,16 @@ impl HwClient {
                 MmError::err(HwProcessingError::HwError(HwError::ConnectionTimedOut { timeout }))
             },
         }
+    }
+
+    #[cfg(target_os = "ios")]
+    pub(crate) async fn trezor<Processor: TrezorConnectProcessor>(
+        processor: &Processor,
+    ) -> MmResult<TrezorClient, HwProcessingError<Processor::Error>> {
+        let _timeout = processor.on_connect().await?;
+        processor.on_connection_failed().await?;
+        MmError::err(HwProcessingError::HwError(HwError::TransportNotSupported {
+            transport: "USB".to_owned(),
+        }))
     }
 }

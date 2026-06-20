@@ -1,17 +1,24 @@
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::mm2::database::my_swaps::update_my_swap_fiat_snapshot;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::mm2::database::stats_swaps::FiatPriceSnapshot;
+#[cfg(not(target_arch = "wasm32"))]
 use mm2_net::transport::slurp_url;
 
+#[cfg(not(target_arch = "wasm32"))]
 const PRICE_SERVICE_ENDPOINT: &str = "https://prices.komodo.live:1313/api/v2/tickers";
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Deserialize)]
 struct FiatTickerInfo {
     last_price: BigDecimal,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn strip_platform_suffix(ticker: &str) -> &str { ticker.split('-').next().unwrap_or(ticker) }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn fetch_completion_fiat_snapshot(swap: &SavedSwap) -> Option<FiatPriceSnapshot> {
     let maker_coin = swap.maker_coin_ticker().ok()?;
     let taker_coin = swap.taker_coin_ticker().ok()?;
