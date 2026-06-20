@@ -9,7 +9,8 @@
 //! - Keys are serialized once for the response and not persisted or logged.
 
 use common::HttpStatusCode;
-use crypto::{CryptoCtx, CryptoCtxError};
+use crypto::{Bip32DerPathOps, Bip44PathToCoin, ChildNumber, CryptoCtx, CryptoCtxError, DerivationPath, GlobalHDAccountArc,
+             KeyPairPolicy, Secp256k1Secret};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -17,7 +18,17 @@ use mm2_err_handle::prelude::*;
 use ser_error_derive::SerializeErrorType;
 use serde::{Deserialize, Serialize};
 
-use crate::{lp_coinfind, MarketCoinOps};
+use crate::eth::{addr_from_raw_pubkey, checksum_address};
+use crate::tendermint::account_id_from_pubkey_hex;
+use crate::utxo::utxo_builder::UtxoConfBuilder;
+use crate::utxo::{Address as UtxoAddress, AddressHashEnum, KeyPair as UtxoKeyPair, Private as UtxoPrivate,
+                  UtxoActivationParams};
+use crate::{coin_conf, lp_coinfind, CoinProtocol, MarketCoinOps};
+
+/// Maximum number of HD addresses derivable in a single `get_private_keys`
+/// call (R-K4). A request whose `[start_index, end_index]` range exceeds this
+/// bound is refused with a typed error.
+const MAX_HD_ADDRESSES_PER_CALL: u32 = 100;
 
 // ── Request / Response types ────────────────────────────────────────────
 
@@ -82,9 +93,62 @@ pub struct CoinKeyInfo {
     pub pubkey: String,
 }
 
+/// A single per-coin entry of the opt-in `iguana`-mode superset response (R-K4).
 #[derive(Serialize)]
-pub struct GetPrivateKeysResponse {
-    pub keys: Vec<CoinKeyInfo>,
+pub struct IguanaKeyEntry {
+    pub coin: String,
+    pub pubkey: String,
+    pub address: String,
+    pub priv_key: String,
+    /// Shielded full viewing key (ZHTLC only); omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewing_key: Option<String>,
+}
+
+/// A single derived address of the opt-in `hd`-mode superset response (R-K4).
+#[derive(Serialize)]
+pub struct HdAddressEntry {
+    /// The full BIP-44-style derivation path of this address.
+    pub derivation_path: String,
+    /// The shielded derivation path (ZHTLC only); omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub z_derivation_path: Option<String>,
+    pub pubkey: String,
+    pub address: String,
+    pub priv_key: String,
+    /// Shielded full viewing key (ZHTLC only); omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewing_key: Option<String>,
+}
+
+/// A per-coin entry of the opt-in `hd`-mode superset response (R-K4).
+#[derive(Serialize)]
+pub struct HdKeyEntry {
+    pub coin: String,
+    pub addresses: Vec<HdAddressEntry>,
+}
+
+/// `get_private_keys` response (R-K4 interop). The reduced, always-available
+/// form returns the `{keys: [...]}` object; the opt-in superset returns an
+/// untagged array of per-coin objects whose shape depends on the export mode.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum GetPrivateKeysResponse {
+    /// Reduced activated-coins form (R-K3).
+    Reduced { keys: Vec<CoinKeyInfo> },
+    /// Opt-in `iguana`-mode superset (R-K4).
+    Iguana(Vec<IguanaKeyEntry>),
+    /// Opt-in `hd`-mode superset (R-K4).
+    Hd(Vec<HdKeyEntry>),
+}
+
+/// Internal carrier for a single derived key triple plus an optional shielded
+/// viewing key, shared by the per-protocol derivation helpers.
+struct DerivedKey {
+    pubkey: String,
+    address: String,
+    priv_key: String,
+    viewing_key: Option<String>,
 }
 
 // ── Error type ──────────────────────────────────────────────────────────
@@ -94,8 +158,22 @@ pub struct GetPrivateKeysResponse {
 pub enum GetPrivateKeysError {
     #[display(fmt = "Coin not activated: {}", _0)]
     CoinNotActive(String),
+    #[display(fmt = "Coin configuration not found: {}", _0)]
+    CoinConfigNotFound(String),
+    #[display(fmt = "Could not parse the protocol of {}: {}", ticker, reason)]
+    CoinProtocolParseError { ticker: String, reason: String },
     #[display(fmt = "Key export failed for {}: {}", ticker, reason)]
     KeyExportFailed { ticker: String, reason: String },
+    #[display(fmt = "Key derivation failed for {}: {}", ticker, reason)]
+    KeyDerivationFailed { ticker: String, reason: String },
+    #[display(fmt = "HD index range is inverted: start_index {} > end_index {}", start, end)]
+    HdRangeInverted { start: u32, end: u32 },
+    #[display(fmt = "HD index range of {} addresses exceeds the maximum of {}", requested, max)]
+    HdRangeExceedsMax { requested: u32, max: u32 },
+    #[display(fmt = "Required protocol prefix is missing for {}", _0)]
+    MissingProtocolPrefix(String),
+    #[display(fmt = "Index parameters (start_index/end_index/account_index) are valid only in `hd` mode")]
+    IndexParamsOutsideHdMode,
     #[display(fmt = "Internal error: {}", _0)]
     Internal(String),
     #[display(fmt = "Hardware wallets do not expose private keys")]
@@ -104,19 +182,25 @@ pub enum GetPrivateKeysError {
         fmt = "Insecure key export is disabled; set `allow_insecure_key_export=true` in MM2.json to enable the offline/HD/ZHTLC export superset"
     )]
     InsecureExportDisabled,
-    #[display(fmt = "Key-export mode not yet implemented: {}", _0)]
-    SupersetNotYetImplemented(String),
 }
 
 impl HttpStatusCode for GetPrivateKeysError {
     fn status_code(&self) -> StatusCode {
         match self {
-            GetPrivateKeysError::CoinNotActive(_) => StatusCode::BAD_REQUEST,
-            GetPrivateKeysError::KeyExportFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            GetPrivateKeysError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            GetPrivateKeysError::HardwareWalletNotSupported => StatusCode::BAD_REQUEST,
+            // Client-input faults → 400.
+            GetPrivateKeysError::CoinNotActive(_)
+            | GetPrivateKeysError::CoinConfigNotFound(_)
+            | GetPrivateKeysError::HdRangeInverted { .. }
+            | GetPrivateKeysError::HdRangeExceedsMax { .. }
+            | GetPrivateKeysError::IndexParamsOutsideHdMode
+            | GetPrivateKeysError::HardwareWalletNotSupported => StatusCode::BAD_REQUEST,
+            // Derivation / data / internal faults → 500.
+            GetPrivateKeysError::CoinProtocolParseError { .. }
+            | GetPrivateKeysError::KeyExportFailed { .. }
+            | GetPrivateKeysError::KeyDerivationFailed { .. }
+            | GetPrivateKeysError::MissingProtocolPrefix(_)
+            | GetPrivateKeysError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             GetPrivateKeysError::InsecureExportDisabled => StatusCode::FORBIDDEN,
-            GetPrivateKeysError::SupersetNotYetImplemented(_) => StatusCode::NOT_IMPLEMENTED,
         }
     }
 }
@@ -163,18 +247,11 @@ pub async fn get_private_keys(
         return MmError::err(GetPrivateKeysError::HardwareWalletNotSupported);
     }
 
-    // TODO(ch07b): implement the opt-in superset (R-K4) — offline export of
-    // merely-configured coins, HD per-derivation-path ranges bounded at 100
-    // addresses per call, and ZHTLC shielded `viewing_key` / `z_derivation_path`
-    // export — together with the untagged-union response shape. Until then the
-    // switch is genuinely consumed (the gate above) and an opted-in superset
-    // request returns a typed not-implemented error rather than a panic.
+    // Opt-in superset (R-K4): offline export of merely-configured coins, HD
+    // per-derivation-path ranges, and protocol-specific formatting, returned
+    // via the untagged-union response shape.
     if req.requests_superset() {
-        let mode = match req.mode {
-            GetPrivateKeysMode::Hd => "hd",
-            GetPrivateKeysMode::Iguana => "iguana (offline/shielded)",
-        };
-        return MmError::err(GetPrivateKeysError::SupersetNotYetImplemented(mode.to_owned()));
+        return export_superset(&ctx, &crypto_ctx, &req);
     }
 
     let mut keys = Vec::with_capacity(req.coins.len());
@@ -225,7 +302,293 @@ pub async fn get_private_keys(
         });
     }
 
-    Ok(GetPrivateKeysResponse { keys })
+    Ok(GetPrivateKeysResponse::Reduced { keys })
+}
+
+// ── Opt-in superset (R-K4) ──────────────────────────────────────────────
+
+/// Export private keys for the opt-in superset (R-K4): any configured coin
+/// (regardless of activation), per-protocol formatting, and — in `hd` mode —
+/// a bounded range of BIP-44-style derivation paths.
+fn export_superset(
+    ctx: &MmArc,
+    crypto_ctx: &CryptoCtx,
+    req: &GetPrivateKeysRequest,
+) -> Result<GetPrivateKeysResponse, MmError<GetPrivateKeysError>> {
+    match req.mode {
+        GetPrivateKeysMode::Iguana => {
+            // Index parameters are valid only in `hd` mode (R-K5).
+            if req.start_index.is_some() || req.end_index.is_some() || req.account_index.is_some() {
+                return MmError::err(GetPrivateKeysError::IndexParamsOutsideHdMode);
+            }
+
+            // The single Iguana key is the wallet's internal secp256k1 secret.
+            let secret = crypto_ctx.mm2_internal_privkey_secret();
+            let mut entries = Vec::with_capacity(req.coins.len());
+            for ticker in &req.coins {
+                let conf = load_coin_conf(ctx, ticker)?;
+                let protocol = parse_protocol(ticker, &conf)?;
+                let derived = derive_for_protocol(ticker, &conf, &protocol, &secret)?;
+                entries.push(IguanaKeyEntry {
+                    coin: ticker.clone(),
+                    pubkey: derived.pubkey,
+                    address: derived.address,
+                    priv_key: derived.priv_key,
+                    viewing_key: derived.viewing_key,
+                });
+            }
+            Ok(GetPrivateKeysResponse::Iguana(entries))
+        },
+        GetPrivateKeysMode::Hd => {
+            // HD derivation requires a seed-backed (GlobalHD) wallet.
+            let global_hd = match crypto_ctx.key_pair_policy() {
+                KeyPairPolicy::GlobalHDAccount(hd) => hd,
+                KeyPairPolicy::Iguana => {
+                    return MmError::err(GetPrivateKeysError::KeyDerivationFailed {
+                        ticker: req.coins.first().cloned().unwrap_or_default(),
+                        reason: "`hd` mode requires an HD (seed-derived) wallet".to_owned(),
+                    })
+                },
+            };
+
+            // Validate and normalise the requested index range (R-K4 bounds).
+            let account = req.account_index.unwrap_or(0);
+            let start = req.start_index.unwrap_or(0);
+            let end = req.end_index.unwrap_or(start);
+            if end < start {
+                return MmError::err(GetPrivateKeysError::HdRangeInverted { start, end });
+            }
+            let requested = end - start + 1;
+            if requested > MAX_HD_ADDRESSES_PER_CALL {
+                return MmError::err(GetPrivateKeysError::HdRangeExceedsMax {
+                    requested,
+                    max: MAX_HD_ADDRESSES_PER_CALL,
+                });
+            }
+
+            let mut entries = Vec::with_capacity(req.coins.len());
+            for ticker in &req.coins {
+                let conf = load_coin_conf(ctx, ticker)?;
+                let protocol = parse_protocol(ticker, &conf)?;
+                let base = parse_base_derivation_path(ticker, &conf)?;
+
+                let mut addresses = Vec::with_capacity(requested as usize);
+                for index in start..=end {
+                    let (path, secret) = derive_hd_secret(ticker, global_hd, &base, account, index)?;
+                    let derived = derive_for_protocol(ticker, &conf, &protocol, &secret)?;
+                    addresses.push(HdAddressEntry {
+                        derivation_path: path.to_string(),
+                        z_derivation_path: None,
+                        pubkey: derived.pubkey,
+                        address: derived.address,
+                        priv_key: derived.priv_key,
+                        viewing_key: derived.viewing_key,
+                    });
+                }
+                entries.push(HdKeyEntry {
+                    coin: ticker.clone(),
+                    addresses,
+                });
+            }
+            Ok(GetPrivateKeysResponse::Hd(entries))
+        },
+    }
+}
+
+/// Read a coin's configuration (offline; no activation required). Returns a
+/// typed error when the ticker is absent from the node configuration.
+fn load_coin_conf(ctx: &MmArc, ticker: &str) -> Result<serde_json::Value, MmError<GetPrivateKeysError>> {
+    let conf = coin_conf(ctx, ticker);
+    if conf.is_null() {
+        return MmError::err(GetPrivateKeysError::CoinConfigNotFound(ticker.to_owned()));
+    }
+    Ok(conf)
+}
+
+/// Parse a coin's protocol descriptor from its configuration.
+fn parse_protocol(ticker: &str, conf: &serde_json::Value) -> Result<CoinProtocol, MmError<GetPrivateKeysError>> {
+    serde_json::from_value(conf["protocol"].clone()).map_to_mm(|e| GetPrivateKeysError::CoinProtocolParseError {
+        ticker: ticker.to_owned(),
+        reason: e.to_string(),
+    })
+}
+
+/// Parse the base (coin-level) BIP-44 derivation path from a coin's config.
+fn parse_base_derivation_path(
+    ticker: &str,
+    conf: &serde_json::Value,
+) -> Result<Bip44PathToCoin, MmError<GetPrivateKeysError>> {
+    if conf["derivation_path"].is_null() {
+        return MmError::err(GetPrivateKeysError::MissingProtocolPrefix(format!(
+            "{}: no `derivation_path` configured",
+            ticker
+        )));
+    }
+    serde_json::from_value(conf["derivation_path"].clone()).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+        ticker: ticker.to_owned(),
+        reason: format!("invalid `derivation_path`: {}", e),
+    })
+}
+
+/// Derive the secp256k1 secret at `m/44'/coin'/account'/0/index` for an HD wallet.
+fn derive_hd_secret(
+    ticker: &str,
+    global_hd: &GlobalHDAccountArc,
+    base: &Bip44PathToCoin,
+    account: u32,
+    index: u32,
+) -> Result<(DerivationPath, Secp256k1Secret), MmError<GetPrivateKeysError>> {
+    let mut path = base.to_derivation_path();
+    let child = |value: u32, hardened: bool| {
+        ChildNumber::new(value, hardened).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        })
+    };
+    path.push(child(account, true)?);
+    path.push(child(0, false)?);
+    path.push(child(index, false)?);
+
+    let secret = global_hd
+        .derive_secp256k1_secret(&path)
+        .mm_err(|e| GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        })?;
+    Ok((path, secret))
+}
+
+/// Format a derived secret into the coin's native key/address representation.
+fn derive_for_protocol(
+    ticker: &str,
+    conf: &serde_json::Value,
+    protocol: &CoinProtocol,
+    secret: &Secp256k1Secret,
+) -> Result<DerivedKey, MmError<GetPrivateKeysError>> {
+    match protocol {
+        CoinProtocol::UTXO | CoinProtocol::QTUM | CoinProtocol::BCH { .. } => derive_utxo(ticker, conf, secret),
+        CoinProtocol::ETH { .. } | CoinProtocol::ERC20 { .. } => derive_evm(ticker, secret),
+        CoinProtocol::TENDERMINT { account_prefix, .. } => derive_tendermint(ticker, account_prefix, secret),
+        CoinProtocol::ZHTLC { .. } => MmError::err(GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: "ZHTLC shielded key export is implemented in a later slice".to_owned(),
+        }),
+        other => MmError::err(GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: format!("key export is not supported for protocol {:?}", other),
+        }),
+    }
+}
+
+/// UTXO formatting: WIF private key + legacy/segwit address (R-K4).
+fn derive_utxo(
+    ticker: &str,
+    conf: &serde_json::Value,
+    secret: &Secp256k1Secret,
+) -> Result<DerivedKey, MmError<GetPrivateKeysError>> {
+    // Build minimal activation params for offline conf parsing (no RPC mode is
+    // exercised; only the configured prefixes / address format are read).
+    let params = UtxoActivationParams::from_legacy_req(&serde_json::json!({ "method": "enable" })).mm_err(|e| {
+        GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        }
+    })?;
+    let utxo_conf = UtxoConfBuilder::new(conf, &params, ticker)
+        .build()
+        .mm_err(|e| GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        })?;
+
+    let private = UtxoPrivate {
+        prefix: utxo_conf.wif_prefix,
+        secret: *secret,
+        compressed: true,
+        checksum_type: utxo_conf.checksum_type,
+    };
+    let wif = private.to_string();
+    let key_pair = UtxoKeyPair::from_private(private).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+        ticker: ticker.to_owned(),
+        reason: e.to_string(),
+    })?;
+
+    let address = UtxoAddress {
+        prefix: utxo_conf.pub_addr_prefix,
+        t_addr_prefix: utxo_conf.pub_t_addr_prefix,
+        hash: AddressHashEnum::AddressHash(key_pair.public().address_hash()),
+        checksum_type: utxo_conf.checksum_type,
+        hrp: utxo_conf.bech32_hrp.clone(),
+        addr_format: utxo_conf.default_address_format.clone(),
+    };
+    let address = address
+        .display_address()
+        .map_to_mm(|reason| GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason,
+        })?;
+
+    Ok(DerivedKey {
+        pubkey: hex::encode(key_pair.public().to_vec()),
+        address,
+        priv_key: wif,
+        viewing_key: None,
+    })
+}
+
+/// EVM formatting: `0x`-prefixed hex secret + EIP-55 checksummed address (R-K4).
+fn derive_evm(ticker: &str, secret: &Secp256k1Secret) -> Result<DerivedKey, MmError<GetPrivateKeysError>> {
+    let secp = secp256k1::Secp256k1::new();
+    let secret_key =
+        secp256k1::SecretKey::from_slice(secret.as_slice()).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        })?;
+    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let pubkey_compressed = public_key.serialize();
+
+    let eth_address = addr_from_raw_pubkey(&pubkey_compressed).map_to_mm(|reason| {
+        GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason,
+        }
+    })?;
+
+    Ok(DerivedKey {
+        pubkey: hex::encode(pubkey_compressed),
+        address: checksum_address(&format!("{:#x}", eth_address)),
+        priv_key: format!("0x{}", hex::encode(secret.as_slice())),
+        viewing_key: None,
+    })
+}
+
+/// Tendermint formatting: hex secret + bech32 account address (R-K4).
+fn derive_tendermint(
+    ticker: &str,
+    account_prefix: &str,
+    secret: &Secp256k1Secret,
+) -> Result<DerivedKey, MmError<GetPrivateKeysError>> {
+    let signing_key = cosmrs::crypto::secp256k1::SigningKey::from_slice(secret.as_slice()).map_to_mm(|e| {
+        GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        }
+    })?;
+    let pubkey_bytes = signing_key.public_key().to_bytes();
+    let pubkey_hex = hex::encode(&pubkey_bytes);
+
+    let account_id =
+        account_id_from_pubkey_hex(account_prefix, &pubkey_hex).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+            ticker: ticker.to_owned(),
+            reason: e.to_string(),
+        })?;
+
+    Ok(DerivedKey {
+        pubkey: pubkey_hex,
+        address: account_id.to_string(),
+        priv_key: hex::encode(secret.as_slice()),
+        viewing_key: None,
+    })
 }
 
 #[cfg(test)]
@@ -251,8 +614,32 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         assert_eq!(
-            GetPrivateKeysError::SupersetNotYetImplemented("hd".into()).status_code(),
-            StatusCode::NOT_IMPLEMENTED
+            GetPrivateKeysError::IndexParamsOutsideHdMode.status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            GetPrivateKeysError::HdRangeInverted { start: 5, end: 1 }.status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            GetPrivateKeysError::HdRangeExceedsMax {
+                requested: 200,
+                max: MAX_HD_ADDRESSES_PER_CALL
+            }
+            .status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            GetPrivateKeysError::CoinConfigNotFound("X".into()).status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            GetPrivateKeysError::KeyDerivationFailed {
+                ticker: "X".into(),
+                reason: "x".into()
+            }
+            .status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
         );
     }
 
@@ -355,5 +742,59 @@ mod tests {
                 ));
             },
         }
+    }
+
+    // A fixed, valid secp256k1 secret used across the derivation-format tests.
+    fn sample_secret() -> Secp256k1Secret { Secp256k1Secret::from([0x11u8; 32]) }
+
+    fn unwrap_derived(r: Result<DerivedKey, MmError<GetPrivateKeysError>>) -> DerivedKey {
+        r.unwrap_or_else(|e| panic!("derivation failed: {}", e))
+    }
+
+    #[test]
+    fn test_derive_evm_format() {
+        let d = unwrap_derived(derive_evm("ETH", &sample_secret()));
+        // EVM private key is the `0x`-prefixed hex of the 32-byte secret (R-K4).
+        assert_eq!(d.priv_key, format!("0x{}", "11".repeat(32)));
+        // EIP-55 checksummed 20-byte address.
+        assert!(d.address.starts_with("0x"));
+        assert_eq!(d.address.len(), 42);
+        // Hex-encoded 33-byte compressed secp256k1 public key.
+        assert_eq!(d.pubkey.len(), 66);
+        assert!(d.viewing_key.is_none());
+    }
+
+    #[test]
+    fn test_derive_utxo_format_and_pubkey_invariant() {
+        let conf = serde_json::json!({
+            "coin": "BTC",
+            "pubtype": 0,
+            "p2shtype": 5,
+            "wiftype": 128,
+            "derivation_path": "m/44'/0'"
+        });
+        let utxo = unwrap_derived(derive_utxo("BTC", &conf, &sample_secret()));
+        // BTC mainnet P2PKH address (version byte 0) is Base58Check starting '1'.
+        assert!(utxo.address.starts_with('1'), "got {}", utxo.address);
+        // WIF is non-empty and the compressed flag yields the 'K'/'L' prefix family.
+        assert!(!utxo.priv_key.is_empty());
+        assert!(utxo.viewing_key.is_none());
+
+        // The compressed secp256k1 public key must be identical regardless of the
+        // protocol formatting path (UTXO vs EVM both expose the same key).
+        let evm = unwrap_derived(derive_evm("ETH", &sample_secret()));
+        assert_eq!(utxo.pubkey, evm.pubkey);
+    }
+
+    #[test]
+    fn test_derive_tendermint_format() {
+        let d = unwrap_derived(derive_tendermint("ATOM", "cosmos", &sample_secret()));
+        // Bech32 account address bound by the configured prefix.
+        assert!(d.address.starts_with("cosmos1"), "got {}", d.address);
+        // Tendermint private key is the hex of the 32-byte secret (R-K4).
+        assert_eq!(d.priv_key, "11".repeat(32));
+        // Hex-encoded 33-byte compressed secp256k1 public key.
+        assert_eq!(d.pubkey.len(), 66);
+        assert!(d.viewing_key.is_none());
     }
 }
