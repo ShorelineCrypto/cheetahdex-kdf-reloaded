@@ -166,7 +166,9 @@ where
             .get_unspent_ordered_list(&self.sender_address())
             .await
             .mm_err(Into::into)?;
-        let p2pk_outpoints: HashSet<OutPoint> = HashSet::new();
+        let p2pk_outpoints = crate::utxo::electrum_p2pk_outpoints_for_address(coin.as_ref(), &self.sender_address())
+            .await
+            .mm_err(Into::into)?;
         let (value, fee_policy) = if req.max {
             (
                 unspents.iter().fold(0, |sum, unspent| sum + unspent.value),

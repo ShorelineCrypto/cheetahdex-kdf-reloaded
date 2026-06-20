@@ -1709,7 +1709,7 @@ where
     let my_address = try_tx_s!(coin.as_ref().derivation_method.iguana_or_err());
     let key_pair = try_tx_s!(coin.as_ref().priv_key_policy.key_pair_or_err());
 
-    let p2pk_outpoints: HashSet<OutPoint> = HashSet::new();
+    let p2pk_outpoints = try_tx_s!(electrum_p2pk_outpoints_for_address(coin.as_ref(), my_address).await);
 
     let mut builder = UtxoTxBuilder::new(coin)
         .add_available_inputs(unspents)
@@ -1762,6 +1762,47 @@ pub fn output_script(address: &Address, script_type: ScriptType) -> Script {
             ScriptType::P2WSH => Builder::build_witness_script(&address.hash),
         },
     }
+}
+
+/// Returns Electrum P2PK unspents for the given legacy address if the address
+/// belongs to the currently activated keypair.
+///
+/// This is used to discover legacy pay-to-pubkey outputs (`<pubkey> OP_CHECKSIG`)
+/// that are not returned by address-based P2PKH script-hash queries.
+pub(crate) async fn electrum_p2pk_unspents_for_address(
+    utxo: &UtxoCoinFields,
+    address: &Address,
+) -> UtxoRpcResult<Vec<UnspentInfo>> {
+    if !address.addr_format.is_legacy() {
+        return Ok(vec![]);
+    }
+
+    let key_pair = match utxo.priv_key_policy.key_pair() {
+        Some(key_pair) => key_pair,
+        None => return Ok(vec![]),
+    };
+
+    let my_p2pkh_hash = AddressHashEnum::AddressHash(key_pair.public().address_hash());
+    if my_p2pkh_hash != address.hash {
+        return Ok(vec![]);
+    }
+
+    let electrum = match &utxo.rpc_client {
+        UtxoRpcClientEnum::Electrum(electrum) => electrum,
+        UtxoRpcClientEnum::Native(_) => return Ok(vec![]),
+    };
+
+    let p2pk_script = Builder::build_p2pk(key_pair.public());
+    electrum.list_unspent_for_script(&p2pk_script).compat().await
+}
+
+/// Returns outpoints of Electrum P2PK unspents for the given legacy address.
+pub(crate) async fn electrum_p2pk_outpoints_for_address(
+    utxo: &UtxoCoinFields,
+    address: &Address,
+) -> UtxoRpcResult<HashSet<OutPoint>> {
+    let unspents = electrum_p2pk_unspents_for_address(utxo, address).await?;
+    Ok(unspents.into_iter().map(|unspent| unspent.outpoint).collect())
 }
 
 pub fn address_by_conf_and_pubkey_str(

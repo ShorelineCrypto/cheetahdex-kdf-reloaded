@@ -21,8 +21,19 @@ where
         .compat()
         .await?;
 
+    // Electrum `display_balance` tracks the address script-hash (P2PKH/P2SH)
+    // and doesn't include legacy pay-to-pubkey outputs. Add P2PK script-level
+    // unspents for this address when applicable.
+    let p2pk_extra = crate::utxo::electrum_p2pk_unspents_for_address(coin.as_ref(), address)
+        .await
+        .mm_err(Into::into)?
+        .into_iter()
+        .fold(BigDecimal::default(), |acc, unspent| {
+            acc + big_decimal_from_sat_unsigned(unspent.value, coin.as_ref().decimals)
+        });
+
     Ok(CoinBalance {
-        spendable: balance,
+        spendable: balance + p2pk_extra,
         unspendable: BigDecimal::from(0),
     })
 }
