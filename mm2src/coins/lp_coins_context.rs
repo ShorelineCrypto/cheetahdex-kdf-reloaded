@@ -120,6 +120,8 @@ pub struct CoinsContext {
     pub(crate) tx_history_db: SharedDb<TxHistoryDb>,
     #[cfg(target_arch = "wasm32")]
     pub(crate) hd_wallet_db: SharedDb<HDWalletDb>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) block_headers_storage_db: SharedDb<BlockHeaderStorageDb>,
 }
 #[derive(Debug)]
 pub struct CoinIsAlreadyActivatedErr {
@@ -144,6 +146,8 @@ impl CoinsContext {
                 tx_history_db: ConstructibleDb::new_shared(ctx),
                 #[cfg(target_arch = "wasm32")]
                 hd_wallet_db: ConstructibleDb::new_shared(ctx),
+                #[cfg(target_arch = "wasm32")]
+                block_headers_storage_db: ConstructibleDb::new_shared(ctx),
             })
         })))
     }
