@@ -77,7 +77,7 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
     };
 
     let servers = servers.into_iter().map(|s| json::from_value(s).unwrap()).collect();
-    block_on(builder.electrum_client(args, servers)).unwrap()
+    block_on(builder.electrum_client(args, servers, None, None)).unwrap()
 }
 
 /// Returned client won't work by default, requires some mocks to be usable
