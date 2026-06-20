@@ -25,10 +25,7 @@ type SwapResult<T> = MmResult<T, OneInchClassicSwapError>;
 const NATIVE_COIN_DECIMALS: u8 = 18;
 
 /// `classic_swap_contract` — returns the 1inch v6.0 aggregation-router address.
-pub async fn classic_swap_contract(
-    _ctx: MmArc,
-    _req: ClassicSwapContractRequest,
-) -> SwapResult<String> {
+pub async fn classic_swap_contract(_ctx: MmArc, _req: ClassicSwapContractRequest) -> SwapResult<String> {
     Ok(ApiClient::classic_swap_contract().to_owned())
 }
 
@@ -78,9 +75,7 @@ pub async fn classic_swap_create(ctx: MmArc, req: ClassicSwapCreateRequest) -> S
     let src = one_inch_token_address(&base)?;
     let dst = one_inch_token_address(&rel)?;
     let amount = sell_amount_in_wei(&req.amount, &base)?;
-    let from = base
-        .my_address()
-        .map_to_mm(OneInchClassicSwapError::InvalidAddress)?;
+    let from = base.my_address().map_to_mm(OneInchClassicSwapError::InvalidAddress)?;
 
     let mut params = ClassicSwapCreateParams::new(src, dst, amount, from, req.slippage);
     params
@@ -218,8 +213,8 @@ fn build_classic_swap_response(
 ) -> SwapResult<ClassicSwapResponse> {
     let dst_wei = U256::from_dec_str(&data.dst_amount)
         .map_to_mm(|e| OneInchClassicSwapError::ApiDataError(format!("invalid dst_amount: {e:?}")))?;
-    let dst_amount = u256_to_big_decimal(dst_wei, rel_decimals)
-        .mm_err(|e| OneInchClassicSwapError::NumConversion(e.to_string()))?;
+    let dst_amount =
+        u256_to_big_decimal(dst_wei, rel_decimals).mm_err(|e| OneInchClassicSwapError::NumConversion(e.to_string()))?;
 
     let tx = match data.tx {
         Some(tx) => Some(build_tx_response(tx)?),
@@ -282,8 +277,7 @@ mod tests {
 
     #[test]
     fn quote_request_accepts_numeric_amount() {
-        let req: ClassicSwapQuoteRequest =
-            serde_json::from_str(r#"{"base":"ETH","rel":"USDC","amount":1.5}"#).unwrap();
+        let req: ClassicSwapQuoteRequest = serde_json::from_str(r#"{"base":"ETH","rel":"USDC","amount":1.5}"#).unwrap();
         assert_eq!(req.amount.to_decimal(), "1.5".parse::<BigDecimal>().unwrap());
     }
 

@@ -4,9 +4,9 @@
 /// SSE events when the balance changes. Each coin gets its own streamer
 /// instance identified by `StreamerId::Balance(ticker)`.
 use async_trait::async_trait;
+use coins::utxo::utxo_common::{address_balance as utxo_address_balance, address_from_str_unchecked};
 use common::executor::Timer;
 use common::log;
-use coins::utxo::utxo_common::{address_balance as utxo_address_balance, address_from_str_unchecked};
 use futures::compat::Future01CompatExt;
 use futures::future::{select, Either};
 use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};

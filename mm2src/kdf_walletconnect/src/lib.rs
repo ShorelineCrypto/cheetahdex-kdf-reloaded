@@ -770,13 +770,20 @@ impl WalletConnectCtx {
     /// the settled [`Session`] from the establishment state and the settle
     /// payload, registers and persists it, acknowledges the settle, and clears
     /// the in-flight establishment record.
-    async fn handle_settle(&self, session_topic: &Topic, sym_key: &SymKey, id: Option<u64>, payload: &serde_json::Value) {
+    async fn handle_settle(
+        &self,
+        session_topic: &Topic,
+        sym_key: &SymKey,
+        id: Option<u64>,
+        payload: &serde_json::Value,
+    ) {
         let Some(pending) = self.establishing.lock().remove(session_topic) else {
             // No establishment state (e.g. a re-settle on a live session); ack
             // politely but do not rebuild.
             common::log::debug!("walletconnect: settle for topic without establishment state");
             if let Some(id) = id {
-                self.reply_success(session_topic, sym_key, id, settle::TAG.response).await;
+                self.reply_success(session_topic, sym_key, id, settle::TAG.response)
+                    .await;
             }
             return;
         };
@@ -802,7 +809,8 @@ impl WalletConnectCtx {
         self.sessions.insert(session);
 
         if let Some(id) = id {
-            self.reply_success(session_topic, sym_key, id, settle::TAG.response).await;
+            self.reply_success(session_topic, sym_key, id, settle::TAG.response)
+                .await;
         }
     }
 }
@@ -1151,8 +1159,7 @@ mod persistence_tests {
 
         // The §22.8.1.6 `sessionProperties.keys` record itself still serialises
         // with the dictated camelCase spellings (used by the signing slices).
-        let props = serde_json::to_value(session.properties.as_ref().unwrap())
-            .expect("serialize session properties");
+        let props = serde_json::to_value(session.properties.as_ref().unwrap()).expect("serialize session properties");
         let entry = props["keys"][0].as_object().expect("key entry is an object");
         for field in ["chainId", "algo", "pubKey", "address", "isNanoLedger"] {
             assert!(entry.contains_key(field), "key entry missing `{field}`");

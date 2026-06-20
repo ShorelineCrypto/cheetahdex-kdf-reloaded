@@ -91,7 +91,9 @@ impl WcEvmTxParams {
             data: tx.data.to_vec(),
             value: tx.value,
             gas: tx.gas,
-            fee: WcEvmFee::Legacy { gas_price: tx.gas_price },
+            fee: WcEvmFee::Legacy {
+                gas_price: tx.gas_price,
+            },
             nonce: Some(tx.nonce),
             chain_id,
         }
@@ -108,7 +110,10 @@ impl WcEvmTxParams {
             object.insert("to".to_string(), Value::String(address_to_0x(to)));
         }
         if !self.data.is_empty() {
-            object.insert("data".to_string(), Value::String(format!("0x{}", hex::encode(&self.data))));
+            object.insert(
+                "data".to_string(),
+                Value::String(format!("0x{}", hex::encode(&self.data))),
+            );
         }
         object.insert("value".to_string(), Value::String(u256_to_0x_quantity(&self.value)));
         object.insert("gas".to_string(), Value::String(u256_to_0x_quantity(&self.gas)));
@@ -120,7 +125,10 @@ impl WcEvmTxParams {
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
             } => {
-                object.insert("maxFeePerGas".to_string(), Value::String(u256_to_0x_quantity(max_fee_per_gas)));
+                object.insert(
+                    "maxFeePerGas".to_string(),
+                    Value::String(u256_to_0x_quantity(max_fee_per_gas)),
+                );
                 object.insert(
                     "maxPriorityFeePerGas".to_string(),
                     Value::String(u256_to_0x_quantity(max_priority_fee_per_gas)),
@@ -166,7 +174,8 @@ fn decode_0x_hex(value: &Value) -> Result<Vec<u8>, WalletConnectError> {
     let body = text
         .strip_prefix("0x")
         .ok_or_else(|| WalletConnectError::InvalidResponse(format!("response `{text}` is missing the 0x prefix")))?;
-    hex::decode(body).map_err(|e| WalletConnectError::InvalidResponse(format!("response `{text}` is not valid hex: {e}")))
+    hex::decode(body)
+        .map_err(|e| WalletConnectError::InvalidResponse(format!("response `{text}` is not valid hex: {e}")))
 }
 
 /// Parses an `eth_signTransaction` result: the signed raw transaction bytes
@@ -373,7 +382,9 @@ mod tests {
         assert_eq!(params.to, Some(addr(0x44)));
         assert_eq!(params.nonce, Some(U256::from(3u64)));
         assert_eq!(params.chain_id, Some(137));
-        assert_eq!(params.fee, WcEvmFee::Legacy { gas_price: U256::from(15u64) });
+        assert_eq!(params.fee, WcEvmFee::Legacy {
+            gas_price: U256::from(15u64)
+        });
         let object = params.to_request_object();
         assert_eq!(object["data"], "0x0102");
         assert_eq!(object["chainId"], "0x89");
@@ -388,7 +399,10 @@ mod tests {
         assert_eq!(payload["request"]["method"], "eth_signTransaction");
         assert!(payload["request"]["params"].is_array());
         assert_eq!(payload["request"]["params"].as_array().unwrap().len(), 1);
-        assert_eq!(payload["request"]["params"][0]["from"], "0x1111111111111111111111111111111111111111");
+        assert_eq!(
+            payload["request"]["params"][0]["from"],
+            "0x1111111111111111111111111111111111111111"
+        );
     }
 
     #[test]

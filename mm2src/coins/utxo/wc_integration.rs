@@ -44,7 +44,10 @@ const BIP122_REFERENCE_BYTES: usize = 16;
 /// Formats a genesis block hash (given in conventional big-endian **display**
 /// order) as its CAIP-2 identifier `bip122:<first 32 hex chars>` (§22.8.1.4).
 fn bip122_caip2_chain_id(genesis_display_hash: &H256) -> String {
-    format!("bip122:{}", hex::encode(&genesis_display_hash[..BIP122_REFERENCE_BYTES]))
+    format!(
+        "bip122:{}",
+        hex::encode(&genesis_display_hash[..BIP122_REFERENCE_BYTES])
+    )
 }
 
 /// A single entry of a bip122 `signPsbt` `signInputs` array (§22.8.1.3):
@@ -148,9 +151,7 @@ fn sign_psbt_params(tx: &WcUtxoPsbtParams, broadcast: bool) -> Value {
 
 /// Builds the `signMessage` `params` object (§22.8.1.3):
 /// `{ "address": <addr>, "message": <message> }`.
-fn sign_message_params(address: &str, message: &str) -> Value {
-    json!({ "address": address, "message": message })
-}
+fn sign_message_params(address: &str, message: &str) -> Value { json!({ "address": address, "message": message }) }
 
 /// Builds the `getAccountAddresses` `params` object (§22.8.1.3): an
 /// empty selector object.
@@ -170,7 +171,10 @@ fn send_transfer_params(
     if let Some(account) = account {
         object.insert("account".to_string(), Value::String(account.to_string()));
     }
-    object.insert("recipientAddress".to_string(), Value::String(recipient_address.to_string()));
+    object.insert(
+        "recipientAddress".to_string(),
+        Value::String(recipient_address.to_string()),
+    );
     object.insert("amount".to_string(), Value::String(amount.to_string()));
     if let Some(change) = change_address {
         object.insert("changeAddress".to_string(), Value::String(change.to_string()));
@@ -195,10 +199,7 @@ fn required_str(result: &Value, field: &str) -> Result<String, WalletConnectErro
 /// is always required; when `broadcast` was requested the `txid` must be present
 /// (a missing `txid` after a broadcast request is rejected with
 /// [`WalletConnectError::InvalidResponse`]).
-fn parse_sign_psbt_result(
-    result: &Value,
-    broadcast: bool,
-) -> Result<(String, Option<String>), WalletConnectError> {
+fn parse_sign_psbt_result(result: &Value, broadcast: bool) -> Result<(String, Option<String>), WalletConnectError> {
     let psbt = required_str(result, "psbt")?;
     let txid = match result.get("txid").and_then(Value::as_str) {
         Some(txid) => Some(txid.to_string()),
@@ -215,9 +216,7 @@ fn parse_sign_psbt_result(
 }
 
 /// Parses a `sendTransfer` result `{ "txid" }` (§22.8.1.3).
-fn parse_send_transfer_result(result: &Value) -> Result<String, WalletConnectError> {
-    required_str(result, "txid")
-}
+fn parse_send_transfer_result(result: &Value) -> Result<String, WalletConnectError> { required_str(result, "txid") }
 
 /// Parses a `signMessage` result `{ "signature", "address" }` (§22.8.1.3),
 /// base64-decoding the signature field.
@@ -450,7 +449,11 @@ mod tests {
         assert_eq!(inputs[0]["index"], 0);
         assert_eq!(inputs[0]["sighashTypes"], json!([1]));
 
-        let payload = session_request_payload("bip122:000000000019d6689c085ae165831e93", WcRequestMethods::UtxoSignPsbt, params);
+        let payload = session_request_payload(
+            "bip122:000000000019d6689c085ae165831e93",
+            WcRequestMethods::UtxoSignPsbt,
+            params,
+        );
         assert_eq!(payload["chainId"], "bip122:000000000019d6689c085ae165831e93");
         assert_eq!(payload["request"]["method"], "signPsbt");
         assert_eq!(payload["request"]["params"]["psbt"], "cHNidP8BAA==");

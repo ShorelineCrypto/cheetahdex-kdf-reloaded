@@ -195,10 +195,7 @@ fn parse_cosmos_signature(result: &Value, encoding: CosmosByteEncoding) -> Resul
 /// Parses the `signed` echo of a `cosmos_signDirect` result into the
 /// `(bodyBytes, authInfoBytes)` the broadcast tx must be assembled from
 /// (§22.8.1.2 — the echo may be wallet-normalised and MUST be used).
-fn parse_signed_direct(
-    result: &Value,
-    encoding: CosmosByteEncoding,
-) -> Result<(Vec<u8>, Vec<u8>), WalletConnectError> {
+fn parse_signed_direct(result: &Value, encoding: CosmosByteEncoding) -> Result<(Vec<u8>, Vec<u8>), WalletConnectError> {
     let signed = result
         .get("signed")
         .ok_or_else(|| WalletConnectError::InvalidResponse("missing `signed` echo".to_string()))?;
@@ -275,11 +272,7 @@ impl TendermintCoin {
     /// Re-builds the broadcast `AuthInfo` with SignMode `SIGN_MODE_LEGACY_AMINO_JSON`
     /// (the wallet signed the Amino doc) and assembles the broadcast `TxRaw`,
     /// reusing the protobuf `body_bytes` from the params.
-    fn assemble_amino_tx(
-        &self,
-        tx: &WcCosmosTxParams,
-        signature: Vec<u8>,
-    ) -> Result<Vec<u8>, WalletConnectError> {
+    fn assemble_amino_tx(&self, tx: &WcCosmosTxParams, signature: Vec<u8>) -> Result<Vec<u8>, WalletConnectError> {
         let public_key = cosmrs::crypto::PublicKey::from(
             self.activation_policy
                 .public_key()
@@ -455,7 +448,10 @@ mod tests {
     fn binary_field_encoding_keyed_on_wallet_name() {
         assert_eq!(CosmosByteEncoding::for_wallet_name("Keplr"), CosmosByteEncoding::Base64);
         assert_eq!(CosmosByteEncoding::for_wallet_name("Leap"), CosmosByteEncoding::Hex);
-        assert_eq!(CosmosByteEncoding::for_wallet_name("Cosmostation"), CosmosByteEncoding::Hex);
+        assert_eq!(
+            CosmosByteEncoding::for_wallet_name("Cosmostation"),
+            CosmosByteEncoding::Hex
+        );
         assert_eq!(CosmosByteEncoding::for_wallet_name(""), CosmosByteEncoding::Hex);
 
         // The byte fields encode accordingly.

@@ -117,8 +117,14 @@ fn migration_7() -> Vec<(&'static str, Vec<String>)> {
 
 fn migration_8() -> Vec<(&'static str, Vec<String>)> {
     let mut statements = vec![
-        ("ALTER TABLE my_swaps ADD COLUMN maker_coin_usd_price TEXT NOT NULL DEFAULT '';", vec![]),
-        ("ALTER TABLE my_swaps ADD COLUMN taker_coin_usd_price TEXT NOT NULL DEFAULT '';", vec![]),
+        (
+            "ALTER TABLE my_swaps ADD COLUMN maker_coin_usd_price TEXT NOT NULL DEFAULT '';",
+            vec![],
+        ),
+        (
+            "ALTER TABLE my_swaps ADD COLUMN taker_coin_usd_price TEXT NOT NULL DEFAULT '';",
+            vec![],
+        ),
     ];
     statements.extend(stats_swaps::add_fiat_snapshot_columns());
     statements

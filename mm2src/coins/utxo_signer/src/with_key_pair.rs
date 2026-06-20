@@ -334,7 +334,10 @@ mod tests {
         .unwrap();
 
         let script_sig = Script::from(signed.inputs[0].script_sig.to_vec());
-        assert!(script_sig.get_instruction(1).is_none(), "P2PK scriptSig must contain signature only");
+        assert!(
+            script_sig.get_instruction(1).is_none(),
+            "P2PK scriptSig must contain signature only"
+        );
 
         let sig_with_type = parse_sig_with_hashtype(&signed.inputs[0].script_sig);
         assert_eq!(sig_with_type.last().copied(), Some(sighash_type as u8));
@@ -389,7 +392,10 @@ mod tests {
 
         // Input 0: P2PK => signature-only scriptSig
         let p2pk_script_sig = Script::from(signed.inputs[0].script_sig.to_vec());
-        assert!(p2pk_script_sig.get_instruction(1).is_none(), "P2PK input must be signature-only");
+        assert!(
+            p2pk_script_sig.get_instruction(1).is_none(),
+            "P2PK input must be signature-only"
+        );
         let p2pk_sig_with_type = parse_sig_with_hashtype(&signed.inputs[0].script_sig);
         assert_eq!(p2pk_sig_with_type.last().copied(), Some(sighash_type as u8));
         let p2pk_der = Signature::from(p2pk_sig_with_type[..p2pk_sig_with_type.len() - 1].to_vec());

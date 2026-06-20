@@ -71,7 +71,10 @@ fn get_last_block_height_sql(for_coin: &str) -> Result<String, MmError<BlockHead
 
 fn get_all_headers_descending_sql(for_coin: &str) -> Result<String, MmError<BlockHeaderStorageError>> {
     let table_name = get_table_name_and_validate(for_coin)?;
-    let sql = format!("SELECT block_height, hex FROM {} ORDER BY block_height DESC;", table_name);
+    let sql = format!(
+        "SELECT block_height, hex FROM {} ORDER BY block_height DESC;",
+        table_name
+    );
 
     Ok(sql)
 }
@@ -536,12 +539,16 @@ mod sql_block_headers_storage_tests {
         );
 
         // All stored headers share `bits`.
-        assert!(block_on(storage.get_last_block_header_with_non_max_bits(for_coin, bits))
-            .unwrap()
-            .is_none());
-        assert!(block_on(storage.get_last_block_header_with_non_max_bits(for_coin, bits.wrapping_add(1)))
-            .unwrap()
-            .is_some());
+        assert!(
+            block_on(storage.get_last_block_header_with_non_max_bits(for_coin, bits))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.get_last_block_header_with_non_max_bits(for_coin, bits.wrapping_add(1)))
+                .unwrap()
+                .is_some()
+        );
 
         // Inclusive range removal [2, 3].
         block_on(storage.remove_block_headers_from_to_height(for_coin, 2, 3)).unwrap();

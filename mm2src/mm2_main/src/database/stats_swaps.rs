@@ -118,7 +118,10 @@ fn split_coin(coin: &str) -> (String, String) {
     (ticker, platform)
 }
 
-fn insert_stats_maker_swap_sql(swap: &MakerSavedSwap, fiat_snapshot: Option<&FiatPriceSnapshot>) -> Option<(&'static str, Vec<String>)> {
+fn insert_stats_maker_swap_sql(
+    swap: &MakerSavedSwap,
+    fiat_snapshot: Option<&FiatPriceSnapshot>,
+) -> Option<(&'static str, Vec<String>)> {
     let swap_data = match swap.swap_data() {
         Ok(d) => d,
         Err(e) => {
@@ -202,7 +205,10 @@ fn insert_stats_maker_swap_sql_init(swap: &MakerSavedSwap) -> Option<(&'static s
     Some((INSERT_STATS_SWAP_ON_INIT, params))
 }
 
-fn insert_stats_taker_swap_sql(swap: &TakerSavedSwap, fiat_snapshot: Option<&FiatPriceSnapshot>) -> Option<(&'static str, Vec<String>)> {
+fn insert_stats_taker_swap_sql(
+    swap: &TakerSavedSwap,
+    fiat_snapshot: Option<&FiatPriceSnapshot>,
+) -> Option<(&'static str, Vec<String>)> {
     let swap_data = match swap.swap_data() {
         Ok(d) => d,
         Err(e) => {
@@ -321,10 +327,7 @@ pub fn add_and_split_tickers() -> Vec<(&'static str, Vec<String>)> {
 }
 
 pub fn add_fiat_snapshot_columns() -> Vec<(&'static str, Vec<String>)> {
-    ADD_FIAT_SNAPSHOT_COLUMNS
-        .iter()
-        .map(|sql| (*sql, vec![]))
-        .collect()
+    ADD_FIAT_SNAPSHOT_COLUMNS.iter().map(|sql| (*sql, vec![])).collect()
 }
 
 #[test]

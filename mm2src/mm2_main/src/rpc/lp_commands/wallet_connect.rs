@@ -153,11 +153,12 @@ async fn wc_ctx(ctx: &MmArc) -> WcRpcResult<Arc<WalletConnectCtx>> {
 }
 
 /// Downcasts the type-erased cached handle back to a [`WalletConnectCtx`].
-fn downcast_wc_ctx(
-    any: Arc<dyn std::any::Any + Send + Sync>,
-) -> WcRpcResult<Arc<WalletConnectCtx>> {
-    any.downcast::<WalletConnectCtx>()
-        .map_err(|_| MmError::new(WalletConnectRpcError::InternalError("unexpected WalletConnect context type".to_string())))
+fn downcast_wc_ctx(any: Arc<dyn std::any::Any + Send + Sync>) -> WcRpcResult<Arc<WalletConnectCtx>> {
+    any.downcast::<WalletConnectCtx>().map_err(|_| {
+        MmError::new(WalletConnectRpcError::InternalError(
+            "unexpected WalletConnect context type".to_string(),
+        ))
+    })
 }
 
 /// Maps a subsystem [`WalletConnectError`] onto the public RP7 error envelope.
@@ -179,7 +180,10 @@ fn map_session_err(e: WalletConnectError) -> MmError<WalletConnectRpcError> {
 pub async fn wc_new_connection(ctx: MmArc, req: NewConnectionRequest) -> WcRpcResult<NewConnectionResponse> {
     let wc = wc_ctx(&ctx).await?;
     let (pairing_topic, url) = wc
-        .new_connection(Json::Object(req.required_namespaces), req.optional_namespaces.map(Json::Object))
+        .new_connection(
+            Json::Object(req.required_namespaces),
+            req.optional_namespaces.map(Json::Object),
+        )
         .await
         .map_err(map_session_err)?;
     Ok(NewConnectionResponse {
@@ -211,7 +215,9 @@ pub async fn wc_get_session(ctx: MmArc, req: GetSessionRequest) -> WcRpcResult<G
 /// §22.9A.2 RP5 / AC4).
 pub async fn wc_delete_session(ctx: MmArc, req: SessionTopicRequest) -> WcRpcResult<EmptyResponse> {
     let wc = wc_ctx(&ctx).await?;
-    wc.drop_session(&Topic::from(req.topic)).await.map_err(map_session_err)?;
+    wc.drop_session(&Topic::from(req.topic))
+        .await
+        .map_err(map_session_err)?;
     Ok(EmptyResponse {})
 }
 
@@ -219,7 +225,9 @@ pub async fn wc_delete_session(ctx: MmArc, req: SessionTopicRequest) -> WcRpcRes
 /// (chapter 22 §22.9A.2 RP5).
 pub async fn wc_ping_session(ctx: MmArc, req: SessionTopicRequest) -> WcRpcResult<PingSessionResponse> {
     let wc = wc_ctx(&ctx).await?;
-    wc.ping_session(&Topic::from(req.topic)).await.map_err(map_session_err)?;
+    wc.ping_session(&Topic::from(req.topic))
+        .await
+        .map_err(map_session_err)?;
     Ok(PingSessionResponse {
         result: "session ping succeeded".to_string(),
     })

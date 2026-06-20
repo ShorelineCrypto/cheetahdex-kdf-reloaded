@@ -86,20 +86,23 @@ pub struct IndexedDBBlockHeadersStorage {
 
 impl IndexedDBBlockHeadersStorage {
     pub fn new(ctx: &MmArc) -> Result<Self, MmError<BlockHeaderStorageError>> {
-        let coins_ctx = CoinsContext::from_ctx(ctx).map_to_mm(|reason| BlockHeaderStorageError::InitializationError {
-            ticker: DB_NAME.to_owned(),
-            reason,
-        })?;
+        let coins_ctx =
+            CoinsContext::from_ctx(ctx).map_to_mm(|reason| BlockHeaderStorageError::InitializationError {
+                ticker: DB_NAME.to_owned(),
+                reason,
+            })?;
         Ok(IndexedDBBlockHeadersStorage {
             db: SharedDb::downgrade(&coins_ctx.block_headers_storage_db),
         })
     }
 
     fn get_shared_db(&self) -> Result<SharedDb<BlockHeaderStorageDb>, MmError<BlockHeaderStorageError>> {
-        self.db.upgrade().or_mm_err(|| BlockHeaderStorageError::InitializationError {
-            ticker: DB_NAME.to_owned(),
-            reason: "'IndexedDBBlockHeadersStorage::db' doesn't exist".to_owned(),
-        })
+        self.db
+            .upgrade()
+            .or_mm_err(|| BlockHeaderStorageError::InitializationError {
+                ticker: DB_NAME.to_owned(),
+                reason: "'IndexedDBBlockHeadersStorage::db' doesn't exist".to_owned(),
+            })
     }
 
     async fn lock_db(

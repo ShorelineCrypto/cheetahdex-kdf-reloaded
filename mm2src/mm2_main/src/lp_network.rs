@@ -23,6 +23,7 @@ use derive_more::Display;
 use futures::{channel::oneshot,
               future::{select, Either},
               FutureExt, StreamExt};
+use http::StatusCode;
 use keys::KeyPair;
 use mm2_core::mm_ctx::{MmArc, MmWeak};
 use mm2_err_handle::prelude::*;
@@ -30,7 +31,7 @@ use mm2_metrics::{ClockOps, MetricsOps};
 use mm2_p2p::atomicdex_behaviour::{AdexBehaviourCmd, AdexBehaviourEvent, AdexCmdTx, AdexEventRx, AdexResponse,
                                    AdexResponseChannel};
 use mm2_p2p::peers_exchange::PeerAddresses;
-use mm2_p2p::{decode_signed, decode_message, encode_and_sign, encode_message, pub_sub_topic, DecodingError,
+use mm2_p2p::{decode_message, decode_signed, encode_and_sign, encode_message, pub_sub_topic, DecodingError,
               GossipsubMessage, Libp2pPublic, Libp2pSecpPublic, MessageId, NetworkPorts, PeerId, TOPIC_SEPARATOR};
 #[cfg(test)] use mocktopus::macros::*;
 use parking_lot::Mutex as PaMutex;
@@ -39,7 +40,6 @@ use serde::de;
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
-use http::StatusCode;
 
 use crate::mm2::{lp_ordermatch, lp_stats, lp_swap};
 

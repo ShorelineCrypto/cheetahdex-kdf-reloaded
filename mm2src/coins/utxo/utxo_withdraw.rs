@@ -6,7 +6,6 @@ use crate::{CoinWithDerivationMethod, GetWithdrawSenderAddress, MarketCoinOps, T
             WithdrawFee, WithdrawRequest, WithdrawResult};
 use async_trait::async_trait;
 use chain::{OutPoint, TransactionOutput};
-use std::collections::HashSet;
 use common::log::info;
 use common::now_ms;
 use crypto::hw_rpc_task::{HwConnectStatuses, TrezorRpcTaskConnectProcessor};
@@ -20,6 +19,7 @@ use rpc::v1::types::ToTxHash;
 use rpc_task::RpcTaskError;
 use script::{Builder, Script, SignatureVersion, TransactionInputSigner};
 use serialization::{serialize, serialize_with_flags, SERIALIZE_TRANSACTION_WITNESS};
+use std::collections::HashSet;
 use std::iter::once;
 use std::time::Duration;
 use utxo_signer::sign_params::{SendingOutputInfo, SpendingInputInfo, UtxoSignTxParamsBuilder};

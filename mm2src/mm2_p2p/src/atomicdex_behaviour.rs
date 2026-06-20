@@ -34,8 +34,7 @@ use wasm_timer::{Instant, Interval};
 
 #[cfg(feature = "application")]
 use crate::{decode_message, encode_message};
-#[cfg(feature = "application")]
-use futures::FutureExt;
+#[cfg(feature = "application")] use futures::FutureExt;
 #[cfg(feature = "application")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "application")]
@@ -330,8 +329,7 @@ impl AtomicDexBehaviour {
         for (peer_id, mut response_rx) in pending_checks {
             match response_rx.poll_unpin(cx) {
                 Poll::Ready(Ok(response)) => {
-                    if !Self::is_peer_clock_check_passed(response)
-                        && Swarm::disconnect_peer_id(swarm, peer_id).is_err()
+                    if !Self::is_peer_clock_check_passed(response) && Swarm::disconnect_peer_id(swarm, peer_id).is_err()
                     {
                         error!("Peer {} disconnect error after failed clock check", peer_id);
                     }
@@ -548,7 +546,10 @@ impl NetworkBehaviourEventProcess<RequestResponseBehaviourEvent> for AtomicDexBe
                 response_channel,
             } => {
                 #[cfg(feature = "application")]
-                if matches!(decode_message::<ApplicationRequest>(&request.req), Ok(ApplicationRequest::CurrentTimestamp)) {
+                if matches!(
+                    decode_message::<ApplicationRequest>(&request.req),
+                    Ok(ApplicationRequest::CurrentTimestamp)
+                ) {
                     let response = match encode_message(&Self::current_utc_timestamp_secs()) {
                         Ok(now) => PeerResponse::Ok { res: now },
                         Err(e) => PeerResponse::Err {

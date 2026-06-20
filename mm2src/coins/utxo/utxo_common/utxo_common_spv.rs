@@ -335,10 +335,7 @@ fn block_header_bits(header: &BlockHeader) -> u32 {
 
 /// Fetches the header at the configured anchor height from the coin's RPC and checks that its
 /// hash, compact bits, and timestamp match the configured `starting_block_header` (R37.1.3).
-async fn verify_anchor_header(
-    client: &ElectrumClient,
-    anchor: &crate::utxo::SPVBlockHeader,
-) -> Result<bool, String> {
+async fn verify_anchor_header(client: &ElectrumClient, anchor: &crate::utxo::SPVBlockHeader) -> Result<bool, String> {
     let bytes = client
         .blockchain_block_header(anchor.height)
         .compat()
@@ -351,9 +348,7 @@ async fn verify_anchor_header(
         .parse::<H256>()
         .map_err(|e| format!("invalid anchor hash '{}': {:?}", anchor.hash, e))?
         .reversed();
-    Ok(header.hash() == configured_hash
-        && block_header_bits(&header) == anchor.bits
-        && header.time == anchor.time)
+    Ok(header.hash() == configured_hash && block_header_bits(&header) == anchor.bits && header.time == anchor.time)
 }
 
 /// Outcome of comparing a freshly-fetched candidate batch against the stored header chain.
@@ -405,9 +400,7 @@ pub(crate) fn detect_reorg(
     // The header one below the divergence must be the agreed common ancestor that the candidate
     // chain builds upon. If it is not present or does not line up, the real fork is lower still.
     match (stored.get(&(divergent - 1)), candidate.get(&divergent)) {
-        (Some(predecessor), Some(divergent_header))
-            if divergent_header.previous_header_hash == predecessor.hash() =>
-        {
+        (Some(predecessor), Some(divergent_header)) if divergent_header.previous_header_hash == predecessor.hash() => {
             ReorgOutcome::ForkAt(divergent)
         },
         _ => ReorgOutcome::NeedMoreHistory,
@@ -440,9 +433,7 @@ async fn reconcile_reorg(
     if let ReorgOutcome::ForkAt(fork) = outcome {
         if let Some(tip) = storage.get_last_block_height(ticker).await? {
             if fork <= tip {
-                storage
-                    .remove_block_headers_from_to_height(ticker, fork, tip)
-                    .await?;
+                storage.remove_block_headers_from_to_height(ticker, fork, tip).await?;
             }
         }
         storage.add_block_headers_to_storage(ticker, candidate.clone()).await?;
@@ -461,8 +452,8 @@ async fn walk_back_reorg(
     from_height: u64,
 ) -> Result<(), String> {
     let anchor_height = conf.starting_block_header.height;
-    let limit = NonZeroU64::new(crate::utxo::DIFFICULTY_RETARGET_INTERVAL)
-        .expect("difficulty-retarget interval is non-zero");
+    let limit =
+        NonZeroU64::new(crate::utxo::DIFFICULTY_RETARGET_INTERVAL).expect("difficulty-retarget interval is non-zero");
     let mut top = from_height;
     while top > anchor_height {
         let (registry, headers) = client
@@ -594,7 +585,10 @@ mod reorg_tests {
         assert_eq!(prefix.hash(), stored[&(fork - 1)].hash());
         // Retained count: prefix [anchor..fork-1] + candidate [fork..new_tip].
         let expected_count = (fork - anchor) + (new_tip - fork + 1);
-        assert_eq!(block_on(storage.get_block_headers_count(ticker)).unwrap(), expected_count);
+        assert_eq!(
+            block_on(storage.get_block_headers_count(ticker)).unwrap(),
+            expected_count
+        );
     }
 
     #[test]

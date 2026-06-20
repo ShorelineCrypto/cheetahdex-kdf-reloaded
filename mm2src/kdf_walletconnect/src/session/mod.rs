@@ -287,7 +287,8 @@ impl From<&Session> for SessionInfo {
 #[derive(Default)]
 pub struct SessionManager {
     sessions: Mutex<HashMap<Topic, Session>>,
-}impl SessionManager {
+}
+impl SessionManager {
     pub fn new() -> Self { Self::default() }
 
     /// Inserts or replaces a session.
@@ -405,10 +406,9 @@ fn session_grants_chain(namespaces: &SettleNamespaces, chain_id: &str) -> bool {
             .chains
             .as_ref()
             .map_or(false, |chains| chains.contains(chain_id));
-        let in_accounts = namespace
-            .accounts
-            .as_ref()
-            .map_or(false, |accounts| accounts.iter().any(|account| account.starts_with(&account_prefix)));
+        let in_accounts = namespace.accounts.as_ref().map_or(false, |accounts| {
+            accounts.iter().any(|account| account.starts_with(&account_prefix))
+        });
         in_chains || in_accounts
     })
 }
@@ -448,4 +448,3 @@ mod tests {
         assert!(!session_grants_chain(&namespaces, "eip155:11"));
     }
 }
-

@@ -66,10 +66,11 @@ pub fn update_my_swap_fiat_snapshot(
     taker_coin_usd_price: &str,
 ) -> SqlResult<()> {
     let conn = ctx.sqlite_connection();
-    conn.execute(
-        UPDATE_MY_SWAP_FIAT_SNAPSHOT,
-        &[maker_coin_usd_price, taker_coin_usd_price, uuid],
-    )
+    conn.execute(UPDATE_MY_SWAP_FIAT_SNAPSHOT, &[
+        maker_coin_usd_price,
+        taker_coin_usd_price,
+        uuid,
+    ])
     .map(|_| ())
 }
 

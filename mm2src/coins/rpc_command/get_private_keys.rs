@@ -9,8 +9,8 @@
 //! - Keys are serialized once for the response and not persisted or logged.
 
 use common::HttpStatusCode;
-use crypto::{Bip32DerPathOps, Bip44PathToCoin, ChildNumber, CryptoCtx, CryptoCtxError, DerivationPath, GlobalHDAccountArc,
-             KeyPairPolicy, Secp256k1Secret};
+use crypto::{Bip32DerPathOps, Bip44PathToCoin, ChildNumber, CryptoCtx, CryptoCtxError, DerivationPath,
+             GlobalHDAccountArc, KeyPairPolicy, Secp256k1Secret};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -226,9 +226,7 @@ impl From<CryptoCtxError> for GetPrivateKeysError {
 /// Default-false: only a configuration value that is the boolean `true`
 /// enables the opt-in superset. This mirrors the `allow_weak_password`
 /// convention but is a **separate** switch governing a different threat model.
-pub fn allow_insecure_key_export(ctx: &MmArc) -> bool {
-    ctx.conf["allow_insecure_key_export"].as_bool() == Some(true)
-}
+pub fn allow_insecure_key_export(ctx: &MmArc) -> bool { ctx.conf["allow_insecure_key_export"].as_bool() == Some(true) }
 
 // ── Handler ─────────────────────────────────────────────────────────────
 
@@ -502,12 +500,13 @@ fn derive_utxo(
             reason: e.to_string(),
         }
     })?;
-    let utxo_conf = UtxoConfBuilder::new(conf, &params, ticker)
-        .build()
-        .mm_err(|e| GetPrivateKeysError::KeyDerivationFailed {
-            ticker: ticker.to_owned(),
-            reason: e.to_string(),
-        })?;
+    let utxo_conf =
+        UtxoConfBuilder::new(conf, &params, ticker)
+            .build()
+            .mm_err(|e| GetPrivateKeysError::KeyDerivationFailed {
+                ticker: ticker.to_owned(),
+                reason: e.to_string(),
+            })?;
 
     let private = UtxoPrivate {
         prefix: utxo_conf.wif_prefix,
@@ -547,20 +546,20 @@ fn derive_utxo(
 /// EVM formatting: `0x`-prefixed hex secret + EIP-55 checksummed address (R-K4).
 fn derive_evm(ticker: &str, secret: &Secp256k1Secret) -> Result<DerivedKey, MmError<GetPrivateKeysError>> {
     let secp = secp256k1::Secp256k1::new();
-    let secret_key =
-        secp256k1::SecretKey::from_slice(secret.as_slice()).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+    let secret_key = secp256k1::SecretKey::from_slice(secret.as_slice()).map_to_mm(|e| {
+        GetPrivateKeysError::KeyDerivationFailed {
             ticker: ticker.to_owned(),
             reason: e.to_string(),
-        })?;
+        }
+    })?;
     let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
     let pubkey_compressed = public_key.serialize();
 
-    let eth_address = addr_from_raw_pubkey(&pubkey_compressed).map_to_mm(|reason| {
-        GetPrivateKeysError::KeyDerivationFailed {
+    let eth_address =
+        addr_from_raw_pubkey(&pubkey_compressed).map_to_mm(|reason| GetPrivateKeysError::KeyDerivationFailed {
             ticker: ticker.to_owned(),
             reason,
-        }
-    })?;
+        })?;
 
     Ok(DerivedKey {
         pubkey: hex::encode(pubkey_compressed),
@@ -585,11 +584,12 @@ fn derive_tendermint(
     let pubkey_bytes = signing_key.public_key().to_bytes();
     let pubkey_hex = hex::encode(&pubkey_bytes);
 
-    let account_id =
-        account_id_from_pubkey_hex(account_prefix, &pubkey_hex).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+    let account_id = account_id_from_pubkey_hex(account_prefix, &pubkey_hex).map_to_mm(|e| {
+        GetPrivateKeysError::KeyDerivationFailed {
             ticker: ticker.to_owned(),
             reason: e.to_string(),
-        })?;
+        }
+    })?;
 
     Ok(DerivedKey {
         pubkey: pubkey_hex,
@@ -612,15 +612,17 @@ fn derive_zhtlc(ticker: &str, secret: &Secp256k1Secret) -> Result<DerivedKey, Mm
     // the same key that master-derives the shielded material and keeps the
     // `pubkey` field meaningful and consistent with the other protocols.
     let secp = secp256k1::Secp256k1::new();
-    let secret_key =
-        secp256k1::SecretKey::from_slice(secret.as_slice()).map_to_mm(|e| GetPrivateKeysError::KeyDerivationFailed {
+    let secret_key = secp256k1::SecretKey::from_slice(secret.as_slice()).map_to_mm(|e| {
+        GetPrivateKeysError::KeyDerivationFailed {
             ticker: ticker.to_owned(),
             reason: e.to_string(),
-        })?;
+        }
+    })?;
     let pubkey_compressed = secp256k1::PublicKey::from_secret_key(&secp, &secret_key).serialize();
 
     let z_spending_key = ExtendedSpendingKey::master(secret.as_slice());
-    let priv_key = encode_extended_spending_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY, &z_spending_key);
+    let priv_key =
+        encode_extended_spending_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY, &z_spending_key);
     let efvk = ExtendedFullViewingKey::from(&z_spending_key);
     let viewing_key =
         encode_extended_full_viewing_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &efvk);
@@ -786,10 +788,7 @@ mod tests {
             Ok(_) => panic!("expected InsecureExportDisabled"),
             Err(e) => {
                 assert_eq!(e.get_inner().status_code(), StatusCode::FORBIDDEN);
-                assert!(matches!(
-                    e.into_inner(),
-                    GetPrivateKeysError::InsecureExportDisabled
-                ));
+                assert!(matches!(e.into_inner(), GetPrivateKeysError::InsecureExportDisabled));
             },
         }
     }
@@ -855,7 +854,8 @@ mod tests {
         // Encoded extended spending key, full viewing key and shielded payment
         // address carry their bound mainnet Sapling HRPs (R-K4).
         assert!(
-            z.priv_key.starts_with(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY),
+            z.priv_key
+                .starts_with(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY),
             "got {}",
             z.priv_key
         );

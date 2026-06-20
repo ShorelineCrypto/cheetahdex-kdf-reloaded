@@ -94,9 +94,7 @@ impl From<ApiClientError> for OneInchClassicSwapError {
                 error_msg,
                 description,
                 status_code,
-            } => OneInchClassicSwapError::OneInchProviderError(format!(
-                "{error_msg} ({status_code}): {description}"
-            )),
+            } => OneInchClassicSwapError::OneInchProviderError(format!("{error_msg} ({status_code}): {description}")),
             ApiClientError::AllowanceNotEnough { allowance, amount, .. } => {
                 // The library carries these as its own (newer) ethereum-types
                 // `U256`; promote them into the EVM-coin-support `U256` (R6) via

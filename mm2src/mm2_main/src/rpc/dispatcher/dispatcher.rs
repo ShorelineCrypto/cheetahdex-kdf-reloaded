@@ -2,10 +2,10 @@ use super::{DispatcherError, DispatcherResult, PUBLIC_METHODS};
 use crate::mm2::lp_native_dex::init_hw::{init_trezor, init_trezor_status, init_trezor_user_action};
 use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simple_market_maker_bot,
                                 stop_simple_market_maker_bot};
-use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
-use crate::mm2::rpc::streaming_activations;
 use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
                                 classic_swap_quote, classic_swap_tokens};
+use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
+use crate::mm2::rpc::streaming_activations;
 use crate::mm2::rpc::wallet_connect::{wc_delete_session, wc_get_session, wc_get_sessions, wc_new_connection,
                                       wc_ping_session};
 use crate::{mm2::lp_stats::{add_node_to_version_stat, remove_node_from_version_stat, start_version_stat_collection,

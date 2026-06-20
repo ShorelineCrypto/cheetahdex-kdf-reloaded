@@ -150,8 +150,8 @@ pub async fn unban_pubkeys_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::maker_swap::MakerSwapEvent;
+    use super::*;
     use common::block_on;
     use mm2_core::mm_ctx::MmCtxBuilder;
 
@@ -209,7 +209,10 @@ mod tests {
 
         // No duration means a permanent (None) expiry that survives purging.
         let swaps_ctx = SwapsContext::from_ctx(&ctx).unwrap();
-        assert_eq!(swaps_ctx.banned_pubkeys.lock().unwrap().get(&pk).unwrap().expires_at, None);
+        assert_eq!(
+            swaps_ctx.banned_pubkeys.lock().unwrap().get(&pk).unwrap().expires_at,
+            None
+        );
         drop(swaps_ctx);
 
         assert!(is_pubkey_banned(&ctx, &pk));
@@ -254,7 +257,11 @@ mod tests {
     fn list_and_unban_emit_bare_ban_reason() {
         let ctx = MmCtxBuilder::default().into_mm_arc();
         let pk = pubkey(5);
-        block_on(ban_pubkey_rpc(ctx.clone(), json!({ "pubkey": pk, "reason": "wire shape" }))).unwrap();
+        block_on(ban_pubkey_rpc(
+            ctx.clone(),
+            json!({ "pubkey": pk, "reason": "wire shape" }),
+        ))
+        .unwrap();
 
         // The list value is the bare type-tagged BanReason, not a wrapper object.
         let listed = result_of(block_on(list_banned_pubkeys_rpc(ctx.clone())).unwrap());
@@ -263,7 +270,10 @@ mod tests {
         // Unban responses keep the same bare BanReason shape under `unbanned`.
         let unban_req = json!({ "unban_by": { "type": "All" } });
         let unban_res = result_of(block_on(unban_pubkeys_rpc(ctx, unban_req)).unwrap());
-        assert_eq!(only_value(&unban_res["unbanned"]), json!({ "type": "Manual", "reason": "wire shape" }));
+        assert_eq!(
+            only_value(&unban_res["unbanned"]),
+            json!({ "type": "Manual", "reason": "wire shape" })
+        );
         assert_eq!(unban_res["still_banned"], json!({}));
     }
 }

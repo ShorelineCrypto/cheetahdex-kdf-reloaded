@@ -107,8 +107,8 @@ pub async fn approve_token(ctx: MmArc, req: ApproveTokenRequest) -> MmResult<Str
     let coin = eth_coin_from_ticker(&ctx, &req.coin).await?;
     let spender = valid_addr_from_str(&req.spender).map_to_mm(Erc20AllowanceError::InvalidAddress)?;
 
-    let amount =
-        wei_from_big_decimal(&req.amount, coin.decimals).mm_err(|e| Erc20AllowanceError::NumConversion(e.to_string()))?;
+    let amount = wei_from_big_decimal(&req.amount, coin.decimals)
+        .mm_err(|e| Erc20AllowanceError::NumConversion(e.to_string()))?;
 
     let tx = coin
         .approve(spender, amount)
@@ -125,19 +125,16 @@ mod tests {
 
     #[test]
     fn get_token_allowance_request_deserializes() {
-        let req: GetTokenAllowanceRequest = serde_json::from_str(
-            r#"{"coin":"ETH","spender":"0x111111125421ca6dc452d289314280a0f8842a65"}"#,
-        )
-        .unwrap();
+        let req: GetTokenAllowanceRequest =
+            serde_json::from_str(r#"{"coin":"ETH","spender":"0x111111125421ca6dc452d289314280a0f8842a65"}"#).unwrap();
         assert_eq!(req.coin, "ETH");
         assert_eq!(req.spender, "0x111111125421ca6dc452d289314280a0f8842a65");
     }
 
     #[test]
     fn get_token_allowance_request_rejects_unknown_field() {
-        let res: Result<GetTokenAllowanceRequest, _> = serde_json::from_str(
-            r#"{"coin":"ETH","spender":"0x111111125421ca6dc452d289314280a0f8842a65","extra":1}"#,
-        );
+        let res: Result<GetTokenAllowanceRequest, _> =
+            serde_json::from_str(r#"{"coin":"ETH","spender":"0x111111125421ca6dc452d289314280a0f8842a65","extra":1}"#);
         assert!(res.is_err());
     }
 
@@ -153,16 +150,14 @@ mod tests {
 
     #[test]
     fn approve_token_request_rejects_unknown_field() {
-        let res: Result<ApproveTokenRequest, _> = serde_json::from_str(
-            r#"{"coin":"ETH","spender":"0x0","amount":"1","extra":true}"#,
-        );
+        let res: Result<ApproveTokenRequest, _> =
+            serde_json::from_str(r#"{"coin":"ETH","spender":"0x0","amount":"1","extra":true}"#);
         assert!(res.is_err());
     }
 
     #[test]
     fn approve_token_request_requires_amount() {
-        let res: Result<ApproveTokenRequest, _> =
-            serde_json::from_str(r#"{"coin":"ETH","spender":"0x0"}"#);
+        let res: Result<ApproveTokenRequest, _> = serde_json::from_str(r#"{"coin":"ETH","spender":"0x0"}"#);
         assert!(res.is_err());
     }
 
