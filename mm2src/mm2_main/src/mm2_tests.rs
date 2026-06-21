@@ -536,7 +536,7 @@ fn test_p2wpkh_my_balance() {
         "userpass": mm.userpass,
         "method": "electrum",
         "coin": "tBTC",
-        "servers": [{"url":"electrum1.cipig.net:10068"},{"url":"electrum2.cipig.net:10068"},{"url":"electrum3.cipig.net:10068"}],
+        "servers": [{"url":"blockstream.info:143"},{"url":"blackie.c3-soft.com:57005"},{"url":"testnet.qtornado.com:51001"}],
         "mm2": 1,
         "address_format": {
             "format": "segwit",
@@ -1498,7 +1498,7 @@ fn test_tbtc_withdraw_to_cashaddresses_should_fail() {
         "userpass": mm_alice.userpass,
         "method": "electrum",
         "coin": "tBTC",
-        "servers": [{"url":"electrum1.cipig.net:10068"},{"url":"electrum2.cipig.net:10068"},{"url":"electrum3.cipig.net:10068"}],
+        "servers": [{"url":"blockstream.info:143"},{"url":"blackie.c3-soft.com:57005"},{"url":"testnet.qtornado.com:51001"}],
         "mm2": 1,
     }))).unwrap();
     assert_eq!(
@@ -1681,7 +1681,7 @@ fn test_withdraw_segwit() {
         "userpass": mm_alice.userpass,
         "method": "electrum",
         "coin": "tBTC",
-        "servers": [{"url":"electrum1.cipig.net:10068"},{"url":"electrum2.cipig.net:10068"},{"url":"electrum3.cipig.net:10068"}],
+        "servers": [{"url":"blockstream.info:143"},{"url":"blackie.c3-soft.com:57005"},{"url":"testnet.qtornado.com:51001"}],
         "mm2": 1,
         "address_format": {
             "format": "segwit",
@@ -3516,9 +3516,9 @@ fn test_convert_segwit_address() {
     log!({ "log path: {}", mm.log_path.display() });
 
     let _electrum = block_on(enable_electrum(&mm, "tBTC", false, &[
-        "electrum1.cipig.net:10068",
-        "electrum2.cipig.net:10068",
-        "electrum3.cipig.net:10068",
+        "blockstream.info:143",
+        "blackie.c3-soft.com:57005",
+        "testnet.qtornado.com:51001",
     ]));
 
     // test standard to segwit
@@ -4279,7 +4279,7 @@ fn test_validateaddress_segwit() {
         "userpass": mm_alice.userpass,
         "method": "electrum",
         "coin": "tBTC",
-        "servers": [{"url":"electrum1.cipig.net:10068"},{"url":"electrum2.cipig.net:10068"},{"url":"electrum3.cipig.net:10068"}],
+        "servers": [{"url":"blockstream.info:143"},{"url":"blackie.c3-soft.com:57005"},{"url":"testnet.qtornado.com:51001"}],
         "mm2": 1,
         "address_format": {
             "format": "segwit",
@@ -4913,7 +4913,7 @@ fn test_tx_history_segwit() {
         "userpass": mm.userpass,
         "method": "electrum",
         "coin": "tBTC",
-        "servers": [{"url":"electrum1.cipig.net:10068"},{"url":"electrum2.cipig.net:10068"},{"url":"electrum3.cipig.net:10068"}],
+        "servers": [{"url":"blockstream.info:143"},{"url":"blackie.c3-soft.com:57005"},{"url":"testnet.qtornado.com:51001"}],
         "mm2": 1,
         "tx_history": true,
         "address_format": {
@@ -5038,7 +5038,7 @@ fn test_tx_history_tbtc_non_segwit() {
         "userpass": mm.userpass,
         "method": "electrum",
         "coin": "tBTC",
-        "servers": [{"url":"electrum1.cipig.net:10068"},{"url":"electrum2.cipig.net:10068"},{"url":"electrum3.cipig.net:10068"}],
+        "servers": [{"url":"blockstream.info:143"},{"url":"blackie.c3-soft.com:57005"},{"url":"testnet.qtornado.com:51001"}],
         "mm2": 1,
         "tx_history": true,
     })))

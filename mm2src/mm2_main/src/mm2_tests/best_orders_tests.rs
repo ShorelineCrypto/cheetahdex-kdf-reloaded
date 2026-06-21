@@ -479,7 +479,7 @@ fn test_best_orders_address_and_confirmations() {
         "userpass": "pass",
         "method": "electrum",
         "coin": "tBTC",
-        "servers": [{"url":"electrum1.cipig.net:10068"},{"url":"electrum2.cipig.net:10068"},{"url":"electrum3.cipig.net:10068"}],
+        "servers": [{"url":"blockstream.info:143"},{"url":"blackie.c3-soft.com:57005"},{"url":"testnet.qtornado.com:51001"}],
         "address_format":{"format":"segwit"},
         "mm2": 1,
     }))).unwrap();

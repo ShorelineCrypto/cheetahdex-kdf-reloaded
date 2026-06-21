@@ -98,9 +98,9 @@ pub fn tbtc_electrums() -> Vec<Json> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn tbtc_electrums() -> Vec<Json> {
     vec![
-        json!({ "url": "electrum1.cipig.net:10068" }),
-        json!({ "url": "electrum2.cipig.net:10068" }),
-        json!({ "url": "electrum3.cipig.net:10068" }),
+        json!({ "url": "blockstream.info:143" }),
+        json!({ "url": "blackie.c3-soft.com:57005" }),
+        json!({ "url": "testnet.qtornado.com:51001" }),
     ]
 }
 
