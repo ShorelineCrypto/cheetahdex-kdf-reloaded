@@ -132,8 +132,20 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.release]
 # Due to the "package" section only affects out-of-workspace crates, as intended.
-debug = true
+debug = 0
 debug-assertions = false
+opt-level = 3
+strip = true
+codegen-units = 1
+panic = 'unwind'
+
+
+[profile.dev]
+debug = 1
+debug-assertions = false # TODO: Should we enable in the future?
+opt-level = 0
+strip = false
+codegen-units = 128
 
 [profile.release.package."*"]
 # Turns debugging symbols off for the out-of-workspace dependencies.
