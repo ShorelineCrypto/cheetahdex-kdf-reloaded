@@ -397,6 +397,112 @@ read those values from the state-8 `stats_swaps` price columns by swap `uuid`.
 The aggregate stats row is the canonical `MM2.db` storage location for those
 price snapshots in the GLEEC-compatible schema.
 
+## 44.8A Legacy Saved-Swap Event JSON
+
+R44.8A.1 The legacy V1 saved-swap JSON surface is a public persisted
+compatibility contract. A saved swap is role-tagged with a string `type` field
+whose accepted values are `Maker` and `Taker`. Each record carries `uuid`,
+optional order UUID, coin tickers and amounts when known, optional GUI/version
+metadata, `success_events`, `error_events`, and an ordered `events` array.
+
+R44.8A.2 Each legacy saved event in the `events` array shall be a JSON object
+with:
+
+- `timestamp`: an unsigned millisecond timestamp;
+- `event`: a role-specific event object encoded with a string `type` field and
+  a `data` field when the event carries payload data.
+
+Unit events shall be accepted without a `data` field. Events with payloads
+shall preserve their existing JSON payload shape; transaction identifiers,
+payment instructions, swap errors, negotiation data, secret material, and
+refund deadlines are dictated by the legacy swap RPC/history surface and are
+not renamed by this chapter.
+
+R44.8A.3 The maker-side event parser shall accept these persisted event
+`type` values:
+
+`Started`, `StartFailed`, `Negotiated`, `NegotiateFailed`,
+`MakerPaymentInstructionsReceived`, `TakerFeeValidated`,
+`TakerFeeValidateFailed`, `MakerPaymentSent`,
+`MakerPaymentTransactionFailed`, `MakerPaymentDataSendFailed`,
+`MakerPaymentWaitConfirmFailed`, `TakerPaymentReceived`,
+`TakerPaymentWaitConfirmStarted`, `TakerPaymentValidatedAndConfirmed`,
+`TakerPaymentValidateFailed`, `TakerPaymentWaitConfirmFailed`,
+`TakerPaymentSpent`, `TakerPaymentSpendFailed`,
+`TakerPaymentSpendConfirmStarted`, `TakerPaymentSpendConfirmed`,
+`TakerPaymentSpendConfirmFailed`, `MakerPaymentWaitRefundStarted`,
+`MakerPaymentRefundStarted`, `MakerPaymentRefunded`,
+`MakerPaymentRefundFailed`, `MakerPaymentRefundFinished`, and `Finished`.
+
+R44.8A.4 The taker-side event parser shall accept these persisted event
+`type` values:
+
+`Started`, `StartFailed`, `Negotiated`, `NegotiateFailed`, `TakerFeeSent`,
+`TakerFeeSendFailed`, `TakerPaymentInstructionsReceived`,
+`MakerPaymentReceived`, `MakerPaymentWaitConfirmStarted`,
+`MakerPaymentValidatedAndConfirmed`, `MakerPaymentValidateFailed`,
+`MakerPaymentWaitConfirmFailed`, `TakerPaymentSent`, `WatcherMessageSent`,
+`TakerPaymentTransactionFailed`, `TakerPaymentDataSendFailed`,
+`TakerPaymentWaitConfirmFailed`, `TakerPaymentSpent`,
+`TakerPaymentWaitForSpendFailed`, `MakerPaymentSpent`,
+`MakerPaymentSpendConfirmed`, `MakerPaymentSpendConfirmFailed`,
+`MakerPaymentSpentByWatcher`, `MakerPaymentSpendFailed`,
+`TakerPaymentWaitRefundStarted`, `TakerPaymentRefundStarted`,
+`TakerPaymentRefunded`, `TakerPaymentRefundFailed`,
+`TakerPaymentRefundFinished`, `TakerPaymentRefundedByWatcher`, and
+`Finished`.
+
+R44.8A.5 Backward-compatible parsing shall be tolerant across the known legacy
+event family. In particular, loading legacy JSON MUST NOT fail solely because
+it contains `WatcherMessageSent` or `MakerPaymentSpendConfirmed`. Event
+variants that represent watcher notification, watcher spend/refund outcomes,
+post-spend confirmation, refund-start, or refund-finish milestones shall be
+treated as valid historical milestones even when the current runtime no longer
+emits all of them on new swaps.
+
+R44.8A.6 Legacy event storage is append-only per swap. When a new V1 event is
+persisted, the implementation shall load the existing saved swap by `uuid`,
+append exactly one timestamped event to the end of its `events` array, and
+replace the saved record for that same `uuid`. The storage backend may be a
+legacy JSON file, a browser object store, or the native `my_swaps.events_json`
+column after import; the role tag, event tag, order, and payload JSON contract
+remain the same.
+
+R44.8A.7 Replay shall apply saved events in array order to reconstruct the
+role-specific swap state. The first event is expected to be `Started`; if the
+first event is absent or is not a start event, replay cannot reconstruct coin
+identity, amounts, or secret/key material and the swap shall not be
+kickstarted. Error events shall restore the failed status and accumulated
+error state; success milestone events shall restore observed transaction
+identifiers, confirmation milestones, refund deadlines, watcher milestones, and
+finished status as applicable.
+
+R44.8A.8 After replay, unfinished swaps shall resume from the command implied
+by the last accepted event. Terminal `Finished` events shall not schedule a
+continuation. Recovery entry MUST NOT append a duplicate copy of the event it
+is resuming from; only new events produced after recovery may be appended.
+
+R44.8A.9 Fund-recovery eligibility is derived from the saved event sequence,
+not from string matching on human-readable status text. A finished swap with a
+known successful counterparty spend is not recoverable by the local refund
+path. A finished swap that failed after the local payment may be recoverable
+when replay preserved enough payment, secret/hash, locktime, and coin data to
+construct the refund or spend transaction. If any required coin is not active
+or required event payload data is missing, recovery shall fail cleanly without
+rewriting the saved history.
+
+R44.8A.10 Historical import into `MM2.db` shall preserve legacy event order and
+known event tags. Unknown future event tags outside the family enumerated in
+R44.8A.3-R44.8A.4 may prevent automatic replay of that swap, but they shall
+not justify deleting the saved record or marking the swap finished. The
+preferred failure mode is to retain the raw saved history and surface that the
+swap cannot be replayed by this binary.
+
+> **Upstream divergence (informative).** The active RELOADED tree's legacy
+> event parser may be narrower than the historical persisted event family. This
+> chapter binds the broader persisted JSON family so existing saved swaps can
+> be loaded, replayed, or retained without data loss.
+
 ## 44.9 Creation/Migration Interaction
 
 R44.9.1 The version-1 creation SQL and the numbered migrations are a single
@@ -462,6 +568,10 @@ lineage and a conversion rule for existing `MM2.db` files.
   error.
 - Historical JSON imports run only at their bound migration states and do not
   require columns that are introduced by later migrations.
+- Legacy saved-swap JSON containing `WatcherMessageSent` or
+  `MakerPaymentSpendConfirmed` loads without an unknown-variant failure; replay
+  either resumes from the last accepted event or preserves the raw history when
+  replay is not possible.
 - Native live swap/order/stats persistence is exercised only after migration
   completion and succeeds against the state-15 schema.
 - Completion-fiat snapshots are stored in `stats_swaps`; `my_swaps` does not

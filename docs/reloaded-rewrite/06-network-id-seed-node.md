@@ -6,9 +6,10 @@
 > a peer-to-peer subnetwork identified by a 16-bit numeric
 > netid -- shall be expressed as a compile-time registry
 > implementing a single public trait that covers every
-> per-network constant (seed nodes, DEX-fee addresses in three
-> flavours, fee rates, burn-share parameters), and the daemon
-> shall refuse to start on any netid the binary cannot describe.
+> per-network constant (optional seed nodes, DEX-fee addresses in
+> three flavours, fee rates, burn-share parameters), and the
+> daemon shall refuse to start on any netid the binary cannot
+> describe.
 
 ## 6.0 Executive Summary
 
@@ -35,7 +36,10 @@ that backs every per-netid constant in the codebase:
    release builds cannot accidentally accept them.
 3. The peer-to-peer subsystem is **netid-blind**: it accepts a
    resolved list of relay addresses to dial on startup and does
-   not know which netid produced that list.
+   not know which netid produced that list. Production operation
+   expects operators to provide reachable `seednodes` in
+   `MM2.json`; compiled-in seed-node lists are optional bootstrap
+   conveniences, not a precondition for a working binary.
 4. The daemon **refuses to start** on any netid the registry
    does not describe. This is enforced at initialisation, before
    the peer-to-peer subsystem is brought up.
@@ -71,7 +75,7 @@ across threads.
 | DEX-fee share                      | `BigRational` (default 1)  | Fraction retained as fee (vs burned)             |
 | Burn address (secp256k1)           | `&'static str` (default "")| Hex-encoded compressed-secp256k1 pubkey          |
 | Burn address raw pubkey            | `&'static [u8]` (default &[])| Burn pubkey as raw bytes                       |
-| Seed-node list                     | `&'static [&'static str]`  | DNS names (preferred) or address strings         |
+| Seed-node list                     | `&'static [&'static str]`  | Optional DNS names or address strings            |
 
 Return-type discipline:
 
@@ -184,8 +188,9 @@ R4. The peer-to-peer subsystem shall not carry an in-source
     list of seed-node addresses for any specific netid.
 R5. The peer-to-peer subsystem shall accept its bootstrap
     seed-node list as a parameter at startup; the caller is
-    responsible for having resolved that list through the
-    network-config registry.
+    responsible for having resolved that list from operator
+    configuration and, only when appropriate, the network-config
+    registry fallback.
 
 R1-R5 together mean the peer-to-peer subsystem can be compiled
 and tested without knowing any netid at all. The "what network
@@ -209,26 +214,41 @@ S2. Call the registry's `net_config_or_panic(netid)` entry
     point. This either returns a trait object or terminates the
     daemon with the descriptive message of §6.2.
 S3. Use the returned trait object as the source of truth for
-    every per-network constant the daemon needs at startup,
-    including the seed-node list it will pass into the
-    peer-to-peer subsystem.
+    every per-network constant the daemon needs at startup. The
+    seed-node list is an exception in priority only: operator
+    configuration wins when supplied.
 
 The seed-node-resolution helper called by the daemon shall:
 
 S4. Prefer an operator-supplied `seednodes` list in the JSON
-    configuration if present.
-S5. Otherwise fall back to the registry's seed-node list for
-    the active netid.
-S6. Map each registry-supplied seed-node string to the
+    configuration if present. This is the expected production
+    bootstrap path.
+S5. Treat an explicitly supplied empty `seednodes` list as "dial
+    no bootstrap relays"; the daemon may still start, but it has
+    no initial route into the relay mesh unless it is itself a
+    reachable relay or peers are supplied later by another
+    mechanism.
+S6. If `seednodes` is absent, an implementation MAY fall back to
+    the registry's seed-node list for the active netid. That
+    fallback is not required to be non-empty; release builds MUST
+    NOT depend on hard-coded production seed nodes being present.
+S7. Map each registry-supplied seed-node string to the
     appropriate address variant for the build target: a DNS
     variant on the browser target (where DNS resolution is
     delegated to the host environment) and a resolved-IPv4
     variant on native targets (where the daemon resolves DNS
-    itself).
+    itself). Operator-supplied `seednodes` are parsed as the P2P
+    relay-address surface of Chapter 28.
 
 Because S2 has already rejected unknown netids by the time
-seed-node resolution runs, the fallback in S5 never has to
+seed-node resolution runs, the fallback in S6 never has to
 handle a missing registry entry.
+
+> **Upstream divergence (informative).** The historical lineage treated
+> operator-provided `seednodes` as the normal bootstrap source. The active
+> RELOADED branch may additionally use a network-registry fallback. This
+> chapter keeps the fallback optional and requires production deployments to
+> work without hard-coded production relay addresses in the binary.
 
 ## 6.7 Wire and Configuration Invariants
 

@@ -79,6 +79,8 @@ pub enum P2PInitError {
     InvalidNetId(NetIdError),
     #[display(fmt = "Invalid relay address: '{}'", _0)]
     InvalidRelayAddress(RelayAddressError),
+    #[display(fmt = "Error listening on P2P address '{}': {}", address, error)]
+    ErrorListeningOnAddress { address: String, error: String },
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[display(fmt = "WASM node can be a seed if only 'p2p_in_memory' is true")]
     WasmNodeCannotBeSeed,
@@ -94,6 +96,9 @@ impl From<AdexBehaviourError> for P2PInitError {
     fn from(e: AdexBehaviourError) -> Self {
         match e {
             AdexBehaviourError::ParsingRelayAddress(e) => P2PInitError::InvalidRelayAddress(e),
+            AdexBehaviourError::ListenOn { address, error } => {
+                P2PInitError::ErrorListeningOnAddress { address, error }
+            },
         }
     }
 }
@@ -250,29 +255,37 @@ impl MmInitError {
 /// Returns compile-time seed nodes from NetConfig for the given netid.
 /// Falls back to an empty list for unknown netids (which shouldn't happen
 /// because startup validation rejects unknown netids).
+fn default_seednode_from_str(netid: u16, seed: &str) -> Option<RelayAddress> {
+    match seed.parse() {
+        Ok(seednode) => Some(seednode),
+        Err(e) => {
+            error!("Invalid default P2P seednode '{}' for netid {}: {}", seed, netid, e);
+            None
+        },
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn default_seednodes(netid: u16) -> Vec<RelayAddress> {
     match net_config_for(netid) {
         Some(cfg) => cfg
             .seed_nodes()
             .iter()
-            .map(|seed| RelayAddress::Dns(seed.to_string()))
+            .filter_map(|seed| default_seednode_from_str(netid, seed))
             .collect(),
         None => Vec::new(),
     }
 }
 
 /// Returns compile-time seed nodes from NetConfig for the given netid,
-/// resolving DNS hostnames to IPv4 addresses.
+/// preserving hostnames so libp2p can resolve them and report seed-level diagnostics.
 #[cfg(not(target_arch = "wasm32"))]
 fn default_seednodes(netid: u16) -> Vec<RelayAddress> {
-    use crate::mm2::lp_network::addr_to_ipv4_string;
     match net_config_for(netid) {
         Some(cfg) => cfg
             .seed_nodes()
             .iter()
-            .filter_map(|seed| addr_to_ipv4_string(seed).ok())
-            .map(RelayAddress::IPv4)
+            .filter_map(|seed| default_seednode_from_str(netid, seed))
             .collect(),
         None => Vec::new(),
     }
@@ -569,15 +582,37 @@ fn seednodes(ctx: &MmArc) -> P2PResult<Vec<RelayAddress>> {
     if ctx.conf["seednodes"].is_null() {
         if ctx.p2p_in_memory() {
             // If the network is in memory, there is no need to use default seednodes.
+            info!("P2P in-memory network selected; no seednodes will be used");
             return Ok(Vec::new());
         }
-        return Ok(default_seednodes(ctx.netid()));
+        let seednodes = default_seednodes(ctx.netid());
+        if seednodes.is_empty() {
+            warn!(
+                "No default P2P seednodes configured for netid {}; relay discovery will rely on already known peers",
+                ctx.netid()
+            );
+        } else {
+            info!(
+                "Using {} default P2P seednodes for netid {}: {:?}",
+                seednodes.len(),
+                ctx.netid(),
+                seednodes
+            );
+        }
+        return Ok(seednodes);
     }
 
-    json::from_value(ctx.conf["seednodes"].clone()).map_to_mm(|e| P2PInitError::ErrorDeserializingConfig {
-        field: "seednodes".to_owned(),
-        error: e.to_string(),
-    })
+    let seednodes: Vec<RelayAddress> =
+        json::from_value(ctx.conf["seednodes"].clone()).map_to_mm(|e| P2PInitError::ErrorDeserializingConfig {
+            field: "seednodes".to_owned(),
+            error: e.to_string(),
+        })?;
+    if seednodes.is_empty() {
+        warn!("The 'seednodes' config field is present but empty; relay discovery may not find peers");
+    } else {
+        info!("Using {} P2P seednodes from config: {:?}", seednodes.len(), seednodes);
+    }
+    Ok(seednodes)
 }
 
 #[cfg(target_arch = "wasm32")]

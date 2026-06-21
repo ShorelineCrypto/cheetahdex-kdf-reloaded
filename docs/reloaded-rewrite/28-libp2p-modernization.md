@@ -236,14 +236,18 @@ bound to the standard libp2p forms: `/ip4/<addr>/tcp/<port>`,
 ## 28.9 Bound Discovery, Mesh Maintenance, NAT
 
 **R21.** The substrate MUST NOT attempt open-internet peer discovery.
-The bootstrap list supplied via configuration is the bound source of
-truth for initial peer addresses.
+The bootstrap list supplied by the daemon is the bound source of truth
+for initial peer addresses. In production that list is expected to come
+from operator-provided `seednodes` in `MM2.json`; a compiled registry
+fallback may contribute entries, but compiled production seed nodes are
+not required by the substrate contract.
 
 **R22.** At swarm-spawn time the substrate MUST:
 
 1. parse the configured bootstrap list (a vector of `RelayAddress`)
    into multiaddrs;
-2. dial up to `mesh_n` random entries;
+2. dial up to `mesh_n` random entries; if the parsed list is empty,
+   start the swarm without dialing any relay;
 3. start a 10-second maintenance timer running R11 plus a periodic
    peers-exchange request to a random connected relay on a bound
    300-second interval after a bound 20-second initial delay.
@@ -254,6 +258,18 @@ nodes that sit behind NAT reach the mesh exclusively via at least one
 relay. The substrate MUST NOT advertise non-routable listener
 addresses to peers; the bound `ip_helpers::is_global` predicate is
 applied to listener announcements.
+
+**R24.** A client node with no configured or reachable relay peers SHALL
+remain in an empty relay-mesh state until at least one relay connection is
+established. The relay-mesh maintenance loop may report that the mesh is
+below its low watermark, but this condition is diagnostic rather than a
+startup failure. While the relay mesh is empty, orderbook and swap pub/sub
+traffic cannot reach the wider network through this substrate.
+
+**R25.** A node configured as a relay may start with an empty bootstrap
+list and act as the first reachable relay for a deployment. Other nodes
+must receive that relay's address through `seednodes` or another
+operator-controlled bootstrap channel before they can join its mesh.
 
 ## 28.9A Required Port — Peer Health-check, Time-sync Admission, Expirable Bans (driving-spec)
 
@@ -417,6 +433,12 @@ remains a one-symbol substrate edit.
 no more than 100 addresses in its response, regardless of how many
 peers the responder is connected to.
 
+**T7.** *Empty bootstrap list.* A client spawned with no bootstrap
+relays MUST start without a fatal P2P initialisation error, keep an
+empty relay mesh, and report zero connected relays until a reachable
+relay is introduced. A relay node spawned with no bootstrap relays
+MUST still listen on its configured reachable address.
+
 ## 28.11 Deferred Work
 
 > **Note.** The §28.9A items (peer health-check RPC, time-sync
@@ -447,6 +469,10 @@ disconnect.
 **D5.** Addition of libp2p relay-v2 plus DCUtR fallback for clients
 whose only path to a relay is blocked is deferred. The substrate
 currently degrades to "no connection" for such clients.
+
+**D6.** Automatic production seed-node discovery is deferred. Operators
+remain responsible for supplying reachable relay addresses when the binary
+does not carry a usable registry fallback for the selected netid.
 
 ## 28.12 External References
 
