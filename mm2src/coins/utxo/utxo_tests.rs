@@ -1015,12 +1015,15 @@ fn test_electrum_rpc_client_error() {
     let empty_hash = H256Json::default();
     let err = client.get_verbose_transaction(&empty_hash).wait().unwrap_err();
 
-    // use the static string instead because the actual error message cannot be obtain
-    // by serde_json serialization
-    let expected = r#"JsonRpcError { client_info: "coin: RICK", request: JsonRpcRequest { jsonrpc: "2.0", id: "1", method: "blockchain.transaction.get", params: [String("0000000000000000000000000000000000000000000000000000000000000000"), Bool(true)] }, error: Response(electrum1.cipig.net:10060, Object({"code": Number(2), "message": String("daemon error: DaemonError({'code': -5, 'message': 'No such mempool or blockchain transaction. Use gettransaction for wallet transactions.'})")})) }"#;
     let actual = format!("{}", err);
+    let debug_actual = format!("{:?}", err);
 
-    assert!(actual.contains(expected));
+    assert!(actual.contains("JsonRpcError { client_info: coin: RICK"));
+    assert!(actual.contains("request: blockchain.transaction.get id=1 params=2"));
+    assert!(actual.contains("response from electrum1.cipig.net:10060"));
+    assert!(actual.contains("No such mempool or blockchain transaction"));
+    assert!(!actual.contains("params: [String("));
+    assert!(debug_actual.contains("params: [String("));
 }
 
 #[test]

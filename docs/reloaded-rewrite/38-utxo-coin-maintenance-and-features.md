@@ -156,10 +156,17 @@ R38.6.7 The project shall parse FIRO Spark verbose transactions (the
 Spark-specific script/output types) so FIRO activates and transacts. Acceptance:
 a FIRO Spark verbose tx parses and its details render.
 
+### 38.6.8 Verus-family verbose-tx script labels
+R38.6.8 The project shall parse Verus / VRSC-family verbose transactions whose
+`scriptPubKey.type` is `cryptocondition`, including vARRR, vDEX, CHIPS, and
+other coins using the same verbose transaction shape. Acceptance: a verbose
+transaction output with `type: "cryptocondition"` deserializes without falling
+back to an error path that skips transaction-history processing.
+
 ## 38.7 Acceptance criteria (chapter)
 
 - Baseline (Part A) RPCs `sign_raw_transaction` and `consolidate_utxos` behave
   per §38.5; Qtum staking uses `validator_address`; maturity is config-driven.
-- Each Part-B item (R38.6.1--R38.6.7) is implemented with the acceptance test
+- Each Part-B item (R38.6.1--R38.6.8) is implemented with the acceptance test
   stated inline, and its coins-config keys / RPC field additions are documented
   alongside the implementation.

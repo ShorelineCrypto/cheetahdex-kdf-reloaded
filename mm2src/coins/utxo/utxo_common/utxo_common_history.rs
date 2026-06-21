@@ -148,13 +148,21 @@ where
                             }
                             updated = true;
                         },
-                        Err(e) => log_tag!(
-                            ctx,
-                            "",
-                            "tx_history",
-                            "coin" => coin.as_ref().conf.ticker;
-                            fmt = "Error {:?} on getting the details of {:?}, skipping the tx", e, txid
-                        ),
+                        Err(e) => {
+                            debug!(
+                                "Full error on getting the details of {:?} for {}: {:?}",
+                                txid,
+                                coin.as_ref().conf.ticker,
+                                e
+                            );
+                            log_tag!(
+                                ctx,
+                                "",
+                                "tx_history",
+                                "coin" => coin.as_ref().conf.ticker;
+                                fmt = "Error {} on getting the details of {:?}, skipping the tx", e, txid
+                            )
+                        },
                     }
                 },
                 Entry::Occupied(mut e) => {

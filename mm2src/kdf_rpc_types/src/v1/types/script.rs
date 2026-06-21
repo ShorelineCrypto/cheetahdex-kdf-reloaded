@@ -27,6 +27,8 @@ pub enum ScriptType {
     LelantusJMint,
     SparkMint,
     SparkSpend,
+    // Verus / VRSC family specific
+    CryptoCondition,
 }
 
 impl ScriptType {
@@ -49,6 +51,7 @@ impl ScriptType {
             ScriptType::LelantusJMint => "lelantusjmint",
             ScriptType::SparkMint => "sparkmint",
             ScriptType::SparkSpend => "sparkspend",
+            ScriptType::CryptoCondition => "cryptocondition",
         }
     }
 
@@ -71,6 +74,7 @@ impl ScriptType {
             "lelantusjmint" => ScriptType::LelantusJMint,
             "sparkmint" => ScriptType::SparkMint,
             "sparkspend" => ScriptType::SparkSpend,
+            "cryptocondition" => ScriptType::CryptoCondition,
             _ => return None,
         })
     }
@@ -147,6 +151,7 @@ mod tests {
             (ScriptType::LelantusJMint, r#""lelantusjmint""#),
             (ScriptType::SparkMint, r#""sparkmint""#),
             (ScriptType::SparkSpend, r#""sparkspend""#),
+            (ScriptType::CryptoCondition, r#""cryptocondition""#),
         ];
         for (variant, encoded) in cases {
             assert_eq!(serde_json::to_string(&variant).unwrap(), encoded);
