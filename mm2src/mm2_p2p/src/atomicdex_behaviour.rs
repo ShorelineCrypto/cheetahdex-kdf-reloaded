@@ -335,18 +335,16 @@ impl AtomicDexBehaviour {
 
         for (peer_id, mut response_rx) in pending_checks {
             match response_rx.poll_unpin(cx) {
-                Poll::Ready(Ok(response)) => {
-                    match Self::peer_clock_check_result(response) {
-                        PeerClockCheck::Passed => (),
-                        PeerClockCheck::Failed => {
-                            if Swarm::disconnect_peer_id(swarm, peer_id).is_err() {
-                                error!("Peer {} disconnect error after failed clock check", peer_id);
-                            }
-                        },
-                        PeerClockCheck::Inconclusive => {
-                            debug!("Keeping peer {} after inconclusive clock check", peer_id);
-                        },
-                    }
+                Poll::Ready(Ok(response)) => match Self::peer_clock_check_result(response) {
+                    PeerClockCheck::Passed => (),
+                    PeerClockCheck::Failed => {
+                        if Swarm::disconnect_peer_id(swarm, peer_id).is_err() {
+                            error!("Peer {} disconnect error after failed clock check", peer_id);
+                        }
+                    },
+                    PeerClockCheck::Inconclusive => {
+                        debug!("Keeping peer {} after inconclusive clock check", peer_id);
+                    },
                 },
                 Poll::Ready(Err(_)) => {
                     debug!("Keeping peer {} after missing clock-check response", peer_id);
@@ -727,7 +725,10 @@ fn dial_bootstrap_addr(swarm: &mut AtomicDexSwarm, addr: Multiaddr, reason: &str
 fn dial_peer_addr(swarm: &mut AtomicDexSwarm, peer: PeerId, addr: Multiaddr, reason: &str) {
     match Swarm::dial(swarm, addr.clone()) {
         Ok(_) => info!("Dialed peer {} at {} ({})", peer, addr, reason),
-        Err(e) => error!("P2P peer dial scheduling failed for peer {} at {} ({}): {}", peer, addr, reason, e),
+        Err(e) => error!(
+            "P2P peer dial scheduling failed for peer {} at {} ({}): {}",
+            peer, addr, reason, e
+        ),
     }
 }
 
@@ -794,7 +795,10 @@ where
             warn!("P2P outgoing connection failed for peer {:?}: {}", peer_id, error);
         },
         SwarmEvent::BannedPeer { peer_id, endpoint } => {
-            warn!("P2P connection from banned peer {} via {:?} was closed", peer_id, endpoint);
+            warn!(
+                "P2P connection from banned peer {} via {:?} was closed",
+                peer_id, endpoint
+            );
         },
         SwarmEvent::NewListenAddr { listener_id, address } => {
             info!("P2P listener {:?} is listening on {}", listener_id, address);
@@ -807,8 +811,14 @@ where
             addresses,
             reason,
         } => match reason {
-            Ok(()) => info!("P2P listener {:?} closed cleanly; addresses: {:?}", listener_id, addresses),
-            Err(e) => warn!("P2P listener {:?} closed with error {}; addresses: {:?}", listener_id, e, addresses),
+            Ok(()) => info!(
+                "P2P listener {:?} closed cleanly; addresses: {:?}",
+                listener_id, addresses
+            ),
+            Err(e) => warn!(
+                "P2P listener {:?} closed with error {}; addresses: {:?}",
+                listener_id, e, addresses
+            ),
         },
         SwarmEvent::ListenerError { listener_id, error } => {
             warn!("P2P listener {:?} reported non-fatal error: {}", listener_id, error);
@@ -1025,10 +1035,7 @@ fn start_gossipsub(
         loop {
             match swarm.poll_next_unpin(cx) {
                 Poll::Ready(Some(event)) => {
-                    if let SwarmEvent::ConnectionEstablished {
-                        peer_id: _peer_id, ..
-                    } = event
-                    {
+                    if let SwarmEvent::ConnectionEstablished { peer_id: _peer_id, .. } = event {
                         #[cfg(feature = "application")]
                         swarm.behaviour_mut().request_peer_clock_check(_peer_id);
                     }

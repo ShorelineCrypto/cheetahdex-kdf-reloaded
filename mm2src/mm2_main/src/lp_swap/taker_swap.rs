@@ -614,12 +614,8 @@ impl From<TakerSwapEventDeser> for TakerSwapEvent {
             },
             TakerSwapEventDeser::MakerPaymentReceived(tx) => TakerSwapEvent::MakerPaymentReceived(tx),
             TakerSwapEventDeser::MakerPaymentWaitConfirmStarted => TakerSwapEvent::MakerPaymentWaitConfirmStarted,
-            TakerSwapEventDeser::MakerPaymentValidatedAndConfirmed => {
-                TakerSwapEvent::MakerPaymentValidatedAndConfirmed
-            },
-            TakerSwapEventDeser::MakerPaymentValidateFailed(err) => {
-                TakerSwapEvent::MakerPaymentValidateFailed(err)
-            },
+            TakerSwapEventDeser::MakerPaymentValidatedAndConfirmed => TakerSwapEvent::MakerPaymentValidatedAndConfirmed,
+            TakerSwapEventDeser::MakerPaymentValidateFailed(err) => TakerSwapEvent::MakerPaymentValidateFailed(err),
             TakerSwapEventDeser::MakerPaymentWaitConfirmFailed(err) => {
                 TakerSwapEvent::MakerPaymentWaitConfirmFailed(err)
             },
@@ -628,9 +624,7 @@ impl From<TakerSwapEventDeser> for TakerSwapEvent {
             TakerSwapEventDeser::TakerPaymentTransactionFailed(err) => {
                 TakerSwapEvent::TakerPaymentTransactionFailed(err)
             },
-            TakerSwapEventDeser::TakerPaymentDataSendFailed(err) => {
-                TakerSwapEvent::TakerPaymentDataSendFailed(err)
-            },
+            TakerSwapEventDeser::TakerPaymentDataSendFailed(err) => TakerSwapEvent::TakerPaymentDataSendFailed(err),
             TakerSwapEventDeser::TakerPaymentWaitConfirmFailed(err) => {
                 TakerSwapEvent::TakerPaymentWaitConfirmFailed(err)
             },
@@ -2749,8 +2743,7 @@ mod taker_swap_tests {
     #[test]
     fn test_legacy_taker_watcher_message_sent_event_is_accepted() {
         let event: TakerSavedEvent =
-            json::from_str(r#"{"timestamp":1,"event":{"type":"WatcherMessageSent","data":{"ignored":true}}}"#)
-                .unwrap();
+            json::from_str(r#"{"timestamp":1,"event":{"type":"WatcherMessageSent","data":{"ignored":true}}}"#).unwrap();
 
         assert_eq!(event.event, TakerSwapEvent::WatcherMessageSent);
         assert!(event.event.is_success());

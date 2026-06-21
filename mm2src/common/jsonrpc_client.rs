@@ -112,13 +112,9 @@ impl fmt::Debug for JsonRpcRequestEnum {
 impl fmt::Display for JsonRpcRequestEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            JsonRpcRequestEnum::Single(single) => write!(
-                f,
-                "{} id={} params={}",
-                single.method,
-                single.id,
-                single.params.len()
-            ),
+            JsonRpcRequestEnum::Single(single) => {
+                write!(f, "{} id={} params={}", single.method, single.id, single.params.len())
+            },
             JsonRpcRequestEnum::Batch(batch) => write!(f, "batch requests={}", batch.len()),
         }
     }

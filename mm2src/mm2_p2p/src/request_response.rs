@@ -174,9 +174,9 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<PeerRequest, PeerResponse
             RequestResponseEvent::Message { peer, message } => (peer, message),
             RequestResponseEvent::InboundFailure { error, .. } => {
                 match error {
-                    InboundFailure::UnsupportedProtocols => debug!(
-                        "Remote peer requested unsupported request-response protocol; keeping connection"
-                    ),
+                    InboundFailure::UnsupportedProtocols => {
+                        debug!("Remote peer requested unsupported request-response protocol; keeping connection")
+                    },
                     error => error!("Error on receive a request: {:?}", error),
                 }
                 return;

@@ -3,8 +3,8 @@ use crate::NetworkInfo;
 use futures::StreamExt;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{multiaddr::{Multiaddr, Protocol},
-             request_response::{InboundFailure, OutboundFailure, ProtocolName, ProtocolSupport, RequestResponse, RequestResponseConfig,
-                                RequestResponseEvent, RequestResponseMessage},
+             request_response::{InboundFailure, OutboundFailure, ProtocolName, ProtocolSupport, RequestResponse,
+                                RequestResponseConfig, RequestResponseEvent, RequestResponseMessage},
              swarm::{NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters},
              NetworkBehaviour, PeerId};
 use log::{error, info, warn};

@@ -96,9 +96,7 @@ impl From<AdexBehaviourError> for P2PInitError {
     fn from(e: AdexBehaviourError) -> Self {
         match e {
             AdexBehaviourError::ParsingRelayAddress(e) => P2PInitError::InvalidRelayAddress(e),
-            AdexBehaviourError::ListenOn { address, error } => {
-                P2PInitError::ErrorListeningOnAddress { address, error }
-            },
+            AdexBehaviourError::ListenOn { address, error } => P2PInitError::ErrorListeningOnAddress { address, error },
         }
     }
 }
