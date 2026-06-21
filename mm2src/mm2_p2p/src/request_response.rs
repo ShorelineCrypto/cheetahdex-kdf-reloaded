@@ -6,8 +6,9 @@ use futures::io::{AsyncRead, AsyncWrite};
 use futures::task::{Context, Poll};
 use futures::StreamExt;
 use libp2p::core::upgrade::{read_length_prefixed, write_length_prefixed};
-use libp2p::request_response::{ProtocolName, ProtocolSupport, RequestId, RequestResponse, RequestResponseCodec,
-                               RequestResponseConfig, RequestResponseEvent, RequestResponseMessage, ResponseChannel};
+use libp2p::request_response::{InboundFailure, OutboundFailure, ProtocolName, ProtocolSupport, RequestId,
+                               RequestResponse, RequestResponseCodec, RequestResponseConfig, RequestResponseEvent,
+                               RequestResponseMessage, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters};
 use libp2p::NetworkBehaviour;
 use libp2p::PeerId;
@@ -172,7 +173,12 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<PeerRequest, PeerResponse
         let (peer_id, message) = match event {
             RequestResponseEvent::Message { peer, message } => (peer, message),
             RequestResponseEvent::InboundFailure { error, .. } => {
-                error!("Error on receive a request: {:?}", error);
+                match error {
+                    InboundFailure::UnsupportedProtocols => debug!(
+                        "Remote peer requested unsupported request-response protocol; keeping connection"
+                    ),
+                    error => error!("Error on receive a request: {:?}", error),
+                }
                 return;
             },
             RequestResponseEvent::OutboundFailure {
@@ -180,7 +186,13 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<PeerRequest, PeerResponse
                 request_id,
                 error,
             } => {
-                error!("Error on send request {:?} to peer {:?}: {:?}", request_id, peer, error);
+                match &error {
+                    OutboundFailure::UnsupportedProtocols => debug!(
+                        "Peer {:?} does not support request-response protocol for request {:?}",
+                        peer, request_id
+                    ),
+                    _ => error!("Error on send request {:?} to peer {:?}: {:?}", request_id, peer, error),
+                }
                 let err_response = PeerResponse::Err {
                     err: format!("{:?}", error),
                 };

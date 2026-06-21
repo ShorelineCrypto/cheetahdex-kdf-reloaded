@@ -3,7 +3,7 @@ use crate::NetworkInfo;
 use futures::StreamExt;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{multiaddr::{Multiaddr, Protocol},
-             request_response::{ProtocolName, ProtocolSupport, RequestResponse, RequestResponseConfig,
+             request_response::{InboundFailure, OutboundFailure, ProtocolName, ProtocolSupport, RequestResponse, RequestResponseConfig,
                                 RequestResponseEvent, RequestResponseMessage},
              swarm::{NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters},
              NetworkBehaviour, PeerId};
@@ -328,18 +328,29 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<PeersExchangeRequest, Pee
                 request_id,
                 error,
             } => {
-                error!(
-                    "Outbound failure {:?} while requesting {:?} to peer {}",
-                    error, request_id, peer
-                );
-                self.forget_peer(&peer);
-                self.request_known_peers_from_random_peer();
+                if error == OutboundFailure::UnsupportedProtocols {
+                    info!(
+                        "Peer {} does not support peers-exchange protocol for request {:?}",
+                        peer, request_id
+                    );
+                } else {
+                    error!(
+                        "Outbound failure {:?} while requesting {:?} to peer {}",
+                        error, request_id, peer
+                    );
+                    self.forget_peer(&peer);
+                    self.request_known_peers_from_random_peer();
+                }
             },
             RequestResponseEvent::InboundFailure { peer, error, .. } => {
-                error!(
-                    "Inbound failure {:?} while processing request from peer {}",
-                    error, peer
-                );
+                if error == InboundFailure::UnsupportedProtocols {
+                    info!("Peer {} requested unsupported peers-exchange protocol", peer);
+                } else {
+                    error!(
+                        "Inbound failure {:?} while processing request from peer {}",
+                        error, peer
+                    );
+                }
             },
             RequestResponseEvent::ResponseSent { .. } => (),
         }

@@ -54,6 +54,13 @@ const CHANNEL_BUF_SIZE: usize = 1024 * 8;
 const MAX_ALLOWED_CLOCK_SKEW_SECS: u64 = 20;
 
 #[cfg(feature = "application")]
+enum PeerClockCheck {
+    Passed,
+    Failed,
+    Inconclusive,
+}
+
+#[cfg(feature = "application")]
 #[derive(Deserialize, Serialize)]
 enum ApplicationRequest {
     CurrentTimestamp,
@@ -292,19 +299,19 @@ impl AtomicDexBehaviour {
     }
 
     #[cfg(feature = "application")]
-    fn is_peer_clock_check_passed(response: PeerResponse) -> bool {
+    fn peer_clock_check_result(response: PeerResponse) -> PeerClockCheck {
         let peer_timestamp = match response {
             PeerResponse::Ok { res } => match decode_message::<u64>(&res) {
                 Ok(timestamp) => timestamp,
                 Err(e) => {
                     error!("Malformed peer timestamp response: {}", e);
-                    return false;
+                    return PeerClockCheck::Failed;
                 },
             },
-            PeerResponse::None => return false,
+            PeerResponse::None => return PeerClockCheck::Inconclusive,
             PeerResponse::Err { err } => {
-                error!("Error receiving peer timestamp response: {}", err);
-                return false;
+                debug!("Peer clock check inconclusive: {}", err);
+                return PeerClockCheck::Inconclusive;
             },
         };
 
@@ -315,10 +322,10 @@ impl AtomicDexBehaviour {
                 "Peer clock skew {}s exceeds allowed {}s",
                 diff, MAX_ALLOWED_CLOCK_SKEW_SECS
             );
-            return false;
+            return PeerClockCheck::Failed;
         }
 
-        true
+        PeerClockCheck::Passed
     }
 
     #[cfg(feature = "application")]
@@ -329,15 +336,20 @@ impl AtomicDexBehaviour {
         for (peer_id, mut response_rx) in pending_checks {
             match response_rx.poll_unpin(cx) {
                 Poll::Ready(Ok(response)) => {
-                    if !Self::is_peer_clock_check_passed(response) && Swarm::disconnect_peer_id(swarm, peer_id).is_err()
-                    {
-                        error!("Peer {} disconnect error after failed clock check", peer_id);
+                    match Self::peer_clock_check_result(response) {
+                        PeerClockCheck::Passed => (),
+                        PeerClockCheck::Failed => {
+                            if Swarm::disconnect_peer_id(swarm, peer_id).is_err() {
+                                error!("Peer {} disconnect error after failed clock check", peer_id);
+                            }
+                        },
+                        PeerClockCheck::Inconclusive => {
+                            debug!("Keeping peer {} after inconclusive clock check", peer_id);
+                        },
                     }
                 },
                 Poll::Ready(Err(_)) => {
-                    if Swarm::disconnect_peer_id(swarm, peer_id).is_err() {
-                        error!("Peer {} disconnect error after missing clock response", peer_id);
-                    }
+                    debug!("Keeping peer {} after missing clock-check response", peer_id);
                 },
                 Poll::Pending => {
                     still_pending.insert(peer_id, response_rx);
