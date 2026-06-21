@@ -213,6 +213,17 @@ jobs:
         run: scripts/with-test-passphrases.sh cargo test --bin docker_tests --features regtest-netid -- --test-threads=1 test_search_for_swap_tx_spend test_one_hundred_maker_payments test_withdraw test_utxo_merge test_send_and_validate test_validate_maker_payment_wrong_amount test_list_unspent test_multiple_sequential
         env:
           RUST_LOG: debug
+          
+      - name: Upload mm2 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm2-logs-${{ github.run_id }}-${{ github.job }}
+          path: |
+            /tmp/mm2_*/mm2.log
+            /tmp/mm2_*/**/mm2.log
+          if-no-files-found: warn
+          retention-days: 7
 
   external-network-tests:
     # Allow-to-fail job for tests that depend on live external endpoints
@@ -277,3 +288,14 @@ jobs:
           # seeds (no mainnet funds), safe to keep fixed. See docs/TEST_ENV_VARS.md.
           BOB_PASSPHRASE: "also shoot benefit prefer juice shell elder veteran woman mimic image kidney"
           ALICE_PASSPHRASE: "spice describe gravity federal blast come thank unfair canal monkey style afraid"
+
+      - name: Upload mm2 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm2-logs-${{ github.run_id }}-${{ github.job }}
+          path: |
+            /tmp/mm2_*/mm2.log
+            /tmp/mm2_*/**/mm2.log
+          if-no-files-found: warn
+          retention-days: 7
