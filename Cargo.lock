@@ -1043,19 +1043,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "asynchronous-codec"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0de5164e5edbf51c45fb8c2d9664ae1c095cce1b265ecf7569093c0d66ef690"
-dependencies = [
- "bytes 1.11.1",
- "futures-sink",
- "futures-util",
- "memchr",
- "pin-project-lite 0.2.17",
-]
-
-[[package]]
 name = "atomic-shim"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4787,7 +4774,6 @@ dependencies = [
  "libp2p-dns",
  "libp2p-floodsub",
  "libp2p-metrics",
- "libp2p-mplex",
  "libp2p-noise",
  "libp2p-ping",
  "libp2p-request-response",
@@ -4796,6 +4782,7 @@ dependencies = [
  "libp2p-tcp",
  "libp2p-wasm-ext",
  "libp2p-websocket",
+ "libp2p-yamux",
  "multiaddr",
  "parking_lot 0.12.5",
  "pin-project 1.1.11",
@@ -4876,23 +4863,6 @@ dependencies = [
  "libp2p-ping",
  "libp2p-swarm",
  "prometheus-client",
-]
-
-[[package]]
-name = "libp2p-mplex"
-version = "0.33.0"
-source = "git+https://github.com/libp2p/rust-libp2p.git#ef2afcd41eac1459c0408a7a6eb599bfc2035938"
-dependencies = [
- "asynchronous-codec",
- "bytes 1.11.1",
- "futures 0.3.15",
- "libp2p-core",
- "log 0.4.29",
- "nohash-hasher",
- "parking_lot 0.12.5",
- "rand 0.7.3",
- "smallvec 1.15.1",
- "unsigned-varint 0.7.1",
 ]
 
 [[package]]
@@ -5021,6 +4991,18 @@ dependencies = [
  "soketto",
  "url",
  "webpki-roots 0.22.3",
+]
+
+[[package]]
+name = "libp2p-yamux"
+version = "0.37.0"
+source = "git+https://github.com/libp2p/rust-libp2p.git#ef2afcd41eac1459c0408a7a6eb599bfc2035938"
+dependencies = [
+ "futures 0.3.15",
+ "libp2p-core",
+ "parking_lot 0.12.5",
+ "thiserror 1.0.69",
+ "yamux",
 ]
 
 [[package]]
@@ -10623,8 +10605,6 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86a8dc7f45e4c1b0d30e43038c38f274e77af056aa5f74b93c2cf9eb3c1c836"
 dependencies = [
- "asynchronous-codec",
- "bytes 1.11.1",
  "futures-io",
  "futures-util",
 ]
@@ -11291,6 +11271,20 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "zeroize",
+]
+
+[[package]]
+name = "yamux"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5d9ba232399af1783a58d8eb26f6b5006fbefe2dc9ef36bd283324792d03ea5"
+dependencies = [
+ "futures 0.3.15",
+ "log 0.4.29",
+ "nohash-hasher",
+ "parking_lot 0.12.5",
+ "rand 0.8.4",
+ "static_assertions",
 ]
 
 [[package]]

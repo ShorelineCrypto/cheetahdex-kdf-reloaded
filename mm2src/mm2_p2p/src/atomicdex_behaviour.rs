@@ -1099,7 +1099,7 @@ fn build_memory_transport(
     upgrade_transport(transport, noise_keys)
 }
 
-/// Set up an encrypted Transport over the Mplex protocol.
+/// Set up an encrypted Transport over the Yamux protocol.
 fn upgrade_transport<T>(
     transport: T,
     noise_keys: libp2p::noise::AuthenticKeypair<libp2p::noise::X25519Spec>,
@@ -1115,7 +1115,7 @@ where
     transport
         .upgrade(libp2p::core::upgrade::Version::V1)
         .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
-        .multiplex(libp2p::mplex::MplexConfig::default())
+        .multiplex(libp2p::yamux::YamuxConfig::default())
         .timeout(std::time::Duration::from_secs(20))
         .map(|(peer, muxer), _| (peer, libp2p::core::muxing::StreamMuxerBox::new(muxer)))
         .boxed()

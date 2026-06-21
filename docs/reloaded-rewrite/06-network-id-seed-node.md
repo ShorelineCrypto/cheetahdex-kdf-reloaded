@@ -232,12 +232,19 @@ S6. If `seednodes` is absent, an implementation MAY fall back to
     the registry's seed-node list for the active netid. That
     fallback is not required to be non-empty; release builds MUST
     NOT depend on hard-coded production seed nodes being present.
-S7. Map each registry-supplied seed-node string to the
-    appropriate address variant for the build target: a DNS
-    variant on the browser target (where DNS resolution is
-    delegated to the host environment) and a resolved-IPv4
-    variant on native targets (where the daemon resolves DNS
-    itself). Operator-supplied `seednodes` are parsed as the P2P
+S7. Treat each registry-supplied seed-node string as a bare
+    host string: either an IPv4 literal or a DNS name, not a
+    full multiaddr. On native targets, map that host to the TCP
+    P2P port derived from the active netid before passing it to
+    the peer-to-peer subsystem. DNS may be preserved as a DNS
+    address or resolved before dialing according to the active
+    target transport.
+S8. WSS seed connectivity is optional transport support, not a
+    replacement for the native TCP seed mapping. When WSS is
+    configured, WSS addresses use the configured WSS port and
+    TLS bundle. In-process memory addresses are test-only and
+    shall not appear in production registry seed-node lists.
+    Operator-supplied `seednodes` are parsed as the P2P
     relay-address surface of Chapter 28.
 
 Because S2 has already rejected unknown netids by the time

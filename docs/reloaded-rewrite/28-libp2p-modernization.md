@@ -42,13 +42,14 @@ wrapper, request-response wrapper, swarm runtime helpers, IP helpers).
 The consolidated substrate exposes a small public surface (R5 below) and
 keeps everything else internal. The composed network behaviour is a
 five-element `NetworkBehaviour` derive over the canonical libp2p protocol
-families plus the substrate-internal `PeersExchange` and `AdexPing`
-wrappers (R6).
+families plus baseline-existing substrate wrappers named in R6. The wrapper
+type spellings are retained only under the R11 baseline-existing identifier
+carve-out; they are not wire bytes.
 
 The libp2p protocol families *not* present in the composed behaviour are
 themselves bound (R7): no Kademlia DHT, no mDNS, no Identify, no Relay
 (v1 or v2), no DCUtR, no AutoNAT. Peer discovery is bootstrap-list-plus-
-peers-exchange-only; NAT traversal is solved structurally (R18) by
+peers-exchange-only; NAT traversal is solved structurally (R24) by
 always having a small set of globally-routable relay nodes in the
 bootstrap list.
 
@@ -111,13 +112,13 @@ Every other symbol in the substrate MUST be private to the crate.
 derive over exactly five sub-behaviours, with bound substrate role for
 each:
 
-| Sub-behaviour                  | Bound role                                                     |
-| ------------------------------ | -------------------------------------------------------------- |
-| `Gossipsub` (vendored)         | Mesh-based publish-subscribe for orderbook and swap traffic.   |
-| `Floodsub`                     | Flood-based publish-subscribe for the bound peers topic.       |
-| `RequestResponseBehaviour`     | Direct one-shot RPC over the mesh.                              |
-| `PeersExchange`                | Request-response over a bound protocol identifier (R8).         |
-| `AdexPing`                     | Ping wrapper that forces a disconnect on consecutive failures. |
+| Sub-behaviour                  | R11 basis                        | Bound role                                                     |
+| ------------------------------ | -------------------------------- | -------------------------------------------------------------- |
+| `Gossipsub` (vendored)         | public libp2p / vendored surface | Mesh-based publish-subscribe for orderbook and swap traffic.   |
+| `Floodsub`                     | public libp2p / vendored surface | Flood-based publish-subscribe for the bound peers topic.       |
+| `RequestResponseBehaviour`     | baseline-existing identifier     | Direct one-shot RPC over the mesh.                              |
+| `PeersExchange`                | baseline-existing identifier     | Request-response over a bound protocol identifier (R8).         |
+| `AdexPing`                     | baseline-existing identifier     | Ping wrapper that forces a disconnect on consecutive failures. |
 
 **R7.** The composed behaviour MUST NOT include any of the following
 libp2p protocol families: Kademlia DHT, mDNS, Identify, Relay (v1 or
@@ -220,56 +221,90 @@ target:
 
 | Target  | Bound transport                                                                                       |
 | ------- | ----------------------------------------------------------------------------------------------------- |
-| Native  | TCP plus DNS, optionally upgraded with WebSocket and WSS when the configuration supplies a TLS bundle. |
+| Native  | TCP plus DNS; optional WebSocket / WSS transport when a WSS port and TLS bundle are configured.        |
 | WASM    | Browser WebSocket via the libp2p WASM FFI substrate.                                                  |
 | Testing | An in-process memory transport for the substrate's own integration tests.                              |
 
-**R19.** The application-level upgrade pipeline is bound to be uniform
-across all targets: noise XX (`Xx25519Spec`) key agreement followed by
-mplex stream multiplexing, with a 20-second upgrade timeout.
+**R19.** The native libp2p identity used to derive the node's
+`PeerId` MUST be an Ed25519 libp2p identity. This identity is the
+transport-level peer identity authenticated by the libp2p handshake
+and is separate from the secp256k1 key material used for the
+application-payload signing surface in §28.7.
 
-**R20.** The bootstrap-multiaddr formats the configuration accepts are
-bound to the standard libp2p forms: `/ip4/<addr>/tcp/<port>`,
-`/ip4/<addr>/tcp/<port>/wss`, `/dns/<host>/tcp/<port>`, and
-`/memory/<port>` for the testing transport.
+**R20.** The libp2p connection upgrade pipeline is bound to be
+uniform across all targets: multistream-select V1 negotiation,
+Noise XX security, yamux stream multiplexing, and a 20-second
+upgrade timeout. mplex MUST NOT be used for the GLEEC-compatible
+handshake path.
+
+**R21.** Bootstrap address input is source-dependent:
+
+- native distributed seed-node entries are bare host strings, either
+  IPv4 literals or DNS names, not full multiaddrs. The caller maps
+  each host to the TCP P2P port derived from the active netid before
+  handing addresses to the substrate;
+- WSS is optional native transport support. When configured, WSS
+  listeners and dials use the configured WSS port and TLS bundle
+  rather than replacing the netid-derived TCP P2P port for bare
+  native seed hosts;
+- explicit operator bootstrap entries MAY use standard libp2p
+  multiaddr forms for TCP, DNS, WebSocket, or WSS as supported by
+  the configured target transport;
+- `/memory/<port>` addresses are reserved for in-process test mode
+  and MUST NOT be treated as production seed-node addresses.
 
 ## 28.9 Bound Discovery, Mesh Maintenance, NAT
 
-**R21.** The substrate MUST NOT attempt open-internet peer discovery.
+**R22.** The substrate MUST NOT attempt open-internet peer discovery.
 The bootstrap list supplied by the daemon is the bound source of truth
 for initial peer addresses. In production that list is expected to come
 from operator-provided `seednodes` in `MM2.json`; a compiled registry
 fallback may contribute entries, but compiled production seed nodes are
 not required by the substrate contract.
 
-**R22.** At swarm-spawn time the substrate MUST:
+**R23.** At swarm-spawn time the substrate MUST:
 
-1. parse the configured bootstrap list (a vector of `RelayAddress`)
-   into multiaddrs;
-2. dial up to `mesh_n` random entries; if the parsed list is empty,
-   start the swarm without dialing any relay;
+1. normalise the configured bootstrap list into libp2p dial
+   addresses using the address rules in R21;
+2. dial up to `mesh_n` random entries; if the normalised list is
+   empty, start the swarm without dialing any relay;
 3. start a 10-second maintenance timer running R11 plus a periodic
    peers-exchange request to a random connected relay on a bound
    300-second interval after a bound 20-second initial delay.
 
-**R23.** NAT traversal is bound to a *structural* solution: relay
+Dial failures for configured seed addresses MUST be diagnosable by
+the attempted address and a failure reason. A failed seed dial MUST
+NOT by itself make swarm startup fail after the local transport and
+listeners have been created.
+
+**R24.** NAT traversal is bound to a *structural* solution: relay
 nodes MUST be deployed at globally-routable addresses, and client
 nodes that sit behind NAT reach the mesh exclusively via at least one
 relay. The substrate MUST NOT advertise non-routable listener
 addresses to peers; the bound `ip_helpers::is_global` predicate is
 applied to listener announcements.
 
-**R24.** A client node with no configured or reachable relay peers SHALL
+**R25.** A client node with no configured or reachable relay peers SHALL
 remain in an empty relay-mesh state until at least one relay connection is
 established. The relay-mesh maintenance loop may report that the mesh is
 below its low watermark, but this condition is diagnostic rather than a
 startup failure. While the relay mesh is empty, orderbook and swap pub/sub
 traffic cannot reach the wider network through this substrate.
 
-**R25.** A node configured as a relay may start with an empty bootstrap
+**R26.** A node configured as a relay may start with an empty bootstrap
 list and act as the first reachable relay for a deployment. Other nodes
 must receive that relay's address through `seednodes` or another
 operator-controlled bootstrap channel before they can join its mesh.
+
+**R27.** Connection handling MUST keep relay state in sync with the
+connection lifecycle. When a connected peer advertises itself as a
+relay, it is eligible for the connected-relays set and relay-mesh
+maintenance of R10-R11. When a relay disconnects or is pruned, relay
+state MUST be updated so later maintenance ticks do not keep a stale
+mesh entry. Failed dials for seed addresses or peer-exchange addresses
+MUST be logged or otherwise exposed to diagnostics with the attempted
+address and failure reason; they MUST NOT be converted into a fatal
+startup condition merely because no relay mesh has formed yet.
 
 ## 28.9A Required Port — Peer Health-check, Time-sync Admission, Expirable Bans (driving-spec)
 
@@ -291,20 +326,24 @@ named peer is currently reachable on the mesh.
   acknowledged within the timeout (or is the local node itself),
   `false` otherwise.
 - **Behaviour:** if `peer_address` equals the local node's own
-  peer id, return `true` immediately. Otherwise the node MUST
-  build a signed health-check probe (signed with the §28.7
-  application-payload signing surface), register an **expirable**
-  one-shot waiter keyed by the target peer address (the record
-  self-clears on expiry), publish the probe on a dedicated
-  per-peer health-check pub/sub topic derived from the peer
-  address via the §28.7 `pub_sub_topic` helper, and await an
-  acknowledgement. The call returns `true` if an ack arrives
-  before a bound timeout (the health-check message expiry) and
-  `false` on timeout.
-- **Responder side:** a node receiving a health-check probe on the
-  health-check topic MUST verify the signed envelope and, when the
-  probe targets it, reply on the same topic so the originator's
-  waiter is woken.
+  peer id, return `true` immediately. For every other target, the
+  externally observable protocol action MUST be a health-check
+  probe signed with the §28.7 application-payload signing surface
+  and published on the dedicated per-peer health-check pub/sub
+  topic derived from the target peer address by the §28.7 topic
+  construction rule. These are non-conditionable interoperability
+  requirements: the signed envelope, target-peer binding,
+  per-peer topic, bounded timeout, and acknowledgement semantics
+  MUST NOT be made optional or replaced by another channel. The
+  call returns `true` only if a valid acknowledgement for that
+  probe arrives before the bound timeout (the health-check message
+  expiry), and `false` otherwise.
+- **Responder side:** a node receiving a health-check probe on its
+  health-check topic MUST verify the signed envelope before
+  responding. When a verified probe targets that node, the node
+  MUST publish a health-check acknowledgement on the same topic.
+  Invalidly authenticated probes or probes for another target MUST
+  NOT produce a positive acknowledgement.
 - **Errors:** failures MUST surface through the project's typed-
   error envelope (`error_type` / `error_data`) with wire tokens
   distinguishing a probe-generation failure, a probe-encoding
@@ -439,6 +478,13 @@ empty relay mesh, and report zero connected relays until a reachable
 relay is introduced. A relay node spawned with no bootstrap relays
 MUST still listen on its configured reachable address.
 
+**T8.** *Handshake and address surface.* A compatibility audit MUST
+confirm that native peer identities are Ed25519, connection upgrades
+negotiate multistream-select V1, Noise XX, and yamux, native
+distributed seed-node hosts map to the netid-derived TCP P2P port,
+WSS uses the configured WSS port when enabled, and memory addresses
+are limited to in-process tests.
+
 ## 28.11 Deferred Work
 
 > **Note.** The §28.9A items (peer health-check RPC, time-sync
@@ -483,10 +529,14 @@ does not carry a usable registry fallback for the selected netid.
   extends with R10–R13.
 - *libp2p floodsub specification* — the basis of the substrate's
   flood-based topic.
-- *libp2p noise handshake specification* — the bound key-agreement
-  protocol in R19.
+- *libp2p multistream-select specification* — the bound upgrade
+  negotiation in R20.
+- *libp2p noise handshake specification* — the bound security
+  protocol in R20.
+- *libp2p yamux stream-multiplexing protocol* — the bound stream
+  muxer in R20.
 - *libp2p multiaddr format* — the bound bootstrap-address grammar in
-  R20.
+  R21.
 - *secp256k1* — the bound signing primitive in R16.
 - *msgpack serialization format* — the bound envelope serialization
   in R16.
@@ -535,17 +585,19 @@ git -C <baseline> show c1d46c0:<root>/<glue-crate>/Cargo.toml | grep -E 'libp2p|
   field, and the P2P command-channel sender are bound on per
   chapter 31 R6 / R7), and the external libp2p / cryptographic /
   wire-format specifications listed in §28.12.
-- *Permitted-input classes used:* baseline source; chapter-bound
-  substrate identifiers introduced here as contract surface
-  (`AtomicDexBehaviour` composed-behaviour shape, `PeersExchange`,
-  `AdexPing`, `RelayAddress`, `PeerAddresses`, `encode_and_sign`,
-  `decode_signed`, `pub_sub_topic`, `TOPIC_SEPARATOR`, the bound
+- *Permitted-input classes used:* baseline source, including
+  baseline-existing identifier spellings retained under R11 for the
+  composed-behaviour labels (`AtomicDexBehaviour`,
+  `RequestResponseBehaviour`, `PeersExchange`, `AdexPing`) and for
+  the crate-root public surface (`RelayAddress`, `PeerAddresses`,
+  `encode_and_sign`, `decode_signed`, `pub_sub_topic`,
+  `TOPIC_SEPARATOR`); interop / contract surface for the bound
   `/peers-exchange/1` protocol identifier, the `IAmRelay` control-
   message name, the `i_am_relay` configuration field, the
   `mesh_n_low`/`mesh_n`/`mesh_n_high` parameter names, the bound
   numeric constants 10 s / 300 s / 20 s / 100 / ~1 MiB); standard
   libp2p protocol names; standard cryptographic primitive names
-  (secp256k1, noise XX, SHA-256, msgpack).
+  (Ed25519, secp256k1, Noise XX, SHA-256, msgpack).
 - *Sibling chapters cross-referenced:* Chapter 06, Chapter 09,
   Chapter 11, Chapter 27, Chapter 31.
 - *Author of this chapter:* clean-room round-2 driving-spec working
