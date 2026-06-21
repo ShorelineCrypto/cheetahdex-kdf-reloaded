@@ -126,10 +126,9 @@ pub use swap_msg::*;
 
 #[path = "lp_swap/swap_rpc.rs"] mod swap_rpc;
 use keys::{KeyPair, SECP_SIGN, SECP_VERIFY};
-use maker_swap::MakerSwapEvent;
 pub use maker_swap::{calc_max_maker_vol, check_balance_for_maker_swap, maker_swap_trade_preimage, run_maker_swap,
-                     MakerSavedEvent, MakerSavedSwap, MakerSwap, MakerSwapStatusChanged, MakerTradePreimage,
-                     RunMakerSwapInput};
+                     MakerSavedEvent, MakerSavedSwap, MakerSwap, MakerSwapEvent, MakerSwapStatusChanged,
+                     MakerTradePreimage, RunMakerSwapInput};
 pub use max_maker_vol_rpc::max_maker_vol;
 use my_swaps_storage::{MySwapsOps, MySwapsStorage};
 use pubkey_banning::BannedPubkey;
@@ -141,11 +140,10 @@ use std::num::NonZeroUsize;
 pub use swap_rpc::*;
 #[allow(unused_imports)]
 pub use swap_watcher::{process_watcher_msg, watcher_topic, SwapWatcherMsg, TakerSwapWatcherData, WATCHER_PREFIX};
-use taker_swap::TakerSwapEvent;
 #[allow(unused_imports)]
 pub use taker_swap::{calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available,
                      run_taker_swap, taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap,
-                     TakerSwapPreparedParams, TakerTradePreimage};
+                     TakerSwapEvent, TakerSwapPreparedParams, TakerTradePreimage};
 pub use trade_preimage::trade_preimage_rpc;
 
 pub const SWAP_PREFIX: TopicPrefix = "swap";

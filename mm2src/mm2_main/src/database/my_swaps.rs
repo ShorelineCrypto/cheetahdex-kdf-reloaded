@@ -12,13 +12,14 @@ use uuid::Uuid;
 /// Query to select V2 swap data for RPC display by uuid.
 /// Column order must match `MySwapForRpc::from_row` field order.
 pub const SELECT_MY_SWAP_V2_FOR_RPC_BY_UUID: &str =
-    "SELECT my_coin, other_coin, uuid, started_at, is_finished, events_json, \
-     maker_volume, taker_volume, premium, dex_fee, lock_duration, \
-    maker_coin_confs, maker_coin_nota, taker_coin_confs, taker_coin_nota, swap_version, \
-    maker_coin_usd_price, taker_coin_usd_price \
-     FROM my_swaps WHERE uuid = ?1;";
+    "SELECT m.my_coin, m.other_coin, m.uuid, m.started_at, m.is_finished, m.events_json, \
+     m.maker_volume, m.taker_volume, m.premium, m.dex_fee, m.lock_duration, \
+     m.maker_coin_confs, m.maker_coin_nota, m.taker_coin_confs, m.taker_coin_nota, m.swap_version, \
+     COALESCE(CAST(s.maker_coin_usd_price AS TEXT), ''), COALESCE(CAST(s.taker_coin_usd_price AS TEXT), '') \
+     FROM my_swaps m LEFT JOIN stats_swaps s ON s.uuid = m.uuid WHERE m.uuid = ?1;";
 
 const MY_SWAPS_TABLE: &str = "my_swaps";
+const INSERT_MY_SWAP_V1: &str = "INSERT INTO my_swaps (my_coin, other_coin, uuid, started_at) VALUES (?1, ?2, ?3, ?4)";
 
 // Using a macro because static variable can't be passed to concat!
 // https://stackoverflow.com/a/39024422
@@ -36,8 +37,7 @@ macro_rules! CREATE_MY_SWAPS_TABLE {
 }
 const INSERT_MY_SWAP: &str =
     "INSERT INTO my_swaps (my_coin, other_coin, uuid, started_at, swap_type) VALUES (?1, ?2, ?3, ?4, ?5)";
-const UPDATE_MY_SWAP_FIAT_SNAPSHOT: &str =
-    "UPDATE my_swaps SET maker_coin_usd_price = ?1, taker_coin_usd_price = ?2 WHERE uuid = ?3";
+const MARK_SWAP_FINISHED_BY_UUID: &str = "UPDATE my_swaps SET is_finished = 1 WHERE uuid = ?1";
 
 pub fn insert_new_swap(
     ctx: &MmArc,
@@ -59,25 +59,19 @@ pub fn insert_new_swap(
     .map(|_| ())
 }
 
-pub fn update_my_swap_fiat_snapshot(
-    ctx: &MmArc,
-    uuid: &str,
-    maker_coin_usd_price: &str,
-    taker_coin_usd_price: &str,
-) -> SqlResult<()> {
-    let conn = ctx.sqlite_connection();
-    conn.execute(UPDATE_MY_SWAP_FIAT_SNAPSHOT, &[
-        maker_coin_usd_price,
-        taker_coin_usd_price,
-        uuid,
-    ])
-    .map(|_| ())
-}
-
 /// Returns SQL statements to initially fill my_swaps table using existing DB with JSON files
 pub async fn fill_my_swaps_from_json_statements(ctx: &MmArc) -> Vec<(&'static str, Vec<String>)> {
     let swaps = SavedSwap::load_all_my_swaps_from_db(ctx).await.unwrap_or_default();
     swaps.into_iter().filter_map(insert_saved_swap_sql).collect()
+}
+
+pub async fn mark_finished_swaps_from_json_statements(ctx: &MmArc) -> Vec<(&'static str, Vec<String>)> {
+    let swaps = SavedSwap::load_all_my_swaps_from_db(ctx).await.unwrap_or_default();
+    swaps
+        .into_iter()
+        .filter(|swap| swap.is_finished())
+        .map(|swap| (MARK_SWAP_FINISHED_BY_UUID, vec![swap.uuid().to_string()]))
+        .collect()
 }
 
 fn insert_saved_swap_sql(swap: SavedSwap) -> Option<(&'static str, Vec<String>)> {
@@ -88,7 +82,7 @@ fn insert_saved_swap_sql(swap: SavedSwap) -> Option<(&'static str, Vec<String>)>
         swap.uuid().to_string(),
         swap_info.started_at.to_string(),
     ];
-    Some((INSERT_MY_SWAP, params))
+    Some((INSERT_MY_SWAP_V1, params))
 }
 
 #[derive(Debug)]

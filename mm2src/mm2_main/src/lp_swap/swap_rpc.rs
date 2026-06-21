@@ -1,7 +1,5 @@
 use super::*;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::mm2::database::my_swaps::update_my_swap_fiat_snapshot;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::mm2::database::stats_swaps::FiatPriceSnapshot;
 #[cfg(not(target_arch = "wasm32"))]
 use mm2_net::transport::slurp_url;
@@ -79,16 +77,6 @@ pub(crate) fn add_swap_to_db_index(ctx: &MmArc, swap: &SavedSwap) {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn save_stats_swap(ctx: &MmArc, swap: &SavedSwap) -> Result<(), String> {
     let fiat_snapshot = fetch_completion_fiat_snapshot(swap).await;
-
-    if let Some(snapshot) = &fiat_snapshot {
-        update_my_swap_fiat_snapshot(
-            ctx,
-            &swap.uuid().to_string(),
-            &snapshot.maker_coin_usd_price,
-            &snapshot.taker_coin_usd_price,
-        )
-        .map_err(|e| ERRL!("Error {} on updating fiat swap snapshot", e))?;
-    }
 
     try_s!(swap.save_to_stats_db(ctx).await);
     crate::mm2::database::stats_swaps::add_swap_to_index(&ctx.sqlite_connection(), swap, fiat_snapshot.as_ref());

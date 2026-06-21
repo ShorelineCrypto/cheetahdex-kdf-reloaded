@@ -112,14 +112,15 @@ aggregator API, not by this project.
 ## 42.6 Fiat price at swap completion (T-PORT, implemented)
 
 R42.6.1 When a swap completes, the project shall record the fiat (e.g. USD)
-reference price of the swapped coins **as of the moment of completion** into the
-swap-history records (the per-wallet swap history and the aggregate swap stats),
-so historical swaps can be valued at their contemporaneous price rather than the
-current one.
+reference price of the swapped coins **as of the moment of completion** so that
+both per-wallet swap history and aggregate swap stats can expose the
+contemporaneous price rather than the current one. On native SQLite, the
+GLEEC-compatible storage location is the aggregate `stats_swaps` row; per-wallet
+history may read the same values by swap `uuid`.
 
 > **Status of §42.6:** implemented in reloaded. At swap completion, fiat-price
-> snapshots are fetched and persisted in both per-wallet swap history and
-> aggregate swap stats records.
+> snapshots are fetched, stored in the GLEEC-compatible aggregate stats columns,
+> and exposed through per-wallet swap-history RPCs by `uuid`.
 
 ## 42.7 Acceptance criteria (chapter)
 
