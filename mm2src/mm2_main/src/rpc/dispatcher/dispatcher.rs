@@ -116,7 +116,13 @@ where
     T: serde::Serialize + 'static,
     E: SerMmErrorType + HttpStatusCode + 'static,
 {
-    let params = json::from_value(request.params)?;
+    // Clients (e.g. the Flutter wallet) may send `"params": null` for zero-argument RPCs.
+    // serde_json cannot deserialize JSON null into an empty struct, so coerce null → {}.
+    let params_value = match request.params {
+        Json::Null => Json::Object(serde_json::Map::new()),
+        other => other,
+    };
+    let params = json::from_value(params_value)?;
     let result = handler(ctx, params).await;
     if let Err(ref e) = result {
         error!("RPC error response: {}", e);

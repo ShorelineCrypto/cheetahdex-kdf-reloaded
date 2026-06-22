@@ -359,9 +359,14 @@ pub(crate) fn broadcast_keep_alive_for_pub(
 }
 
 pub async fn broadcast_maker_orders_keep_alive_loop(ctx: MmArc) {
-    let persistent_pubsecp = CryptoCtx::from_ctx(&ctx)
-        .expect("CryptoCtx not available")
-        .mm2_internal_pubkey_hex();
+    let crypto_ctx = match CryptoCtx::from_ctx(&ctx) {
+        Ok(c) => c,
+        Err(_) => {
+            // No signing identity (e.g. no-login mode) — nothing to broadcast.
+            return;
+        },
+    };
+    let persistent_pubsecp = crypto_ctx.mm2_internal_pubkey_hex();
 
     while !ctx.is_stopping() {
         Timer::sleep(MIN_ORDER_KEEP_ALIVE_INTERVAL as f64).await;
@@ -568,9 +573,14 @@ pub(crate) fn lp_connected_alice(ctx: MmArc, taker_order: TakerOrder, taker_matc
 }
 
 pub async fn lp_ordermatch_loop(ctx: MmArc) {
-    let my_pubsecp = CryptoCtx::from_ctx(&ctx)
-        .expect("CryptoCtx not available")
-        .mm2_internal_pubkey_hex();
+    let crypto_ctx = match CryptoCtx::from_ctx(&ctx) {
+        Ok(c) => c,
+        Err(_) => {
+            // No signing identity (e.g. no-login mode) — ordermatch loop inactive.
+            return;
+        },
+    };
+    let my_pubsecp = crypto_ctx.mm2_internal_pubkey_hex();
 
     let maker_order_timeout = ctx.conf["maker_order_timeout"].as_u64().unwrap_or(MAKER_ORDER_TIMEOUT);
     loop {
