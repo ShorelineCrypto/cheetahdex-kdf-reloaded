@@ -116,22 +116,46 @@ each:
 | ------------------------------ | -------------------------------- | -------------------------------------------------------------- |
 | `Gossipsub` (vendored)         | public libp2p / vendored surface | Mesh-based publish-subscribe for orderbook and swap traffic.   |
 | `Floodsub`                     | public libp2p / vendored surface | Flood-based publish-subscribe for the bound peers topic.       |
-| `RequestResponseBehaviour`     | baseline-existing identifier     | Direct one-shot application RPC over the mesh; not required for baseline seed/relay admission. |
-| `PeersExchange`                | baseline-existing identifier     | Request-response over a bound protocol identifier (R8).         |
-| `AdexPing`                     | baseline-existing identifier     | Ping wrapper that forces a disconnect on consecutive failures. |
+| Generic request-response channel | baseline-existing capability     | Direct one-shot application RPC over the mesh; not required for baseline seed/relay admission. |
+| Peer-exchange channel            | baseline-existing capability     | Request-response over a bound protocol identifier (R8).         |
+| Disconnecting ping channel       | baseline-existing capability     | Ping wrapper that forces a disconnect on consecutive failures. |
 
 **R7.** The composed behaviour MUST NOT include any of the following
 libp2p protocol families: Kademlia DHT, mDNS, Identify, Relay (v1 or
 v2), DCUtR, AutoNAT. Their absence is a substrate contract.
 
-**R8.** The peer-exchange request-response protocol identifier for the
-baseline-compatible reloaded surface is bound as the string
-`/peers-exchange/1`. The peer-exchange responder MUST cap each reply at
-no more than 100 addresses. A peer that does not negotiate this protocol
-MUST NOT be disconnected or excluded from the relay mesh solely for that
-reason; peer-exchange is an address-discovery aid, while relay usefulness
-is determined by the transport connection plus relay advertisement state
-in R10-R12.
+**R8.** The peer-exchange request-response channel MUST negotiate exactly
+one protocol identifier: `/peers-exchange/2`. The negotiation offer set is
+the singleton ordered list `["/peers-exchange/2"]`; this surface MUST NOT
+offer `/peers-exchange/1` and MUST NOT require remote support for
+`/peers-exchange/1`.
+
+The peer-exchange wire payload contract is also bound:
+
+- request payload: msgpack encoding of
+  `PeersExchangeRequest::GetKnownPeers { num }`;
+- responder behaviour: if `num > 20`, omit the response; otherwise answer
+  with msgpack encoding of `PeersExchangeResponse::KnownPeers { peers }`;
+- `peers` payload shape: map of peer-id to address-set, where peer-id is
+  serialized as raw peer-id bytes and each address is a libp2p multiaddr;
+- response bound: no more than 20 peer entries in `peers` per response.
+
+A peer that does not negotiate `/peers-exchange/2` MUST NOT be disconnected
+or excluded from the relay mesh solely for that reason; peer-exchange is an
+address-discovery aid, while relay usefulness is determined by the transport
+connection plus relay advertisement state in R10-R12.
+
+**R8a.** The generic request-response channel MUST negotiate exactly one
+protocol identifier: `/request-response/2`. The negotiation offer set is the
+singleton ordered list `["/request-response/2"]`; this surface MUST NOT
+offer `/request-response/1` and MUST NOT require remote support for
+`/request-response/1`.
+
+**R8b.** The two channels in R8 and R8a MUST use the same framing and
+serialization contract: each request and response is one
+length-prefixed libp2p request-response frame whose payload is msgpack
+(`rmp-serde`) bytes for the channel's bound request/response type. The
+maximum accepted or emitted frame payload is `1024 * 1024 - 100` bytes.
 
 **R9.** The ping wrapper MUST disconnect a peer after a bounded number
 of consecutive ping failures (the exact count is a substrate-internal
@@ -377,20 +401,23 @@ compatibility requirement.
 - **Compatibility boundary:** GLEEC-compatible seed/relay peers are not
   required to support the generic request-response protocol used for
   this check. For the baseline-compatible reloaded surface, that generic
-  request-response protocol identifier is `/request-response/1`, but
+  request-response protocol identifier is `/request-response/2`, but
   support for it MUST NOT be treated as a condition for keeping a
   seed/relay connection.
 - **Mechanism:** when the generic request-response protocol is
   available, the node issues a query over the substrate's
   request-response sub-behaviour (§28.5 R6) asking the newly-connected
-  peer for its current UTC timestamp (Unix epoch seconds). A supporting
-  peer replies with a msgpack-encoded unsigned epoch-seconds value.
+  peer for its current UTC timestamp (Unix epoch seconds). The request
+  payload MUST be msgpack encoding of the protocol's network-info
+  UTC-timestamp query variant.
+  A supporting peer replies with a msgpack-encoded unsigned epoch-seconds
+  value (`u64`).
 - **Admission rule:** when the peer returns a well-formed timestamp, the
   node compares it to its own UTC time. If the absolute difference is
   within the bound maximum gap, the peer is admitted. If the peer returns
   a well-formed timestamp outside the gap, the node MUST disconnect that
   peer. If the peer returns a successful response that is not a
-  well-formed timestamp, the node MAY disconnect that peer as a failed
+  well-formed timestamp, the node MUST disconnect that peer as a failed
   reloaded clock check.
 - **Unsupported / absent support:** if the request fails because the
   peer does not negotiate the generic request-response protocol, closes
@@ -415,11 +442,12 @@ another independent rule disconnects it.
 
 > **Upstream divergence (informative).** Post-baseline lineages have used
 > different versioned protocol identifiers and stricter clock-check failure
-> handling for newer network layers. This chapter keeps the
-> baseline-compatible reloaded peer-exchange identifier at
-> `/peers-exchange/1` and requires timestamp-check fallback so legacy/GLEEC
-> seed and relay peers are not rejected merely because they do not support
-> reloaded's generic request-response clock query.
+> handling for newer network layers. This chapter binds the
+> baseline-compatible reloaded request-response and peer-exchange identifiers
+> to `/request-response/2` and `/peers-exchange/2`, and requires
+> timestamp-check fallback so legacy/GLEEC seed and relay peers are not
+> rejected merely because they do not support reloaded's post-connection
+> clock query.
 
 ### 28.9A.3 RP3 — Expirable pubkey bans (partially present; expiry missing)
 
@@ -504,9 +532,10 @@ A test or audit MUST confirm the helper's implementation reads
 `TOPIC_SEPARATOR` (not a hard-coded `/`) so a future separator change
 remains a one-symbol substrate edit.
 
-**T6.** *Peer-exchange bound.* A peers-exchange request MUST receive
-no more than 100 addresses in its response, regardless of how many
-peers the responder is connected to.
+**T6.** *Peer-exchange bound.* A peers-exchange request
+`GetKnownPeers { num }` with `num <= 20` MUST receive a
+`KnownPeers { peers }` response containing no more than 20 peer entries;
+when `num > 20`, the responder MUST omit the response.
 
 **T7.** *Empty bootstrap list.* A client spawned with no bootstrap
 relays MUST start without a fatal P2P initialisation error, keep an
@@ -524,7 +553,7 @@ are limited to in-process tests.
 **T9.** *Seed/relay compatibility fallback.* A compatibility test or
 audit MUST cover a connected seed/relay peer that does not negotiate the
 generic request-response timestamp-check protocol and/or does not
-negotiate `/peers-exchange/1`. The peer MUST remain connected and relay-
+negotiate `/peers-exchange/2`. The peer MUST remain connected and relay-
 eligible when it otherwise satisfies the transport and relay-advertisement
 requirements. A separate test MUST confirm that a supporting peer whose
 reported timestamp is more than 20 seconds away from local UTC is
@@ -627,21 +656,19 @@ git -C <baseline> show c1d46c0:<root>/<glue-crate>/Cargo.toml | grep -E 'libp2p|
   conventions), Chapter 11 (order-match cancellation cache), Chapter
   27 (infrastructure substrate inventory and proxy-signature
   substrate row), Chapter 31 (the central application-context
-  substrate the `p2p_ctx` sub-context slot, the `peer_id` once-set
-  field, and the P2P command-channel sender are bound on per
-  chapter 31 R6 / R7), and the external libp2p / cryptographic /
+  substrate constraints bound by Chapter 31 R6 / R7), and the
+  external libp2p / cryptographic /
   wire-format specifications listed in §28.12.
 - *Permitted-input classes used:* baseline source, including
-  baseline-existing identifier spellings retained under R11 for the
-  composed-behaviour labels (`AtomicDexBehaviour`,
-  `RequestResponseBehaviour`, `PeersExchange`, `AdexPing`) and for
-  the crate-root public surface (`RelayAddress`, `PeerAddresses`,
+  baseline-existing contract categories for composed-behaviour roles
+  and for the crate-root public surface (`RelayAddress`, `PeerAddresses`,
   `encode_and_sign`, `decode_signed`, `pub_sub_topic`,
   `TOPIC_SEPARATOR`); interop / contract surface for the bound
-  `/peers-exchange/1` protocol identifier, the `IAmRelay` control-
+  `/request-response/2` and `/peers-exchange/2` protocol identifiers,
+  the `IAmRelay` control-
   message name, the `i_am_relay` configuration field, the
   `mesh_n_low`/`mesh_n`/`mesh_n_high` parameter names, the bound
-  numeric constants 10 s / 300 s / 20 s / 100 / ~1 MiB); dictated
+  numeric constants 10 s / 300 s / 20 s / 20 / ~1 MiB); dictated
   compatibility behaviour for unsupported post-connection
   request-response checks; standard
   libp2p protocol names; standard cryptographic primitive names

@@ -386,16 +386,25 @@ fn process_p2p_request(
     request: Vec<u8>,
     response_channel: AdexResponseChannel,
 ) -> P2PRequestResult<()> {
-    let request = decode_message::<P2PRequest>(&request)?;
-    let result = match request {
-        P2PRequest::Ordermatch(req) => lp_ordermatch::process_peer_request(ctx.clone(), req),
-        P2PRequest::NetworkInfo(req) => lp_stats::process_info_request(ctx.clone(), req),
-    };
+    let mut decode_error = None;
+    let res = match decode_message::<P2PRequest>(&request) {
+        Ok(request) => {
+            let result = match request {
+                P2PRequest::Ordermatch(req) => lp_ordermatch::process_peer_request(ctx.clone(), req),
+                P2PRequest::NetworkInfo(req) => lp_stats::process_info_request(ctx.clone(), req),
+            };
 
-    let res = match result {
-        Ok(Some(response)) => AdexResponse::Ok { response },
-        Ok(None) => AdexResponse::None,
-        Err(e) => AdexResponse::Err { error: e },
+            match result {
+                Ok(Some(response)) => AdexResponse::Ok { response },
+                Ok(None) => AdexResponse::None,
+                Err(e) => AdexResponse::Err { error: e },
+            }
+        },
+        Err(e) => {
+            let error = e.to_string();
+            decode_error = Some(error.clone());
+            AdexResponse::Err { error }
+        },
     };
 
     let p2p_ctx = P2PContext::fetch_from_mm_arc(&ctx);
@@ -405,6 +414,11 @@ fn process_p2p_request(
         .lock()
         .try_send(cmd)
         .map_to_mm(|e| P2PRequestError::SendError(e.to_string()))?;
+
+    if let Some(error) = decode_error {
+        return MmError::err(P2PRequestError::DecodeError(error));
+    }
+
     Ok(())
 }
 

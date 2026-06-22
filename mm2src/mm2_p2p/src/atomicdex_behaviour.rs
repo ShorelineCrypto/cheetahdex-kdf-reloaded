@@ -62,8 +62,16 @@ enum PeerClockCheck {
 
 #[cfg(feature = "application")]
 #[derive(Deserialize, Serialize)]
-enum ApplicationRequest {
+enum NetworkInfoRequest {
+    GetMm2Version,
     CurrentTimestamp,
+}
+
+#[cfg(feature = "application")]
+#[derive(Deserialize, Serialize)]
+enum WireP2PRequest {
+    Ordermatch,
+    NetworkInfo(NetworkInfoRequest),
 }
 
 /// Returns info about connected peers
@@ -275,8 +283,19 @@ pub struct AtomicDexBehaviour {
 
 impl AtomicDexBehaviour {
     #[cfg(feature = "application")]
+    fn is_current_timestamp_request(request: &[u8]) -> bool {
+        matches!(
+            decode_message::<WireP2PRequest>(request),
+            Ok(WireP2PRequest::NetworkInfo(NetworkInfoRequest::CurrentTimestamp))
+        ) || matches!(
+            decode_message::<NetworkInfoRequest>(request),
+            Ok(NetworkInfoRequest::CurrentTimestamp)
+        )
+    }
+
+    #[cfg(feature = "application")]
     fn request_peer_clock_check(&mut self, peer_id: PeerId) {
-        let request = match encode_message(&ApplicationRequest::CurrentTimestamp) {
+        let request = match encode_message(&WireP2PRequest::NetworkInfo(NetworkInfoRequest::CurrentTimestamp)) {
             Ok(req) => req,
             Err(e) => {
                 error!("Error serializing clock-check request for peer {}: {}", peer_id, e);
@@ -556,10 +575,7 @@ impl NetworkBehaviourEventProcess<RequestResponseBehaviourEvent> for AtomicDexBe
                 response_channel,
             } => {
                 #[cfg(feature = "application")]
-                if matches!(
-                    decode_message::<ApplicationRequest>(&request.req),
-                    Ok(ApplicationRequest::CurrentTimestamp)
-                ) {
+                if Self::is_current_timestamp_request(&request.req) {
                     let response = match encode_message(&Self::current_utc_timestamp_secs()) {
                         Ok(now) => PeerResponse::Ok { res: now },
                         Err(e) => PeerResponse::Err {
@@ -1237,7 +1253,7 @@ async fn request_one_peer(peer: PeerId, req: Vec<u8>, mut request_response_tx: R
 
 #[cfg(all(test, feature = "application"))]
 mod application_tests {
-    use super::{ApplicationRequest, AtomicDexBehaviour, PeerResponse};
+    use super::{AtomicDexBehaviour, NetworkInfoRequest, PeerClockCheck, PeerResponse, WireP2PRequest};
     use crate::encode_message;
 
     #[test]
@@ -1245,7 +1261,10 @@ mod application_tests {
         let now = AtomicDexBehaviour::current_utc_timestamp_secs();
         let encoded = encode_message(&(now.saturating_sub(1))).unwrap();
         let response = PeerResponse::Ok { res: encoded };
-        assert!(AtomicDexBehaviour::is_peer_clock_check_passed(response));
+        assert!(matches!(
+            AtomicDexBehaviour::peer_clock_check_result(response),
+            PeerClockCheck::Passed
+        ));
     }
 
     #[test]
@@ -1253,13 +1272,49 @@ mod application_tests {
         let response = PeerResponse::Ok {
             res: vec![1_u8, 2_u8, 3_u8],
         };
-        assert!(!AtomicDexBehaviour::is_peer_clock_check_passed(response));
+        assert!(matches!(
+            AtomicDexBehaviour::peer_clock_check_result(response),
+            PeerClockCheck::Failed
+        ));
     }
 
     #[test]
-    fn application_request_roundtrip() {
-        let encoded = encode_message(&ApplicationRequest::CurrentTimestamp).unwrap();
-        let decoded: ApplicationRequest = crate::decode_message(&encoded).unwrap();
-        assert!(matches!(decoded, ApplicationRequest::CurrentTimestamp));
+    fn peer_clock_check_inconclusive_on_protocol_failure() {
+        assert!(matches!(
+            AtomicDexBehaviour::peer_clock_check_result(PeerResponse::None),
+            PeerClockCheck::Inconclusive
+        ));
+        assert!(matches!(
+            AtomicDexBehaviour::peer_clock_check_result(PeerResponse::Err {
+                err: "unsupported".into()
+            }),
+            PeerClockCheck::Inconclusive
+        ));
+    }
+
+    #[test]
+    fn network_info_request_roundtrip() {
+        let encoded = encode_message(&NetworkInfoRequest::CurrentTimestamp).unwrap();
+        let decoded: NetworkInfoRequest = crate::decode_message(&encoded).unwrap();
+        assert!(matches!(decoded, NetworkInfoRequest::CurrentTimestamp));
+    }
+
+    #[test]
+    fn wire_p2p_request_roundtrip() {
+        let encoded = encode_message(&WireP2PRequest::NetworkInfo(NetworkInfoRequest::CurrentTimestamp)).unwrap();
+        let decoded: WireP2PRequest = crate::decode_message(&encoded).unwrap();
+        assert!(matches!(
+            decoded,
+            WireP2PRequest::NetworkInfo(NetworkInfoRequest::CurrentTimestamp)
+        ));
+    }
+
+    #[test]
+    fn detects_timestamp_in_both_wire_shapes() {
+        let wrapped = encode_message(&WireP2PRequest::NetworkInfo(NetworkInfoRequest::CurrentTimestamp)).unwrap();
+        let bare = encode_message(&NetworkInfoRequest::CurrentTimestamp).unwrap();
+
+        assert!(AtomicDexBehaviour::is_current_timestamp_request(&wrapped));
+        assert!(AtomicDexBehaviour::is_current_timestamp_request(&bare));
     }
 }

@@ -28,7 +28,7 @@ pub type RequestResponseSender = mpsc::UnboundedSender<(PeerId, PeerRequest, one
 /// Build a request-response network behaviour.
 pub fn build_request_response_behaviour() -> RequestResponseBehaviour {
     let config = RequestResponseConfig::default();
-    let protocol = iter::once((Protocol::Version1, ProtocolSupport::Full));
+    let protocol = iter::once((Protocol::Version2, ProtocolSupport::Full));
     let inner = RequestResponse::new(Codec::default(), protocol, config);
 
     let (tx, rx) = mpsc::unbounded();
@@ -233,7 +233,7 @@ impl<Proto, Req, Res> Default for Codec<Proto, Req, Res> {
 
 #[derive(Debug, Clone)]
 pub enum Protocol {
-    Version1,
+    Version2,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -260,8 +260,18 @@ macro_rules! try_io {
 impl ProtocolName for Protocol {
     fn protocol_name(&self) -> &[u8] {
         match self {
-            Protocol::Version1 => b"/request-response/1",
+            Protocol::Version2 => b"/request-response/2",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Protocol, ProtocolName};
+
+    #[test]
+    fn protocol_name_is_version2() {
+        assert_eq!(Protocol::Version2.protocol_name(), b"/request-response/2");
     }
 }
 
