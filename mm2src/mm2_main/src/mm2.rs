@@ -429,7 +429,8 @@ pub fn get_mm2config(first_arg: Option<&str>) -> Result<Json, String> {
 
     let mut conf: Json = match json::from_str(conf) {
         Ok(json) => json,
-        Err(err) => return ERR!("Couldn't parse.({}).{}", conf, err),
+        // Don't include raw config payload in the error to avoid leaking sensitive values.
+        Err(_) => return ERR!("Couldn't parse mm2 config to JSON format!"),
     };
 
     if conf["coins"].is_null() {
@@ -441,7 +442,7 @@ pub fn get_mm2config(first_arg: Option<&str>) -> Result<Json, String> {
                 coins_path
             );
         }
-        conf["coins"] = match json::from_slice(&coins_from_file) {
+        let coins: Json = match json::from_slice(&coins_from_file) {
             Ok(j) => j,
             Err(e) => {
                 return ERR!(
@@ -449,7 +450,15 @@ pub fn get_mm2config(first_arg: Option<&str>) -> Result<Json, String> {
                     e
                 )
             },
+        };
+
+        if !coins.is_array() {
+            return ERR!("'coins' file must contain a JSON array");
         }
+
+        conf["coins"] = coins;
+    } else if !conf["coins"].is_array() {
+        return ERR!("'coins' field must be a JSON array");
     }
 
     Ok(conf)
@@ -513,4 +522,79 @@ fn init_logger(level: LogLevel) -> Result<(), String> {
 #[cfg(target_arch = "wasm32")]
 fn init_logger(level: LogLevel) -> Result<(), String> {
     common::log::WasmLoggerBuilder::default().level_filter(level).try_init()
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::get_mm2config;
+    use lazy_static::lazy_static;
+    use std::env;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::sync::Mutex;
+
+    lazy_static! {
+        static ref ENV_LOCK: Mutex<()> = Mutex::new(());
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = env::var_os(key);
+            // SAFETY: test-only process-global env mutation is serialized by ENV_LOCK.
+            unsafe { env::set_var(key, value) };
+            EnvVarGuard { key, old }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let old = env::var_os(key);
+            // SAFETY: test-only process-global env mutation is serialized by ENV_LOCK.
+            unsafe { env::remove_var(key) };
+            EnvVarGuard { key, old }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.old.as_ref() {
+                Some(value) => {
+                    // SAFETY: test-only process-global env mutation is serialized by ENV_LOCK.
+                    unsafe { env::set_var(self.key, value) };
+                },
+                None => {
+                    // SAFETY: test-only process-global env mutation is serialized by ENV_LOCK.
+                    unsafe { env::remove_var(self.key) };
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_config_without_passphrase_uses_mm_coins_path() {
+        let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
+
+        let tmp_dir = env::temp_dir().join(format!("kdf-mm2config-test-{}", common::now_ms()));
+        fs::create_dir_all(&tmp_dir).expect("unable to create temp dir");
+        let coins_path = tmp_dir.join("kdf_coins.json");
+        fs::write(&coins_path, br#"[{"coin":"DOC"}]"#).expect("unable to write coins file");
+
+        let _coins_guard = EnvVarGuard::set("MM_COINS_PATH", coins_path.to_str().expect("valid coins path"));
+        let _conf_guard = EnvVarGuard::remove("MM_CONF_PATH");
+
+        let conf = get_mm2config(Some(r#"{"gui":"test","netid":8762,"rpc_password":"StrongPass123*"}"#))
+            .expect("config should load from runtime JSON and MM_COINS_PATH");
+
+        assert!(conf["coins"].is_array(), "coins should be loaded from MM_COINS_PATH");
+        assert!(
+            conf["passphrase"].is_null(),
+            "missing passphrase should remain unset at config stage"
+        );
+
+        fs::remove_file(coins_path).expect("unable to remove coins file");
+        fs::remove_dir(tmp_dir).expect("unable to remove temp dir");
+    }
 }

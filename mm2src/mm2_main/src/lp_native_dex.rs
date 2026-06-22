@@ -250,6 +250,45 @@ impl MmInitError {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum PassphraseInitAction {
+    NoLogin,
+    ContinueWithoutPassphrase,
+    InitWithPassphrase(String),
+}
+
+fn validate_netid_range(conf: &json::Value) -> MmInitResult<()> {
+    if let Some(netid) = conf["netid"].as_u64() {
+        if netid > u16::MAX as u64 {
+            return MmError::err(MmInitError::ErrorDeserializingConfig {
+                field: "netid".to_owned(),
+                error: format!("netid {} exceeds u16::MAX ({})", netid, u16::MAX),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn resolve_passphrase_init_action(conf: &json::Value) -> MmInitResult<PassphraseInitAction> {
+    let wallet_name_configured = !conf["wallet_name"].is_null();
+    let hw_wallet_configured = !conf["hw_wallet"].is_null();
+
+    if conf["passphrase"].is_null() {
+        if !wallet_name_configured && !hw_wallet_configured {
+            return Ok(PassphraseInitAction::NoLogin);
+        }
+        return Ok(PassphraseInitAction::ContinueWithoutPassphrase);
+    }
+
+    let passphrase: String =
+        json::from_value(conf["passphrase"].clone()).map_to_mm(|e| MmInitError::ErrorDeserializingConfig {
+            field: "passphrase".to_owned(),
+            error: e.to_string(),
+        })?;
+
+    Ok(PassphraseInitAction::InitWithPassphrase(passphrase))
+}
+
 /// Returns compile-time seed nodes from NetConfig for the given netid.
 /// Falls back to an empty list for unknown netids (which shouldn't happen
 /// because startup validation rejects unknown netids).
@@ -412,6 +451,8 @@ pub async fn lp_init_continue(ctx: MmArc) -> MmInitResult<()> {
 pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
     info!("Version: {} DT {}", MM_VERSION, MM_DATETIME);
 
+    validate_netid_range(&ctx.conf)?;
+
     // Validate netid against compiled network configurations ("deny except config exists").
     let netid = ctx.netid();
     if net_config_for(netid).is_none() {
@@ -439,17 +480,7 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
     let net_cfg = net_config_or_panic(netid);
     info!("Network: {} (netid {})", net_cfg.network_name(), netid);
 
-    if ctx.conf["passphrase"].is_null() && ctx.conf["hw_wallet"].is_null() {
-        return MmError::err(MmInitError::FieldNotFoundInConfig {
-            field: "passphrase".to_owned(),
-        });
-    }
-
-    let passphrase: String =
-        json::from_value(ctx.conf["passphrase"].clone()).map_to_mm(|e| MmInitError::ErrorDeserializingConfig {
-            field: "passphrase".to_owned(),
-            error: e.to_string(),
-        })?;
+    let passphrase_init_action = resolve_passphrase_init_action(&ctx.conf)?;
 
     // Optionally persist the passphrase as an encrypted wallet file.
     // If wallet_name is set in config, the passphrase is encrypted with wallet_password
@@ -458,12 +489,25 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
     {
         let wallet_name = ctx.conf["wallet_name"].as_str();
         let wallet_password = ctx.conf["wallet_password"].as_str();
-        crate::mm2::lp_wallet::initialize_wallet_passphrase(&ctx, &passphrase, wallet_name, wallet_password)
+        if wallet_name.is_some() {
+            let passphrase_for_wallet = match &passphrase_init_action {
+                PassphraseInitAction::InitWithPassphrase(passphrase) => passphrase.as_str(),
+                PassphraseInitAction::ContinueWithoutPassphrase | PassphraseInitAction::NoLogin => "",
+            };
+            crate::mm2::lp_wallet::initialize_wallet_passphrase(
+                &ctx,
+                passphrase_for_wallet,
+                wallet_name,
+                wallet_password,
+            )
             .await
             .map_err(|e| MmError::new(MmInitError::WalletError(e.to_string())))?;
+        }
     }
 
-    CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase).mm_err(Into::into)?;
+    if let PassphraseInitAction::InitWithPassphrase(passphrase) = passphrase_init_action {
+        CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase).mm_err(Into::into)?;
+    }
     lp_init_continue(ctx.clone()).await?;
 
     let ctx_id = ctx.ffi_handle().map_to_mm(MmInitError::Internal)?;
@@ -512,6 +556,12 @@ async fn kick_start(ctx: MmArc) -> MmInitResult<()> {
 
 async fn init_p2p(ctx: MmArc) -> P2PResult<()> {
     let i_am_seed = ctx.conf["i_am_seed"].as_bool().unwrap_or(false);
+
+    if i_am_seed && ctx.secp256k1_key_pair.as_option().is_none() {
+        return MmError::err(P2PInitError::Internal(
+            "i_am_seed requires an initialized signing identity".to_owned(),
+        ));
+    }
 
     let seednodes = seednodes(&ctx)?;
 
@@ -726,4 +776,51 @@ fn wss_certs(ctx: &MmArc) -> P2PResult<Option<WssCerts>> {
         "Certificate, DER-encoded X.509 format".to_owned(),
     )?;
     Ok(Some(WssCerts { server_priv_key, certs }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_passphrase_init_action, validate_netid_range, MmInitError, PassphraseInitAction};
+    use serde_json::json;
+
+    #[test]
+    fn passphrase_absent_wallet_and_hw_absent_is_no_login() {
+        let conf = json!({});
+        let action = resolve_passphrase_init_action(&conf).expect("passphrase resolution should succeed");
+        assert_eq!(action, PassphraseInitAction::NoLogin);
+    }
+
+    #[test]
+    fn passphrase_unexpected_types_refuse_cleanly() {
+        let num_conf = json!({ "passphrase": 1 });
+        let err = resolve_passphrase_init_action(&num_conf).unwrap_err();
+        assert!(matches!(
+            err.get_inner(),
+            MmInitError::ErrorDeserializingConfig { field, .. } if field == "passphrase"
+        ));
+
+        let bool_conf = json!({ "passphrase": true });
+        let err = resolve_passphrase_init_action(&bool_conf).unwrap_err();
+        assert!(matches!(
+            err.get_inner(),
+            MmInitError::ErrorDeserializingConfig { field, .. } if field == "passphrase"
+        ));
+    }
+
+    #[test]
+    fn empty_string_passphrase_is_treated_as_present() {
+        let conf = json!({ "passphrase": "" });
+        let action = resolve_passphrase_init_action(&conf).expect("passphrase resolution should succeed");
+        assert_eq!(action, PassphraseInitAction::InitWithPassphrase(String::new()));
+    }
+
+    #[test]
+    fn out_of_range_netid_refuses_cleanly() {
+        let conf = json!({ "netid": u16::MAX as u64 + 1 });
+        let err = validate_netid_range(&conf).unwrap_err();
+        assert!(matches!(
+            err.get_inner(),
+            MmInitError::ErrorDeserializingConfig { field, .. } if field == "netid"
+        ));
+    }
 }
