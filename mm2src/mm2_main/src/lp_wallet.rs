@@ -7,7 +7,7 @@
 /// The currently active wallet name is recorded in `MmCtx::wallet_name` (write-once)
 /// during startup. Only inactive wallets can be deleted.
 use common::HttpStatusCode;
-use crypto::{decrypt_mnemonic, encrypt_mnemonic};
+use crypto::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -282,26 +282,80 @@ pub async fn delete_wallet_rpc(
 
 // --- Startup integration ---
 
-/// Called during `lp_init` to optionally persist the passphrase as an encrypted wallet.
-/// If `wallet_name` is provided in the config, encrypts and saves the passphrase
-/// (unless the wallet already exists, in which case it verifies the passphrase matches).
+use super::lp_native_dex::PassphraseForm;
+
+/// Word count for a freshly generated wallet mnemonic.
+#[cfg(not(target_arch = "wasm32"))]
+const GENERATED_MNEMONIC_WORD_COUNT: usize = 24;
+
+/// Validates `wallet_password` for non-emptiness and, unless `allow_weak_password`
+/// is set, against the password policy. Used only on the rows that create or
+/// first-save a record (R29).
+#[cfg(not(target_arch = "wasm32"))]
+fn enforce_wallet_password_policy(ctx: &MmArc, password: &str) -> Result<(), MmError<WalletError>> {
+    if password.is_empty() {
+        return MmError::err(WalletError::InvalidRequest(
+            "wallet_password cannot be empty".to_string(),
+        ));
+    }
+    let allow_weak = ctx.conf["allow_weak_password"].as_bool() == Some(true);
+    if !allow_weak {
+        super::password_policy(password).map_err(|e| MmError::new(WalletError::InvalidRequest(e.to_string())))?;
+    }
+    Ok(())
+}
+
+/// Encrypts and persists a plaintext mnemonic as `<wallet_name>` record.
+#[cfg(not(target_arch = "wasm32"))]
+async fn persist_passphrase(
+    ctx: &MmArc,
+    wallet_name: &str,
+    mnemonic: &str,
+    password: &str,
+) -> Result<(), MmError<WalletError>> {
+    let encrypted =
+        encrypt_mnemonic(mnemonic, password).map_err(|e| MmError::new(WalletError::EncryptionError(e.to_string())))?;
+    save_encrypted_passphrase(ctx, wallet_name, &encrypted)
+        .await
+        .map_err(|e| MmError::new(WalletError::StorageError(e)))
+}
+
+/// Resolves the signing-identity seed at startup from the three configuration
+/// inputs of R18, applying the full R27 decision matrix. The returned `Some(seed)`
+/// is the **plaintext** mnemonic the caller must initialise the signing identity
+/// with (R28); `None` is the anonymous row (no identity). The active-wallet slot
+/// is pinned as a side effect.
 ///
-/// Returns the wallet name if set, or None for anonymous mode.
+/// Failure modes are kept distinct (R29): a wrong `wallet_password` surfaces as
+/// `InvalidPassword` (decryption failure); a correctly-decrypting but conflicting
+/// stored seed surfaces as `InvalidRequest` (passphrase mismatch). Every refusal
+/// returns an error so startup fails closed before serving (R30).
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn initialize_wallet_passphrase(
     ctx: &MmArc,
-    passphrase: &str,
+    passphrase: PassphraseForm,
     wallet_name: Option<&str>,
     wallet_password: Option<&str>,
 ) -> Result<Option<String>, MmError<WalletError>> {
-    let (name, password) = match (wallet_name, wallet_password) {
-        (Some(name), Some(password)) => (name, password),
-        (None, _) => {
-            // Anonymous mode — no wallet persistence
+    // `wallet_name` absent: anonymous, legacy-plaintext, or refuse-encrypted rows.
+    let name = match wallet_name {
+        None => {
             let _ = ctx.wallet_name.pin(None);
-            return Ok(None);
+            return match passphrase {
+                PassphraseForm::Absent => Ok(None),
+                PassphraseForm::Plaintext(seed) => Ok(Some(seed)),
+                PassphraseForm::Encrypted(_) => MmError::err(WalletError::InvalidRequest(
+                    "wallet_name is required to use an encrypted passphrase".to_string(),
+                )),
+            };
         },
-        (Some(_), None) => {
+        Some(name) => name,
+    };
+
+    // `wallet_name` present: `wallet_password` is mandatory.
+    let password = match wallet_password {
+        Some(password) => password,
+        None => {
             return MmError::err(WalletError::InvalidRequest(
                 "wallet_password is required when wallet_name is set".to_string(),
             ));
@@ -314,27 +368,65 @@ pub async fn initialize_wallet_passphrase(
         .await
         .map_err(|e| MmError::new(WalletError::StorageError(e)))?;
 
-    if let Some(encrypted) = existing {
-        // Wallet exists — verify passphrase matches
-        let stored_mnemonic =
-            decrypt_mnemonic(&encrypted, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
-        if stored_mnemonic != passphrase {
-            return MmError::err(WalletError::InvalidRequest(
-                "Passphrase doesn't match the stored wallet. Create a new wallet to use a different passphrase"
-                    .to_string(),
-            ));
-        }
-    } else {
-        // New wallet — encrypt and save
-        let encrypted = encrypt_mnemonic(passphrase, password)
-            .map_err(|e| MmError::new(WalletError::EncryptionError(e.to_string())))?;
-        save_encrypted_passphrase(ctx, name, &encrypted)
-            .await
-            .map_err(|e| MmError::new(WalletError::StorageError(e)))?;
-    }
+    let seed = match (passphrase, existing) {
+        // Re-login: load-and-use, with NO equality comparison (the core re-login fix).
+        (PassphraseForm::Absent, Some(encrypted)) => {
+            decrypt_mnemonic(&encrypted, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?
+        },
+        // Generate-and-persist a fresh mnemonic.
+        (PassphraseForm::Absent, None) => {
+            enforce_wallet_password_policy(ctx, password)?;
+            let mnemonic = generate_mnemonic(GENERATED_MNEMONIC_WORD_COUNT)
+                .map_err(|e| MmError::new(WalletError::Internal(e.to_string())))?
+                .to_string();
+            persist_passphrase(ctx, name, &mnemonic, password).await?;
+            mnemonic
+        },
+        // First-save of the supplied plaintext seed.
+        (PassphraseForm::Plaintext(seed), None) => {
+            enforce_wallet_password_policy(ctx, password)?;
+            persist_passphrase(ctx, name, &seed, password).await?;
+            seed
+        },
+        // Confirm the supplied plaintext seed against the stored record.
+        (PassphraseForm::Plaintext(seed), Some(encrypted)) => {
+            let stored =
+                decrypt_mnemonic(&encrypted, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            if stored != seed {
+                return MmError::err(WalletError::InvalidRequest(
+                    "Passphrase doesn't match the stored wallet. Create a new wallet to use a different passphrase"
+                        .to_string(),
+                ));
+            }
+            stored
+        },
+        // Import-and-save the supplied envelope verbatim.
+        (PassphraseForm::Encrypted(supplied), None) => {
+            enforce_wallet_password_policy(ctx, password)?;
+            let seed = decrypt_mnemonic(&supplied, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            save_encrypted_passphrase(ctx, name, &supplied)
+                .await
+                .map_err(|e| MmError::new(WalletError::StorageError(e)))?;
+            seed
+        },
+        // Confirm the supplied envelope against the stored record.
+        (PassphraseForm::Encrypted(supplied), Some(stored)) => {
+            let supplied_seed =
+                decrypt_mnemonic(&supplied, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            let stored_seed =
+                decrypt_mnemonic(&stored, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            if supplied_seed != stored_seed {
+                return MmError::err(WalletError::InvalidRequest(
+                    "Passphrase doesn't match the stored wallet. Create a new wallet to use a different passphrase"
+                        .to_string(),
+                ));
+            }
+            stored_seed
+        },
+    };
 
     let _ = ctx.wallet_name.pin(Some(name.to_string()));
-    Ok(Some(name.to_string()))
+    Ok(Some(seed))
 }
 
 #[cfg(test)]
@@ -348,9 +440,12 @@ mod tests {
 
     /// Create a test MmCtx with a unique temp dbdir.
     fn test_ctx() -> MmArc {
-        let dir = env::temp_dir().join(format!("kdf_wallet_test_{}", common::now_ms()));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = env::temp_dir().join(format!("kdf_wallet_test_{}_{}", common::now_ms(), unique));
         MmCtxBuilder::default()
-            .with_conf(json!({"dbdir": dir.to_str().unwrap()}))
+            .with_conf(json!({"dbdir": dir.to_str().unwrap(), "allow_weak_password": true}))
             .into_mm_arc()
     }
 
@@ -504,13 +599,14 @@ mod tests {
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let password = "init_test_pw";
 
+        // First-save of a supplied plaintext seed: returns the resolved seed.
         let result = block_on(initialize_wallet_passphrase(
             &ctx,
-            mnemonic,
+            PassphraseForm::Plaintext(mnemonic.to_string()),
             Some("init-wallet"),
             Some(password),
         ));
-        assert_eq!(result.unwrap(), Some("init-wallet".to_string()));
+        assert_eq!(result.unwrap(), Some(mnemonic.to_string()));
 
         // wallet_name should be set on ctx
         assert_eq!(ctx.wallet_name.as_option(), Some(&Some("init-wallet".to_string())));
@@ -523,10 +619,197 @@ mod tests {
     #[test]
     fn test_initialize_wallet_passphrase_anonymous_mode() {
         let ctx = test_ctx();
-        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-        let result = block_on(initialize_wallet_passphrase(&ctx, mnemonic, None, None));
+        let result = block_on(initialize_wallet_passphrase(&ctx, PassphraseForm::Absent, None, None));
         assert_eq!(result.unwrap(), None);
         assert_eq!(ctx.wallet_name.as_option(), Some(&None));
+    }
+
+    #[test]
+    fn test_initialize_wallet_passphrase_legacy_plaintext_no_name() {
+        let ctx = test_ctx();
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+        // Legacy passphrase-only: plaintext seed used directly, slot pinned None.
+        let result = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Plaintext(mnemonic.to_string()),
+            None,
+            None,
+        ));
+        assert_eq!(result.unwrap(), Some(mnemonic.to_string()));
+        assert_eq!(ctx.wallet_name.as_option(), Some(&None));
+    }
+
+    /// T5 regression: a re-login that supplies only the stored name and password
+    /// (no passphrase) MUST load the stored seed without any equality comparison
+    /// and resolve the same seed as the first start.
+    #[test]
+    fn test_initialize_wallet_passphrase_relogin_loads_stored_seed() {
+        let ctx = test_ctx();
+        let password = "relogin_pw";
+
+        // First start: generate-and-persist (passphrase absent, no stored file).
+        let first = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Absent,
+            Some("relogin-wallet"),
+            Some(password),
+        ))
+        .unwrap();
+        let seed = first.expect("first start must resolve a generated seed");
+
+        // Second start: passphrase absent, stored file present => load-and-use.
+        let second = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Absent,
+            Some("relogin-wallet"),
+            Some(password),
+        ))
+        .unwrap();
+        assert_eq!(second, Some(seed));
+    }
+
+    /// T5: a re-login with an incorrect wallet_password against an existing record
+    /// MUST abort with a decryption/mnemonic error (InvalidPassword), distinct
+    /// from the passphrase-mismatch case (R29).
+    #[test]
+    fn test_initialize_wallet_passphrase_relogin_wrong_password() {
+        let ctx = test_ctx();
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+        block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Plaintext(mnemonic.to_string()),
+            Some("wrongpw-wallet"),
+            Some("correct_pw"),
+        ))
+        .unwrap();
+
+        let err = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Absent,
+            Some("wrongpw-wallet"),
+            Some("incorrect_pw"),
+        ))
+        .unwrap_err();
+        assert_eq!(err.get_inner().status_code(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err.get_inner(), WalletError::InvalidPassword));
+    }
+
+    /// T5: a start that supplies a different plaintext passphrase than the stored
+    /// seed MUST abort with a passphrase-mismatch error (genuine seed conflict).
+    #[test]
+    fn test_initialize_wallet_passphrase_genuine_conflict() {
+        let ctx = test_ctx();
+        let stored = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let other = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+        let password = "conflict_pw";
+
+        block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Plaintext(stored.to_string()),
+            Some("conflict-wallet"),
+            Some(password),
+        ))
+        .unwrap();
+
+        let err = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Plaintext(other.to_string()),
+            Some("conflict-wallet"),
+            Some(password),
+        ))
+        .unwrap_err();
+        assert_eq!(err.get_inner().status_code(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err.get_inner(), WalletError::InvalidRequest(_)));
+    }
+
+    /// T5: a plaintext passphrase that matches the stored seed confirms and proceeds.
+    #[test]
+    fn test_initialize_wallet_passphrase_plaintext_confirm() {
+        let ctx = test_ctx();
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let password = "confirm_pw";
+
+        block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Plaintext(mnemonic.to_string()),
+            Some("confirm-wallet"),
+            Some(password),
+        ))
+        .unwrap();
+
+        let again = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Plaintext(mnemonic.to_string()),
+            Some("confirm-wallet"),
+            Some(password),
+        ))
+        .unwrap();
+        assert_eq!(again, Some(mnemonic.to_string()));
+    }
+
+    /// T5: an encrypted re-login (supplied envelope, stored file present) confirms
+    /// and proceeds when the decrypted seeds match.
+    #[test]
+    fn test_initialize_wallet_passphrase_encrypted_confirm() {
+        let ctx = test_ctx();
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let password = "encrypted_pw";
+
+        // First-save establishes the stored record.
+        block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Plaintext(mnemonic.to_string()),
+            Some("encrypted-wallet"),
+            Some(password),
+        ))
+        .unwrap();
+
+        // Supply the same seed as an encrypted envelope: confirm-and-proceed.
+        let supplied = encrypt_mnemonic(mnemonic, password).unwrap();
+        let resolved = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Encrypted(supplied),
+            Some("encrypted-wallet"),
+            Some(password),
+        ))
+        .unwrap();
+        assert_eq!(resolved, Some(mnemonic.to_string()));
+    }
+
+    /// T5: an encrypted passphrase without a wallet_name refuses to start.
+    #[test]
+    fn test_initialize_wallet_passphrase_encrypted_without_name_refused() {
+        let ctx = test_ctx();
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let supplied = encrypt_mnemonic(mnemonic, "any_pw").unwrap();
+
+        let err = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Encrypted(supplied),
+            None,
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(err.get_inner().status_code(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err.get_inner(), WalletError::InvalidRequest(_)));
+    }
+
+    /// T5: a wallet_name without wallet_password refuses to start.
+    #[test]
+    fn test_initialize_wallet_passphrase_missing_password_refused() {
+        let ctx = test_ctx();
+
+        let err = block_on(initialize_wallet_passphrase(
+            &ctx,
+            PassphraseForm::Absent,
+            Some("no-password-wallet"),
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(err.get_inner().status_code(), StatusCode::BAD_REQUEST);
+        assert!(matches!(err.get_inner(), WalletError::InvalidRequest(_)));
     }
 }

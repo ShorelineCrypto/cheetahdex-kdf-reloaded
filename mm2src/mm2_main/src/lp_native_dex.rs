@@ -20,7 +20,7 @@
 use coins::register_balance_update_handler;
 use common::executor::{spawn, spawn_boxed, Timer};
 use common::log::{error, info, warn};
-use crypto::{CryptoCtx, CryptoInitError, HwError, HwProcessingError};
+use crypto::{CryptoCtx, CryptoInitError, EncryptedMnemonicData, HwError, HwProcessingError};
 use derive_more::Display;
 use kdf_crypto::sha256;
 use mm2_core::mm_ctx::{MmArc, MmCtx};
@@ -250,13 +250,6 @@ impl MmInitError {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum PassphraseInitAction {
-    NoLogin,
-    ContinueWithoutPassphrase,
-    InitWithPassphrase(String),
-}
-
 fn validate_netid_range(conf: &json::Value) -> MmInitResult<()> {
     if let Some(netid) = conf["netid"].as_u64() {
         if netid > u16::MAX as u64 {
@@ -269,24 +262,41 @@ fn validate_netid_range(conf: &json::Value) -> MmInitResult<()> {
     Ok(())
 }
 
-fn resolve_passphrase_init_action(conf: &json::Value) -> MmInitResult<PassphraseInitAction> {
-    let wallet_name_configured = !conf["wallet_name"].is_null();
-    let hw_wallet_configured = !conf["hw_wallet"].is_null();
+/// The three mutually-exclusive forms the configuration `passphrase` field may
+/// take, recognised purely by structural shape (R26). Defined here (rather than
+/// in the native-only `lp_wallet` module) because the startup handshake must
+/// recognise the field on both native and WASM targets.
+#[derive(Debug)]
+pub(crate) enum PassphraseForm {
+    /// The field is missing or JSON `null`.
+    Absent,
+    /// A JSON string carrying the mnemonic in clear.
+    Plaintext(String),
+    /// A JSON object matching the encrypted-mnemonic envelope.
+    Encrypted(EncryptedMnemonicData),
+}
 
-    if conf["passphrase"].is_null() {
-        if !wallet_name_configured && !hw_wallet_configured {
-            return Ok(PassphraseInitAction::NoLogin);
-        }
-        return Ok(PassphraseInitAction::ContinueWithoutPassphrase);
+/// Parses the configuration `passphrase` field into one of the three forms of
+/// R26. The object (encrypted) form is recognised before the string (plaintext)
+/// form; an object that is not a well-formed envelope is a configuration error.
+pub(crate) fn parse_passphrase_form(conf: &json::Value) -> MmInitResult<PassphraseForm> {
+    let value = &conf["passphrase"];
+    if value.is_null() {
+        return Ok(PassphraseForm::Absent);
     }
-
-    let passphrase: String =
-        json::from_value(conf["passphrase"].clone()).map_to_mm(|e| MmInitError::ErrorDeserializingConfig {
-            field: "passphrase".to_owned(),
-            error: e.to_string(),
-        })?;
-
-    Ok(PassphraseInitAction::InitWithPassphrase(passphrase))
+    if value.is_object() {
+        let data: EncryptedMnemonicData =
+            json::from_value(value.clone()).map_to_mm(|e| MmInitError::ErrorDeserializingConfig {
+                field: "passphrase".to_owned(),
+                error: format!("passphrase object is not a well-formed encrypted envelope: {e}"),
+            })?;
+        return Ok(PassphraseForm::Encrypted(data));
+    }
+    let plaintext: String = json::from_value(value.clone()).map_to_mm(|e| MmInitError::ErrorDeserializingConfig {
+        field: "passphrase".to_owned(),
+        error: e.to_string(),
+    })?;
+    Ok(PassphraseForm::Plaintext(plaintext))
 }
 
 /// Returns compile-time seed nodes from NetConfig for the given netid.
@@ -480,32 +490,38 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
     let net_cfg = net_config_or_panic(netid);
     info!("Network: {} (netid {})", net_cfg.network_name(), netid);
 
-    let passphrase_init_action = resolve_passphrase_init_action(&ctx.conf)?;
+    // Recognise the three forms of the configured `passphrase` field (R26):
+    // absent/null, an encrypted envelope object, or a plaintext mnemonic string.
+    let passphrase_form = parse_passphrase_form(&ctx.conf)?;
 
-    // Optionally persist the passphrase as an encrypted wallet file.
-    // If wallet_name is set in config, the passphrase is encrypted with wallet_password
-    // and saved (or verified against an existing wallet file).
+    // Resolve the signing-identity seed from the startup wallet handshake per the
+    // R27 decision matrix. On native targets this consults the on-disk wallet
+    // store (load-and-use on re-login, generate/first-save/import, or confirm); on
+    // WASM there is no store, so only the anonymous and legacy-plaintext rows apply.
     #[cfg(not(target_arch = "wasm32"))]
-    {
+    let resolved_seed = {
         let wallet_name = ctx.conf["wallet_name"].as_str();
         let wallet_password = ctx.conf["wallet_password"].as_str();
-        if wallet_name.is_some() {
-            let passphrase_for_wallet = match &passphrase_init_action {
-                PassphraseInitAction::InitWithPassphrase(passphrase) => passphrase.as_str(),
-                PassphraseInitAction::ContinueWithoutPassphrase | PassphraseInitAction::NoLogin => "",
-            };
-            crate::mm2::lp_wallet::initialize_wallet_passphrase(
-                &ctx,
-                passphrase_for_wallet,
-                wallet_name,
-                wallet_password,
-            )
+        crate::mm2::lp_wallet::initialize_wallet_passphrase(&ctx, passphrase_form, wallet_name, wallet_password)
             .await
-            .map_err(|e| MmError::new(MmInitError::WalletError(e.to_string())))?;
-        }
-    }
+            .map_err(|e| MmError::new(MmInitError::WalletError(e.to_string())))?
+    };
+    #[cfg(target_arch = "wasm32")]
+    let resolved_seed = match passphrase_form {
+        PassphraseForm::Absent => None,
+        PassphraseForm::Plaintext(seed) => Some(seed),
+        PassphraseForm::Encrypted(_) => {
+            return MmError::err(MmInitError::WalletError(
+                "An encrypted passphrase requires the native wallet store and is unsupported on this target"
+                    .to_string(),
+            ));
+        },
+    };
 
-    if let PassphraseInitAction::InitWithPassphrase(passphrase) = passphrase_init_action {
+    // Identity invariant (R28): every resolved plaintext seed — including the pure
+    // re-login load-and-use path — initialises the node's signing identity. Only
+    // the anonymous row leaves the node without an identity.
+    if let Some(passphrase) = resolved_seed {
         CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase).mm_err(Into::into)?;
     }
     lp_init_continue(ctx.clone()).await?;
@@ -780,27 +796,31 @@ fn wss_certs(ctx: &MmArc) -> P2PResult<Option<WssCerts>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_passphrase_init_action, validate_netid_range, MmInitError, PassphraseInitAction};
+    use super::{parse_passphrase_form, validate_netid_range, MmInitError, PassphraseForm};
     use serde_json::json;
 
     #[test]
-    fn passphrase_absent_wallet_and_hw_absent_is_no_login() {
+    fn passphrase_absent_is_absent_form() {
         let conf = json!({});
-        let action = resolve_passphrase_init_action(&conf).expect("passphrase resolution should succeed");
-        assert_eq!(action, PassphraseInitAction::NoLogin);
+        let form = parse_passphrase_form(&conf).expect("passphrase resolution should succeed");
+        assert!(matches!(form, PassphraseForm::Absent));
+
+        let null_conf = json!({ "passphrase": null });
+        let form = parse_passphrase_form(&null_conf).expect("passphrase resolution should succeed");
+        assert!(matches!(form, PassphraseForm::Absent));
     }
 
     #[test]
     fn passphrase_unexpected_types_refuse_cleanly() {
         let num_conf = json!({ "passphrase": 1 });
-        let err = resolve_passphrase_init_action(&num_conf).unwrap_err();
+        let err = parse_passphrase_form(&num_conf).unwrap_err();
         assert!(matches!(
             err.get_inner(),
             MmInitError::ErrorDeserializingConfig { field, .. } if field == "passphrase"
         ));
 
         let bool_conf = json!({ "passphrase": true });
-        let err = resolve_passphrase_init_action(&bool_conf).unwrap_err();
+        let err = parse_passphrase_form(&bool_conf).unwrap_err();
         assert!(matches!(
             err.get_inner(),
             MmInitError::ErrorDeserializingConfig { field, .. } if field == "passphrase"
@@ -808,10 +828,32 @@ mod tests {
     }
 
     #[test]
-    fn empty_string_passphrase_is_treated_as_present() {
+    fn malformed_passphrase_envelope_refuses_cleanly() {
+        let conf = json!({ "passphrase": { "foo": "bar" } });
+        let err = parse_passphrase_form(&conf).unwrap_err();
+        assert!(matches!(
+            err.get_inner(),
+            MmInitError::ErrorDeserializingConfig { field, .. } if field == "passphrase"
+        ));
+    }
+
+    #[test]
+    fn empty_string_passphrase_is_plaintext() {
         let conf = json!({ "passphrase": "" });
-        let action = resolve_passphrase_init_action(&conf).expect("passphrase resolution should succeed");
-        assert_eq!(action, PassphraseInitAction::InitWithPassphrase(String::new()));
+        let form = parse_passphrase_form(&conf).expect("passphrase resolution should succeed");
+        assert!(matches!(form, PassphraseForm::Plaintext(s) if s.is_empty()));
+    }
+
+    #[test]
+    fn well_formed_envelope_is_encrypted_form() {
+        let envelope = crypto::encrypt_mnemonic(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+            "pw",
+        )
+        .unwrap();
+        let conf = json!({ "passphrase": serde_json::to_value(&envelope).unwrap() });
+        let form = parse_passphrase_form(&conf).expect("passphrase resolution should succeed");
+        assert!(matches!(form, PassphraseForm::Encrypted(_)));
     }
 
     #[test]

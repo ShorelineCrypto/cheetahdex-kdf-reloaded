@@ -26,15 +26,20 @@ passphrase-derived key pair, *without* changing the wire shape of the
 pre-existing read-only key-export endpoints `get_public_key` and
 `get_public_key_hash`. The new substrate has four bound pieces:
 
-- a **named-wallet store** consisting of one encrypted file per wallet under a
-  dedicated subdirectory of the per-node data directory;
+- a **named-wallet store** consisting of one encrypted file per wallet written
+  directly in the database root directory (the same directory that parents the
+  per-identity subdirectories — see §7.5);
 - a **password-based encryption envelope** that protects the BIP-39 mnemonic
   at rest using Argon2id key derivation feeding AES-256-CBC encryption and an
   HMAC-SHA-256 tag, in encrypt-then-MAC order;
-- a **startup verification handshake** that lifts an optional
-  `wallet_name` / `wallet_password` pair out of the runtime configuration,
-  encrypts-and-persists on first start with a given name, and decrypts-and-
-  compares on every subsequent start;
+- a **startup wallet handshake** that lifts an optional
+  `wallet_name` / `wallet_password` pair plus an optional multi-form
+  `passphrase` out of the runtime configuration and resolves a signing
+  identity from them. On a first start with a given name it encrypts and
+  persists; on a re-login that supplies only the stored name and password it
+  **loads and uses** the stored seed without any equality comparison; only when
+  the configuration also carries a passphrase does it confirm that the stored
+  seed agrees with the supplied one (see §7.8);
 - three **V2 RPCs** — `create_wallet`, `get_wallet_names`, `delete_wallet` —
   plus a write-once active-wallet slot on the central context.
 
@@ -55,9 +60,13 @@ also the file-stem portion of the on-disk record. The store is native-only;
 WASM builds do not register the three new RPCs and do not maintain the on-disk
 directory.
 
-The handshake distinguishes four configuration cases (see §7.8) and
-deliberately fails closed: an inconsistent configuration refuses to start
-rather than silently degrading.
+The handshake resolves an identity from the full combination of
+`wallet_name`, `wallet_password` and the multi-form `passphrase` field (see
+§7.8) and deliberately fails closed: an inconsistent configuration (a genuine
+seed conflict, a missing required field, or a failed decryption) refuses to
+start rather than silently degrading. A re-login that supplies only the stored
+name and password is *not* an inconsistency — it loads the stored seed and
+proceeds.
 
 ## 7.3 Bound Wire Surface
 
@@ -96,8 +105,10 @@ opt-in parity with the upstream capability.
 
 **R4.** Two runtime-configuration field names are bound at the configuration
 boundary: `wallet_name` (optional string) and `wallet_password` (optional
-string). The pre-existing `passphrase` configuration field is preserved
-unchanged.
+string; required only when `wallet_name` is present). The pre-existing
+`passphrase` configuration field is preserved, and its accepted value space is
+bound in full as a three-form field (absent, plaintext string, or encrypted
+envelope object) in R26.
 
 ## 7.3A Bound Key-Export Surface
 
@@ -255,15 +266,45 @@ and the HTTP-status trait bound in Chapter 04.
 
 ## 7.5 Bound On-Disk Layout
 
-**R7.** Persisted wallets MUST live in a single dedicated subdirectory of
-the per-node data directory, sibling to (and at a level *above*) any
-per-identity subdirectories. One regular file per wallet.
+**R7.** *Interoperable storage location.* Persisted wallet files MUST live
+**directly in the database root directory** — the configured `dbdir` root (and,
+when `dbdir` is unset, the default relative `DB` directory or the application
+`DB` directory resolved at startup). That root is the **parent** of the
+per-identity subdirectories (the directories named by the hex-encoded identity
+hash); the wallet files sit one level *above* those per-identity directories,
+as siblings of them. There is **no** dedicated wallet subdirectory: the files
+are named directly in the root. One regular file per wallet.
 
-**R8.** The on-disk file name MUST be `<wallet_name>.<extension>` where the
-extension is bound as `wallet`. The file content MUST be the
-JSON serialization of the persisted encryption envelope value defined in
-§7.7. JSON encoding (rather than a compact binary form) is bound so that the
-records remain operator-inspectable.
+> **Upstream divergence (informative).** An earlier draft bound a dedicated
+> wallet subdirectory of the per-node data directory. The interoperable
+> contract — the one a co-resident original build reads and writes — places the
+> files directly in the database root. Binding a separate subdirectory is the
+> root cause of two binaries not seeing each other's wallets; the location is
+> therefore corrected to the database root.
+
+**R8.** *Interoperable file name and extension.* The on-disk file name MUST be
+`<wallet_name>.json` — the wallet name followed by the bound wallet-file
+extension `json` (the project-wide wallet-file-extension constant). The file
+content MUST be the JSON serialization of the persisted encryption-envelope
+value defined in §7.7. JSON encoding (rather than a compact binary form) is
+bound both for operator inspectability and because it is the format the
+original build reads.
+
+> **Upstream divergence (informative).** An earlier draft bound the extension
+> as `wallet`. The interoperable extension is `json`; a node that writes
+> `<wallet_name>.wallet` produces files the original build neither lists nor
+> loads. The extension is corrected to `json`.
+
+**R8A.** *Name normalisation and listing for interop.* Before a wallet name is
+turned into a path component the original build **trims** leading and trailing
+whitespace and requires the trimmed name to be non-empty and composed only of
+alphanumeric characters, dash, underscore and space. The on-disk stem is the
+*trimmed* name. `get_wallet_names` MUST enumerate the wallet files by scanning
+the database root for entries bearing the `json` extension, **non-recursively**
+(it MUST NOT descend into the per-identity subdirectories), and report the
+file stems. A reloaded node that wishes to interoperate MUST apply the same
+trim-then-validate normalisation and the same non-recursive root scan, so that
+a wallet created by either binary is discoverable by the other.
 
 **R9.** The on-disk store MUST NOT contain a separate password hash or
 verifier. Password verification is performed exclusively by attempting
@@ -288,73 +329,184 @@ existing wallet requires explicit deletion first.
 
 ## 7.7 Bound Encryption Envelope
 
-**R12.** The persisted record carries two bound fields:
+**R12.** *Interoperable envelope shape.* The persisted record is a single JSON
+object with **six** bound top-level fields, all part of the on-disk/interop
+contract (the original build reads exactly this layout):
 
-- `encrypted_data` — a structure with three byte vectors: the ciphertext, the
-  initialization vector, and the authentication tag.
-- `key_derivation` — a self-describing key-derivation descriptor (see R15).
+- `version` — an integer format-version tag; the bound current value is `1`.
+- `encryption_algorithm` — a string-tagged enum naming the symmetric cipher;
+  the bound value is the AES-256-CBC token (`AES256CBC`).
+- `key_derivation_details` — a tagged enum describing how the symmetric keys
+  were derived (R15).
+- `iv` — the AES initialization vector, **Base64-encoded (standard alphabet)
+  string**.
+- `ciphertext` — the AES ciphertext, **Base64-encoded string**.
+- `tag` — the HMAC authentication tag, **Base64-encoded string**.
+
+`iv`, `ciphertext` and `tag` are top-level Base64 strings; they are **not**
+nested under an `encrypted_data` object and are **not** raw byte arrays.
+
+> **Upstream divergence (informative).** An earlier draft bound a two-field
+> record (`encrypted_data` holding three byte vectors, plus `key_derivation`).
+> The interoperable record is the six-field, top-level, Base64-string layout
+> above. The field names (`version`, `encryption_algorithm`,
+> `key_derivation_details`, `iv`, `ciphertext`, `tag`) and the Base64 string
+> encoding are dictated by the original file format and MUST match for a record
+> written by either binary to be read by the other.
 
 **R13.** Encryption is AES-256-CBC with PKCS-7 padding under a 32-byte
 symmetric key. The initialization vector MUST be 16 fresh random bytes drawn
-per encryption from the project's secure random source.
+per encryption from the project's secure random source, stored Base64-encoded
+in `iv`.
 
 **R14.** Authentication is HMAC-SHA-256 under a separate 32-byte key,
-computed over the byte concatenation `iv || ciphertext`. The authentication
-order is bound as **encrypt-then-MAC**: decryption MUST verify the
-authentication tag (in constant time) *before* attempting any cipher
-operation on the ciphertext.
+computed over the byte concatenation **`ciphertext || iv`** (ciphertext first,
+then the IV) and stored Base64-encoded in `tag`. The authentication order is
+bound as **encrypt-then-MAC**: decryption MUST verify the authentication tag
+(in constant time) over the same `ciphertext || iv` concatenation *before*
+attempting any cipher operation on the ciphertext.
 
-**R15.** Key derivation is bound as a tagged enum with two variants:
+> **Upstream divergence (informative).** An earlier draft bound the MAC input
+> as `iv || ciphertext`. The interoperable order is `ciphertext || iv`; a tag
+> computed over the reversed concatenation fails verification against records
+> written by the original build (and vice-versa). The order is corrected.
 
-- *Password-derived (Argon2id).* Carries an `Argon2Params` record with three
-  fields — memory cost in kibibytes, iteration count, and parallelism — plus
-  a 32-byte salt drawn from the project's secure random source. The bound
-  parameter triple at substrate-introduction time is **(memory_cost: 65536
-  KiB, iterations: 3, parallelism: 1)**. The parameter triple travels with
-  every persisted record so future raises remain backward-compatible.
-- *Seed-derived (SLIP-0021).* Used by the higher-level mnemonic-from-seed
-  bootstrap flow described in Chapter 05; not exercised by the user-facing
-  RPCs bound in this chapter.
+**R15.** `key_derivation_details` is bound as a tagged enum with two variants;
+the variant tag and its fields are part of the interop contract:
 
-**R16.** The 64 bytes of key material returned by the bound derivation MUST
-be split with the lower 32 bytes used as the AES encryption key and the
-upper 32 bytes used as the HMAC key. The substrate MUST NEVER use the same
-32-byte half for both encryption and authentication.
+- *Password-derived \u2014 tag `Argon2`.* Carries a `params` object plus **two
+  independent salts**, `salt_aes` and `salt_hmac`, each a Base64-encoded string
+  drawn from the project's secure random source. The `params` object carries
+  six fields: `algorithm` (string, bound value `argon2id`), `version` (integer
+  Argon2 version, bound value `19` = `0x13`), `m_cost` (memory cost in KiB,
+  bound value `65536`), `t_cost` (iteration count, bound value `2`), `p_cost`
+  (parallelism, bound value `1`), and `output_len` (derived-key length in
+  bytes, bound value `32`). The whole `params` object travels with every
+  persisted record so future parameter raises remain backward-compatible \u2014 an
+  old record decrypts under its own embedded parameters.
+- *Seed-derived \u2014 tag `SLIP0021`.* Carries `encryption_path` and
+  `authentication_path` strings. Used by the higher-level mnemonic-from-seed
+  bootstrap flow described in Chapter 05; it is **not** exercised by the
+  user-facing wallet RPCs bound in this chapter and is explicitly not accepted
+  as the key-derivation method for a mnemonic record.
+
+> **Upstream divergence (informative).** An earlier draft bound a single
+> 32-byte salt and an iteration count of 3. The interoperable form carries
+> **two** salts (`salt_aes`, `salt_hmac`) and an iteration count (`t_cost`) of
+> **2**, alongside the explicit `algorithm`, `version` and `output_len`
+> fields. Because the parameters travel with each record, a co-resident build
+> can still *read* a record written with different parameters; binding the
+> exact emitted defaults keeps newly *written* records byte-shape-compatible.
+
+**R16.** *Two-derivation key separation.* For the `Argon2` variant the AES key
+and the HMAC key MUST be produced by **two independent Argon2id evaluations**
+of the wallet password: one under `salt_aes` yielding the 32-byte AES
+encryption key, and one under `salt_hmac` yielding the 32-byte HMAC key, each
+emitting `output_len` (32) bytes. The substrate MUST NEVER reuse a single salt,
+or a single derivation output, for both the encryption and the authentication
+key.
+
+> **Upstream divergence (informative).** An earlier draft bound a single
+> derivation emitting 64 bytes split into halves. The interoperable scheme is
+> two separate salted derivations (one per salt). The 64-byte-split model is
+> not produced by the original build and is not byte-compatible with it.
 
 **R17.** Inputs to `create_wallet` MUST be validated as English BIP-39
 mnemonics *before* the encryption envelope is constructed. Non-mnemonic
 input MUST be rejected with `InvalidRequest`; an invalid mnemonic MUST NOT
-produce a written `.wallet` file.
+produce a written `<wallet_name>.json` file.
 
 ## 7.8 Bound Startup Handshake
 
-**R18.** The startup integration point reads the optional pair
-(`wallet_name`, `wallet_password`) from the runtime configuration and
-distinguishes four cases. The behaviour for each case is bound:
+**R18.** The startup integration point resolves a wallet identity from three
+runtime-configuration inputs, taken together:
 
-| Configuration                                            | Required behaviour                                                                                                       |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `wallet_name` absent                                     | *Anonymous mode.* Pin the active-wallet slot to `None`. Write nothing. The node behaves identically to a baseline start. |
-| `wallet_name` present, `wallet_password` absent          | Fail with `InvalidRequest`. Refuse to start.                                                                              |
-| `wallet_name` present, password present, file absent     | Encrypt the configured passphrase, write `<wallet_name>.wallet`, pin the active-wallet slot to `Some(wallet_name)`.       |
-| `wallet_name` present, password present, file exists     | Decrypt the stored mnemonic with the supplied password. Reject password mismatch as `InvalidPassword`. Reject decrypted-text vs configured-passphrase mismatch as `InvalidRequest`. On success, pin the active-wallet slot to `Some(wallet_name)`. |
+- `wallet_name` — optional string;
+- `wallet_password` — string, **required only when `wallet_name` is present**;
+- `passphrase` — optional, multi-form (R26).
+
+The active-wallet slot is pinned to the configured `wallet_name` value (which
+may be `None`) and the signing identity is resolved per the full decision
+matrix in R27. The earlier four-row table — which assumed a plaintext
+`passphrase` was always present and always compared the stored seed against
+it — is **superseded** by R26–R30: it could not express a re-login that
+supplies only the stored name and password, and so wrongly compared the stored
+seed against an empty configured passphrase and refused to start.
+
+**R26.** *Accepted forms of the `passphrase` field.* The configuration
+`passphrase` field is parsed as exactly one of three mutually-exclusive forms,
+recognised purely by structural shape (there is no discriminator field):
+
+| Form        | Recognised when the value is…                                                  |
+| ----------- | ------------------------------------------------------------------------------ |
+| *absent*    | missing or JSON `null`                                                          |
+| *encrypted* | a JSON **object** matching the §7.7 envelope layout (`{version, encryption_algorithm, key_derivation_details, iv, ciphertext, tag}`) |
+| *plaintext* | a JSON **string** carrying the mnemonic in clear                                |
+
+The object form is recognised before the string form. An object that is not a
+well-formed envelope is a configuration error.
+
+**R27.** *Full startup decision matrix.* With the three inputs of R18, the
+required behaviour is bound per cell below. "Stored file" means a
+`<wallet_name>.json` record already present at the §7.5 location.
+
+| `wallet_name` | `passphrase` form | stored file | Required behaviour                                                                                                                                                                                                 |
+| ------------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| absent        | absent            | —           | **Anonymous / no-login.** Pin the active-wallet slot to `None`. Initialise **no** signing identity. Persist nothing. The node serves only passphrase-free functionality.                                            |
+| absent        | plaintext         | —           | **Legacy passphrase-only.** Use the plaintext seed directly to initialise the signing identity. Encrypt nothing, persist nothing. Pin the slot to `None`. This is the baseline-compatible passphrase-only start.    |
+| absent        | encrypted         | —           | **Refuse to start (fail-closed).** An encrypted passphrase cannot be imported without a wallet name (there is nowhere to persist it). Abort with a "wallet name required" configuration error.                       |
+| present       | (any)             | —           | If `wallet_password` is absent or not a string: **refuse to start** with a configuration-field error. `wallet_password` is mandatory whenever `wallet_name` is set. (The rows below assume it is present.)           |
+| present       | absent            | **absent**  | **Generate-and-persist.** Require a non-empty `wallet_password` (else a password-policy failure) and enforce the password policy unless `allow_weak_password`; generate a fresh BIP-39 mnemonic, encrypt and persist it as `<wallet_name>.json`, initialise the identity from it, pin the slot to `Some(wallet_name)`. |
+| present       | absent            | **present** | **Re-login: load-and-use.** Decrypt the stored mnemonic with `wallet_password` and **use it as-is — perform NO equality comparison against anything**. Initialise the identity from the loaded seed and pin the slot. A failed decryption (wrong password or tampered record) aborts startup with a decryption/mnemonic error. |
+| present       | plaintext         | **absent**  | **First-save of supplied seed.** Require a non-empty `wallet_password` + policy; encrypt and persist the supplied plaintext as `<wallet_name>.json`; initialise the identity from it; pin the slot.                  |
+| present       | plaintext         | **present** | **Confirm.** Decrypt the stored mnemonic with `wallet_password`; if it **equals** the supplied plaintext, use it and pin the slot; if it **differs**, abort with a passphrase-mismatch error (genuine seed conflict). |
+| present       | encrypted         | **absent**  | **Import-and-save.** Decrypt the **supplied** envelope with `wallet_password` (failure aborts); persist the supplied envelope verbatim as `<wallet_name>.json`; initialise the identity from the decrypted seed; pin the slot. |
+| present       | encrypted         | **present** | **Confirm.** Decrypt **both** the supplied envelope and the stored record with `wallet_password`; if the two decrypted seeds **match**, use it and pin the slot; if they **differ**, abort with a passphrase-mismatch error. |
+
+**R28.** *Identity invariant.* In every row that resolves a seed (legacy
+plaintext; generate-and-persist; re-login load-and-use; first-save; both
+confirm rows; import-and-save), the resolved **plaintext** seed is the value
+used to initialise the node's signing identity — an Iguana single key pair, or
+a global-HD account when HD mode is enabled. In particular the re-login
+load-and-use row yields a **fully working** signing identity from the merely
+loaded stored seed; it MUST NOT leave an identity-less node. Only the anonymous
+row leaves the node without a signing identity.
+
+**R29.** *Password-check placement (two distinct failure modes).* The
+`wallet_password` is validated for non-emptiness and against the password
+policy (unless `allow_weak_password` is set, using the same truthy convention
+as elsewhere) **only** on the rows that create or first-save a record
+(generate-and-persist; both first-save / import-and-save rows). On the
+re-login load-and-use row and on the two confirm rows the `wallet_password` is
+exercised **solely as the decryption key**: a wrong password surfaces as a
+decryption / mnemonic failure, never as a policy violation. The two genuine
+failure conditions are kept distinct: a wrong password ⇒ decryption failure;
+a correctly-decrypting but **conflicting** stored seed ⇒ passphrase-mismatch
+failure.
+
+**R30.** *Fail-closed before serving.* Every refuse-to-start condition
+(encrypted-without-name; missing `wallet_password`; passphrase mismatch; any
+decryption or storage failure) aborts node initialisation **before** RPC
+dispatch is enabled (per R20), so the node never serves traffic with a
+half-resolved or empty-by-accident identity.
 
 **R19.** The active-wallet slot on the central context MUST be a write-once
 container: pinning a second value MUST fail. Runtime switching of the
 active wallet therefore requires a node restart with a different
 configuration.
 
-**R20.** The startup handshake MUST run *after* the passphrase has been
-ingested from configuration and *before* RPC dispatch is enabled, so the
+**R20.** The startup handshake MUST run *after* the configuration inputs of
+R18 have been ingested and *before* RPC dispatch is enabled, so the
 node never serves traffic with an inconsistent (`wallet_name` set but slot
 unpinned) state.
 
 ## 7.9 Bound RPC Semantics
 
-**R21.** `get_wallet_names` MUST read both the on-disk directory listing
-(filtered by the `.wallet` extension and the bound name grammar) and the
-active-wallet slot from the central context, returning both. `wallet_names`
-MUST include the active wallet if one is set.
+**R21.** `get_wallet_names` MUST read both the on-disk listing of the database
+root (the §7.5 location, scanned **non-recursively** and filtered by the `json`
+wallet-file extension and the bound name grammar) and the active-wallet slot
+from the central context, returning both. `wallet_names` MUST include the
+active wallet if one is set.
 
 **R22.** `delete_wallet` MUST first reject when the requested
 `wallet_name` equals the currently pinned active wallet, with
@@ -405,14 +557,32 @@ of whether the supplied password is correct, and MUST NOT unlink the file.
 
 **T4.** *Ciphertext tamper rejection.* Flipping a single byte of the
 on-disk record's ciphertext, IV, or authentication tag MUST cause the next
-`delete_wallet` decryption attempt (and the startup-handshake decryption)
-to fail with `InvalidPassword` (HMAC mismatch), not with a UTF-8 decode
-error and not with a panic.
+decryption attempt to fail cleanly with an HMAC mismatch — surfaced as
+`InvalidPassword` on the RPC paths (`delete_wallet`, plaintext `get_mnemonic`)
+and as a decryption/mnemonic startup abort on the startup-handshake path — and
+never with a UTF-8 decode error and never with a panic.
 
-**T5.** *Startup handshake matrix.* Each of the four configuration cases
-listed in R18 MUST be exercised by an integration test or equivalent; the
-two failure cases (no password, mismatched passphrase) MUST be confirmed to
-keep the daemon from entering RPC-serving state.
+**T5.** *Startup handshake matrix.* Each row of the R27 decision matrix MUST
+be exercised by an integration test or equivalent. In particular:
+
+- **Re-login (regression).** After a first start with (`wallet_name`,
+  `wallet_password`) that generates-and-persists, a *second* start that
+  supplies the **same `wallet_name` and `wallet_password` but no `passphrase`**
+  (passphrase-absent, stored-file-present) MUST start successfully, MUST load
+  the stored seed without any equality comparison, and MUST come up with the
+  **same working signing identity** as the first start (R28). It MUST NOT
+  abort with a passphrase-mismatch or empty-passphrase error.
+- **Encrypted re-login.** A re-start that supplies the stored name, the
+  password, and the previously-stored **encrypted** envelope (encrypted,
+  stored-file-present) MUST confirm-and-proceed when the seeds match.
+- **Genuine conflict.** A start that supplies a *different* plaintext
+  `passphrase` than the stored seed MUST abort with a passphrase-mismatch
+  error before RPC dispatch (R30).
+- **Wrong password.** A re-login with an incorrect `wallet_password` against an
+  existing record MUST abort with a decryption/mnemonic error, distinct from
+  the passphrase-mismatch case (R29).
+- **Refuse-to-start cells.** The encrypted-without-name and missing-`wallet_password`
+  cells MUST keep the daemon from entering RPC-serving state.
 
 **T6.** *Export-switch gating.* With `allow_insecure_key_export` absent or
 false, a `get_private_keys` request that asks for an offline (non-activated)
@@ -439,8 +609,8 @@ records under stronger parameters is deferred. The self-describing
 parameter envelope (R15) makes such a helper additive when introduced.
 
 **D4.** A multi-process file-locking discipline (so two daemons sharing a
-data directory cannot race on the same `.wallet` file) is deferred; the
-current substrate documents the constraint that the data directory is
+data directory cannot race on the same `<wallet_name>.json` file) is deferred;
+the current substrate documents the constraint that the data directory is
 single-tenant.
 
 ## 7.13 External References
@@ -458,8 +628,10 @@ single-tenant.
 - *SLIP-0021 — Symmetric key derivation.* Referenced as the
   non-password-derived variant of the bound key-derivation enum.
 - *RFC 9106 — Argon2 Memory-Hard Function for Password Hashing and Proof-
-  of-Work Applications.* Defines Argon2id and the parameter triple
-  (memory, iterations, parallelism) bound in §7.7.
+  of-Work Applications.* Defines Argon2id and the parameter set
+  (algorithm, version, memory `m_cost`, iterations `t_cost`, parallelism
+  `p_cost`, `output_len`) plus the two independent salts (`salt_aes`,
+  `salt_hmac`) bound in §7.7.
 - *NIST SP 800-38A — Recommendation for Block Cipher Modes of Operation.*
   Specifies CBC mode bound in R13.
 - *RFC 2104 — HMAC: Keyed-Hashing for Message Authentication* and
@@ -511,9 +683,10 @@ git -C <baseline> grep -nE '"(create_wallet|get_wallet_names|delete_wallet)"'
 ```
 
 **V2.** The baseline tree MUST be confirmed to lack a dedicated wallet
-module and the on-disk store directory name: searches for a `lp_wallet`
-source file and for the literal `wallets/` directory token in source MUST
-return zero hits.
+module: a search for a `lp_wallet` source file MUST return zero hits. (The
+baseline has no named-wallet store at all; the on-disk store this chapter binds
+lives in the database root — see §7.5 — and is introduced by the substrate, not
+the baseline.)
 
 **V3.** The pre-existing read-only key-export methods MUST be confirmed
 present in the baseline dispatcher:
@@ -541,8 +714,11 @@ disturb.
   IETF/BIP/SLIP/ZIP specifications; standard cryptographic primitive names.
 - *Sibling chapters cross-referenced:* Chapter 01, Chapter 04, Chapter 05.
 - *Author of this chapter:* clean-room round-2 driving-spec working set.
-- *Forbidden corpus:* consulted only for dictated-interop wire surface (the
-  public request/response field layout and method strings of the adopted
-  key-export RPCs). No private identifiers, function bodies, control flow, or
-  error/log string literals were carried across; all behaviour is restated as
-  functional requirements.
+- *Forbidden corpus:* consulted only for dictated-interop wire/file surface
+  (the public request/response field layout and method strings of the adopted
+  key-export RPCs; the on-disk wallet file location, name and extension; the
+  persisted encryption-envelope field layout and encodings; the configuration
+  `passphrase` field's accepted forms; and the externally-observable startup
+  decision matrix and its fail-closed/error surface). No private identifiers,
+  function bodies, control flow, or error/log string literals were carried
+  across; all behaviour is restated as functional requirements.
