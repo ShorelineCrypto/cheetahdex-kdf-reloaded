@@ -46,6 +46,8 @@ mod dispatcher_legacy;
 pub mod lp_commands_legacy;
 #[path = "rpc/lp_commands/one_inch/mod.rs"] pub mod one_inch;
 #[path = "rpc/rate_limiter.rs"] mod rate_limiter;
+#[path = "rpc/lp_commands/send_asked_data.rs"]
+pub mod send_asked_data;
 #[path = "rpc/lp_commands/shared_db_id.rs"] pub mod shared_db_id;
 #[path = "rpc/sse_handler.rs"] mod sse_handler;
 #[path = "rpc/streaming_activations/mod.rs"]

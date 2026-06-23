@@ -5,6 +5,7 @@ use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simp
 use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
                                 classic_swap_quote, classic_swap_tokens};
 use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
+use crate::mm2::rpc::send_asked_data::send_asked_data;
 use crate::mm2::rpc::shared_db_id::get_shared_db_id;
 use crate::mm2::rpc::streaming_activations;
 use crate::mm2::rpc::wallet_connect::{wc_delete_session, wc_get_session, wc_get_sessions, wc_new_connection,
@@ -232,6 +233,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "recreate_swap_data" => handle_mmrpc(ctx, request, recreate_swap_data).await,
         "remove_delegation" => handle_mmrpc(ctx, request, remove_delegation).await,
         "remove_node_from_version_stat" => handle_mmrpc(ctx, request, remove_node_from_version_stat).await,
+        "send_asked_data" => handle_mmrpc(ctx, request, send_asked_data).await,
         "sign_message" => handle_mmrpc(ctx, request, sign_message).await,
         "start_simple_market_maker_bot" => handle_mmrpc(ctx, request, start_simple_market_maker_bot).await,
         "start_version_stat_collection" => handle_mmrpc(ctx, request, start_version_stat_collection).await,

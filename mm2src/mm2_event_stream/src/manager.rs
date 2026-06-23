@@ -270,6 +270,18 @@ impl StreamingManager {
         let inner = self.inner.read();
         inner.streamers.contains_key(streamer_id)
     }
+
+    /// Publish a one-off `Event` directly to all clients subscribed to its
+    /// origin streamer, without going through a running streamer instance.
+    ///
+    /// Used for events that are not produced by a long-lived streamer (e.g.
+    /// the interactive data-asker "data needed" event).
+    pub fn broadcast(&self, event: Arc<Event>) {
+        Broadcaster {
+            inner: self.inner.clone(),
+        }
+        .broadcast(event);
+    }
 }
 
 #[cfg(test)]

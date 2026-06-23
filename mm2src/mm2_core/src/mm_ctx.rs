@@ -24,6 +24,8 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::data_asker::DataAsker;
+
 cfg_wasm32! {
     use mm2_rpc::wasm_rpc::WasmRpcSender;
     use crate::DbNamespaceId;
@@ -71,6 +73,10 @@ pub struct MmCtx {
     pub metrics: MetricsArc,
     /// Event streaming manager for real-time SSE subscriptions.
     pub event_stream_manager: StreamingManager,
+    /// Interactive data-asker facility (R19): an always-present registry by
+    /// which an internal daemon flow asks an external client for a piece of
+    /// data and awaits the answer over the event stream.
+    pub data_asker: DataAsker,
     /// Set to true after `lp_passphrase_init`, indicating that we have a usable state.
     ///
     /// Should be refactored away in the future. State should always be valid.
@@ -145,6 +151,7 @@ impl MmCtx {
             log: log::LogArc::new(log),
             metrics: MetricsArc::new(),
             event_stream_manager: StreamingManager::default(),
+            data_asker: DataAsker::default(),
             initialized: Constructible::default(),
             rpc_started: Constructible::default(),
             stop: Constructible::default(),
@@ -198,6 +205,24 @@ impl MmCtx {
             static ref DEFAULT: H160 = [0; 20].into();
         }
         self.shared_db_id.or(&|| &*DEFAULT)
+    }
+
+    /// Ask an external client for a piece of data (R19), forwarding to the
+    /// always-present [`DataAsker`] facility with this context's event-stream
+    /// manager as the outward-event surface.
+    pub async fn ask_for_data<Input, Output>(
+        &self,
+        data_type: &str,
+        data: Input,
+        timeout_secs: f64,
+    ) -> Result<Output, crate::data_asker::AskForDataError>
+    where
+        Input: Serialize,
+        Output: serde::de::DeserializeOwned,
+    {
+        self.data_asker
+            .ask_for_data(&self.event_stream_manager, data_type, data, timeout_secs)
+            .await
     }
 
     #[cfg(not(target_arch = "wasm32"))]

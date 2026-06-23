@@ -38,7 +38,12 @@ pub enum StreamerId {
     Network,
     SwapStatus,
     OrderStatus,
-    OrderbookUpdate { topic: String },
+    OrderbookUpdate {
+        topic: String,
+    },
+    /// Carries an interactive data-asker "data needed" event; the payload is
+    /// the data-type discriminator naming the kind of data being requested.
+    DataNeeded(String),
 }
 
 impl fmt::Display for StreamerId {
@@ -50,6 +55,7 @@ impl fmt::Display for StreamerId {
             StreamerId::SwapStatus => write!(f, "SWAP_STATUS"),
             StreamerId::OrderStatus => write!(f, "ORDER_STATUS"),
             StreamerId::OrderbookUpdate { topic } => write!(f, "ORDERBOOK:{}", topic),
+            StreamerId::DataNeeded(data_type) => write!(f, "DATA_NEEDED:{}", data_type),
         }
     }
 }
