@@ -46,9 +46,9 @@ use coins::utxo::utxo_standard::UtxoStandardCoin;
 use coins::{add_delegation, claim_staking_rewards, delegations_info, get_raw_transaction, get_staking_infos,
             ongoing_undelegations_info, remove_delegation, sign_message, sign_raw_transaction, validators_info,
             verify_message, withdraw};
-use coins_activation::{cancel_l2_activation, enable_l2, enable_platform_coin_with_tokens, enable_token, init_l2,
-                       init_l2_status, init_l2_user_action, init_standalone_coin, init_standalone_coin_status,
-                       init_standalone_coin_user_action};
+use coins_activation::{cancel_init_standalone_coin, cancel_l2_activation, enable_l2, enable_platform_coin_with_tokens,
+                       enable_token, init_l2, init_l2_status, init_l2_user_action, init_standalone_coin,
+                       init_standalone_coin_status, init_standalone_coin_user_action};
 use common::log::{error, warn};
 use common::HttpStatusCode;
 use futures::Future as Future03;
@@ -397,9 +397,11 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "enable_utxo::user_action" => {
             handle_mmrpc(ctx, request, init_standalone_coin_user_action::<UtxoStandardCoin>).await
         },
+        "enable_utxo::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<UtxoStandardCoin>).await,
         "enable_qtum::init" => handle_mmrpc(ctx, request, init_standalone_coin::<QtumCoin>).await,
         "enable_qtum::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<QtumCoin>).await,
         "enable_qtum::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<QtumCoin>).await,
+        "enable_qtum::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<QtumCoin>).await,
         "init_trezor::init" => handle_mmrpc(ctx, request, init_trezor).await,
         "init_trezor::status" => handle_mmrpc(ctx, request, init_trezor_status).await,
         "init_trezor::user_action" => handle_mmrpc(ctx, request, init_trezor_user_action).await,
@@ -418,6 +420,7 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
             "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
             "enable_z_coin::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
             "enable_z_coin::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
+            "enable_z_coin::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<ZCoin>).await,
             "enable_lightning::init" => handle_mmrpc(ctx, request, init_l2::<LightningCoin>).await,
             "enable_lightning::status" => handle_mmrpc(ctx, request, init_l2_status::<LightningCoin>).await,
             "enable_lightning::user_action" => handle_mmrpc(ctx, request, init_l2_user_action::<LightningCoin>).await,
