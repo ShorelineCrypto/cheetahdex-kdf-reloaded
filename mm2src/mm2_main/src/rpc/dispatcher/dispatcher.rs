@@ -464,3 +464,7 @@ async fn lightning_dispatcher(
         },
     }
 }
+
+#[cfg(test)]
+#[path = "dispatcher_resolution_guard.rs"]
+mod dispatcher_resolution_guard;
