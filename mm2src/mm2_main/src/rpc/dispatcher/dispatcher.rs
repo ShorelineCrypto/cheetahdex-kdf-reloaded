@@ -180,6 +180,19 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         return gui_storage_dispatcher(request, ctx, &gui_storage_method).await;
     }
 
+    // Route task:: namespace methods to the long-running task dispatcher.
+    if let Some(task_method) = request.method.strip_prefix("task::") {
+        let task_method = task_method.to_owned();
+        return task_dispatcher(request, ctx, &task_method).await;
+    }
+
+    // Route lightning:: namespace methods to the Lightning Network dispatcher (native only).
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(lightning_method) = request.method.strip_prefix("lightning::") {
+        let lightning_method = lightning_method.to_owned();
+        return lightning_dispatcher(request, ctx, &lightning_method).await;
+    }
+
     match request.method.as_str() {
         "account_balance" => handle_mmrpc(ctx, request, account_balance).await,
         "active_swaps" => handle_mmrpc(ctx, request, active_swaps_rpc_v2).await,
@@ -369,5 +382,85 @@ async fn gui_storage_dispatcher(
         "activate_coins" => handle_mmrpc(ctx, request, activate_coins).await,
         "deactivate_coins" => handle_mmrpc(ctx, request, deactivate_coins).await,
         _ => MmError::err(DispatcherError::NoSuchMethod),
+    }
+}
+
+/// Routes `task::*` namespaced RPC methods to the corresponding long-running task handlers.
+///
+/// These are the canonical upstream wire names for the init/status/user_action/cancel task
+/// lifecycle. The legacy flat aliases (e.g. `init_utxo`, `init_qtum`) remain routed by the
+/// main dispatcher for backward compatibility.
+async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -> DispatcherResult<Response<Vec<u8>>> {
+    match task_method {
+        "enable_utxo::init" => handle_mmrpc(ctx, request, init_standalone_coin::<UtxoStandardCoin>).await,
+        "enable_utxo::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<UtxoStandardCoin>).await,
+        "enable_utxo::user_action" => {
+            handle_mmrpc(ctx, request, init_standalone_coin_user_action::<UtxoStandardCoin>).await
+        },
+        "enable_qtum::init" => handle_mmrpc(ctx, request, init_standalone_coin::<QtumCoin>).await,
+        "enable_qtum::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<QtumCoin>).await,
+        "enable_qtum::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<QtumCoin>).await,
+        "init_trezor::init" => handle_mmrpc(ctx, request, init_trezor).await,
+        "init_trezor::status" => handle_mmrpc(ctx, request, init_trezor_status).await,
+        "init_trezor::user_action" => handle_mmrpc(ctx, request, init_trezor_user_action).await,
+        "account_balance::init" => handle_mmrpc(ctx, request, init_account_balance).await,
+        "account_balance::status" => handle_mmrpc(ctx, request, init_account_balance_status).await,
+        "create_new_account::init" => handle_mmrpc(ctx, request, init_create_new_account).await,
+        "create_new_account::status" => handle_mmrpc(ctx, request, init_create_new_account_status).await,
+        "create_new_account::user_action" => handle_mmrpc(ctx, request, init_create_new_account_user_action).await,
+        "scan_for_new_addresses::init" => handle_mmrpc(ctx, request, init_scan_for_new_addresses).await,
+        "scan_for_new_addresses::status" => handle_mmrpc(ctx, request, init_scan_for_new_addresses_status).await,
+        "withdraw::init" => handle_mmrpc(ctx, request, init_withdraw).await,
+        "withdraw::status" => handle_mmrpc(ctx, request, withdraw_status).await,
+        "withdraw::user_action" => handle_mmrpc(ctx, request, withdraw_user_action).await,
+        #[cfg(not(target_arch = "wasm32"))]
+        native_only_task => match native_only_task {
+            "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
+            "enable_z_coin::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
+            "enable_z_coin::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
+            "enable_lightning::init" => handle_mmrpc(ctx, request, init_l2::<LightningCoin>).await,
+            "enable_lightning::status" => handle_mmrpc(ctx, request, init_l2_status::<LightningCoin>).await,
+            "enable_lightning::user_action" => handle_mmrpc(ctx, request, init_l2_user_action::<LightningCoin>).await,
+            "enable_lightning::cancel" => handle_mmrpc(ctx, request, cancel_l2_activation::<LightningCoin>).await,
+            _ => {
+                warn!("No such task:: RPC method: '{}'", native_only_task);
+                MmError::err(DispatcherError::NoSuchMethod)
+            },
+        },
+        #[cfg(target_arch = "wasm32")]
+        unknown_task => {
+            warn!("No such task:: RPC method: '{}'", unknown_task);
+            MmError::err(DispatcherError::NoSuchMethod)
+        },
+    }
+}
+
+/// Routes `lightning::*` namespaced RPC methods to the Lightning Network handlers.
+///
+/// These are the canonical upstream wire names grouped under `channels::`, `nodes::` and
+/// `payments::`. The legacy flat aliases (e.g. `open_channel`, `send_payment`) remain routed
+/// by the main dispatcher for backward compatibility. Lightning is native only.
+#[cfg(not(target_arch = "wasm32"))]
+async fn lightning_dispatcher(
+    request: MmRpcRequest,
+    ctx: MmArc,
+    lightning_method: &str,
+) -> DispatcherResult<Response<Vec<u8>>> {
+    match lightning_method {
+        "channels::open_channel" => handle_mmrpc(ctx, request, open_channel).await,
+        "channels::close_channel" => handle_mmrpc(ctx, request, close_channel).await,
+        "channels::get_channel_details" => handle_mmrpc(ctx, request, get_channel_details).await,
+        "channels::get_claimable_balances" => handle_mmrpc(ctx, request, get_claimable_balances).await,
+        "channels::list_open_channels_by_filter" => handle_mmrpc(ctx, request, list_open_channels_by_filter).await,
+        "channels::list_closed_channels_by_filter" => handle_mmrpc(ctx, request, list_closed_channels_by_filter).await,
+        "nodes::connect_to_node" => handle_mmrpc(ctx, request, connect_to_lightning_node).await,
+        "payments::generate_invoice" => handle_mmrpc(ctx, request, generate_invoice).await,
+        "payments::send_payment" => handle_mmrpc(ctx, request, send_payment).await,
+        "payments::get_payment_details" => handle_mmrpc(ctx, request, get_payment_details).await,
+        "payments::list_payments_by_filter" => handle_mmrpc(ctx, request, list_payments_by_filter).await,
+        _ => {
+            warn!("No such lightning:: RPC method: '{}'", lightning_method);
+            MmError::err(DispatcherError::NoSuchMethod)
+        },
     }
 }
