@@ -7,7 +7,7 @@
 /// The currently active wallet name is recorded in `MmCtx::wallet_name` (write-once)
 /// during startup. Only inactive wallets can be deleted.
 use common::HttpStatusCode;
-use crypto::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic};
+use crypto::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic, EncryptedMnemonicData};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -184,6 +184,41 @@ pub struct DeleteWalletResponse {
     pub wallet_name: String,
 }
 
+/// Selects how the caller's own seed is returned by `get_mnemonic`.
+///
+/// `encrypted` returns the stored encryption envelope unchanged (no password,
+/// no plaintext exposure); `plaintext` requires the wallet password and returns
+/// the decoded mnemonic string.
+#[derive(Deserialize)]
+#[serde(tag = "format", rename_all = "lowercase")]
+pub enum GetMnemonicRequest {
+    Encrypted,
+    Plaintext { password: String },
+}
+
+/// Mirrors the requested `format`: the encrypted form carries the stored
+/// envelope, the plaintext form carries the decoded mnemonic string.
+#[derive(Serialize)]
+#[serde(tag = "format", rename_all = "lowercase")]
+pub enum GetMnemonicResponse {
+    Encrypted {
+        encrypted_mnemonic_data: EncryptedMnemonicData,
+    },
+    Plaintext {
+        mnemonic: String,
+    },
+}
+
+/// Changes the wallet password by re-encrypting the stored mnemonic.
+///
+/// `current_password` authenticates the request (it must decrypt the stored
+/// envelope); `new_password` becomes the wallet password going forward.
+#[derive(Deserialize)]
+pub struct ChangeMnemonicPasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
 // --- RPC handlers ---
 
 /// Creates a new wallet by encrypting and persisting the given mnemonic.
@@ -278,6 +313,106 @@ pub async fn delete_wallet_rpc(
     Ok(DeleteWalletResponse {
         wallet_name: req.wallet_name,
     })
+}
+
+/// Returns the caller's *own* seed, authenticated by the wallet password.
+///
+/// `encrypted` format returns the stored envelope unchanged (no password
+/// required, no decryption). `plaintext` format decrypts the stored mnemonic
+/// under the supplied wallet password; a wrong password yields `InvalidPassword`
+/// and never a usable-but-corrupt plaintext. Host-side seed export is refused
+/// for hardware-wallet (Trezor) sessions. The recovered secret is serialized
+/// exactly once, for the response only, and is never logged or persisted.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn get_mnemonic_rpc(
+    ctx: MmArc,
+    req: GetMnemonicRequest,
+) -> Result<GetMnemonicResponse, MmError<WalletError>> {
+    // Reject hardware-wallet (Trezor) sessions: host-side seed export is never
+    // performed for hardware wallets.
+    let crypto_ctx =
+        crypto::CryptoCtx::from_ctx(&ctx).map_err(|e| MmError::new(WalletError::Internal(e.to_string())))?;
+    if crypto_ctx.hw_ctx().is_some() {
+        return MmError::err(WalletError::InvalidRequest(
+            "Mnemonic export is not supported for hardware-wallet sessions".to_string(),
+        ));
+    }
+
+    // Resolve the active wallet name.
+    let wallet_name = match ctx.wallet_name.as_option() {
+        Some(Some(name)) => name.clone(),
+        _ => return MmError::err(WalletError::InvalidRequest("No active wallet".to_string())),
+    };
+
+    // Load the stored encryption envelope.
+    let encrypted = read_encrypted_passphrase(&ctx, &wallet_name)
+        .await
+        .map_err(|e| MmError::new(WalletError::StorageError(e)))?
+        .ok_or_else(|| MmError::new(WalletError::WalletNotFound(wallet_name.clone())))?;
+
+    match req {
+        GetMnemonicRequest::Encrypted => Ok(GetMnemonicResponse::Encrypted {
+            encrypted_mnemonic_data: encrypted,
+        }),
+        GetMnemonicRequest::Plaintext { password } => {
+            let mnemonic =
+                decrypt_mnemonic(&encrypted, &password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            Ok(GetMnemonicResponse::Plaintext { mnemonic })
+        },
+    }
+}
+
+/// Re-encrypts the caller's *own* stored mnemonic under a new wallet password.
+///
+/// `current_password` is verified by decrypting the stored envelope; a wrong
+/// password yields `InvalidPassword`. On success the mnemonic is re-wrapped
+/// under `new_password` and the wallet record is overwritten in place. Refused
+/// for hardware-wallet (Trezor) sessions, which hold no host-side mnemonic. The
+/// recovered secret lives only for the duration of the re-encryption and is
+/// never logged or persisted in plaintext.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn change_mnemonic_password_rpc(
+    ctx: MmArc,
+    req: ChangeMnemonicPasswordRequest,
+) -> Result<(), MmError<WalletError>> {
+    // Reject hardware-wallet (Trezor) sessions: there is no host-side mnemonic to re-encrypt.
+    let crypto_ctx =
+        crypto::CryptoCtx::from_ctx(&ctx).map_err(|e| MmError::new(WalletError::Internal(e.to_string())))?;
+    if crypto_ctx.hw_ctx().is_some() {
+        return MmError::err(WalletError::InvalidRequest(
+            "Changing the mnemonic password is not supported for hardware-wallet sessions".to_string(),
+        ));
+    }
+
+    if req.new_password.is_empty() {
+        return MmError::err(WalletError::InvalidRequest("new_password cannot be empty".to_string()));
+    }
+
+    // Resolve the active wallet name.
+    let wallet_name = match ctx.wallet_name.as_option() {
+        Some(Some(name)) => name.clone(),
+        _ => return MmError::err(WalletError::InvalidRequest("No active wallet".to_string())),
+    };
+
+    // Load the stored encryption envelope.
+    let encrypted = read_encrypted_passphrase(&ctx, &wallet_name)
+        .await
+        .map_err(|e| MmError::new(WalletError::StorageError(e)))?
+        .ok_or_else(|| MmError::new(WalletError::WalletNotFound(wallet_name.clone())))?;
+
+    // Verify the current password by decrypting the stored mnemonic.
+    let mnemonic =
+        decrypt_mnemonic(&encrypted, &req.current_password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+
+    // Re-encrypt the mnemonic under the new password and overwrite the record.
+    let re_encrypted = encrypt_mnemonic(&mnemonic, &req.new_password)
+        .map_err(|e| MmError::new(WalletError::EncryptionError(e.to_string())))?;
+
+    save_encrypted_passphrase(&ctx, &wallet_name, &re_encrypted)
+        .await
+        .map_err(|e| MmError::new(WalletError::StorageError(e)))?;
+
+    Ok(())
 }
 
 // --- Startup integration ---

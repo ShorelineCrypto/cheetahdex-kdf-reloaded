@@ -232,6 +232,45 @@ in \u00a77.10. The activated-coin reveals (`show_priv_key` and the reduced
 `get_private_keys` of R-K3) are available on whatever targets the requested
 coins can be activated on.
 
+**R-K11.** *Own-address query — public address, no secret, all targets.* The
+method `get_my_address` (mmrpc 2.0, flat method) is the operator's own-address
+query: it returns the wallet address currently in use for one configured coin
+**without requiring that coin to be activated first**. It surrenders only a
+public address — never any secret key material — and is therefore available on
+**all targets** and is NOT gated by `allow_insecure_key_export` nor by the
+native-only wallet-store gating of §7.10. It is the address-surface companion
+to the read-only `get_public_key` / `get_public_key_hash` methods anchored in
+R2.
+
+- *Request (interop).* The request carries `coin: String` (required) naming the
+  coin ticker, plus an **optional** `path_to_address` object that selects a
+  specific hierarchical-deterministic address by BIP-44 coordinates. The
+  selector carries three fields: `account_id` (unsigned integer account index),
+  `chain` (the BIP-44 change-level branch selector — external vs internal), and
+  `address_id` (unsigned integer address index). When `path_to_address` is
+  absent it defaults to the first account's first external address (account
+  index 0, external branch, address index 0).
+- *Response (interop).* The success response carries `coin: String` (echoes the
+  requested ticker) and `wallet_address: String` (the resolved address in the
+  coin's native display form).
+- *Resolution semantics.* The address is resolved from the node's coin
+  configuration and signing identity directly, with no prior enable/activation
+  call required for the coin. For an HD wallet the `path_to_address` selector is
+  honoured to derive the address at the requested coordinate; a single-address
+  (Iguana) wallet resolves its one address. The current bound protocol scope is
+  EVM / ETH-protocol coins; a coin whose protocol does not support own-address
+  resolution MUST be refused.
+- *Bound error surface (interop).* The method exposes a single type-tagged error
+  enum whose `error_type` tokens are part of the wire contract:
+  `CoinsConfCheckError` (the coin's configuration failed validation),
+  `CoinIsNotSupported` (the coin's protocol does not support own-address
+  resolution), `InvalidRequest` (the request could not be parsed), `Internal`
+  (an internal / crypto-context failure), and `GetEthAddressError` (EVM address
+  derivation failed). `CoinsConfCheckError`, `CoinIsNotSupported` and
+  `InvalidRequest` map to HTTP 400; `Internal` and `GetEthAddressError` map to
+  HTTP 500. The enum implements the project-wide type-tagged
+  error-serialization trait and the HTTP-status trait bound in Chapter 04.
+
 **R-K10.** *Refactor-later (security hardening) \u2014 informative.* A future
 hardening review is bound as deferred work, not as a current requirement: it
 should consider rate-limiting and/or an explicit confirmation step for the
@@ -456,7 +495,7 @@ required behaviour is bound per cell below. "Stored file" means a
 | absent        | plaintext         | —           | **Legacy passphrase-only.** Use the plaintext seed directly to initialise the signing identity. Encrypt nothing, persist nothing. Pin the slot to `None`. This is the baseline-compatible passphrase-only start.    |
 | absent        | encrypted         | —           | **Refuse to start (fail-closed).** An encrypted passphrase cannot be imported without a wallet name (there is nowhere to persist it). Abort with a "wallet name required" configuration error.                       |
 | present       | (any)             | —           | If `wallet_password` is absent or not a string: **refuse to start** with a configuration-field error. `wallet_password` is mandatory whenever `wallet_name` is set. (The rows below assume it is present.)           |
-| present       | absent            | **absent**  | **Generate-and-persist.** Require a non-empty `wallet_password` (else a password-policy failure) and enforce the password policy unless `allow_weak_password`; generate a fresh BIP-39 mnemonic, encrypt and persist it as `<wallet_name>.json`, initialise the identity from it, pin the slot to `Some(wallet_name)`. |
+| present       | absent            | **absent**  | **Generate-and-persist.** Require a non-empty `wallet_password` (else a password-policy failure) and enforce the password policy unless `allow_weak_password`; generate a fresh BIP-39 mnemonic (at the default strength bound in R31), encrypt and persist it as `<wallet_name>.json`, initialise the identity from it, pin the slot to `Some(wallet_name)`. |
 | present       | absent            | **present** | **Re-login: load-and-use.** Decrypt the stored mnemonic with `wallet_password` and **use it as-is — perform NO equality comparison against anything**. Initialise the identity from the loaded seed and pin the slot. A failed decryption (wrong password or tampered record) aborts startup with a decryption/mnemonic error. |
 | present       | plaintext         | **absent**  | **First-save of supplied seed.** Require a non-empty `wallet_password` + policy; encrypt and persist the supplied plaintext as `<wallet_name>.json`; initialise the identity from it; pin the slot.                  |
 | present       | plaintext         | **present** | **Confirm.** Decrypt the stored mnemonic with `wallet_password`; if it **equals** the supplied plaintext, use it and pin the slot; if it **differs**, abort with a passphrase-mismatch error (genuine seed conflict). |
@@ -489,6 +528,22 @@ failure.
 decryption or storage failure) aborts node initialisation **before** RPC
 dispatch is enabled (per R20), so the node never serves traffic with a
 half-resolved or empty-by-accident identity.
+
+**R31.** *Generated-mnemonic entropy strength (security-strength parity).* On
+the generate-and-persist row of R27 — and on any other path that auto-creates a
+fresh seed rather than importing one — the fresh BIP-39 mnemonic SHOULD be
+generated at a default strength of **128 bits of entropy (a 12-word English
+mnemonic)**, matching the default strength of the original build so that
+freshly auto-created wallets are not silently issued at a different entropy
+tier than the baseline. The generator SHOULD honour an optional operator
+configuration override (`word_count`) selecting a higher BIP-39 strength
+(e.g. a 24-word / 256-bit mnemonic) for deployments that want stronger seeds,
+defaulting to the 12-word value when the override is absent or unparseable.
+This is a soft security-parameter recommendation, not a byte-format
+requirement: any valid BIP-39 mnemonic, at any supported strength, encrypts
+into the §7.7 envelope and round-trips identically, so the choice affects only
+the entropy of newly *generated* seeds, never cross-binary interoperability of
+already-persisted records.
 
 **R19.** The active-wallet slot on the central context MUST be a write-once
 container: pinning a second value MUST fail. Runtime switching of the
@@ -591,6 +646,20 @@ reduced activated-coins form (R-K3), `show_priv_key` (R-K2) and `get_mnemonic`
 (R-K7) MUST still succeed. With the switch set to `true`, the same offline /
 `hd` / ZHTLC requests MUST succeed. A hardware-wallet session MUST be rejected
 by every key-export path in both switch states (R-K6).
+
+**T7.** *Own-address query.* A `get_my_address` request naming a configured
+EVM / ETH-protocol coin MUST return a response carrying the requested `coin`
+and a non-empty `wallet_address`, **without** any prior enable/activation call
+for that coin. The same request supplying an explicit `path_to_address` that
+selects a non-default `account_id` / `chain` / `address_id` MUST resolve the
+address for that HD coordinate (an HD wallet MUST return the address at the
+selected path; a single-address wallet returns its sole address). A request
+naming a coin whose protocol does not support own-address resolution MUST be
+refused with the unsupported-protocol error at HTTP 400; a request naming a
+coin absent from configuration MUST be refused with the configuration-check
+error at HTTP 400; a malformed request MUST be refused with the invalid-request
+error at HTTP 400. No secret key material MUST appear anywhere in any
+`get_my_address` response.
 
 ## 7.12 Deferred Work
 
@@ -716,9 +785,12 @@ disturb.
 - *Author of this chapter:* clean-room round-2 driving-spec working set.
 - *Forbidden corpus:* consulted only for dictated-interop wire/file surface
   (the public request/response field layout and method strings of the adopted
-  key-export RPCs; the on-disk wallet file location, name and extension; the
-  persisted encryption-envelope field layout and encodings; the configuration
-  `passphrase` field's accepted forms; and the externally-observable startup
-  decision matrix and its fail-closed/error surface). No private identifiers,
-  function bodies, control flow, or error/log string literals were carried
-  across; all behaviour is restated as functional requirements.
+  key-export RPCs; the own-address query method string, its `coin` /
+  `path_to_address` request fields and its `coin` / `wallet_address` response
+  fields and `error_type` token set; the on-disk wallet file location, name and
+  extension; the persisted encryption-envelope field layout and encodings; the
+  configuration `passphrase` field's accepted forms; and the
+  externally-observable startup decision matrix and its fail-closed/error
+  surface). No private identifiers, function bodies, control flow, or error/log
+  string literals were carried across; all behaviour is restated as functional
+  requirements.

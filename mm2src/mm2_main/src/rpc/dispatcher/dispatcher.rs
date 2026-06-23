@@ -29,6 +29,7 @@ use coins::rpc_command::consolidate_utxos::consolidate_utxos_rpc;
 use coins::rpc_command::fetch_utxos::fetch_utxos_rpc;
 use coins::rpc_command::get_current_mtp::get_current_mtp_rpc;
 use coins::rpc_command::get_enabled_coins::get_enabled_coins_rpc;
+use coins::rpc_command::get_my_address::get_my_address_rpc;
 use coins::rpc_command::get_private_keys::get_private_keys;
 use coins::rpc_command::init_account_balance::{init_account_balance, init_account_balance_status};
 use coins::rpc_command::init_create_account::{init_create_new_account, init_create_new_account_status,
@@ -66,7 +67,7 @@ cfg_native! {
         send_payment, LightningCoin};
     use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
-    use crate::mm2::lp_wallet::{create_wallet_rpc, delete_wallet_rpc, get_wallet_names_rpc};
+    use crate::mm2::lp_wallet::{change_mnemonic_password_rpc, create_wallet_rpc, delete_wallet_rpc, get_mnemonic_rpc, get_wallet_names_rpc};
 }
 
 pub async fn process_single_request(
@@ -190,6 +191,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_current_mtp" => handle_mmrpc(ctx, request, get_current_mtp_rpc).await,
         "get_enabled_coins" => handle_mmrpc(ctx, request, get_enabled_coins_rpc).await,
         "get_eth_estimated_fee_per_gas" => handle_mmrpc(ctx, request, get_eth_estimated_fee_per_gas).await,
+        "get_my_address" => handle_mmrpc(ctx, request, get_my_address_rpc).await,
         "get_new_address" => handle_mmrpc(ctx, request, get_new_address).await,
         "get_private_keys" => handle_mmrpc(ctx, request, get_private_keys).await,
         "get_public_key" => handle_mmrpc(ctx, request, get_public_key).await,
@@ -252,6 +254,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             "refresh_nft_metadata" => handle_mmrpc(ctx, request, refresh_nft_metadata).await,
             "update_nft" => handle_mmrpc(ctx, request, update_nft).await,
             "withdraw_nft" => handle_mmrpc(ctx, request, withdraw_nft).await,
+            "change_mnemonic_password" => handle_mmrpc(ctx, request, change_mnemonic_password_rpc).await,
             "close_channel" => handle_mmrpc(ctx, request, close_channel).await,
             "connect_to_lightning_node" => handle_mmrpc(ctx, request, connect_to_lightning_node).await,
             "create_wallet" => handle_mmrpc(ctx, request, create_wallet_rpc).await,
@@ -260,6 +263,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             "generate_invoice" => handle_mmrpc(ctx, request, generate_invoice).await,
             "get_channel_details" => handle_mmrpc(ctx, request, get_channel_details).await,
             "get_claimable_balances" => handle_mmrpc(ctx, request, get_claimable_balances).await,
+            "get_mnemonic" => handle_mmrpc(ctx, request, get_mnemonic_rpc).await,
             "get_payment_details" => handle_mmrpc(ctx, request, get_payment_details).await,
             "get_wallet_names" => handle_mmrpc(ctx, request, get_wallet_names_rpc).await,
             "init_lightning" => handle_mmrpc(ctx, request, init_l2::<LightningCoin>).await,
@@ -278,10 +282,16 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
                 handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<SolanaCoin>).await
             },
             "enable_spl" => handle_mmrpc(ctx, request, enable_token::<SplToken>).await,
-            _ => MmError::err(DispatcherError::NoSuchMethod),
+            _ => {
+                warn!("No such v2 RPC method: '{}'", native_only_methods);
+                MmError::err(DispatcherError::NoSuchMethod)
+            },
         },
         #[cfg(target_arch = "wasm32")]
-        _ => MmError::err(DispatcherError::NoSuchMethod),
+        unknown_method => {
+            warn!("No such v2 RPC method: '{}'", unknown_method);
+            MmError::err(DispatcherError::NoSuchMethod)
+        },
     }
 }
 
