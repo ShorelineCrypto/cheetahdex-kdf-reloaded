@@ -49,6 +49,9 @@ pub mod lp_commands_legacy;
 #[path = "rpc/sse_handler.rs"] mod sse_handler;
 #[path = "rpc/streaming_activations/mod.rs"]
 pub mod streaming_activations;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "rpc/lp_commands/trezor.rs"]
+pub mod trezor;
 #[path = "rpc/lp_commands/wallet_connect.rs"]
 pub mod wallet_connect;
 

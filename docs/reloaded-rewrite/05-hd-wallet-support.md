@@ -345,6 +345,53 @@ device through the existing hardware-wallet protocol; the HD-path
 types from R17 MUST be the same — only the signature computation
 moves off-process.
 
+## 5.10A Bound Trezor Connection-Status Query
+
+**R28.** *Trezor connection-status query — native-only.* The
+substrate MUST bind the daemon RPC method
+`trezor_connection_status` (mmrpc 2.0, flat method), routed
+through the version-two RPC dispatcher and gated to native
+targets only: on the WebAssembly target the method MUST be
+absent / refused, since the hardware-wallet path of R25 is itself
+native-only. The method reports the current connection state of
+the Trezor hardware-wallet device known to the running daemon,
+derived from the hardware-wallet handle held by the central
+cryptographic context (R5 / R25).
+
+- *Request (interop).* The request carries a single **optional**
+  field `device_pubkey`: a hex-encoded 20-byte hardware-wallet
+  public-key identifier (the RIPEMD-160-of-SHA-256 digest of the
+  device's extended public key, identical to the identifier the
+  daemon reports for the device elsewhere). When present it
+  asserts the expected device — the query MUST verify the
+  connected device's identifier equals the supplied value. When
+  absent no device-identity assertion is made.
+- *Response (interop).* The success response carries a single
+  field `status` whose value is one of two wire-visible
+  discriminant strings: `"Connected"` — the device is reachable
+  (currently usable, or already in use by a concurrent task) —
+  and `"Unreachable"` — the device is disconnected or in an
+  incorrect state and SHOULD be re-initialised.
+- *Probe semantics.* The query MUST resolve the status as a state
+  value, not a long-running task: if the handle is flagged
+  disconnected it reports `"Unreachable"`; if a concurrent task
+  already holds the device session the query MUST treat the
+  device as `"Connected"` without contending for the session;
+  otherwise it performs a lightweight connectivity check and
+  reports `"Connected"` on success or `"Unreachable"` on failure.
+  The query MUST NOT mutate device state nor enqueue a
+  user-interaction task.
+- *Bound error surface (interop).* The method exposes a
+  type-tagged error enum whose `error_type` tokens are part of
+  the wire contract: `TrezorNotInitialized` (no hardware-wallet
+  context is initialised on the running daemon),
+  `FoundUnexpectedDevice` (a `device_pubkey` was supplied but the
+  connected device's identifier does not match it), and
+  `Internal` (the cryptographic context was unavailable or
+  another internal failure occurred). `TrezorNotInitialized` maps
+  to HTTP 400; `FoundUnexpectedDevice` and `Internal` map to
+  HTTP 500.
+
 ## 5.11 Bound WebAssembly-Only MetaMask Path
 
 **R26.** The substrate MUST add two new modules
@@ -417,6 +464,17 @@ expected derived key — single passphrase-derived key for
 the translator into the `ypub` prefix and back; the test
 asserts both intermediate and final byte representations match
 the public version-byte tables.
+
+**T9.** *Trezor connection-status query.* A central context is
+constructed with an initialised hardware-wallet handle backed by
+a test double; a `trezor_connection_status` request with no
+`device_pubkey` is issued and the test asserts the response
+`status` is one of the two bound discriminant strings
+(`"Connected"` / `"Unreachable"`); a second request supplies a
+`device_pubkey` that does not match the handle's identifier and
+the test asserts the unexpected-device error variant; a third
+request is issued against a context with no hardware-wallet
+handle and the test asserts the not-initialised error variant.
 
 ## 5.14 Deferred Work
 
@@ -515,4 +573,10 @@ surface.
   specification documents; public crate documentation.
 - *Sibling-allowlist consultations:* none beyond the cross-chapter
   references listed in *Inputs*.
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* consulted only for the dictated-interop wire
+  surface of R28 (the `trezor_connection_status` method string,
+  its optional `device_pubkey` request field, its `status`
+  response field with the `"Connected"` / `"Unreachable"`
+  discriminant strings, and the method's `error_type` token set
+  with their HTTP-status mapping); no protected expression
+  crossed.

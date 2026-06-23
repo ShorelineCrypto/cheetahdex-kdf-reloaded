@@ -37,6 +37,24 @@ impl TrezorClient {
         session.initialize_device().await?;
         Ok(session)
     }
+
+    /// Lightweight, non-mutating reachability probe.
+    ///
+    /// Returns `true` when the device is reachable: either the session is
+    /// already held by a concurrent task (reported as reachable *without*
+    /// contending for the session lock), or a fresh `Initialize` exchange
+    /// succeeds. Returns `false` when the session is free but the device does
+    /// not respond. This never enqueues a user-interaction request.
+    pub async fn is_connected(&self) -> bool {
+        // Don't contend for the session: if another task already holds it the
+        // device is in use and therefore reachable.
+        let guard = match self.inner.try_lock() {
+            Some(guard) => guard,
+            None => return true,
+        };
+        let mut session = TrezorSession { inner: guard };
+        session.initialize_device().await.is_ok()
+    }
 }
 
 pub struct TrezorClientImpl {

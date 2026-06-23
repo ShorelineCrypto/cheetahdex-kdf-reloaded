@@ -68,6 +68,7 @@ cfg_native! {
     use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
     use crate::mm2::lp_wallet::{change_mnemonic_password_rpc, create_wallet_rpc, delete_wallet_rpc, get_mnemonic_rpc, get_wallet_names_rpc};
+    use crate::mm2::rpc::trezor::trezor_connection_status_rpc;
 }
 
 pub async fn process_single_request(
@@ -282,6 +283,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
                 handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<SolanaCoin>).await
             },
             "enable_spl" => handle_mmrpc(ctx, request, enable_token::<SplToken>).await,
+            "trezor_connection_status" => handle_mmrpc(ctx, request, trezor_connection_status_rpc).await,
             _ => {
                 warn!("No such v2 RPC method: '{}'", native_only_methods);
                 MmError::err(DispatcherError::NoSuchMethod)
