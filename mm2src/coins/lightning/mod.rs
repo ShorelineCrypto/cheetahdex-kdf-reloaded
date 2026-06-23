@@ -62,7 +62,7 @@ pub(crate) use lightning_invoice::utils::{create_invoice_from_channelmanager, De
 pub(crate) use lightning_invoice::{Invoice, InvoiceDescription};
 pub(crate) use lightning_persister::storage::{ClosedChannelsFilter, DbStorage, FileSystemStorage, HTLCStatus,
                                               NodesAddressesMapShared, PaymentInfo, PaymentType, PaymentsFilter,
-                                              Scorer, SqlChannelDetails};
+                                              Scorer, SqlChannelDetails, TrustedNodesShared};
 pub(crate) use lightning_persister::LightningPersister;
 pub(crate) use ln_conf::{ChannelOptions, LightningCoinConf, LightningProtocolConf, PlatformCoinConfirmations};
 pub(crate) use ln_errors::{ClaimableBalancesError, ClaimableBalancesResult, CloseChannelError, CloseChannelResult,
@@ -70,7 +70,8 @@ pub(crate) use ln_errors::{ClaimableBalancesError, ClaimableBalancesResult, Clos
                            GenerateInvoiceError, GenerateInvoiceResult, GetChannelDetailsError,
                            GetChannelDetailsResult, GetPaymentDetailsError, GetPaymentDetailsResult,
                            ListChannelsError, ListChannelsResult, ListPaymentsError, ListPaymentsResult,
-                           OpenChannelError, OpenChannelResult, SendPaymentError, SendPaymentResult};
+                           OpenChannelError, OpenChannelResult, SendPaymentError, SendPaymentResult, TrustedNodeError,
+                           TrustedNodeResult};
 pub(crate) use ln_events::LightningEventHandler;
 pub(crate) use ln_p2p::{connect_to_node, ConnectToNodeRes, PeerManager};
 pub(crate) use ln_platform::{h256_json_from_txid, Platform};

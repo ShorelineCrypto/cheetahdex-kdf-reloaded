@@ -64,9 +64,9 @@ use serde_json::{self as json, Value as Json};
 use std::net::SocketAddr;
 
 cfg_native! {
-    use coins::lightning::{close_channel, connect_to_lightning_node, generate_invoice, get_channel_details,
-        get_claimable_balances, get_payment_details, list_closed_channels_by_filter, list_open_channels_by_filter, list_payments_by_filter, open_channel,
-        send_payment, LightningCoin};
+    use coins::lightning::{add_trusted_node, close_channel, connect_to_lightning_node, generate_invoice, get_channel_details,
+        get_claimable_balances, get_payment_details, list_closed_channels_by_filter, list_open_channels_by_filter, list_payments_by_filter, list_trusted_nodes, open_channel,
+        remove_trusted_node, send_payment, LightningCoin};
     use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
     use crate::mm2::lp_wallet::{change_mnemonic_password_rpc, create_wallet_rpc, delete_wallet_rpc, get_mnemonic_rpc, get_wallet_names_rpc};
@@ -457,6 +457,9 @@ async fn lightning_dispatcher(
         "channels::list_open_channels_by_filter" => handle_mmrpc(ctx, request, list_open_channels_by_filter).await,
         "channels::list_closed_channels_by_filter" => handle_mmrpc(ctx, request, list_closed_channels_by_filter).await,
         "nodes::connect_to_node" => handle_mmrpc(ctx, request, connect_to_lightning_node).await,
+        "nodes::add_trusted_node" => handle_mmrpc(ctx, request, add_trusted_node).await,
+        "nodes::list_trusted_nodes" => handle_mmrpc(ctx, request, list_trusted_nodes).await,
+        "nodes::remove_trusted_node" => handle_mmrpc(ctx, request, remove_trusted_node).await,
         "payments::generate_invoice" => handle_mmrpc(ctx, request, generate_invoice).await,
         "payments::send_payment" => handle_mmrpc(ctx, request, send_payment).await,
         "payments::get_payment_details" => handle_mmrpc(ctx, request, get_payment_details).await,

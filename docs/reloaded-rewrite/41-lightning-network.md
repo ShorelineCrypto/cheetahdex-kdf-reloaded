@@ -100,7 +100,164 @@ version.
 > flat names for backward compatibility, or document the flat names as the
 > reloaded contract. No behavioural change is required.
 
-## 41.7 Acceptance criteria
+## 41.7 Trusted-node management RPCs
+
+> **Source of truth (informative).** The request/response field names and the
+> namespaced method strings in this section are the **public** Komodo DeFi
+> Framework API contract (the published Lightning RPC reference). Where this
+> chapter and the public API docs disagree on a field name, the public API docs
+> govern the wire contract.
+
+> **Status:** these three RPCs are **not yet present** in reloaded-public and are
+> specified here as a forward requirement (see the implementation-substrate note
+> at the end of this section).
+
+R41.7.1 The project shall expose three native-only mmrpc-2.0 RPCs for managing the
+set of *trusted nodes* of an activated Lightning coin:
+- `lightning::nodes::add_trusted_node`
+- `lightning::nodes::list_trusted_nodes`
+- `lightning::nodes::remove_trusted_node`
+
+Each request is an mmrpc-2.0 envelope (`mmrpc: "2.0"`, a `method` string from the
+list above, a `params` object, and an optional client-supplied `id` echoed in the
+response). Each is resolved against the **activated** Lightning coin named by the
+`params.coin` field; if no such activated Lightning coin exists the call fails
+(R41.7.7). All three are absent from the WASM build.
+
+R41.7.2 **Definition of a trusted node.** A trusted node is a counterparty peer,
+identified by its Lightning node public key, from which the local node is willing
+to accept **zero-confirmation** inbound channel funding -- i.e. to treat a
+channel that peer opens as usable before its funding transaction has confirmed on
+the parent chain. Membership of the trusted-node set is the sole gate on that
+zero-confirmation acceptance for inbound channels; a peer not in the set is
+subject to the node's normal confirmation requirement.
+
+R41.7.3 **`add_trusted_node` request / response.**
+- Request `params`:
+  - `coin` -- string, **required** -- ticker of the activated Lightning coin.
+  - `node_id` -- string, **required** -- the trusted peer's Lightning node public
+    key (compressed-pubkey hex, as used elsewhere in the Lightning surface).
+- Success `result`:
+  - `added_node` -- string -- the node public key that the request asked to add
+    (echo of `node_id`).
+
+R41.7.4 **`remove_trusted_node` request / response.**
+- Request `params`:
+  - `coin` -- string, **required**.
+  - `node_id` -- string, **required** -- the node public key to drop from the set.
+- Success `result`:
+  - `removed_node` -- string -- the node public key that the request asked to
+    remove (echo of `node_id`).
+
+R41.7.5 **`list_trusted_nodes` request / response.**
+- Request `params`:
+  - `coin` -- string, **required**.
+- Success `result`:
+  - `trusted_nodes` -- array of strings -- the node public keys currently in the
+    coin's trusted-node set (order unspecified; may be empty).
+
+R41.7.6 **Idempotent-reporting mutation semantics.** `add_trusted_node` and
+`remove_trusted_node` shall be idempotent in effect: adding a node already present
+leaves the set unchanged and still succeeds; removing a node not present leaves
+the set unchanged and still succeeds. The implementation shall determine and may
+surface whether the call actually changed the set (added a new member / removed an
+existing member), so that a no-op add or remove is distinguishable from one that
+mutated the set.
+
+R41.7.7 **Persistence and reload.** The trusted-node set is durable state of the
+Lightning coin. A successful `add`/`remove` shall be persisted through the coin's
+existing Lightning persister before the call reports success, and the set shall be
+re-loaded from persistent storage at coin activation so that trusted-node
+membership survives a restart. `list_trusted_nodes` shall reflect the current
+persisted set.
+
+R41.7.8 **Error conditions (public `error_type` + HTTP status).**
+- The `coin` does not name an activated Lightning coin (unknown coin, or a coin
+  that is not a Lightning coin) -- `error_type` reporting an unsupported/unknown
+  coin -- HTTP **400 Bad Request**.
+- `node_id` is missing or not a well-formed Lightning node public key -- an
+  invalid-request / parse `error_type` -- HTTP **400 Bad Request**.
+- A failure to persist the updated set through the persister -- an internal/save
+  `error_type` -- HTTP **500 Internal Server Error**.
+
+## 41.8 Live channel configuration update (`lightning::channels::update_channel`)
+
+> **Source of truth (informative).** As in §41.7, the field names and method
+> string below are the **public** Komodo DeFi Framework Lightning RPC contract;
+> the published API docs govern on any discrepancy.
+
+> **Status:** this RPC is **not yet present** in reloaded-public and is specified
+> here as a forward requirement.
+
+R41.8.1 The project shall expose a native-only mmrpc-2.0 RPC
+`lightning::channels::update_channel` that mutates the configurable parameters of
+a single **live** channel on the running channel manager of the activated
+Lightning coin named by `params.coin`. It is absent from the WASM build.
+
+R41.8.2 **Channel identity.** The target channel is named by its **rpc channel id**
+-- the local unsigned-integer handle assigned to the channel when it was opened
+(the same identifier surfaced by the channel-listing/-details RPCs of §41.3), not
+the on-chain funding outpoint and not the swap UUID.
+
+R41.8.3 **Request `params`.**
+- `coin` -- string, **required** -- ticker of the activated Lightning coin.
+- `rpc_channel_id` -- unsigned integer, **required** -- the rpc channel id of the
+  channel to update.
+- `channel_options` -- object, **required** -- the mutable per-channel
+  configuration to apply. Every field is **optional**; a field that is present
+  replaces the channel's current value for that parameter, and a field that is
+  absent leaves the corresponding parameter unchanged. The publicly exposed
+  configurable fields are:
+  - `proportional_fee_in_millionths_sats` -- integer -- the proportional
+    forwarding fee charged for routing through this channel, in millionths of the
+    forwarded amount.
+  - `base_fee_msat` -- integer -- the flat per-forward base fee, in millisatoshis.
+  - `cltv_expiry_delta` -- integer -- the CLTV expiry delta this channel
+    advertises/enforces for forwarded HTLCs (a block count).
+  - `max_dust_htlc_exposure_msat` -- integer -- the cap on total in-flight dust
+    HTLC exposure on this channel, in millisatoshis.
+  - `force_close_avoidance_max_fee_satoshis` -- integer -- the maximum fee, in
+    satoshis, the node will absorb to avoid a force-close.
+
+R41.8.4 **Behaviour.** The call shall apply the supplied overrides to the named
+channel's configuration on the **running** channel manager (taking effect on the
+live channel without re-activation), then persist the channel manager state so the
+new configuration survives a restart, and return the channel's resulting
+**effective** configuration (the merge of prior values and the applied overrides).
+
+R41.8.5 **Success `result`.**
+- `channel_options` -- object -- the channel's effective configuration after the
+  update, carrying the same fields enumerated in R41.8.3 with their current
+  values.
+
+R41.8.6 **Error conditions (public `error_type` + HTTP status).**
+- `coin` does not name an activated Lightning coin -- unsupported/unknown-coin
+  `error_type` -- HTTP **400 Bad Request**.
+- No channel with the given `rpc_channel_id` exists on the coin -- a
+  no-such-channel `error_type` -- HTTP **400 Bad Request**.
+- A failure to persist the updated channel-manager state -- an internal/save
+  `error_type` -- HTTP **500 Internal Server Error**.
+
+> **Implementation-substrate note (informative; status).** §41.7 is
+> **IMPLEMENTED**: `LightningCoin` (in
+> `mm2src/coins/lightning/lightning_types.rs`) now carries a persisted
+> `trusted_nodes` set, the Lightning persister gained save/load support for it,
+> and the set is restored at coin activation (R41.7.7).
+>
+> §41.8 (`update_channel`) is **BLOCKED ON SUBSTRATE** and is therefore *not*
+> routed in the dispatcher. The vendored `rust-lightning-patched` is LDK
+> **0.0.106**, which exposes **no public API to mutate a live channel's
+> configuration**: there is no `ChannelManager::update_channel_config` (added
+> upstream only in LDK 0.0.107) and the per-channel `ChannelConfig` is
+> crate-private, so it cannot be reached from the `coins` crate. Satisfying
+> §41.8 first requires either bumping the vendored Lightning crates to a version
+> that exposes live channel-config mutation, or adding an
+> `update_channel_config`-equivalent method to the vendored channel manager
+> (locate channel by handle, overwrite its config, regenerate/broadcast the
+> `channel_update`, persist the manager). Classified greenfield-dependent
+> (vendored-LDK uplift), not a routing/aliasing gap.
+
+## 41.9 Acceptance criteria
 
 - Lightning is absent from the WASM build and present on native (R41.1).
 - A node activates via `init_lightning` and reaches a ready state (R41.2).
@@ -110,3 +267,9 @@ version.
   details fetched (R41.4).
 - A swap leg using Lightning derives its final-CLTV expiry from the swap lock
   duration (R41.5).
+- A node can be added to, listed in, and removed from a Lightning coin's
+  trusted-node set; the set survives a restart; repeated add/remove report
+  whether the set actually changed (R41.7).
+- A live channel's configurable parameters (fees, CLTV delta, dust cap,
+  force-close fee ceiling) can be updated by rpc channel id and the effective
+  configuration is echoed back and persisted (R41.8).
