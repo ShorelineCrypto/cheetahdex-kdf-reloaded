@@ -54,7 +54,9 @@ constructor helper, and the chapter-bound asynchronous SQLite
 slot; R10–R13 cover the chapter-bound construction-and-
 lifecycle discipline; R14–R16 cover the chapter-bound consumer-
 routing pattern; R17 covers the chapter-bound platform-gate
-discipline on chapter-bound platform-specific fields.
+discipline on chapter-bound platform-specific fields; R18 binds
+the chapter-bound process-level shared-database identifier and
+its chapter-bound daemon query.
 
 ## 31.2 Subsystem Shape
 
@@ -160,6 +162,73 @@ stream-manager handle `event_stream_manager: StreamingManager`:
 these are chapter-bound owned plain fields set via the chapter-
 bound builder of R10 (chapter-bound `conf` only) or chapter-
 bound default-constructed in `MmCtx::with_log_state(...)`.
+
+## 31.4A Bound Shared-Database Identifier and its Query
+
+**R18.** The chapter-bound owned-state record MUST carry a
+chapter-bound process-level shared-database identifier field —
+chapter-bound distinct from the chapter-bound per-process
+public-key identifier `rmd160` of R3 / R6 — that names a
+chapter-bound database shared across the chapter-bound running
+process (a chapter-bound namespace shared across the chapter-
+bound wallets and coins activated under the chapter-bound active
+seed), and MUST expose it through a chapter-bound read accessor
+returning the chapter-bound identifier value. The chapter-bound
+field MUST follow the chapter-bound once-set lazy-initialisation
+field model of R4 / R5 (chapter-bound set once during chapter-
+bound process startup, chapter-bound read-many thereafter); its
+chapter-bound payload MUST be a chapter-bound twenty-byte `H160`
+hash, and the chapter-bound read accessor MUST surface it as a
+chapter-bound lowercase hexadecimal string when used to name a
+chapter-bound on-disk database namespace.
+
+The chapter-bound shared-database identifier MUST be chapter-
+bound derived deterministically from the chapter-bound active
+seed passphrase by a chapter-bound fixed derivation: the
+chapter-bound passphrase (with any chapter-bound leading `0x`
+prefix removed) is chapter-bound combined with a chapter-bound
+fixed build-constant salt string, the chapter-bound combined
+value is chapter-bound hashed into a chapter-bound secp256k1
+private key, a chapter-bound key-pair is formed from that
+chapter-bound private key, and the chapter-bound identifier is
+the chapter-bound `RIPEMD160(SHA256(public-key))` address hash
+of that chapter-bound key-pair. The chapter-bound derivation
+MUST reject a chapter-bound empty passphrase. Because the
+chapter-bound derivation consumes the chapter-bound seed through
+a chapter-bound fixed salt transform rather than the chapter-
+bound active account key, the chapter-bound resulting identifier
+is chapter-bound stable for a chapter-bound given seed yet
+chapter-bound deliberately distinct from the chapter-bound
+`rmd160` per-account public-key identifier of R3, so the
+chapter-bound shared-database namespace is chapter-bound
+decoupled from the chapter-bound selected account or address.
+The chapter-bound salt-string bytes are chapter-bound
+implementation-defined and chapter-bound not part of any
+chapter-bound third-party interop contract (the chapter-bound
+identifier names only a chapter-bound process-local database
+namespace); reloaded MUST fix a chapter-bound single salt
+constant of its own and MUST NOT reproduce the chapter-bound
+upstream salt expression.
+
+The chapter-bound application-entry crate `mm2_main` MUST expose
+a chapter-bound flat `mmrpc` 2.0 daemon method whose chapter-
+bound method string is `get_shared_db_id` on chapter-bound both
+the chapter-bound non-WebAssembly and the chapter-bound
+WebAssembly target. The chapter-bound request MUST take chapter-
+bound no required parameters — the chapter-bound request payload
+is chapter-bound ignored, so a chapter-bound caller MAY submit a
+chapter-bound empty object and any chapter-bound supplied fields
+are chapter-bound disregarded. The chapter-bound successful
+response MUST carry a chapter-bound single field `shared_db_id`
+whose chapter-bound value is the chapter-bound current shared-
+database identifier serialised as a chapter-bound lowercase
+hexadecimal string of the chapter-bound twenty-byte hash. The
+chapter-bound handler MUST always succeed under chapter-bound
+normal operation: it MUST return the chapter-bound currently
+pinned identifier, or — before the chapter-bound identifier has
+been pinned — a chapter-bound well-defined all-zero default
+identifier; it MUST NOT chapter-bound fail on a chapter-bound
+caller-supplied request shape.
 
 ## 31.5 Bound Sub-Context Slot Substrate
 
@@ -409,6 +478,14 @@ record's chapter-bound lifetime: dropping every chapter-bound
 strong handle while a chapter-bound weak handle remains MUST
 chapter-bound drop the chapter-bound owned-state record.
 
+**T6.** *Shared-database identifier query.* A chapter-bound
+regression test MUST confirm that the chapter-bound
+`get_shared_db_id` query of R18 returns the chapter-bound
+lowercase-hexadecimal twenty-byte identifier pinned on the
+chapter-bound owned-state record, and that two chapter-bound
+queries against the chapter-bound same owned-state record return
+the chapter-bound same identifier.
+
 ## 31.10 Deferred Work
 
 **D1.** A chapter-bound rationalisation of the chapter-bound
@@ -501,4 +578,9 @@ state record by adding chapter-bound those fields.
   asynchronous-runtime crate (for the chapter-bound
   asynchronous-mutex primitive of R7 and the chapter-bound
   asynchronous-once-cell pattern of R5).
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* consulted only for the chapter-bound
+  dictated-interop wire surface of R18 (the `get_shared_db_id`
+  method string; its chapter-bound empty / ignored request
+  payload; and its `shared_db_id` response field carrying the
+  chapter-bound twenty-byte hash as a chapter-bound lowercase
+  hexadecimal string); no protected expression crossed.

@@ -5,6 +5,7 @@ use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simp
 use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
                                 classic_swap_quote, classic_swap_tokens};
 use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
+use crate::mm2::rpc::shared_db_id::get_shared_db_id;
 use crate::mm2::rpc::streaming_activations;
 use crate::mm2::rpc::wallet_connect::{wc_delete_session, wc_get_session, wc_get_sessions, wc_new_connection,
                                       wc_ping_session};
@@ -198,6 +199,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_public_key" => handle_mmrpc(ctx, request, get_public_key).await,
         "get_public_key_hash" => handle_mmrpc(ctx, request, get_public_key_hash).await,
         "get_raw_transaction" => handle_mmrpc(ctx, request, get_raw_transaction).await,
+        "get_shared_db_id" => handle_mmrpc(ctx, request, get_shared_db_id).await,
         "get_staking_infos" => handle_mmrpc(ctx, request, get_staking_infos).await,
         "get_token_allowance" => handle_mmrpc(ctx, request, get_token_allowance).await,
         "sign_raw_transaction" => handle_mmrpc(ctx, request, sign_raw_transaction).await,

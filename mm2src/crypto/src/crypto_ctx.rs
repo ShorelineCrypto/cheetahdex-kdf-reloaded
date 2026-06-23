@@ -3,7 +3,7 @@ use crate::hw_client::{HwError, HwProcessingError, TrezorConnectProcessor};
 use crate::hw_ctx::{HardwareWalletArc, HardwareWalletCtx};
 #[cfg(target_arch = "wasm32")]
 use crate::metamask_ctx::{MetamaskArc, MetamaskCtx, MetamaskError};
-use crate::privkey::{key_pair_from_seed, PrivKeyError};
+use crate::privkey::{key_pair_from_seed, shared_db_id_from_seed, PrivKeyError};
 use arrayref::array_ref;
 use common::bits256;
 use common::log::info;
@@ -279,6 +279,14 @@ impl CryptoCtx {
             .pin(secp256k1_key_pair_for_legacy)
             .map_to_mm(CryptoInitError::Internal)?;
         ctx.rmd160.pin(rmd160).map_to_mm(CryptoInitError::Internal)?;
+
+        // Pin the process-level shared-database identifier (R18), derived from the
+        // active seed passphrase through a fixed salt transform (distinct from the
+        // per-account `rmd160`). Set for both the iguana and HD login paths.
+        let shared_db_id = shared_db_id_from_seed(passphrase).mm_err(Into::into)?;
+        ctx.shared_db_id
+            .pin(shared_db_id)
+            .map_to_mm(CryptoInitError::Internal)?;
 
         info!("Public key hash: {rmd160}");
         Ok(result)

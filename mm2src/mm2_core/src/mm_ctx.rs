@@ -100,6 +100,12 @@ pub struct MmCtx {
     pub crypto_ctx: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
     /// RIPEMD160(SHA256(x)) where x is secp256k1 pubkey derived from passphrase.
     pub rmd160: Constructible<H160>,
+    /// Process-level shared-database identifier (R18): RIPEMD160(SHA256(x)) where
+    /// x is a secp256k1 pubkey derived from the active seed passphrase combined
+    /// with a fixed namespace salt. Distinct from `rmd160`; names a database
+    /// namespace shared across the wallets and coins activated under the active
+    /// seed. Set once during startup, read-many thereafter.
+    pub shared_db_id: Constructible<H160>,
     /// secp256k1 key pair derived from passphrase.
     /// cf. `key_pair_from_seed`.
     pub secp256k1_key_pair: Constructible<KeyPair>,
@@ -155,6 +161,7 @@ impl MmCtx {
             coins_activation_ctx: Mutex::new(None),
             crypto_ctx: Mutex::new(None),
             rmd160: Constructible::default(),
+            shared_db_id: Constructible::default(),
             secp256k1_key_pair: Constructible::default(),
             coins_needed_for_kick_start: Mutex::new(HashSet::new()),
             swaps_ctx: Mutex::new(None),
@@ -182,6 +189,15 @@ impl MmCtx {
             static ref DEFAULT: H160 = [0; 20].into();
         }
         self.rmd160.or(&|| &*DEFAULT)
+    }
+
+    /// Process-level shared-database identifier (R18). Falls back to a lazy
+    /// all-zero `H160` default before the id is pinned, so it never panics.
+    pub fn shared_db_id(&self) -> &H160 {
+        lazy_static! {
+            static ref DEFAULT: H160 = [0; 20].into();
+        }
+        self.shared_db_id.or(&|| &*DEFAULT)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
