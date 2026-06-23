@@ -29,6 +29,12 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 90
 
+    # Pin the iOS deployment target so the `cc`-compiled C deps and the rustc
+    # link step agree (default mismatch otherwise yields an `___chkstk_darwin`
+    # undefined-symbol link error). Mirrors `.cargo/config.toml [env]`.
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+
     strategy:
       fail-fast: false
       matrix:
