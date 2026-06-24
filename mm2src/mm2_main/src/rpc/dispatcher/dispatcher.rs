@@ -42,6 +42,7 @@ use coins::rpc_command::init_scan_for_new_addresses::{init_scan_for_new_addresse
 use coins::rpc_command::init_withdraw::{init_withdraw, withdraw_status, withdraw_user_action};
 use coins::rpc_command::swap_gas_fee_policy::{get_swap_gas_fee_policy, set_swap_gas_fee_policy};
 use coins::rpc_command::token_allowance::{approve_token, get_token_allowance};
+use coins::tendermint::{TendermintCoin, TendermintToken};
 use coins::utxo::bch::BchCoin;
 use coins::utxo::qtum::QtumCoin;
 use coins::utxo::slp::SlpToken;
@@ -208,6 +209,10 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "enable_erc20" => handle_mmrpc(ctx, request, enable_token::<EthCoin>).await,
         "enable_eth_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<EthCoin>).await,
         "enable_slp" => handle_mmrpc(ctx, request, enable_token::<SlpToken>).await,
+        "enable_tendermint_token" => handle_mmrpc(ctx, request, enable_token::<TendermintToken>).await,
+        "enable_tendermint_with_assets" => {
+            handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<TendermintCoin>).await
+        },
         "fetch_utxos" => handle_mmrpc(ctx, request, fetch_utxos_rpc).await,
         "get_current_mtp" => handle_mmrpc(ctx, request, get_current_mtp_rpc).await,
         "get_enabled_coins" => handle_mmrpc(ctx, request, get_enabled_coins_rpc).await,
