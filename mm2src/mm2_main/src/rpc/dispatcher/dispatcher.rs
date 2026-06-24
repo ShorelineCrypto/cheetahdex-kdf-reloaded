@@ -2,6 +2,8 @@ use super::{DispatcherError, DispatcherResult, PUBLIC_METHODS};
 use crate::mm2::lp_native_dex::init_hw::{init_trezor, init_trezor_status, init_trezor_user_action};
 use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simple_market_maker_bot,
                                 stop_simple_market_maker_bot};
+#[cfg(target_arch = "wasm32")]
+use crate::mm2::rpc::connect_metamask::{connect_metamask_cancel, connect_metamask_init, connect_metamask_status};
 use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
                                 classic_swap_quote, classic_swap_tokens};
 use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
@@ -434,6 +436,15 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "withdraw::init" => handle_mmrpc(ctx, request, init_withdraw).await,
         "withdraw::status" => handle_mmrpc(ctx, request, withdraw_status).await,
         "withdraw::user_action" => handle_mmrpc(ctx, request, withdraw_user_action).await,
+        // MetaMask connection task family (ch. 47) is WASM-only: MetaMask is a
+        // browser EIP-1193 wallet. On native these arms are absent, so the
+        // method falls through to the native catch-all's method-not-found.
+        #[cfg(target_arch = "wasm32")]
+        "connect_metamask::init" => handle_mmrpc(ctx, request, connect_metamask_init).await,
+        #[cfg(target_arch = "wasm32")]
+        "connect_metamask::status" => handle_mmrpc(ctx, request, connect_metamask_status).await,
+        #[cfg(target_arch = "wasm32")]
+        "connect_metamask::cancel" => handle_mmrpc(ctx, request, connect_metamask_cancel).await,
         #[cfg(not(target_arch = "wasm32"))]
         native_only_task => match native_only_task {
             "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,

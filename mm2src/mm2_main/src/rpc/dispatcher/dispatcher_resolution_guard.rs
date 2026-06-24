@@ -160,6 +160,23 @@ fn evm_v2_flat_methods_are_routed() {
 }
 
 #[test]
+fn metamask_connect_methods_are_routed() {
+    // MetaMask connection task surface (CRD ch. 47) is WASM-only; the dispatcher
+    // arms are `#[cfg(target_arch = "wasm32")]`-gated, but this guard reads
+    // `dispatcher.rs` as text so the method strings are asserted on every target.
+    for method in [
+        "connect_metamask::init",
+        "connect_metamask::status",
+        "connect_metamask::cancel",
+    ] {
+        assert!(
+            DISPATCHER_SOURCE.contains(&format!("\"{method}\"")),
+            "v2 dispatcher lost routing for the WASM-only MetaMask method `{method}`"
+        );
+    }
+}
+
+#[test]
 fn tendermint_v2_flat_methods_are_routed() {
     // Tendermint (Cosmos) V2 activation & token RPC surface (CRD ch. 36). These
     // are flat (un-namespaced) mmrpc-2.0 methods routed on all targets,

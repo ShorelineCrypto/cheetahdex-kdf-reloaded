@@ -38,6 +38,9 @@ use serde_json::{self as json, Value as Json};
 use std::borrow::Cow;
 use std::net::SocketAddr;
 
+#[cfg(target_arch = "wasm32")]
+#[path = "rpc/lp_commands/connect_metamask.rs"]
+pub mod connect_metamask;
 #[path = "rpc/dispatcher/dispatcher.rs"] mod dispatcher;
 #[path = "rpc/dispatcher/dispatcher_legacy.rs"]
 mod dispatcher_legacy;
