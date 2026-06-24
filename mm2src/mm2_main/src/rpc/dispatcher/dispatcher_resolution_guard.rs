@@ -63,6 +63,24 @@ fn task_namespace_methods_are_routed() {
 }
 
 #[test]
+fn sia_v2_task_methods_are_routed() {
+    // Sia (ch. 46) standalone-coin V2 task activation surface. Sia is not a
+    // platform-with-tokens coin and is routed on all targets (native + WASM),
+    // alongside the UTXO/Qtum task arms rather than in the native-only block.
+    assert_namespace_routed("task::", &[
+        "enable_sia::init",
+        "enable_sia::status",
+        "enable_sia::user_action",
+        "enable_sia::cancel",
+    ]);
+    // The legacy flat `enable_sia` alias reaches the same `init` handler (§46.6).
+    assert!(
+        DISPATCHER_SOURCE.contains("\"enable_sia\""),
+        "v2 dispatcher lost routing for the legacy flat `enable_sia` alias"
+    );
+}
+
+#[test]
 fn lightning_namespace_methods_are_routed() {
     assert_namespace_routed("lightning::", &[
         "channels::open_channel",

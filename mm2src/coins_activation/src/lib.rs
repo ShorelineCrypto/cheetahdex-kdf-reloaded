@@ -8,6 +8,7 @@ mod l2;
 #[cfg(not(target_arch = "wasm32"))] mod lightning_activation;
 mod platform_coin_with_tokens;
 mod prelude;
+mod sia_activation;
 mod slp_token_activation;
 #[cfg(not(target_arch = "wasm32"))]
 mod solana_with_tokens_activation;
