@@ -175,7 +175,7 @@ pub struct EnablePlatformCoinWithTokensReq<T: Clone> {
     request: T,
 }
 
-#[derive(Debug, Display, Serialize, SerializeErrorType)]
+#[derive(Clone, Debug, Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub enum EnablePlatformCoinWithTokensError {
     PlatformIsAlreadyActivated(String),

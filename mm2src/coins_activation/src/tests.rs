@@ -732,3 +732,70 @@ fn test_standalone_error_json_timeout() {
     assert_eq!(json["error_type"], "TaskTimedOut");
     assert!(json["error_data"]["duration"].is_object() || json["error_data"]["duration"].is_number());
 }
+
+// ---------------------------------------------------------------------------
+// Platform-coin task-activation framework (CRD ch. 48) — native only.
+//
+// The framework wraps the `?Send`-on-wasm one-shot activation inside a `Send`
+// `RpcTask`, so it (and these tests) compile only on native targets.
+// ---------------------------------------------------------------------------
+
+#[cfg(not(target_arch = "wasm32"))]
+mod platform_coin_task_activation {
+    use crate::init_platform_coin_with_tokens::{InitPlatformCoinWithTokensInProgressStatus,
+                                                InitPlatformCoinWithTokensTaskManagerShared};
+    use coins::eth::EthCoin;
+    use rpc_task::rpc_common::RpcTaskUserActionRequest;
+    use rpc_task::{RpcTaskError, RpcTaskManager};
+
+    /// The in-progress surface (R48.3.1) reports the three coarse phases:
+    /// activating, requesting balances, and finishing.
+    #[test]
+    fn in_progress_status_phases_serialize() {
+        let activating = serde_json::to_value(InitPlatformCoinWithTokensInProgressStatus::ActivatingCoin).unwrap();
+        let balances =
+            serde_json::to_value(InitPlatformCoinWithTokensInProgressStatus::RequestingWalletBalance).unwrap();
+        let finishing = serde_json::to_value(InitPlatformCoinWithTokensInProgressStatus::Finishing).unwrap();
+        assert_eq!(activating, serde_json::json!("ActivatingCoin"));
+        assert_eq!(balances, serde_json::json!("RequestingWalletBalance"));
+        assert_eq!(finishing, serde_json::json!("Finishing"));
+    }
+
+    /// A3 / R48.5.2: the framework discriminants on an unknown `task_id`.
+    /// `status` reports no task, while `cancel` and `user_action` surface the
+    /// `NoSuchTask` framework discriminant — and crucially neither panics
+    /// (R48.6.3: `user_action` is routed and validates its `task_id` even
+    /// though the shipped EVM policies never enter the awaiting state).
+    #[test]
+    fn unknown_task_id_yields_framework_discriminants() {
+        let manager: InitPlatformCoinWithTokensTaskManagerShared<EthCoin> = RpcTaskManager::new_shared();
+        let unknown_task_id = 4242;
+
+        let mut guard = manager.lock().unwrap();
+
+        // status: unknown task -> no status entry.
+        assert!(guard.task_status(unknown_task_id, true).is_none());
+
+        // cancel: unknown task -> NoSuchTask (non-panicking).
+        match guard.cancel_task(unknown_task_id) {
+            Err(e) => assert!(matches!(e.into_inner(), RpcTaskError::NoSuchTask(id) if id == unknown_task_id)),
+            Ok(()) => panic!("cancel of an unknown task_id must fail"),
+        }
+
+        // user_action: unknown task -> NoSuchTask (non-panicking, no fabricated confirmation).
+        match guard.on_user_action(unknown_task_id, ()) {
+            Err(e) => assert!(matches!(e.into_inner(), RpcTaskError::NoSuchTask(id) if id == unknown_task_id)),
+            Ok(()) => panic!("user_action on an unknown task_id must fail"),
+        }
+    }
+
+    /// R48.1.4: `user_action` keeps wire parity with the published surface —
+    /// the request carries `{task_id, user_action}`. The MVP user action is the
+    /// unit type, which deserializes from a `null` payload.
+    #[test]
+    fn user_action_request_deserializes_unit_payload() {
+        let json = r#"{"task_id": 7, "user_action": null}"#;
+        let req: RpcTaskUserActionRequest<()> = serde_json::from_str(json).unwrap();
+        assert_eq!(req.task_id, 7);
+    }
+}
