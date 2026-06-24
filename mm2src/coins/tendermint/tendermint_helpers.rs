@@ -4,8 +4,8 @@ use super::rpc::*;
 use super::tendermint_types::*;
 use super::IRIS_PREFIX;
 use crate::utxo::sat_from_big_decimal;
-use crate::utxo::utxo_common::big_decimal_from_sat;
-use crate::{HistorySyncState, MarketCoinOps, TransactionEnum, TransactionErr, WithdrawFee};
+use crate::utxo::utxo_common::{big_decimal_from_sat, big_decimal_from_sat_unsigned};
+use crate::{CoinBalance, HistorySyncState, MarketCoinOps, TransactionEnum, TransactionErr, WithdrawFee};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use common::executor::Timer;
@@ -24,6 +24,7 @@ use futures::compat::Future01CompatExt;
 use futures::FutureExt;
 use kdf_crypto::sha256;
 use mm2_err_handle::prelude::*;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::time::Duration;
@@ -165,6 +166,51 @@ impl TendermintCoin {
             .amount
             .parse()
             .map_to_mm(|e| TendermintCoinRpcError::InvalidResponse(format!("balance is not u64, err {e}")))
+    }
+
+    // ————————————————————————————————————————————————————————————
+    // Activation helpers (token registration & balance enumeration)
+    // ————————————————————————————————————————————————————————————
+
+    /// Register a freshly activated token so the platform coin's activation
+    /// result and token-balance enumeration include it.
+    pub fn add_activated_token_info(&self, ticker: String, decimals: u8, denom: Denom) {
+        self.tokens_info.lock().insert(ticker.clone(), ActivatedTokenInfo {
+            decimals,
+            ticker,
+            denom,
+        });
+    }
+
+    /// Whether activation should report balances in its result (the
+    /// `get_balances` activation flag captured at coin creation).
+    pub fn activation_get_balances(&self) -> bool { self.get_balances }
+
+    /// The set of currently activated token tickers.
+    pub fn activated_token_tickers(&self) -> HashSet<String> { self.tokens_info.lock().keys().cloned().collect() }
+
+    /// Query the balance of every activated token, keyed by token ticker.
+    pub async fn get_activated_tokens_balances(
+        &self,
+    ) -> MmResult<HashMap<String, CoinBalance>, TendermintCoinRpcError> {
+        let tokens: Vec<(String, u8, Denom)> = self
+            .tokens_info
+            .lock()
+            .values()
+            .map(|info| (info.ticker.clone(), info.decimals, info.denom.clone()))
+            .collect();
+
+        let mut balances = HashMap::new();
+        for (ticker, decimals, denom) in tokens {
+            let amount = self
+                .account_balance_for_denom(&self.account_id, denom.to_string())
+                .await?;
+            balances.insert(ticker, CoinBalance {
+                spendable: big_decimal_from_sat_unsigned(amount, decimals),
+                unspendable: BigDecimal::default(),
+            });
+        }
+        Ok(balances)
     }
 
     // ————————————————————————————————————————————————————————————

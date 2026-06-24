@@ -858,3 +858,96 @@ pub async fn get_claimable_balances(
 
     Ok(claimable_balances)
 }
+
+#[derive(Deserialize)]
+pub struct AddTrustedNodeReq {
+    pub coin: String,
+    pub node_id: PublicKeyForRPC,
+}
+
+#[derive(Serialize)]
+pub struct AddTrustedNodeResponse {
+    pub added_node: PublicKeyForRPC,
+}
+
+/// Adds a node to the set of trusted nodes from which zero-confirmation inbound channel funding is accepted.
+pub async fn add_trusted_node(ctx: MmArc, req: AddTrustedNodeReq) -> TrustedNodeResult<AddTrustedNodeResponse> {
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    let ln_coin = match coin {
+        MmCoinEnum::LightningCoin(c) => c,
+        _ => return MmError::err(TrustedNodeError::UnsupportedCoin(coin.ticker().to_string())),
+    };
+
+    ln_coin.trusted_nodes.lock().insert(req.node_id.clone().into());
+
+    ln_coin
+        .persister
+        .save_trusted_nodes(ln_coin.trusted_nodes.clone())
+        .await?;
+
+    Ok(AddTrustedNodeResponse {
+        added_node: req.node_id,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct RemoveTrustedNodeReq {
+    pub coin: String,
+    pub node_id: PublicKeyForRPC,
+}
+
+#[derive(Serialize)]
+pub struct RemoveTrustedNodeResponse {
+    pub removed_node: PublicKeyForRPC,
+}
+
+/// Removes a node from the set of trusted nodes from which zero-confirmation inbound channel funding is accepted.
+pub async fn remove_trusted_node(
+    ctx: MmArc,
+    req: RemoveTrustedNodeReq,
+) -> TrustedNodeResult<RemoveTrustedNodeResponse> {
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    let ln_coin = match coin {
+        MmCoinEnum::LightningCoin(c) => c,
+        _ => return MmError::err(TrustedNodeError::UnsupportedCoin(coin.ticker().to_string())),
+    };
+
+    ln_coin.trusted_nodes.lock().remove(&req.node_id.clone().into());
+
+    ln_coin
+        .persister
+        .save_trusted_nodes(ln_coin.trusted_nodes.clone())
+        .await?;
+
+    Ok(RemoveTrustedNodeResponse {
+        removed_node: req.node_id,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct ListTrustedNodesReq {
+    pub coin: String,
+}
+
+#[derive(Serialize)]
+pub struct ListTrustedNodesResponse {
+    pub trusted_nodes: Vec<String>,
+}
+
+/// Lists the node public keys currently in the coin's trusted-node set.
+pub async fn list_trusted_nodes(ctx: MmArc, req: ListTrustedNodesReq) -> TrustedNodeResult<ListTrustedNodesResponse> {
+    let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
+    let ln_coin = match coin {
+        MmCoinEnum::LightningCoin(c) => c,
+        _ => return MmError::err(TrustedNodeError::UnsupportedCoin(coin.ticker().to_string())),
+    };
+
+    let trusted_nodes = ln_coin
+        .trusted_nodes
+        .lock()
+        .iter()
+        .map(|pubkey| pubkey.to_string())
+        .collect();
+
+    Ok(ListTrustedNodesResponse { trusted_nodes })
+}

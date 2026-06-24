@@ -127,6 +127,157 @@ invalid proofs.
 > before prover initialization, and mismatches are rejected with explicit
 > read/hash-mismatch errors.
 
+---
+
+## Part C -- Shielded transaction-history RPC (T-DOC)
+
+## 39.8 `z_coin_tx_history` method
+
+> **Source-of-truth note.** The wire contract below (method string, request and
+> response field names/types, error variants) is the externally dictated public
+> RPC interface; the authoritative reference is the Komodo DeFi Framework API
+> documentation for `z_coin_tx_history`. Behaviour is specified abstractly.
+
+> **Implementation status (reloaded): BLOCKED ON SUBSTRATE.** This wire
+> contract is specified ahead of implementation. The reloaded `ZCoin` is a
+> native-full-node port whose local SQLite store holds only the shielded-tx
+> *creation* cache; there is no shielded transaction-history store, no
+> compact-block scanner, and no stable signed-64-bit `internal_id` keyspace to
+> page over. Satisfying R39.8.9 / §39.7 first requires porting a shielded
+> wallet-history store (zcash light-client `WalletDb` + scanner) and adding the
+> shared `target` field to the v2 request envelope. Until that substrate exists,
+> `z_coin_tx_history` is classified greenfield-dependent (Phase 4-adjacent), not
+> a routing/aliasing gap.
+
+### 39.8.1 Envelope, method string & platform gate
+
+R39.8.1 The project shall expose a dedicated shielded-coin transaction-history
+method with the wire method string `z_coin_tx_history`, dispatched over the
+**mmrpc 2.0** envelope (`{"mmrpc":"2.0","method":"z_coin_tx_history",
+"params":{...}}`, with the usual `userpass`). The result is returned in the
+standard v2 `{"mmrpc":"2.0","result":{...}}` success envelope; errors use the v2
+error envelope (`error`, `error_path`, `error_trace`, `error_type`,
+`error_data`).
+
+R39.8.2 The method is **native-only**, consistent with the ZCoin platform gate
+(§39.1). It is resolved against the activated coin named by `coin` and shall
+succeed only when that coin is an activated shielded (ZCoin) coin; any other
+activated coin type is rejected (see R39.8.6).
+
+### 39.8.2 Request parameters
+
+R39.8.3 The request `params` object shall accept the following fields (this is
+the shared v2 transaction-history request envelope, specialized to an
+**integer** paging identifier for the shielded coin):
+
+| Field | JSON type | Required | Default | Notes / bounds |
+|-------|-----------|----------|---------|----------------|
+| `coin` | string | yes | — | Ticker of an activated shielded coin. |
+| `limit` | integer (unsigned) | no | `10` | Maximum number of transaction entries to return for the page. |
+| `paging_options` | object (tagged union) | no | `{ "PageNumber": 1 }` | Selects the page; see R39.8.4. |
+| `target` | object (tagged union) | no | `{ "type": "iguana" }` | Shared-envelope address-scope selector; accepted and echoed back in the response. Not used to scope shielded history results. |
+
+R39.8.4 `paging_options` is a tagged union with exactly one of two shapes:
+- `{ "PageNumber": <n> }` -- 1-based page number; `<n>` is a non-zero positive
+  integer. This is the default when `paging_options` is omitted (page `1`).
+- `{ "FromId": <id> }` -- continue paging from the entry whose internal
+  identifier is `<id>` (a signed 64-bit integer matching the `internal_id`
+  field of response entries; see R39.8.5). When `FromId` is supplied the page
+  begins at the entries that follow that identifier in history order.
+
+R39.8.5 `target` is a tagged union on field `type` with values `iguana`
+(default), `account_id` (carrying an `account_id` integer), and `address_id`
+(carrying an HD account/address path selector). It is part of the shared
+request envelope; for the shielded method it is accepted for envelope
+compatibility and reflected in the response unchanged, and does not alter which
+shielded transactions are returned.
+
+### 39.8.3 Success response
+
+R39.8.6 On success the `result` object shall carry:
+
+| Field | JSON type | Description |
+|-------|-----------|-------------|
+| `coin` | string | Echo of the requested ticker. |
+| `target` | object | Echo of the request `target`. |
+| `current_block` | integer | Current tip height known to the coin's backend at query time. |
+| `transactions` | array of objects | The page of shielded transaction detail entries (see R39.8.7). |
+| `sync_status` | object | History-sync state, tagged on field `state` with optional `additional_info`. For the shielded coin this is always the terminal `Finished` state, because a shielded coin is only active after its initial scan completes (§39.3). |
+| `limit` | integer | Echo of the effective page limit. |
+| `skipped` | integer | Number of entries skipped ahead of this page. |
+| `total` | integer | Total number of known shielded transactions. |
+| `total_pages` | integer | Total page count for `total` at the effective `limit`. |
+| `paging_options` | object | Echo of the effective paging selector. |
+
+R39.8.7 Each entry in `transactions` is a **shielded-coin transaction detail**
+object whose shape differs from the generic v2 history entry. Its fields are:
+
+| Field | JSON type | Description |
+|-------|-----------|-------------|
+| `tx_hash` | string | Transaction hash, hexadecimal. |
+| `from` | array of strings | Source address set the coins were sent from. |
+| `to` | array of strings | Destination address set the coins were sent to. |
+| `spent_by_me` | decimal (string/number) | Amount spent from the wallet's own address. |
+| `received_by_me` | decimal | Amount received by the wallet's own address. |
+| `my_balance_change` | decimal | Net balance change for the wallet (received minus spent). |
+| `block_height` | integer | Block height the transaction was mined at. |
+| `confirmations` | integer | Confirmation count derived from `current_block` versus `block_height`. |
+| `timestamp` | integer | Transaction timestamp (Unix seconds). |
+| `transaction_fee` | decimal | Fee paid by the transaction. |
+| `coin` | string | Ticker the transaction belongs to. |
+| `internal_id` | integer (signed 64-bit) | Stable internal identifier used for `FromId` paging (R39.8.4). |
+
+### 39.8.4 Error conditions
+
+R39.8.8 The method shall report failures using the v2 error envelope with an
+`error_type` drawn from the following set (functional descriptions; literal
+operator-facing wording is not normative):
+
+| `error_type` | HTTP status | Condition |
+|--------------|-------------|-----------|
+| `CoinIsNotActive` | 404 | The named `coin` is not an activated coin. |
+| `NotSupportedFor` | 400 | The named coin is activated but is not a shielded (ZCoin) coin, so shielded history is unavailable for it. |
+| `InvalidTarget` | 400 | The supplied `target` selector is invalid for the coin's wallet (e.g. an HD path/chain that does not apply). |
+| `StorageIsNotInitialized` | 500 | The local transaction-history store for the coin has not been initialized. |
+| `StorageError` | 500 | A failure occurred reading or building the local history store. |
+| `RpcError` | 500 | A backend RPC error occurred while resolving tip height or fetching verbose transaction data. |
+| `Internal` | 500 | An otherwise-unclassified internal error (e.g. address resolution). |
+
+### 39.8.5 Functional behaviour
+
+R39.8.9 The handler shall: resolve the activated coin by `coin` and confirm it
+is a shielded coin; determine the current tip height from the coin's backend;
+read one page of stored shielded transaction records from the coin's local
+wallet history store honouring `limit` and `paging_options`; resolve the full
+(verbose) transaction data for those records (and for their referenced previous
+transactions) from a local cache or, on a miss, the backend; and assemble each
+record into a shielded transaction detail entry (R39.8.7) -- deriving the
+`from`/`to` address sets, the own-wallet spent/received amounts and net balance
+change, the fee, and the confirmation count relative to the tip. The response
+also reports paging metadata (`skipped`, `total`, `total_pages`) computed from
+the stored history.
+
+### 39.8.6 Relationship to the generic `my_tx_history` v2 method
+
+R39.8.10 `z_coin_tx_history` reuses the **same v2 request/response envelope
+types** as the generic v2 `my_tx_history` method (the same `coin`, `limit`,
+`paging_options`, `target` request fields and the same `current_block`,
+`transactions`, `sync_status`, `limit`, `skipped`, `total`, `total_pages`,
+`paging_options` response framing). It differs in two contract-visible ways and
+is therefore a distinct method rather than a branch of `my_tx_history`:
+- **Paging identifier type.** The shielded method's paging identifier
+  (`FromId` and the entry `internal_id`) is a **signed 64-bit integer**, whereas
+  the generic v2 method keys paging on an opaque byte-string identifier.
+- **Transaction entry shape.** The shielded method returns the shielded-specific
+  detail object of R39.8.7 (shielded `from`/`to` address sets, integer
+  `internal_id`), rather than the generic transaction-details entry returned by
+  `my_tx_history`.
+
+> **Upstream divergence (informative).** The `target` field is part of the
+> shared v2 history-request envelope; for the shielded method it is accepted and
+> echoed but does not scope the returned shielded transactions. Reloaded keeps
+> this envelope-compatible acceptance to preserve the dictated wire contract.
+
 ## 39.7 Acceptance criteria (chapter)
 
 - Baseline: a light-mode shielded coin activates via `init_z_coin`, advances
@@ -136,3 +287,8 @@ invalid proofs.
 - R39.6.3 is implemented with integrity-check behaviour enforced before prover
   initialization.
 - R39.6.1 and R39.6.2 remain pending ports.
+- `z_coin_tx_history` (mmrpc 2.0, native-only) returns a paginated page of
+  shielded transaction detail entries for an activated shielded coin, honours
+  `limit` and both `PageNumber`/`FromId` paging modes, echoes paging metadata,
+  reports `sync_status: Finished`, and rejects non-shielded coins
+  (`NotSupportedFor`) and inactive coins (`CoinIsNotActive`) (§39.8).

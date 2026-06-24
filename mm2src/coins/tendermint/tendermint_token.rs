@@ -93,6 +93,20 @@ impl TendermintToken {
         let hash = sha256(self.denom.to_string().to_lowercase().as_bytes());
         hex::encode(hash.as_slice())
     }
+
+    /// Build a token from its protocol descriptor, parsing the on-chain
+    /// denomination (a bank `u<base>` denom or an `ibc/<HASH>` IBC denom)
+    /// from configuration. Used by the V2 token activation layer.
+    pub fn from_protocol(
+        ticker: String,
+        platform_coin: TendermintCoin,
+        decimals: u8,
+        denom: &str,
+    ) -> MmResult<Self, TendermintTokenInitError> {
+        let denom = Denom::from_str(denom)
+            .map_to_mm(|e| TendermintTokenInitError::InternalError(format!("Invalid denom '{denom}': {e}")))?;
+        Ok(TendermintToken::new(ticker, platform_coin, decimals, denom))
+    }
 }
 
 // ————————————————————————————————————————————————————————————————
