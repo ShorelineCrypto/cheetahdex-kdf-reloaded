@@ -10,8 +10,8 @@ reloaded; it does not introduce a new coin or a new low-level transport.
 > context, and shall let EVM coins (ch. 35) activate under a MetaMask signing
 > policy so that transaction signing and broadcast are delegated to the connected
 > browser wallet (via `eth_sendTransaction`) instead of a locally held secret,
-> restricting such coins to non-swap operations (balance / send / withdraw /
-> approve / message-sign).
+> restricting such coins to non-swap operations (balance / address / withdraw;
+> message *verification* works, message *signing* is cleanly rejected — §47.11).
 
 > **Treatment:** **T-PORT.** The low-level EIP-1193 transport, the MetaMask
 > session abstraction, and the crypto-context login handshake are all present in
@@ -263,11 +263,13 @@ JSON-RPC requests. The bound interop surface is:
 The connect-time login challenge (§47.1) is the only typed-data signature the
 framework relies on for session establishment. The wallet `personal_sign` /
 `eth_signTypedData_v4` methods are over user-presented payloads, never an
-extractable transaction signature. **Implementation note:** binding these to a
-post-activation message-signing RPC is **deferred** — the synchronous
-`MarketCoinOps::sign_message` trait cannot drive the asynchronous wallet call,
-so (as with WalletConnect) a dedicated async message-signing RPC path is
-required; see R47.5.11 and the deferral note below.
+extractable transaction signature. **Message-signing note:** the public
+`sign_message` RPC signs with a *local* key and so cannot be served for a
+MetaMask-policy coin; bridging it to the wallet's asynchronous `personal_sign`
+is **not delivered** (the message-signing coin operation is synchronous and
+cannot drive an asynchronous wallet call, and the framework exposes no async
+message-signing RPC to reuse). Under MetaMask `sign_message` therefore fails
+cleanly; `verify_message` still works. The full contract is §47.11.
 
 R47.5.9 **Per-operation active-account consistency re-check.** Because the user
 can switch the active account inside the extension at any moment, before each
@@ -297,7 +299,8 @@ a single wallet-side sign-and-broadcast):
 | Public-key display | yes | connected account public key (R47.5.14) |
 | `withdraw` (the user-facing send) | yes | single `eth_sendTransaction` (R47.5.6); already broadcast by the wallet, so no re-broadcastable `tx_hex` is returned (R47.5.7) |
 | Plain send / ERC-20 `approve` as standalone operations | n/a in reloaded | reloaded reaches these only through the swap path (no standalone non-swap RPC exposes them); under the non-swap MetaMask policy they are therefore not separately available, and `withdraw` is the user-facing broadcast op |
-| Message signing | deferred | requires a future async message-signing RPC: the synchronous `MarketCoinOps::sign_message` trait cannot drive the asynchronous wallet `personal_sign` / `eth_signTypedData_v4`, mirroring the WalletConnect async signing path |
+| Message signing (`sign_message`) | no (clean rejection) | the message-signing operation signs with a **local** key; under MetaMask the coin holds none, so it cannot produce a signature and is rejected with a structured 400 error — never a fabricated signature. The contract is §47.11 |
+| Message verification (`verify_message`) | yes | verification is pure public-key recovery and address comparison; it needs no private key and therefore works for a MetaMask-policy coin like any other (§47.11) |
 
 R47.5.12 **Atomic swaps are NOT supported under the MetaMask policy.** An EVM
 coin activated under MetaMask shall be treated as a non-swap (balance / address /
@@ -383,13 +386,11 @@ unsupported-operation rejection (R47.5.12, R47.5.14, R47.5.15) likewise map per
 > (the message-sign coin operation is synchronous and is never bridged to the
 > wallet's asynchronous `personal_sign`), and the **per-swap key-derivation step
 > is an unimplemented placeholder** for every non-keypair policy (MetaMask /
-> hardware / WalletConnect). Reloaded therefore (a) refuses MetaMask message
-> signing with a clean unsupported-operation error rather than introducing a new
-> async message-signing surface upstream never built (a future async message-sign
-> RPC, mirroring the WalletConnect signing path, would be the place to add it),
-> and (b) gates swaps early and cleanly (R47.5.13a) instead of reproducing the
-> unguarded placeholder. Both are documented "not-yet-delivered" boundaries, not
-> behavioural regressions.
+> hardware / WalletConnect). Reloaded therefore (a) rejects MetaMask message
+> signing with a clean structured error (§47.11) rather than introducing a new
+> async message-signing surface upstream never built, and (b) gates swaps early
+> and cleanly (R47.5.13a) instead of reproducing the unguarded placeholder. Both
+> are documented "not-yet-delivered" boundaries, not behavioural regressions.
 
 ---
 
@@ -549,8 +550,9 @@ A6. An EVM coin activated under the MetaMask policy performs balance / address /
 never with a local secret, never producing a detached raw signature — and
 rejects any operation when the wallet's active account no longer matches the
 connected account. Standalone send / `approve` are swap-coupled in reloaded and
-not separately exposed under the non-swap policy; message signing is deferred to
-a future async RPC path (R47.5.11).
+not separately exposed under the non-swap policy; `sign_message` is rejected with
+a structured 400 error (no fabricated signature) while `verify_message` still
+succeeds (§47.11).
 
 A6b. An attempt to use a MetaMask-policy EVM coin in an atomic swap (maker or
 taker), to export its private key, or to perform an HD/derivation-path operation
@@ -585,3 +587,188 @@ coins under MetaMask? This chapter records the swap-support verdict as
 and the structural impossibility of meeting the swap pre-sign / detached-raw-
 signature requirement with a delegate-only browser wallet. If the docs define
 such a flow, they govern and §47.5.C must be revisited.
+
+---
+
+## 47.11 EVM message signing and verification (`sign_message` / `verify_message`)
+
+This section is the behavioural contract for the two public, stable, mmrpc-2.0
+message-signing methods as they apply to EVM coins under each signing policy. It
+supersedes the earlier "deferred" placeholder in §47.5.C. The governing
+principle: message **signing** needs the account's secret and is served only
+when the coin holds a local key; message **verification** needs no secret and is
+served for every coin. Under MetaMask (and any other key-less external/hardware
+policy) signing is rejected cleanly — never faked.
+
+> **Source of truth (informative).** The method strings, request/response field
+> names, and `error_type` discriminants below are governed by the published KDF
+> API documentation (the `sign_message` / `verify_message` sections). Where this
+> section and the public API docs disagree, the docs govern. The role-level
+> behaviour and the policy-dependent signing/rejection model are distilled from
+> current framework behaviour and flagged where they diverge.
+
+### 47.11.A Public RPC contract
+
+R47.11.1 `sign_message` and `verify_message` are **stable-namespace** mmrpc-2.0
+methods (no `task::` / `stream::` prefix), routed on **all** targets (they are
+not WASM-gated). Both use the standard mmrpc-2.0 envelope and, on error, the
+standard mmrpc-2.0 error envelope; only the `error_type` discriminant and its
+HTTP status are bound (the human-readable `error` text is not).
+
+R47.11.2 `sign_message` `params`:
+
+- `coin` (string, required) — the ticker of an enabled coin.
+- `message` (string, required) — the UTF-8 message to sign.
+
+Success `result`: `{ "signature": <string> }` — for EVM, a `0x`-prefixed
+hex-encoded 65-byte secp256k1 signature.
+
+> **Upstream divergence (informative).** Current upstream additionally accepts an
+> optional HD address-selector field on `sign_message` to sign from a specific
+> derived address. Reloaded's request carries only `coin` and `message` and signs
+> from the coin's single active address. If the public API docs require the HD
+> selector field, the docs govern and it shall be added as an optional field that
+> defaults to the active address; absent it, the active-address behaviour is the
+> contract. See O-4.
+
+R47.11.3 `verify_message` `params`:
+
+- `coin` (string, required) — the ticker of an enabled coin.
+- `message` (string, required) — the message that was signed.
+- `signature` (string, required) — the signature to check.
+- `address` (string, required) — the address the signature is expected to
+  recover to.
+
+Success `result`: `{ "is_valid": <boolean> }`.
+
+R47.11.4 `sign_message` bound `error_type` discriminants and HTTP status:
+
+| `error_type` | HTTP status | Condition |
+| --- | --- | --- |
+| `InvalidRequest` | 400 | the request is not valid for this coin/policy (includes a key-less signing policy that cannot produce a signature — R47.11.8) |
+| `CoinIsNotFound` | 400 | `coin` is not an enabled coin |
+| `PrefixNotFound` | 500 | the coin config does not define a message-signing prefix |
+| `InternalError` | 500 | any other internal failure |
+
+R47.11.5 `verify_message` bound `error_type` discriminants and HTTP status:
+
+| `error_type` | HTTP status | Condition |
+| --- | --- | --- |
+| `InvalidRequest` | 400 | `address` fails the coin's address validation |
+| `SignatureDecodingError` | 400 | `signature` is malformed |
+| `AddressDecodingError` | 400 | `address` is malformed |
+| `CoinIsNotFound` | 400 | `coin` is not an enabled coin |
+| `PrefixNotFound` | 500 | the coin config does not define a message-signing prefix |
+| `InternalError` | 500 | any other internal failure |
+
+### 47.11.B Local-keypair EVM policy (already-working)
+
+R47.11.6 For an EVM coin activated under a **local** signing policy (Iguana
+single-key or HD-wallet), `sign_message` shall produce an EIP-191
+personal-sign-style signature: the framework forms a message hash by keccak256
+over the coin-config message prefix, the decimal length of the message, and the
+message bytes, then signs that hash with the account's secp256k1 secret and
+returns the `0x`-prefixed signature. `verify_message` shall recover the signer
+from the signature over the same hash and report whether it equals the supplied
+`address`. This is the dictated interop format a third-party verifier must
+reproduce; it is the source of truth, not this project's code.
+
+R47.11.7 The reloaded substrate **already implements** R47.11.6 correctly for
+local-keypair EVM coins; no behavioural change is required there. The reloaded
+EVM coin signs only when a local secret is present and otherwise rejects (the
+basis of R47.11.8).
+
+### 47.11.C MetaMask / external-wallet / hardware policy (clean rejection)
+
+R47.11.8 For an EVM coin activated under the MetaMask policy — or any other
+policy that holds **no local secret** (WalletConnect, hardware) — `sign_message`
+shall **not** fabricate or guess a signature and shall **not** silently fall
+through to an unrelated path. Because the coin has no local key and the
+message-signing operation cannot drive the wallet's asynchronous
+`personal_sign`, `sign_message` shall fail with the `InvalidRequest`
+discriminant (HTTP 400), signalling that the operation is not available for a
+key-less signing policy. No private key is ever required, exported, or exposed,
+and no partial/placeholder signature is returned.
+
+> **Upstream divergence (informative).** Current upstream and the reloaded
+> baseline surface the key-less case as a generic `InternalError` (HTTP 500),
+> because the message-sign step reaches the local-key accessor and that accessor
+> reports a not-allowed-for-this-policy condition that is mapped to an internal
+> error. That is semantically a **client** condition (the coin fundamentally
+> cannot sign under this policy), not a server fault, and a 500 misleads GUIs
+> into "internal error / retry" handling. Reloaded reclassifies it as
+> `InvalidRequest` (400) — a published discriminant, no new wire surface — and
+> the same correction is recommended upstream. The change is confined to the
+> never-succeeding error path of one operation (status integer + discriminant
+> only); it does not alter any successful response or signature format.
+
+R47.11.9 `verify_message` shall succeed for a MetaMask-policy (or any key-less)
+EVM coin exactly as for a local-keypair coin: verification is pure secp256k1
+recovery and address comparison (R47.11.6) and never consults a private key. A
+MetaMask-policy coin can therefore verify signatures (including ones produced by
+the connected wallet through `personal_sign` out-of-band), even though it cannot
+itself produce one through `sign_message`.
+
+R47.11.10 No asynchronous message-signing RPC is introduced. Current upstream
+exposes no reusable async message-signing method: its only wallet
+`personal_sign` use is the one-shot connect-time login challenge for public-key
+recovery (§47.1), which is an activation handshake, not a general
+message-signing surface. Delivering MetaMask message signing would require a new
+asynchronous message-signing RPC seam that upstream has never built; this
+project does **not** add one (see the feasibility verdict, §47.11.D). If such a
+surface is later defined by the public API docs, the docs govern and this
+section shall be revisited (O-5).
+
+R47.11.11 Non-EVM-keypair EVM-family chains whose message-signing format differs
+from EIP-191 (e.g. the TRON family, consistent with R47.5.6a) are out of scope
+for `sign_message` / `verify_message` in this project and shall be rejected
+rather than signed/verified with the EIP-191 format.
+
+### 47.11.D Feasibility verdict (for the Coder)
+
+R47.11.12 **Local-keypair EVM message signing/verification: already delivered
+(no port required).** Reloaded's EVM coin already signs and verifies per
+R47.11.6 / R47.11.7. The Coder's only obligation is the conformance check in
+A9 — confirm the signature/verification format matches the public docs and that
+the `error_type`/HTTP mappings of R47.11.4–R47.11.5 hold.
+
+R47.11.13 **MetaMask (external-wallet) EVM message signing: substrate-blocked /
+architecturally-deferred (Verdict B).** "Finishing" message signing under
+MetaMask is **not** delivering a real wallet-bridged signature: the
+message-signing coin operation is synchronous and cannot await the wallet's
+asynchronous `personal_sign`, and no async message-signing RPC seam exists to
+reuse. The honest finish is the **clean documented rejection** of R47.11.8 (a
+published `InvalidRequest`/400, no panic, no security hole, no fabricated
+signature), plus the verification capability of R47.11.9. The single concrete
+code change for the Coder is the error reclassification of the
+divergence note under R47.11.8 (map the key-less signing case to
+`InvalidRequest`/400 instead of `InternalError`/500) and surfacing it for any
+key-less policy, not only MetaMask. Building a wallet-bridged async
+message-signing RPC is explicitly **out of scope** unless the public API docs
+later mandate it (O-5).
+
+### 47.11.E Acceptance criteria (message signing)
+
+A9. A local-keypair EVM coin returns a `0x`-prefixed signature for `sign_message`
+and `verify_message` reports `is_valid: true` for that signature/address pair and
+`false` for a wrong address; `error_type`/HTTP mappings match R47.11.4–R47.11.5.
+
+A10. A MetaMask-policy (or other key-less) EVM coin fails `sign_message` with
+`InvalidRequest` (400) — never a fabricated signature, never a panic — while
+`verify_message` for the same coin still succeeds (R47.11.8–R47.11.9).
+
+A11. No asynchronous message-signing RPC method string is added on any target
+(R47.11.10).
+
+### 47.11.F Open questions (message signing)
+
+O-4. Does the published `sign_message` schema include an optional HD
+address-selector field? Reloaded currently signs from the single active address
+only (R47.11.2). If the docs require the selector, it shall be added as an
+optional field defaulting to the active address.
+
+O-5. Does the published KDF API documentation define an asynchronous,
+wallet-bridged message-signing flow for MetaMask / external-wallet EVM coins?
+This section records **no** such surface and rejects `sign_message` under those
+policies (R47.11.8, R47.11.10). If the docs define one, they govern and §47.11.C
+must be revisited.

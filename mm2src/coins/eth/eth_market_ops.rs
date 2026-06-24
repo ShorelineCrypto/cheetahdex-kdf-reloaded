@@ -25,10 +25,11 @@ impl MarketCoinOps for EthCoin {
 
     fn sign_message(&self, message: &str) -> SignatureResult<String> {
         let message_hash = self.sign_message_hash(message).ok_or(SignatureError::PrefixNotFound)?;
-        let privkey = self
-            .signer
-            .local_secret()
-            .ok_or_else(|| SignatureError::InternalError("message signing requires a local private key".to_string()))?;
+        let privkey = self.signer.local_secret().ok_or_else(|| {
+            SignatureError::InvalidRequest(
+                "message signing is not available for a key-less signing policy (e.g. MetaMask)".to_string(),
+            )
+        })?;
         let signature = sign(privkey, &H256::from(message_hash))?;
         Ok(format!("0x{}", signature))
     }
