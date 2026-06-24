@@ -460,6 +460,26 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
                 handle_mmrpc(ctx, request, init_platform_coin_with_tokens_user_action::<EthCoin>).await
             },
             "enable_eth::cancel" => handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<EthCoin>).await,
+            // Tendermint platform activation task family (CRD ch. 36 §36.6 /
+            // ch. 48). Mirrors `enable_tendermint_with_assets`' params and
+            // result; native-only for the same reason as `enable_eth::*`.
+            "enable_tendermint::init" => {
+                handle_mmrpc(ctx, request, init_platform_coin_with_tokens::<TendermintCoin>).await
+            },
+            "enable_tendermint::status" => {
+                handle_mmrpc(ctx, request, init_platform_coin_with_tokens_status::<TendermintCoin>).await
+            },
+            "enable_tendermint::user_action" => {
+                handle_mmrpc(
+                    ctx,
+                    request,
+                    init_platform_coin_with_tokens_user_action::<TendermintCoin>,
+                )
+                .await
+            },
+            "enable_tendermint::cancel" => {
+                handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<TendermintCoin>).await
+            },
             "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
             "enable_z_coin::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
             "enable_z_coin::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,

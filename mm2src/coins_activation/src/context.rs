@@ -3,6 +3,8 @@ use crate::eth_with_tokens_activation::EthTaskManagerShared;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::l2::L2TaskManagerShared;
 use crate::sia_activation::SiaTaskManagerShared;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::tendermint_with_tokens_activation::TendermintTaskManagerShared;
 use crate::utxo_activation::{QtumTaskManagerShared, UtxoStandardTaskManagerShared};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::z_coin_activation::ZcoinTaskManagerShared;
@@ -19,6 +21,8 @@ pub struct CoinsActivationContext {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) init_eth_task_manager: EthTaskManagerShared,
     #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) init_tendermint_task_manager: TendermintTaskManagerShared,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) init_z_coin_task_manager: ZcoinTaskManagerShared,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) init_lightning_task_manager: L2TaskManagerShared<LightningCoin>,
@@ -34,6 +38,8 @@ impl CoinsActivationContext {
                 init_sia_task_manager: RpcTaskManager::new_shared(),
                 #[cfg(not(target_arch = "wasm32"))]
                 init_eth_task_manager: RpcTaskManager::new_shared(),
+                #[cfg(not(target_arch = "wasm32"))]
+                init_tendermint_task_manager: RpcTaskManager::new_shared(),
                 #[cfg(not(target_arch = "wasm32"))]
                 init_z_coin_task_manager: RpcTaskManager::new_shared(),
                 #[cfg(not(target_arch = "wasm32"))]

@@ -146,7 +146,7 @@ impl RegisterTokenInfo<TendermintToken> for TendermintCoin {
 /// `enable_tendermint_with_assets` success result (R36.1.5). The `balance` /
 /// `tokens_balances` view and the `tokens_tickers` view are mutually exclusive,
 /// selected by the request's `get_balances` flag; absent fields are omitted.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TendermintActivationResult {
     ticker: String,
     address: String,
@@ -299,6 +299,23 @@ impl PlatformWithTokensActivationOps for TendermintCoin {
         // coins without spawning a fetch loop.
         let (_fut, abort_handle) = abortable(futures::future::ready(()));
         abort_handle
+    }
+}
+
+/// Per-coin task registry for the Tendermint `task::enable_tendermint::*` family
+/// (CRD ch. 48).
+///
+/// Native-only: the platform-coin task framework wraps the `?Send`-on-wasm
+/// one-shot activation inside a `Send` `RpcTask`, which does not compile on
+/// wasm32 (see `init_platform_coin_with_tokens` module docs).
+#[cfg(not(target_arch = "wasm32"))]
+pub type TendermintTaskManagerShared =
+    crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensTaskManagerShared<TendermintCoin>;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensActivationOps for TendermintCoin {
+    fn rpc_task_manager(activation_ctx: &crate::context::CoinsActivationContext) -> &TendermintTaskManagerShared {
+        &activation_ctx.init_tendermint_task_manager
     }
 }
 

@@ -789,6 +789,30 @@ mod platform_coin_task_activation {
         }
     }
 
+    /// Same framework guarantee for the Tendermint task family
+    /// (`task::enable_tendermint::*`): instantiating the manager over
+    /// `TendermintCoin` confirms the per-coin `InitPlatformCoinWithTokensActivationOps`
+    /// registration satisfies the framework bounds, and an unknown `task_id` on
+    /// `status` yields the standard `NoSuchTask` framework discriminant without
+    /// panicking.
+    #[test]
+    fn unknown_tendermint_task_id_yields_framework_discriminants() {
+        let manager: InitPlatformCoinWithTokensTaskManagerShared<coins::tendermint::TendermintCoin> =
+            RpcTaskManager::new_shared();
+        let unknown_task_id = 4242;
+
+        let mut guard = manager.lock().unwrap();
+
+        // status: unknown task -> no status entry.
+        assert!(guard.task_status(unknown_task_id, true).is_none());
+
+        // cancel: unknown task -> NoSuchTask (non-panicking).
+        match guard.cancel_task(unknown_task_id) {
+            Err(e) => assert!(matches!(e.into_inner(), RpcTaskError::NoSuchTask(id) if id == unknown_task_id)),
+            Ok(()) => panic!("cancel of an unknown task_id must fail"),
+        }
+    }
+
     /// R48.1.4: `user_action` keeps wire parity with the published surface —
     /// the request carries `{task_id, user_action}`. The MVP user action is the
     /// unit type, which deserializes from a `null` payload.
