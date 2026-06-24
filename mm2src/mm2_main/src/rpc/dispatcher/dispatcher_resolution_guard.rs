@@ -93,6 +93,7 @@ fn lightning_namespace_methods_are_routed() {
     assert_namespace_routed("lightning::", &[
         "channels::open_channel",
         "channels::close_channel",
+        "channels::update_channel",
         "channels::get_channel_details",
         "channels::get_claimable_balances",
         "channels::list_open_channels_by_filter",

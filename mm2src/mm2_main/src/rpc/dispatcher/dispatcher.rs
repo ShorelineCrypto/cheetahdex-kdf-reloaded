@@ -75,7 +75,7 @@ use std::net::SocketAddr;
 cfg_native! {
     use coins::lightning::{add_trusted_node, close_channel, connect_to_lightning_node, generate_invoice, get_channel_details,
         get_claimable_balances, get_payment_details, list_closed_channels_by_filter, list_open_channels_by_filter, list_payments_by_filter, list_trusted_nodes, open_channel,
-        remove_trusted_node, send_payment, LightningCoin};
+        remove_trusted_node, send_payment, update_channel, LightningCoin};
     use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
     use coins::my_tx_history_v2::z_coin_tx_history_rpc;
@@ -514,6 +514,7 @@ async fn lightning_dispatcher(
     match lightning_method {
         "channels::open_channel" => handle_mmrpc(ctx, request, open_channel).await,
         "channels::close_channel" => handle_mmrpc(ctx, request, close_channel).await,
+        "channels::update_channel" => handle_mmrpc(ctx, request, update_channel).await,
         "channels::get_channel_details" => handle_mmrpc(ctx, request, get_channel_details).await,
         "channels::get_claimable_balances" => handle_mmrpc(ctx, request, get_claimable_balances).await,
         "channels::list_open_channels_by_filter" => handle_mmrpc(ctx, request, list_open_channels_by_filter).await,
