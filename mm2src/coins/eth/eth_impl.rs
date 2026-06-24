@@ -61,7 +61,33 @@ impl EthCoinImpl {
 
     /// Returns the wallet public key as a hex string (informative; used to
     /// populate the V2 activation result address-info records).
-    pub fn display_public_key(&self) -> String { format!("0x{:02x}", self.key_pair.public()) }
+    pub fn display_public_key(&self) -> String { format!("0x{:02x}", self.signer.public()) }
+
+    /// Signs `tx` with the local signing key for the delegated-broadcast send
+    /// path (plain send / `withdraw` / `approve`). Under the MetaMask policy
+    /// this currently returns a not-yet-wired error; the real delegated
+    /// `eth_sendTransaction` sign-and-broadcast (CRD R47.5.6) is wired in a
+    /// later step. For the `Local` policy behaviour is identical to the prior
+    /// `tx.sign(key_pair.secret(), chain_id)`.
+    pub(crate) fn sign_tx_for_send(&self, tx: UnSignedEthTx) -> Result<SignedEthTx, EthSignerError> {
+        match &self.signer {
+            EthSigner::Local(key_pair) => Ok(tx.sign(key_pair.secret(), self.chain_id)),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(_) => Err(EthSignerError::MetamaskSendNotWired),
+        }
+    }
+
+    /// Produces an offline-signed raw transaction (no broadcast). Unavailable
+    /// under the MetaMask policy (CRD R47.5.7 / R47.5.12): the wallet never
+    /// yields a detached, re-broadcastable signed raw transaction. For the
+    /// `Local` policy behaviour is identical to the prior offline signing.
+    pub(crate) fn sign_raw_tx_offline(&self, tx: UnSignedEthTx) -> Result<SignedEthTx, EthSignerError> {
+        match &self.signer {
+            EthSigner::Local(key_pair) => Ok(tx.sign(key_pair.secret(), self.chain_id)),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(_) => Err(EthSignerError::OfflineSigningUnsupported),
+        }
+    }
 
     /// Gets Transfer events from ERC20 smart contract `addr` between `from_block` and `to_block`
     pub(crate) fn erc20_transfer_events(
@@ -476,7 +502,9 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         gas_price,
     };
 
-    let signed = tx.sign(coin.key_pair.secret(), coin.chain_id);
+    let signed = coin
+        .sign_tx_for_send(tx)
+        .map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
     let bytes = rlp::encode(&signed);
     let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
     let mut spent_by_me = amount_decimal.clone();
@@ -551,7 +579,9 @@ pub async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest
         gas_price,
     };
 
-    let signed = tx.sign(coin.key_pair.secret(), coin.chain_id);
+    let signed = coin
+        .sign_raw_tx_offline(tx)
+        .map_to_mm(|e| RawTransactionError::SigningError(e.to_string()))?;
     let bytes = rlp::encode(&signed);
 
     Ok(RawTransactionRes {
@@ -616,7 +646,7 @@ pub async fn sign_and_send_transaction_impl(
         value,
         data,
     };
-    let signed = tx.sign(coin.key_pair.secret(), coin.chain_id);
+    let signed = try_tx_s!(coin.sign_tx_for_send(tx));
     let bytes = rlp::encode(&signed).to_vec();
     status.status(tags!(), "send_raw_transaction…");
 
@@ -740,7 +770,7 @@ impl EthCoin {
             },
         };
         let token_impl = EthCoinImpl {
-            key_pair: self.key_pair.clone(),
+            signer: self.signer.clone(),
             my_address: self.my_address,
             coin_type: EthCoinType::Erc20 {
                 platform: self.ticker().to_string(),
@@ -2916,7 +2946,7 @@ pub async fn eth_coin_from_conf_and_request(
         json::from_value(req["gas_station_policy"].clone()).unwrap_or_default();
 
     let coin = EthCoinImpl {
-        key_pair,
+        signer: EthSigner::Local(key_pair),
         my_address,
         coin_type,
         sign_message_prefix,

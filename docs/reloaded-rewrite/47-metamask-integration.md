@@ -8,8 +8,10 @@ reloaded; it does not introduce a new coin or a new low-level transport.
 > a long-running connection task `task::connect_metamask::{init,status,cancel}`
 > that establishes an authenticated MetaMask session in the framework crypto
 > context, and shall let EVM coins (ch. 35) activate under a MetaMask signing
-> policy so that swap signing is delegated to the connected browser wallet
-> instead of a locally held secret.
+> policy so that transaction signing and broadcast are delegated to the connected
+> browser wallet (via `eth_sendTransaction`) instead of a locally held secret,
+> restricting such coins to non-swap operations (balance / send / withdraw /
+> approve / message-sign).
 
 > **Treatment:** **T-PORT.** The low-level EIP-1193 transport, the MetaMask
 > session abstraction, and the crypto-context login handshake are all present in
@@ -167,44 +169,184 @@ crypto context so a subsequent `init` starts cleanly. Cancelling an unknown
 
 ---
 
-## 47.5 EVM-coin activation under a MetaMask signing policy
+## 47.5 EVM-coin activation and operation under a MetaMask signing policy
+
+This section is the behavioural contract for running an EVM coin (ch. 35) whose
+signer is a connected browser MetaMask session rather than a locally held
+secret. It is the source of truth for the EVM signing port (§47.8 gap #2). The
+governing principle: under MetaMask the framework **delegates** signing — and,
+for transactions, broadcast — to the wallet over the EIP-1193 provider, and the
+framework never holds, derives, or exports the account's private key.
+
+### 47.5.A Activation contract
 
 R47.5.1 The V2 EVM platform activation RPC `enable_eth_with_tokens` (ch. 35)
 shall accept a MetaMask signing policy selected through its `priv_key_policy`
 field. The wire shape is the tagged policy object of R35.1.4: a MetaMask policy
-is `"priv_key_policy": { "type": "Metamask" }` (no payload). This policy value is
-defined **only on the WASM target**.
+is `"priv_key_policy": { "type": "Metamask" }` (no payload). Any standalone EVM
+platform-enable RPC that exposes a `priv_key_policy` field shall accept the same
+tagged value with the same semantics. This policy value is defined and routed
+**only on the WASM target** (§47.7).
 
 R47.5.2 When the MetaMask policy is selected, activation shall consume the
 already-connected MetaMask session from the crypto context (established via
-§47.1). If no MetaMask session is present, activation shall fail with the
-context-not-initialized condition of §47.6 (R47.5.6), instructing the caller to
-run `task::connect_metamask::init` first. Activation shall **not** itself perform
-the connection handshake.
+§47.1). A MetaMask session **must already be connected** (the caller must have
+run `task::connect_metamask::init` to a successful terminal state) before EVM
+activation under this policy. Activation shall **not** itself perform the
+connection handshake. If no MetaMask session is present, activation shall fail
+with the not-initialized condition of §47.6 (R47.5.16), instructing the caller
+to connect first.
 
-R47.5.3 An EVM coin activated under the MetaMask policy shall delegate all
-transaction and message signing to the connected MetaMask session over EIP-1193,
-rather than signing with a locally held secp256k1 secret. The EVM coin's account
-public key and address for swaps shall be those of the connected MetaMask
-account.
+R47.5.3 The activated EVM coin's address and account public key shall be derived
+from the **connected MetaMask account** — the account whose ownership was proven
+at connect time (§47.1) — and not from any local seed or derivation path. At
+activation, the address bound to the coin is that connected account.
 
-R47.5.4 Address-consistency requirement: the address the activated EVM coin signs
-for shall be the connected MetaMask account verified at connect time. Because the
-user can switch the active account inside the extension at any moment, signing
-under the MetaMask policy shall verify, before each signing operation, that the
-wallet's currently active account still equals the connected account; a mismatch
-shall fail the signing operation with the account-mismatch condition of §47.6
-rather than signing with the wrong key.
+R47.5.4 Activation-time account-consistency: activation shall bind the coin to
+the account that the connected session authenticated. If the wallet's
+currently-selected active account no longer matches the session's connected
+account at activation time, activation shall fail with the account-mismatch
+condition of §47.6 rather than binding a coin to an address the framework cannot
+prove the user controls.
 
 R47.5.5 The MetaMask policy applies to the EVM platform coin and, transitively,
 to its ERC-20 child tokens activated in the same `enable_eth_with_tokens` call;
-the tokens inherit the platform's signing policy.
+the tokens inherit the platform's signing policy. There is no per-token MetaMask
+override.
 
-R47.5.6 On the `enable_eth_with_tokens` wire, a missing/uninitialized MetaMask
-session surfaces as the platform-coin-with-tokens **`Transport`** `error_type`
-(HTTP 502), consistent with ch. 35's aggregated activation error contract; the
-MetaMask-specific cause is conveyed in the human-readable `error` text, which is
-not bound.
+### 47.5.B Signing and broadcast model
+
+R47.5.6 **Delegated sign-and-broadcast.** Under the MetaMask policy, an EVM coin
+shall NOT produce an offline-signed raw transaction and broadcast it itself.
+Instead, for any on-chain transaction it shall hand the unsigned transaction
+request to the connected wallet via the EIP-1193 `eth_sendTransaction` request;
+the wallet signs the transaction with the account's key (held only by the
+extension) **and broadcasts it**, returning a transaction hash. The framework's
+role is reduced to building the transaction request fields, issuing the provider
+request, and observing the returned hash and subsequent chain state.
+
+R47.5.7 **No offline raw signature is available.** Explicitly: there is no
+MetaMask path that returns a detached raw signature, a locally re-broadcastable
+signed raw transaction, or the account private key. The wallet only signs
+transactions that it then broadcasts itself (R47.5.6), and only signs *messages*
+it presents to the user (R47.5.8). The framework cannot obtain a signature over a
+transaction it intends to broadcast later on its own schedule, nor a signature it
+can hand to a third party for later broadcast.
+
+R47.5.8 **Provider request surface.** The framework shall interact with the
+connected wallet only through the standard, wire-dictated EIP-1193 / MetaMask
+JSON-RPC requests. The bound interop surface is:
+
+| EIP-1193 request | Purpose | Wallet returns |
+| --- | --- | --- |
+| `eth_requestAccounts` / `eth_accounts` | obtain / re-read the connected account(s) | account address list |
+| `eth_chainId` | read the wallet's active EIP-155 chain id | chain id (hex quantity) |
+| `wallet_switchEthereumChain` | ask the wallet to switch its active chain to the coin's chain | success / user-rejection error |
+| `personal_sign` / `eth_signTypedData_v4` | message / EIP-712 typed-data signing (user-presented) | a signature over the presented message |
+| `eth_sendTransaction` | sign **and broadcast** a transaction | the broadcast transaction hash |
+
+The connect-time login challenge (§47.1) is the only typed-data signature the
+framework relies on for session establishment; post-activation message signing
+(`personal_sign` / `eth_signTypedData_v4`) is available for the message-signing
+RPC but is over user-presented payloads, never an extractable transaction
+signature.
+
+R47.5.9 **Per-operation active-account consistency re-check.** Because the user
+can switch the active account inside the extension at any moment, before each
+signing/broadcast request the framework shall re-read the wallet's currently
+active account and verify it still equals the account the coin was activated
+under (R47.5.3). A mismatch shall fail the operation with the account-mismatch
+condition of §47.6 **before** any `eth_sendTransaction` / signing request is
+issued, so the wrong account is never asked to sign.
+
+R47.5.10 **Chain-consistency.** Before broadcasting, the framework shall ensure
+the wallet's active chain (R47.5.8 `eth_chainId`) matches the coin's EIP-155
+chain; if it does not, it shall request `wallet_switchEthereumChain`. A
+user-rejected or failed switch shall fail the operation rather than broadcasting
+on the wrong chain.
+
+### 47.5.C Operation support matrix
+
+R47.5.11 The following operation classes ARE supported for an EVM coin under the
+MetaMask policy (they need only the connected account, read-only chain access, or
+a single wallet-side sign-and-broadcast):
+
+| Operation class | Supported | Mechanism |
+| --- | --- | --- |
+| Activation / enable (platform + ERC-20 tokens) | yes | §47.5.A |
+| Balance query (platform + tokens) | yes | read-only, address only |
+| Address display (`my_address`) | yes | connected account (R47.5.14) |
+| Public-key display | yes | connected account public key (R47.5.14) |
+| Plain send / `withdraw` | yes | single `eth_sendTransaction` (R47.5.6) |
+| ERC-20 `approve` / allowance | yes | single `eth_sendTransaction` |
+| Message signing | yes | `personal_sign` / `eth_signTypedData_v4` (user-presented) |
+
+R47.5.12 **Atomic swaps are NOT supported under the MetaMask policy.** An EVM
+coin activated under MetaMask shall be treated as a non-swap (balance / send /
+approve / message-sign) account. Any attempt to use a MetaMask-policy EVM coin in
+an atomic swap (as maker or taker) shall be rejected as an unsupported-operation
+condition (§47.6) rather than silently producing an unusable swap.
+
+R47.5.13 **Rationale (normative requirement, behavioural).** Atomic swaps impose
+two demands that the delegated sign-and-broadcast model (R47.5.6–R47.5.7) cannot
+satisfy:
+
+- *Pre-signed, framework-scheduled broadcast.* The swap protocol must build and
+  broadcast HTLC transactions on the framework's own timeline (payment, spend,
+  refund), and must be able to derive a per-swap HTLC key-pair from a local
+  secret to do so. Under MetaMask the framework holds no secret and cannot derive
+  that key material; the wallet will only sign transactions it immediately
+  broadcasts itself.
+- *Detached offline signatures for third-party broadcast.* The swap protocol must
+  produce raw, signed refund/spend transactions (and watcher-assisted variants)
+  that a **watcher node or the counterparty** may broadcast later. MetaMask never
+  yields a detached raw signature or a re-broadcastable signed raw transaction
+  (R47.5.7), so the watcher / refund pre-sign requirement cannot be met.
+
+Accordingly, the swap-signing and per-swap HTLC key-derivation paths shall remain
+unavailable under the MetaMask policy, and watcher participation for a
+MetaMask-policy EVM coin shall be disabled.
+
+### 47.5.D Address / key model
+
+R47.5.14 Under the MetaMask policy the coin has **no local private key**. Its
+address (`my_address`) shall be the connected MetaMask account address, and its
+public-key display shall be the connected account's public key as recovered at
+connect time (§47.1). Private-key export / display for a MetaMask-policy EVM coin
+shall be refused as an unsupported operation (the framework cannot expose a key
+it does not hold).
+
+R47.5.15 HD / derivation-path operations and any local-secret-dependent feature
+(BIP-32/SLIP-10 derivation, address-at-derivation-path, multi-address HD
+accounts, local-key message-proofs beyond wallet message signing) are
+**unavailable** under the MetaMask policy. The coin presents the single connected
+account only; requests that presuppose local-key derivation shall be rejected as
+unsupported.
+
+### 47.5.E Error surface (cross-reference)
+
+R47.5.16 On the `enable_eth_with_tokens` wire, a missing/uninitialized MetaMask
+session, and an activation-time active-account mismatch, surface through the
+platform-coin-with-tokens aggregated activation error contract of ch. 35 (the
+MetaMask-specific cause carried in the human-readable `error`, which is not
+bound); see §47.6 (R47.6.7) for the bound `error_type` / HTTP mapping. A
+post-activation per-operation account mismatch (R47.5.9) and an
+unsupported-operation rejection (R47.5.12, R47.5.14, R47.5.15) likewise map per
+§47.6.
+
+> **Upstream divergence / open semantics (informative).** The published KDF API
+> documentation specifies the `task::connect_metamask` family and the
+> `priv_key_policy` MetaMask value, but is largely **silent** on the
+> transaction-level semantics of an EVM coin operating under MetaMask — in
+> particular whether atomic swaps are offered. The signing/broadcast model
+> (R47.5.6–R47.5.7), the operation-support matrix (R47.5.11–R47.5.12), and the
+> swap restriction (R47.5.12–R47.5.13) are therefore distilled from current
+> framework behaviour and from the structural impossibility of meeting the swap
+> pre-sign / detached-signature requirement with a delegate-only browser wallet.
+> **Swap-support verdict: UNSUPPORTED under MetaMask** — MetaMask-policy EVM coins
+> are non-swap accounts in this project. If the public API docs are later updated
+> to define a MetaMask swap flow, the docs govern and this section shall be
+> revisited (see §47.10 O-3).
 
 ---
 
@@ -241,11 +383,26 @@ every `task::*` namespace.
 
 R47.6.5 EVM activation under the MetaMask policy -- error discriminants are those
 of `enable_eth_with_tokens` (ch. 35, R35.1.5), with the MetaMask-not-initialized
-case mapping to `Transport`/502 per R47.5.6.
+case and the activation-time account-mismatch case mapping per R47.6.7.
 
 R47.6.6 Native-target invocation of any `task::connect_metamask::*` method shall
 return the dispatcher's standard method-not-found error (the same response any
 unrecognized method produces); see §47.7.
+
+R47.6.7 EVM operation under the MetaMask policy -- bound condition-to-status
+mapping (the human-readable cause is not bound):
+
+| Condition | Surfacing channel | `error_type` | HTTP status |
+| --- | --- | --- | --- |
+| No active MetaMask session at activation (not connected) | `enable_eth_with_tokens` aggregated activation error | `Transport` | 502 |
+| Active-account mismatch at activation | `enable_eth_with_tokens` aggregated activation error | `Transport` | 502 |
+| Per-operation active-account mismatch (R47.5.9) | the invoked operation's error envelope | account-mismatch / transport-class discriminant of that operation | 500 |
+| Unsupported operation under MetaMask -- atomic swap (R47.5.12), private-key export (R47.5.14), HD/derivation-path op (R47.5.15) | the invoked operation's error envelope | that operation's unsupported / not-supported discriminant | 400 |
+| MetaMask `priv_key_policy` requested on a native build | EVM activation rejects the value | invalid-policy / unsupported discriminant | 400 |
+
+The per-operation discriminant names are inherited from each operation's own
+ch. 35 error contract; this chapter binds only the **condition** and its HTTP
+status class, not new discriminants.
 
 ---
 
@@ -298,11 +455,14 @@ The Coder shall reuse them rather than reinvent the MetaMask handshake.
    query only), and this connect task does not need one either -- it is a single
    `run` step driven entirely by the browser popup.
 2. An EVM private-key policy value that selects MetaMask signing, plus an
-   EIP-1193 signing path in the EVM coin. The reloaded EVM coin currently signs
-   **only** with a locally held secp256k1 secret and has **no MetaMask signing
-   branch** -- this must be added, delegating signing to the connected
-   `MetamaskSession` and enforcing the per-signature active-account re-check
-   (R47.5.4).
+   EIP-1193 signing/broadcast path in the EVM coin. The reloaded EVM coin
+   currently signs **only** with a locally held secp256k1 secret and has **no
+   MetaMask branch** -- this must be added, delegating each transaction to the
+   connected `MetamaskSession` via `eth_sendTransaction` (wallet signs **and**
+   broadcasts; no offline raw transaction is produced, R47.5.6-R47.5.7),
+   enforcing the per-operation active-account re-check (R47.5.9), and keeping the
+   swap-signing and per-swap HTLC key-derivation paths unavailable under this
+   policy (R47.5.12-R47.5.13).
 3. Threading the MetaMask policy through `enable_eth_with_tokens`: the activation
    request's `priv_key_policy` shall accept the WASM-only MetaMask value
    (R47.5.1) and resolve it to the connected `MetamaskCtx` from
@@ -339,9 +499,17 @@ A5. After a successful connect, `enable_eth_with_tokens` with
 signing account equals the connected MetaMask account; without a prior connect it
 fails with `Transport` (502).
 
-A6. An EVM coin activated under the MetaMask policy signs swap/withdraw
-transactions via the MetaMask session, never with a local secret, and rejects
-signing when the wallet's active account no longer matches the connected account.
+A6. An EVM coin activated under the MetaMask policy performs balance / address /
+send / `withdraw` / token-`approve` / message-sign operations by delegating each
+transaction to the wallet via `eth_sendTransaction` (wallet signs **and**
+broadcasts, returns a tx hash) — never with a local secret, never producing a
+detached raw signature — and rejects any operation when the wallet's active
+account no longer matches the connected account.
+
+A6b. An attempt to use a MetaMask-policy EVM coin in an atomic swap (maker or
+taker), to export its private key, or to perform an HD/derivation-path operation
+is rejected as unsupported (R47.5.12, R47.5.14, R47.5.15); watcher participation
+is disabled for such coins.
 
 A7. On native builds, every `task::connect_metamask::*` method returns the
 standard method-not-found error, and `{ "type": "Metamask" }` is not a valid EVM
@@ -364,3 +532,10 @@ O-2. Does the published `status` `Ok` payload carry more than `eth_address`
 only `eth_address` (R47.2.3). The richer fields exist in the crypto-context
 session and could be surfaced from there if the docs require them, without
 touching the handshake.
+
+O-3. Does the published KDF API documentation define an atomic-swap flow for EVM
+coins under MetaMask? This chapter records the swap-support verdict as
+**UNSUPPORTED** (R47.5.12–R47.5.13), distilled from current framework behaviour
+and the structural impossibility of meeting the swap pre-sign / detached-raw-
+signature requirement with a delegate-only browser wallet. If the docs define
+such a flow, they govern and §47.5.C must be revisited.

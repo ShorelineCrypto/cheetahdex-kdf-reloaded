@@ -330,7 +330,7 @@ impl ParseCoinAssocTypes for EthCoin {
 
 #[async_trait]
 impl CommonSwapOpsV2 for EthCoin {
-    fn derive_htlc_pubkey_v2(&self, _swap_unique_data: &[u8]) -> Public { self.key_pair.public().clone() }
+    fn derive_htlc_pubkey_v2(&self, _swap_unique_data: &[u8]) -> Public { self.signer.public() }
 
     fn derive_htlc_pubkey_v2_bytes(&self, swap_unique_data: &[u8]) -> Vec<u8> {
         self.derive_htlc_pubkey_v2(swap_unique_data).to_vec()
