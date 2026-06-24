@@ -501,6 +501,13 @@ pub enum WithdrawError {
     Transport(String),
     #[display(fmt = "Internal error: {}", _0)]
     InternalError(String),
+    /// CRD R47.5.6a / R47.6.7: the requested withdraw is unsupported under the
+    /// MetaMask signing policy (e.g. the non-EVM-keypair TRON family, which the
+    /// delegated EVM `eth_sendTransaction` model cannot drive). WASM-only: the
+    /// MetaMask policy exists only on the browser target.
+    #[cfg(target_arch = "wasm32")]
+    #[display(fmt = "Unsupported under the MetaMask signing policy: {}", _0)]
+    UnsupportedUnderMetamask(String),
 }
 impl HttpStatusCode for WithdrawError {
     fn status_code(&self) -> StatusCode {
@@ -517,6 +524,9 @@ impl HttpStatusCode for WithdrawError {
             | WithdrawError::FromAddressNotFound
             | WithdrawError::UnexpectedFromAddress(_)
             | WithdrawError::UnknownAccount { .. } => StatusCode::BAD_REQUEST,
+            // CRD R47.6.7: unsupported operation under MetaMask maps to 400.
+            #[cfg(target_arch = "wasm32")]
+            WithdrawError::UnsupportedUnderMetamask(_) => StatusCode::BAD_REQUEST,
             WithdrawError::NoTrezorDeviceAvailable
             | WithdrawError::TrezorDisconnected
             | WithdrawError::FoundUnexpectedDevice(_) => StatusCode::GONE,

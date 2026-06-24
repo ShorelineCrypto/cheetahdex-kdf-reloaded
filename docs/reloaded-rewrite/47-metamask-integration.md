@@ -225,6 +225,21 @@ extension) **and broadcasts it**, returning a transaction hash. The framework's
 role is reduced to building the transaction request fields, issuing the provider
 request, and observing the returned hash and subsequent chain state.
 
+R47.5.6a **Withdraw response contract (docs-compatible).** The public `withdraw`
+request schema is unchanged (`coin` / `to` / `amount` / `max` / `fee`); **no**
+MetaMask-specific request field is introduced, so the request stays byte-for-byte
+compatible with the published `withdraw` API. Because the wallet broadcasts
+immediately (R47.5.6), the withdraw response under MetaMask carries the broadcast
+transaction `tx_hash`, and its `tx_hex` is populated on a **best-effort** basis:
+after broadcast the framework polls the node for a bounded window for the
+transaction to appear and, if found, reconstructs and fills the signed-transaction
+hex; if it has not yet appeared within the window, `tx_hex` is returned empty.
+Under MetaMask the documented `send_raw_transaction` follow-up is therefore
+redundant (the transaction is already on-chain), and callers must treat `tx_hex`
+as best-effort / possibly-empty. The nonce is wallet-owned (omitted from the
+request). The non-EVM-keypair TRON family is rejected under MetaMask as an
+unsupported withdraw.
+
 R47.5.7 **No offline raw signature is available.** Explicitly: there is no
 MetaMask path that returns a detached raw signature, a locally re-broadcastable
 signed raw transaction, or the account private key. The wallet only signs
@@ -310,6 +325,17 @@ Accordingly, the swap-signing and per-swap HTLC key-derivation paths shall remai
 unavailable under the MetaMask policy, and watcher participation for a
 MetaMask-policy EVM coin shall be disabled.
 
+R47.5.13a **Early, clean swap rejection (no panic).** A MetaMask-policy EVM coin
+shall be prevented from entering an atomic swap at the **earliest** practical
+lifecycle point (order placement / swap start), failing with a structured
+unsupported-operation error of §47.6 — never by reaching, and panicking inside,
+an unimplemented per-swap key-derivation path. (Informative: upstream leaves this
+path unguarded for the non-keypair signing policies, so a swap that reaches the
+key-derivation step aborts rather than failing cleanly; reloaded shall instead
+gate it explicitly and early. This is a deliberate safety hardening, not a
+behavioural port of the upstream gap.) The same early gate covers any other
+non-keypair signing policy that shares the unavailable-key-derivation property.
+
 ### 47.5.D Address / key model
 
 R47.5.14 Under the MetaMask policy the coin has **no local private key**. Its
@@ -350,6 +376,20 @@ unsupported-operation rejection (R47.5.12, R47.5.14, R47.5.15) likewise map per
 > are non-swap accounts in this project. If the public API docs are later updated
 > to define a MetaMask swap flow, the docs govern and this section shall be
 > revisited (see §47.10 O-3).
+>
+> **Upstream maturity (informative).** In the current upstream framework the
+> MetaMask policy is a WASM-only, experimental signing mode: activation and
+> withdraw are functional, but **message signing under MetaMask is unimplemented**
+> (the message-sign coin operation is synchronous and is never bridged to the
+> wallet's asynchronous `personal_sign`), and the **per-swap key-derivation step
+> is an unimplemented placeholder** for every non-keypair policy (MetaMask /
+> hardware / WalletConnect). Reloaded therefore (a) refuses MetaMask message
+> signing with a clean unsupported-operation error rather than introducing a new
+> async message-signing surface upstream never built (a future async message-sign
+> RPC, mirroring the WalletConnect signing path, would be the place to add it),
+> and (b) gates swaps early and cleanly (R47.5.13a) instead of reproducing the
+> unguarded placeholder. Both are documented "not-yet-delivered" boundaries, not
+> behavioural regressions.
 
 ---
 
@@ -397,8 +437,8 @@ mapping (the human-readable cause is not bound):
 
 | Condition | Surfacing channel | `error_type` | HTTP status |
 | --- | --- | --- | --- |
-| No active MetaMask session at activation (not connected) | `enable_eth_with_tokens` aggregated activation error | `Transport` | 500 |
-| Active-account mismatch at activation | `enable_eth_with_tokens` aggregated activation error | `Transport` | 500 |
+| No active MetaMask session at activation (not connected) | `enable_eth_with_tokens` aggregated activation error | `Transport` | 502 |
+| Active-account mismatch at activation | `enable_eth_with_tokens` aggregated activation error | `Transport` | 502 |
 | Per-operation active-account mismatch (R47.5.9) | the invoked operation's error envelope | account-mismatch / transport-class discriminant of that operation | 500 |
 | Unsupported operation under MetaMask -- atomic swap (R47.5.12), private-key export (R47.5.14), HD/derivation-path op (R47.5.15) | the invoked operation's error envelope | that operation's unsupported / not-supported discriminant | 400 |
 | MetaMask `priv_key_policy` requested on a native build | EVM activation rejects the value | invalid-policy / unsupported discriminant | 400 |
@@ -500,7 +540,8 @@ acknowledgement, and resets the crypto-context MetaMask session; an unknown
 A5. After a successful connect, `enable_eth_with_tokens` with
 `"priv_key_policy": { "type": "Metamask" }` activates the EVM platform coin whose
 signing account equals the connected MetaMask account; without a prior connect it
-fails with `Transport` (500, the shared platform-coin activation-error status).
+fails with `Transport` (502, the shared platform-coin-with-tokens activation-error
+status `BAD_GATEWAY`).
 
 A6. An EVM coin activated under the MetaMask policy performs balance / address /
 `withdraw` operations by delegating each transaction to the wallet via

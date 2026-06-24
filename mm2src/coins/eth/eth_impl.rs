@@ -392,6 +392,19 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
     // TRON uses a dedicated pipeline: its transaction format, address
     // encoding, signing digest and fee model all differ from the EVM flow.
     if matches!(coin.coin_type, EthCoinType::Tron | EthCoinType::Trc20 { .. }) {
+        // CRD R47.5.6a: the non-EVM-keypair TRON family is rejected under the
+        // MetaMask signing policy as an unsupported withdraw. The delegated
+        // sign-and-broadcast model (`eth_sendTransaction`, R47.5.6) is EVM-only
+        // and cannot drive TRON's distinct transaction format/signing digest,
+        // and the framework holds no local TRON secret under MetaMask. (TRON is
+        // not activated under the MetaMask policy in practice, so this is a
+        // defensive early rejection rather than a reachable runtime path.)
+        #[cfg(target_arch = "wasm32")]
+        if matches!(coin.signer, EthSigner::Metamask(_)) {
+            return MmError::err(WithdrawError::UnsupportedUnderMetamask(
+                "TRON withdraw is not supported under the MetaMask signing policy".to_owned(),
+            ));
+        }
         let _ = ctx;
         return crate::eth::tron::withdraw::withdraw_tron(coin, req).await;
     }
@@ -554,6 +567,47 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             .await
             .mm_err(|e| WithdrawError::Transport(e.to_string()))?;
 
+        // CRD R47.5.6a -- best-effort `tx_hex`. The wallet already broadcast the
+        // transaction (R47.5.6), so no detached, re-broadcastable raw signed
+        // bytes were produced by the framework. To still populate `tx_hex` when
+        // possible, poll the node for a bounded window for the broadcast tx to
+        // appear; if found, round-trip the returned web3/alloy `Transaction`
+        // through `signed_tx_from_alloy_tx` (the same helper `get_raw_transaction`
+        // uses, preserving the legacy `SignedEthTx` RLP shape) and rlp-encode it.
+        // If the tx has not appeared before the deadline, leave `tx_hex` empty
+        // (current behaviour) -- withdraw does NOT fail on a poll timeout since
+        // the broadcast already succeeded.
+        let tx_hex: BytesJson = {
+            use crate::eth::alloy_compat::assert_send_future;
+            use alloy::providers::Provider;
+
+            let mut found = BytesJson::from(Vec::new());
+            if let Ok(hash) = H256::from_str(tx_hash.trim_start_matches("0x")) {
+                let alloy_hash = alloy::primitives::B256::from_slice(&hash.0);
+                let provider = coin.alloy_provider();
+                // ~12s overall best-effort window; each attempt is capped so a
+                // hung lookup cannot stall past the deadline.
+                let deadline_ms = now_ms() + 12_000;
+                while now_ms() < deadline_ms {
+                    let lookup = Box::pin(assert_send_future(provider.get_transaction_by_hash(alloy_hash)));
+                    match select(lookup, Timer::sleep(3.)).await {
+                        Either::Left((Ok(Some(alloy_tx)), _)) => {
+                            if let Ok(signed) = signed_tx_from_alloy_tx(alloy_tx) {
+                                found = BytesJson(rlp::encode(&signed).to_vec());
+                            }
+                            break;
+                        },
+                        // Not yet mined / not yet visible / transient transport
+                        // error: brief backoff, then retry until the deadline.
+                        Either::Left((_, _)) => Timer::sleep(1.).await,
+                        // Per-attempt timeout: loop re-checks the overall deadline.
+                        Either::Right(_) => {},
+                    }
+                }
+            }
+            found
+        };
+
         let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
         let mut spent_by_me = amount_decimal.clone();
         let received_by_me = if to_addr == coin.my_address {
@@ -573,9 +627,11 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             my_balance_change: &received_by_me - &spent_by_me,
             spent_by_me,
             received_by_me,
-            // CRD R47.5.6/R47.5.7: already broadcast by the wallet; no
-            // re-broadcastable raw signed bytes exist.
-            tx_hex: BytesJson::from(Vec::new()),
+            // CRD R47.5.6/R47.5.6a/R47.5.7: already broadcast by the wallet, so no
+            // detached re-broadcastable bytes exist; `tx_hex` is filled
+            // best-effort from the node above and is empty if the tx had not yet
+            // appeared within the poll window.
+            tx_hex,
             tx_hash: tx_hash.trim_start_matches("0x").to_lowercase(),
             block_height: 0,
             fee_details: Some(fee_details.into()),

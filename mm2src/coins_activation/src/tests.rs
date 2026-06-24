@@ -384,7 +384,7 @@ fn test_platform_error_http_status_codes() {
     );
     assert_eq!(
         EnablePlatformCoinWithTokensError::Transport("e".into()).status_code(),
-        StatusCode::INTERNAL_SERVER_ERROR
+        StatusCode::BAD_GATEWAY
     );
     assert_eq!(
         EnablePlatformCoinWithTokensError::Internal("e".into()).status_code(),

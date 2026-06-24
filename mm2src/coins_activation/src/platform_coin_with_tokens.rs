@@ -262,8 +262,8 @@ impl HttpStatusCode for EnablePlatformCoinWithTokensError {
             | EnablePlatformCoinWithTokensError::PlatformCoinCreationError { .. }
             | EnablePlatformCoinWithTokensError::PrivKeyNotAllowed(_)
             | EnablePlatformCoinWithTokensError::UnexpectedDerivationMethod(_)
-            | EnablePlatformCoinWithTokensError::Transport(_)
             | EnablePlatformCoinWithTokensError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            EnablePlatformCoinWithTokensError::Transport(_) => StatusCode::BAD_GATEWAY,
             EnablePlatformCoinWithTokensError::PlatformIsAlreadyActivated(_)
             | EnablePlatformCoinWithTokensError::PlatformConfigIsNotFound(_)
             | EnablePlatformCoinWithTokensError::AtLeastOneNodeRequired

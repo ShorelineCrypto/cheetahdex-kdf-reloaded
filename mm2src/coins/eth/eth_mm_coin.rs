@@ -31,6 +31,24 @@ impl EthTxFeeDetails {
 impl MmCoin for EthCoin {
     fn is_asset_chain(&self) -> bool { false }
 
+    /// CRD R47.5.12 / R47.5.13a -- an EVM coin activated under the MetaMask
+    /// signing policy is a non-swap (balance / address / `withdraw`) account: it
+    /// holds no local secret, so it cannot derive a per-swap HTLC key-pair or
+    /// produce the detached, framework-scheduled signatures atomic swaps require.
+    /// Reporting it as `wallet_only` rejects it from a swap at the earliest
+    /// practical lifecycle point -- order placement (`buy` / `sell` / `setprice`
+    /// all gate on `wallet_only`) -- with a clean structured error, instead of
+    /// letting it reach and abort inside a later HTLC key-derivation / signing
+    /// path. WASM-only: the MetaMask policy exists only on the browser target.
+    fn wallet_only(&self, ctx: &MmArc) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        if matches!(self.signer, EthSigner::Metamask(_)) {
+            return true;
+        }
+        let coin_conf = crate::coin_conf(ctx, self.ticker());
+        coin_conf["wallet_only"].as_bool().unwrap_or(false)
+    }
+
     fn get_raw_transaction(&self, req: RawTransactionRequest) -> RawTransactionFut {
         Box::new(get_raw_transaction_impl(self.clone(), req).boxed().compat())
     }
