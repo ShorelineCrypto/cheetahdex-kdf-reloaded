@@ -143,9 +143,11 @@ it shall not re-implement or fork the activation logic.
 
 R48.3.1 While a task runs, `status` shall report observable in-progress states
 covering at least: **activating the platform coin**, **requesting balances /
-initialising tokens**, and **finishing**. A task that exceeds its activation
-deadline shall reach a terminal error with a **timeout-class** `error_type`
-(R48.5.2).
+initialising tokens**, and **finishing**. The framework imposes no separate
+activation wall-clock deadline of its own beyond the timeouts the wrapped
+one-shot routine and the shared task plumbing already enforce; the only
+timeout-class surface is the standard task-framework one (R48.5.2), matching the
+standalone-coin and l2 sibling families.
 
 R48.3.2 When the active signing policy requires interactive confirmation -- in
 particular a hardware-backed (Trezor) policy -- `status` shall additionally
@@ -199,10 +201,12 @@ config-not-found, protocol-parse, transport, internal, etc.).
 
 R48.5.2 In addition, the `status`, `user_action`, and `cancel` methods shall
 carry the **task-framework discriminants** common to every `task::` family:
-unknown/`no_such_task` for an unrecognised `task_id`, and a timeout-class
-discriminant for a task that exceeds its activation deadline (R48.3.1). These are
-the same task-framework discriminants the standalone-coin and l2 families already
-surface; no new task-framework error type is introduced.
+unknown/`no_such_task` for an unrecognised `task_id`, and the shared
+timeout-class discriminant the task plumbing already surfaces (e.g. when a
+bounded `user_action` wait elapses) -- not a separate activation deadline
+imposed by this framework (R48.3.1). These are the same task-framework
+discriminants the standalone-coin and l2 families already surface; no new
+task-framework error type is introduced.
 
 R48.5.3 The HTTP status mapping of each reused discriminant shall be the same as
 in the one-shot chapters (ch. 35 §35.1.5, ch. 36 §36.1.6) and the shared
