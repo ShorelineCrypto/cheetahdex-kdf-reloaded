@@ -240,6 +240,15 @@ discriminants of R35.1.5 (for `task::enable_eth`) and the single-token
 discriminants of R35.2.5 (for `task::enable_erc20`), plus task-framework
 discriminants for unknown-task and task-timeout conditions.
 
+R35.3.6 The `task::enable_eth` family is delivered by the shared **platform-coin
+task-activation framework of ch. 48**, which wraps the one-shot
+`enable_eth_with_tokens` activation of §35.1 as its unit of work (so the one-shot
+and task variants share a single activation path). Under reloaded's shipped EVM
+signing policies -- local/context (Iguana, HD) and, on WASM, MetaMask (ch. 47) --
+activation completes without any `user_action`; the `user_action` method is
+routed for wire parity and for the hardware (Trezor) policy that the published
+surface targets (ch. 48 §48.6).
+
 ---
 
 ## 35.4 `get_token_info` -- on-chain ERC-20 contract info

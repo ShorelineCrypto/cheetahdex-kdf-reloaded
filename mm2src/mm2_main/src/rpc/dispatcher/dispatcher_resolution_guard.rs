@@ -38,6 +38,14 @@ fn task_namespace_methods_are_routed() {
         "enable_qtum::status",
         "enable_qtum::user_action",
         "enable_qtum::cancel",
+        "enable_eth::init",
+        "enable_eth::status",
+        "enable_eth::user_action",
+        "enable_eth::cancel",
+        "enable_tendermint::init",
+        "enable_tendermint::status",
+        "enable_tendermint::user_action",
+        "enable_tendermint::cancel",
         "enable_z_coin::init",
         "enable_z_coin::status",
         "enable_z_coin::user_action",
@@ -85,6 +93,7 @@ fn lightning_namespace_methods_are_routed() {
     assert_namespace_routed("lightning::", &[
         "channels::open_channel",
         "channels::close_channel",
+        "channels::update_channel",
         "channels::get_channel_details",
         "channels::get_claimable_balances",
         "channels::list_open_channels_by_filter",
@@ -160,6 +169,23 @@ fn evm_v2_flat_methods_are_routed() {
 }
 
 #[test]
+fn metamask_connect_methods_are_routed() {
+    // MetaMask connection task surface (CRD ch. 47) is WASM-only; the dispatcher
+    // arms are `#[cfg(target_arch = "wasm32")]`-gated, but this guard reads
+    // `dispatcher.rs` as text so the method strings are asserted on every target.
+    for method in [
+        "connect_metamask::init",
+        "connect_metamask::status",
+        "connect_metamask::cancel",
+    ] {
+        assert!(
+            DISPATCHER_SOURCE.contains(&format!("\"{method}\"")),
+            "v2 dispatcher lost routing for the WASM-only MetaMask method `{method}`"
+        );
+    }
+}
+
+#[test]
 fn tendermint_v2_flat_methods_are_routed() {
     // Tendermint (Cosmos) V2 activation & token RPC surface (CRD ch. 36). These
     // are flat (un-namespaced) mmrpc-2.0 methods routed on all targets,
@@ -171,4 +197,16 @@ fn tendermint_v2_flat_methods_are_routed() {
             "v2 dispatcher lost routing for the flat Tendermint method `{method}`"
         );
     }
+}
+
+#[test]
+fn z_coin_tx_history_method_is_routed() {
+    // Shielded-coin transaction-history method (CRD ch. 39 §39.8). It is
+    // native-only, so the dispatcher arm lives in the `#[cfg(not(wasm))]`
+    // native-only block; this guard reads `dispatcher.rs` as text so the method
+    // string is asserted on every target.
+    assert!(
+        DISPATCHER_SOURCE.contains("\"z_coin_tx_history\""),
+        "v2 dispatcher lost routing for the native-only method `z_coin_tx_history`"
+    );
 }

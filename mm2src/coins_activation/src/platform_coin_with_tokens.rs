@@ -175,7 +175,7 @@ pub struct EnablePlatformCoinWithTokensReq<T: Clone> {
     request: T,
 }
 
-#[derive(Debug, Display, Serialize, SerializeErrorType)]
+#[derive(Clone, Debug, Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub enum EnablePlatformCoinWithTokensError {
     PlatformIsAlreadyActivated(String),
@@ -262,8 +262,8 @@ impl HttpStatusCode for EnablePlatformCoinWithTokensError {
             | EnablePlatformCoinWithTokensError::PlatformCoinCreationError { .. }
             | EnablePlatformCoinWithTokensError::PrivKeyNotAllowed(_)
             | EnablePlatformCoinWithTokensError::UnexpectedDerivationMethod(_)
-            | EnablePlatformCoinWithTokensError::Transport(_)
             | EnablePlatformCoinWithTokensError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            EnablePlatformCoinWithTokensError::Transport(_) => StatusCode::BAD_GATEWAY,
             EnablePlatformCoinWithTokensError::PlatformIsAlreadyActivated(_)
             | EnablePlatformCoinWithTokensError::PlatformConfigIsNotFound(_)
             | EnablePlatformCoinWithTokensError::AtLeastOneNodeRequired

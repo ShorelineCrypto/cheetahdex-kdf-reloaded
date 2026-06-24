@@ -82,7 +82,8 @@ impl<L2: InitL2ActivationOps> RpcTaskTypes for L2ActivationTask<L2> {
     type UserAction = L2::UserAction;
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl<L2> RpcTask for L2ActivationTask<L2>
 where
     L2: InitL2ActivationOps,

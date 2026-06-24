@@ -2,6 +2,8 @@ use super::{DispatcherError, DispatcherResult, PUBLIC_METHODS};
 use crate::mm2::lp_native_dex::init_hw::{init_trezor, init_trezor_status, init_trezor_user_action};
 use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simple_market_maker_bot,
                                 stop_simple_market_maker_bot};
+#[cfg(target_arch = "wasm32")]
+use crate::mm2::rpc::connect_metamask::{connect_metamask_cancel, connect_metamask_init, connect_metamask_status};
 use crate::mm2::rpc::one_inch::{classic_swap_contract, classic_swap_create, classic_swap_liquidity_sources,
                                 classic_swap_quote, classic_swap_tokens};
 use crate::mm2::rpc::rate_limiter::{process_rate_limit, RateLimitContext};
@@ -51,6 +53,8 @@ use coins::utxo::utxo_standard::UtxoStandardCoin;
 use coins::{add_delegation, claim_staking_rewards, delegations_info, get_raw_transaction, get_staking_infos,
             ongoing_undelegations_info, remove_delegation, sign_message, sign_raw_transaction, validators_info,
             verify_message, withdraw};
+use coins_activation::{cancel_init_platform_coin_with_tokens, init_platform_coin_with_tokens,
+                       init_platform_coin_with_tokens_status, init_platform_coin_with_tokens_user_action};
 use coins_activation::{cancel_init_standalone_coin, cancel_l2_activation, enable_l2, enable_platform_coin_with_tokens,
                        enable_token, init_l2, init_l2_status, init_l2_user_action, init_standalone_coin,
                        init_standalone_coin_status, init_standalone_coin_user_action};
@@ -71,9 +75,10 @@ use std::net::SocketAddr;
 cfg_native! {
     use coins::lightning::{add_trusted_node, close_channel, connect_to_lightning_node, generate_invoice, get_channel_details,
         get_claimable_balances, get_payment_details, list_closed_channels_by_filter, list_open_channels_by_filter, list_payments_by_filter, list_trusted_nodes, open_channel,
-        remove_trusted_node, send_payment, LightningCoin};
+        remove_trusted_node, send_payment, update_channel, LightningCoin};
     use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
+    use coins::my_tx_history_v2::z_coin_tx_history_rpc;
     use crate::mm2::lp_wallet::{change_mnemonic_password_rpc, create_wallet_rpc, delete_wallet_rpc, get_mnemonic_rpc, get_wallet_names_rpc};
     use crate::mm2::rpc::trezor::trezor_connection_status_rpc;
 }
@@ -306,6 +311,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             "init_z_coin" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
             "init_z_coin_status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
             "init_z_coin_user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
+            "z_coin_tx_history" => handle_mmrpc(ctx, request, z_coin_tx_history_rpc).await,
             "list_closed_channels_by_filter" => handle_mmrpc(ctx, request, list_closed_channels_by_filter).await,
             "list_open_channels_by_filter" => handle_mmrpc(ctx, request, list_open_channels_by_filter).await,
             "list_payments_by_filter" => handle_mmrpc(ctx, request, list_payments_by_filter).await,
@@ -421,6 +427,34 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "enable_sia::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<SiaCoin>).await,
         "enable_sia::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<SiaCoin>).await,
         "enable_sia::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<SiaCoin>).await,
+        // EVM platform activation task family (CRD ch. 35 §35.3 / ch. 48).
+        // Mirrors `enable_eth_with_tokens`' params and result; cross-platform
+        // (the platform-coin task framework wraps the one-shot activation, which
+        // the `rpc_task` `?Send`-on-wasm relaxation makes spawnable on wasm too).
+        "enable_eth::init" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens::<EthCoin>).await,
+        "enable_eth::status" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens_status::<EthCoin>).await,
+        "enable_eth::user_action" => {
+            handle_mmrpc(ctx, request, init_platform_coin_with_tokens_user_action::<EthCoin>).await
+        },
+        "enable_eth::cancel" => handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<EthCoin>).await,
+        // Tendermint platform activation task family (CRD ch. 36 §36.6 / ch. 48).
+        // Mirrors `enable_tendermint_with_assets`' params and result;
+        // cross-platform for the same reason as `enable_eth::*`.
+        "enable_tendermint::init" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens::<TendermintCoin>).await,
+        "enable_tendermint::status" => {
+            handle_mmrpc(ctx, request, init_platform_coin_with_tokens_status::<TendermintCoin>).await
+        },
+        "enable_tendermint::user_action" => {
+            handle_mmrpc(
+                ctx,
+                request,
+                init_platform_coin_with_tokens_user_action::<TendermintCoin>,
+            )
+            .await
+        },
+        "enable_tendermint::cancel" => {
+            handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<TendermintCoin>).await
+        },
         "init_trezor::init" => handle_mmrpc(ctx, request, init_trezor).await,
         "init_trezor::status" => handle_mmrpc(ctx, request, init_trezor_status).await,
         "init_trezor::user_action" => handle_mmrpc(ctx, request, init_trezor_user_action).await,
@@ -434,6 +468,15 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "withdraw::init" => handle_mmrpc(ctx, request, init_withdraw).await,
         "withdraw::status" => handle_mmrpc(ctx, request, withdraw_status).await,
         "withdraw::user_action" => handle_mmrpc(ctx, request, withdraw_user_action).await,
+        // MetaMask connection task family (ch. 47) is WASM-only: MetaMask is a
+        // browser EIP-1193 wallet. On native these arms are absent, so the
+        // method falls through to the native catch-all's method-not-found.
+        #[cfg(target_arch = "wasm32")]
+        "connect_metamask::init" => handle_mmrpc(ctx, request, connect_metamask_init).await,
+        #[cfg(target_arch = "wasm32")]
+        "connect_metamask::status" => handle_mmrpc(ctx, request, connect_metamask_status).await,
+        #[cfg(target_arch = "wasm32")]
+        "connect_metamask::cancel" => handle_mmrpc(ctx, request, connect_metamask_cancel).await,
         #[cfg(not(target_arch = "wasm32"))]
         native_only_task => match native_only_task {
             "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
@@ -471,6 +514,7 @@ async fn lightning_dispatcher(
     match lightning_method {
         "channels::open_channel" => handle_mmrpc(ctx, request, open_channel).await,
         "channels::close_channel" => handle_mmrpc(ctx, request, close_channel).await,
+        "channels::update_channel" => handle_mmrpc(ctx, request, update_channel).await,
         "channels::get_channel_details" => handle_mmrpc(ctx, request, get_channel_details).await,
         "channels::get_claimable_balances" => handle_mmrpc(ctx, request, get_claimable_balances).await,
         "channels::list_open_channels_by_filter" => handle_mmrpc(ctx, request, list_open_channels_by_filter).await,

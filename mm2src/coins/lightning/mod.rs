@@ -55,7 +55,7 @@ pub(crate) use lightning::chain::Access;
 pub(crate) use lightning::ln::channelmanager::{ChannelDetails, MIN_FINAL_CLTV_EXPIRY};
 pub(crate) use lightning::ln::{PaymentHash, PaymentPreimage};
 pub(crate) use lightning::routing::network_graph::{NetGraphMsgHandler, NetworkGraph};
-pub(crate) use lightning::util::config::UserConfig;
+pub(crate) use lightning::util::config::{ChannelConfig, UserConfig};
 pub(crate) use lightning_background_processor::BackgroundProcessor;
 pub(crate) use lightning_invoice::payment;
 pub(crate) use lightning_invoice::utils::{create_invoice_from_channelmanager, DefaultRouter};
@@ -71,7 +71,7 @@ pub(crate) use ln_errors::{ClaimableBalancesError, ClaimableBalancesResult, Clos
                            GetChannelDetailsResult, GetPaymentDetailsError, GetPaymentDetailsResult,
                            ListChannelsError, ListChannelsResult, ListPaymentsError, ListPaymentsResult,
                            OpenChannelError, OpenChannelResult, SendPaymentError, SendPaymentResult, TrustedNodeError,
-                           TrustedNodeResult};
+                           TrustedNodeResult, UpdateChannelError, UpdateChannelResult};
 pub(crate) use ln_events::LightningEventHandler;
 pub(crate) use ln_p2p::{connect_to_node, ConnectToNodeRes, PeerManager};
 pub(crate) use ln_platform::{h256_json_from_txid, Platform};

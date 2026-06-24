@@ -4359,6 +4359,16 @@ impl<Signer: Sign> Channel<Signer> {
 		self.config.max_dust_htlc_exposure_msat
 	}
 
+	/// Overwrites this channel's [`ChannelConfig`] with `config`, bumping the gossip update
+	/// timestamp so that a freshly generated channel_update strictly supersedes the previous
+	/// one (guarding against peers continuing to route on the old forwarding policy).
+	/// Returns `true` to signal the caller that the channel policy should be re-advertised.
+	pub fn update_config(&mut self, config: &ChannelConfig) -> bool {
+		self.config = config.clone();
+		self.update_time_counter += 1;
+		true
+	}
+
 	pub fn get_feerate(&self) -> u32 {
 		self.feerate_per_kw
 	}

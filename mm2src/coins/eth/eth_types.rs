@@ -241,12 +241,117 @@ pub struct Erc20TokenInfo {
     pub decimals: u8,
 }
 
+/// EVM signing policy held by an [`EthCoinImpl`].
+///
+/// `Local` wraps the secp256k1 [`KeyPair`] derived from a locally-held secret
+/// (Iguana / HD-activated key / TRON) and signs transactions offline, exactly
+/// as the coin did before this seam was introduced. `Metamask` (WASM-only)
+/// delegates signing — and, for transactions, broadcast — to a connected
+/// browser MetaMask session over EIP-1193; the framework holds no secret
+/// (CRD §47.5).
+#[derive(Clone)]
+pub(crate) enum EthSigner {
+    Local(KeyPair),
+    #[cfg(target_arch = "wasm32")]
+    Metamask(crypto::MetamaskArc),
+}
+
+impl std::fmt::Debug for EthSigner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EthSigner::Local(_) => f.write_str("EthSigner::Local"),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(_) => f.write_str("EthSigner::Metamask"),
+        }
+    }
+}
+
+impl EthSigner {
+    /// The address controlled by this signing policy. For `Local` this is the
+    /// key pair's address (unchanged behaviour); for `Metamask` it is the
+    /// connected account proven at connect time (CRD R47.5.3/R47.5.14).
+    pub(crate) fn address(&self) -> Address {
+        match self {
+            EthSigner::Local(key_pair) => key_pair.address(),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(ctx) => ctx.eth_account(),
+        }
+    }
+
+    /// The uncompressed secp256k1 public key (64-byte `X || Y`, no `0x04`
+    /// prefix). For `Metamask` it is the connected account's public key as
+    /// recovered at connect time (CRD R47.5.14).
+    pub(crate) fn public(&self) -> Public {
+        match self {
+            EthSigner::Local(key_pair) => *key_pair.public(),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(ctx) => {
+                // `eth_account_pubkey_uncompressed` is the 65-byte
+                // `0x04 || X || Y` form; `Public` is the 64-byte `X || Y` body.
+                let uncompressed = ctx.eth_account_pubkey_uncompressed();
+                #[allow(deprecated)]
+                Public::from_slice(&AsRef::<[u8]>::as_ref(&uncompressed)[1..65])
+            },
+        }
+    }
+
+    /// The local signing secret, or `None` under the MetaMask policy. The
+    /// framework never holds a MetaMask account key (CRD R47.5.7/R47.5.14).
+    pub(crate) fn local_secret(&self) -> Option<&mm2_eth::keys::Secret> {
+        match self {
+            EthSigner::Local(key_pair) => Some(key_pair.secret()),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(_) => None,
+        }
+    }
+}
+
+/// Error returned by [`EthCoinImpl`] signing entrypoints when the active EVM
+/// signing policy cannot satisfy the request (CRD §47.5). Constructed only on
+/// the WASM target, where the MetaMask policy exists.
+///
+/// `Debug` delegates to `Display` so the bound condition text surfaces verbatim
+/// through the `try_tx_s!`/`{:?}` swap error path (CRD R47.6.7).
+pub enum EthSignerError {
+    /// Atomic-swap / HTLC sign-and-broadcast is unsupported under the MetaMask
+    /// signing policy. A MetaMask-policy EVM coin is a non-swap account: the
+    /// wallet only signs transactions it immediately broadcasts itself, so the
+    /// framework cannot produce the framework-scheduled HTLC payment / spend /
+    /// refund broadcasts a swap requires (CRD R47.5.12 / R47.5.13). Reached only
+    /// via the swap/HTLC send path (`sign_and_send_transaction_impl`); the
+    /// user-facing `withdraw` delegated-broadcast path is handled separately in
+    /// `withdraw_impl` via `eth_sendTransaction` (CRD R47.5.6).
+    SwapSendUnsupported,
+    /// Offline raw-transaction signing is unavailable under MetaMask: the
+    /// wallet never yields a detached, re-broadcastable signed raw transaction
+    /// (CRD R47.5.7 / R47.5.12).
+    OfflineSigningUnsupported,
+}
+
+impl std::fmt::Debug for EthSignerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { std::fmt::Display::fmt(self, f) }
+}
+
+impl std::fmt::Display for EthSignerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EthSignerError::SwapSendUnsupported => f.write_str(
+                "Atomic swaps are unsupported under the MetaMask signing policy (CRD R47.5.12): a \
+                 MetaMask-policy EVM coin is a non-swap account",
+            ),
+            EthSignerError::OfflineSigningUnsupported => f.write_str(
+                "Offline raw transaction signing is unsupported under the MetaMask signing policy (CRD R47.5.7)",
+            ),
+        }
+    }
+}
+
 /// pImpl idiom.
 #[derive(Debug)]
 pub struct EthCoinImpl {
     pub(crate) ticker: String,
     pub(crate) coin_type: EthCoinType,
-    pub(crate) key_pair: KeyPair,
+    pub(crate) signer: EthSigner,
     pub(crate) my_address: Address,
     pub(crate) sign_message_prefix: Option<String>,
     pub(crate) swap_contract_address: Address,

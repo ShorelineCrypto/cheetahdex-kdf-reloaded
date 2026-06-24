@@ -139,6 +139,10 @@ pub struct MmCtx {
     /// Cache for the NFT subsystem context. Populated lazily on first
     /// access via `coins::nft::context::NftCtx::from_mm_ctx`.
     pub nft_ctx: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
+    /// The MetaMask connection task-manager context (WASM only):
+    /// `crate::rpc::connect_metamask::ConnectMetamaskCtx`.
+    #[cfg(target_arch = "wasm32")]
+    pub metamask_connect_ctx: Mutex<Option<Arc<dyn Any + 'static + Send + Sync>>>,
     pub abort_handlers: Mutex<Vec<AbortHandle>>,
     #[cfg(target_arch = "wasm32")]
     pub db_namespace: DbNamespaceId,
@@ -185,6 +189,8 @@ impl MmCtx {
             async_sqlite_connection: OnceLock::default(),
             mm_init_ctx: Mutex::new(None),
             nft_ctx: Mutex::new(None),
+            #[cfg(target_arch = "wasm32")]
+            metamask_connect_ctx: Mutex::new(None),
             abort_handlers: Mutex::new(Vec::new()),
             #[cfg(target_arch = "wasm32")]
             db_namespace: DbNamespaceId::Main,

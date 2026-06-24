@@ -65,7 +65,8 @@ impl RpcTaskTypes for InitAccountBalanceTask {
     type UserAction = AccountBalanceUserAction;
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl RpcTask for InitAccountBalanceTask {
     fn initial_status(&self) -> Self::InProgressStatus { AccountBalanceInProgressStatus::RequestingAccountBalance }
 

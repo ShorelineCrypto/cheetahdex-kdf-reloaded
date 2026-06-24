@@ -49,7 +49,7 @@ use ln::msgs::NetAddress;
 use ln::onion_utils;
 use ln::msgs::{ChannelMessageHandler, DecodeError, LightningError, MAX_VALUE_MSAT, OptionalField};
 use chain::keysinterface::{Sign, KeysInterface, KeysManager, InMemorySigner, Recipient};
-use util::config::UserConfig;
+use util::config::{UserConfig, ChannelConfig};
 use util::events::{EventHandler, EventsProvider, MessageSendEvent, MessageSendEventsProvider, ClosureReason};
 use util::{byte_utils, events};
 use util::scid_utils::fake_scid;
@@ -2190,6 +2190,65 @@ impl<Signer: Sign, M: Deref, T: Deref, K: Deref, F: Deref, L: Deref> ChannelMana
 		for chan in self.list_channels() {
 			let _ = self.force_close_channel(&chan.channel_id);
 		}
+	}
+
+	/// Atomically applies the given [`ChannelConfig`] to the live channels identified by
+	/// `channel_ids`, all of which must belong to `counterparty_node_id`.
+	///
+	/// On success each updated channel has its forwarding policy re-advertised (a fresh
+	/// channel_update is enqueued as a [`MessageSendEvent::BroadcastChannelUpdate`] for public
+	/// channels, or a [`MessageSendEvent::SendChannelUpdate`] to the counterparty for private
+	/// channels) and the channel manager is marked for persistence so the new configuration
+	/// survives a restart.
+	///
+	/// Returns an error without mutating any channel if any `channel_id` is unknown to this
+	/// manager, or if any of them is not owned by `counterparty_node_id`.
+	pub fn update_channel_config(
+		&self, counterparty_node_id: &PublicKey, channel_ids: &[[u8; 32]], config: &ChannelConfig,
+	) -> Result<(), APIError> {
+		let _persistence_guard = PersistenceNotifierGuard::notify_on_drop(&self.total_consistency_lock, &self.persistence_notifier);
+
+		let mut channel_state_lock = self.channel_state.lock().unwrap();
+		let channel_state = &mut *channel_state_lock;
+		// Validate every target channel up-front so the mutation is all-or-nothing.
+		for channel_id in channel_ids {
+			let channel_counterparty_node_id = channel_state.by_id.get(channel_id)
+				.ok_or(APIError::ChannelUnavailable {
+					err: format!("Channel with id {} not found", log_bytes!(*channel_id)),
+				})?
+				.get_counterparty_node_id();
+			if channel_counterparty_node_id != *counterparty_node_id {
+				return Err(APIError::APIMisuseError {
+					err: format!("Channel {} is not owned by the given counterparty node id", log_bytes!(*channel_id)),
+				});
+			}
+		}
+		for channel_id in channel_ids {
+			let policy_update = {
+				let channel = match channel_state.by_id.get_mut(channel_id) {
+					Some(channel) => channel,
+					None => continue,
+				};
+				if !channel.update_config(config) {
+					continue;
+				}
+				let counterparty_node_id = channel.get_counterparty_node_id();
+				match self.get_channel_update_for_broadcast(channel) {
+					Ok(msg) => Some(events::MessageSendEvent::BroadcastChannelUpdate { msg }),
+					Err(_) => match self.get_channel_update_for_unicast(channel) {
+						Ok(msg) => Some(events::MessageSendEvent::SendChannelUpdate {
+							node_id: counterparty_node_id,
+							msg,
+						}),
+						Err(_) => None,
+					},
+				}
+			};
+			if let Some(event) = policy_update {
+				channel_state.pending_msg_events.push(event);
+			}
+		}
+		Ok(())
 	}
 
 	fn construct_recv_pending_htlc_info(&self, hop_data: msgs::OnionHopData, shared_secret: [u8; 32],

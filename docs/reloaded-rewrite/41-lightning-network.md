@@ -186,76 +186,149 @@ R41.7.8 **Error conditions (public `error_type` + HTTP status).**
 > string below are the **public** Komodo DeFi Framework Lightning RPC contract;
 > the published API docs govern on any discrepancy.
 
-> **Status:** this RPC is **not yet present** in reloaded-public and is specified
-> here as a forward requirement.
+> **Status:** this RPC is **not yet routed** in reloaded-public. It is
+> **deliverable** against the vendored Lightning substrate via a bounded patch
+> (see the feasibility verdict at the end of this section); the contract below is
+> the finished target.
 
 R41.8.1 The project shall expose a native-only mmrpc-2.0 RPC
 `lightning::channels::update_channel` that mutates the configurable parameters of
 a single **live** channel on the running channel manager of the activated
 Lightning coin named by `params.coin`. It is absent from the WASM build.
 
-R41.8.2 **Channel identity.** The target channel is named by its **rpc channel id**
--- the local unsigned-integer handle assigned to the channel when it was opened
-(the same identifier surfaced by the channel-listing/-details RPCs of §41.3), not
-the on-chain funding outpoint and not the swap UUID.
+R41.8.2 **Channel identity.** The target channel is named by its **RPC channel
+identifier** (`rpc_channel_id`) -- the stable per-channel numeric handle assigned
+when the channel was opened and surfaced by the channel-listing / channel-details
+RPCs of §41.3. It is **not** the on-chain funding outpoint. The implementation
+resolves this identifier to the live channel's counterparty node public key and
+channel id before applying the update.
+
+> **Wire-identifier divergence (informative).** The published reference material
+> names the per-channel identifier `uuid` across the Lightning channel RPC
+> surface. The reloaded Lightning module instead identifies channels by the
+> numeric `rpc_channel_id` across **all** of its §41.3 channel RPCs; there is no
+> UUID handle anywhere in the reloaded substrate. `update_channel` therefore takes
+> `rpc_channel_id` to remain consistent with the identifier the §41.3 RPCs return
+> -- the only handle a caller can actually obtain. Migrating the whole Lightning
+> channel surface to a `uuid` wire name is a separate module-wide decision and is
+> out of scope for this method.
 
 R41.8.3 **Request `params`.**
 - `coin` -- string, **required** -- ticker of the activated Lightning coin.
-- `rpc_channel_id` -- unsigned integer, **required** -- the rpc channel id of the
-  channel to update.
+- `rpc_channel_id` -- unsigned integer (64-bit), **required** -- the RPC channel
+  identifier of the channel to update (R41.8.2).
 - `channel_options` -- object, **required** -- the mutable per-channel
   configuration to apply. Every field is **optional**; a field that is present
-  replaces the channel's current value for that parameter, and a field that is
-  absent leaves the corresponding parameter unchanged. The publicly exposed
+  overrides the corresponding parameter, and a field that is absent leaves that
+  parameter to be carried from the merge base (R41.8.4). The publicly exposed
   configurable fields are:
-  - `proportional_fee_in_millionths_sats` -- integer -- the proportional
-    forwarding fee charged for routing through this channel, in millionths of the
-    forwarded amount.
-  - `base_fee_msat` -- integer -- the flat per-forward base fee, in millisatoshis.
-  - `cltv_expiry_delta` -- integer -- the CLTV expiry delta this channel
-    advertises/enforces for forwarded HTLCs (a block count).
-  - `max_dust_htlc_exposure_msat` -- integer -- the cap on total in-flight dust
-    HTLC exposure on this channel, in millisatoshis.
-  - `force_close_avoidance_max_fee_satoshis` -- integer -- the maximum fee, in
-    satoshis, the node will absorb to avoid a force-close.
+  - `proportional_fee_in_millionths_sats` -- unsigned integer (32-bit) -- the
+    proportional outbound forwarding fee charged for routing through this channel,
+    in millionths of the forwarded amount.
+  - `base_fee_msat` -- unsigned integer (32-bit) -- the flat per-forward base fee
+    charged for outbound forwarding, in millisatoshis.
+  - `cltv_expiry_delta` -- unsigned integer (16-bit) -- the CLTV expiry delta this
+    channel advertises/enforces for forwarded HTLCs (a block count).
+  - `max_dust_htlc_exposure_msat` -- unsigned integer (64-bit) -- the cap on total
+    in-flight dust HTLC exposure on this channel, in millisatoshis.
+  - `force_close_avoidance_max_fee_sats` -- unsigned integer (64-bit) -- the
+    additional fee, in satoshis, the node is willing to absorb on a cooperative
+    close to avoid waiting on the counterparty's locktime (a force-close
+    avoidance ceiling).
 
-R41.8.4 **Behaviour.** The call shall apply the supplied overrides to the named
-channel's configuration on the **running** channel manager (taking effect on the
-live channel without re-activation), then persist the channel manager state so the
-new configuration survives a restart, and return the channel's resulting
-**effective** configuration (the merge of prior values and the applied overrides).
+> **Field-name note (informative).** The on-wire option name for the force-close
+> ceiling is `force_close_avoidance_max_fee_sats`. The underlying Lightning
+> channel-config field is spelled `force_close_avoidance_max_fee_satoshis`; the
+> RPC surface deliberately exposes the shorter `_sats` form, so the wire contract
+> uses `_sats` even though some published reference material mirrors the internal
+> `_satoshis` spelling.
+
+R41.8.4 **Behaviour and merge base.** The call shall:
+1. resolve `coin` to an activated Lightning coin (else error per R41.8.6);
+2. resolve `rpc_channel_id` to a live channel on that coin (else error per
+   R41.8.6), obtaining its counterparty node public key and channel id;
+3. form the **effective** option set by taking the coin's configured
+   channel-option defaults as the merge base and overlaying each option present in
+   the request `channel_options`; where the coin carries no configured defaults,
+   the request `channel_options` is itself the base;
+4. apply the effective option set to the channel's configuration on the
+   **running** channel manager so it takes effect on the live channel without
+   re-activation, which includes re-advertising the channel's forwarding policy to
+   peers (a fresh channel-update gossip message reflecting the new fees / CLTV
+   delta);
+5. persist the channel-manager state so the new configuration survives a restart;
+6. return the effective option set (R41.8.5).
+
+> **Merge-base note (informative; Upstream divergence).** The merge base in step 3
+> is the **coin-level configured channel-option defaults**, not a read-back of the
+> channel's *current* live runtime config. The vendored Lightning substrate does
+> not expose reading a live channel's `ChannelConfig` back out, so a parameter
+> omitted from the request is filled from the coin's defaults rather than from a
+> value that may have been set by a prior `update_channel` call. Callers that want
+> deterministic results should send the full `channel_options` set they intend.
 
 R41.8.5 **Success `result`.**
-- `channel_options` -- object -- the channel's effective configuration after the
-  update, carrying the same fields enumerated in R41.8.3 with their current
+- `channel_options` -- object -- the effective configuration applied to the
+  channel, carrying the same fields enumerated in R41.8.3 with their resulting
   values.
 
-R41.8.6 **Error conditions (public `error_type` + HTTP status).**
-- `coin` does not name an activated Lightning coin -- unsupported/unknown-coin
-  `error_type` -- HTTP **400 Bad Request**.
-- No channel with the given `rpc_channel_id` exists on the coin -- a
-  no-such-channel `error_type` -- HTTP **400 Bad Request**.
-- A failure to persist the updated channel-manager state -- an internal/save
-  `error_type` -- HTTP **500 Internal Server Error**.
+R41.8.6 **Error conditions (public `error_type` discriminant + HTTP status).**
+- The named `coin` exists but is not a Lightning coin -- `error_type`
+  **`UnsupportedCoin`** -- HTTP **400 Bad Request**.
+- No coin with the given ticker is activated -- `error_type` **`NoSuchCoin`** --
+  HTTP **404 Not Found**.
+- No channel with the given `rpc_channel_id` exists on the coin -- `error_type`
+  **`NoSuchChannel`** -- HTTP **404 Not Found**.
+- The channel manager rejects the configuration mutation or the updated state
+  cannot be persisted -- `error_type` **`FailureToUpdateChannel`** -- HTTP
+  **500 Internal Server Error**.
 
-> **Implementation-substrate note (informative; status).** §41.7 is
-> **IMPLEMENTED**: `LightningCoin` (in
-> `mm2src/coins/lightning/lightning_types.rs`) now carries a persisted
-> `trusted_nodes` set, the Lightning persister gained save/load support for it,
-> and the set is restored at coin activation (R41.7.7).
+> **Implementation-substrate note + FEASIBILITY VERDICT (informative; status).**
+> §41.7 is **IMPLEMENTED** (persisted `trusted_nodes` set with save/load and
+> activation reload, R41.7.7).
 >
-> §41.8 (`update_channel`) is **BLOCKED ON SUBSTRATE** and is therefore *not*
-> routed in the dispatcher. The vendored `rust-lightning-patched` is LDK
-> **0.0.106**, which exposes **no public API to mutate a live channel's
-> configuration**: there is no `ChannelManager::update_channel_config` (added
-> upstream only in LDK 0.0.107) and the per-channel `ChannelConfig` is
-> crate-private, so it cannot be reached from the `coins` crate. Satisfying
-> §41.8 first requires either bumping the vendored Lightning crates to a version
-> that exposes live channel-config mutation, or adding an
-> `update_channel_config`-equivalent method to the vendored channel manager
-> (locate channel by handle, overwrite its config, regenerate/broadcast the
-> `channel_update`, persist the manager). Classified greenfield-dependent
-> (vendored-LDK uplift), not a routing/aliasing gap.
+> §41.8 (`update_channel`) is **IMPLEMENTED** via a BOUNDED vendored-LDK patch
+> (verdict **A**) and is **routed** in the dispatcher (native-only). Substrate
+> reality that the patch addressed:
+> - The vendored `rust-lightning-patched` is LDK **0.0.106**, but its
+>   per-channel `ChannelConfig` is **already a public struct with all five
+>   configurable fields public** (proportional fee, base fee, CLTV delta, max
+>   dust HTLC exposure, force-close avoidance ceiling), and the **dust-exposure
+>   cap is already enforced** by the channel state machine. The `coins` crate can
+>   therefore already *construct* the target `ChannelConfig`.
+> - The **only** missing substrate capability is the *runtime* mutation entry
+>   point on the channel manager (the public live-config-update method that LDK
+>   added upstream in 0.0.107). 0.0.106 only sets channel config at open time via
+>   `UserConfig` and exposes no public method to mutate an open channel's config
+>   and re-gossip its policy.
+> - **Bounded patch shape (role level, no upstream code transcribed):** add one
+>   public method on the vendored channel manager that takes a counterparty node
+>   public key, a list of channel ids, and a `ChannelConfig`, and for each matched
+>   live channel (a) overwrites its stored per-channel config, (b) regenerates and
+>   enqueues a broadcast channel-update gossip message reflecting the new
+>   forwarding policy, and (c) marks the manager for persistence. The handler in
+>   the `coins` crate then resolves coin + `rpc_channel_id` -> live channel, builds
+>   the merged `ChannelConfig` per R41.8.4, calls this method, persists, and
+>   returns the merged options. Route the method in the dispatcher.
+> - **Risk: MODERATE.** The patch touches the channel manager's gossip/broadcast
+>   and persistence paths; the upstream 0.0.107 change is the well-scoped
+>   reference for correctness. Failure modes to guard in implementation/tests:
+>   stale or mis-sequenced channel-update gossip (peers routing on old fees), and
+>   failure to persist (config lost on restart). No funds-custody surface is
+>   touched -- only this node's own forwarding-policy / fee parameters -- so a
+>   correctly bounded patch introduces no security hole.
+> - A full LDK uplift (0.0.106 -> 0.0.113, matching corpus) is **not required**
+>   for §41.8 because the field set and dust enforcement are already present; an
+>   uplift remains a larger, separate effort tracked elsewhere and is out of scope
+>   here.
+>
+> **Fallback (clean published failure, only if the user elects to route §41.8
+> before the bounded patch lands):** the method may be routed to a documented
+> failure rather than left unrouted -- it shall return a single documented
+> `error_type` of a not-available class with HTTP **501 Not Implemented**, never a
+> panic, never a partial/silent mutation. This fallback is a divergence from the
+> public contract (which performs the update) and must itself be documented as
+> such; it is *not* the preferred finish, which is verdict **A** above.
 
 ## 41.9 Acceptance criteria
 
@@ -271,5 +344,6 @@ R41.8.6 **Error conditions (public `error_type` + HTTP status).**
   trusted-node set; the set survives a restart; repeated add/remove report
   whether the set actually changed (R41.7).
 - A live channel's configurable parameters (fees, CLTV delta, dust cap,
-  force-close fee ceiling) can be updated by rpc channel id and the effective
-  configuration is echoed back and persisted (R41.8).
+  force-close fee ceiling) can be updated by `rpc_channel_id` and the effective
+  configuration is echoed back and persisted (R41.8), delivered by the bounded
+  vendored-LDK runtime-config-mutation patch described in §41.8.
