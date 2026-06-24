@@ -63,17 +63,20 @@ impl EthCoinImpl {
     /// populate the V2 activation result address-info records).
     pub fn display_public_key(&self) -> String { format!("0x{:02x}", self.signer.public()) }
 
-    /// Signs `tx` with the local signing key for the delegated-broadcast send
-    /// path (plain send / `withdraw` / `approve`). Under the MetaMask policy
-    /// this currently returns a not-yet-wired error; the real delegated
-    /// `eth_sendTransaction` sign-and-broadcast (CRD R47.5.6) is wired in a
-    /// later step. For the `Local` policy behaviour is identical to the prior
-    /// `tx.sign(key_pair.secret(), chain_id)`.
+    /// Signs `tx` with the local signing key for the offline-then-broadcast
+    /// send path used by atomic swaps (`sign_and_send_transaction_impl`). For
+    /// the `Local` policy behaviour is identical to the prior
+    /// `tx.sign(key_pair.secret(), chain_id)`. Under the MetaMask policy this
+    /// path is reached only by swap/HTLC sends and is rejected with
+    /// [`EthSignerError::SwapSendUnsupported`] (CRD R47.5.12); the user-facing
+    /// `withdraw` delegated-broadcast path does not use this entrypoint — it
+    /// routes the final step to the wallet via `eth_sendTransaction` directly in
+    /// `withdraw_impl` (CRD R47.5.6).
     pub(crate) fn sign_tx_for_send(&self, tx: UnSignedEthTx) -> Result<SignedEthTx, EthSignerError> {
         match &self.signer {
             EthSigner::Local(key_pair) => Ok(tx.sign(key_pair.secret(), self.chain_id)),
             #[cfg(target_arch = "wasm32")]
-            EthSigner::Metamask(_) => Err(EthSignerError::MetamaskSendNotWired),
+            EthSigner::Metamask(_) => Err(EthSignerError::SwapSendUnsupported),
         }
     }
 
@@ -501,6 +504,88 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         gas,
         gas_price,
     };
+
+    // CRD R47.5.6/R47.5.7 -- delegated sign-and-broadcast under the MetaMask
+    // policy. Unlike the Local (Iguana) path below -- which signs `tx` offline
+    // and returns re-broadcastable raw bytes for a later `send_raw_transaction`
+    // -- under MetaMask the framework holds no key: it hands the unsigned
+    // EIP-1193 transaction object to the wallet, which SIGNS AND BROADCASTS it
+    // immediately and returns only a transaction hash. There is therefore no
+    // separate broadcast step and NO detached, re-broadcastable raw signed
+    // bytes exist; `tx_hex` is deliberately left empty (the framework must not
+    // fabricate signed bytes).
+    #[cfg(target_arch = "wasm32")]
+    if let EthSigner::Metamask(metamask_arc) = &coin.signer {
+        // CRD R47.5.9 -- re-read the wallet's currently-active account and verify
+        // it still matches the activated account BEFORE any signing/broadcast
+        // request, so the wrong account is never asked to sign.
+        metamask_arc
+            .check_active_eth_account()
+            .await
+            .mm_err(|e| WithdrawError::Transport(e.to_string()))?;
+
+        // CRD R47.5.10 -- ensure the wallet's active chain matches the coin's
+        // EIP-155 chain (requesting a switch otherwise) before broadcasting.
+        if let Some(coin_chain_id) = coin.chain_id {
+            metamask_arc
+                .ensure_active_chain(coin_chain_id)
+                .await
+                .mm_err(|e| WithdrawError::Transport(e.to_string()))?;
+        }
+
+        // CRD R47.5.8 -- build the EIP-1193 transaction object. `from` is the
+        // activated (connected) account; `to`/`value`/`gas`/`gasPrice` reuse the
+        // exact fields the local path computed above. The wallet owns the nonce
+        // for delegated broadcast, so `nonce` is intentionally omitted (the
+        // framework's computed `tx.nonce` is consumed only by the local path).
+        let mut tx_object = serde_json::json!({
+            "from": format!("{:#x}", coin.my_address),
+            "to": format!("{:#x}", call_addr),
+            "value": format!("{:#x}", eth_value),
+            "gas": format!("{:#x}", gas),
+            "gasPrice": format!("{:#x}", gas_price),
+        });
+        if !tx.data.is_empty() {
+            tx_object["data"] = serde_json::json!(format!("0x{}", hex::encode(&tx.data)));
+        }
+
+        let tx_hash = metamask_arc
+            .eth_send_transaction(tx_object)
+            .await
+            .mm_err(|e| WithdrawError::Transport(e.to_string()))?;
+
+        let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
+        let mut spent_by_me = amount_decimal.clone();
+        let received_by_me = if to_addr == coin.my_address {
+            amount_decimal.clone()
+        } else {
+            0.into()
+        };
+        let fee_details = EthTxFeeDetails::new(gas, gas_price, fee_coin).mm_err(Into::into)?;
+        if coin.coin_type == EthCoinType::Eth {
+            spent_by_me += &fee_details.total_fee;
+        }
+        let my_address = coin.my_address().map_to_mm(WithdrawError::InternalError)?;
+        return Ok(TransactionDetails {
+            to: vec![checksum_address(&format!("{:#02x}", to_addr))],
+            from: vec![my_address],
+            total_amount: amount_decimal,
+            my_balance_change: &received_by_me - &spent_by_me,
+            spent_by_me,
+            received_by_me,
+            // CRD R47.5.6/R47.5.7: already broadcast by the wallet; no
+            // re-broadcastable raw signed bytes exist.
+            tx_hex: BytesJson::from(Vec::new()),
+            tx_hash: tx_hash.trim_start_matches("0x").to_lowercase(),
+            block_height: 0,
+            fee_details: Some(fee_details.into()),
+            coin: coin.ticker.clone(),
+            internal_id: vec![].into(),
+            timestamp: now_ms() / 1000,
+            kmd_rewards: None,
+            transaction_type: Default::default(),
+        });
+    }
 
     let signed = coin
         .sign_tx_for_send(tx)
@@ -2848,6 +2933,40 @@ pub async fn eth_coin_from_conf_and_request(
     priv_key: &[u8],
     protocol: CoinProtocol,
 ) -> Result<EthCoin, String> {
+    let key_pair: KeyPair = try_s!(KeyPair::from_secret_slice(priv_key));
+    eth_coin_from_conf_and_request_with_signer(ctx, ticker, conf, req, EthSigner::Local(key_pair), protocol).await
+}
+
+/// MetaMask-policy EVM activation (CRD §47.5.A). Builds an [`EthCoin`] whose
+/// signer delegates signing and broadcast to the connected browser MetaMask
+/// session (`EthSigner::Metamask`); the framework holds no local key. The
+/// coin's address is the connected account (CRD R47.5.3); the centrally-threaded
+/// `priv_key` is intentionally ignored under this policy.
+#[cfg(target_arch = "wasm32")]
+pub async fn eth_coin_from_conf_and_request_with_metamask(
+    ctx: &MmArc,
+    ticker: &str,
+    conf: &Json,
+    req: &Json,
+    metamask_arc: crypto::MetamaskArc,
+    protocol: CoinProtocol,
+) -> Result<EthCoin, String> {
+    eth_coin_from_conf_and_request_with_signer(ctx, ticker, conf, req, EthSigner::Metamask(metamask_arc), protocol)
+        .await
+}
+
+/// Shared EVM-coin builder body: identical for every signing policy except how
+/// the [`EthSigner`] is constructed and where the coin address comes from
+/// (`signer.address()`). The `Local` path is byte-identical to the prior
+/// `eth_coin_from_conf_and_request` behaviour.
+async fn eth_coin_from_conf_and_request_with_signer(
+    ctx: &MmArc,
+    ticker: &str,
+    conf: &Json,
+    req: &Json,
+    signer: EthSigner,
+    protocol: CoinProtocol,
+) -> Result<EthCoin, String> {
     // Defensive: TRON activates through a dedicated builder
     // (`tron::tron_coin_from_conf_and_request`); reject any attempt to route
     // TRX/TRC20 through the EVM legacy activator.
@@ -2874,8 +2993,7 @@ pub async fn eth_coin_from_conf_and_request(
         }
     }
 
-    let key_pair: KeyPair = try_s!(KeyPair::from_secret_slice(priv_key));
-    let my_address = key_pair.address();
+    let my_address = signer.address();
 
     let mut web3_instances = vec![];
     let event_handlers = rpc_event_handlers_for_eth_transport(ctx, ticker.to_string());
@@ -2946,7 +3064,7 @@ pub async fn eth_coin_from_conf_and_request(
         json::from_value(req["gas_station_policy"].clone()).unwrap_or_default();
 
     let coin = EthCoinImpl {
-        signer: EthSigner::Local(key_pair),
+        signer,
         my_address,
         coin_type,
         sign_message_prefix,

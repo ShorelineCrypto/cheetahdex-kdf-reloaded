@@ -246,10 +246,13 @@ JSON-RPC requests. The bound interop surface is:
 | `eth_sendTransaction` | sign **and broadcast** a transaction | the broadcast transaction hash |
 
 The connect-time login challenge (§47.1) is the only typed-data signature the
-framework relies on for session establishment; post-activation message signing
-(`personal_sign` / `eth_signTypedData_v4`) is available for the message-signing
-RPC but is over user-presented payloads, never an extractable transaction
-signature.
+framework relies on for session establishment. The wallet `personal_sign` /
+`eth_signTypedData_v4` methods are over user-presented payloads, never an
+extractable transaction signature. **Implementation note:** binding these to a
+post-activation message-signing RPC is **deferred** — the synchronous
+`MarketCoinOps::sign_message` trait cannot drive the asynchronous wallet call,
+so (as with WalletConnect) a dedicated async message-signing RPC path is
+required; see R47.5.11 and the deferral note below.
 
 R47.5.9 **Per-operation active-account consistency re-check.** Because the user
 can switch the active account inside the extension at any moment, before each
@@ -277,13 +280,13 @@ a single wallet-side sign-and-broadcast):
 | Balance query (platform + tokens) | yes | read-only, address only |
 | Address display (`my_address`) | yes | connected account (R47.5.14) |
 | Public-key display | yes | connected account public key (R47.5.14) |
-| Plain send / `withdraw` | yes | single `eth_sendTransaction` (R47.5.6) |
-| ERC-20 `approve` / allowance | yes | single `eth_sendTransaction` |
-| Message signing | yes | `personal_sign` / `eth_signTypedData_v4` (user-presented) |
+| `withdraw` (the user-facing send) | yes | single `eth_sendTransaction` (R47.5.6); already broadcast by the wallet, so no re-broadcastable `tx_hex` is returned (R47.5.7) |
+| Plain send / ERC-20 `approve` as standalone operations | n/a in reloaded | reloaded reaches these only through the swap path (no standalone non-swap RPC exposes them); under the non-swap MetaMask policy they are therefore not separately available, and `withdraw` is the user-facing broadcast op |
+| Message signing | deferred | requires a future async message-signing RPC: the synchronous `MarketCoinOps::sign_message` trait cannot drive the asynchronous wallet `personal_sign` / `eth_signTypedData_v4`, mirroring the WalletConnect async signing path |
 
 R47.5.12 **Atomic swaps are NOT supported under the MetaMask policy.** An EVM
-coin activated under MetaMask shall be treated as a non-swap (balance / send /
-approve / message-sign) account. Any attempt to use a MetaMask-policy EVM coin in
+coin activated under MetaMask shall be treated as a non-swap (balance / address /
+`withdraw`) account. Any attempt to use a MetaMask-policy EVM coin in
 an atomic swap (as maker or taker) shall be rejected as an unsupported-operation
 condition (§47.6) rather than silently producing an unusable swap.
 
@@ -394,8 +397,8 @@ mapping (the human-readable cause is not bound):
 
 | Condition | Surfacing channel | `error_type` | HTTP status |
 | --- | --- | --- | --- |
-| No active MetaMask session at activation (not connected) | `enable_eth_with_tokens` aggregated activation error | `Transport` | 502 |
-| Active-account mismatch at activation | `enable_eth_with_tokens` aggregated activation error | `Transport` | 502 |
+| No active MetaMask session at activation (not connected) | `enable_eth_with_tokens` aggregated activation error | `Transport` | 500 |
+| Active-account mismatch at activation | `enable_eth_with_tokens` aggregated activation error | `Transport` | 500 |
 | Per-operation active-account mismatch (R47.5.9) | the invoked operation's error envelope | account-mismatch / transport-class discriminant of that operation | 500 |
 | Unsupported operation under MetaMask -- atomic swap (R47.5.12), private-key export (R47.5.14), HD/derivation-path op (R47.5.15) | the invoked operation's error envelope | that operation's unsupported / not-supported discriminant | 400 |
 | MetaMask `priv_key_policy` requested on a native build | EVM activation rejects the value | invalid-policy / unsupported discriminant | 400 |
@@ -497,14 +500,16 @@ acknowledgement, and resets the crypto-context MetaMask session; an unknown
 A5. After a successful connect, `enable_eth_with_tokens` with
 `"priv_key_policy": { "type": "Metamask" }` activates the EVM platform coin whose
 signing account equals the connected MetaMask account; without a prior connect it
-fails with `Transport` (502).
+fails with `Transport` (500, the shared platform-coin activation-error status).
 
 A6. An EVM coin activated under the MetaMask policy performs balance / address /
-send / `withdraw` / token-`approve` / message-sign operations by delegating each
-transaction to the wallet via `eth_sendTransaction` (wallet signs **and**
-broadcasts, returns a tx hash) — never with a local secret, never producing a
-detached raw signature — and rejects any operation when the wallet's active
-account no longer matches the connected account.
+`withdraw` operations by delegating each transaction to the wallet via
+`eth_sendTransaction` (wallet signs **and** broadcasts, returns a tx hash) —
+never with a local secret, never producing a detached raw signature — and
+rejects any operation when the wallet's active account no longer matches the
+connected account. Standalone send / `approve` are swap-coupled in reloaded and
+not separately exposed under the non-swap policy; message signing is deferred to
+a future async RPC path (R47.5.11).
 
 A6b. An attempt to use a MetaMask-policy EVM coin in an atomic swap (maker or
 taker), to export its private key, or to perform an HD/derivation-path operation

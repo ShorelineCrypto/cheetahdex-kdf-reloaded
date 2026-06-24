@@ -14,6 +14,8 @@ use crate::erc20_token_activation::{Erc20ActivationRequest, Erc20Protocol};
 use crate::platform_coin_with_tokens::*;
 use crate::prelude::*;
 use async_trait::async_trait;
+#[cfg(target_arch = "wasm32")]
+use coins::eth::eth_coin_from_conf_and_request_with_metamask;
 use coins::eth::{eth_coin_from_conf_and_request, EthCoin};
 use coins::my_tx_history_v2::TxHistoryStorage;
 use coins::{CoinBalance, CoinProtocol, MarketCoinOps, MmCoin, UnexpectedDerivationMethod};
@@ -21,6 +23,7 @@ use common::executor::spawn;
 use common::log::info;
 use common::mm_number::BigDecimal;
 use common::Future01CompatExt;
+#[cfg(target_arch = "wasm32")] use crypto::CryptoCtx;
 use futures::future::{abortable, AbortHandle};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -61,10 +64,30 @@ pub struct EthWithTokensActivationRequest {
     required_confirmations: Option<u64>,
     #[serde(default)]
     tx_history: bool,
+    /// EVM signing policy (CRD R47.5.1). Defaults to `Iguana` (local secret).
+    #[serde(default)]
+    priv_key_policy: EthActivationPolicy,
 }
 
 impl TxHistory for EthWithTokensActivationRequest {
     fn tx_history(&self) -> bool { self.tx_history }
+}
+
+/// EVM activation signing policy (CRD R47.5.1 / R35.1.4), selected via the
+/// `priv_key_policy` request field as a tagged object (`{"type":"Iguana"}` /
+/// `{"type":"Metamask"}`). `Iguana` (the default) signs with the
+/// centrally-threaded local secret, exactly as before. `Metamask` delegates
+/// signing and broadcast to a connected browser MetaMask session and is defined
+/// **only on the WASM target** (CRD R47.7.1); on native builds the variant does
+/// not exist, so a `{"type":"Metamask"}` request fails deserialization and is
+/// rejected (CRD R47.7.2 / R47.6.7).
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(tag = "type")]
+pub enum EthActivationPolicy {
+    #[default]
+    Iguana,
+    #[cfg(target_arch = "wasm32")]
+    Metamask,
 }
 
 /// EVM platform protocol info resolved from coin configuration.
@@ -243,12 +266,53 @@ impl PlatformWithTokensActivationOps for EthCoin {
             chain_id: protocol_conf.chain_id,
         };
 
-        let platform_coin = eth_coin_from_conf_and_request(&ctx, &ticker, &platform_conf, &req, priv_key, protocol)
-            .await
-            .map_to_mm(|error| EthWithTokensActivationError::PlatformCoinCreationError {
-                ticker: ticker.clone(),
-                error,
-            })?;
+        // CRD R47.5.A -- resolve the signing policy. `Iguana` signs with the
+        // centrally-threaded local secret (unchanged); `Metamask` (WASM only)
+        // ignores `priv_key` and binds the coin to the connected MetaMask
+        // session.
+        let platform_coin = match activation_request.priv_key_policy {
+            EthActivationPolicy::Iguana => {
+                eth_coin_from_conf_and_request(&ctx, &ticker, &platform_conf, &req, priv_key, protocol)
+                    .await
+                    .map_to_mm(|error| EthWithTokensActivationError::PlatformCoinCreationError {
+                        ticker: ticker.clone(),
+                        error,
+                    })?
+            },
+            #[cfg(target_arch = "wasm32")]
+            EthActivationPolicy::Metamask => {
+                // CRD R47.5.2 -- a MetaMask session must already be connected
+                // (via task::connect_metamask::init); activation does not perform
+                // the handshake itself.
+                let crypto_ctx =
+                    CryptoCtx::from_ctx(&ctx).mm_err(|e| EthWithTokensActivationError::Internal(e.to_string()))?;
+                let metamask_arc = crypto_ctx.metamask_ctx().or_mm_err(|| {
+                    EthWithTokensActivationError::Transport(
+                        "MetaMask session is not initialized; call task::connect_metamask::init first".to_string(),
+                    )
+                })?;
+                // CRD R47.5.4 -- bind only the account the connected session
+                // authenticated; reject if the wallet's active account drifted
+                // before broadcasting any activation-bound address.
+                metamask_arc
+                    .check_active_eth_account()
+                    .await
+                    .mm_err(|e| EthWithTokensActivationError::Transport(e.to_string()))?;
+                eth_coin_from_conf_and_request_with_metamask(
+                    &ctx,
+                    &ticker,
+                    &platform_conf,
+                    &req,
+                    metamask_arc,
+                    protocol,
+                )
+                .await
+                .map_to_mm(|error| EthWithTokensActivationError::PlatformCoinCreationError {
+                    ticker: ticker.clone(),
+                    error,
+                })?
+            },
+        };
         Ok(platform_coin)
     }
 

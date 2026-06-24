@@ -309,27 +309,39 @@ impl EthSigner {
 /// Error returned by [`EthCoinImpl`] signing entrypoints when the active EVM
 /// signing policy cannot satisfy the request (CRD §47.5). Constructed only on
 /// the WASM target, where the MetaMask policy exists.
-#[derive(Debug)]
+///
+/// `Debug` delegates to `Display` so the bound condition text surfaces verbatim
+/// through the `try_tx_s!`/`{:?}` swap error path (CRD R47.6.7).
 pub enum EthSignerError {
-    /// Delegated MetaMask sign-and-broadcast is not yet wired. Placeholder for
-    /// the structural seam; the real `eth_sendTransaction` path (CRD R47.5.6)
-    /// is wired in a later step.
-    MetamaskSendNotWired,
+    /// Atomic-swap / HTLC sign-and-broadcast is unsupported under the MetaMask
+    /// signing policy. A MetaMask-policy EVM coin is a non-swap account: the
+    /// wallet only signs transactions it immediately broadcasts itself, so the
+    /// framework cannot produce the framework-scheduled HTLC payment / spend /
+    /// refund broadcasts a swap requires (CRD R47.5.12 / R47.5.13). Reached only
+    /// via the swap/HTLC send path (`sign_and_send_transaction_impl`); the
+    /// user-facing `withdraw` delegated-broadcast path is handled separately in
+    /// `withdraw_impl` via `eth_sendTransaction` (CRD R47.5.6).
+    SwapSendUnsupported,
     /// Offline raw-transaction signing is unavailable under MetaMask: the
     /// wallet never yields a detached, re-broadcastable signed raw transaction
     /// (CRD R47.5.7 / R47.5.12).
     OfflineSigningUnsupported,
 }
 
+impl std::fmt::Debug for EthSignerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { std::fmt::Display::fmt(self, f) }
+}
+
 impl std::fmt::Display for EthSignerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EthSignerError::MetamaskSendNotWired => {
-                f.write_str("MetaMask delegated sign-and-broadcast is not yet available")
-            },
-            EthSignerError::OfflineSigningUnsupported => {
-                f.write_str("Offline raw transaction signing is unsupported under the MetaMask signing policy")
-            },
+            EthSignerError::SwapSendUnsupported => f.write_str(
+                "Atomic swaps are unsupported under the MetaMask signing policy (CRD R47.5.12): a \
+                 MetaMask-policy EVM coin is a non-swap account",
+            ),
+            EthSignerError::OfflineSigningUnsupported => f.write_str(
+                "Offline raw transaction signing is unsupported under the MetaMask signing policy (CRD R47.5.7)",
+            ),
         }
     }
 }
