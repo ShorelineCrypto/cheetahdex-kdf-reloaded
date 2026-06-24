@@ -120,3 +120,23 @@ fn preexisting_namespaces_remain_routed() {
         "classic_swap_tokens",
     ]);
 }
+
+#[test]
+fn evm_v2_flat_methods_are_routed() {
+    // EVM (Ethereum) V2 activation & token RPC surface (CRD ch. 35). These are
+    // flat (un-namespaced) mmrpc-2.0 methods routed on all targets, including
+    // WASM, so they must appear in the main dispatcher match (not the
+    // native-only block).
+    for method in [
+        "enable_eth_with_tokens",
+        "enable_erc20",
+        "get_token_info",
+        "get_swap_gas_fee_policy",
+        "set_swap_gas_fee_policy",
+    ] {
+        assert!(
+            DISPATCHER_SOURCE.contains(&format!("\"{method}\"")),
+            "v2 dispatcher lost routing for the flat EVM method `{method}`"
+        );
+    }
+}

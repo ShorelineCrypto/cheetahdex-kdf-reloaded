@@ -136,7 +136,8 @@ pub trait GetPlatformBalance {
     fn get_platform_balance(&self) -> BigDecimal;
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait PlatformWithTokensActivationOps: Into<MmCoinEnum> {
     type ActivationRequest: Clone + Send + Sync + TxHistory;
     type PlatformProtocolInfo: TryFromCoinProtocol;
@@ -180,6 +181,8 @@ pub enum EnablePlatformCoinWithTokensError {
     PlatformIsAlreadyActivated(String),
     #[display(fmt = "Platform {} config is not found", _0)]
     PlatformConfigIsNotFound(String),
+    #[display(fmt = "Activation request must contain at least one node")]
+    AtLeastOneNodeRequired,
     #[display(fmt = "Platform coin {} protocol parsing failed: {}", ticker, error)]
     CoinProtocolParseError {
         ticker: String,
@@ -263,6 +266,7 @@ impl HttpStatusCode for EnablePlatformCoinWithTokensError {
             | EnablePlatformCoinWithTokensError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             EnablePlatformCoinWithTokensError::PlatformIsAlreadyActivated(_)
             | EnablePlatformCoinWithTokensError::PlatformConfigIsNotFound(_)
+            | EnablePlatformCoinWithTokensError::AtLeastOneNodeRequired
             | EnablePlatformCoinWithTokensError::TokenConfigIsNotFound(_)
             | EnablePlatformCoinWithTokensError::UnexpectedPlatformProtocol { .. }
             | EnablePlatformCoinWithTokensError::UnexpectedTokenProtocol { .. } => StatusCode::BAD_REQUEST,

@@ -17,6 +17,7 @@ use crate::{mm2::lp_stats::{add_node_to_version_stat, remove_node_from_version_s
             mm2::lp_swap::{get_locked_amount_rpc, max_maker_vol, recreate_swap_data, trade_preimage_rpc},
             mm2::rpc::lp_commands::{get_public_key, get_public_key_hash, peer_connection_healthcheck}};
 use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
+use coins::eth::EthCoin;
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
 // `coins::nft::rpc` and the `withdraw_nft` handler are native-only:
@@ -33,11 +34,13 @@ use coins::rpc_command::get_current_mtp::get_current_mtp_rpc;
 use coins::rpc_command::get_enabled_coins::get_enabled_coins_rpc;
 use coins::rpc_command::get_my_address::get_my_address_rpc;
 use coins::rpc_command::get_private_keys::get_private_keys;
+use coins::rpc_command::get_token_info::get_token_info;
 use coins::rpc_command::init_account_balance::{init_account_balance, init_account_balance_status};
 use coins::rpc_command::init_create_account::{init_create_new_account, init_create_new_account_status,
                                               init_create_new_account_user_action};
 use coins::rpc_command::init_scan_for_new_addresses::{init_scan_for_new_addresses, init_scan_for_new_addresses_status};
 use coins::rpc_command::init_withdraw::{init_withdraw, withdraw_status, withdraw_user_action};
+use coins::rpc_command::swap_gas_fee_policy::{get_swap_gas_fee_policy, set_swap_gas_fee_policy};
 use coins::rpc_command::token_allowance::{approve_token, get_token_allowance};
 use coins::utxo::bch::BchCoin;
 use coins::utxo::qtum::QtumCoin;
@@ -202,6 +205,8 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "best_orders" => handle_mmrpc(ctx, request, best_orders_rpc_v2).await,
         "consolidate_utxos" => handle_mmrpc(ctx, request, consolidate_utxos_rpc).await,
         "enable_bch_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<BchCoin>).await,
+        "enable_erc20" => handle_mmrpc(ctx, request, enable_token::<EthCoin>).await,
+        "enable_eth_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<EthCoin>).await,
         "enable_slp" => handle_mmrpc(ctx, request, enable_token::<SlpToken>).await,
         "fetch_utxos" => handle_mmrpc(ctx, request, fetch_utxos_rpc).await,
         "get_current_mtp" => handle_mmrpc(ctx, request, get_current_mtp_rpc).await,
@@ -215,7 +220,9 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "get_raw_transaction" => handle_mmrpc(ctx, request, get_raw_transaction).await,
         "get_shared_db_id" => handle_mmrpc(ctx, request, get_shared_db_id).await,
         "get_staking_infos" => handle_mmrpc(ctx, request, get_staking_infos).await,
+        "get_swap_gas_fee_policy" => handle_mmrpc(ctx, request, get_swap_gas_fee_policy).await,
         "get_token_allowance" => handle_mmrpc(ctx, request, get_token_allowance).await,
+        "get_token_info" => handle_mmrpc(ctx, request, get_token_info).await,
         "sign_raw_transaction" => handle_mmrpc(ctx, request, sign_raw_transaction).await,
         "get_locked_amount" => handle_mmrpc(ctx, request, get_locked_amount_rpc).await,
         "init_account_balance" => handle_mmrpc(ctx, request, init_account_balance).await,
@@ -247,6 +254,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "remove_delegation" => handle_mmrpc(ctx, request, remove_delegation).await,
         "remove_node_from_version_stat" => handle_mmrpc(ctx, request, remove_node_from_version_stat).await,
         "send_asked_data" => handle_mmrpc(ctx, request, send_asked_data).await,
+        "set_swap_gas_fee_policy" => handle_mmrpc(ctx, request, set_swap_gas_fee_policy).await,
         "sign_message" => handle_mmrpc(ctx, request, sign_message).await,
         "start_simple_market_maker_bot" => handle_mmrpc(ctx, request, start_simple_market_maker_bot).await,
         "start_version_stat_collection" => handle_mmrpc(ctx, request, start_version_stat_collection).await,

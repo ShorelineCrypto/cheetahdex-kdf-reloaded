@@ -57,6 +57,8 @@ async fn test_send() {
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
         tron_api: None,
         nft_swap_v2_contract: None,
+        swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
+        erc20_tokens_infos: Default::default(),
     }));
     let tx = coin
         .send_maker_payment(

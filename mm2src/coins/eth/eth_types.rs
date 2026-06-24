@@ -218,6 +218,29 @@ pub enum EthCoinType {
     Trc20 { platform: String, token_addr: Address },
 }
 
+/// Per-coin swap gas-fee policy (CRD R35.6.3). Governs how the EVM coin prices
+/// gas for subsequent swap transactions: `Legacy` selects pre-EIP-1559
+/// single gas-price pricing (the default); `Low`/`Medium`/`High` select an
+/// EIP-1559 max-fee / max-priority-fee tier.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub enum SwapGasFeePolicy {
+    #[default]
+    Legacy,
+    Low,
+    Medium,
+    High,
+}
+
+/// Lightweight registration record for an ERC-20 token activated on top of an
+/// EVM platform coin. Stored on the platform [`EthCoinImpl`] so the V2
+/// platform-with-tokens activation result can report per-token balances
+/// (CRD §35.1.3). Mirrors `solana::SplTokenInfo`.
+#[derive(Clone, Copy, Debug)]
+pub struct Erc20TokenInfo {
+    pub token_addr: Address,
+    pub decimals: u8,
+}
+
 /// pImpl idiom.
 #[derive(Debug)]
 pub struct EthCoinImpl {
@@ -258,6 +281,13 @@ pub struct EthCoinImpl {
     /// the chain has an NFT HTLC contract deployed; `None` disables
     /// NFT swap paths for this coin (P10.3.7.b).
     pub(crate) nft_swap_v2_contract: Option<Address>,
+    /// Per-coin swap gas-fee policy (CRD R35.6). Mutable at runtime via
+    /// `set_swap_gas_fee_policy`; defaults to [`SwapGasFeePolicy::Legacy`].
+    pub(crate) swap_gas_fee_policy: Mutex<SwapGasFeePolicy>,
+    /// ERC-20 tokens activated on top of this platform coin, keyed by ticker.
+    /// Populated during V2 platform-with-tokens activation so the activation
+    /// result can report per-token balances (CRD §35.1.3).
+    pub(crate) erc20_tokens_infos: Arc<Mutex<std::collections::HashMap<String, Erc20TokenInfo>>>,
 }
 
 // ─── V2 swap types ──────────────────────────────────────────────────────────
