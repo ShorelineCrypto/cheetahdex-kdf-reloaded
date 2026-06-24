@@ -19,14 +19,14 @@
 //!
 //! [`enable_platform_coin_with_tokens`] is `async_trait(?Send)` on `wasm32`
 //! (its trait methods return non-`Send` boxed futures so EVM/Tendermint
-//! activation can hold browser-bound, non-`Send` state across `await`).
-//! [`RpcTask::run`] requires a `Send` future (the `RpcTaskManager` spawns onto
-//! `common::executor::spawn`, whose bound is `Future + Send + 'static` even on
-//! wasm). Wrapping the `?Send` one-shot routine inside a `Send` task therefore
-//! does not compile on `wasm32`, so this whole module is native-gated. The wasm
-//! task variant is deferred until the one-shot platform activation can be driven
-//! through a `Send`-compatible path. See the chapter-48 report for the exact
-//! blocker.
+//! activation can hold browser-bound, non-`Send` state across `await`). To wrap
+//! that `?Send` one-shot routine inside an [`RpcTask`], the `rpc_task` framework
+//! relaxes [`RpcTask::run`]'s async-trait boxing to `?Send` on `wasm32` (it is
+//! `Send` on native); the `RpcTaskManager` then spawns the task onto
+//! `common::executor::spawn`, whose `wasm32` variant accepts a non-`Send`
+//! future. This module is therefore cross-platform: `task::enable_eth::*` and
+//! `task::enable_tendermint::*` are routed on both native and wasm, with
+//! byte-identical `init` params and success results.
 
 use crate::context::CoinsActivationContext;
 use crate::platform_coin_with_tokens::{enable_platform_coin_with_tokens, EnablePlatformCoinWithTokensError,
@@ -100,7 +100,8 @@ where
     type UserAction = ();
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl<Platform> RpcTask for InitPlatformCoinWithTokensTask<Platform>
 where
     Platform: PlatformWithTokensActivationOps + Send + Sync + 'static,

@@ -387,15 +387,9 @@ impl PlatformWithTokensActivationOps for EthCoin {
 }
 
 /// Per-coin task registry for the EVM `task::enable_eth::*` family (CRD ch. 48).
-///
-/// Native-only: the platform-coin task framework wraps the `?Send`-on-wasm
-/// one-shot activation inside a `Send` `RpcTask`, which does not compile on
-/// wasm32 (see `init_platform_coin_with_tokens` module docs).
-#[cfg(not(target_arch = "wasm32"))]
 pub type EthTaskManagerShared =
     crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensTaskManagerShared<EthCoin>;
 
-#[cfg(not(target_arch = "wasm32"))]
 impl crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensActivationOps for EthCoin {
     fn rpc_task_manager(activation_ctx: &crate::context::CoinsActivationContext) -> &EthTaskManagerShared {
         &activation_ctx.init_eth_task_manager

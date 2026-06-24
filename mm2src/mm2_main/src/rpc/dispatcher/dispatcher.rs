@@ -53,7 +53,6 @@ use coins::utxo::utxo_standard::UtxoStandardCoin;
 use coins::{add_delegation, claim_staking_rewards, delegations_info, get_raw_transaction, get_staking_infos,
             ongoing_undelegations_info, remove_delegation, sign_message, sign_raw_transaction, validators_info,
             verify_message, withdraw};
-#[cfg(not(target_arch = "wasm32"))]
 use coins_activation::{cancel_init_platform_coin_with_tokens, init_platform_coin_with_tokens,
                        init_platform_coin_with_tokens_status, init_platform_coin_with_tokens_user_action};
 use coins_activation::{cancel_init_standalone_coin, cancel_l2_activation, enable_l2, enable_platform_coin_with_tokens,
@@ -426,6 +425,34 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "enable_sia::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<SiaCoin>).await,
         "enable_sia::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<SiaCoin>).await,
         "enable_sia::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<SiaCoin>).await,
+        // EVM platform activation task family (CRD ch. 35 §35.3 / ch. 48).
+        // Mirrors `enable_eth_with_tokens`' params and result; cross-platform
+        // (the platform-coin task framework wraps the one-shot activation, which
+        // the `rpc_task` `?Send`-on-wasm relaxation makes spawnable on wasm too).
+        "enable_eth::init" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens::<EthCoin>).await,
+        "enable_eth::status" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens_status::<EthCoin>).await,
+        "enable_eth::user_action" => {
+            handle_mmrpc(ctx, request, init_platform_coin_with_tokens_user_action::<EthCoin>).await
+        },
+        "enable_eth::cancel" => handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<EthCoin>).await,
+        // Tendermint platform activation task family (CRD ch. 36 §36.6 / ch. 48).
+        // Mirrors `enable_tendermint_with_assets`' params and result;
+        // cross-platform for the same reason as `enable_eth::*`.
+        "enable_tendermint::init" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens::<TendermintCoin>).await,
+        "enable_tendermint::status" => {
+            handle_mmrpc(ctx, request, init_platform_coin_with_tokens_status::<TendermintCoin>).await
+        },
+        "enable_tendermint::user_action" => {
+            handle_mmrpc(
+                ctx,
+                request,
+                init_platform_coin_with_tokens_user_action::<TendermintCoin>,
+            )
+            .await
+        },
+        "enable_tendermint::cancel" => {
+            handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<TendermintCoin>).await
+        },
         "init_trezor::init" => handle_mmrpc(ctx, request, init_trezor).await,
         "init_trezor::status" => handle_mmrpc(ctx, request, init_trezor_status).await,
         "init_trezor::user_action" => handle_mmrpc(ctx, request, init_trezor_user_action).await,
@@ -450,36 +477,6 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "connect_metamask::cancel" => handle_mmrpc(ctx, request, connect_metamask_cancel).await,
         #[cfg(not(target_arch = "wasm32"))]
         native_only_task => match native_only_task {
-            // EVM platform activation task family (CRD ch. 35 §35.3 / ch. 48).
-            // Mirrors `enable_eth_with_tokens`' params and result; native-only
-            // because the platform-coin task framework wraps the `?Send`-on-wasm
-            // one-shot activation inside a `Send` `RpcTask` (see ch. 48 report).
-            "enable_eth::init" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens::<EthCoin>).await,
-            "enable_eth::status" => handle_mmrpc(ctx, request, init_platform_coin_with_tokens_status::<EthCoin>).await,
-            "enable_eth::user_action" => {
-                handle_mmrpc(ctx, request, init_platform_coin_with_tokens_user_action::<EthCoin>).await
-            },
-            "enable_eth::cancel" => handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<EthCoin>).await,
-            // Tendermint platform activation task family (CRD ch. 36 §36.6 /
-            // ch. 48). Mirrors `enable_tendermint_with_assets`' params and
-            // result; native-only for the same reason as `enable_eth::*`.
-            "enable_tendermint::init" => {
-                handle_mmrpc(ctx, request, init_platform_coin_with_tokens::<TendermintCoin>).await
-            },
-            "enable_tendermint::status" => {
-                handle_mmrpc(ctx, request, init_platform_coin_with_tokens_status::<TendermintCoin>).await
-            },
-            "enable_tendermint::user_action" => {
-                handle_mmrpc(
-                    ctx,
-                    request,
-                    init_platform_coin_with_tokens_user_action::<TendermintCoin>,
-                )
-                .await
-            },
-            "enable_tendermint::cancel" => {
-                handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<TendermintCoin>).await
-            },
             "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
             "enable_z_coin::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
             "enable_z_coin::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,

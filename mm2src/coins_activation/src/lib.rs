@@ -4,7 +4,6 @@ mod bch_with_tokens_activation;
 mod context;
 mod erc20_token_activation;
 mod eth_with_tokens_activation;
-#[cfg(not(target_arch = "wasm32"))]
 mod init_platform_coin_with_tokens;
 mod l2;
 #[cfg(not(target_arch = "wasm32"))] mod lightning_activation;
@@ -22,7 +21,6 @@ mod token;
 mod utxo_activation;
 #[cfg(not(target_arch = "wasm32"))] mod z_coin_activation;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use init_platform_coin_with_tokens::{cancel_init_platform_coin_with_tokens, init_platform_coin_with_tokens,
                                          init_platform_coin_with_tokens_status,
                                          init_platform_coin_with_tokens_user_action};
