@@ -78,6 +78,7 @@ cfg_native! {
         remove_trusted_node, send_payment, LightningCoin};
     use coins::{SolanaCoin, SplToken};
     use coins::z_coin::ZCoin;
+    use coins::my_tx_history_v2::z_coin_tx_history_rpc;
     use crate::mm2::lp_wallet::{change_mnemonic_password_rpc, create_wallet_rpc, delete_wallet_rpc, get_mnemonic_rpc, get_wallet_names_rpc};
     use crate::mm2::rpc::trezor::trezor_connection_status_rpc;
 }
@@ -310,6 +311,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             "init_z_coin" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
             "init_z_coin_status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
             "init_z_coin_user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
+            "z_coin_tx_history" => handle_mmrpc(ctx, request, z_coin_tx_history_rpc).await,
             "list_closed_channels_by_filter" => handle_mmrpc(ctx, request, list_closed_channels_by_filter).await,
             "list_open_channels_by_filter" => handle_mmrpc(ctx, request, list_open_channels_by_filter).await,
             "list_payments_by_filter" => handle_mmrpc(ctx, request, list_payments_by_filter).await,

@@ -197,3 +197,15 @@ fn tendermint_v2_flat_methods_are_routed() {
         );
     }
 }
+
+#[test]
+fn z_coin_tx_history_method_is_routed() {
+    // Shielded-coin transaction-history method (CRD ch. 39 §39.8). It is
+    // native-only, so the dispatcher arm lives in the `#[cfg(not(wasm))]`
+    // native-only block; this guard reads `dispatcher.rs` as text so the method
+    // string is asserted on every target.
+    assert!(
+        DISPATCHER_SOURCE.contains("\"z_coin_tx_history\""),
+        "v2 dispatcher lost routing for the native-only method `z_coin_tx_history`"
+    );
+}
