@@ -61,10 +61,10 @@ generic activators drive Tendermint activation.
 Tendermint activation is available on **all targets, including WASM**.
 
 A long-running, **task-based** activation variant
-(`task::enable_tendermint::{init,status,user_action,cancel}`) exists in the
-published KDF surface but is a **forward requirement blocked on shared
-substrate**; it is recorded in §36.6 and is explicitly **not** specified as
-implementable in this chapter.
+(`task::enable_tendermint::{init,status,user_action,cancel}`) is also part of the
+published KDF surface; it is specified in §36.6 and is delivered by the shared
+platform-coin task-activation framework of ch. 48 (which wraps the one-shot
+activation of this chapter as its unit of work).
 
 ---
 
@@ -274,7 +274,7 @@ choice.
 
 ---
 
-## 36.6 Forward requirement -- task-based activation (blocked on shared substrate)
+## 36.6 Task-based activation (delivered via ch. 48 substrate)
 
 R36.6.1 The published KDF surface also exposes a long-running, task-based
 Tendermint platform-activation family
@@ -283,20 +283,19 @@ init/status/user_action/cancel pattern as the other `task::enable_*` families.
 This variant is the intended path for activation policies that need interactive
 user actions (e.g. hardware-backed signing).
 
-R36.6.2 This task variant is a **forward requirement** and is **not specified as
-implementable in this chapter**. It depends on a **platform-coin task-activation
-framework** that reloaded does not yet provide: reloaded currently supplies only
-the standalone-coin and l2 task-activation families, not a platform-with-tokens
-task family. This is the **same blocker** recorded for the EVM `task::enable_eth`
-family (ch. 35 §35.3): both are blocked on the shared platform-coin
-task-activation substrate.
+R36.6.2 This task variant is delivered by the **shared platform-coin
+task-activation framework of ch. 48** -- the third sibling alongside the
+standalone-coin and l2 task substrates. The framework wraps the one-shot
+activation of §36.1 as its unit of work; the same dependency was recorded for the
+EVM `task::enable_eth` family (ch. 35 §35.3), and ch. 48 unblocks both.
 
-R36.6.3 When that shared substrate is added, `task::enable_tendermint::init` shall
-accept the same activation parameters as `enable_tendermint_with_assets` (§36.1)
-and ultimately yield the same success result shape (R36.1.5), with `status`
-surfacing in-progress states and `user_action` supplying interactive
-confirmations. Until then, implementers shall not stub this family; the one-shot
-`enable_tendermint_with_assets` of §36.1 is the supported activation path.
+R36.6.3 `task::enable_tendermint::init` shall accept the same activation
+parameters as `enable_tendermint_with_assets` (§36.1) and ultimately yield the
+same success result shape (R36.1.5), with `status` surfacing in-progress states
+and `user_action` supplying interactive confirmations, per ch. 48 §§48.1--48.3.
+The family shall not be stubbed: it performs the real one-shot activation as its
+unit of work, so the one-shot `enable_tendermint_with_assets` of §36.1 and the
+task variant share a single activation path.
 
 ---
 
@@ -320,6 +319,6 @@ confirmations. Until then, implementers shall not stub this family; the one-shot
 - The token-protocol descriptor resolves `platform`, `decimals`, and `denom` from
   coin configuration, accepting both bank and IBC (`ibc/<HASH>`) denoms (R36.3).
 - Both method strings are routed and build on native **and** WASM targets (R36.5).
-- The task-based `task::enable_tendermint::*` family is recorded as a forward
-  requirement blocked on the shared platform-coin task-activation substrate and is
-  **not** implemented or stubbed in this port (R36.6).
+- The task-based `task::enable_tendermint::*` family is delivered via the shared
+  platform-coin task-activation framework of ch. 48, wrapping the one-shot
+  activation of §36.1 as its unit of work (R36.6).
