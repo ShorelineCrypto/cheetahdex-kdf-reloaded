@@ -22,6 +22,7 @@ use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::eth::EthCoin;
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
+use coins::nft::activation::enable_nft;
 // `coins::nft::rpc` and the `withdraw_nft` handler are native-only:
 // `coins/nft/mod.rs` gates `pub mod rpc;` and `pub mod withdraw;` behind
 // `#[cfg(not(target_arch = "wasm32"))]`. The matching dispatcher arms
@@ -219,6 +220,7 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "enable_bch_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<BchCoin>).await,
         "enable_erc20" => handle_mmrpc(ctx, request, enable_token::<EthCoin>).await,
         "enable_eth_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<EthCoin>).await,
+        "enable_nft" => handle_mmrpc(ctx, request, enable_nft).await,
         "enable_sia" => handle_mmrpc(ctx, request, init_standalone_coin::<SiaCoin>).await,
         "enable_slp" => handle_mmrpc(ctx, request, enable_token::<SlpToken>).await,
         "enable_tendermint_token" => handle_mmrpc(ctx, request, enable_token::<TendermintToken>).await,

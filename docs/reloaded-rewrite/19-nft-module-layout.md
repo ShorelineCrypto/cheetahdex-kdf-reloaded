@@ -3,11 +3,12 @@
 **Status:** driving-spec
 
 > **One-sentence claim:** the project provides an in-tree NFT
-> subsystem that covers five EVM chains, exposes seven JSON-RPC
-> methods (inventory, metadata, transfer history, withdrawal,
-> wipe), embeds no third-party indexer hostnames, and abstracts
-> both its outbound HTTP surface and its on-device storage
-> behind narrow traits with native and browser implementations.
+> subsystem that covers five EVM chains, exposes eight JSON-RPC
+> methods (activation, inventory, metadata, transfer history,
+> withdrawal, wipe), embeds no third-party indexer hostnames,
+> and abstracts both its outbound HTTP surface and its on-device
+> storage behind narrow traits with native and browser
+> implementations.
 
 ## 19.0 Executive Summary
 
@@ -56,7 +57,7 @@ The subsystem is grouped into the following functional regions:
 | Providers -- crawl      | Trait + HTTP implementation                     |
 | Providers -- metadata   | Trait + HTTP implementation                     |
 | Providers -- spam       | Caller-supplied domain-list filtering           |
-| RPC handlers            | Seven JSON-RPC entry points (native; selected   |
+| RPC handlers            | Eight JSON-RPC entry points (native; selected   |
 |                         | are stubbed on the browser target)              |
 | Withdraw                | ERC-721 / ERC-1155 calldata encoding & signing  |
 
@@ -265,12 +266,17 @@ client-side filtering and display masking.
 
 ## 19.6 RPC Wire Surface
 
-The subsystem registers seven JSON-RPC methods in the public
-dispatcher. The native target supports all seven; the browser
-target supports five (with two stubbed as not-yet-supported).
+The subsystem registers eight JSON-RPC methods in the public
+dispatcher. Seven (§19.6.1 onward) are the operational methods;
+the eighth (`enable_nft`, §19.6.2) is the activation entry
+point. The native target supports all eight; the browser target
+supports six (with `update_nft` stubbed and `withdraw_nft`
+unsupported, and with `enable_nft` registering the context but
+not performing an initial crawl -- see D1).
 
 | Method                  | Native | Browser | Returns                  |
 |-------------------------|--------|---------|--------------------------|
+| `enable_nft`            | yes    | yes\*   | Owned-NFT snapshot       |
 | `get_nft_list`          | yes    | yes     | Paginated inventory list |
 | `get_nft_metadata`      | yes    | yes     | Single inventory entry   |
 | `get_nft_transfers`     | yes    | yes     | Paginated transfer list  |
@@ -279,7 +285,11 @@ target supports five (with two stubbed as not-yet-supported).
 | `update_nft`            | yes    | stub    | empty success (crawl)    |
 | `withdraw_nft`          | yes    | -       | Transaction details      |
 
-Request payloads:
+\* On the browser target `enable_nft` registers the NFT context
+but performs no initial crawl, returning an empty snapshot,
+pending the browser-crawl harness named in D1.
+
+Request payloads (operational methods):
 
 - `get_nft_list` -- chains, max-flag, page size, page number,
   spam-protection flag, optional filters.
@@ -303,6 +313,167 @@ Request payloads:
 
 The withdraw request is the only payload whose shape varies per
 token standard.
+
+### 19.6.1 Operational vs Activation Methods
+
+The seven methods above operate on an NFT subsystem that is
+*already active* for a platform coin. They neither create nor
+tear down the per-context NFT state; they read, refresh, wipe,
+or withdraw against it. Of these, `update_nft` carries the
+crawl-provider base URL and is the method that drives a full
+re-crawl of inventory and transfer history for the requested
+chains.
+
+`enable_nft` (§19.6.2) is distinct: it is the **activation**
+entry point that brings the NFT subsystem into existence for a
+platform coin and performs the initial inventory fetch. It is
+the method the Komodo DeFi SDK and SDK-derived GUIs invoke when
+a user turns NFT support on for an EVM platform coin; its
+absence surfaces to those clients as an NFT-activation runtime
+failure.
+
+### 19.6.2 Bound `enable_nft` Activation
+
+`enable_nft` is a **dictated-interop** method: its wire name,
+envelope, request field shape, and response field shape are
+fixed by the Komodo DeFi SDK / GUI clients that call it, and the
+subsystem must honour that contract verbatim for those clients
+to activate NFT support.
+
+**Envelope and dispatch surface.** `enable_nft` is an
+**mmrpc 2.0** method (the structured request/response envelope
+with top-level `mmrpc`, `method`, `params`, and `id` fields). It
+is routed on the version-2 dispatch surface alongside the other
+token-activation methods (it shares the generic ERC-family
+token-activation entry point, the same one that backs
+`enable_erc20`). It is **not** platform-gated: it is registered
+for all targets (native and browser). On the browser target the
+context is registered but the initial crawl is subject to the
+browser-crawl deferral (D1), so the returned snapshot is empty
+there until that harness lands.
+
+**Request shape.** The `params` object is the standard
+token-activation envelope specialised for the NFT protocol:
+
+| Field               | Type                       | Req? | Notes                                                       |
+|---------------------|----------------------------|------|------------------------------------------------------------|
+| `ticker`            | string                     | yes  | The configured NFT pseudo-coin ticker whose coin-config protocol entry is of NFT type bound to an EVM platform. |
+| `protocol`          | object (coin-protocol)     | no   | Optional inline protocol descriptor for a custom (non-config) NFT entry; of NFT type carrying the platform-coin ticker. When omitted the protocol is resolved from the coin config keyed by `ticker`. |
+| `activation_params` | object                     | yes  | NFT activation parameters (below).                          |
+
+`activation_params` carries a single required member:
+
+| Field      | Type                       | Req? | Notes                                                   |
+|------------|----------------------------|------|---------------------------------------------------------|
+| `provider` | object (tagged union)      | yes  | The indexer provider descriptor (below).                |
+
+`provider` is a tagged union with an externally-tagged shape:
+a `type` discriminant string selecting the provider variant and
+an `info` object carrying that variant's configuration. The
+single variant in scope carries:
+
+| `info` field   | Type    | Req? | Default | Notes                                                                                   |
+|----------------|---------|------|---------|-----------------------------------------------------------------------------------------|
+| `url`          | string (URL) | yes | --    | Caller-supplied indexer base URL used for the initial inventory crawl. Consistent with R1: no default or embedded value -- the caller supplies it at RPC time. |
+| `komodo_proxy` | boolean | no   | `false` | Signed-proxy flag (the same reserved per-provider signed-proxy flag described in §19.5 / D4). |
+
+The exact `type` discriminant literal that SDK/GUI clients emit
+is a fixed wire constant dictated by those clients; it is
+recoverable from the public Komodo DeFi SDK API documentation
+for `enable_nft` and is not restated here (see the divergence
+note below on its vendor-name nature).
+
+There is **no** chain field in the request: the platform/ticker
+in `ticker` (and its resolved NFT protocol) identifies the
+single EVM chain whose NFT support is being activated.
+
+**Response shape.** On success the method returns an object with
+two members:
+
+| Field          | Type                         | Notes                                                                 |
+|----------------|------------------------------|-----------------------------------------------------------------------|
+| `nfts`         | object (map)                 | A map keyed by per-token identifier string; each value is an owned-NFT entry (below). Reflects the inventory observed during the initial crawl. |
+| `platform_coin`| string                       | The platform-coin ticker the NFT subsystem was activated under.        |
+
+Each owned-NFT entry carries the public fields:
+
+| Field           | Type           | Notes                                                            |
+|-----------------|----------------|-----------------------------------------------------------------|
+| `token_address` | string (address) | The NFT contract address.                                     |
+| `token_id`      | string         | The token id, serialised as a decimal string.                   |
+| `chain`         | string         | The chain discriminant (the §19.3 upper-case chain values).     |
+| `contract_type` | string         | The token-standard discriminant (ERC-721 / ERC-1155).           |
+| `amount`        | string (decimal) | Owned quantity; meaningful for ERC-1155 multi-supply tokens.  |
+
+**Behavioural contract.**
+
+1. The platform coin named by the resolved NFT protocol (one of
+   the five EVM platform coins of §19.3) **must already be
+   activated**. If it is not, activation fails with a
+   platform-coin-not-activated outcome.
+2. The NFT subsystem must not already be active for that ticker.
+   A second `enable_nft` for an already-active NFT ticker fails
+   with an already-activated outcome.
+3. On success the method registers the per-context NFT state
+   under the platform coin (the `nft_ctx` sub-context slot of
+   §19.2 / Chapter 31), seeds it, and performs an **initial
+   inventory crawl** against the caller-supplied `url`,
+   populating the owned-NFT snapshot returned in `nfts`.
+4. The method is the activation counterpart to `update_nft`:
+   `enable_nft` brings the subsystem into existence and performs
+   the first inventory fetch; `update_nft` performs subsequent
+   full re-crawls (inventory plus transfer history) against a
+   caller-supplied crawl-provider URL once the subsystem is
+   active. A client that has called `enable_nft` does not need a
+   separate `update_nft` to obtain the initial inventory.
+
+**Error conditions (functional).** The implementer maps these
+onto the chapter's activation error type; the wire surface
+distinguishes at least:
+
+- Platform coin for the requested NFT not activated
+  (client-input error).
+- NFT already activated for the requested ticker
+  (client-input error).
+- NFT ticker has no coin-config entry, or the resolved protocol
+  is not an NFT protocol (client-input / configuration error).
+- The resolved platform coin is not an EVM platform coin
+  (unsupported-platform error).
+- Caller-supplied provider URL invalid or the initial crawl
+  fails to reach the indexer (transport / invalid-payload
+  error).
+- The NFT protocol's declared platform does not match the
+  resolved platform coin (internal consistency error).
+
+> **Upstream divergence (informative).**
+>
+> 1. **Provider discriminant carries a vendor name.** The
+>    `provider.type` discriminant string that SDK/GUI clients
+>    emit is a vendor name. R1 forbids the subsystem from
+>    *embedding* indexer hostnames, vendor names, or default
+>    URLs; it does not forbid *accepting* a wire discriminant
+>    that a third-party client dictates, since the indexer
+>    `url` itself remains caller-supplied (R1's substance is
+>    preserved). The implementer must accept the dictated
+>    discriminant for SDK compatibility; whether to also expose
+>    a neutral alias is an open question for the orchestrator.
+> 2. **Coin-model vs context-slot.** Upstream models NFT
+>    activation as enabling a "global NFT" pseudo-coin
+>    registered in the coins registry. Reloaded models the NFT
+>    subsystem as a per-context sub-context slot (`nft_ctx`,
+>    §19.2), not a coin. The `enable_nft` contract above is
+>    expressed against reloaded's context-slot model: the
+>    implementer must register/seed the `nft_ctx` slot rather
+>    than add a coin, while preserving the dictated request and
+>    response wire shapes so SDK/GUI clients are unaffected.
+> 3. **`update_nft` overlap.** Reloaded introduced `update_nft`
+>    as its init/refresh path before `enable_nft` was bound.
+>    `update_nft` remains the refresh/re-crawl path;
+>    `enable_nft` becomes the activation + initial-crawl path.
+>    The implementer must ensure the two share the underlying
+>    crawl logic rather than duplicating it, and that calling
+>    `update_nft` before `enable_nft` (i.e. against an inactive
+>    subsystem) yields a coherent not-activated outcome.
 
 ## 19.7 EVM Withdrawal Path
 
@@ -499,7 +670,7 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
 ## 19.12 Provenance Footer
 
 - *Status:* driving-spec.
-- *Version:* v2.
+- *Version:* v3.
 - *Verified against:* baseline commit
   `c1d46c0c1592faa0860f704008b2b2381bc3840f`; absence of the
   NFT subsystem at baseline verified via
@@ -513,4 +684,14 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
   balance query); EIP-1559 (one of the two signing policies);
   publicly-documented mainnet ticker symbols of the five EVM
   ecosystems named in §19.3.
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* consulted **only** for the §19.6.2
+  `enable_nft` dictated-interop contract (wire method name,
+  mmrpc-2.0 envelope, request/response public field shapes,
+  platform gate, and functional error outcomes), which is fixed
+  by the Komodo DeFi SDK / GUI clients that call the method.
+  That section restates the externally-dictated contract and the
+  activation behaviour as functional requirements in this
+  document's own words; no upstream private identifiers,
+  function bodies, control flow, internal module structure, or
+  error/log string literals were carried across. The remainder
+  of the chapter was authored without corpus consultation.
