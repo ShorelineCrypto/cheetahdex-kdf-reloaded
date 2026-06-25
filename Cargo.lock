@@ -5827,6 +5827,7 @@ dependencies = [
  "lazy_static",
  "libp2p",
  "log 0.4.29",
+ "mm2_event_stream",
  "num-bigint 0.4.6",
  "num-rational",
  "prost 0.12.6",

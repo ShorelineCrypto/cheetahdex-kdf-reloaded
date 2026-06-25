@@ -3,7 +3,7 @@
 **Status:** driving-spec.
 
 A reusable in-process event-broker substrate plus a native-only HTTP
-transport adapter, together exposing five Server-Sent-Events streamers
+transport adapter, together exposing six Server-Sent-Events streamers
 under a dedicated RPC namespace, structurally replacing the polling-only
 read model the baseline tree carried for live GUI updates.
 
@@ -22,7 +22,7 @@ chapter introduces a structural split into two layers:
    `text/event-stream` wire format.
 
 Activation is bound to a new RPC namespace prefix (`stream::`) with
-exactly five `<category>::enable` methods. Deactivation is bound to be
+exactly six `<category>::enable` methods. Deactivation is bound to be
 implicit: when an HTTP client connection drops, its bookkeeping is
 removed and any streamer that loses its last subscriber is shut down.
 Slow clients are bound to be individually back-pressured (events dropped
@@ -30,7 +30,7 @@ per slow client) and never block the broadcaster or other clients.
 
 This chapter binds the broker's public crate surface, the streamer trait
 contract, the wire-stable streamer origin tags, the HTTP endpoint shape,
-the `stream::*` dispatcher routing, the five concrete streamer identities
+the `stream::*` dispatcher routing, the six concrete streamer identities
 shipped by the substrate, and the runtime invariants the design relies
 on.
 
@@ -46,12 +46,13 @@ The substrate occupies a structural seam between three subsystems:
   additional handler beside the JSON-RPC handler, gated to native-only
   targets).
 
-The substrate is *not* a redesign of the JSON-RPC surface. The five
+The substrate is *not* a redesign of the JSON-RPC surface. The six
 streamers add a push channel beside the existing pull surface; no
 pre-existing read RPC is removed, renamed, or repurposed. Bound rules
 (R1–R6) constrain the broker; (R7–R14) constrain the streamer trait
 contract and origin tags; (R15–R20) constrain the HTTP endpoint and
-namespace; (R21–R25) constrain the five concrete streamers.
+namespace; (R21–R25) constrain the originally-bound five concrete
+streamers; (R28–R31) bind the sixth (Network) streamer.
 
 ## 10.3 Bound Crate Surface
 
@@ -242,23 +243,24 @@ without the prefix MUST be routed unchanged through the existing v2
 dispatcher.
 
 **R20.** The streamer-activation table MUST contain exactly the
-following five entries (no aliases, no deprecated names, no additional
+following six entries (no aliases, no deprecated names, no additional
 methods):
 
 | Method name                  | Streamer key                              |
 | ---------------------------- | ----------------------------------------- |
 | `stream::heartbeat::enable`  | `Heartbeat`                              |
 | `stream::balance::enable`    | `Balance(<request.coin>)`                |
+| `stream::network::enable`    | `Network`                                |
 | `stream::swap_status::enable`| `SwapStatus`                             |
 | `stream::order_status::enable`| `OrderStatus`                            |
 | `stream::orderbook::enable`  | `OrderbookUpdate { topic: <request.topic> }` |
 
-A sixth `Network` origin tag is reserved (R6) without an activation
-entry: it is bound for future use by a streamer driven by the
-peer-discovery substrate (D2).
+The `Network` origin tag reserved in R6 is now bound to its activation
+method; its request shape, payload shape, cadence, and platform gate
+are bound in §10.16 (R28–R31). This resolves D2.
 
-**R21.** All five activation handlers MUST share a common request and
-response envelope:
+**R21.** All activation handlers (the six bound in R20/R28) MUST share a
+common request and response envelope:
 
 - Request: a generic envelope carrying a `client_id` field (the same
   unsigned 64-bit integer the HTTP endpoint accepts) plus an
@@ -280,17 +282,22 @@ MUST be wrapped into this variant verbatim.
 
 ## 10.10 Bound Concrete Streamers
 
-**R23.** The substrate MUST ship exactly the following five concrete
-streamers, each in its own module under a single streamer-activation
-directory:
+**R23.** The substrate MUST ship exactly the following six concrete
+streamers, each with its own activation module under a single
+streamer-activation directory:
 
 | Streamer module | Activation method            | Streamer key                          |
 | --------------- | ---------------------------- | ------------------------------------- |
 | `heartbeat`     | `stream::heartbeat::enable`  | `Heartbeat`                          |
 | `balance`       | `stream::balance::enable`    | `Balance(<ticker>)`                  |
+| `network`       | `stream::network::enable`    | `Network`                            |
 | `swaps`         | `stream::swap_status::enable`| `SwapStatus`                         |
 | `orders`        | `stream::order_status::enable`| `OrderStatus`                        |
 | `orderbook`     | `stream::orderbook::enable`  | `OrderbookUpdate { topic }`          |
+
+The `network` streamer's request, payload, cadence, and placement are
+bound in §10.16 (R28–R31); its streamer struct is placed in the
+peer-discovery / p2p crate rather than under this directory (R31).
 
 **R24.** The balance streamer's activation request MUST carry exactly
 two fields: a coin ticker, and an interval in seconds defaulting to 30,
@@ -371,10 +378,12 @@ currently has the broker but no transport adapter; a future substrate
 chapter is expected to bind an in-process callback adapter for
 embedded WebAssembly consumers).
 
-**D2.** Activation of the reserved `Network` origin tag (a streamer
-driven by the peer-discovery substrate; the tag is bound now to fix the
-wire string, but no activation handler is bound until the consumer
-exists).
+**D2.** *(Resolved by §10.16, R28–R31.)* Activation of the reserved
+`Network` origin tag. Originally deferred (the tag was bound to fix the
+wire string while no consumer existed); the consumer now exists, so the
+activation method `stream::network::enable`, its request and payload
+shapes, its timer-driven emit-on-change cadence, and its ALL-targets
+platform gate are bound in §10.16.
 
 **D3.** Per-client authentication and per-client rate limits. The
 substrate currently relies on the bound CORS origin (R16) and the
@@ -394,7 +403,7 @@ neither of which is bound).
 context. All graphical synchronisation in the baseline tree is
 pull-mode through the existing JSON-RPC read surface.
 
-**V2.** The five activation method names bound in R20 MUST be confirmed
+**V2.** The six activation method names bound in R20 MUST be confirmed
 absent from the baseline's v2 dispatcher method table. Adding them in
 the substrate is a pure surface addition; no baseline method is
 renamed or repurposed.
@@ -419,20 +428,108 @@ and become part of the GUI-visible contract surface on first release.
   non-asynchronous lock bound in R14.
 - `async-trait`, <https://crates.io/crates/async-trait> — used by the
   trait definition in R8.
+- libp2p gossipsub, <https://docs.rs/libp2p-gossipsub/latest/libp2p_gossipsub/>
+  — the peer/topic/mesh introspection surface that dictates the
+  `NETWORK` event payload field set bound in R29.
 
-## 10.16 Provenance Footer
+## 10.16 Bound Network Streamer Activation
+
+This section binds activation of the sixth concrete streamer, whose
+origin tag (`Network`, wire string `NETWORK`) is already reserved in
+R6. It resolves D2: a consumer for the tag now exists (a graphical
+peer-connectivity view), so the previously-deferred activation handler
+is bound here. The exact wire method name is `stream::network::enable`.
+
+**R28.** A sixth entry MUST be added to the streamer-activation table
+(R20) and routed through the `stream::` dispatcher branch (R19):
+
+| Method name                | Streamer key |
+| -------------------------- | ------------ |
+| `stream::network::enable`  | `Network`    |
+
+The activation handler MUST follow the shared R21/R25 contract:
+
+- Request: the shared envelope carrying `client_id` (unsigned 64-bit,
+  defaulting to 0) flattened beside a single per-streamer
+  configuration object named `config`. The `config` object MUST carry
+  exactly two optional fields, both supplying a default when omitted:
+
+  | Field                     | Type                   | Default | Meaning                                                                                            |
+  | ------------------------- | ---------------------- | ------- | -------------------------------------------------------------------------------------------------- |
+  | `stream_interval_seconds` | number (float seconds) | `5.0`   | Delay between successive network-snapshot emissions.                                               |
+  | `always_send`             | boolean                | `false` | When `true`, emit every cycle even if the snapshot is unchanged; when `false`, emit only on change. |
+
+  Unknown fields inside `config` MUST be rejected. There is no minimum
+  floor on `stream_interval_seconds` (unlike the balance streamer's
+  10-second floor in R24).
+- Response: the single boolean `active` field of R21, returned `true`
+  on successful activation. Any streamer initialisation failure MUST be
+  surfaced through the bound activation error variant (R22).
+
+**R29.** The `NETWORK` event message body MUST be a JSON object with
+exactly the following five fields, describing the node's current
+gossipsub / peer-connectivity snapshot. The field names are wire-stable
+(GUI-visible interop), byte-for-byte:
+
+| Field                      | JSON value                                             | Semantics                                                                            |
+| -------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `directly_connected_peers` | object: peer-id string → array of multiaddress strings | Peers the node currently holds live transport connections to, with reachable addresses. |
+| `gossip_mesh`              | object: topic string → array of peer-id strings        | Per-topic gossipsub mesh membership.                                                 |
+| `gossip_peer_topics`       | object: peer-id string → array of topic strings        | Topics each known peer is subscribed to.                                             |
+| `gossip_topic_peers`       | object: topic string → array of peer-id strings        | Peers subscribed to each known topic.                                                |
+| `relay_mesh`               | array of peer-id strings                               | Peers in the relay mesh.                                                             |
+
+These five values are dictated by the gossipsub introspection surface
+of the peer-discovery substrate; this section binds their presence,
+names, and JSON shape, not the internal traversal that produces them.
+
+**R30.** The network streamer MUST be self-driven (input type
+`NoDataIn`, R8/R10) and timer-paced:
+
+1. On activation it MUST report ready (R9) after attaching to the
+   peer-discovery substrate, then begin its emission loop.
+2. Each cycle it MUST assemble the R29 snapshot from the peer-discovery
+   substrate, then wait `stream_interval_seconds` before the next cycle.
+3. Emit semantics MUST be emit-on-change by default: a cycle whose
+   snapshot equals the previously broadcast snapshot MUST NOT emit. The
+   first cycle always emits (there is no prior snapshot). When
+   `always_send` is `true`, every cycle MUST emit regardless of change.
+4. The streamer MUST return when its shutdown signal resolves (R9),
+   i.e. when its last subscriber leaves (R12 `stop`).
+
+**R31.** Platform gate: the network streamer activation MUST be bound on
+ALL targets (native and WebAssembly). It carries no native-only `cfg`
+gate, because the peer-discovery substrate it introspects is present on
+every target. Placement: the activation handler module is bound as
+`network` under the streamer-activation directory (R23); the streamer
+struct itself is bound to live in the peer-discovery / p2p networking
+crate (it introspects that crate's gossipsub state), not in
+`mm2_event_stream`.
+
+## 10.17 Provenance Footer
 
 - *Inputs:* the baseline workspace at the pinned baseline-revision
   commit; chapter 01 (clean-room rules); chapter 31 (the central
   application-context substrate the broker handle of R26 and the
   `event_stream_access_control()` accessor are bound on); the
   chapter-bound identifier set for the broker substrate, the HTTP
-  endpoint, the RPC namespace, and the five concrete streamers;
+  endpoint, the RPC namespace, and the six concrete streamers;
   public protocol documentation (HTML Living Standard SSE, WHATWG
-  CORS); public documentation for the asynchronous-runtime and
+  CORS); the libp2p gossipsub introspection surface (peer/topic/mesh
+  enumeration) that dictates the `NETWORK` payload field set (R29);
+  public documentation for the asynchronous-runtime and
   lock crates listed in 10.15.
 - *Permitted-input classes used:* baseline source; bound substrate
   identifiers introduced with in-chapter justification; public
-  protocol documentation; public crate documentation.
+  protocol documentation; public crate documentation;
+  dictated-interop wire facts (the `stream::network::enable` method
+  string, its `config` request fields, and the `NETWORK` event field
+  names — all GUI/third-party-visible contract surface).
 - *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* consulted (via the spec-author channel) ONLY for
+  §10.16's dictated-interop facts — the network streamer's public wire
+  method name, its activation request field names/defaults, the
+  `NETWORK` event payload field names and value shapes, and its
+  timer-driven emit-on-change cadence and ALL-targets gate. No private
+  identifiers, function bodies, control-flow, or string literals were
+  carried across; the behaviour is restated as the public contract.

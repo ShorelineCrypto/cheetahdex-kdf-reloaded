@@ -349,6 +349,7 @@ async fn rpc_streaming_dispatcher(
     match streaming_method {
         "balance::enable" => handle_mmrpc(ctx, request, streaming_activations::balance::enable_balance).await,
         "heartbeat::enable" => handle_mmrpc(ctx, request, streaming_activations::heartbeat::enable_heartbeat).await,
+        "network::enable" => handle_mmrpc(ctx, request, streaming_activations::network::enable_network).await,
         "order_status::enable" => handle_mmrpc(ctx, request, streaming_activations::orders::enable_order_status).await,
         "orderbook::enable" => handle_mmrpc(ctx, request, streaming_activations::orderbook::enable_orderbook).await,
         "swap_status::enable" => handle_mmrpc(ctx, request, streaming_activations::swaps::enable_swap_status).await,

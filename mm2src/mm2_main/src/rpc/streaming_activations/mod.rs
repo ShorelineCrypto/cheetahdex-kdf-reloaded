@@ -4,6 +4,7 @@
 /// enabling or disabling real-time event streams per client.
 pub mod balance;
 pub mod heartbeat;
+pub mod network;
 pub mod orderbook;
 pub mod orders;
 pub mod swaps;

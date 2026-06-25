@@ -25,6 +25,7 @@ futures-rustls = { version = "0.21.1" }
 hex = { workspace = true }
 lazy_static = { workspace = true }
 log = "0.4.8"
+mm2_event_stream = { path = "../mm2_event_stream" }
 num-bigint = { version = "0.4", features = ["serde", "std"] }
 num-rational = { version = "0.4", features = ["serde"] }
 prost = { workspace = true }
@@ -34,6 +35,7 @@ rmp-serde = "0.14.3"
 secp256k1 = { version = "0.20", features = ["rand"] }
 serde = { workspace = true }
 serde_bytes = "0.11.5"
+serde_json = { workspace = true }
 sha2 = "0.9"
 smallvec = "1.1.0"
 unsigned-varint = { version = "0.4.0", features = ["futures-codec"] }
@@ -51,6 +53,3 @@ wasm-bindgen-futures = "0.4.21"
 
 [build-dependencies]
 prost-build = "0.12"
-
-[dev-dependencies]
-serde_json = { workspace = true }
