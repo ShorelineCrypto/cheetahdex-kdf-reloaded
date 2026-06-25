@@ -256,12 +256,13 @@ pub async fn enable_balance(
     let interval = req.inner.interval_secs;
 
     let streamer = BalanceEventStreamer::new(ticker, interval, ctx.clone());
+    let streamer_id = streamer.streamer_id().to_string();
     ctx.event_stream_manager
         .add(client_id, streamer)
         .await
         .map_err(|e| MmError::new(StreamingError::InitFailed(e)))?;
 
-    Ok(EnableStreamingResponse::new())
+    Ok(EnableStreamingResponse::new(streamer_id))
 }
 
 #[cfg(test)]

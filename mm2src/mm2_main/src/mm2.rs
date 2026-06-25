@@ -356,7 +356,7 @@ pub fn mm2_main() {
     use libc::c_char;
 
     init_crash_reports();
-    log!({"AtomicDEX MarketMaker {} DT {}", MM_VERSION, MM_DATETIME});
+    log!({"KDF-Reloaded DeFi Framework {} DT {}", MM_VERSION, MM_DATETIME});
 
     // Temporarily simulate `argv[]` for the C version of the main method.
     let args: Vec<String> = env::args()

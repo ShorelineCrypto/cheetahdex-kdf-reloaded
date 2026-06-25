@@ -26,10 +26,18 @@ pub struct EnableStreamingRequest<T> {
 #[derive(Serialize)]
 pub struct EnableStreamingResponse {
     pub active: bool,
+    /// Identifier of the enabled streamer. Clients use it to correlate the
+    /// subscription with the SSE events it emits.
+    pub streamer_id: String,
 }
 
 impl EnableStreamingResponse {
-    pub fn new() -> Self { Self { active: true } }
+    pub fn new(streamer_id: String) -> Self {
+        Self {
+            active: true,
+            streamer_id,
+        }
+    }
 }
 
 /// Errors that can occur during streaming operations.

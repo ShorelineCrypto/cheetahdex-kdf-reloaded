@@ -169,8 +169,12 @@ pub struct GetWalletNamesRequest {}
 #[derive(Debug, Serialize)]
 pub struct GetWalletNamesResponse {
     pub wallet_names: Vec<String>,
-    /// The currently active wallet, if any.
-    pub active_wallet: Option<String>,
+    /// The currently active wallet, or `null` when not logged in.
+    ///
+    /// The wire field name is `activated_wallet` to match the upstream
+    /// `get_wallet_names` contract that clients (e.g. the Komodo DeFi SDK) rely
+    /// on to determine the signed-in wallet.
+    pub activated_wallet: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -269,11 +273,11 @@ pub async fn get_wallet_names_rpc(
         .await
         .map_err(|e| MmError::new(WalletError::StorageError(e)))?;
 
-    let active_wallet = ctx.wallet_name.as_option().and_then(|opt| opt.clone());
+    let activated_wallet = ctx.wallet_name.as_option().and_then(|opt| opt.clone());
 
     Ok(GetWalletNamesResponse {
         wallet_names,
-        active_wallet,
+        activated_wallet,
     })
 }
 
@@ -644,7 +648,7 @@ mod tests {
         // List wallets — should contain exactly one
         let list = block_on(get_wallet_names_rpc(ctx.clone(), GetWalletNamesRequest {})).unwrap();
         assert_eq!(list.wallet_names, vec!["test-wallet".to_string()]);
-        assert_eq!(list.active_wallet, None); // no active wallet set
+        assert_eq!(list.activated_wallet, None); // no active wallet set
 
         // Delete with wrong password — should fail
         let err = block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {

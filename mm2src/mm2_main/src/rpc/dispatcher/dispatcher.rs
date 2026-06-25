@@ -58,7 +58,7 @@ use coins_activation::{cancel_init_platform_coin_with_tokens, init_platform_coin
 use coins_activation::{cancel_init_standalone_coin, cancel_l2_activation, enable_l2, enable_platform_coin_with_tokens,
                        enable_token, init_l2, init_l2_status, init_l2_user_action, init_standalone_coin,
                        init_standalone_coin_status, init_standalone_coin_user_action};
-use common::log::{error, warn};
+use common::log::{debug, error, warn};
 use common::HttpStatusCode;
 use futures::Future as Future03;
 use http::Response;
@@ -90,6 +90,11 @@ pub async fn process_single_request(
     local_only: bool,
 ) -> DispatcherResult<Response<Vec<u8>>> {
     let request: MmRpcRequest = json::from_value(req)?;
+
+    // Trace-level visibility into which RPC methods are invoked and how often.
+    // SECURITY: log the method name ONLY. Never log `params`/`userpass`, as they
+    // may carry wallet passwords, seed phrases or private keys.
+    debug!("Incoming JSON-RPC method: '{}'", request.method);
 
     // https://github.com/artemii235/SuperNET/issues/368
     let method_name = Some(request.method.as_str());
