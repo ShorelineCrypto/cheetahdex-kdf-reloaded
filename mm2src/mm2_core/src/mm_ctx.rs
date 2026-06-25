@@ -273,22 +273,24 @@ impl MmCtx {
         path.join(hex::encode(**self.rmd160()))
     }
 
-    /// Directory for wallet files (encrypted mnemonics).
-    /// Sits at the DB root level (not per-identity), since wallet files must be
-    /// accessible before the passphrase-derived identity is known.
-    pub fn wallets_dir(&self) -> PathBuf {
-        let base = if let Some(dbdir) = self.conf["dbdir"].as_str() {
+    /// The database root directory — the configured `dbdir` (or the default
+    /// relative `DB` directory when unset). This is the **parent** of the
+    /// per-identity hex subdirectories returned by [`MmCtx::dbdir`]; wallet
+    /// files live directly in this root (Chapter 07 §7.5).
+    pub fn db_root(&self) -> PathBuf {
+        if let Some(dbdir) = self.conf["dbdir"].as_str() {
             let dbdir = dbdir.trim();
             if !dbdir.is_empty() {
-                PathBuf::from(dbdir)
-            } else {
-                PathBuf::from("DB")
+                return PathBuf::from(dbdir);
             }
-        } else {
-            PathBuf::from("DB")
-        };
-        base.join("wallets")
+        }
+        PathBuf::from("DB")
     }
+
+    /// Legacy directory for wallet files written by an earlier reloaded build
+    /// (`<db_root>/wallets`). Retained for backward-compatible reads only; new
+    /// wallet records are written directly in [`MmCtx::db_root`].
+    pub fn wallets_dir(&self) -> PathBuf { self.db_root().join("wallets") }
 
     pub fn netid(&self) -> u16 {
         let netid = self.conf["netid"].as_u64().unwrap_or(0);

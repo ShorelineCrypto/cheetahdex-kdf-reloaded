@@ -1,13 +1,19 @@
 /// Wallet management: encrypted mnemonic persistence, wallet lifecycle RPCs.
 ///
-/// Wallets are stored as JSON files in `DB/wallets/{wallet_name}.wallet`, each
-/// containing an `EncryptedMnemonicData` blob. The wallet password is verified
-/// by attempting to decrypt the mnemonic — no password hash is stored on disk.
+/// Wallets are stored as JSON files named `<wallet_name>.json` directly in the
+/// database root directory (the parent of the per-identity hex subdirectories,
+/// Chapter 07 §7.5), each containing the canonical six-field `EncryptedMnemonicData`
+/// envelope (§7.7). The wallet password is verified by attempting to decrypt the
+/// mnemonic — no password hash is stored on disk.
+///
+/// For backward compatibility the read paths also recognise wallets written by
+/// the previous reloaded build at `<db_root>/wallets/<name>.wallet` (the legacy
+/// two-field envelope). New writes are ALWAYS the canonical `.json` format.
 ///
 /// The currently active wallet name is recorded in `MmCtx::wallet_name` (write-once)
 /// during startup. Only inactive wallets can be deleted.
 use common::HttpStatusCode;
-use crypto::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic, EncryptedMnemonicData};
+use crypto::{decrypt_mnemonic, encrypt_mnemonic, generate_mnemonic};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -17,27 +23,69 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod storage {
-    use crypto::EncryptedMnemonicData;
+    use crypto::legacy::{legacy_decrypt_mnemonic, LegacyEncryptedMnemonicData};
+    use crypto::{decrypt_mnemonic, EncryptedMnemonicData};
     use mm2_core::mm_ctx::MmArc;
     use mm2_io::fs::{read_dir_async, remove_file_async};
     use std::io;
     use std::path::PathBuf;
 
-    /// Returns the directory where wallet files are stored, creating it if needed.
-    fn wallets_dir(ctx: &MmArc) -> io::Result<PathBuf> {
-        let dir = ctx.wallets_dir();
+    /// The project-wide on-disk wallet-file extension (§7.5 R8).
+    pub const WALLET_FILE_EXTENSION: &str = "json";
+
+    /// The legacy on-disk wallet-file extension written by an earlier reloaded
+    /// build. Recognised on read only.
+    const LEGACY_WALLET_FILE_EXTENSION: &str = "wallet";
+
+    /// A persisted wallet record, in either the canonical §7.7 `.json` format or
+    /// the legacy `wallets/*.wallet` format (read-only).
+    pub enum StoredEnvelope {
+        New(EncryptedMnemonicData),
+        Legacy(LegacyEncryptedMnemonicData),
+    }
+
+    impl StoredEnvelope {
+        /// Decrypts the stored mnemonic with `password`, regardless of format.
+        pub fn decrypt(&self, password: &str) -> Result<String, String> {
+            match self {
+                StoredEnvelope::New(e) => decrypt_mnemonic(e, password).map_err(|e| e.to_string()),
+                StoredEnvelope::Legacy(e) => legacy_decrypt_mnemonic(e, password).map_err(|e| e.to_string()),
+            }
+        }
+
+        /// Serializes the stored envelope verbatim for the encrypted `get_mnemonic`
+        /// export form (§7.3A R-K7): the stored record is returned unchanged.
+        pub fn as_json(&self) -> serde_json::Value {
+            match self {
+                StoredEnvelope::New(e) => serde_json::to_value(e).unwrap_or(serde_json::Value::Null),
+                StoredEnvelope::Legacy(e) => serde_json::to_value(e).unwrap_or(serde_json::Value::Null),
+            }
+        }
+    }
+
+    /// Returns the database root directory, creating it if needed (§7.5 R7).
+    fn ensure_db_root(ctx: &MmArc) -> io::Result<PathBuf> {
+        let dir = ctx.db_root();
         if !dir.exists() {
             std::fs::create_dir_all(&dir)?;
         }
         Ok(dir)
     }
 
-    /// Path to a specific wallet file.
+    /// Path to a canonical wallet file `<db_root>/<wallet_name>.json`.
     fn wallet_path(ctx: &MmArc, wallet_name: &str) -> io::Result<PathBuf> {
-        Ok(wallets_dir(ctx)?.join(format!("{}.wallet", wallet_name)))
+        Ok(ensure_db_root(ctx)?.join(format!("{}.{}", wallet_name, WALLET_FILE_EXTENSION)))
     }
 
-    /// Save encrypted mnemonic for a wallet. Overwrites if the wallet already exists.
+    /// Path to a legacy wallet file `<db_root>/wallets/<wallet_name>.wallet`.
+    fn legacy_wallet_path(ctx: &MmArc, wallet_name: &str) -> PathBuf {
+        ctx.wallets_dir()
+            .join(format!("{}.{}", wallet_name, LEGACY_WALLET_FILE_EXTENSION))
+    }
+
+    /// Save the encrypted mnemonic for a wallet as the canonical `.json` record in
+    /// the database root. Overwrites if the wallet already exists. New writes are
+    /// NEVER the legacy `.wallet` format.
     pub async fn save_encrypted_passphrase(
         ctx: &MmArc,
         wallet_name: &str,
@@ -48,42 +96,91 @@ mod storage {
         mm2_io::fs::write(&path, &json.as_bytes()).map_err(|e| format!("write error: {e}"))
     }
 
-    /// Read encrypted mnemonic for a wallet. Returns None if the wallet doesn't exist.
-    pub async fn read_encrypted_passphrase(
-        ctx: &MmArc,
-        wallet_name: &str,
-    ) -> Result<Option<EncryptedMnemonicData>, String> {
+    /// Read the encrypted mnemonic for a wallet. Tries the canonical `.json`
+    /// record first, then falls back to the legacy `wallets/<name>.wallet` record.
+    /// Returns `None` if neither exists.
+    pub async fn read_encrypted_passphrase(ctx: &MmArc, wallet_name: &str) -> Result<Option<StoredEnvelope>, String> {
+        // Canonical §7.7 record in the database root.
         let path = wallet_path(ctx, wallet_name).map_err(|e| format!("wallet dir error: {e}"))?;
-        if !path.exists() {
-            return Ok(None);
+        if path.exists() {
+            let bytes = mm2_io::fs::slurp(&path)?;
+            let data: EncryptedMnemonicData =
+                serde_json::from_slice(&bytes).map_err(|e| format!("corrupt wallet file: {e}"))?;
+            return Ok(Some(StoredEnvelope::New(data)));
         }
-        let bytes = mm2_io::fs::slurp(&path)?;
-        let data: EncryptedMnemonicData =
-            serde_json::from_slice(&bytes).map_err(|e| format!("corrupt wallet file: {e}"))?;
-        Ok(Some(data))
+
+        // Legacy fallback: `<db_root>/wallets/<name>.wallet` (read-only).
+        let legacy_path = legacy_wallet_path(ctx, wallet_name);
+        if legacy_path.exists() {
+            let bytes = mm2_io::fs::slurp(&legacy_path)?;
+            let data: LegacyEncryptedMnemonicData =
+                serde_json::from_slice(&bytes).map_err(|e| format!("corrupt legacy wallet file: {e}"))?;
+            return Ok(Some(StoredEnvelope::Legacy(data)));
+        }
+
+        Ok(None)
     }
 
-    /// List all wallet names (from filenames, stripping the .wallet extension).
+    /// Returns the trimmed file stem if `path` bears `extension` and the trimmed
+    /// stem matches the bound wallet-name grammar (§7.5 R8A), else `None`.
+    fn wallet_stem_for_extension(path: &std::path::Path, extension: &str) -> Option<String> {
+        if path.extension().and_then(|e| e.to_str()) != Some(extension) {
+            return None;
+        }
+        let stem = path.file_stem()?.to_str()?.trim().to_string();
+        if super::validate_wallet_name(&stem).is_ok() {
+            Some(stem)
+        } else {
+            None
+        }
+    }
+
+    /// List all wallet names. Scans the database root **non-recursively** for
+    /// canonical `.json` records (§7.5 R8A), plus any legacy `wallets/*.wallet`
+    /// records, and de-duplicates (preferring the canonical record).
     pub async fn read_all_wallet_names(ctx: &MmArc) -> Result<Vec<String>, String> {
-        let dir = wallets_dir(ctx).map_err(|e| format!("wallet dir error: {e}"))?;
-        let entries = read_dir_async(&dir).await.map_err(|e| format!("read dir error: {e}"))?;
-        let names = entries
+        let root = ensure_db_root(ctx).map_err(|e| format!("wallet dir error: {e}"))?;
+        // Non-recursive: `read_dir_async` lists immediate children only; filtering
+        // by the `.json` extension naturally excludes the per-identity subdirectories.
+        let root_entries = read_dir_async(&root)
+            .await
+            .map_err(|e| format!("read dir error: {e}"))?;
+        let mut names: Vec<String> = root_entries
             .iter()
-            .filter_map(|p| {
-                let name = p.file_name()?.to_str()?.to_string();
-                name.strip_suffix(".wallet").map(|n| n.to_string())
-            })
+            .filter_map(|p| wallet_stem_for_extension(p, WALLET_FILE_EXTENSION))
             .collect();
+
+        // Legacy directory (may not exist).
+        let legacy_dir = ctx.wallets_dir();
+        if legacy_dir.exists() {
+            if let Ok(legacy_entries) = read_dir_async(&legacy_dir).await {
+                for p in &legacy_entries {
+                    if let Some(stem) = wallet_stem_for_extension(p, LEGACY_WALLET_FILE_EXTENSION) {
+                        if !names.contains(&stem) {
+                            names.push(stem);
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(names)
     }
 
-    /// Delete a wallet file. Returns error if the file doesn't exist or I/O fails.
+    /// Delete a wallet record from whichever location it exists in (canonical
+    /// `.json` in the root, or legacy `wallets/<name>.wallet`).
     pub async fn delete_wallet(ctx: &MmArc, wallet_name: &str) -> Result<(), String> {
         let path = wallet_path(ctx, wallet_name).map_err(|e| format!("wallet dir error: {e}"))?;
-        if !path.exists() {
-            return Err(format!("Wallet '{}' not found", wallet_name));
+        if path.exists() {
+            return remove_file_async(path).await.map_err(|e| format!("delete error: {e}"));
         }
-        remove_file_async(path).await.map_err(|e| format!("delete error: {e}"))
+        let legacy_path = legacy_wallet_path(ctx, wallet_name);
+        if legacy_path.exists() {
+            return remove_file_async(legacy_path)
+                .await
+                .map_err(|e| format!("delete error: {e}"));
+        }
+        Err(format!("Wallet '{}' not found", wallet_name))
     }
 }
 
@@ -201,16 +298,13 @@ pub enum GetMnemonicRequest {
 }
 
 /// Mirrors the requested `format`: the encrypted form carries the stored
-/// envelope, the plaintext form carries the decoded mnemonic string.
+/// envelope verbatim (in whichever on-disk format it was persisted), the
+/// plaintext form carries the decoded mnemonic string.
 #[derive(Serialize)]
 #[serde(tag = "format", rename_all = "lowercase")]
 pub enum GetMnemonicResponse {
-    Encrypted {
-        encrypted_mnemonic_data: EncryptedMnemonicData,
-    },
-    Plaintext {
-        mnemonic: String,
-    },
+    Encrypted { encrypted_mnemonic_data: serde_json::Value },
+    Plaintext { mnemonic: String },
 }
 
 /// Changes the wallet password by re-encrypting the stored mnemonic.
@@ -307,7 +401,9 @@ pub async fn delete_wallet_rpc(
         .ok_or_else(|| MmError::new(WalletError::WalletNotFound(req.wallet_name.clone())))?;
 
     // Verify password by attempting decryption
-    decrypt_mnemonic(&encrypted, &req.password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+    encrypted
+        .decrypt(&req.password)
+        .map_err(|_| MmError::new(WalletError::InvalidPassword))?;
 
     // Password verified — delete the wallet file
     delete_wallet(&ctx, &req.wallet_name)
@@ -356,11 +452,12 @@ pub async fn get_mnemonic_rpc(
 
     match req {
         GetMnemonicRequest::Encrypted => Ok(GetMnemonicResponse::Encrypted {
-            encrypted_mnemonic_data: encrypted,
+            encrypted_mnemonic_data: encrypted.as_json(),
         }),
         GetMnemonicRequest::Plaintext { password } => {
-            let mnemonic =
-                decrypt_mnemonic(&encrypted, &password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            let mnemonic = encrypted
+                .decrypt(&password)
+                .map_err(|_| MmError::new(WalletError::InvalidPassword))?;
             Ok(GetMnemonicResponse::Plaintext { mnemonic })
         },
     }
@@ -405,8 +502,9 @@ pub async fn change_mnemonic_password_rpc(
         .ok_or_else(|| MmError::new(WalletError::WalletNotFound(wallet_name.clone())))?;
 
     // Verify the current password by decrypting the stored mnemonic.
-    let mnemonic =
-        decrypt_mnemonic(&encrypted, &req.current_password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+    let mnemonic = encrypted
+        .decrypt(&req.current_password)
+        .map_err(|_| MmError::new(WalletError::InvalidPassword))?;
 
     // Re-encrypt the mnemonic under the new password and overwrite the record.
     let re_encrypted = encrypt_mnemonic(&mnemonic, &req.new_password)
@@ -509,9 +607,9 @@ pub async fn initialize_wallet_passphrase(
 
     let seed = match (passphrase, existing) {
         // Re-login: load-and-use, with NO equality comparison (the core re-login fix).
-        (PassphraseForm::Absent, Some(encrypted)) => {
-            decrypt_mnemonic(&encrypted, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?
-        },
+        (PassphraseForm::Absent, Some(encrypted)) => encrypted
+            .decrypt(password)
+            .map_err(|_| MmError::new(WalletError::InvalidPassword))?,
         // Generate-and-persist a fresh mnemonic.
         (PassphraseForm::Absent, None) => {
             enforce_wallet_password_policy(ctx, password)?;
@@ -529,8 +627,9 @@ pub async fn initialize_wallet_passphrase(
         },
         // Confirm the supplied plaintext seed against the stored record.
         (PassphraseForm::Plaintext(seed), Some(encrypted)) => {
-            let stored =
-                decrypt_mnemonic(&encrypted, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            let stored = encrypted
+                .decrypt(password)
+                .map_err(|_| MmError::new(WalletError::InvalidPassword))?;
             if stored != seed {
                 return MmError::err(WalletError::InvalidRequest(
                     "Passphrase doesn't match the stored wallet. Create a new wallet to use a different passphrase"
@@ -552,8 +651,9 @@ pub async fn initialize_wallet_passphrase(
         (PassphraseForm::Encrypted(supplied), Some(stored)) => {
             let supplied_seed =
                 decrypt_mnemonic(&supplied, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
-            let stored_seed =
-                decrypt_mnemonic(&stored, password).map_err(|_| MmError::new(WalletError::InvalidPassword))?;
+            let stored_seed = stored
+                .decrypt(password)
+                .map_err(|_| MmError::new(WalletError::InvalidPassword))?;
             if supplied_seed != stored_seed {
                 return MmError::err(WalletError::InvalidRequest(
                     "Passphrase doesn't match the stored wallet. Create a new wallet to use a different passphrase"
@@ -950,5 +1050,144 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.get_inner().status_code(), StatusCode::BAD_REQUEST);
         assert!(matches!(err.get_inner(), WalletError::InvalidRequest(_)));
+    }
+
+    const TEST_MNEMONIC: &str =
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    /// Create writes the canonical six-field `.json` envelope directly in the
+    /// database root — not under a `wallets/` subdirectory and not as `.wallet`.
+    #[test]
+    fn test_create_writes_json_in_db_root() {
+        let ctx = test_ctx();
+        block_on(create_wallet_rpc(ctx.clone(), CreateWalletRequest {
+            wallet_name: "root-wallet".to_string(),
+            password: "pw123".to_string(),
+            mnemonic: TEST_MNEMONIC.to_string(),
+        }))
+        .unwrap();
+
+        let json_path = ctx.db_root().join("root-wallet.json");
+        assert!(json_path.exists(), "create must write <db_root>/<name>.json");
+        assert!(
+            !ctx.wallets_dir().join("root-wallet.wallet").exists(),
+            "create must NOT write a legacy .wallet file"
+        );
+
+        // The on-disk record is the canonical six-field envelope.
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
+        let obj = value.as_object().unwrap();
+        assert_eq!(obj["version"], json!(1));
+        assert_eq!(obj["encryption_algorithm"], json!("AES256CBC"));
+        assert!(obj.contains_key("key_derivation_details"));
+        assert!(obj["iv"].is_string());
+        assert!(obj["ciphertext"].is_string());
+        assert!(obj["tag"].is_string());
+    }
+
+    /// Legacy-read: a record written by the previous reloaded build
+    /// (`<db_root>/wallets/<name>.wallet`, two-field envelope) MUST still be
+    /// listed and decryptable, while new creates keep emitting `.json`.
+    #[test]
+    fn test_legacy_wallet_read_compat() {
+        let ctx = test_ctx();
+        let password = "legacy_pw";
+
+        // Reconstruct a legacy `.wallet` record using the retained legacy path.
+        let legacy = crypto::legacy_encrypt_mnemonic(TEST_MNEMONIC, password).unwrap();
+        let legacy_dir = ctx.wallets_dir();
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        let legacy_path = legacy_dir.join("legacy-wallet.wallet");
+        std::fs::write(&legacy_path, serde_json::to_string(&legacy).unwrap()).unwrap();
+
+        // The legacy wallet is discoverable.
+        let list = block_on(get_wallet_names_rpc(ctx.clone(), GetWalletNamesRequest {})).unwrap();
+        assert!(list.wallet_names.contains(&"legacy-wallet".to_string()));
+
+        // A new create still emits `.json` in the root (never `.wallet`).
+        block_on(create_wallet_rpc(ctx.clone(), CreateWalletRequest {
+            wallet_name: "fresh-wallet".to_string(),
+            password: "fresh_pw_123".to_string(),
+            mnemonic: TEST_MNEMONIC.to_string(),
+        }))
+        .unwrap();
+        assert!(ctx.db_root().join("fresh-wallet.json").exists());
+
+        // Wrong password against the legacy record fails and leaves it intact.
+        let err = block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {
+            wallet_name: "legacy-wallet".to_string(),
+            password: "wrong".to_string(),
+        }))
+        .unwrap_err();
+        assert!(matches!(err.get_inner(), WalletError::InvalidPassword));
+        assert!(legacy_path.exists());
+
+        // Correct password decrypts and deletes the legacy record.
+        block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {
+            wallet_name: "legacy-wallet".to_string(),
+            password: password.to_string(),
+        }))
+        .unwrap();
+        assert!(!legacy_path.exists());
+    }
+
+    /// Listing scans the database root non-recursively (ignoring per-identity
+    /// subdirectories) and trims whitespace from file stems (§7.5 R8A).
+    #[test]
+    fn test_listing_non_recursive_and_trims_stems() {
+        let ctx = test_ctx();
+        let root = ctx.db_root();
+        std::fs::create_dir_all(&root).unwrap();
+
+        // A canonical record whose on-disk stem carries surrounding whitespace.
+        let env = crypto::encrypt_mnemonic(TEST_MNEMONIC, "pw").unwrap();
+        std::fs::write(root.join("  spaced  .json"), serde_json::to_string(&env).unwrap()).unwrap();
+
+        // A per-identity-style subdirectory with a `.json` that MUST NOT be listed.
+        let subdir = root.join("00deadbeef");
+        std::fs::create_dir_all(&subdir).unwrap();
+        std::fs::write(subdir.join("hidden.json"), b"{}").unwrap();
+
+        let list = block_on(get_wallet_names_rpc(ctx.clone(), GetWalletNamesRequest {})).unwrap();
+        assert!(
+            list.wallet_names.contains(&"spaced".to_string()),
+            "stem must be trimmed"
+        );
+        assert!(
+            !list.wallet_names.contains(&"hidden".to_string()),
+            "must not descend into per-identity subdirectories"
+        );
+    }
+
+    /// T4: tampering a byte of the on-disk record's ciphertext MUST surface as
+    /// `InvalidPassword` on `delete_wallet`, never a panic or UTF-8 error, and
+    /// MUST leave the record in place.
+    #[test]
+    fn test_on_disk_tamper_rejected_on_delete() {
+        let ctx = test_ctx();
+        let password = "tamper_pw";
+        block_on(create_wallet_rpc(ctx.clone(), CreateWalletRequest {
+            wallet_name: "tamper".to_string(),
+            password: password.to_string(),
+            mnemonic: TEST_MNEMONIC.to_string(),
+        }))
+        .unwrap();
+
+        let path = ctx.db_root().join("tamper.json");
+        let mut value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        // Flip the first Base64 character of the ciphertext (stays valid Base64).
+        let ct = value["ciphertext"].as_str().unwrap().to_string();
+        let mut chars: Vec<char> = ct.chars().collect();
+        chars[0] = if chars[0] == 'A' { 'B' } else { 'A' };
+        value["ciphertext"] = json!(chars.into_iter().collect::<String>());
+        std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+
+        let err = block_on(delete_wallet_rpc(ctx.clone(), DeleteWalletRequest {
+            wallet_name: "tamper".to_string(),
+            password: password.to_string(),
+        }))
+        .unwrap_err();
+        assert!(matches!(err.get_inner(), WalletError::InvalidPassword));
+        assert!(path.exists(), "a failed password check must leave the record intact");
     }
 }
