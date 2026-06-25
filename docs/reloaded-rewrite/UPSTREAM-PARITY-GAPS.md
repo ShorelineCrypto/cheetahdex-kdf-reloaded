@@ -51,9 +51,10 @@ Upstream `stream::` surface (census) vs reloaded:
 | `stream::shutdown_signal::enable` | **no** | TODO — needs new variant |
 | `stream::disable` | **no** | TODO — generic unsubscribe |
 
-- [ ] **`stream::network::enable`** — implement the reserved `Network` streamer
-  (D2 completion). Lowest-risk: the tag + wire string are already bound. Requires
-  a clean-room spec section for the activation request and emitted payload.
+- [x] **`stream::network::enable`** — implemented (D2 completion). The `Network`
+  streamer, its activation request/payload, and the `stream::network::enable`
+  route are bound by [`10-sse-streaming.md`](./10-sse-streaming.md) §10.16
+  (R28–R31) and merged on `dev`.
 - [ ] `stream::tx_history::enable` — requires a new `StreamerId` variant + spec.
 - [ ] `stream::shutdown_signal::enable` — requires a new `StreamerId` variant + spec.
 - [ ] `stream::disable` — generic per-client unsubscribe RPC. Reloaded currently
@@ -71,11 +72,14 @@ streaming** variant is missing.
 
 CRD reference: [`08-fee-routing-engine.md`](./08-fee-routing-engine.md) covers
 the swap fee-routing engine but does not bind a fee-estimator streamer;
-[`10-sse-streaming.md`](./10-sse-streaming.md) does not list one among its five.
+[`10-sse-streaming.md`](./10-sse-streaming.md) now binds it as the seventh
+concrete streamer (§10.17, R32–R37).
 
-- [ ] **`stream::fee_estimator::enable`** — add a `FeeEstimator` `StreamerId`
-  variant + activation module that periodically broadcasts EIP-1559 fee
-  estimates for a given EVM coin. Requires a clean-room spec section.
+- [x] **`stream::fee_estimator::enable`** — implemented: a `FeeEstimation`
+  `StreamerId` variant + activation module that periodically broadcasts EIP-1559
+  fee estimates for a given EVM coin. Bound by
+  [`10-sse-streaming.md`](./10-sse-streaming.md) §10.17 (R32–R37) and merged on
+  `dev`.
 
 ## #1 — NFT activation (`enable_nft`)
 
@@ -115,9 +119,9 @@ only.
 
 - [x] Documented as a known, intentional omission. No implementation planned.
 
-## #5 — Streaming activation response carries an extra `active` field
+## #5 — Streaming activation response carries an extra `active` field — **RESOLVED**
 
-**Confirmed real. Reloaded code is a superset of the upstream wire contract.**
+**Resolved. Reloaded wire contract now matches upstream.**
 
 Upstream's `stream::*::enable` success response is the mmrpc-2.0 envelope whose
 `result` is an object with a single string field `streamer_id` (the wire-stable
@@ -128,24 +132,20 @@ previously-specified boolean `active`).
 
 Code evidence:
 - `mm2src/mm2_main/src/rpc/streaming_activations/mod.rs` — `EnableStreamingResponse`
-  currently serialises **both** `active: bool` (always `true`) and
-  `streamer_id: String`. The `streamer_id` field was added for SDK compatibility;
-  `active` is a reloaded-only invention not present upstream.
+  now serialises **only** `streamer_id: String`; the reloaded-only `active: bool`
+  field was removed and the constructor takes just the `streamer_id`.
 - No reloaded code reads `active`; the Komodo DeFi SDK's `BalanceManager` reads
   `streamer_id` (a captured run log shows `Key "streamer_id" not found in Map`
   failures from an older build that returned only `active`, confirming the SDK
   requires `streamer_id` and does not depend on `active`).
 
-Three-way alignment: corpus `{streamer_id}` ⊂ reloaded code `{active, streamer_id}`
-(code is a superset); CRD R21 now equals the corpus shape; reloaded code is a
-superset of CRD R21 until `active` is removed.
+Three-way alignment: corpus `{streamer_id}` = reloaded code `{streamer_id}` = CRD
+R21. The superset has been removed; all three shapes now agree.
 
-- [ ] **Drop `active`** from `EnableStreamingResponse` (and its constructor) so
+- [x] **Drop `active`** from `EnableStreamingResponse` (and its constructor) so
   the success payload is exactly `{ "streamer_id": "<token>" }`, matching upstream
-  and the corrected R21. Wire-safe: the SDK consumes only `streamer_id`; mmrpc
-  result deserialization is field-additive-tolerant, so removing the unused field
-  breaks no known consumer. Touches the shared struct + the five activation
-  handlers' construction sites; own feature branch cut from `dev`.
+  and the corrected R21. Done on `dev` (commit `fd075e66e`); the shared struct and
+  all activation handlers compile and the streaming_activations tests pass.
 
 ---
 
