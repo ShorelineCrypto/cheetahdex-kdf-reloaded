@@ -115,6 +115,38 @@ only.
 
 - [x] Documented as a known, intentional omission. No implementation planned.
 
+## #5 — Streaming activation response carries an extra `active` field
+
+**Confirmed real. Reloaded code is a superset of the upstream wire contract.**
+
+Upstream's `stream::*::enable` success response is the mmrpc-2.0 envelope whose
+`result` is an object with a single string field `streamer_id` (the wire-stable
+`StreamerId` display token, e.g. `HEARTBEAT`, `BALANCE:<ticker>`) — with **no
+boolean field**. CRD reference: [`10-sse-streaming.md`](./10-sse-streaming.md)
+R21 (corrected this round to bind the `streamer_id` response and drop the
+previously-specified boolean `active`).
+
+Code evidence:
+- `mm2src/mm2_main/src/rpc/streaming_activations/mod.rs` — `EnableStreamingResponse`
+  currently serialises **both** `active: bool` (always `true`) and
+  `streamer_id: String`. The `streamer_id` field was added for SDK compatibility;
+  `active` is a reloaded-only invention not present upstream.
+- No reloaded code reads `active`; the Komodo DeFi SDK's `BalanceManager` reads
+  `streamer_id` (a captured run log shows `Key "streamer_id" not found in Map`
+  failures from an older build that returned only `active`, confirming the SDK
+  requires `streamer_id` and does not depend on `active`).
+
+Three-way alignment: corpus `{streamer_id}` ⊂ reloaded code `{active, streamer_id}`
+(code is a superset); CRD R21 now equals the corpus shape; reloaded code is a
+superset of CRD R21 until `active` is removed.
+
+- [ ] **Drop `active`** from `EnableStreamingResponse` (and its constructor) so
+  the success payload is exactly `{ "streamer_id": "<token>" }`, matching upstream
+  and the corrected R21. Wire-safe: the SDK consumes only `streamer_id`; mmrpc
+  result deserialization is field-additive-tolerant, so removing the unused field
+  breaks no known consumer. Touches the shared struct + the five activation
+  handlers' construction sites; own feature branch cut from `dev`.
+
 ---
 
 ## Audit method (for reproducibility)
