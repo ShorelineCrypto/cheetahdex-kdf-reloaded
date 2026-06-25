@@ -3,6 +3,7 @@
 /// These handlers respond to `stream::*` RPC namespace methods,
 /// enabling or disabling real-time event streams per client.
 pub mod balance;
+pub mod fee_estimator;
 pub mod heartbeat;
 pub mod network;
 pub mod orderbook;

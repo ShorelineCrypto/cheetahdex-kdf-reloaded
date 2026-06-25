@@ -348,6 +348,9 @@ async fn rpc_streaming_dispatcher(
 ) -> DispatcherResult<Response<Vec<u8>>> {
     match streaming_method {
         "balance::enable" => handle_mmrpc(ctx, request, streaming_activations::balance::enable_balance).await,
+        "fee_estimator::enable" => {
+            handle_mmrpc(ctx, request, streaming_activations::fee_estimator::enable_fee_estimator).await
+        },
         "heartbeat::enable" => handle_mmrpc(ctx, request, streaming_activations::heartbeat::enable_heartbeat).await,
         "network::enable" => handle_mmrpc(ctx, request, streaming_activations::network::enable_network).await,
         "order_status::enable" => handle_mmrpc(ctx, request, streaming_activations::orders::enable_order_status).await,
