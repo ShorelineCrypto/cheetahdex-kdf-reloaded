@@ -263,8 +263,15 @@ response envelope:
 - Request: a generic envelope carrying a `client_id` field (the same
   unsigned 64-bit integer the HTTP endpoint accepts) plus an
   inner per-streamer request flattened beside it.
-- Response: a single boolean `active` field, returned `true` on
-  successful activation.
+- Response: the standard mmrpc-2.0 envelope (`mmrpc`, `result`, `id`)
+  whose `result` is an object carrying a single string field
+  `streamer_id` — the wire-stable identifier of the activated streamer
+  (the same `StreamerId` display string bound in R6, e.g. `HEARTBEAT`,
+  `BALANCE:<ticker>`, `SWAP_STATUS`, `ORDER_STATUS`,
+  `ORDERBOOK:<topic>`). The client MUST retain this string to later
+  deactivate the streamer via `stream::disable`. Success is conveyed by
+  the mmrpc `result` envelope itself; there is NO boolean field in the
+  response.
 
 **R22.** The activation error type MUST be a single-variant enumeration
 with display string `Streamer initialization failed: <reason>` and HTTP
