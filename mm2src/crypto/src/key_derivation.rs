@@ -47,10 +47,11 @@ impl Default for Argon2Params {
     }
 }
 
-/// Specifies how the symmetric keys were derived (R15). The variant tag and its
-/// fields are part of the interop contract.
+/// Specifies how the symmetric keys were derived (R15). The enum is
+/// **externally tagged** — the variant name (`Argon2` / `SLIP0021`) is the JSON
+/// key wrapping the variant's fields — which is the interop contract: records
+/// written by the original build are read back, and vice-versa.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(tag = "type")]
 pub enum KeyDerivationDetails {
     /// Password-derived. Carries the Argon2 parameters plus two independent,
     /// Base64-encoded salts (`salt_aes`, `salt_hmac`).

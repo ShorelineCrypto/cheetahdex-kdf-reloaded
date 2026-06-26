@@ -253,9 +253,13 @@ mod tests {
         assert!(BASE64.decode(obj["ciphertext"].as_str().unwrap()).is_ok());
         assert!(BASE64.decode(obj["tag"].as_str().unwrap()).is_ok());
 
+        // `key_derivation_details` is externally tagged: the variant name `Argon2`
+        // is the JSON key wrapping the variant fields (interop contract, R15).
         let kdd = &obj["key_derivation_details"];
-        assert_eq!(kdd["type"], serde_json::json!("Argon2"));
-        let params = &kdd["params"];
+        assert!(kdd.get("type").is_none());
+        let argon2 = &kdd["Argon2"];
+        assert!(argon2.is_object());
+        let params = &argon2["params"];
         assert_eq!(params["algorithm"], serde_json::json!("argon2id"));
         assert_eq!(params["version"], serde_json::json!(19));
         assert_eq!(params["m_cost"], serde_json::json!(65536));
@@ -263,8 +267,8 @@ mod tests {
         assert_eq!(params["p_cost"], serde_json::json!(1));
         assert_eq!(params["output_len"], serde_json::json!(32));
         // Two distinct salts.
-        let salt_aes = kdd["salt_aes"].as_str().unwrap();
-        let salt_hmac = kdd["salt_hmac"].as_str().unwrap();
+        let salt_aes = argon2["salt_aes"].as_str().unwrap();
+        let salt_hmac = argon2["salt_hmac"].as_str().unwrap();
         assert!(!salt_aes.is_empty());
         assert!(!salt_hmac.is_empty());
         assert_ne!(salt_aes, salt_hmac);
