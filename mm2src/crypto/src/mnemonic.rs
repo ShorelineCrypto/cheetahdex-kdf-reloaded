@@ -10,7 +10,7 @@
 /// verifies the tag in constant time *before* any cipher operation.
 use crate::key_derivation::{derive_keys_for_mnemonic, Argon2Params, KeyDerivationDetails, KeyDerivationError};
 use aes::Aes256;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD};
 use base64::Engine;
 use bip39::Mnemonic;
 use cbc::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
@@ -94,16 +94,19 @@ pub fn encrypt_mnemonic(mnemonic_str: &str, password: &str) -> Result<EncryptedM
     let _ = Mnemonic::parse_in_normalized(bip39::Language::English, mnemonic_str)
         .map_err(|e| MnemonicError::InvalidMnemonic(e.to_string()))?;
 
-    // Two independent, fresh salts (R16) and the bound default Argon2 params (R15).
-    let mut salt_aes = [0u8; 32];
-    let mut salt_hmac = [0u8; 32];
+    // Two independent, fresh 16-byte salts (R16) and the bound default Argon2
+    // params (R15). Salts are stored as UNPADDED Base64 (the canonical
+    // `SaltString` form, 22 chars) so records written here are byte-compatible
+    // with the reference build and decrypt cleanly on read.
+    let mut salt_aes = [0u8; 16];
+    let mut salt_hmac = [0u8; 16];
     common::os_rng(&mut salt_aes).map_err(|e| MnemonicError::EncryptionError(format!("RNG error: {e}")))?;
     common::os_rng(&mut salt_hmac).map_err(|e| MnemonicError::EncryptionError(format!("RNG error: {e}")))?;
 
     let details = KeyDerivationDetails::Argon2 {
         params: Argon2Params::default(),
-        salt_aes: BASE64.encode(salt_aes),
-        salt_hmac: BASE64.encode(salt_hmac),
+        salt_aes: STANDARD_NO_PAD.encode(salt_aes),
+        salt_hmac: STANDARD_NO_PAD.encode(salt_hmac),
     };
 
     let keys = derive_keys_for_mnemonic(password.as_bytes(), &details)?;
@@ -220,6 +223,41 @@ mod tests {
         let password = "test_password_123";
         let encrypted = encrypt_mnemonic(TEST_MNEMONIC, password).expect("encryption should succeed");
         let decrypted = decrypt_mnemonic(&encrypted, password).expect("decryption should succeed");
+        assert_eq!(decrypted, TEST_MNEMONIC);
+    }
+
+    /// Interop regression: fresh records store each salt as the canonical
+    /// UNPADDED 16-byte Base64 string (22 chars, no `=`), and re-padding those
+    /// salts must still decrypt — proving canonical write + padding-indifferent
+    /// read on the real mnemonic path (the cause of the prior spurious
+    /// "invalid password" when opening reference-build wallets).
+    #[test]
+    fn test_salts_are_canonical_unpadded_and_decrypt_when_repadded() {
+        use crate::key_derivation::KeyDerivationDetails;
+
+        let encrypted = encrypt_mnemonic(TEST_MNEMONIC, "pw").unwrap();
+        let (salt_aes, salt_hmac) = match &encrypted.key_derivation_details {
+            KeyDerivationDetails::Argon2 {
+                salt_aes, salt_hmac, ..
+            } => (salt_aes.clone(), salt_hmac.clone()),
+            _ => panic!("expected Argon2 key derivation"),
+        };
+
+        // Canonical form: 16-byte salt -> 22 chars, no padding.
+        assert_eq!(salt_aes.len(), 22, "16-byte salt encodes to 22 unpadded chars");
+        assert_eq!(salt_hmac.len(), 22);
+        assert!(!salt_aes.contains('='), "salt must be unpadded");
+        assert!(!salt_hmac.contains('='), "salt must be unpadded");
+        assert_eq!(STANDARD_NO_PAD.decode(&salt_aes).unwrap().len(), 16);
+
+        // Re-pad the salts to the legacy padded form; decryption must still work.
+        let mut repadded = encrypted.clone();
+        repadded.key_derivation_details = KeyDerivationDetails::Argon2 {
+            params: Argon2Params::default(),
+            salt_aes: BASE64.encode(STANDARD_NO_PAD.decode(&salt_aes).unwrap()),
+            salt_hmac: BASE64.encode(STANDARD_NO_PAD.decode(&salt_hmac).unwrap()),
+        };
+        let decrypted = decrypt_mnemonic(&repadded, "pw").expect("padded salts must still decrypt");
         assert_eq!(decrypted, TEST_MNEMONIC);
     }
 

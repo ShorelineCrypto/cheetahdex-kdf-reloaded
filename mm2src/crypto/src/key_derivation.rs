@@ -10,10 +10,25 @@
 ///   Chapter 05. It is NOT accepted as the key-derivation method for a
 ///   user-facing wallet record.
 use crate::slip21;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::alphabet;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use base64::Engine;
 use derive_more::Display;
 use zeroize::Zeroize;
+
+/// Salt Base64 *decode* engine: standard alphabet, padding-INDIFFERENT.
+///
+/// Interop: the canonical wallet record (and every record written by the
+/// reference build) stores each Argon2 salt as an **unpadded** 16-byte
+/// `SaltString` (22 chars, e.g. `Zy+pgtDwUkpJ0EZuedpFBQ`). A strict
+/// padding-required decoder rejects that form, which previously made such
+/// records undecryptable (surfacing as a spurious "invalid password"). This
+/// engine accepts a salt whether it carries canonical padding or none, so both
+/// canonical unpadded salts and any legacy padded salt are read back.
+const SALT_B64_DECODE: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
 
 /// Bound Argon2id parameters (R15). The whole object travels with every
 /// persisted record so a future parameter raise stays backward-compatible — an
@@ -113,10 +128,10 @@ pub fn derive_keys_for_mnemonic(
             salt_aes,
             salt_hmac,
         } => {
-            let salt_aes = BASE64
+            let salt_aes = SALT_B64_DECODE
                 .decode(salt_aes)
                 .map_err(|e| KeyDerivationError::InvalidBase64(format!("salt_aes: {e}")))?;
-            let salt_hmac = BASE64
+            let salt_hmac = SALT_B64_DECODE
                 .decode(salt_hmac)
                 .map_err(|e| KeyDerivationError::InvalidBase64(format!("salt_hmac: {e}")))?;
             let encryption_key = derive_argon2_key(password_or_seed, params, &salt_aes)?;
@@ -186,6 +201,7 @@ fn derive_keys_slip0021(seed: &[u8]) -> Result<DerivedKeys, KeyDerivationError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD};
 
     fn test_params() -> Argon2Params {
         Argon2Params {
@@ -243,6 +259,38 @@ mod tests {
         };
         let keys = derive_keys_for_mnemonic(password, &details).unwrap();
         assert_eq!(keys.encryption_key, keys.hmac_key);
+    }
+
+    #[test]
+    fn test_argon2_salt_padding_indifferent() {
+        // Interop regression: the canonical record stores each salt as an
+        // UNPADDED 16-byte Base64 string (`SaltString`, e.g. 22 chars). A padded
+        // form of the same bytes must derive the identical key, proving the read
+        // path no longer rejects canonical unpadded salts (which previously
+        // surfaced as a spurious "invalid password").
+        let password = b"test password";
+        let salt_bytes = b"sixteen_byte_salt"; // 17 bytes; any length is fine for Argon2
+        let unpadded = STANDARD_NO_PAD.encode(salt_bytes);
+        let padded = BASE64.encode(salt_bytes);
+        assert!(!unpadded.contains('='), "unpadded salt must carry no padding");
+
+        let details_unpadded = KeyDerivationDetails::Argon2 {
+            params: test_params(),
+            salt_aes: unpadded.clone(),
+            salt_hmac: unpadded,
+        };
+        let details_padded = KeyDerivationDetails::Argon2 {
+            params: test_params(),
+            salt_aes: padded.clone(),
+            salt_hmac: padded,
+        };
+
+        let keys_unpadded =
+            derive_keys_for_mnemonic(password, &details_unpadded).expect("unpadded (canonical) salt must derive");
+        let keys_padded = derive_keys_for_mnemonic(password, &details_padded).expect("padded salt must derive");
+
+        assert_eq!(keys_unpadded.encryption_key, keys_padded.encryption_key);
+        assert_eq!(keys_unpadded.hmac_key, keys_padded.hmac_key);
     }
 
     #[test]
