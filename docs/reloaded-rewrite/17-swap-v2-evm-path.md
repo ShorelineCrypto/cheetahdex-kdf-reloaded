@@ -477,10 +477,63 @@ An attempted trade that requires the taker side to lock or pay an
 NFT MUST be rejected as unsupported rather than mapped onto a
 maker-side NFT operation.
 
+**R17.9.7. NFT identity validation.** The maker-side NFT branch
+MUST validate the NFT identity before a maker-payment transaction
+is built. ERC-721 maker payments MUST carry a token contract,
+token id, and token standard; their amount is implicit and equal
+to one. An explicit ERC-721 amount other than one MUST be
+rejected. ERC-1155 maker payments MUST carry a token contract,
+token id, token standard, and a positive amount. A zero, missing,
+or otherwise non-positive ERC-1155 amount MUST be rejected before
+signing or broadcast.
+
+**R17.9.8. Native `MM2.db` compatibility.** Candidate-1 NFT V2
+support MUST preserve the native `MM2.db` schema and migration
+lineage defined by Chapter 44. It MUST NOT add an NFT-specific
+native `MM2.db` table, `my_swaps` column, migration state, index,
+or versioning rule. The compatible native restart surface for V2
+swaps is limited to the corpus-compatible generic V2 persistence:
+`my_swaps`, the generic scalar V2 fields defined for that table,
+`events_json`, `swap_type`, `is_finished`, and `swap_version`.
+Any proposal to persist NFT token contract, token id, token
+standard, ERC-1155 amount, or other NFT metadata by adding a
+native `MM2.db` table, column, migration state, or alternate
+versioning rule is a compatibility-breaking divergence and
+requires explicit human approval before implementation.
+
+**R17.9.9. Restart data sources.** NFT V2 restart recovery MUST
+reconstruct state only from corpus-compatible generic V2
+persistence and, after a maker-payment transaction is available,
+from that transaction's public calldata. The recovery path MUST
+NOT fabricate NFT identity fields, infer token standard from an
+unreliable local default, or read a Reloaded-local native DB
+extension that is not part of the Chapter-44-compatible
+`MM2.db` contract.
+
+**R17.9.10. Pre-maker-payment restart boundary.** If the process
+restarts before the NFT maker-payment transaction has been
+broadcast or otherwise persisted in generic V2 state, recovery may
+resume only when the token contract, token id, token standard, and
+ERC-1155 amount when applicable are recoverable from existing
+corpus-compatible state. When those fields are not recoverable,
+the recovery handler MUST park or refuse the unfinished NFT swap
+with a recoverable status; it MUST NOT build, sign, or broadcast a
+maker-payment transaction with invented NFT identity.
+
+**R17.9.11. Post-maker-payment restart recovery.** Once the
+maker-payment transaction is available, NFT recovery MUST decode
+the maker-payment calldata where possible to recover the token id
+and, for ERC-1155, the positive amount. The recovery path still
+MUST obtain the token standard from a corpus-compatible source
+before selecting the ERC-721 or ERC-1155 spend/refund path. If
+the token standard is unavailable, recovery MUST park or refuse
+the NFT-specific on-chain action rather than selecting a path by
+guessing.
+
 **T17.9.1. Use NFT V2 path.** Given an ERC-721 maker asset and an
 ERC-1155 maker asset in separate cases, with both peers
-advertising NFT V2 and the maker chain configured with an
-deployed NFT-aware maker contract, the dispatch decision returns
+advertising NFT V2 and the maker chain configured with a deployed
+NFT-aware maker contract, the dispatch decision returns
 *Use NFT V2 path*. The maker-side call site builds the NFT
 maker-payment operation for the selected token standard, and the
 taker side uses the fungible EVM V2 payment flow.
@@ -508,6 +561,48 @@ that satisfies T17.9.1, the same test fixture asserts that the
 taker funding and payment actions use the fungible EVM V2
 surface, not an NFT-specific taker surface.
 
+**T17.9.5. NFT identity validation.** Given an ERC-721 maker
+asset with token contract, token id, and token standard, the
+maker-payment builder accepts the implicit amount of one and
+rejects any explicit non-one amount. Given an ERC-1155 maker
+asset, the builder accepts only a positive amount and rejects a
+missing, zero, or otherwise non-positive amount before signing or
+broadcasting.
+
+**T17.9.6. `MM2.db` schema compatibility.** A native database used
+for candidate-1 NFT V2 support migrates through the Chapter-44
+state-15 lineage without creating any NFT-specific table, column,
+index, migration state, or versioning rule. Schema inspection in
+the test asserts that NFT token contract, token id, token
+standard, and ERC-1155 amount are not added to native `MM2.db`.
+
+**T17.9.7. Restart uses only compatible sources.** Given an
+unfinished NFT V2 swap row, the recovery handler reads only the
+generic V2 `my_swaps` fields, `events_json`, `swap_type`,
+`is_finished`, `swap_version`, and any already-available
+maker-payment transaction calldata. The test rejects any recovery
+path that requires a Reloaded-local NFT metadata table, column, or
+migration in native `MM2.db`.
+
+**T17.9.8. Pre-maker-payment recovery parks unsupported state.**
+Given an unfinished NFT V2 swap whose process stops before a
+maker-payment transaction is available, and whose token contract,
+token id, token standard, or required ERC-1155 amount cannot be
+recovered from corpus-compatible state, restart recovery parks or
+refuses the swap. The test asserts that no maker-payment
+transaction is built, signed, broadcast, or marked sent from
+fabricated NFT identity.
+
+**T17.9.9. Post-maker-payment recovery decodes calldata but does
+not guess standard.** Given an already-available NFT maker-payment
+transaction, restart recovery decodes calldata to recover the
+token id and, for ERC-1155, the amount. If the token standard is
+available from corpus-compatible state, the recovery path selects
+the matching ERC-721 or ERC-1155 spend/refund operation. If the
+token standard is unavailable, the recovery path parks or refuses
+the NFT-specific action and does not guess from amount, coin
+ticker, or local defaults.
+
 > **Upstream divergence (informative).** The observed lineage
 > exposes maker-side NFT swap operations and direct tests for
 > them, but does not show a production state-machine selector that
@@ -515,7 +610,9 @@ surface, not an NFT-specific taker surface.
 > R17.9.5 bind that missing call-site behaviour for Reloaded.
 
 See [Chapter 19 — NFT Module Layout](19-nft-module-layout.md) for
-the broader NFT activation and storage surface.
+the broader NFT activation surface. Native `MM2.db` persistence
+for candidate-1 NFT V2 remains constrained by R17.9.8 through
+R17.9.11 and Chapter 44.
 
 ---
 
@@ -581,9 +678,10 @@ relevant entry points.
 Unit tests are collocated with each EVM-side V2 implementation
 module. End-to-end V2 EVM coverage runs against an Anvil node as
 part of the docker test fleet (gated behind the `docker_tests`
-feature). NFT dispatch acceptance requirements are enumerated in
-T17.9.1 through T17.9.4 because those branches are part of the
-maker-side state-machine contract.
+feature). NFT dispatch and restart-compatibility acceptance
+requirements are enumerated in T17.9.1 through T17.9.9 because
+those branches are part of the maker-side state-machine and
+native persistence contract.
 
 ---
 

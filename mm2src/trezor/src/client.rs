@@ -9,14 +9,9 @@ use crate::response::TrezorResponse;
 use crate::result_handler::ResultHandler;
 use crate::transport::Transport;
 use crate::{TrezorError, TrezorResult};
-use common::custom_futures::FutureTimerExt;
 use futures::lock::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
-use futures::FutureExt;
 use mm2_err_handle::prelude::*;
 use std::sync::Arc;
-use std::time::Duration;
-
-const CONNECTION_STATUS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone)]
 pub struct TrezorClient {
@@ -48,11 +43,10 @@ impl TrezorClient {
     /// Returns `true` when the device is reachable: either the session is
     /// already held by a concurrent task (reported as reachable *without*
     /// contending for the session lock), or a fresh `Initialize` exchange
-    /// succeeds. Returns `false` when the session is free but the device does
-    /// not respond. This never enqueues a user-interaction request.
-    pub async fn is_connected(&self) -> bool { self.is_connected_with_timeout(CONNECTION_STATUS_PROBE_TIMEOUT).await }
-
-    async fn is_connected_with_timeout(&self, timeout: Duration) -> bool {
+    /// succeeds. Returns `false` when the session is free but the underlying
+    /// transport/device call reports failure. This never enqueues a
+    /// user-interaction request.
+    pub async fn is_connected(&self) -> bool {
         // Don't contend for the session: if another task already holds it the
         // device is in use and therefore reachable.
         let guard = match self.inner.try_lock() {
@@ -60,7 +54,7 @@ impl TrezorClient {
             None => return true,
         };
         let mut session = TrezorSession { inner: guard };
-        matches!(session.initialize_device().boxed().timeout(timeout).await, Ok(Ok(_)))
+        session.initialize_device().await.is_ok()
     }
 }
 
@@ -211,7 +205,7 @@ mod tests {
         let client = TrezorClient::from_transport(transport);
         let _held_session = block_on(client.inner.lock());
 
-        assert!(block_on(client.is_connected_with_timeout(Duration::from_millis(1))));
+        assert!(block_on(client.is_connected()));
         assert_eq!(counters.writes.load(Ordering::SeqCst), 0);
         assert_eq!(counters.reads.load(Ordering::SeqCst), 0);
     }
@@ -221,7 +215,7 @@ mod tests {
         let (transport, counters) = TestTransport::new(ReadBehavior::Features);
         let client = TrezorClient::from_transport(transport);
 
-        assert!(block_on(client.is_connected_with_timeout(Duration::from_millis(100))));
+        assert!(block_on(client.is_connected()));
         assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
         assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
     }
@@ -231,17 +225,7 @@ mod tests {
         let (transport, counters) = TestTransport::new(ReadBehavior::Error);
         let client = TrezorClient::from_transport(transport);
 
-        assert!(!block_on(client.is_connected_with_timeout(Duration::from_millis(100))));
-        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
-        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn reachability_probe_reports_unreachable_on_timeout() {
-        let (transport, counters) = TestTransport::new(ReadBehavior::Pending);
-        let client = TrezorClient::from_transport(transport);
-
-        assert!(!block_on(client.is_connected_with_timeout(Duration::from_millis(10))));
+        assert!(!block_on(client.is_connected()));
         assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
         assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
     }

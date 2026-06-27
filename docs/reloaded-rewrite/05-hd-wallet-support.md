@@ -451,16 +451,14 @@ moves off-process.
 
 ## 5.10A Bound Trezor Connection-Status Query
 
-**R28.** *Trezor connection-status query — native-only RPC
-contract.* The substrate MUST bind the daemon RPC method
+**R28.** *Trezor connection-status query — RPC contract.* The
+substrate MUST bind the daemon RPC method
 `trezor_connection_status` (mmrpc 2.0, flat method), routed
-through the version-two RPC dispatcher and gated to native
-targets only: on the WebAssembly target the method MUST be
-absent / refused, since the hardware-wallet path of R25 is itself
-native-only. The method reports the current connection state of
-the Trezor hardware-wallet context held by the central
-cryptographic context (R5 / R25) and MUST expose the following
-wire contract:
+through the version-two RPC dispatcher where the hardware-wallet
+path of R25 is available. The method reports the current
+connection state of the already-initialised Trezor hardware-wallet
+context held by the central cryptographic context (R5 / R25) and
+MUST expose the following wire contract:
 
 - *Request (interop).* The request object has one optional field,
   `device_pubkey`. When supplied, the value is a hex-encoded
@@ -507,26 +505,29 @@ present.
 
 **R28B.** *Connection-status resolution and concurrent-session
 branch.* After the R28A identity rule has passed or has been
-skipped, the method MUST resolve the status without starting a
-long-running operation. Trigger condition: the initialised Trezor
-context is already marked disconnected or otherwise has no usable
-connected handle. Required behaviour: return a successful
-`"Unreachable"` status. Trigger condition: another task already
-owns the exclusive device session for the same Trezor context.
-Required behaviour: return a successful `"Connected"` status
-without waiting for, stealing, cancelling, or otherwise contending
-for that session. Trigger condition: the context is initialised,
-not marked disconnected, and no concurrent task owns the device
-session. Required behaviour: perform a bounded non-mutating
-reachability probe and return `"Connected"` if the probe succeeds
-or `"Unreachable"` if the probe fails.
+skipped, the method MUST resolve status from the already-initialised
+hardware-wallet context; it MUST NOT perform initial device
+acquisition, rediscovery, or reconnection. Trigger condition:
+another task already owns the exclusive device session for the
+same Trezor context. Required behaviour: return a successful
+`"Connected"` status without waiting for, stealing, cancelling, or
+otherwise contending for that session. Trigger condition: the
+context is initialised and the exclusive device session is
+available. Required behaviour: perform a non-mutating reachability
+probe through the existing transport/device-call path and return
+`"Connected"` if that probe succeeds or `"Unreachable"` if that
+probe fails. The status RPC MUST NOT impose an additional short
+RPC-level deadline on this probe; completion/failure timing is
+governed by the underlying transport and device-call behaviour.
 
 **R28C.** *Observational status query.* The
 `trezor_connection_status` call MUST be observational with respect
 to wallet/account/key state. It MUST NOT create, remove, or
 rewrite wallet state; MUST NOT derive, sign, export, or display
 user keys or addresses; and MUST NOT start, require, or complete a
-user-confirmation-dependent hardware-wallet operation. A failed
+user-confirmation-dependent hardware-wallet operation. The
+reachability probe is limited to connection-state observation and
+MUST NOT request a user confirmation on the device. A failed
 reachability probe MAY update volatile connection-state bookkeeping
 so subsequent calls can report `"Unreachable"` without probing a
 handle already known to be unavailable.
@@ -613,9 +614,7 @@ issued and the test asserts the successful response has exactly
 the `status` field and that its value is one of the two bound
 discriminant strings (`"Connected"` / `"Unreachable"`). A request
 issued against a context with no hardware-wallet context asserts
-the `TrezorNotInitialized` error token and HTTP 400 mapping. A
-WebAssembly-target dispatcher test asserts the method is absent or
-refused.
+the `TrezorNotInitialized` error token and HTTP 400 mapping.
 
 **T9A.** *Trezor connection-status query — optional device
 identity.* A central context is constructed with an initialised
@@ -638,17 +637,17 @@ for the in-flight task to finish, without taking ownership of the
 session, and without cancelling or otherwise affecting the
 in-flight task.
 
-**T9C.** *Trezor connection-status query — unreachable and
-observational paths.* With an initialised Trezor context whose
-connected handle is already marked unavailable, the request returns
-a successful `"Unreachable"` status and performs no device-session
-probe. With an available handle, the test double drives one
-successful reachability probe and one failed reachability probe;
-the test asserts the respective `"Connected"` and `"Unreachable"`
-statuses. Across all cases, wallet identity, account storage, key
-material, and user-confirmation counters exposed by the test
-harness remain unchanged; only volatile connection-status
-bookkeeping may change after a failed probe.
+**T9C.** *Trezor connection-status query — available-session
+probe result and observational paths.* With an initialised Trezor
+context whose exclusive device session is available, the test
+double drives one successful reachability probe and one failed
+reachability probe; the test asserts the respective `"Connected"`
+and `"Unreachable"` statuses according to the probe result. The
+test MUST NOT assert a short RPC-level timeout. Across all cases,
+wallet identity, account storage, key material, and
+user-confirmation counters exposed by the test harness remain
+unchanged; only volatile connection-status bookkeeping may change
+after a failed probe.
 
 **T10.** *Software account xpub matches a reference wallet
 (dictated interop).* A central context is constructed in the
@@ -784,5 +783,6 @@ surface.
   the `"Connected"` / `"Unreachable"` discriminant strings, the
   method's `error_type` token set with their HTTP-status mapping,
   and the status-query behaviour for optional identity assertions,
-  unavailable handles, concurrent session ownership, and
-  non-mutating probes); no protected expression crossed.
+  concurrent session ownership, and non-mutating reachability
+  probes governed by the underlying transport/device-call
+  behaviour); no protected expression crossed.
