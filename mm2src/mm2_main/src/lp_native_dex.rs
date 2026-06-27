@@ -520,9 +520,17 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
 
     // Identity invariant (R28): every resolved plaintext seed — including the pure
     // re-login load-and-use path — initialises the node's signing identity. Only
-    // the anonymous row leaves the node without an identity.
+    // the anonymous row leaves the node without an identity. Per R45.4.8 this is
+    // the single startup site that consumes the resolved seed, so `enable_hd`
+    // selects the key-pair policy here for every resolved-seed path: a truthy
+    // `enable_hd` binds the seed to a global-HD account, otherwise to the
+    // baseline Iguana single-key context.
     if let Some(passphrase) = resolved_seed {
-        CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase).mm_err(Into::into)?;
+        if ctx.enable_hd() {
+            CryptoCtx::init_with_global_hd_account(ctx.clone(), &passphrase).mm_err(Into::into)?;
+        } else {
+            CryptoCtx::init_with_iguana_passphrase(ctx.clone(), &passphrase).mm_err(Into::into)?;
+        }
     }
     lp_init_continue(ctx.clone()).await?;
 

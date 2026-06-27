@@ -152,6 +152,27 @@ an alternative signing-identity source that, like a passphrase, satisfies the
 successful launch, and its absence shall not by itself refuse a launch
 (R45.4.1).
 
+R45.4.8 **HD-mode identity selection (single source of truth).** The
+configuration field `enable_hd` is a boolean that selects, for *every* path
+that initialises a passphrase-derived signing identity — the plaintext-
+passphrase path of R45.4.2 **and** the named-wallet path of R45.4.4 /
+Chapter 07 — which key-pair policy the resolved seed is bound to. It shall be
+parsed as a JSON boolean defaulting to `false` when absent, null, or of any
+non-boolean type (the same truthy convention as `allow_weak_password`). When
+`enable_hd` is truthy the resolved plaintext seed MUST initialise a **global-HD
+account** context (the BIP-39 / BIP-32 hierarchical-deterministic identity of
+Chapter 05); otherwise it MUST initialise the baseline **Iguana** single-key
+context. This requirement is the single normative source that discharges the
+"or a global-HD account when HD mode is enabled" clause of Chapter 07 R28 and
+the parenthetical of R45.4.2: the selection MUST be applied at the **one**
+startup identity-initialisation site that consumes the resolved seed, so that
+no resolved-seed path (legacy plaintext, generate-and-persist, re-login load-
+and-use, first-save, confirm, or import-and-save) can silently fall back to the
+Iguana policy while HD mode is configured. An acceptance test MUST assert both
+directions: a truthy `enable_hd` yields a global-HD key-pair policy (such that
+HD-only operations — e.g. deriving an additional account/address — are
+available), and an absent or `false` `enable_hd` yields the Iguana policy.
+
 ## 45.5 Per-Field Startup Tolerance
 
 R45.5.1 The following launch-relevant configuration fields are bound to the
@@ -173,6 +194,7 @@ error (never a panic).
 | `rpcip` | Tolerated → loopback default | — | `127.0.0.1` |
 | `rpcport` | Tolerated → default port | `0` → bind any free port; `<1024` non-zero → refuse; `>65535` → refuse; numeric string accepted | `7783` |
 | `allow_weak_password` | Tolerated → `false` | Non-boolean → `false` | `false` |
+| `enable_hd` | Tolerated → `false` (Iguana single-key identity) | Non-boolean → `false` | `false`; truthy selects the global-HD identity (R45.4.8) |
 
 R45.5.2 **`rpc_password` absence/empty.** An absent or empty `rpc_password`
 shall not silently grant unauthenticated access to protected methods: protected

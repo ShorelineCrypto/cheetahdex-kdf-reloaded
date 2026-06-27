@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use chain::TxHashAlgo;
 use common::executor::{spawn, Timer};
 use crypto::GlobalHDAccountArc;
-use crypto::{Bip32DerPathError, Bip32DerPathOps, Bip44DerPathError, Bip44PathToCoin, CryptoCtx, CryptoCtxError,
-             CryptoInitError, HwWalletType};
+use crypto::{Bip32DerPathError, Bip32DerPathOps, Bip44DerPathError, CryptoCtx, CryptoCtxError, CryptoInitError,
+             HDPathToCoin, HwWalletType};
 use derive_more::Display;
 use futures::channel::mpsc;
 use futures::compat::Future01CompatExt;
@@ -362,7 +362,7 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
     async fn load_hd_wallet_accounts(
         &self,
         hd_wallet_storage: &HDWalletCoinStorage,
-        derivation_path: &Bip44PathToCoin,
+        derivation_path: &HDPathToCoin,
     ) -> UtxoCoinBuildResult<HDAccountsMap<UtxoHDAccount>> {
         utxo_common::load_hd_accounts_from_storage(hd_wallet_storage, derivation_path)
             .await
@@ -370,7 +370,7 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
     }
 
     #[inline]
-    fn derivation_path(&self) -> UtxoConfResult<Bip44PathToCoin> {
+    fn derivation_path(&self) -> UtxoConfResult<HDPathToCoin> {
         if self.conf()["derivation_path"].is_null() {
             return MmError::err(UtxoConfError::DerivationPathIsNotSet);
         }

@@ -27,6 +27,10 @@ Reloaded ships some of it and lacks the rest, so the chapter is split:
   (min/max connected + server ordering), UTXO balance event streaming,
   fixed-tx-fee ("dingo") option and fixed-fee-derived minimum trading volume, and
   FIRO Spark verbose-tx support.
+- **§38.8 (T-PORT, required, NOT yet in reloaded):** software (non-hardware)
+  global-HD UTXO accounts -- storage availability, account-`0` bootstrap at
+  activation, `get_new_address` advance, and gap/scan semantics for BIP-44 and
+  BIP-84 coins -- consuming the Chapter 5 §5.9A software-HD crypto substrate.
 
 > **Binding scope (R36).** Requirements bind observable behaviour, public RPC
 > method strings / request-response field names, coins-config keys, and dictated
@@ -62,6 +66,28 @@ withdraw to P2SH addresses.
 R38.3.2 Output-script creation shall follow an address-builder model in which an
 address carries its script type, and the signing path shall parse scriptSig
 signatures tolerantly across real-world P2PKH variants.
+
+R38.3.3 **HD derivation-path purpose generality.** When a UTXO coin's
+coins-config supplies a `derivation_path` and the daemon is in HD mode, the coin
+activation path and every UTXO HD consumer that parses that config field (the
+account-derivation machinery, the new-address derivation RPC, the my-address RPC,
+and the private-key-export RPC) shall deserialize it with the generic
+purpose-level standard HD path of Chapter 5 R18 (`HDPathToCoin` /
+`HDPathToAccount`), which accepts every standard BIP-43 purpose (32, 44, 49, 84).
+These consumers shall NOT use the strict BIP-44 alias of Chapter 5 R19, whose
+purpose level is pinned to 44 and which therefore rejects any other purpose.
+Consequently a UTXO coin whose `derivation_path` declares a non-44 purpose — in
+particular BIP-84 native segwit (`m/84'/<coin_type>'`) or BIP-49 nested segwit
+(`m/49'/<coin_type>'`) — shall activate and derive HD addresses, instead of being
+refused at activation with a purpose-mismatch error. The strict BIP-44 alias
+remains reserved for fixed/internal paths only (e.g. the bound internal key path
+of Chapter 5 R16); coins whose configured path is genuinely BIP-44 (such as the
+EVM `m/44'/60'` family) are unaffected, since BIP-44 is a subset of the accepted
+purposes. Acceptance (two-direction): a UTXO segwit coin configured with an
+`m/84'` `derivation_path` activates in HD mode and a freshly derived external HD
+address advances the address index under that same purpose; a UTXO coin
+configured with an `m/44'` `derivation_path` continues to activate and derive.
+Each derived address's reported `derivation_path` carries the configured purpose.
 
 ## 38.4 KMD interest / rewards & dust policy
 
@@ -163,6 +189,85 @@ other coins using the same verbose transaction shape. Acceptance: a verbose
 transaction output with `type: "cryptocondition"` deserializes without falling
 back to an error path that skips transaction-history processing.
 
+## 38.8 Software global-HD UTXO accounts & address derivation (T-PORT)
+
+> **Status of §38.8:** required port. The reloaded UTXO HD path can only obtain
+> an account extended public key through a hardware device; a **software**
+> (non-hardware) global-HD account therefore cannot create an HD account or
+> derive HD addresses. This section binds the software-HD UTXO behaviour as
+> first-class, testable requirements. It is the coin-side consumer of Chapter 5
+> §5.9A (R29–R31), which binds the crypto substrate (software wallet identity,
+> software account-xpub derivation and canonical serialisation, and source
+> selection by key-pair policy). §38.8 binds the UTXO account bootstrap, the
+> `get_new_address` advance, and the scan/gap behaviour for both BIP-44 and
+> BIP-84 coins. It cross-references Chapter 5 R15–R20, R29–R31; Chapter 7 R28;
+> §38.3.3 (HD purpose generality); and Chapter 45 R45.4.8 (HD-mode identity
+> selection).
+
+R38.8.1 **Software-HD storage availability.** When a UTXO coin is activated in
+HD mode under a software global-HD account (key-pair policy `GlobalHDAccount`,
+selected by Chapter 45 R45.4.8 / Chapter 7 R28; no hardware device present), the
+coin's per-wallet HD-account storage MUST initialise successfully using the
+software wallet-identity digest of Chapter 5 R29 (the in-context
+`RIPEMD160(SHA256(pubkey))` identity, equal to the daemon-wide `mm2_rmd160`).
+It MUST NOT be refused on the grounds that no hardware device is connected. Iguana mode remains unsupported for HD (the request is
+refused); hardware mode is unchanged. The on-disk identity namespacing
+(`mm2_rmd160`, `hd_wallet_rmd160` columns) is unchanged; in software mode both
+take the same software-derived value.
+
+R38.8.2 **Account-0 bootstrap at activation.** Activating a software-HD UTXO
+coin MUST establish HD account `0` so the coin is usable immediately after
+activation. The observable contract matches the existing enable-HD-wallet flow:
+HD accounts are loaded from storage at activation, and **if none exist the
+default account `0` is created at activation time** (its account-level extended
+public key derived in software per Chapter 5 R30 at the configured
+`purpose'/coin_type'/0'` path), persisted with its canonical `account_xpub`, and
+returned in the activation balance result; if accounts already exist they are
+loaded and re-bound. After a successful software-HD activation the coin exposes
+at least account `0`. This bootstrap MUST NOT require a `trezor_coin` config
+field and MUST NOT contact a hardware device.
+
+R38.8.3 **`get_new_address` advance (software HD).** For a software-HD UTXO coin
+the public `get_new_address` RPC MUST advance the **external-chain** (BIP-44
+chain `External`) address index under the requested `account_id` (default
+account `0`) and return the freshly derived address together with its full
+`derivation_path`, its `chain`, and its `balance`. The returned
+`derivation_path` MUST carry the coin's configured BIP-43 purpose (44, 49, or 84
+per §38.3.3) and an address index one greater than the previous external
+known-addresses count for that account; successive calls MUST return successive
+addresses. The derived address MUST equal the address a conformant reference
+wallet derives from the same mnemonic at the same full derivation path
+(`purpose'/coin_type'/account'/0/address_index`), which follows from the
+canonical account-xpub contract of Chapter 5 R30. The request/response field
+names are the existing wire surface: request `coin`, `account_id`, `chain`;
+response `new_address` carrying `address`, `derivation_path`, `chain`,
+`balance`.
+
+R38.8.4 **`can_get_new_address` and gap-limit semantics.** The new-address
+preconditions and gap-limit accounting that govern hardware HD MUST hold
+identically for software HD: an address may be added when within the account's
+gap limit of the last used address; scanning for new addresses
+(`scan_for_new_addresses`) under account `0` discovers used addresses up to the
+gap limit and advances the known-addresses count accordingly. These semantics
+MUST work for both BIP-44 (legacy/P2PKH) and BIP-84 (native segwit / P2WPKH)
+UTXO coins; the only per-coin difference is the address encoding, not the
+derivation or gap accounting.
+
+R38.8.5 **Tests (two-direction, observable).**
+- *Segwit (BIP-84) software-HD activation & advance.* A software-HD UTXO segwit
+  coin configured with an `m/84'/<coin_type>'` `derivation_path` activates,
+  exposes account `0`, and successive `get_new_address` calls return successive
+  external addresses whose reported `derivation_path` carries purpose `84'` and
+  an incrementing address index; the returned addresses match those a reference
+  wallet derives from the same mnemonic at those paths.
+- *Legacy (BIP-44) software-HD equivalence.* A software-HD UTXO coin configured
+  with an `m/44'/<coin_type>'` `derivation_path` behaves equivalently
+  (activates, exposes account `0`, advances external addresses; addresses match
+  the reference wallet).
+- *Negative (Iguana refusal).* With the daemon in Iguana (non-HD) mode, an HD
+  request — coin activation in HD mode or `get_new_address` — is refused (HD is
+  unavailable in Iguana mode); no software HD account is created.
+
 ## 38.7 Acceptance criteria (chapter)
 
 - Baseline (Part A) RPCs `sign_raw_transaction` and `consolidate_utxos` behave
@@ -170,3 +275,7 @@ back to an error path that skips transaction-history processing.
 - Each Part-B item (R38.6.1--R38.6.8) is implemented with the acceptance test
   stated inline, and its coins-config keys / RPC field additions are documented
   alongside the implementation.
+- §38.8 software global-HD UTXO behaviour (R38.8.1--R38.8.5) is implemented: a
+  software-HD UTXO coin (BIP-84 and BIP-44) activates without a hardware device,
+  exposes account `0`, and `get_new_address` returns successive external
+  addresses matching a reference wallet; Iguana-mode HD requests stay refused.

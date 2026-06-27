@@ -164,6 +164,20 @@ impl CryptoCtx {
     #[inline]
     pub fn hw_wallet_rmd160(&self) -> Option<H160> { self.hw_ctx.read().to_option().map(|hw_ctx| hw_ctx.rmd160()) }
 
+    /// Returns the software global-HD wallet-identity digest (`RIPEMD160(SHA256(pubkey))`)
+    /// for the active key-pair policy, or `None` in Iguana mode.
+    ///
+    /// In `GlobalHDAccount` mode this is the internal secp256k1 public-key hash, equal to the
+    /// daemon-wide `mm2_rmd160` identity. It namespaces per-wallet HD-account storage without
+    /// requiring a hardware device, and is stable across restarts for the same mnemonic.
+    #[inline]
+    pub fn global_hd_wallet_rmd160(&self) -> Option<H160> {
+        match self.key_pair_policy {
+            KeyPairPolicy::GlobalHDAccount(_) => Some(self.secp256k1_key_pair.public().address_hash()),
+            KeyPairPolicy::Iguana => None,
+        }
+    }
+
     /// Initialize with a legacy Iguana passphrase (hashed to a single key pair).
     pub fn init_with_iguana_passphrase(ctx: MmArc, passphrase: &str) -> CryptoInitResult<Arc<CryptoCtx>> {
         Self::init_crypto_ctx_with_policy_builder(ctx, passphrase, KeyPairPolicyBuilder::Iguana)

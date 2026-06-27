@@ -10,7 +10,7 @@
 //! protocol does not support own-address resolution is refused.
 
 use common::HttpStatusCode;
-use crypto::{Bip32DerPathOps, Bip44Chain, Bip44PathToCoin, ChildNumber, CryptoCtx, CryptoCtxError, GlobalHDAccountArc,
+use crypto::{Bip32DerPathOps, Bip44Chain, ChildNumber, CryptoCtx, CryptoCtxError, GlobalHDAccountArc, HDPathToCoin,
              KeyPairPolicy, Secp256k1Secret};
 use derive_more::Display;
 use http::StatusCode;
@@ -165,7 +165,7 @@ fn derive_eth_hd_secret(
             ticker
         )));
     }
-    let base: Bip44PathToCoin = serde_json::from_value(conf["derivation_path"].clone()).map_to_mm(|e| {
+    let base: HDPathToCoin = serde_json::from_value(conf["derivation_path"].clone()).map_to_mm(|e| {
         GetMyAddressError::CoinsConfCheckError(format!("invalid `derivation_path` for {}: {}", ticker, e))
     })?;
 
