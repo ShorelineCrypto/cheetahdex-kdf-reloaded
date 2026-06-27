@@ -236,8 +236,6 @@ struct PendingSettle {
     pairing_topic: Topic,
     /// The namespace requirements carried forward from the proposal.
     propose_namespaces: ProposeNamespaces,
-    /// The negotiated transport encoding for the session.
-    encoding: EncodingAlgo,
 }
 
 impl WalletConnectCtx {
@@ -762,7 +760,6 @@ impl WalletConnectCtx {
             session_key,
             pairing_topic: proposal.pairing_topic,
             propose_namespaces: proposal.propose_namespaces,
-            encoding: EncodingAlgo::Hex,
         });
     }
 
@@ -867,6 +864,7 @@ fn propose_namespaces_from_value(value: &serde_json::Value) -> ProposeNamespaces
 /// Builds the settled [`Session`] from the in-flight establishment state and the
 /// parsed `wc_sessionSettle` payload (chapter 22 §22.8.1.5).
 fn build_session(session_topic: Topic, pending: PendingSettle, settle: settle::SettleRequest) -> Session {
+    let encoding = session_encoding_for_wallet_name(&settle.controller.metadata.name);
     Session {
         topic: session_topic,
         pairing_topic: pending.pairing_topic,
@@ -874,7 +872,7 @@ fn build_session(session_topic: Topic, pending: PendingSettle, settle: settle::S
         controller: settle::SettleRequest::PEER_ROLE,
         metadata: settle.controller.metadata,
         expiry: settle.expiry,
-        encoding: pending.encoding,
+        encoding,
         properties: settle.session_properties,
         subscription_id: None,
         proposer: metadata::generate_metadata(),
@@ -882,6 +880,16 @@ fn build_session(session_topic: Topic, pending: PendingSettle, settle: settle::S
         namespaces: settle_to_relay_namespaces(settle.namespaces),
         propose_namespaces: pending.propose_namespaces,
         active_chain_id: None,
+    }
+}
+
+/// Selects the session-level byte-string encoder from the settled wallet
+/// metadata. This is intentionally not keyed on CAIP namespace or request
+/// method; Cosmos field-level byte encoding is handled by the coin module.
+fn session_encoding_for_wallet_name(wallet_name: &str) -> EncodingAlgo {
+    match wallet_name {
+        "Keplr" => EncodingAlgo::Base64,
+        _ => EncodingAlgo::Hex,
     }
 }
 
@@ -1085,6 +1093,55 @@ mod persistence_tests {
     }
 
     #[test]
+    fn restored_record_without_encoding_algo_defaults_to_hex() {
+        let session = sample_session("topicEncodingDefault", 0x34);
+        let mut stored = session.to_stored().expect("serialize");
+        let mut data: serde_json::Value = serde_json::from_str(&stored.data).expect("stored JSON");
+        data.as_object_mut()
+            .expect("stored record is an object")
+            .remove("encoding_algo")
+            .expect("fixture includes encoding_algo");
+        stored.data = serde_json::to_string(&data).expect("serialize edited JSON");
+
+        let restored = Session::from_stored(&stored).expect("deserialize without encoding_algo");
+        let bytes = [0x01u8, 0x02, 0x03, 0xff];
+        assert_eq!(restored.encoding, EncodingAlgo::Hex);
+        assert_eq!(restored.encoding.encode(bytes), "010203ff");
+    }
+
+    #[test]
+    fn restored_record_rejects_unknown_encoding_algo() {
+        let session = sample_session("topicEncodingInvalid", 0x35);
+        let mut stored = session.to_stored().expect("serialize");
+        let mut data: serde_json::Value = serde_json::from_str(&stored.data).expect("stored JSON");
+        data.as_object_mut().expect("stored record is an object").insert(
+            "encoding_algo".to_string(),
+            serde_json::Value::String("Binary".to_string()),
+        );
+        stored.data = serde_json::to_string(&data).expect("serialize edited JSON");
+
+        assert!(
+            Session::from_stored(&stored).is_err(),
+            "unknown encoding_algo values must be invalid"
+        );
+    }
+
+    #[test]
+    fn type0_envelope_codec_does_not_use_session_encoding_algo() {
+        let mut session = sample_session("topicType0", 0x36);
+        session.encoding = EncodingAlgo::Base64;
+        let sym_key = session.session_key.symmetric_key();
+        let bytes = [0x01u8, 0x02, 0x03, 0xff];
+        assert_eq!(session.encoding.encode(bytes), "AQID/w==");
+
+        let plaintext = br#"{"jsonrpc":"2.0","id":1}"#.to_vec();
+        let envelope =
+            wc_common::encrypt_and_encode(EnvelopeType::Type0, plaintext.clone(), &sym_key).expect("type0 encrypt");
+        let decrypted = wc_common::decode_and_decrypt_type0(envelope.as_bytes(), &sym_key).expect("type0 decrypt");
+        assert_eq!(decrypted.as_bytes(), plaintext.as_slice());
+    }
+
+    #[test]
     fn save_gating_writes_under_open_and_skips_under_none() {
         block_on(async {
             let conn = AsyncConnection::open_in_memory().await.expect("open in-memory db");
@@ -1173,6 +1230,27 @@ mod establishment_tests {
     use super::*;
     use x25519_dalek::{PublicKey, StaticSecret};
 
+    fn session_key_from_seed(seed: u8) -> SessionKey {
+        let secret = StaticSecret::from([seed; 32]);
+        let peer = PublicKey::from(&StaticSecret::from([seed ^ 0xFF; 32]));
+        let mut session_key = SessionKey::new(PublicKey::from(&secret));
+        session_key
+            .generate_symmetric_key(&secret, &peer.to_bytes())
+            .expect("derive session key");
+        session_key
+    }
+
+    fn cosmos_propose_namespaces() -> ProposeNamespaces {
+        serde_json::from_value(serde_json::json!({
+            "cosmos": {
+                "chains": ["cosmos:cosmoshub-4"],
+                "methods": ["cosmos_signDirect"],
+                "events": []
+            }
+        }))
+        .expect("parse propose namespaces")
+    }
+
     /// The WC2 ECDH (chapter 22 §22.6): the proposer side (which retains its
     /// ephemeral secret) and the responder side must converge on the same
     /// 32-byte symmetric key and therefore the same session topic.
@@ -1254,26 +1332,10 @@ mod establishment_tests {
         let session_topic = Topic::from("session-topic".to_string());
         let pairing_topic = Topic::from("pairing-topic".to_string());
 
-        let secret = StaticSecret::from([5u8; 32]);
-        let mut session_key = SessionKey::new(PublicKey::from(&secret));
-        session_key
-            .generate_symmetric_key(&secret, &PublicKey::from(&StaticSecret::from([9u8; 32])).to_bytes())
-            .expect("derive session key");
-
-        let propose_namespaces: ProposeNamespaces = serde_json::from_value(serde_json::json!({
-            "cosmos": {
-                "chains": ["cosmos:cosmoshub-4"],
-                "methods": ["cosmos_signDirect"],
-                "events": []
-            }
-        }))
-        .expect("parse propose namespaces");
-
         let pending = PendingSettle {
-            session_key,
+            session_key: session_key_from_seed(5),
             pairing_topic: pairing_topic.clone(),
-            propose_namespaces,
-            encoding: EncodingAlgo::Hex,
+            propose_namespaces: cosmos_propose_namespaces(),
         };
 
         let params = serde_json::json!({
@@ -1317,6 +1379,16 @@ mod establishment_tests {
         assert_eq!(session.pairing_topic, pairing_topic);
         assert_eq!(session.metadata.name, "Keplr");
         assert_eq!(session.expiry, 32_503_680_000);
+        assert_eq!(session.encoding, EncodingAlgo::Base64);
+        assert_eq!(session.encoding.encode([0x01u8, 0x02, 0x03, 0xff]), "AQID/w==");
+        assert!(
+            session
+                .to_stored()
+                .expect("serialize session")
+                .data
+                .contains("\"encoding_algo\":\"Base64\""),
+            "Keplr sessions must persist Base64 encoding_algo"
+        );
 
         let cosmos = session.namespaces.get("cosmos").expect("cosmos namespace");
         assert!(cosmos
@@ -1338,5 +1410,57 @@ mod establishment_tests {
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].chain_id, "cosmos:cosmoshub-4");
         assert!(keys[0].is_nano_ledger, "advisory hardware-wallet flag preserved");
+    }
+
+    #[test]
+    fn non_keplr_cosmos_settle_selects_hex_session_encoding() {
+        let session_topic = Topic::from("session-topic-leap".to_string());
+        let pairing_topic = Topic::from("pairing-topic-leap".to_string());
+        let pending = PendingSettle {
+            session_key: session_key_from_seed(6),
+            pairing_topic: pairing_topic.clone(),
+            propose_namespaces: cosmos_propose_namespaces(),
+        };
+        let params = serde_json::json!({
+            "relay": { "protocol": "irn" },
+            "controller": {
+                "publicKey": "a3ad5e26070ddb2809200c6f56e739333512015bceeadbb8ea1731c4c7ddb207",
+                "metadata": {
+                    "description": "Leap",
+                    "url": "https://leapwallet.io",
+                    "icons": [],
+                    "name": "Leap"
+                }
+            },
+            "namespaces": {
+                "cosmos": {
+                    "accounts": ["cosmos:cosmoshub-4:cosmos1examplexyz"],
+                    "methods": ["cosmos_signDirect", "cosmos_getAccounts"],
+                    "events": []
+                }
+            },
+            "expiry": 32_503_680_000u64
+        });
+
+        let settle: settle::SettleRequest = serde_json::from_value(params).expect("parse settle request");
+        let session = build_session(session_topic, pending, settle);
+        let bytes = [0x01u8, 0x02, 0x03, 0xff];
+
+        assert_eq!(session.pairing_topic, pairing_topic);
+        assert!(
+            session.namespaces.get("cosmos").is_some(),
+            "fixture uses the cosmos namespace"
+        );
+        assert_eq!(session.metadata.name, "Leap");
+        assert_eq!(session.encoding, EncodingAlgo::Hex);
+        assert_eq!(session.encoding.encode(bytes), "010203ff");
+        assert!(
+            session
+                .to_stored()
+                .expect("serialize session")
+                .data
+                .contains("\"encoding_algo\":\"Hex\""),
+            "non-Keplr cosmos sessions must persist Hex encoding_algo"
+        );
     }
 }

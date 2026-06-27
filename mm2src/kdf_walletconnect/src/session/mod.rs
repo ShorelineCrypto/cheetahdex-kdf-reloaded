@@ -169,6 +169,7 @@ pub struct SessionRecord {
     #[serde(default)]
     pub active_chain_id: Option<String>,
     /// Negotiated transport encoding (hex / base64).
+    #[serde(default)]
     pub encoding_algo: EncodingAlgo,
 }
 
