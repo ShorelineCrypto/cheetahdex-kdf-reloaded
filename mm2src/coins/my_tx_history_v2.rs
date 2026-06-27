@@ -319,12 +319,96 @@ impl GetHistoryCoinType for MmCoinEnum {
     }
 }
 
+fn skipped_by_paging(
+    transactions: &[TransactionDetails],
+    paging: &PagingOptionsEnum<BytesJson>,
+    limit: usize,
+) -> Option<usize> {
+    match paging {
+        PagingOptionsEnum::FromId(from_id) => transactions
+            .iter()
+            .position(|item| item.internal_id == *from_id)
+            .map(|idx| idx + 1),
+        PagingOptionsEnum::PageNumber(page_number) => Some((page_number.get() - 1) * limit),
+    }
+}
+
+fn build_response_from_history(
+    request: MyTxHistoryRequestV2,
+    sync_status: HistorySyncState,
+    current_block: u64,
+    history: Vec<TransactionDetails>,
+) -> MyTxHistoryResponseV2 {
+    let total = history.len();
+    let (transactions, skipped) = match skipped_by_paging(&history, &request.paging_options, request.limit) {
+        Some(skipped) => {
+            let transactions = history
+                .into_iter()
+                .skip(skipped)
+                .take(request.limit)
+                .map(|details| {
+                    let confirmations = if details.block_height == 0 || details.block_height > current_block {
+                        0
+                    } else {
+                        current_block + 1 - details.block_height
+                    };
+                    MyTxHistoryDetails { confirmations, details }
+                })
+                .collect();
+            (transactions, skipped)
+        },
+        None => (Vec::new(), 0),
+    };
+
+    MyTxHistoryResponseV2 {
+        coin: request.coin,
+        current_block,
+        transactions,
+        sync_status,
+        limit: request.limit,
+        skipped,
+        total,
+        total_pages: calc_total_pages(total, request.limit),
+        paging_options: request.paging_options,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn build_response_from_runtime_history(
+    ctx: MmArc,
+    request: MyTxHistoryRequestV2,
+    coin: MmCoinEnum,
+) -> Result<MyTxHistoryResponseV2, MmError<MyTxHistoryErrorV2>> {
+    let current_block = coin
+        .current_block()
+        .compat()
+        .await
+        .map_to_mm(MyTxHistoryErrorV2::RpcError)?;
+    let history = coin
+        .load_history_from_file(&ctx)
+        .compat()
+        .await
+        .map_err(|e| MmError::new(MyTxHistoryErrorV2::RpcError(e.to_string())))?;
+    let sync_status = coin.history_sync_status();
+
+    Ok(build_response_from_history(
+        request,
+        sync_status,
+        current_block,
+        history,
+    ))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn my_tx_history_v2_rpc(
     ctx: MmArc,
     request: MyTxHistoryRequestV2,
 ) -> Result<MyTxHistoryResponseV2, MmError<MyTxHistoryErrorV2>> {
     let coin = lp_coinfind_or_err(&ctx, &request.coin).await.mm_err(Into::into)?;
+    if matches!(coin, MmCoinEnum::UtxoCoin(_) | MmCoinEnum::QtumCoin(_)) {
+        return build_response_from_runtime_history(ctx, request, coin).await;
+    }
+
     let tx_history_storage = SqliteTxHistoryStorage(
         ctx.sqlite_connection
             .ok_or(MmError::new(MyTxHistoryErrorV2::StorageIsNotInitialized(
@@ -355,7 +439,7 @@ pub async fn my_tx_history_v2_rpc(
         .await
         .mm_err(Into::into)?;
 
-    let transactions = history
+    let history = history
         .transactions
         .into_iter()
         .map(|mut details| {
@@ -363,26 +447,17 @@ pub async fn my_tx_history_v2_rpc(
             if details.coin != request.coin {
                 details.coin = request.coin.clone();
             }
-            let confirmations = if details.block_height == 0 || details.block_height > current_block {
-                0
-            } else {
-                current_block + 1 - details.block_height
-            };
-            MyTxHistoryDetails { confirmations, details }
+            details
         })
         .collect();
+    let sync_status = coin.history_sync_status();
 
-    Ok(MyTxHistoryResponseV2 {
-        coin: request.coin,
+    Ok(build_response_from_history(
+        request,
+        sync_status,
         current_block,
-        transactions,
-        sync_status: coin.history_sync_status(),
-        limit: request.limit,
-        skipped: history.skipped,
-        total: history.total,
-        total_pages: calc_total_pages(history.total, request.limit),
-        paging_options: request.paging_options,
-    })
+        history,
+    ))
 }
 
 /// Shared-envelope address-scope selector for the shielded history request (R39.8.5).
@@ -464,6 +539,88 @@ pub async fn my_tx_history_v2_rpc(
 mod z_coin_tx_history_tests {
     use super::*;
     use std::num::NonZeroUsize;
+
+    fn tx_details(id: u8, block_height: u64) -> TransactionDetails {
+        TransactionDetails {
+            tx_hex: vec![id].into(),
+            tx_hash: format!("{id:02x}"),
+            from: vec![],
+            to: vec![],
+            total_amount: BigDecimal::from(0),
+            spent_by_me: BigDecimal::from(0),
+            received_by_me: BigDecimal::from(0),
+            my_balance_change: BigDecimal::from(0),
+            block_height,
+            timestamp: 0,
+            fee_details: None,
+            coin: "RICK".to_owned(),
+            internal_id: vec![id].into(),
+            kmd_rewards: None,
+            transaction_type: TransactionType::StandardTransfer,
+        }
+    }
+
+    #[test]
+    fn from_id_not_found_returns_empty_page_with_total_preserved() {
+        let request = MyTxHistoryRequestV2 {
+            coin: "RICK".to_owned(),
+            limit: 2,
+            paging_options: PagingOptionsEnum::FromId(vec![99u8].into()),
+        };
+        let response = build_response_from_history(request, HistorySyncState::Finished, 100, vec![
+            tx_details(1, 98),
+            tx_details(2, 99),
+            tx_details(3, 100),
+        ]);
+
+        assert_eq!(response.total, 3);
+        assert_eq!(response.skipped, 0);
+        assert!(response.transactions.is_empty());
+    }
+
+    #[test]
+    fn from_id_found_returns_following_records() {
+        let request = MyTxHistoryRequestV2 {
+            coin: "RICK".to_owned(),
+            limit: 2,
+            paging_options: PagingOptionsEnum::FromId(vec![2u8].into()),
+        };
+        let response = build_response_from_history(request, HistorySyncState::Finished, 100, vec![
+            tx_details(1, 97),
+            tx_details(2, 98),
+            tx_details(3, 99),
+            tx_details(4, 100),
+        ]);
+
+        assert_eq!(response.total, 4);
+        assert_eq!(response.skipped, 2);
+        assert_eq!(response.transactions.len(), 2);
+        assert_eq!(response.transactions[0].details.internal_id, vec![3u8].into());
+        assert_eq!(response.transactions[1].details.internal_id, vec![4u8].into());
+        assert_eq!(response.transactions[0].confirmations, 2);
+        assert_eq!(response.transactions[1].confirmations, 1);
+    }
+
+    #[test]
+    fn page_number_paging_uses_expected_offset() {
+        let request = MyTxHistoryRequestV2 {
+            coin: "RICK".to_owned(),
+            limit: 2,
+            paging_options: PagingOptionsEnum::PageNumber(NonZeroUsize::new(2).unwrap()),
+        };
+        let response = build_response_from_history(request, HistorySyncState::Finished, 100, vec![
+            tx_details(1, 97),
+            tx_details(2, 98),
+            tx_details(3, 99),
+            tx_details(4, 100),
+        ]);
+
+        assert_eq!(response.total, 4);
+        assert_eq!(response.skipped, 2);
+        assert_eq!(response.transactions.len(), 2);
+        assert_eq!(response.transactions[0].details.internal_id, vec![3u8].into());
+        assert_eq!(response.transactions[1].details.internal_id, vec![4u8].into());
+    }
 
     // R39.8.3/R39.8.4/R39.8.5: the request envelope deserializes with `coin`,
     // `limit`, `paging_options` and the shared `target`, and `paging_options`

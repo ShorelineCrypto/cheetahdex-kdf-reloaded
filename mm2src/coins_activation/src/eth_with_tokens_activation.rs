@@ -84,6 +84,7 @@ impl TxHistory for EthWithTokensActivationRequest {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(tag = "type")]
 pub enum EthActivationPolicy {
+    #[serde(alias = "IguanaPrivKey", alias = "ContextPrivKey")]
     #[default]
     Iguana,
     #[cfg(target_arch = "wasm32")]
@@ -489,5 +490,18 @@ mod tests {
         };
         assert_eq!(result.get_platform_balance(), BigDecimal::from(5));
         assert_eq!(result.current_block(), 1);
+    }
+
+    #[test]
+    fn activation_policy_accepts_context_priv_key_alias() {
+        let req: EthWithTokensActivationRequest = serde_json::from_str(
+            r#"{
+                "nodes": [{"url": "https://node1.example"}],
+                "priv_key_policy": {"type": "ContextPrivKey"}
+            }"#,
+        )
+        .unwrap();
+
+        assert!(matches!(req.priv_key_policy, EthActivationPolicy::Iguana));
     }
 }

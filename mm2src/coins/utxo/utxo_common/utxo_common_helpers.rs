@@ -224,12 +224,21 @@ pub fn my_balance<T>(coin: T) -> BalanceFut<CoinBalance>
 where
     T: UtxoCommonOps + GetUtxoListOps + MarketCoinOps,
 {
-    let my_address = try_f!(coin
-        .as_ref()
-        .derivation_method
-        .iguana_or_err()
-        .mm_err(BalanceError::from))
-    .clone();
+    let my_address = match &coin.as_ref().derivation_method {
+        DerivationMethod::Iguana(my_address) => my_address.clone(),
+        DerivationMethod::HDWallet(_) => {
+            let my_public_key = try_f!(my_public_key(coin.as_ref()).mm_err(BalanceError::from));
+            let conf = &coin.as_ref().conf;
+            address_from_pubkey(
+                my_public_key,
+                conf.pub_addr_prefix,
+                conf.pub_t_addr_prefix,
+                conf.checksum_type,
+                conf.bech32_hrp.clone(),
+                addr_format(&coin).clone(),
+            )
+        },
+    };
     let fut = async move { address_balance(&coin, &my_address).await };
     Box::new(fut.boxed().compat())
 }

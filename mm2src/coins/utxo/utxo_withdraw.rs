@@ -9,9 +9,9 @@ use chain::{OutPoint, TransactionOutput};
 use common::log::info;
 use common::now_ms;
 use crypto::hw_rpc_task::{HwConnectStatuses, TrezorRpcTaskConnectProcessor};
+use crypto::privkey::key_pair_from_secret;
 use crypto::trezor::client::TrezorClient;
 use crypto::trezor::{TrezorError, TrezorProcessingError};
-use crypto::privkey::key_pair_from_secret;
 use crypto::{derive_secp256k1_secret, Bip32Error, CryptoCtx, CryptoCtxError, CryptoInitError, DerivationPath, HwError,
              HwProcessingError};
 use keys::{Public as PublicKey, Type as ScriptType};
@@ -341,17 +341,17 @@ where
 
         // For HD wallets derive the child key for the specific sender address so that the
         // signing key matches the funded UTXO's locking script.
-        let hd_child_key_pair;  // extend lifetime beyond the match arm
+        let hd_child_key_pair; // extend lifetime beyond the match arm
         let sign_policy = match self.coin.as_ref().priv_key_policy {
             PrivKeyPolicy::KeyPair(ref key_pair) => SignPolicy::WithKeyPair(key_pair),
             PrivKeyPolicy::HDWallet {
-                ref bip39_secp_priv_key, ..
+                ref bip39_secp_priv_key,
+                ..
             } => {
-                let secret =
-                    derive_secp256k1_secret(bip39_secp_priv_key.clone(), &self.from_derivation_path)
-                        .mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
-                hd_child_key_pair = key_pair_from_secret(secret.as_slice())
+                let secret = derive_secp256k1_secret(bip39_secp_priv_key.clone(), &self.from_derivation_path)
                     .mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
+                hd_child_key_pair =
+                    key_pair_from_secret(secret.as_slice()).mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
                 SignPolicy::WithKeyPair(&hd_child_key_pair)
             },
             PrivKeyPolicy::Trezor => {
