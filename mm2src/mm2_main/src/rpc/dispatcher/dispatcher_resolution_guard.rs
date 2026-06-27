@@ -210,3 +210,13 @@ fn z_coin_tx_history_method_is_routed() {
         "v2 dispatcher lost routing for the native-only method `z_coin_tx_history`"
     );
 }
+
+#[test]
+fn trezor_connection_status_method_is_routed() {
+    // Trezor hardware-wallet status is native-only; the dispatcher arm lives in
+    // the native method block and must keep the flat mmrpc 2.0 method string.
+    assert!(
+        DISPATCHER_SOURCE.contains("\"trezor_connection_status\""),
+        "v2 dispatcher lost routing for the native-only method `trezor_connection_status`"
+    );
+}

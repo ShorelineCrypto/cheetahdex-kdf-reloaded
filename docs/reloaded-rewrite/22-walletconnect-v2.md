@@ -119,9 +119,9 @@ The handle exposes the following operations:
 |                                    | over the relay, awaits the response  |
 | Drop a session                     | Sends the WC2 delete RPC, removes    |
 |                                    | the persisted row, unsubscribes      |
-| Encode an outbound payload         | Applies the negotiated transport     |
-|                                    | encoding (hex by default; base64 for |
-|                                    | wallets that require it)             |
+| Encode session byte strings        | Applies the session `encoding_algo`  |
+|                                    | selector (hex by default; base64     |
+|                                    | only for required-wallet interop)    |
 | Resolve account for a chain        | Looks up the active account address  |
 |                                    | and metadata for a given chain id    |
 | Wallet-type detection              | Identifies certain wallet families   |
@@ -207,12 +207,12 @@ remove implementer guesswork:
   key, derives the session topic, and subscribes to it.
 - `wc_sessionSettle` then arrives **on the session topic** and is
   the point at which the settled `Session` is built and persisted.
-- **Transport encoding** (the `encoding_algo` of §22.5.3 /
-  §22.7) defaults to **hex**; base64 is selected only for wallets
-  that require it (§22.7). This transport-envelope encoding is
-  distinct from the Cosmos binary-**field** encoding of §22.8.1.2
-  (which independently selects base64 vs hex for `pubKey` /
-  `address` bytes by wallet type).
+- The settled session records the `encoding_algo` byte-string
+  selector described normatively in §22.7.1 and R11. The selector
+  defaults to **hex** when absent, switches to **base64** only for
+  explicit required-wallet compatibility, and is independent of
+  both the WC2 Type 0 envelope codec (§22.7) and the Cosmos
+  binary-**field** rule of §22.8.1.2.
 - The originating `pairing` record MAY be retained after settle;
   no teardown is required, and `wc_get_session` with
   `with_pairing_topic` resolves the session via its
@@ -356,7 +356,15 @@ emitted and consumed exactly as named for byte-interop:
 | `session_type`       | Controller / Proposer role                         |
 | `session_properties` | Optional wallet-reported session properties        |
 | `active_chain_id`    | Optional active CAIP-2 chain id                    |
-| `encoding_algo`      | Negotiated transport encoding (hex / base64)       |
+| `encoding_algo`      | Session byte-string selector (`Hex` / `Base64`)    |
+
+For `encoding_algo`, the open-format semantic values are
+`Hex` and `Base64`. A legacy or partial record with the key
+omitted MUST be interpreted as `Hex` when the session is restored
+or when a call site asks the WalletConnect handle to encode bytes
+for that session. Any other value is invalid record data; a
+conforming implementation MUST NOT silently reinterpret unknown
+values as either `Hex` or `Base64`.
 
 The session symmetric key is carried inside `session_key`, an
 object with two keys:
@@ -433,17 +441,68 @@ wrapping a JSON-RPC payload. The envelope structure is:
 | Tag        | 16 bytes            | Poly1305 authentication tag            |
 
 The codebase calls the external SDK's encode and decode entry
-points to produce and consume envelopes; this is the only path
-through which session-keyed bytes leave or enter the subsystem.
+points to produce and consume envelopes; this is the only
+normative WC2 Type 0 envelope codec. Wallet-specific compatibility
+selectors in §22.7.1 MUST NOT alter the x25519/HKDF key
+derivation, the Type 0 encrypted byte layout, or the SDK-defined
+envelope text codec.
 
-The **transport encoding** is applied to the whole envelope
-after the envelope is produced:
+### 22.7.1 Session `encoding_algo` byte-string selector
 
-- Hex encoding is the default and is used for most wallets.
-- Base64 encoding is used for wallets that require it (Keplr is
-  the notable case in this category).
+Separate from the WC2 Type 0 codec, session state carries a
+byte-to-text selector named `encoding_algo`. This selector is a
+KDF compatibility contract for WalletConnect-owned call sites
+that must turn raw bytes into JSON strings before or around a
+`wc_sessionRequest` signing flow. It is not a generic WC2
+negotiation parameter and it is not a replacement for the
+external Type 0 envelope codec.
 
-The wallet-type detection in §22.2 selects the encoding.
+The required contract is:
+
+1. **Interface.** The WalletConnect handle MUST expose an
+   encoding operation equivalent to:
+   `encode(session_topic, bytes) -> string`. A lower-level
+   operation MAY instead accept an already-resolved
+   `encoding_algo` plus bytes. Call sites that construct
+   WalletConnect signing request payloads or apply a
+   KDF-controlled byte-to-text conversion to already-enveloped
+   bytes MUST use this operation rather than hard-coding a
+   codec.
+2. **Valid values.** The only valid semantic values are `Hex`
+   and `Base64` (§22.5.3). `Hex` renders bytes as lowercase hex
+   with no `0x` prefix. `Base64` renders bytes with the standard
+   base64 alphabet and padding. Unknown values are invalid input,
+   not a request to guess.
+3. **Default.** If an otherwise usable session has no
+   `encoding_algo` recorded, for example because a legacy stored
+   record omits the key, the selector MUST default to `Hex`.
+   The same default applies when the handle-level encoder is
+   asked to encode bytes for a session whose selector key is
+   absent. This default is observable and must be tested.
+4. **Base64 trigger.** Base64 is allowed only for an explicit
+   interoperability branch. The current required branch is the
+   settled wallet whose WC2 app metadata `name` is `Keplr`; such
+   a session MUST record/select `Base64`. All other wallet names
+   select `Hex` unless a future compatibility entry is added
+   because a named wallet or chain demonstrably requires base64.
+   Base64 MUST NOT be selected merely because the CAIP namespace
+   is `cosmos` or because a request method belongs to a broad
+   chain family.
+5. **Cosmos field-level independence.** This selector does not
+   change the Cosmos binary-field rule in §22.8.1.2. The
+   `authInfoBytes`, `bodyBytes`, account `pubKey`, account
+   `address`, and Cosmos signature fields remain governed by
+   their field-level contract. An implementation MAY reuse the
+   selected semantic value when that field-level contract says to
+   do so, but the two requirements must remain independently
+   testable.
+
+> **Upstream divergence (informative).** WalletConnect v2 does
+> not negotiate a KDF-specific `encoding_algo` value. This project
+> persists and applies the selector as a compatibility behavior
+> for wallets whose request byte strings require a non-default
+> encoding. The selector is a KDF interop rule, not a change to
+> the WalletConnect Type 0 envelope specification.
 
 A JSON-RPC payload on the WC channel has the standard shape:
 
@@ -888,6 +947,14 @@ R10. **`open`-format byte-interop.** The `open` on-disk record is
     byte-interchangeable with GLEEC KDF in both directions. Schema
     changes must be additive and must not break that interop.
 
+R11. **Session `encoding_algo` selection.** The WalletConnect
+    handle's session byte-string encoder SHALL implement §22.7.1:
+    only `Hex` and `Base64` are valid; omitted or absent
+    selectors default to `Hex`; the required-wallet branch selects
+    `Base64` only for explicit interop needs; and this selector
+    does not amend the WC2 Type 0 codec or the Cosmos field-level
+    binary encoding rules.
+
 The following items are **required ports** (binding driving-spec,
 specified normatively in §22.9A) plus genuinely-optional
 follow-on work; the required-port items are flagged as such:
@@ -1067,6 +1134,17 @@ client-error / 400 token.
   `{ "session": null }`.
 - AC5. The coin integrations add no chain-family knowledge to the
   WalletConnect subsystem (RP2 / R1 / R2 hold after the port).
+- AC6. A restored or constructed session whose stored
+  `encoding_algo` key is omitted or absent still uses the `Hex`
+  default for the handle-level byte encoder. For bytes
+  `[0x01, 0x02, 0x03, 0xff]`, the encoder returns `010203ff`.
+- AC7. A settled session on the required-wallet branch
+  (currently wallet metadata `name = "Keplr"`) records/selects
+  `Base64`. For bytes `[0x01, 0x02, 0x03, 0xff]`, the encoder
+  returns `AQID/w==`; a non-required wallet with the same chain
+  namespace returns the AC6 hex value. The test must also assert
+  that this branch does not change the §22.8.1.2 Cosmos
+  field-level contract.
 
 ## 22.10 External References
 
@@ -1127,32 +1205,38 @@ V3. The third-party Cargo dependencies that provide the relay
   payloads) and the Keplr public account (`Key`) wire shape; the
   relicensed historical record, consulted under R31 solely as the
   Interop / wire-format source for the §22.5.3 `open` on-disk
-  session-record names and, for §22.8.1, the externally-dictated
-  request/response wire field spellings, the CAIP-2 reference
-  formats, the `session-info` / namespace-record field spellings,
-  and the dictated wallet-metadata signals (see *Forbidden corpus*
-  below).
+  session-record names, the §22.7.1/R11 `encoding_algo`
+  selection/default behaviour, and, for §22.8.1, the
+  externally-dictated request/response wire field spellings, the
+  CAIP-2 reference formats, the `session-info` / namespace-record
+  field spellings, and the dictated wallet-metadata signals (see
+  *Forbidden corpus* below).
 - *Permitted-input classes used:* baseline source; external public
   specifications (WalletConnect v2; CAIP-2; CAIP-10; Ethereum
   JSON-RPC; EIP-191/EIP-1559; Cosmos SDK signing schemes / ADR-036;
   BIP-174; the Reown multichain RPC reference; the Keplr public
   account wire shape; RFC 5869, RFC 7539, RFC 7748); cross-chapter
   contracts (Chapter 31); Interop / wire-format reuse (R29/R33) for
-  the `open` on-disk session-record names embedded in §22.5.3 and
-  for the §22.8.1 request/response wire payloads, CAIP-2 reference
-  formats, `session-info` / namespace-record field spellings, and
-  dictated wallet-metadata signals, with the relicensed historical
-  record cited as the R31 source (see *Forbidden corpus* below).
+  the `open` on-disk session-record names embedded in §22.5.3,
+  functional behaviour confirmation for the §22.7.1/R11
+  `encoding_algo` selector, and for the §22.8.1 request/response
+  wire payloads, CAIP-2 reference formats, `session-info` /
+  namespace-record field spellings, and dictated wallet-metadata
+  signals, with the relicensed historical record cited as the R31
+  source (see *Forbidden corpus* below).
 - *Sibling-allowlist consultations:* none.
 - *Forbidden corpus:* not consulted for clean-room derivation of
-  protected expression. There are two Interop / wire-format
-  exceptions, both consulted under R31 **solely** to transcribe
-  externally-required wire facts:
+  protected expression. There are three narrow exceptions, each
+  consulted under R31 **solely** for clean functional or
+  externally-required interop facts:
   1. the §22.5.3 `open` on-disk session-record format, whose only
      authoritative source is the relicensed historical record
      (`wc_session`/`topic`/`data`/`expiry` and the `data`-payload
      keys, including `session_key`/`sym_key`);
-  2. the §22.8.1 request/response wire payloads, CAIP-2 reference
+  2. the §22.7.1/R11 `encoding_algo` selector behaviour: the
+     valid semantic values, the hex default when the selector is
+     missing, and the explicit required-wallet base64 branch;
+  3. the §22.8.1 request/response wire payloads, CAIP-2 reference
      formats, `session-info` / namespace-record JSON field
      spellings, and the dictated wallet-metadata signal values —
      all of which are fixed by public WC2 / CAIP / Reown / EIP /

@@ -43,8 +43,9 @@ impl TrezorClient {
     /// Returns `true` when the device is reachable: either the session is
     /// already held by a concurrent task (reported as reachable *without*
     /// contending for the session lock), or a fresh `Initialize` exchange
-    /// succeeds. Returns `false` when the session is free but the device does
-    /// not respond. This never enqueues a user-interaction request.
+    /// succeeds. Returns `false` when the session is free but the underlying
+    /// transport/device call reports failure. This never enqueues a
+    /// user-interaction request.
     pub async fn is_connected(&self) -> bool {
         // Don't contend for the session: if another task already holds it the
         // device is in use and therefore reachable.
@@ -126,5 +127,106 @@ impl<'a> TrezorSession<'a> {
         let result_handler = ResultHandler::new(|_m: proto_common::Failure| Ok(()));
         // Ignore result.
         self.call(req, result_handler).await.ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::messages::MessageType;
+    use crate::proto::messages_management::Features;
+    use crate::proto::{ProtoMessage, TrezorMessage};
+    use crate::transport::Transport;
+    use async_trait::async_trait;
+    use common::block_on;
+    use futures::future::pending;
+    use prost::Message;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[derive(Clone, Copy)]
+    enum ReadBehavior {
+        Features,
+        Error,
+        Pending,
+    }
+
+    #[derive(Clone, Default)]
+    struct TransportCounters {
+        writes: Arc<AtomicUsize>,
+        reads: Arc<AtomicUsize>,
+    }
+
+    struct TestTransport {
+        counters: TransportCounters,
+        read_behavior: ReadBehavior,
+    }
+
+    impl TestTransport {
+        fn new(read_behavior: ReadBehavior) -> (TestTransport, TransportCounters) {
+            let counters = TransportCounters::default();
+            let transport = TestTransport {
+                counters: counters.clone(),
+                read_behavior,
+            };
+            (transport, counters)
+        }
+    }
+
+    #[async_trait]
+    impl Transport for TestTransport {
+        async fn session_begin(&mut self) -> TrezorResult<()> { Ok(()) }
+
+        async fn session_end(&mut self) -> TrezorResult<()> { Ok(()) }
+
+        async fn write_message(&mut self, message: ProtoMessage) -> TrezorResult<()> {
+            self.counters.writes.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(message.message_type(), proto_management::Initialize::message_type());
+            Ok(())
+        }
+
+        async fn read_message(&mut self) -> TrezorResult<ProtoMessage> {
+            self.counters.reads.fetch_add(1, Ordering::SeqCst);
+            match self.read_behavior {
+                ReadBehavior::Features => {
+                    let mut payload = Vec::new();
+                    Features::default().encode(&mut payload).unwrap();
+                    Ok(ProtoMessage::new(MessageType::Features, payload))
+                },
+                ReadBehavior::Error => MmError::err(TrezorError::DeviceDisconnected),
+                ReadBehavior::Pending => pending().await,
+            }
+        }
+    }
+
+    #[test]
+    fn busy_session_reports_connected_without_waiting_or_probing() {
+        let (transport, counters) = TestTransport::new(ReadBehavior::Pending);
+        let client = TrezorClient::from_transport(transport);
+        let _held_session = block_on(client.inner.lock());
+
+        assert!(block_on(client.is_connected()));
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 0);
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reachability_probe_reports_connected_on_initialize_success() {
+        let (transport, counters) = TestTransport::new(ReadBehavior::Features);
+        let client = TrezorClient::from_transport(transport);
+
+        assert!(block_on(client.is_connected()));
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn reachability_probe_reports_unreachable_on_initialize_failure() {
+        let (transport, counters) = TestTransport::new(ReadBehavior::Error);
+        let client = TrezorClient::from_transport(transport);
+
+        assert!(!block_on(client.is_connected()));
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
     }
 }

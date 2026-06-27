@@ -451,50 +451,86 @@ moves off-process.
 
 ## 5.10A Bound Trezor Connection-Status Query
 
-**R28.** *Trezor connection-status query — native-only.* The
+**R28.** *Trezor connection-status query — RPC contract.* The
 substrate MUST bind the daemon RPC method
 `trezor_connection_status` (mmrpc 2.0, flat method), routed
-through the version-two RPC dispatcher and gated to native
-targets only: on the WebAssembly target the method MUST be
-absent / refused, since the hardware-wallet path of R25 is itself
-native-only. The method reports the current connection state of
-the Trezor hardware-wallet device known to the running daemon,
-derived from the hardware-wallet handle held by the central
-cryptographic context (R5 / R25).
+through the version-two RPC dispatcher where the hardware-wallet
+path of R25 is available. The method reports the current
+connection state of the already-initialised Trezor hardware-wallet
+context held by the central cryptographic context (R5 / R25) and
+MUST expose the following wire contract:
 
-- *Request (interop).* The request carries a single **optional**
-  field `device_pubkey`: a hex-encoded 20-byte hardware-wallet
-  public-key identifier (the RIPEMD-160-of-SHA-256 digest of the
-  device's extended public key, identical to the identifier the
-  daemon reports for the device elsewhere). When present it
-  asserts the expected device — the query MUST verify the
-  connected device's identifier equals the supplied value. When
-  absent no device-identity assertion is made.
-- *Response (interop).* The success response carries a single
-  field `status` whose value is one of two wire-visible
-  discriminant strings: `"Connected"` — the device is reachable
-  (currently usable, or already in use by a concurrent task) —
-  and `"Unreachable"` — the device is disconnected or in an
-  incorrect state and SHOULD be re-initialised.
-- *Probe semantics.* The query MUST resolve the status as a state
-  value, not a long-running task: if the handle is flagged
-  disconnected it reports `"Unreachable"`; if a concurrent task
-  already holds the device session the query MUST treat the
-  device as `"Connected"` without contending for the session;
-  otherwise it performs a lightweight connectivity check and
-  reports `"Connected"` on success or `"Unreachable"` on failure.
-  The query MUST NOT mutate device state nor enqueue a
-  user-interaction task.
+- *Request (interop).* The request object has one optional field,
+  `device_pubkey`. When supplied, the value is a hex-encoded
+  20-byte hardware-wallet public-key identifier (the
+  RIPEMD-160-of-SHA-256 digest of the device's extended public
+  key, identical to the identifier the daemon reports for the
+  device elsewhere). The field MAY be omitted when the caller only
+  wants to query the currently initialised Trezor context.
+- *Response (interop).* A successful response object has one
+  field, `status`, whose value is one of two wire-visible
+  discriminant strings: `"Connected"` or `"Unreachable"`.
+  `"Connected"` means the Trezor context is reachable for the
+  daemon's purposes, including the case where it is already in use
+  by a concurrent task. `"Unreachable"` means the initialised
+  context is disconnected or in an incorrect state and SHOULD be
+  re-initialised.
 - *Bound error surface (interop).* The method exposes a
   type-tagged error enum whose `error_type` tokens are part of
   the wire contract: `TrezorNotInitialized` (no hardware-wallet
   context is initialised on the running daemon),
-  `FoundUnexpectedDevice` (a `device_pubkey` was supplied but the
-  connected device's identifier does not match it), and
-  `Internal` (the cryptographic context was unavailable or
+  `FoundUnexpectedDevice` (the request asserted a device
+  identifier that does not match the initialised Trezor context),
+  and `Internal` (the cryptographic context was unavailable or
   another internal failure occurred). `TrezorNotInitialized` maps
   to HTTP 400; `FoundUnexpectedDevice` and `Internal` map to
   HTTP 500.
+
+**R28A.** *Optional device-identity assertion.* The
+`device_pubkey` field is an assertion by the caller, not a
+selector. Trigger condition: the request supplies a non-null
+`device_pubkey` and the daemon has an initialised Trezor context.
+Required behaviour: before reporting connection status, the method
+MUST compare the supplied identifier with the identifier of the
+initialised Trezor context. If they differ, the method MUST return
+`FoundUnexpectedDevice` and MUST NOT perform a connectivity probe.
+If they match, the method MUST continue to the status resolution
+of R28B. Trigger condition: the request omits `device_pubkey`.
+Required behaviour: the method MUST NOT perform this identity
+assertion and MUST NOT return `FoundUnexpectedDevice` solely
+because the caller did not supply an expected identifier. If no
+Trezor context is initialised, the method returns
+`TrezorNotInitialized` regardless of whether the optional field is
+present.
+
+**R28B.** *Connection-status resolution and concurrent-session
+branch.* After the R28A identity rule has passed or has been
+skipped, the method MUST resolve status from the already-initialised
+hardware-wallet context; it MUST NOT perform initial device
+acquisition, rediscovery, or reconnection. Trigger condition:
+another task already owns the exclusive device session for the
+same Trezor context. Required behaviour: return a successful
+`"Connected"` status without waiting for, stealing, cancelling, or
+otherwise contending for that session. Trigger condition: the
+context is initialised and the exclusive device session is
+available. Required behaviour: perform a non-mutating reachability
+probe through the existing transport/device-call path and return
+`"Connected"` if that probe succeeds or `"Unreachable"` if that
+probe fails. The status RPC MUST NOT impose an additional short
+RPC-level deadline on this probe; completion/failure timing is
+governed by the underlying transport and device-call behaviour.
+
+**R28C.** *Observational status query.* The
+`trezor_connection_status` call MUST be observational with respect
+to wallet/account/key state. It MUST NOT create, remove, or
+rewrite wallet state; MUST NOT derive, sign, export, or display
+user keys or addresses; and MUST NOT start, require, or complete a
+user-confirmation-dependent hardware-wallet operation. The
+reachability probe is limited to connection-state observation and
+MUST NOT request a user confirmation on the device. A failed
+reachability probe MAY update volatile connection-state bookkeeping
+so subsequent calls can report `"Unreachable"` without probing a
+handle already known to be unavailable.
 
 ## 5.11 Bound WebAssembly-Only MetaMask Path
 
@@ -569,16 +605,49 @@ the translator into the `ypub` prefix and back; the test
 asserts both intermediate and final byte representations match
 the public version-byte tables.
 
-**T9.** *Trezor connection-status query.* A central context is
-constructed with an initialised hardware-wallet handle backed by
-a test double; a `trezor_connection_status` request with no
-`device_pubkey` is issued and the test asserts the response
-`status` is one of the two bound discriminant strings
-(`"Connected"` / `"Unreachable"`); a second request supplies a
-`device_pubkey` that does not match the handle's identifier and
-the test asserts the unexpected-device error variant; a third
-request is issued against a context with no hardware-wallet
-handle and the test asserts the not-initialised error variant.
+**T9.** *Trezor connection-status query — RPC wire contract.* On
+a native target, the version-two RPC dispatcher accepts the flat
+method `trezor_connection_status`. A central context is
+constructed with an initialised Trezor hardware-wallet context
+backed by a test double; a request with no `device_pubkey` is
+issued and the test asserts the successful response has exactly
+the `status` field and that its value is one of the two bound
+discriminant strings (`"Connected"` / `"Unreachable"`). A request
+issued against a context with no hardware-wallet context asserts
+the `TrezorNotInitialized` error token and HTTP 400 mapping.
+
+**T9A.** *Trezor connection-status query — optional device
+identity.* A central context is constructed with an initialised
+Trezor context whose known device identifier is `D`. A request
+that omits `device_pubkey` MUST proceed to status resolution and
+MUST NOT produce `FoundUnexpectedDevice`. A request whose
+`device_pubkey` equals `D` MUST also proceed to status resolution.
+A request whose `device_pubkey` differs from `D` MUST return the
+`FoundUnexpectedDevice` error token with HTTP 500 and the test
+double MUST observe that no reachability probe was attempted after
+the mismatch was detected.
+
+**T9B.** *Trezor connection-status query — concurrent session is
+connected.* A test double initialises a Trezor context and then
+has a separate in-flight task hold the exclusive device session.
+While that session remains owned by the in-flight task, a
+`trezor_connection_status` request is issued. The test asserts the
+request returns a successful `"Connected"` status without waiting
+for the in-flight task to finish, without taking ownership of the
+session, and without cancelling or otherwise affecting the
+in-flight task.
+
+**T9C.** *Trezor connection-status query — available-session
+probe result and observational paths.* With an initialised Trezor
+context whose exclusive device session is available, the test
+double drives one successful reachability probe and one failed
+reachability probe; the test asserts the respective `"Connected"`
+and `"Unreachable"` statuses according to the probe result. The
+test MUST NOT assert a short RPC-level timeout. Across all cases,
+wallet identity, account storage, key material, and
+user-confirmation counters exposed by the test harness remain
+unchanged; only volatile connection-status bookkeeping may change
+after a failed probe.
 
 **T10.** *Software account xpub matches a reference wallet
 (dictated interop).* A central context is constructed in the
@@ -708,9 +777,12 @@ surface.
 - *Sibling-allowlist consultations:* none beyond the cross-chapter
   references listed in *Inputs*.
 - *Forbidden corpus:* consulted only for the dictated-interop wire
-  surface of R28 (the `trezor_connection_status` method string,
-  its optional `device_pubkey` request field, its `status`
-  response field with the `"Connected"` / `"Unreachable"`
-  discriminant strings, and the method's `error_type` token set
-  with their HTTP-status mapping); no protected expression
-  crossed.
+  surface and externally observable status semantics of R28–R28C
+  (the `trezor_connection_status` method string, its optional
+  `device_pubkey` request field, its `status` response field with
+  the `"Connected"` / `"Unreachable"` discriminant strings, the
+  method's `error_type` token set with their HTTP-status mapping,
+  and the status-query behaviour for optional identity assertions,
+  concurrent session ownership, and non-mutating reachability
+  probes governed by the underlying transport/device-call
+  behaviour); no protected expression crossed.

@@ -1,4 +1,6 @@
 use crate::global_hd_ctx::{GlobalHDAccountArc, GlobalHDAccountCtx};
+#[cfg(feature = "test-helpers")]
+use crate::hw_client::{HwClient, HwWalletType};
 use crate::hw_client::{HwError, HwProcessingError, TrezorConnectProcessor};
 use crate::hw_ctx::{HardwareWalletArc, HardwareWalletCtx};
 #[cfg(target_arch = "wasm32")]
@@ -8,12 +10,15 @@ use arrayref::array_ref;
 use common::bits256;
 use common::log::info;
 use derive_more::Display;
+#[cfg(feature = "test-helpers")]
+use futures::lock::Mutex as AsyncMutex;
 use hw_common::primitives::EcdsaCurve;
 use keys::{KeyPair, Public as PublicKey, Secret as Secp256k1Secret};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use parking_lot::RwLock;
 use primitives::hash::H160;
+#[cfg(feature = "test-helpers")] use primitives::hash::H264;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -221,6 +226,22 @@ impl CryptoCtx {
 
     /// Resets the hardware wallet context to uninitialized state.
     pub fn reset_hw_ctx(&self) { *self.hw_ctx.write() = HardwareWalletCtxState::NotInitialized; }
+
+    /// Test helper: installs a Trezor hardware-wallet context without probing a physical device.
+    #[cfg(feature = "test-helpers")]
+    pub fn init_trezor_ctx_for_tests(
+        &self,
+        hw_internal_pubkey: H264,
+        hw_wallet: Option<HwClient>,
+    ) -> HardwareWalletArc {
+        let hw_ctx = HardwareWalletArc::new(HardwareWalletCtx {
+            hw_internal_pubkey,
+            hw_wallet_type: HwWalletType::Trezor,
+            hw_wallet: AsyncMutex::new(hw_wallet),
+        });
+        *self.hw_ctx.write() = HardwareWalletCtxState::Ready(hw_ctx.clone());
+        hw_ctx
+    }
 
     /// Returns the MetaMask context if initialized (WASM only).
     #[cfg(target_arch = "wasm32")]

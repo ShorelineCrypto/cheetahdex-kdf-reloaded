@@ -142,6 +142,7 @@ tokio = { version = "1.7", features = ["io-util", "rt-multi-thread", "net"] }
 futures-rustls = { version = "0.21.1" }
 
 [dev-dependencies]
+crypto = { path = "../crypto", features = ["test-helpers"] }
 mocktopus = "0.8.0"
 testcontainers = { path = "../testcontainers-vendored" }
 winapi = "0.3"
