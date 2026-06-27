@@ -104,8 +104,20 @@ pub async fn trezor_connection_status_rpc(
 mod tests {
     use super::*;
     use common::block_on;
-    use mm2_core::mm_ctx::MmCtxBuilder;
+    use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
+    use primitives::hash::H264;
     use serde_json::json;
+    use std::str::FromStr;
+
+    const TEST_TREZOR_PUBKEY: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+
+    fn ctx_with_disconnected_trezor() -> (MmArc, String) {
+        let ctx = MmCtxBuilder::new().into_mm_arc();
+        let crypto_ctx =
+            CryptoCtx::init_with_iguana_passphrase(ctx.clone(), "trezor connection status test passphrase").unwrap();
+        let hw_ctx = crypto_ctx.init_trezor_ctx_for_tests(H264::from_str(TEST_TREZOR_PUBKEY).unwrap(), None);
+        (ctx, hex::encode(hw_ctx.rmd160().as_slice()))
+    }
 
     #[test]
     fn status_serializes_to_bound_discriminants() {
@@ -159,5 +171,59 @@ mod tests {
             err.into_inner(),
             TrezorConnectionStatusError::TrezorNotInitialized
         ));
+    }
+
+    #[test]
+    fn no_hardware_wallet_context_yields_not_initialized_even_with_device_assertion() {
+        let ctx = MmCtxBuilder::new().into_mm_arc();
+        CryptoCtx::init_with_iguana_passphrase(ctx.clone(), "trezor connection status test passphrase").unwrap();
+
+        let err = block_on(trezor_connection_status_rpc(ctx, TrezorConnectionStatusRequest {
+            device_pubkey: Some("not-a-device-id".to_owned()),
+        }))
+        .unwrap_err();
+        let err = err.into_inner();
+        assert!(matches!(err, TrezorConnectionStatusError::TrezorNotInitialized));
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn initialized_disconnected_trezor_reports_unreachable() {
+        let (ctx, _device_pubkey) = ctx_with_disconnected_trezor();
+
+        let response = block_on(trezor_connection_status_rpc(ctx, TrezorConnectionStatusRequest {
+            device_pubkey: None,
+        }))
+        .unwrap();
+        assert!(matches!(response.status, TrezorConnectionStatus::Unreachable));
+    }
+
+    #[test]
+    fn device_pubkey_is_optional_assertion() {
+        let (ctx, device_pubkey) = ctx_with_disconnected_trezor();
+
+        let omitted = block_on(trezor_connection_status_rpc(
+            ctx.clone(),
+            TrezorConnectionStatusRequest { device_pubkey: None },
+        ))
+        .unwrap();
+        assert!(matches!(omitted.status, TrezorConnectionStatus::Unreachable));
+
+        let matching = block_on(trezor_connection_status_rpc(
+            ctx.clone(),
+            TrezorConnectionStatusRequest {
+                device_pubkey: Some(device_pubkey),
+            },
+        ))
+        .unwrap();
+        assert!(matches!(matching.status, TrezorConnectionStatus::Unreachable));
+
+        let err = block_on(trezor_connection_status_rpc(ctx, TrezorConnectionStatusRequest {
+            device_pubkey: Some("1111111111111111111111111111111111111111".to_owned()),
+        }))
+        .unwrap_err();
+        let err = err.into_inner();
+        assert!(matches!(err, TrezorConnectionStatusError::FoundUnexpectedDevice));
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

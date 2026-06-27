@@ -188,4 +188,12 @@ mod tests {
         // No active client → the probe reports the device as unreachable.
         assert!(!block_on(ctx.is_connected()));
     }
+
+    #[test]
+    fn busy_hardware_wallet_context_reports_connected_without_waiting() {
+        let ctx = ctx_with_pubkey("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+        let _held_context = block_on(ctx.hw_wallet.lock());
+
+        assert!(block_on(ctx.is_connected()));
+    }
 }

@@ -9,9 +9,14 @@ use crate::response::TrezorResponse;
 use crate::result_handler::ResultHandler;
 use crate::transport::Transport;
 use crate::{TrezorError, TrezorResult};
+use common::custom_futures::FutureTimerExt;
 use futures::lock::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
+use futures::FutureExt;
 use mm2_err_handle::prelude::*;
 use std::sync::Arc;
+use std::time::Duration;
+
+const CONNECTION_STATUS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone)]
 pub struct TrezorClient {
@@ -45,7 +50,9 @@ impl TrezorClient {
     /// contending for the session lock), or a fresh `Initialize` exchange
     /// succeeds. Returns `false` when the session is free but the device does
     /// not respond. This never enqueues a user-interaction request.
-    pub async fn is_connected(&self) -> bool {
+    pub async fn is_connected(&self) -> bool { self.is_connected_with_timeout(CONNECTION_STATUS_PROBE_TIMEOUT).await }
+
+    async fn is_connected_with_timeout(&self, timeout: Duration) -> bool {
         // Don't contend for the session: if another task already holds it the
         // device is in use and therefore reachable.
         let guard = match self.inner.try_lock() {
@@ -53,7 +60,7 @@ impl TrezorClient {
             None => return true,
         };
         let mut session = TrezorSession { inner: guard };
-        session.initialize_device().await.is_ok()
+        matches!(session.initialize_device().boxed().timeout(timeout).await, Ok(Ok(_)))
     }
 }
 
@@ -126,5 +133,116 @@ impl<'a> TrezorSession<'a> {
         let result_handler = ResultHandler::new(|_m: proto_common::Failure| Ok(()));
         // Ignore result.
         self.call(req, result_handler).await.ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::messages::MessageType;
+    use crate::proto::messages_management::Features;
+    use crate::proto::{ProtoMessage, TrezorMessage};
+    use crate::transport::Transport;
+    use async_trait::async_trait;
+    use common::block_on;
+    use futures::future::pending;
+    use prost::Message;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[derive(Clone, Copy)]
+    enum ReadBehavior {
+        Features,
+        Error,
+        Pending,
+    }
+
+    #[derive(Clone, Default)]
+    struct TransportCounters {
+        writes: Arc<AtomicUsize>,
+        reads: Arc<AtomicUsize>,
+    }
+
+    struct TestTransport {
+        counters: TransportCounters,
+        read_behavior: ReadBehavior,
+    }
+
+    impl TestTransport {
+        fn new(read_behavior: ReadBehavior) -> (TestTransport, TransportCounters) {
+            let counters = TransportCounters::default();
+            let transport = TestTransport {
+                counters: counters.clone(),
+                read_behavior,
+            };
+            (transport, counters)
+        }
+    }
+
+    #[async_trait]
+    impl Transport for TestTransport {
+        async fn session_begin(&mut self) -> TrezorResult<()> { Ok(()) }
+
+        async fn session_end(&mut self) -> TrezorResult<()> { Ok(()) }
+
+        async fn write_message(&mut self, message: ProtoMessage) -> TrezorResult<()> {
+            self.counters.writes.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(message.message_type(), proto_management::Initialize::message_type());
+            Ok(())
+        }
+
+        async fn read_message(&mut self) -> TrezorResult<ProtoMessage> {
+            self.counters.reads.fetch_add(1, Ordering::SeqCst);
+            match self.read_behavior {
+                ReadBehavior::Features => {
+                    let mut payload = Vec::new();
+                    Features::default().encode(&mut payload).unwrap();
+                    Ok(ProtoMessage::new(MessageType::Features, payload))
+                },
+                ReadBehavior::Error => MmError::err(TrezorError::DeviceDisconnected),
+                ReadBehavior::Pending => pending().await,
+            }
+        }
+    }
+
+    #[test]
+    fn busy_session_reports_connected_without_waiting_or_probing() {
+        let (transport, counters) = TestTransport::new(ReadBehavior::Pending);
+        let client = TrezorClient::from_transport(transport);
+        let _held_session = block_on(client.inner.lock());
+
+        assert!(block_on(client.is_connected_with_timeout(Duration::from_millis(1))));
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 0);
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reachability_probe_reports_connected_on_initialize_success() {
+        let (transport, counters) = TestTransport::new(ReadBehavior::Features);
+        let client = TrezorClient::from_transport(transport);
+
+        assert!(block_on(client.is_connected_with_timeout(Duration::from_millis(100))));
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn reachability_probe_reports_unreachable_on_initialize_failure() {
+        let (transport, counters) = TestTransport::new(ReadBehavior::Error);
+        let client = TrezorClient::from_transport(transport);
+
+        assert!(!block_on(client.is_connected_with_timeout(Duration::from_millis(100))));
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn reachability_probe_reports_unreachable_on_timeout() {
+        let (transport, counters) = TestTransport::new(ReadBehavior::Pending);
+        let client = TrezorClient::from_transport(transport);
+
+        assert!(!block_on(client.is_connected_with_timeout(Duration::from_millis(10))));
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
     }
 }

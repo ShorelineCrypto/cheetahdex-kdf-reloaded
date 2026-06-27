@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+test-helpers = []
+
 [dependencies]
 # Cryptographic primitives for AES-256-CBC encryption
 aes = "0.8.3"
