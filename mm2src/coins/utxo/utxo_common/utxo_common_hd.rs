@@ -31,7 +31,7 @@ pub fn derive_address<T: UtxoCommonOps>(
 pub async fn create_new_account<'a, Coin, XPubExtractor>(
     coin: &Coin,
     hd_wallet: &'a UtxoHDWallet,
-    xpub_extractor: &XPubExtractor,
+    xpub_extractor: Option<&XPubExtractor>,
 ) -> MmResult<HDAccountMut<'a, UtxoHDAccount>, NewAccountCreatingError>
 where
     Coin: ExtractExtendedPubkey<ExtendedPublicKey = Secp256k1ExtendedPublicKey>
@@ -59,7 +59,7 @@ where
     let account_child = ChildNumber::new(new_account_id, account_child_hardened)
         .map_to_mm(|e| NewAccountCreatingError::Internal(e.to_string()))?;
 
-    let account_derivation_path: Bip44PathToAccount = hd_wallet.derivation_path.derive(account_child)?;
+    let account_derivation_path: HDPathToAccount = hd_wallet.derivation_path.derive(account_child)?;
     let account_pubkey = coin
         .extract_extended_pubkey(xpub_extractor, account_derivation_path.to_derivation_path())
         .await
@@ -278,7 +278,7 @@ where
 
 pub async fn load_hd_accounts_from_storage(
     hd_wallet_storage: &HDWalletCoinStorage,
-    derivation_path: &Bip44PathToCoin,
+    derivation_path: &HDPathToCoin,
 ) -> HDWalletStorageResult<HDAccountsMap<UtxoHDAccount>> {
     let accounts = hd_wallet_storage.load_all_accounts().await?;
     let res: HDWalletStorageResult<HDAccountsMap<UtxoHDAccount>> = accounts
@@ -299,19 +299,39 @@ pub async fn load_hd_accounts_from_storage(
     }
 }
 
-pub async fn extract_extended_pubkey<XPubExtractor>(
-    conf: &UtxoCoinConf,
-    xpub_extractor: &XPubExtractor,
+pub async fn extract_extended_pubkey<T, XPubExtractor>(
+    coin: &T,
+    xpub_extractor: Option<&XPubExtractor>,
     derivation_path: DerivationPath,
 ) -> MmResult<Secp256k1ExtendedPublicKey, HDExtractPubkeyError>
 where
+    T: AsRef<UtxoCoinFields>,
     XPubExtractor: HDXPubExtractor,
 {
-    let trezor_coin = conf
-        .trezor_coin
-        .or_mm_err(|| HDExtractPubkeyError::CoinDoesntSupportTrezor)?;
-    let xpub = xpub_extractor.extract_utxo_xpub(trezor_coin, derivation_path).await?;
-    Secp256k1ExtendedPublicKey::from_str(&xpub).map_to_mm(HDExtractPubkeyError::InvalidXpub)
+    match xpub_extractor {
+        // Hardware source: require the coin's `trezor_coin` config and run the device protocol.
+        Some(extractor) => {
+            let trezor_coin = coin
+                .as_ref()
+                .conf
+                .trezor_coin
+                .or_mm_err(|| HDExtractPubkeyError::CoinDoesntSupportTrezor)?;
+            let xpub = extractor.extract_utxo_xpub(trezor_coin, derivation_path).await?;
+            Secp256k1ExtendedPublicKey::from_str(&xpub).map_to_mm(HDExtractPubkeyError::InvalidXpub)
+        },
+        // Software global-HD source: derive the account extended pubkey from the in-memory
+        // BIP-32 master held by the coin's HD priv-key policy. No `trezor_coin` and no device.
+        None => {
+            let bip39_secp_priv_key = match &coin.as_ref().priv_key_policy {
+                PrivKeyPolicy::HDWallet {
+                    bip39_secp_priv_key, ..
+                } => bip39_secp_priv_key.clone(),
+                _ => return MmError::err(HDExtractPubkeyError::HwContextNotInitialized),
+            };
+            crypto::derive_secp256k1_extended_pubkey(bip39_secp_priv_key, &derivation_path)
+                .mm_err(|e| HDExtractPubkeyError::Internal(format!("BIP32 derivation error: {}", e)))
+        },
+    }
 }
 
 pub async fn get_withdraw_hd_sender<T>(

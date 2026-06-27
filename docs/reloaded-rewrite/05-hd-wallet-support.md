@@ -333,6 +333,110 @@ substrate MUST NOT introduce a project-specific version-byte
 table; both source and destination tables MUST be the public
 ones.
 
+## 5.9A Bound Software Global-HD Account-Key Derivation
+
+This section binds the **software** (non-hardware) path that makes
+a global-HD account usable by Bitcoin-family (UTXO) coins without a
+hardware device. It complements the per-curve derivation helpers of
+R15 and the policy discriminator of R20–R21: where those bind the
+in-memory master-key machinery, this section binds (a) the
+context-level wallet-identity value that namespaces stored HD
+accounts in software mode, (b) the canonical extended-public-key
+that the in-memory master yields for an account derivation path,
+and (c) the policy-driven selection between the hardware and
+software extended-public-key sources. The coin-side account
+bootstrap, new-address, and scan behaviour that consume this
+surface are bound in Chapter 38 §38.8; this section is the crypto
+substrate those requirements rest on.
+
+**R29.** *Software-HD wallet identity.* The central cryptographic
+context MUST expose, for the `GlobalHDAccount` key-pair policy
+(R20), the 20-byte wallet-identity digest that namespaces
+per-wallet hierarchical-deterministic storage, **derived from the
+in-context software identity, not from a hardware device**. The
+value MUST be the standard `RIPEMD160(SHA256(pubkey))` digest of
+the global-HD identity's internal secp256k1 public key (the same
+daemon-wide public-key-hash the context already derives from the
+active key-pair policy at construction, i.e. the value Chapter 5
+R16 binds for the internal key path and that the central
+application context surfaces as its `rmd160` identity). For a
+software global-HD account this digest is therefore equal to the
+context-wide `mm2_rmd160` identity, matching the on-disk HD-wallet
+identity contract that an HD wallet launched from a passphrase-
+derived master key shares its `mm2_rmd160` and `hd_wallet_rmd160`
+namespacing values. The value MUST be **stable across daemon
+restarts for the same mnemonic** so that stored HD accounts re-bind
+on re-login. When the policy is `Iguana`, no HD wallet-identity is
+available and HD storage MUST remain refused (HD is unsupported in
+Iguana mode); when a hardware-wallet context is active, the
+hardware device's own identity digest is used unchanged (R25).
+Acceptance: in software global-HD mode, an HD UTXO coin's HD
+storage initialises successfully (it MUST NOT be refused on the
+grounds that no hardware HD-wallet identity is present); in Iguana
+mode the same request is refused.
+
+**R30.** *Software account extended-public-key derivation and
+canonical serialisation (dictated interop).* In software global-HD
+mode the account-level extended **public** key for a coin MUST be
+derived **from the in-memory BIP-32 secp256k1 master extended
+private key** held by `GlobalHDAccountCtx` (the master `m` exposed
+by `root_priv_key`, R13/R15), by walking the configured account
+derivation path `purpose'/coin_type'/account'` (Chapter 5 R18
+`HDPathToAccount`, generic over BIP-43 purpose per Chapter 38
+R38.3.3) and taking the extended public key at that node. The
+software path MUST NOT require any `trezor_coin` coins-config field
+and MUST NOT contact a hardware device.
+
+  The derived account extended public key MUST serialise to the
+  **canonical BIP-32 extended-public-key (xpub) form**: a
+  base58check string over the 78-byte BIP-32 serialization whose
+  4-byte version prefix is the standard mainnet public version
+  `0x0488B21E` (the `xpub` prefix). This is the value persisted as
+  the on-disk `account_xpub` schema column (Chapter 44) and is
+  **dictated interop**: it MUST equal, byte-for-byte, the `xpub` a
+  conformant reference wallet computes for the same BIP-39 mnemonic
+  at the same account derivation path. The stored/serialised
+  account xpub MUST use the `xpub` version prefix uniformly and
+  MUST NOT be re-versioned per coin network at this layer
+  (per-network display re-versioning, when required elsewhere, is
+  the separate `XPubConverter` concern of R24). A wrong version
+  prefix or a non-canonical serialization is a conformance failure,
+  because downstream address derivation depends on the exact bytes.
+
+  > **Upstream divergence (informative).** The relicensed substrate
+  > as received carried only a hardware (device) extended-public-key
+  > source; the software derivation above was absent, so a software
+  > global-HD account could not produce an account xpub and HD
+  > activation/address derivation failed. This section binds the
+  > software derivation as first-class. The behaviour is expressed
+  > from the public BIP-32 specification (the master-to-account
+  > public-key walk and the `0x0488B21E` `xpub` serialization are
+  > dictated by BIP-32), not transcribed from any private source.
+
+**R31.** *Extended-public-key source selection by key-pair policy.*
+The extended-public-key source consumed by per-coin account
+extraction MUST be chosen by the active key-pair policy, not by a
+fixed assumption of hardware:
+
+  - when a hardware-wallet context is active, the source is the
+    hardware device (the device extractor of R25, which requires
+    the coin's `trezor_coin` config and performs the device
+    protocol);
+  - when the policy is `GlobalHDAccount` and no hardware context is
+    active, the source is the **in-context software derivation of
+    R30** (the in-memory master), requiring no `trezor_coin` field.
+
+  The per-coin extraction entry point MUST accept "no external
+  (hardware) extractor" as a valid case and, in that case, resolve
+  the account xpub through the software derivation of R30. The
+  selection MUST NOT branch inside coin signing/derivation paths
+  beyond choosing the source; the resulting account xpub is
+  identical in shape (R30) regardless of source. (Per-coin and
+  per-account UTXO consumption is bound in Chapter 38 §38.8;
+  Chapter 5 D1's deferral of per-account activation plumbing is
+  partially discharged here for the extended-public-key source and
+  fully for software UTXO accounts by Chapter 38 §38.8.)
+
 ## 5.10 Bound Hardware-Wallet Path
 
 **R25.** The substrate MUST retain the baseline hardware-wallet
@@ -476,13 +580,43 @@ the test asserts the unexpected-device error variant; a third
 request is issued against a context with no hardware-wallet
 handle and the test asserts the not-initialised error variant.
 
+**T10.** *Software account xpub matches a reference wallet
+(dictated interop).* A central context is constructed in the
+`GlobalHDAccount` policy from a known BIP-39 mnemonic test vector;
+the account-level extended public key is derived in software per
+R30 at a known account derivation path (e.g. `m/84'/<coin_type>'/0'`
+and `m/44'/<coin_type>'/0'`); the test asserts the serialised
+`xpub` (version prefix `0x0488B21E`, base58check) equals,
+byte-for-byte, the published `xpub` a reference wallet derives for
+that mnemonic at that path. The derivation MUST succeed with no
+`trezor_coin` config present.
+
+**T11.** *Software-HD wallet identity is software-derived and
+stable.* In `GlobalHDAccount` policy the wallet-identity digest of
+R29 is materialised and the test asserts (a) it is produced without
+any hardware-wallet handle, (b) it equals the context-wide
+`mm2_rmd160` identity, and (c) two constructions from the same
+mnemonic yield the identical digest (restart stability). In
+`Iguana` policy the HD-storage-identity request is asserted to be
+refused.
+
+**T12.** *Source selection by policy.* With a `GlobalHDAccount`
+policy and no hardware context, per-coin account extraction is
+invoked with no external extractor and the test asserts it resolves
+the account xpub via the software derivation of R30; with a
+hardware context active, the same extraction is asserted to route
+to the device source (R25).
+
 ## 5.14 Deferred Work
 
 **D1.** Per-account hierarchical-deterministic activation
 flows (the substrate binds the per-curve derivation surface and
 the discriminator; the per-coin and per-account activation
 plumbing that consumes them is owned by a sibling activation
-chapter).
+chapter). *Partially discharged:* the software extended-public-key
+source and identity for global-HD accounts are bound in §5.9A
+(R29–R31); the UTXO per-account bootstrap, new-address, and scan
+behaviour are bound in Chapter 38 §38.8.
 
 **D2.** A second password-hashing scheme alongside Argon2id
 (the substrate binds Argon2id as the only password-mode

@@ -304,6 +304,12 @@ impl MmCtx {
 
     pub fn p2p_in_memory_port(&self) -> Option<u64> { self.conf["p2p_in_memory_port"].as_u64() }
 
+    /// Whether HD (BIP-39 / BIP-32 global-HD) mode is enabled for the startup
+    /// signing identity. Per CRD R45.4.8 this is the single source of truth that
+    /// selects a global-HD account over the baseline Iguana single-key context;
+    /// it defaults to `false` when absent, null, or of a non-boolean type.
+    pub fn enable_hd(&self) -> bool { self.conf["enable_hd"].as_bool().unwrap_or(false) }
+
     /// Access-Control-Allow-Origin for the SSE endpoint.
     /// Falls back to the `rpccors` config value, then `http://localhost:3000`.
     pub fn event_stream_access_control(&self) -> String {

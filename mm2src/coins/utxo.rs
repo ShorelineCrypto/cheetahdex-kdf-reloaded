@@ -48,8 +48,8 @@ use common::first_char_to_upper;
 use common::jsonrpc_client::JsonRpcError;
 use common::now_ms;
 use crypto::trezor::utxo::TrezorUtxoCoin;
-use crypto::{Bip32DerPathOps, Bip32Error, Bip44Chain, Bip44DerPathError, Bip44PathToAccount, Bip44PathToCoin,
-             ChildNumber, DerivationPath, Secp256k1ExtendedPublicKey};
+use crypto::{Bip32DerPathOps, Bip32Error, Bip44Chain, Bip44DerPathError, ChildNumber, DerivationPath, HDPathToAccount,
+             HDPathToCoin, Secp256k1ExtendedPublicKey};
 use derive_more::Display;
 #[cfg(not(target_arch = "wasm32"))] use dirs::home_dir;
 use futures::channel::mpsc;
@@ -1435,7 +1435,7 @@ pub struct UtxoHDWallet {
     /// This derivation path consists of `purpose` and `coin_type` only
     /// where the full `BIP44` address has the following structure:
     /// `m/purpose'/coin_type'/account'/change/address_index`.
-    pub derivation_path: Bip44PathToCoin,
+    pub derivation_path: HDPathToCoin,
     /// User accounts.
     pub accounts: HDAccountsMutex<UtxoHDAccount>,
     pub gap_limit: u32,
@@ -1458,7 +1458,7 @@ pub struct UtxoHDAccount {
     /// `m/purpose'/coin_type'/account'`.
     pub extended_pubkey: Secp256k1ExtendedPublicKey,
     /// [`UtxoHDWallet::derivation_path`] derived by [`UtxoHDAccount::account_id`].
-    pub account_derivation_path: Bip44PathToAccount,
+    pub account_derivation_path: HDPathToAccount,
     /// The number of addresses that we know have been used by the user.
     /// This is used in order not to check the transaction history for each address,
     /// but to request the balance of addresses whose index is less than `address_number`.
@@ -1481,7 +1481,7 @@ impl HDAccountOps for UtxoHDAccount {
 
 impl UtxoHDAccount {
     pub fn try_from_storage_item(
-        wallet_der_path: &Bip44PathToCoin,
+        wallet_der_path: &HDPathToCoin,
         account_info: &HDAccountStorageItem,
     ) -> HDWalletStorageResult<UtxoHDAccount> {
         const ACCOUNT_CHILD_HARDENED: bool = true;

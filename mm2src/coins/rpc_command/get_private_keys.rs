@@ -9,8 +9,8 @@
 //! - Keys are serialized once for the response and not persisted or logged.
 
 use common::HttpStatusCode;
-use crypto::{Bip32DerPathOps, Bip44PathToCoin, ChildNumber, CryptoCtx, CryptoCtxError, DerivationPath,
-             GlobalHDAccountArc, KeyPairPolicy, Secp256k1Secret};
+use crypto::{Bip32DerPathOps, ChildNumber, CryptoCtx, CryptoCtxError, DerivationPath, GlobalHDAccountArc,
+             HDPathToCoin, KeyPairPolicy, Secp256k1Secret};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -425,7 +425,7 @@ fn parse_protocol(ticker: &str, conf: &serde_json::Value) -> Result<CoinProtocol
 fn parse_base_derivation_path(
     ticker: &str,
     conf: &serde_json::Value,
-) -> Result<Bip44PathToCoin, MmError<GetPrivateKeysError>> {
+) -> Result<HDPathToCoin, MmError<GetPrivateKeysError>> {
     if conf["derivation_path"].is_null() {
         return MmError::err(GetPrivateKeysError::MissingProtocolPrefix(format!(
             "{}: no `derivation_path` configured",
@@ -442,7 +442,7 @@ fn parse_base_derivation_path(
 fn derive_hd_secret(
     ticker: &str,
     global_hd: &GlobalHDAccountArc,
-    base: &Bip44PathToCoin,
+    base: &HDPathToCoin,
     account: u32,
     index: u32,
 ) -> Result<(DerivationPath, Secp256k1Secret), MmError<GetPrivateKeysError>> {

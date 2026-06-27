@@ -174,7 +174,7 @@ pub(crate) mod common_impl {
         let hd_wallet = coin.derivation_method().hd_wallet_or_err().mm_err(Into::into)?;
 
         let mut new_account = coin
-            .create_new_account(hd_wallet, xpub_extractor)
+            .create_new_account(hd_wallet, Some(xpub_extractor))
             .await
             .mm_err(Into::into)?;
         let address_scanner = coin.produce_hd_address_scanner().await.mm_err(Into::into)?;
