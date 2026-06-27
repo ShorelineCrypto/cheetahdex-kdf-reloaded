@@ -407,24 +407,112 @@ maker-payment contract address) covers `MakerPaymentSpent`.
 
 ## 17.9 NFT variant
 
-The maker-side coin-trait implementation includes a branch for
-EIP-721 and EIP-1155 maker payments through the
-`erc721MakerPayment` and `erc1155MakerPayment` entry points on
-the maker contract. A small bridge layer wires the NFT branch
-into the maker state-machine driver and exposes a decision
-helper with three outcomes:
+The NFT V2 variant is a maker-side extension of the EVM V2 path.
+It covers EIP-721 and EIP-1155 maker payments through the
+NFT-aware maker contract while the taker payment remains a
+fungible EVM V2 payment. The maker-side state-machine dispatch
+decision is therefore part of the protocol contract, not an
+optional optimisation.
 
-- *NFT V2 in use* — both sides advertise NFT V2 and the chain has
-  a deployed NFT-aware contract.
-- *Version mismatch* — protocol version mismatch; fall back to
-  fungible.
-- *No NFT contract* — chain has no NFT-aware contract; refuse the
-  trade.
+**R17.9.1. Maker-side NFT eligibility.** A candidate NFT V2 swap
+MUST be considered only when the maker asset is an enabled EVM
+NFT identified by token contract, token id, and token standard.
+EIP-721 maker payments carry exactly one token id. EIP-1155 maker
+payments carry token id plus amount. The payment id, secret-hash,
+secret-reveal, and timelock semantics remain the maker-payment V2
+semantics of §17.4.
 
-NFT *taker-side* support is intentionally absent: NFT swaps are
-NFT-for-fungible (the taker always uses the fungible-token V2
-path described in §17.5). This keeps the taker surface small and
-avoids a 2×2 maker/taker × NFT/fungible matrix.
+**R17.9.2. Dispatch-decision interface.** Before the maker-side
+state machine builds or validates a maker payment for an EVM NFT
+asset, it MUST make a pure local decision from these public
+inputs: the maker's advertised swap-version tag, the taker's
+advertised swap-version tag, and whether activation configured an
+NFT-aware maker contract address for a deployed contract on the
+maker chain. The decision MUST return a typed outcome with the
+following three meanings:
+
+- *Use NFT V2 path* — both advertised tags are NFT V2 and the
+  maker chain has a deployed NFT-aware maker contract configured.
+- *Version mismatch* — at least one advertised tag is not NFT V2;
+  the caller MUST fall back to the negotiated fungible swap path
+  when the requested trade is otherwise representable by that
+  path.
+- *No NFT contract configured* — both advertised tags are NFT V2
+  but the maker chain has no NFT-aware maker contract configured;
+  the caller MUST refuse the trade.
+
+The outcome MUST NOT be collapsed to a boolean. Callers need to
+distinguish an intentional version downgrade from a chain
+configuration error.
+
+**R17.9.3. Use-branch behaviour.** When R17.9.2 returns *Use NFT
+V2 path*, the maker-side state machine MUST dispatch maker-payment
+send, validation, taker-spend, timelock-refund, and
+secret-refund actions through the maker-side NFT operation
+surface. The ERC-721 path MUST address the selected token
+contract and token id. The ERC-1155 path MUST additionally bind
+the negotiated amount. In this branch the maker payment MUST NOT
+be sent through the native-coin or ERC-20 maker-payment entry
+points.
+
+**R17.9.4. Version-mismatch behaviour.** When R17.9.2 returns
+*Version mismatch*, the NFT maker branch MUST NOT be used. The
+maker-side state machine MUST continue only with the negotiated
+fungible V2 or legacy path selected by Chapter 13. No NFT-aware
+maker contract call may be built or broadcast for this trade
+decision.
+
+**R17.9.5. Missing-contract behaviour.** When R17.9.2 returns *No
+NFT contract configured*, the swap MUST be rejected before any
+maker-payment transaction is built, signed, broadcast, persisted
+as sent, or advertised to the peer. This branch MUST NOT silently
+fall back to a fungible path because both peers explicitly chose
+NFT V2 and the chain configuration is incomplete.
+
+**R17.9.6. Taker-side NFT absence.** NFT V2 swaps are
+maker-NFT-for-taker-fungible only. The taker-side state machine
+MUST use the standard fungible EVM V2 path of §17.5 for funding,
+payment, spend, refund, event monitoring, and secret extraction.
+An attempted trade that requires the taker side to lock or pay an
+NFT MUST be rejected as unsupported rather than mapped onto a
+maker-side NFT operation.
+
+**T17.9.1. Use NFT V2 path.** Given an ERC-721 maker asset and an
+ERC-1155 maker asset in separate cases, with both peers
+advertising NFT V2 and the maker chain configured with an
+deployed NFT-aware maker contract, the dispatch decision returns
+*Use NFT V2 path*. The maker-side call site builds the NFT
+maker-payment operation for the selected token standard, and the
+taker side uses the fungible EVM V2 payment flow.
+
+**T17.9.2. Version mismatch fallback.** Given any case where the
+maker advertises NFT V2 and the taker advertises only a lower
+swap-version tag, or the taker advertises NFT V2 and the maker
+advertises only a lower tag, the dispatch decision returns
+*Version mismatch* and preserves both advertised values for the
+caller. The test asserts that no NFT maker-payment operation is
+built and that the state-machine selection continues through the
+negotiated fungible path when the trade is fungible-compatible.
+
+**T17.9.3. No NFT contract refusal.** Given both peers advertising
+NFT V2 and the maker chain lacking an NFT-aware maker contract
+address, the dispatch decision returns *No NFT contract
+configured*. The state machine rejects the trade before any maker
+payment is built or broadcast and does not fall back to the
+fungible path.
+
+**T17.9.4. Taker-side NFT absence.** Given a trade request whose
+taker payment asset is an NFT, the EVM V2 dispatcher rejects the
+trade as unsupported. Given a maker-NFT-for-taker-fungible trade
+that satisfies T17.9.1, the same test fixture asserts that the
+taker funding and payment actions use the fungible EVM V2
+surface, not an NFT-specific taker surface.
+
+> **Upstream divergence (informative).** The observed lineage
+> exposes maker-side NFT swap operations and direct tests for
+> them, but does not show a production state-machine selector that
+> forces the NFT branch at the maker call site. R17.9.2 through
+> R17.9.5 bind that missing call-site behaviour for Reloaded.
 
 See [Chapter 19 — NFT Module Layout](19-nft-module-layout.md) for
 the broader NFT activation and storage surface.
@@ -493,7 +581,9 @@ relevant entry points.
 Unit tests are collocated with each EVM-side V2 implementation
 module. End-to-end V2 EVM coverage runs against an Anvil node as
 part of the docker test fleet (gated behind the `docker_tests`
-feature). This chapter does not enumerate per-test specs.
+feature). NFT dispatch acceptance requirements are enumerated in
+T17.9.1 through T17.9.4 because those branches are part of the
+maker-side state-machine contract.
 
 ---
 
