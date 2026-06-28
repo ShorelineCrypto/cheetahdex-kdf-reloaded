@@ -4,11 +4,11 @@ use super::pubkey_banning::ban_pubkey_on_failed_swap;
 use super::swap_lock::{SwapLock, SwapLockOps};
 use super::trade_preimage::{TradePreimageRequest, TradePreimageRpcError, TradePreimageRpcResult};
 use super::{broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap,
-            compute_dex_fee, dex_fee_amount_from_taker_coin, dex_fee_rate, dex_fee_threshold, get_locked_amount,
-            recv_swap_msg, swap_topic, AbortOnDropHandle, AtomicSwap, LockedAmount, MySwapInfo, NegotiationDataMsg,
-            NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap, SavedSwapIo,
-            SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext, TransactionIdentifier,
-            WAIT_CONFIRM_INTERVAL};
+            compute_dex_fee_with_taker_pubkey, dex_fee_amount_from_taker_coin, dex_fee_rate, dex_fee_threshold,
+            get_locked_amount, recv_swap_msg, swap_topic, AbortOnDropHandle, AtomicSwap, LockedAmount, MySwapInfo,
+            NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap,
+            SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext,
+            TransactionIdentifier, WAIT_CONFIRM_INTERVAL};
 use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MatchBy, OrderConfirmationsSettings, TakerAction, TakerOrderBuilder};
 use crate::mm2::lp_swap::{broadcast_p2p_tx_msg, tx_helper_topic};
@@ -936,11 +936,13 @@ impl TakerSwap {
     async fn start(&self) -> Result<(Option<TakerSwapCommand>, Vec<TakerSwapEvent>), String> {
         // do not use self.r().data here as it is not initialized at this step yet
         let stage = FeeApproxStage::StartSwap;
-        let dex_fee = compute_dex_fee(
+        let my_taker_coin_htlc_pub = self.r().my_taker_coin_htlc_keypair.public_slice().to_vec();
+        let dex_fee = compute_dex_fee_with_taker_pubkey(
             self.net_cfg(),
             &self.taker_coin,
             self.maker_coin.ticker(),
             &self.taker_amount,
+            &my_taker_coin_htlc_pub,
         );
         let preimage_value = TradePreimageValue::Exact(self.taker_amount.to_decimal());
 
@@ -1193,11 +1195,13 @@ impl TakerSwap {
             ]));
         }
 
-        let dex_fee = compute_dex_fee(
+        let my_taker_coin_htlc_pub = self.r().my_taker_coin_htlc_keypair.public_slice().to_vec();
+        let dex_fee = compute_dex_fee_with_taker_pubkey(
             self.net_cfg(),
             &self.taker_coin,
             &self.r().data.maker_coin,
             &self.taker_amount,
+            &my_taker_coin_htlc_pub,
         );
         let fee_tx = self
             .taker_coin
