@@ -6,7 +6,8 @@ use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTas
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use rpc_task::rpc_common::{InitRpcTaskResponse, RpcTaskStatusError, RpcTaskStatusRequest, RpcTaskUserActionError};
-use rpc_task::{RpcTask, RpcTaskHandle, RpcTaskManager, RpcTaskManagerShared, RpcTaskStatusAlias, RpcTaskTypes};
+use rpc_task::{FinishedTaskResult, RpcTask, RpcTaskHandle, RpcTaskManager, RpcTaskManagerShared, RpcTaskStatusAlias,
+               RpcTaskTypes};
 
 pub type WithdrawAwaitingStatus = HwRpcTaskAwaitingStatus;
 pub type WithdrawUserAction = HwRpcTaskUserAction;
@@ -19,7 +20,20 @@ pub type WithdrawTaskManager = RpcTaskManager<WithdrawTask>;
 pub type WithdrawTaskManagerShared = RpcTaskManagerShared<WithdrawTask>;
 pub type WithdrawTaskHandle = RpcTaskHandle<WithdrawTask>;
 pub type WithdrawRpcStatus = RpcTaskStatusAlias<WithdrawTask>;
+pub type WithdrawCompatFinishedResult = FinishedTaskResult<TransactionDetails, WithdrawError>;
 pub type WithdrawInitResult<T> = Result<T, MmError<WithdrawError>>;
+
+/// Compatibility wire format for `task::withdraw::status` expected by legacy clients.
+///
+/// Legacy clients expect a terminal status value of `"Ok"` and inspect `details`
+/// for either a successful transaction object or an error object.
+#[derive(Serialize)]
+#[serde(tag = "status", content = "details")]
+pub enum WithdrawCompatRpcStatus {
+    Ok(WithdrawCompatFinishedResult),
+    InProgress(WithdrawInProgressStatus),
+    UserActionRequired(WithdrawAwaitingStatus),
+}
 
 #[async_trait]
 pub trait CoinWithdrawInit {
@@ -45,15 +59,25 @@ pub async fn init_withdraw(ctx: MmArc, request: WithdrawRequest) -> WithdrawInit
 pub async fn withdraw_status(
     ctx: MmArc,
     req: WithdrawStatusRequest,
-) -> Result<WithdrawRpcStatus, MmError<WithdrawStatusError>> {
+) -> Result<WithdrawCompatRpcStatus, MmError<WithdrawStatusError>> {
     let coins_ctx = CoinsContext::from_ctx(&ctx).map_to_mm(WithdrawStatusError::Internal)?;
     let mut task_manager = coins_ctx
         .withdraw_task_manager
         .lock()
         .map_to_mm(|e| WithdrawStatusError::Internal(e.to_string()))?;
-    task_manager
+    let status = task_manager
         .task_status(req.task_id, req.forget_if_finished)
-        .or_mm_err(|| WithdrawStatusError::NoSuchTask(req.task_id))
+        .or_mm_err(|| WithdrawStatusError::NoSuchTask(req.task_id))?;
+
+    let compat_status = match status {
+        rpc_task::RpcTaskStatus::Ready(result) => WithdrawCompatRpcStatus::Ok(result),
+        rpc_task::RpcTaskStatus::InProgress(in_progress) => WithdrawCompatRpcStatus::InProgress(in_progress),
+        rpc_task::RpcTaskStatus::UserActionRequired(awaiting_status) => {
+            WithdrawCompatRpcStatus::UserActionRequired(awaiting_status)
+        },
+    };
+
+    Ok(compat_status)
 }
 
 #[derive(Clone, Serialize)]

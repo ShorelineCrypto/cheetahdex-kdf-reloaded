@@ -346,7 +346,8 @@ where
         account_id,
         chain,
         address_id,
-    } = match req.from.clone().or_mm_err(|| WithdrawError::FromAddressNotFound)? {
+    } = match req.from.clone() {
+        Some(from) => match from {
         WithdrawFrom::AddressId(id) => id,
         WithdrawFrom::DerivationPath { derivation_path } => {
             let derivation_path = Bip44DerivationPath::from_str(&derivation_path)
@@ -362,6 +363,31 @@ where
                 return MmError::err(WithdrawError::UnexpectedFromAddress(error));
             }
             HDAddressId::from(derivation_path)
+        },
+        },
+        None => {
+            let default_account_id = 0;
+            let default_chain = Bip44Chain::External;
+            let default_address_id = 0;
+
+            let default_account = hd_wallet
+                .get_account(default_account_id)
+                .await
+                .or_mm_err(|| WithdrawError::FromAddressNotFound)?;
+
+            let is_default_address_activated = default_account
+                .is_address_activated(default_chain, default_address_id)
+                .mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
+
+            if !is_default_address_activated {
+                return MmError::err(WithdrawError::FromAddressNotFound);
+            }
+
+            HDAddressId {
+                account_id: default_account_id,
+                chain: default_chain,
+                address_id: default_address_id,
+            }
         },
     };
 
