@@ -348,22 +348,22 @@ where
         address_id,
     } = match req.from.clone() {
         Some(from) => match from {
-        WithdrawFrom::AddressId(id) => id,
-        WithdrawFrom::DerivationPath { derivation_path } => {
-            let derivation_path = Bip44DerivationPath::from_str(&derivation_path)
-                .map_to_mm(Bip44DerPathError::from)
-                .mm_err(|e| WithdrawError::UnexpectedFromAddress(e.to_string()))?;
-            let coin_type = derivation_path.coin_type();
-            let expected_coin_type = hd_wallet.coin_type();
-            if coin_type != expected_coin_type {
-                let error = format!(
-                    "Derivation path '{}' must has '{}' coin type",
-                    derivation_path, expected_coin_type
-                );
-                return MmError::err(WithdrawError::UnexpectedFromAddress(error));
-            }
-            HDAddressId::from(derivation_path)
-        },
+            WithdrawFrom::AddressId(id) => id,
+            WithdrawFrom::DerivationPath { derivation_path } => {
+                let derivation_path = Bip44DerivationPath::from_str(&derivation_path)
+                    .map_to_mm(Bip44DerPathError::from)
+                    .mm_err(|e| WithdrawError::UnexpectedFromAddress(e.to_string()))?;
+                let coin_type = derivation_path.coin_type();
+                let expected_coin_type = hd_wallet.coin_type();
+                if coin_type != expected_coin_type {
+                    let error = format!(
+                        "Derivation path '{}' must has '{}' coin type",
+                        derivation_path, expected_coin_type
+                    );
+                    return MmError::err(WithdrawError::UnexpectedFromAddress(error));
+                }
+                HDAddressId::from(derivation_path)
+            },
         },
         None => {
             let default_account_id = 0;
