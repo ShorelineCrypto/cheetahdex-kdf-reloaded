@@ -368,20 +368,22 @@ where
         None => {
             let default_account_id = 0;
             let default_chain = Bip44Chain::External;
-            let default_address_id = 0;
 
             let default_account = hd_wallet
                 .get_account(default_account_id)
                 .await
                 .or_mm_err(|| WithdrawError::FromAddressNotFound)?;
 
-            let is_default_address_activated = default_account
-                .is_address_activated(default_chain, default_address_id)
+            let external_addresses_number = default_account
+                .known_addresses_number(default_chain)
                 .mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
 
-            if !is_default_address_activated {
+            if external_addresses_number == 0 {
                 return MmError::err(WithdrawError::FromAddressNotFound);
             }
+
+            // Prefer the last activated external address instead of hardcoding index 0.
+            let default_address_id = external_addresses_number - 1;
 
             HDAddressId {
                 account_id: default_account_id,
