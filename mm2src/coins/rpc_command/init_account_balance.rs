@@ -83,9 +83,7 @@ impl RpcTaskTypes for InitAccountBalanceTask {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl RpcTask for InitAccountBalanceTask {
-    fn initial_status(&self) -> Self::InProgressStatus {
-        AccountBalanceInProgressStatus::RequestingAccountBalance
-    }
+    fn initial_status(&self) -> Self::InProgressStatus { AccountBalanceInProgressStatus::RequestingAccountBalance }
 
     async fn run(self, _task_handle: &AccountBalanceTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         match self.coin {

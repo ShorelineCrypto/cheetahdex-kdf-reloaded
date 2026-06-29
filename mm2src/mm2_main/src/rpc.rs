@@ -18,10 +18,8 @@
 //
 
 use crate::mm2::rpc::rate_limiter::RateLimitError;
-#[cfg(feature = "unsafe-rpc-wire-dump")]
-use common::log::trace;
-#[cfg(not(target_arch = "wasm32"))]
-use common::log::warn;
+#[cfg(feature = "unsafe-rpc-wire-dump")] use common::log::trace;
+#[cfg(not(target_arch = "wasm32"))] use common::log::warn;
 use common::log::{error, info};
 use common::{err_to_rpc_json_string, err_tp_rpc_json, HttpStatusCode};
 use derive_more::Display;
@@ -44,24 +42,18 @@ use std::net::SocketAddr;
 #[cfg(target_arch = "wasm32")]
 #[path = "rpc/lp_commands/connect_metamask.rs"]
 pub mod connect_metamask;
-#[path = "rpc/dispatcher/dispatcher.rs"]
-mod dispatcher;
+#[path = "rpc/dispatcher/dispatcher.rs"] mod dispatcher;
 #[path = "rpc/dispatcher/dispatcher_legacy.rs"]
 mod dispatcher_legacy;
-#[path = "rpc/lp_commands/lp_commands.rs"]
-pub mod lp_commands;
+#[path = "rpc/lp_commands/lp_commands.rs"] pub mod lp_commands;
 #[path = "rpc/lp_commands/lp_commands_legacy.rs"]
 pub mod lp_commands_legacy;
-#[path = "rpc/lp_commands/one_inch/mod.rs"]
-pub mod one_inch;
-#[path = "rpc/rate_limiter.rs"]
-mod rate_limiter;
+#[path = "rpc/lp_commands/one_inch/mod.rs"] pub mod one_inch;
+#[path = "rpc/rate_limiter.rs"] mod rate_limiter;
 #[path = "rpc/lp_commands/send_asked_data.rs"]
 pub mod send_asked_data;
-#[path = "rpc/lp_commands/shared_db_id.rs"]
-pub mod shared_db_id;
-#[path = "rpc/sse_handler.rs"]
-mod sse_handler;
+#[path = "rpc/lp_commands/shared_db_id.rs"] pub mod shared_db_id;
+#[path = "rpc/sse_handler.rs"] mod sse_handler;
 #[path = "rpc/streaming_activations/mod.rs"]
 pub mod streaming_activations;
 #[cfg(not(target_arch = "wasm32"))]
@@ -115,9 +107,7 @@ const RPC_WIRE_DUMP_SECRET_KEY_MARKERS: &[&str] = &[
 ];
 
 #[cfg(feature = "unsafe-rpc-wire-dump")]
-fn rpc_wire_dump_enabled() -> bool {
-    matches!(std::env::var("MM2_RPC_WIRE_DUMP").ok().as_deref(), Some("1"))
-}
+fn rpc_wire_dump_enabled() -> bool { matches!(std::env::var("MM2_RPC_WIRE_DUMP").ok().as_deref(), Some("1")) }
 
 #[cfg(feature = "unsafe-rpc-wire-dump")]
 fn rpc_wire_dump_secrets_enabled() -> bool {
@@ -213,9 +203,7 @@ impl HttpStatusCode for DispatcherError {
 }
 
 impl From<serde_json::Error> for DispatcherError {
-    fn from(e: serde_json::Error) -> Self {
-        DispatcherError::InvalidRequest(e.to_string())
-    }
+    fn from(e: serde_json::Error) -> Self { DispatcherError::InvalidRequest(e.to_string()) }
 }
 
 #[allow(unused_macros)]

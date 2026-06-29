@@ -220,7 +220,46 @@ Enables native test functionality in `coins` for zHTLC-related coverage.
 
 ---
 
-## 5) Quick verification commands
+## 5) Code formatting
+
+This project enforces formatting with a **pinned nightly toolchain** (currently `nightly-2026-05-08`).
+Plain `cargo fmt` uses the stable toolchain and produces different output — it will fail CI.
+
+**Rules:**
+- Always use `cargo +nightly-2026-05-08 fmt`, never bare `cargo fmt`.
+- Always scope to the crate(s) you modified with `-p <crate>`. Never format the whole workspace — it contains third-party patched vendor trees (`*-patched/`) that must not be touched.
+
+```bash
+# Format a single crate:
+cargo +nightly-2026-05-08 fmt -p coins
+
+# Format multiple crates you modified:
+cargo +nightly-2026-05-08 fmt -p coins -p mm2_main
+
+# Format all non-patched KDF packages (CI equivalent):
+pkgs=$(cargo metadata --no-deps --format-version 1 \
+  | jq -r '.packages[] | select(.manifest_path | test("-patched/") | not) | .name')
+args=(); for p in $pkgs; do args+=(-p "$p"); done
+cargo +nightly-2026-05-08 fmt "${args[@]}"
+
+# Check without modifying (CI mode):
+cargo +nightly-2026-05-08 fmt "${args[@]}" -- --check
+```
+
+### 5.1) Pre-commit hook (project-local)
+
+A pre-commit hook that runs the fmt check automatically lives in `.githooks/pre-commit`.
+It is not active by default. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This is a local `.git/config` setting — it only affects your clone and does not affect other developers.
+
+---
+
+## 6) Quick verification commands
 
 Linux:
 

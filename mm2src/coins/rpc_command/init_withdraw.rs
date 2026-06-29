@@ -140,9 +140,7 @@ impl RpcTaskTypes for WithdrawTask {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl RpcTask for WithdrawTask {
-    fn initial_status(&self) -> Self::InProgressStatus {
-        WithdrawInProgressStatus::Preparing
-    }
+    fn initial_status(&self) -> Self::InProgressStatus { WithdrawInProgressStatus::Preparing }
 
     async fn run(self, task_handle: &WithdrawTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         match self.coin {
