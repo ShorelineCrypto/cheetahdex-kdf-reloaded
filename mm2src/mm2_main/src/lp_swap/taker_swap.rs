@@ -2256,18 +2256,11 @@ pub struct TradingVolumeResponse {
     amount: DetailedAmount,
 }
 
-#[derive(Serialize)]
-pub struct CancelSwapResponse {
-    success: bool,
-}
-
 #[derive(Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub enum TradingRpcError {
     #[display(fmt = "No such coin: {}", coin)]
     NoSuchCoin { coin: String },
-    #[display(fmt = "Swap cancellation by UUID is not supported by this node")]
-    CancelSwapUnsupported,
     #[display(fmt = "Internal error: {}", _0)]
     Internal(String),
 }
@@ -2275,7 +2268,7 @@ pub enum TradingRpcError {
 impl HttpStatusCode for TradingRpcError {
     fn status_code(&self) -> StatusCode {
         match self {
-            TradingRpcError::NoSuchCoin { .. } | TradingRpcError::CancelSwapUnsupported => StatusCode::BAD_REQUEST,
+            TradingRpcError::NoSuchCoin { .. } => StatusCode::BAD_REQUEST,
             TradingRpcError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -2317,10 +2310,6 @@ pub async fn min_trading_vol_v2(
         coin: req.coin,
         amount: coin.min_trading_vol().into(),
     })
-}
-
-pub async fn cancel_swap_v2(_ctx: MmArc, _req: serde_json::Value) -> MmResult<CancelSwapResponse, TradingRpcError> {
-    MmError::err(TradingRpcError::CancelSwapUnsupported)
 }
 
 pub async fn max_taker_vol(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, String> {

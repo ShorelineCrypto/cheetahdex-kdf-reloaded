@@ -16,8 +16,8 @@ use crate::{mm2::lp_stats::{add_node_to_version_stat, remove_node_from_version_s
                             stop_version_stat_collection, update_version_stat_collection},
             mm2::lp_swap::swap_v2_rpcs::{active_swaps_rpc as active_swaps_rpc_v2,
                                          my_recent_swaps_rpc as my_recent_swaps_rpc_v2, my_swap_status_rpc},
-            mm2::lp_swap::{cancel_swap_v2, get_locked_amount_rpc, max_maker_vol, max_taker_vol_v2,
-                           min_trading_vol_v2, recreate_swap_data, trade_preimage_rpc},
+            mm2::lp_swap::{get_locked_amount_rpc, max_maker_vol, max_taker_vol_v2, min_trading_vol_v2,
+                           recreate_swap_data, trade_preimage_rpc},
             mm2::rpc::lp_commands::{get_public_key, get_public_key_hash, peer_connection_healthcheck}};
 use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::eth::EthCoin;
@@ -277,7 +277,6 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "remove_node_from_version_stat" => handle_mmrpc(ctx, request, remove_node_from_version_stat).await,
         "send_asked_data" => handle_mmrpc(ctx, request, send_asked_data).await,
         "set_swap_gas_fee_policy" => handle_mmrpc(ctx, request, set_swap_gas_fee_policy).await,
-        "cancel_swap" => handle_mmrpc(ctx, request, cancel_swap_v2).await,
         "sign_message" => handle_mmrpc(ctx, request, sign_message).await,
         "start_simple_market_maker_bot" => handle_mmrpc(ctx, request, start_simple_market_maker_bot).await,
         "start_version_stat_collection" => handle_mmrpc(ctx, request, start_version_stat_collection).await,
@@ -547,6 +546,31 @@ async fn lightning_dispatcher(
             warn!("No such lightning:: RPC method: '{}'", lightning_method);
             MmError::err(DispatcherError::NoSuchMethod)
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use mm2_core::mm_ctx::MmCtxBuilder;
+    use serde_json::json;
+
+    #[test]
+    fn cancel_swap_is_not_registered_as_v2_method() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let request = MmRpcRequest {
+            mmrpc: MmRpcVersion::V2,
+            userpass: Some("unused-after-dispatch".to_owned()),
+            method: "cancel_swap".to_owned(),
+            params: json!({
+                "uuid": "00000000-0000-0000-0000-000000000000"
+            }),
+            id: Some(1),
+        };
+
+        let err = block_on(dispatcher_v2(request, ctx)).unwrap_err();
+        assert!(matches!(err.into_inner(), DispatcherError::NoSuchMethod));
     }
 }
 
