@@ -24,6 +24,10 @@ zhtlc-native-tests = ["coins/zhtlc-native-tests"]
 # Compiles in netid 9000 (regtest) for the docker_tests harness.
 # Never enable on the production `kdf` binary.
 regtest-netid = ["mm2_net_config/regtest-netid"]
+# Debugging-only RPC wire dump. Requires explicit runtime env activation too.
+unsafe-rpc-wire-dump = []
+# Escape hatch for controlled release debugging. Never enable in production builds.
+unsafe-rpc-wire-dump-release-override = []
 
 [[bin]]
 name = "kdf"
