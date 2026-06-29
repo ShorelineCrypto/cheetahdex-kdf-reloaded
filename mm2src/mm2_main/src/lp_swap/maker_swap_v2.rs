@@ -1406,7 +1406,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 .taker_coin
                 .wait_for_confirmations(
                     &taker_funding.tx_hex(),
-                    1,
+                    confirmation_gate_confs(sm.conf_settings.taker_coin_confs),
                     sm.conf_settings.taker_coin_nota,
                     sm.maker_payment_locktime(),
                     10,
@@ -2049,7 +2049,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 .taker_coin
                 .wait_for_confirmations(
                     &self.taker_payment_spend,
-                    sm.conf_settings.taker_coin_confs,
+                    confirmation_gate_confs(sm.conf_settings.taker_coin_confs),
                     sm.conf_settings.taker_coin_nota,
                     sm.maker_payment_locktime(),
                     10,

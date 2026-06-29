@@ -67,6 +67,8 @@ pub const NEGOTIATION_TIMEOUT_SEC: u64 = 90;
 /// The topic prefix used for V2 swap P2P messages (canonical definition in lp_swap.rs).
 pub const SWAP_V2_PREFIX: &str = "swapv2";
 
+pub(super) fn confirmation_gate_confs(configured_confs: u64) -> u64 { configured_confs.min(1) }
+
 // Error / abort types --------------------------------------------------------
 
 /// Reason a V2 swap was aborted.
@@ -2229,6 +2231,13 @@ mod tests {
             assert_eq!(loaded.conf_settings.maker_coin_nota, true);
             assert_eq!(loaded.conf_settings.taker_coin_confs, 3);
             assert_eq!(loaded.conf_settings.taker_coin_nota, false);
+        }
+
+        #[test]
+        fn confirmation_gate_confs_caps_configured_confs_to_one() {
+            assert_eq!(confirmation_gate_confs(0), 0);
+            assert_eq!(confirmation_gate_confs(1), 1);
+            assert_eq!(confirmation_gate_confs(4), 1);
         }
 
         #[test]

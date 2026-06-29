@@ -13,7 +13,7 @@ use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClien
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
-use crate::utxo::utxo_common::UtxoTxBuilder;
+use crate::utxo::utxo_common::{address_from_pubkey, my_public_key, trade_preimage_sender_address, UtxoTxBuilder};
 use crate::utxo::utxo_common_tests;
 use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
 #[cfg(not(target_arch = "wasm32"))] use crate::WithdrawFee;
@@ -191,6 +191,33 @@ fn utxo_coin_for_test(
     is_segwit_coin: bool,
 ) -> UtxoStandardCoin {
     utxo_coin_from_fields(utxo_coin_fields_for_test(rpc_client, force_seed, is_segwit_coin))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn test_trade_preimage_sender_address_uses_active_key_for_hd_wallet() {
+    let client = native_client_for_test();
+    let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
+    let active_pubkey = *my_public_key(&fields).unwrap();
+
+    fields.derivation_method = DerivationMethod::HDWallet(UtxoHDWallet {
+        hd_wallet_storage: HDWalletCoinStorage::default(),
+        address_format: UtxoAddressFormat::Standard,
+        derivation_path: HDPathToCoin::from_str("m/44'/141'").unwrap(),
+        accounts: HDAccountsMutex::new(HDAccountsMap::new()),
+        gap_limit: 3,
+    });
+
+    let actual = trade_preimage_sender_address(&fields).unwrap();
+    let expected = address_from_pubkey(
+        &active_pubkey,
+        fields.conf.pub_addr_prefix,
+        fields.conf.pub_t_addr_prefix,
+        fields.conf.checksum_type,
+        fields.conf.bech32_hrp.clone(),
+        UtxoAddressFormat::Standard,
+    );
+    assert_eq!(actual, expected);
 }
 
 #[test]

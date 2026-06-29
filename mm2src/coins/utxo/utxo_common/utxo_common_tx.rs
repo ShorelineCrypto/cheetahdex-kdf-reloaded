@@ -55,6 +55,23 @@ pub fn tx_size_in_v_bytes(from_addr_format: &UtxoAddressFormat, tx: &UtxoTx) -> 
     }
 }
 
+pub(crate) fn trade_preimage_sender_address(coin: &UtxoCoinFields) -> TradePreimageResult<Address> {
+    match coin.derivation_method {
+        DerivationMethod::Iguana(ref my_address) => Ok(my_address.clone()),
+        DerivationMethod::HDWallet(UtxoHDWallet { ref address_format, .. }) => {
+            let my_public_key = my_public_key(coin).mm_err(Into::into)?;
+            Ok(address_from_pubkey(
+                my_public_key,
+                coin.conf.pub_addr_prefix,
+                coin.conf.pub_t_addr_prefix,
+                coin.conf.checksum_type,
+                coin.conf.bech32_hrp.clone(),
+                address_format.clone(),
+            ))
+        },
+    }
+}
+
 pub struct UtxoTxBuilder<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> {
     coin: &'a T,
     from: Option<Address>,
@@ -552,7 +569,7 @@ where
     let tx_fee = coin.get_tx_fee().await.mm_err(Into::into)?;
     // [`FeePolicy::DeductFromOutput`] is used if the value is [`TradePreimageValue::UpperBound`] only
     let is_amount_upper_bound = matches!(fee_policy, FeePolicy::DeductFromOutput(_));
-    let my_address = coin.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
+    let my_address = trade_preimage_sender_address(coin.as_ref())?;
 
     match tx_fee {
         // if it's a dynamic fee, we should generate a swap transaction to get an actual trade fee
@@ -561,7 +578,7 @@ where
             let dynamic_fee = coin.increase_dynamic_fee_by_stage(fee, stage);
 
             let outputs_count = outputs.len();
-            let (unspents, _recently_sent_txs) = coin.get_unspent_ordered_list(my_address).await.mm_err(Into::into)?;
+            let (unspents, _recently_sent_txs) = coin.get_unspent_ordered_list(&my_address).await.mm_err(Into::into)?;
 
             let actual_tx_fee = ActualTxFee::Dynamic(dynamic_fee);
 
@@ -590,7 +607,7 @@ where
         },
         ActualTxFee::FixedPerKb(fee) => {
             let outputs_count = outputs.len();
-            let (unspents, _recently_sent_txs) = coin.get_unspent_ordered_list(my_address).await.mm_err(Into::into)?;
+            let (unspents, _recently_sent_txs) = coin.get_unspent_ordered_list(&my_address).await.mm_err(Into::into)?;
 
             let mut tx_builder = UtxoTxBuilder::new(coin)
                 .add_available_inputs(unspents)
