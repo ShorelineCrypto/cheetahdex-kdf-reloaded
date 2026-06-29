@@ -172,7 +172,7 @@ chapter-08 `DexFee` type. The chapter-bound names are:
 | Function                  | Bound role                                                                                                                                 |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `new_from_taker_coin`     | Used at swap initiation, before the taker's public key is known. Decides `Standard` vs `WithBurn` (KMD-OP_RETURN vs burn-account) based on coin and network flags. |
-| `new_with_taker_pubkey`   | Used during validation when the taker's public key is known. Returns `NoFee` iff the taker public key equals the burn public key; otherwise delegates to `new_from_taker_coin`. |
+| `new_with_taker_pubkey`   | Used whenever the taker's public key is known, including validation. Returns `NoFee` iff the taker public key equals the burn public key; otherwise delegates to `new_from_taker_coin`. |
 
 The base-fee computation (chapter-bound name `compute_base_fee`,
 provided by chapter 08's `compute_dex_fee` pipeline) MUST NOT be
@@ -245,6 +245,49 @@ the caller (chapter-15 call sites).
 **R12.** The factory MUST emit one of exactly three `DexFee`
 variants: `Standard`, `WithBurn`, `NoFee`. Substrate MUST NOT
 introduce a fourth variant.
+
+**R12A. Production call-site contract for known taker pubkey.**
+Any production path that constructs an expected dex-fee value and
+already knows the taker's expected sender public key MUST call the
+taker-pubkey-aware factory of R6. It MUST NOT compute the expected
+fee with the pubkey-blind factory or with only the chapter-08
+`compute_dex_fee` pipeline. The trigger condition is the presence
+of the public key that the fee transaction, taker funding, or
+taker payment is expected to be signed by or otherwise bound to.
+Under that condition, a taker whose public key equals the burn
+public key MUST be treated as `NoFee`.
+
+The production call-site contract is:
+
+- V1 maker-side taker-fee validation MUST compute the expected
+  `DexFee` from the taker coin, maker coin ticker, taker amount,
+  and the expected taker sender public key before validating or
+  deciding that no taker-fee transaction is required.
+- V1 taker-side fee estimation, taker-fee send, locked-amount,
+  and trade-preimage paths MUST use the taker-pubkey-aware
+  factory whenever the local taker public key is available; they
+  MAY use the pubkey-blind factory only for max-volume or
+  pre-negotiation estimates where the relevant taker public key is
+  not yet available.
+- V2 maker-side validation of taker funding and V2 maker-side
+  construction/validation of taker-payment spend/refund arguments
+  MUST use the taker-pubkey-aware factory after negotiation has
+  supplied the taker's public key.
+- V2 taker-side construction of taker funding, taker payment
+  spend preimages, funding refunds, and payment refunds MUST use
+  the taker-pubkey-aware factory when the local taker public key
+  is available; it MAY use the pubkey-blind factory only as a
+  conservative estimate before that key is available.
+- Watcher-only validation of an already-identified taker-fee
+  transaction by hash, sender public key, age, confirmation
+  boundary, and fee-output script is not required to recompute the
+  swap-negotiated `DexFee` unless that watcher path also validates
+  the expected swap fee amount or decides whether the fee is
+  absent. If it does, this R12A trigger applies.
+
+A direct unit test of `new_with_taker_pubkey` alone is not
+sufficient acceptance coverage for this requirement; at least one
+production call site MUST be exercised.
 
 ## 16.5 Bound Version-Two UTXO Helper Updates
 
@@ -405,6 +448,24 @@ with the OP_RETURN destination tag.
 fee.* The `new_with_taker_pubkey` factory is called with the
 taker public key set equal to the coin's burn public key; the
 test asserts the `NoFee` variant is returned.
+
+**T4A.** *Known-taker-pubkey production validation uses `NoFee`.*
+Given a burn-enabled UTXO taker coin whose expected taker sender
+public key equals the burn public key, the V1 maker-side
+taker-fee validation path computes its expected `DexFee` with the
+taker-pubkey-aware factory and proceeds through the no-fee branch
+without requiring a taker-fee transaction. The same fixture MUST
+fail if the path computes the expected fee with the pubkey-blind
+factory or with only the base-fee pipeline.
+
+**T4B.** *V2 known-taker-pubkey validation uses `NoFee`.* Given a
+V2 maker-side validation fixture after negotiation, where the
+taker public key is known and equals the burn public key, the
+expected `DexFee` passed to taker-funding validation is `NoFee`.
+The test asserts that a `Standard` or `WithBurn` expectation is a
+failure for this trigger condition. A companion taker-side fixture
+MUST assert that local V2 taker construction uses the same
+`NoFee` expectation when the local taker public key is available.
 
 **T5.** *Three-output preimage for burn-account variant.* The
 preimage builder of R13 is driven with `WithBurn` carrying the

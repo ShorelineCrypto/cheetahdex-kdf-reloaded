@@ -4,11 +4,11 @@ use super::pubkey_banning::ban_pubkey_on_failed_swap;
 use super::swap_lock::{SwapLock, SwapLockOps};
 use super::trade_preimage::{TradePreimageRequest, TradePreimageRpcError, TradePreimageRpcResult};
 use super::{broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap,
-            compute_dex_fee, dex_fee_amount_from_taker_coin, dex_fee_rate, dex_fee_threshold, get_locked_amount,
-            recv_swap_msg, swap_topic, AbortOnDropHandle, AtomicSwap, LockedAmount, MySwapInfo, NegotiationDataMsg,
-            NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap, SavedSwapIo,
-            SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext, TransactionIdentifier,
-            WAIT_CONFIRM_INTERVAL};
+            compute_dex_fee_with_taker_pubkey, dex_fee_amount_from_taker_coin, dex_fee_rate, dex_fee_threshold,
+            get_locked_amount, recv_swap_msg, swap_topic, AbortOnDropHandle, AtomicSwap, LockedAmount, MySwapInfo,
+            NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap,
+            SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext,
+            TransactionIdentifier, WAIT_CONFIRM_INTERVAL};
 use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MatchBy, OrderConfirmationsSettings, TakerAction, TakerOrderBuilder};
 use crate::mm2::lp_swap::{broadcast_p2p_tx_msg, tx_helper_topic};
@@ -18,10 +18,11 @@ use coins::{lp_coinfind, CanRefundHtlc, FeeApproxStage, FoundSwapTxSpend, MmCoin
 use common::executor::Timer;
 use common::log::{debug, error, warn};
 use common::mm_number::{BigDecimal, MmNumber};
-use common::{bits256, now_ms};
+use common::{bits256, now_ms, HttpStatusCode};
 use crypto::privkey::SerializableSecp256k1Keypair;
+use derive_more::Display;
 use futures::{compat::Future01CompatExt, select, FutureExt};
-use http::Response;
+use http::{Response, StatusCode};
 use keys::KeyPair;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -36,6 +37,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use uuid::Uuid;
+
+construct_detailed!(DetailedAmount, amount);
 
 pub const TAKER_SUCCESS_EVENTS: [&str; 17] = [
     "Started",
@@ -936,11 +939,13 @@ impl TakerSwap {
     async fn start(&self) -> Result<(Option<TakerSwapCommand>, Vec<TakerSwapEvent>), String> {
         // do not use self.r().data here as it is not initialized at this step yet
         let stage = FeeApproxStage::StartSwap;
-        let dex_fee = compute_dex_fee(
+        let my_taker_coin_htlc_pub = self.r().my_taker_coin_htlc_keypair.public_slice().to_vec();
+        let dex_fee = compute_dex_fee_with_taker_pubkey(
             self.net_cfg(),
             &self.taker_coin,
             self.maker_coin.ticker(),
             &self.taker_amount,
+            &my_taker_coin_htlc_pub,
         );
         let preimage_value = TradePreimageValue::Exact(self.taker_amount.to_decimal());
 
@@ -1193,11 +1198,13 @@ impl TakerSwap {
             ]));
         }
 
-        let dex_fee = compute_dex_fee(
+        let my_taker_coin_htlc_pub = self.r().my_taker_coin_htlc_keypair.public_slice().to_vec();
+        let dex_fee = compute_dex_fee_with_taker_pubkey(
             self.net_cfg(),
             &self.taker_coin,
             &self.r().data.maker_coin,
             &self.taker_amount,
+            &my_taker_coin_htlc_pub,
         );
         let fee_tx = self
             .taker_coin
@@ -2229,6 +2236,80 @@ pub async fn taker_swap_trade_preimage(
 struct MaxTakerVolRequest {
     coin: String,
     trade_with: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct MaxTakerVolV2Request {
+    coin: String,
+    trade_with: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct MinTradingVolV2Request {
+    coin: String,
+}
+
+#[derive(Serialize)]
+pub struct TradingVolumeResponse {
+    coin: String,
+    #[serde(flatten)]
+    amount: DetailedAmount,
+}
+
+#[derive(Display, Serialize, SerializeErrorType)]
+#[serde(tag = "error_type", content = "error_data")]
+pub enum TradingRpcError {
+    #[display(fmt = "No such coin: {}", coin)]
+    NoSuchCoin { coin: String },
+    #[display(fmt = "Internal error: {}", _0)]
+    Internal(String),
+}
+
+impl HttpStatusCode for TradingRpcError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            TradingRpcError::NoSuchCoin { .. } => StatusCode::BAD_REQUEST,
+            TradingRpcError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+pub async fn max_taker_vol_v2(
+    ctx: MmArc,
+    req: MaxTakerVolV2Request,
+) -> MmResult<TradingVolumeResponse, TradingRpcError> {
+    let coin = lp_coinfind(&ctx, &req.coin)
+        .await
+        .map_to_mm(TradingRpcError::Internal)?
+        .or_mm_err(|| TradingRpcError::NoSuchCoin { coin: req.coin.clone() })?;
+    let other_coin = req.trade_with.as_ref().unwrap_or(&req.coin);
+    let max_vol = match calc_max_taker_vol(&ctx, &coin, other_coin, FeeApproxStage::TradePreimage).await {
+        Ok(max_vol) => max_vol,
+        Err(e) if e.get_inner().not_sufficient_balance() => {
+            warn!("{}", e);
+            MmNumber::from(0)
+        },
+        Err(e) => return MmError::err(TradingRpcError::Internal(e.to_string())),
+    };
+
+    Ok(TradingVolumeResponse {
+        coin: coin.ticker().to_owned(),
+        amount: max_vol.into(),
+    })
+}
+
+pub async fn min_trading_vol_v2(
+    ctx: MmArc,
+    req: MinTradingVolV2Request,
+) -> MmResult<TradingVolumeResponse, TradingRpcError> {
+    let coin = lp_coinfind(&ctx, &req.coin)
+        .await
+        .map_to_mm(TradingRpcError::Internal)?
+        .or_mm_err(|| TradingRpcError::NoSuchCoin { coin: req.coin.clone() })?;
+    Ok(TradingVolumeResponse {
+        coin: req.coin,
+        amount: coin.min_trading_vol().into(),
+    })
 }
 
 pub async fn max_taker_vol(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, String> {

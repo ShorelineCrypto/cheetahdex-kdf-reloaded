@@ -27,9 +27,9 @@
 //! - Started-at clock skew between maker and taker must not exceed
 //!   [`MAX_STARTED_AT_DIFF`] seconds.
 
-use coins::{CanRefundHtlc, DexFee, FeeApproxStage, FundingTxSpend, MakerCoinSwapOpsV2, MmCoin,
-            RefundMakerPaymentTimelockArgs, SearchForFundingSpendErr, SendMakerPaymentArgs, SwapTxTypeWithSecretHash,
-            TakerCoinSwapOpsV2, ToBytes, TradePreimageValue, Transaction, ValidateTakerFundingArgs};
+use coins::{CanRefundHtlc, FeeApproxStage, FundingTxSpend, MakerCoinSwapOpsV2, MmCoin, RefundMakerPaymentTimelockArgs,
+            SearchForFundingSpendErr, SendMakerPaymentArgs, SwapTxTypeWithSecretHash, TakerCoinSwapOpsV2, ToBytes,
+            TradePreimageValue, Transaction, ValidateTakerFundingArgs};
 use common::executor::Timer;
 use common::log::{error, info, warn};
 use common::mm_number::MmNumber;
@@ -1376,6 +1376,13 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
+        let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
+            mm2_net_config::net_config_or_panic(sm.ctx.netid()),
+            &sm.taker_coin,
+            sm.maker_coin.ticker(),
+            &sm.taker_volume,
+            &self.negotiation_data.taker_coin_htlc_pub,
+        );
         let validation_args = ValidateTakerFundingArgs {
             funding_tx: &taker_funding,
             payment_time_lock: self.negotiation_data.taker_payment_locktime,
@@ -1383,7 +1390,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             taker_secret_hash: &self.negotiation_data.taker_secret_hash,
             maker_secret_hash: &sm.secret_hash(),
             taker_pub: &taker_htlc_pub,
-            dex_fee: &DexFee::NoFee, // TODO: compute proper dex fee from taker volume
+            dex_fee: &dex_fee,
             premium_amount: sm.taker_premium.to_decimal(),
             trading_amount: sm.taker_volume.to_decimal(),
             swap_unique_data: &unique_data,
@@ -1399,7 +1406,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 .taker_coin
                 .wait_for_confirmations(
                     &taker_funding.tx_hex(),
-                    1,
+                    confirmation_gate_confs(sm.conf_settings.taker_coin_confs),
                     sm.conf_settings.taker_coin_nota,
                     sm.maker_payment_locktime(),
                     10,
@@ -1791,6 +1798,13 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             },
         };
 
+        let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
+            mm2_net_config::net_config_or_panic(sm.ctx.netid()),
+            &sm.taker_coin,
+            sm.maker_coin.ticker(),
+            &sm.taker_volume,
+            &self.negotiation_data.taker_coin_htlc_pub,
+        );
         let gen_args = coins::GenTakerPaymentSpendArgs {
             taker_tx: &taker_payment_tx,
             time_lock: self.negotiation_data.taker_payment_locktime,
@@ -1798,7 +1812,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             maker_pub: &taker_coin_maker_pub,
             maker_address: &taker_coin_maker_addr,
             taker_pub: &taker_htlc_pub,
-            dex_fee: &DexFee::NoFee, // TODO: compute proper dex fee
+            dex_fee: &dex_fee,
             premium_amount: sm.taker_premium.to_decimal(),
             trading_amount: sm.taker_volume.to_decimal(),
         };
@@ -1957,6 +1971,13 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             },
         };
 
+        let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
+            mm2_net_config::net_config_or_panic(sm.ctx.netid()),
+            &sm.taker_coin,
+            sm.maker_coin.ticker(),
+            &sm.taker_volume,
+            &self.negotiation_data.taker_coin_htlc_pub,
+        );
         let gen_args = coins::GenTakerPaymentSpendArgs {
             taker_tx: &taker_payment_tx,
             time_lock: self.negotiation_data.taker_payment_locktime,
@@ -1964,7 +1985,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             maker_pub: &taker_coin_maker_pub,
             maker_address: &taker_coin_maker_addr,
             taker_pub: &taker_htlc_pub,
-            dex_fee: &DexFee::NoFee, // TODO: compute proper dex fee
+            dex_fee: &dex_fee,
             premium_amount: sm.taker_premium.to_decimal(),
             trading_amount: sm.taker_volume.to_decimal(),
         };
@@ -2028,7 +2049,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 .taker_coin
                 .wait_for_confirmations(
                     &self.taker_payment_spend,
-                    sm.conf_settings.taker_coin_confs,
+                    confirmation_gate_confs(sm.conf_settings.taker_coin_confs),
                     sm.conf_settings.taker_coin_nota,
                     sm.maker_payment_locktime(),
                     10,

@@ -90,8 +90,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[path = "lp_swap/check_balance.rs"] mod check_balance;
 #[path = "lp_swap/dex_fee.rs"] mod dex_fee;
-pub use dex_fee::{compute_dex_fee, dex_fee_amount, dex_fee_amount_from_taker_coin};
-pub(crate) use dex_fee::{dex_fee_rate, dex_fee_threshold};
+#[allow(unused_imports)]
+pub use dex_fee::{compute_dex_fee, compute_dex_fee_with_taker_pubkey, dex_fee_amount, dex_fee_amount_from_taker_coin};
+pub(crate) use dex_fee::{compute_dex_fee_with_taker_pubkey_from_coin, dex_fee_rate, dex_fee_threshold};
 #[path = "lp_swap/maker_swap.rs"] mod maker_swap;
 #[path = "lp_swap/maker_swap_v2.rs"] pub mod maker_swap_v2;
 #[path = "lp_swap/max_maker_vol_rpc.rs"] mod max_maker_vol_rpc;
@@ -142,8 +143,9 @@ pub use swap_rpc::*;
 pub use swap_watcher::{process_watcher_msg, watcher_topic, SwapWatcherMsg, TakerSwapWatcherData, WATCHER_PREFIX};
 #[allow(unused_imports)]
 pub use taker_swap::{calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available,
-                     run_taker_swap, taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap,
-                     TakerSwapEvent, TakerSwapPreparedParams, TakerTradePreimage};
+                     max_taker_vol_v2, min_trading_vol_v2, run_taker_swap, taker_swap_trade_preimage,
+                     RunTakerSwapInput, TakerSavedSwap, TakerSwap, TakerSwapEvent, TakerSwapPreparedParams,
+                     TakerTradePreimage};
 pub use trade_preimage::trade_preimage_rpc;
 
 pub const SWAP_PREFIX: TopicPrefix = "swap";
@@ -534,6 +536,13 @@ pub fn active_swaps_using_coin(ctx: &MmArc, coin: &str) -> Result<Vec<Uuid>, Str
             if swap.maker_coin() == coin || swap.taker_coin() == coin {
                 uuids.push(*swap.uuid())
             }
+        }
+    }
+    drop(swaps);
+
+    for swap in swap_ctx.active_swaps_v2_snapshot() {
+        if swap.maker_coin == coin || swap.taker_coin == coin {
+            uuids.push(swap.uuid);
         }
     }
     Ok(uuids)
