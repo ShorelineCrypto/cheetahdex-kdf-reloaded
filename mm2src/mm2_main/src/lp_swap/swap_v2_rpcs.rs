@@ -29,8 +29,8 @@ use super::maker_swap_v2::MakerSwapEvent;
 use super::my_swaps_storage::{MySwapsError, MySwapsOps, MySwapsStorage};
 use super::taker_swap::TakerSavedSwap;
 use super::taker_swap_v2::TakerSwapEvent;
-use super::{active_swaps, MySwapsFilter, SavedSwap, SavedSwapError, SavedSwapIo, LEGACY_SWAP_TYPE, MAKER_SWAP_V2_TYPE,
-            TAKER_SWAP_V2_TYPE};
+use super::{active_swaps, active_swaps_using_coin, MySwapsFilter, SavedSwap, SavedSwapError, SavedSwapIo,
+            LEGACY_SWAP_TYPE, MAKER_SWAP_V2_TYPE, TAKER_SWAP_V2_TYPE};
 use common::log::{error, warn};
 use common::mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr};
 use common::{calc_total_pages, HttpStatusCode, PagingOptions};
@@ -559,6 +559,7 @@ pub(crate) async fn my_recent_swaps_rpc(
 pub(crate) struct ActiveSwapsRequest {
     #[serde(default)]
     include_status: bool,
+    coin: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -588,7 +589,14 @@ pub(crate) async fn active_swaps_rpc(
     ctx: MmArc,
     req: ActiveSwapsRequest,
 ) -> MmResult<ActiveSwapsResponse, ActiveSwapsErr> {
-    let uuids_with_types = active_swaps(&ctx).map_to_mm(ActiveSwapsErr::Internal)?;
+    let mut uuids_with_types = active_swaps(&ctx).map_to_mm(ActiveSwapsErr::Internal)?;
+    if let Some(coin) = req.coin {
+        let allowed: std::collections::HashSet<_> = active_swaps_using_coin(&ctx, &coin)
+            .map_to_mm(ActiveSwapsErr::Internal)?
+            .into_iter()
+            .collect();
+        uuids_with_types.retain(|(uuid, _)| allowed.contains(uuid));
+    }
 
     let statuses = if req.include_status {
         let mut acc = HashMap::with_capacity(uuids_with_types.len());

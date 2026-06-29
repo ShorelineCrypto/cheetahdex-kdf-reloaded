@@ -1161,6 +1161,179 @@ pub struct AutoBuyInput {
     pub(crate) save_in_history: bool,
 }
 
+#[derive(Deserialize)]
+pub struct StartSwapRequest {
+    base: String,
+    rel: String,
+    base_coin_amount: MmNumber,
+    rel_coin_amount: MmNumber,
+    method: StartSwapMethod,
+    #[serde(default)]
+    dest_pubkey: Option<H256Json>,
+    #[serde(default)]
+    dest_pub_key: Option<H256Json>,
+    #[serde(default)]
+    match_by: MatchBy,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StartSwapMethod {
+    SetPrice {},
+    Buy {},
+    Sell {},
+}
+
+#[derive(Serialize)]
+pub struct StartSwapResponse {
+    uuid: Uuid,
+    status: &'static str,
+    swap_type: &'static str,
+}
+
+#[derive(Display, Serialize, SerializeErrorType)]
+#[serde(tag = "error_type", content = "error_data")]
+pub enum StartSwapError {
+    #[display(fmt = "Invalid start_swap request: {}", _0)]
+    InvalidRequest(String),
+    #[display(fmt = "Internal error: {}", _0)]
+    Internal(String),
+}
+
+impl HttpStatusCode for StartSwapError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            StartSwapError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            StartSwapError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+fn start_swap_price(base_amount: &MmNumber, rel_amount: &MmNumber) -> MmResult<MmNumber, StartSwapError> {
+    if base_amount.is_zero() {
+        return MmError::err(StartSwapError::InvalidRequest(
+            "base_coin_amount must be greater than zero".to_owned(),
+        ));
+    }
+    Ok(rel_amount / base_amount)
+}
+
+fn start_swap_dest_pubkey(req: &StartSwapRequest) -> H256Json {
+    req.dest_pubkey.or(req.dest_pub_key).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod start_swap_tests {
+    use super::*;
+
+    #[test]
+    fn test_start_swap_accepts_flutter_sell_payload() {
+        let req: StartSwapRequest = json::from_value(json!({
+            "base": "RIN",
+            "rel": "KMD",
+            "base_coin_amount": "0.001",
+            "rel_coin_amount": "0.00454545",
+            "method": {
+                "sell": {}
+            }
+        }))
+        .unwrap();
+
+        assert!(matches!(req.method, StartSwapMethod::Sell {}));
+        let price = match start_swap_price(&req.base_coin_amount, &req.rel_coin_amount) {
+            Ok(price) => price,
+            Err(e) => panic!("{}", e),
+        };
+        assert_eq!(price, MmNumber::from("4.54545"));
+    }
+
+    #[test]
+    fn test_start_swap_rejects_zero_base_amount() {
+        let err = start_swap_price(&MmNumber::from("0"), &MmNumber::from("0.00454545")).unwrap_err();
+        assert!(matches!(err.into_inner(), StartSwapError::InvalidRequest(_)));
+    }
+}
+
+pub async fn start_swap_rpc(ctx: MmArc, req: StartSwapRequest) -> MmResult<StartSwapResponse, StartSwapError> {
+    let price = start_swap_price(&req.base_coin_amount, &req.rel_coin_amount)?;
+    match req.method {
+        StartSwapMethod::SetPrice {} => {
+            let maker_order = create_maker_order(&ctx, SetPriceReq {
+                base: req.base,
+                rel: req.rel,
+                price,
+                max: false,
+                volume: req.base_coin_amount,
+                min_volume: None,
+                cancel_previous: true,
+                base_confs: None,
+                base_nota: None,
+                rel_confs: None,
+                rel_nota: None,
+                save_in_history: true,
+                timeout_in_minutes: None,
+            })
+            .await
+            .map_to_mm(StartSwapError::Internal)?;
+            Ok(StartSwapResponse {
+                uuid: maker_order.uuid,
+                status: "Created",
+                swap_type: "Maker",
+            })
+        },
+        StartSwapMethod::Buy {} | StartSwapMethod::Sell {} => {
+            let method = match req.method {
+                StartSwapMethod::Buy {} => "buy",
+                StartSwapMethod::Sell {} => "sell",
+                StartSwapMethod::SetPrice {} => unreachable!(),
+            };
+            let response = match method {
+                "buy" => {
+                    buy(
+                        ctx,
+                        json!({
+                            "base": req.base,
+                            "rel": req.rel,
+                            "price": price,
+                            "volume": req.base_coin_amount,
+                            "method": method,
+                            "destpubkey": start_swap_dest_pubkey(&req),
+                            "match_by": req.match_by,
+                        }),
+                    )
+                    .await
+                },
+                "sell" => {
+                    sell(
+                        ctx,
+                        json!({
+                            "base": req.base,
+                            "rel": req.rel,
+                            "price": price,
+                            "volume": req.base_coin_amount,
+                            "method": method,
+                            "destpubkey": start_swap_dest_pubkey(&req),
+                            "match_by": req.match_by,
+                        }),
+                    )
+                    .await
+                },
+                _ => unreachable!(),
+            }
+            .map_to_mm(StartSwapError::Internal)?;
+            let body: Json =
+                json::from_slice(response.body()).map_to_mm(|e| StartSwapError::Internal(e.to_string()))?;
+            let uuid = json::from_value(body["result"]["uuid"].clone())
+                .map_to_mm(|e| StartSwapError::Internal(e.to_string()))?;
+            Ok(StartSwapResponse {
+                uuid,
+                status: "Created",
+                swap_type: "Taker",
+            })
+        },
+    }
+}
+
 pub async fn buy(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>, String> {
     let input: AutoBuyInput = try_s!(json::from_value(req));
     if input.base == input.rel {

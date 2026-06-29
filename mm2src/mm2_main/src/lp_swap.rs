@@ -142,9 +142,10 @@ pub use swap_rpc::*;
 #[allow(unused_imports)]
 pub use swap_watcher::{process_watcher_msg, watcher_topic, SwapWatcherMsg, TakerSwapWatcherData, WATCHER_PREFIX};
 #[allow(unused_imports)]
-pub use taker_swap::{calc_max_taker_vol, check_balance_for_taker_swap, max_taker_vol, max_taker_vol_from_available,
-                     run_taker_swap, taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap,
-                     TakerSwapEvent, TakerSwapPreparedParams, TakerTradePreimage};
+pub use taker_swap::{calc_max_taker_vol, cancel_swap_v2, check_balance_for_taker_swap, max_taker_vol,
+                     max_taker_vol_from_available, max_taker_vol_v2, min_trading_vol_v2, run_taker_swap,
+                     taker_swap_trade_preimage, RunTakerSwapInput, TakerSavedSwap, TakerSwap, TakerSwapEvent,
+                     TakerSwapPreparedParams, TakerTradePreimage};
 pub use trade_preimage::trade_preimage_rpc;
 
 pub const SWAP_PREFIX: TopicPrefix = "swap";
@@ -535,6 +536,13 @@ pub fn active_swaps_using_coin(ctx: &MmArc, coin: &str) -> Result<Vec<Uuid>, Str
             if swap.maker_coin() == coin || swap.taker_coin() == coin {
                 uuids.push(*swap.uuid())
             }
+        }
+    }
+    drop(swaps);
+
+    for swap in swap_ctx.active_swaps_v2_snapshot() {
+        if swap.maker_coin == coin || swap.taker_coin == coin {
+            uuids.push(swap.uuid);
         }
     }
     Ok(uuids)
