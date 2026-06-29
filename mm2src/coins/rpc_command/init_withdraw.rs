@@ -5,9 +5,9 @@ use common::SuccessResponse;
 use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction, HwRpcTaskUserActionRequest};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+use mm2_rpc::mm_protocol::MmRpcResult;
 use rpc_task::rpc_common::{InitRpcTaskResponse, RpcTaskStatusError, RpcTaskStatusRequest, RpcTaskUserActionError};
-use rpc_task::{FinishedTaskResult, RpcTask, RpcTaskHandle, RpcTaskManager, RpcTaskManagerShared, RpcTaskStatusAlias,
-               RpcTaskTypes};
+use rpc_task::{RpcTask, RpcTaskHandle, RpcTaskManager, RpcTaskManagerShared, RpcTaskStatusAlias, RpcTaskTypes};
 
 pub type WithdrawAwaitingStatus = HwRpcTaskAwaitingStatus;
 pub type WithdrawUserAction = HwRpcTaskUserAction;
@@ -20,17 +20,19 @@ pub type WithdrawTaskManager = RpcTaskManager<WithdrawTask>;
 pub type WithdrawTaskManagerShared = RpcTaskManagerShared<WithdrawTask>;
 pub type WithdrawTaskHandle = RpcTaskHandle<WithdrawTask>;
 pub type WithdrawRpcStatus = RpcTaskStatusAlias<WithdrawTask>;
-pub type WithdrawCompatFinishedResult = FinishedTaskResult<TransactionDetails, WithdrawError>;
 pub type WithdrawInitResult<T> = Result<T, MmError<WithdrawError>>;
 
 /// Compatibility wire format for `task::withdraw::status` expected by legacy clients.
 ///
-/// Legacy clients expect a terminal status value of `"Ok"` and inspect `details`
-/// for either a successful transaction object or an error object.
+/// Legacy clients expect a terminal status value of `"Ok"` with `details` being a flat
+/// `TransactionDetails` object, or `"Error"` with `details` being an error message string.
 #[derive(Serialize)]
 #[serde(tag = "status", content = "details")]
 pub enum WithdrawCompatRpcStatus {
-    Ok(WithdrawCompatFinishedResult),
+    /// Task completed successfully; `details` is the flat `TransactionDetails` JSON object.
+    Ok(TransactionDetails),
+    /// Task failed; `details` is a human-readable error string.
+    Error(String),
     InProgress(WithdrawInProgressStatus),
     UserActionRequired(WithdrawAwaitingStatus),
 }
@@ -70,7 +72,10 @@ pub async fn withdraw_status(
         .or_mm_err(|| WithdrawStatusError::NoSuchTask(req.task_id))?;
 
     let compat_status = match status {
-        rpc_task::RpcTaskStatus::Ready(result) => WithdrawCompatRpcStatus::Ok(result),
+        rpc_task::RpcTaskStatus::Ready(result) => match result {
+            MmRpcResult::Ok { result: tx_details } => WithdrawCompatRpcStatus::Ok(tx_details),
+            MmRpcResult::Err(e) => WithdrawCompatRpcStatus::Error(format!("{}", e.get_inner())),
+        },
         rpc_task::RpcTaskStatus::InProgress(in_progress) => WithdrawCompatRpcStatus::InProgress(in_progress),
         rpc_task::RpcTaskStatus::UserActionRequired(awaiting_status) => {
             WithdrawCompatRpcStatus::UserActionRequired(awaiting_status)
@@ -135,7 +140,9 @@ impl RpcTaskTypes for WithdrawTask {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl RpcTask for WithdrawTask {
-    fn initial_status(&self) -> Self::InProgressStatus { WithdrawInProgressStatus::Preparing }
+    fn initial_status(&self) -> Self::InProgressStatus {
+        WithdrawInProgressStatus::Preparing
+    }
 
     async fn run(self, task_handle: &WithdrawTaskHandle) -> Result<Self::Item, MmError<Self::Error>> {
         match self.coin {

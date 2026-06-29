@@ -379,7 +379,13 @@ where
                 .mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
 
             if external_addresses_number == 0 {
-                return MmError::err(WithdrawError::FromAddressNotFound);
+                // No addresses have been discovered yet (e.g. address discovery hasn't run).
+                // Derive address 0 directly as a best-effort fallback so the user can still
+                // withdraw without needing to run account_balance first.
+                let hd_address = coin
+                    .derive_address(&default_account, default_chain, 0)
+                    .mm_err(Into::into)?;
+                return Ok(WithdrawSenderAddress::from(hd_address));
             }
 
             // Prefer the last activated external address instead of hardcoding index 0.
