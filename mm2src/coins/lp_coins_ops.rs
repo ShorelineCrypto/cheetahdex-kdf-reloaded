@@ -287,7 +287,15 @@ pub async fn validate_address(ctx: MmArc, req: Json) -> Result<Response<Vec<u8>>
 }
 pub async fn withdraw(ctx: MmArc, req: WithdrawRequest) -> WithdrawResult {
     let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;
-    coin.withdraw(req).compat().await
+    #[cfg(not(target_arch = "wasm32"))]
+    let publish_zcoin_tx_history = matches!(coin, MmCoinEnum::ZCoin(_));
+    #[cfg(target_arch = "wasm32")]
+    let publish_zcoin_tx_history = false;
+    let tx_details = coin.withdraw(req).compat().await?;
+    if publish_zcoin_tx_history {
+        crate::tx_history_streaming::publish_tx_history_records(&ctx, &tx_details.coin, [tx_details.clone()]);
+    }
+    Ok(tx_details)
 }
 pub async fn get_raw_transaction(ctx: MmArc, req: RawTransactionRequest) -> RawTransactionResult {
     let coin = lp_coinfind_or_err(&ctx, &req.coin).await.mm_err(Into::into)?;

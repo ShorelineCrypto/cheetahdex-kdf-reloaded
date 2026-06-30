@@ -3,7 +3,7 @@
 **Status:** driving-spec.
 
 A reusable in-process event-broker substrate plus a native-only HTTP
-transport adapter, together exposing seven Server-Sent-Events streamers
+transport adapter, together exposing eight Server-Sent-Events streamers
 under a dedicated RPC namespace, structurally replacing the polling-only
 read model the baseline tree carried for live GUI updates.
 
@@ -22,7 +22,7 @@ chapter introduces a structural split into two layers:
    `text/event-stream` wire format.
 
 Activation is bound to a new RPC namespace prefix (`stream::`) with
-exactly seven `<category>::enable` methods. Per-stream deactivation is
+exactly eight `<category>::enable` methods. Per-stream deactivation is
 bound to the same namespace through `stream::disable`; full client
 deactivation also occurs when an HTTP client connection drops. Slow
 clients are bound to be individually back-pressured (events dropped per
@@ -30,7 +30,7 @@ slow client) and never block the broadcaster or other clients.
 
 This chapter binds the broker's public crate surface, the streamer trait
 contract, the wire-stable streamer origin tags, the HTTP endpoint shape,
-the `stream::*` dispatcher routing, the seven concrete streamer identities
+the `stream::*` dispatcher routing, the eight concrete streamer identities
 shipped by the substrate, and the runtime invariants the design relies
 on.
 
@@ -47,14 +47,15 @@ The substrate occupies a structural seam between three subsystems:
   additional handler beside the JSON-RPC handler, gated to native-only
   targets).
 
-The substrate is *not* a redesign of the JSON-RPC surface. The seven
+The substrate is *not* a redesign of the JSON-RPC surface. The eight
 streamers add a push channel beside the existing pull surface; no
 pre-existing read RPC is removed, renamed, or repurposed. Bound rules
 (R1–R6) constrain the broker; (R7–R14) constrain the streamer trait
 contract and origin tags; (R15–R21) constrain the HTTP endpoint and
 namespace; (R22–R26) constrain the shared activation envelope and
 concrete streamers; (R29–R32) bind the sixth (Network) streamer;
-(R33–R38) bind the seventh (fee-estimator) streamer.
+(R33–R38) bind the seventh (fee-estimator) streamer; (R39–R45)
+bind the eighth (tx-history) streamer.
 
 ## 10.3 Bound Crate Surface
 
@@ -101,7 +102,7 @@ bound: `is_error()`, `origin()` returning the wire-stable origin string,
 ## 10.5 Bound Streamer Origin Tags
 
 **R6.** The streamer origin tag (`StreamerId`) MUST be an enumeration
-with exactly seven variants and the following wire-stable display strings
+with exactly eight concrete variants and the following wire-stable display strings
 (GUI-visible, treated as part of the SSE contract surface):
 
 | Variant                                | Wire string             |
@@ -113,6 +114,7 @@ with exactly seven variants and the following wire-stable display strings
 | OrderStatus                            | `ORDER_STATUS`          |
 | OrderbookUpdate { topic }              | `ORDERBOOK:<topic>`     |
 | FeeEstimation(ticker)                  | `FEE_ESTIMATION:<ticker>` |
+| TxHistory(ticker)                      | `TX_HISTORY:<ticker>`   |
 
 These wire strings MUST be exact byte-for-byte: uppercase, colon
 separator before the dynamic component, no whitespace, no padding. They
@@ -234,7 +236,7 @@ without the prefix MUST be routed unchanged through the existing v2
 dispatcher.
 
 **R20.** The streamer-activation table MUST contain exactly the
-following seven activation entries (no aliases, no deprecated names, no
+following eight activation entries (no aliases, no deprecated names, no
 additional activation methods):
 
 | Method name                  | Streamer key                              |
@@ -246,11 +248,13 @@ additional activation methods):
 | `stream::order_status::enable`| `OrderStatus`                            |
 | `stream::orderbook::enable`  | `OrderbookUpdate { topic: <request.topic> }` |
 | `stream::fee_estimator::enable` | `FeeEstimation(<request.coin>)`        |
+| `stream::tx_history::enable` | `TxHistory(<request.coin>)`              |
 
 The `Network` origin tag reserved in R6 is now bound to its activation
 method; its request shape, payload shape, cadence, and platform gate
 are bound in §10.16 (R29–R32). This resolves D2. The fee-estimator
-entry is constrained in detail by §10.17 (R33–R38).
+entry is constrained in detail by §10.17 (R33–R38). The tx-history
+entry is constrained in detail by §10.18 (R39–R45).
 
 **R21.** The streamer-deactivation table MUST contain exactly one
 generic deactivation entry:
@@ -283,7 +287,7 @@ no-op. Missing or invalid `client_id` or `streamer_id` fields MUST fail
 during request decoding or validation, before any subscription state is
 changed.
 
-**R22.** All activation handlers (the seven bound in R20) MUST share a
+**R22.** All activation handlers (the eight bound in R20) MUST share a
 common request and response envelope:
 
 - Request: a generic envelope carrying a `client_id` field (the same
@@ -294,19 +298,21 @@ common request and response envelope:
   `streamer_id` — the wire-stable identifier of the activated streamer
   (the same `StreamerId` display string bound in R6, e.g. `HEARTBEAT`,
   `BALANCE:<ticker>`, `SWAP_STATUS`, `ORDER_STATUS`,
-  `ORDERBOOK:<topic>`). The client MUST retain this string to later
-  deactivate the streamer via `stream::disable`. Success is conveyed by
-  the mmrpc `result` envelope itself; there is NO boolean field in the
-  response.
+  `ORDERBOOK:<topic>`, `TX_HISTORY:<ticker>`). The client MUST retain
+  this string to later deactivate the streamer via `stream::disable`.
+  Success is conveyed by the mmrpc `result` envelope itself; there is
+  NO boolean field in the response.
 
-**R23.** The activation error type MUST be a single-variant enumeration
-with display string `Streamer initialization failed: <reason>` and HTTP
-status mapping 500. Any failure reported by the streamer's `ready_tx`
-MUST be wrapped into this variant verbatim.
+**R23.** Activation handlers without a streamer-specific error surface
+MUST use a single activation-failure category with HTTP status 500. Any
+failure reported by the streamer's `ready_tx` MUST be wrapped into that
+category verbatim. A later streamer-specific section MAY bind a more
+specific public error/status mapping when required for upstream
+interoperability; §10.18 does so for tx-history.
 
 ## 10.10 Bound Concrete Streamers
 
-**R24.** The substrate MUST ship exactly the following seven concrete
+**R24.** The substrate MUST ship exactly the following eight concrete
 streamers:
 
 | Activation method            | Streamer key                          |
@@ -318,9 +324,12 @@ streamers:
 | `stream::order_status::enable`| `OrderStatus`                        |
 | `stream::orderbook::enable`  | `OrderbookUpdate { topic }`          |
 | `stream::fee_estimator::enable` | `FeeEstimation(<ticker>)`         |
+| `stream::tx_history::enable` | `TxHistory(<ticker>)`                |
 
 The `network` streamer's request, payload, cadence, platform gate, and
-peer-discovery integration are bound in §10.16 (R29–R32).
+peer-discovery integration are bound in §10.16 (R29–R32). The
+tx-history streamer's request, payload, trigger, and coin-family support
+are bound in §10.18 (R39–R45).
 
 **R25.** The balance streamer's activation request MUST carry exactly
 two fields: a coin ticker, and an interval in seconds defaulting to 30,
@@ -343,9 +352,11 @@ milliseconds.
 
 **R26.** The non-balance streamers MUST follow the shared activation
 contract of R22 and the lifecycle contract of R8-R12, mapping activation
-failures into the bound activation error variant. The fee-estimator
-streamer's per-streamer specifics are bound
-in §10.17 (R33–R38). The substrate MUST NOT expose any streamer that is
+failures into the bound activation error category unless a
+streamer-specific section binds a more specific public error surface.
+The fee-estimator streamer's per-streamer specifics are bound in §10.17
+(R33–R38); the tx-history streamer's per-streamer specifics are bound
+in §10.18 (R39–R45). The substrate MUST NOT expose any streamer that is
 not on the R24 list.
 
 ## 10.11 Bound Central-Context Wiring
@@ -420,6 +431,35 @@ namespace on native and WebAssembly targets. Native builds additionally
 assert that this RPC is independent from the `GET /event-stream`
 transport route.
 
+**T11.** *Tx-history activation response and origin.* A supported,
+activated coin is used to call `stream::tx_history::enable` through the
+`stream::` namespace with a `client_id` and `coin`. The test asserts the
+standard mmrpc success envelope whose result has exactly
+`streamer_id: "TX_HISTORY:<coin>"`, then injects a new transaction
+history record through the coin-history integration point and asserts
+the SSE frame origin is the same `TX_HISTORY:<coin>` token. The
+activation matrix MUST include every R41 family exposed by the test
+target, including Tendermint-family and Z-coin-family coins when those
+families are compiled into that target.
+
+**T12.** *Tx-history reactive emission and disable interaction.* A
+client enables tx-history for a supported coin, then two transaction
+history records are delivered to the streamer as one update batch. The
+test asserts two normal SSE events are emitted, one per record, with no
+timer-driven empty event between them. After the same client calls
+`stream::disable` with `TX_HISTORY:<coin>`, a later history update MUST
+NOT be delivered to that client; another client subscribed to the same
+streamer, if present, MUST continue receiving events.
+
+**T13.** *Tx-history supported-family producer obligation.* For
+Tendermint-family and Z-coin-family coins exposed by a target, a
+conformance test MUST enable tx-history streaming, deliver a new
+transaction through that family's public history-update path, and assert
+that a `TX_HISTORY:<coin>` event is emitted with the R43 or R44 payload
+contract. A build exposing either family MUST NOT satisfy this test by
+returning HTTP 501 or by accepting activation while no reactive
+history-update path can produce events.
+
 ## 10.13 Deferred Work
 
 **D1.** A WebAssembly-native delivery transport (the WebAssembly target
@@ -452,12 +492,12 @@ neither of which is bound).
 context. All graphical synchronisation in the baseline tree is
 pull-mode through the existing JSON-RPC read surface.
 
-**V2.** The seven activation method names bound in R20 and the
+**V2.** The eight activation method names bound in R20 and the
 `stream::disable` method bound in R21 MUST be confirmed absent from the
 baseline's v2 dispatcher method table. Adding them in the substrate is
 a pure surface addition; no baseline method is renamed or repurposed.
 
-**V3.** The seven `StreamerId` wire strings bound in R6 MUST be confirmed
+**V3.** The eight `StreamerId` wire strings bound in R6 MUST be confirmed
 absent from the baseline tree. They are introduced by the substrate
 and become part of the GUI-visible contract surface on first release.
 
@@ -518,7 +558,7 @@ The activation handler MUST follow the shared R22/R26 contract:
 - Response: the shared R22 envelope — the mmrpc-2.0 `result` carrying
   the activated streamer's `streamer_id` (here the fixed token
   `NETWORK`). Any streamer initialisation failure MUST be surfaced
-  through the bound activation error variant (R23).
+  through the bound activation error category (R23).
 
 **R30.** The `NETWORK` event message body MUST be a JSON object with
 exactly the following five fields, describing the node's current
@@ -635,16 +675,116 @@ The activation handler MUST use the shared envelope of R22 (`client_id`
 plus the flattened inner request) and MUST return the activated
 streamer's `streamer_id` per the R22 response contract (the
 `FEE_ESTIMATION:<ticker>` token), mapping any streamer-initialisation
-failure into the bound activation error variant of R23.
+failure into the bound activation error category of R23.
 
-## 10.18 Provenance Footer
+## 10.18 Bound Tx-History Streamer Activation
+
+This section binds the eighth concrete streamer: a reactive transaction
+history event stream for coin families whose history subsystem can
+publish newly discovered transaction records. It reuses the broker
+substrate (R1–R14), the HTTP/wire frame (R15–R18), the namespace routing
+(R19–R21), and the shared activation envelope (R22–R23) unchanged; only
+the streamer-specific coin support, trigger, payload, and error surface
+are bound here.
+
+**R39.** The substrate MUST ship a tx-history streamer activated by the
+wire-stable method `stream::tx_history::enable`. Its origin tag MUST be
+the `TxHistory` variant of R6 carrying the coin ticker as a dynamic
+component, with the wire-stable display string `TX_HISTORY:<ticker>`.
+Exactly one such streamer runs per distinct ticker (registry
+deduplication per R10/R11). This streamer is reactive: it emits only
+when the corresponding coin-history subsystem reports newly discovered
+transaction history records, not on a timer and not as a full history
+snapshot replay.
+
+**R40.** The activation request MUST use the shared R22 envelope (a
+`client_id` field defaulting to zero when omitted, plus a flattened
+inner request). The inner request MUST carry exactly one required field:
+
+| Field  | Type   | Required | Default | Notes |
+| ------ | ------ | -------- | ------- | ----- |
+| `coin` | string | yes      | none    | Ticker of an already activated coin whose family supports tx-history streaming. |
+
+On success the method MUST return the shared R22 response envelope: the
+mmrpc-2.0 `result` object carrying exactly
+`streamer_id: "TX_HISTORY:<ticker>"` and no additional success fields.
+
+**R41.** Activation MUST resolve `coin` through the central coin
+registry. The compatibility support set is UTXO-style coins, BCH-family
+coins, Qtum-family coins, Tendermint-family coins, and Z-coin-family
+coins. For every activated coin in this set, tx-history streaming support
+means both accepting `stream::tx_history::enable` and providing the
+family's reactive history-update producer required by R42; accepting the
+activation as a dormant stream is nonconforming. A missing or inactive
+coin MUST fail with HTTP 404. An activated coin outside those families
+MUST fail with HTTP 501. Broker add/start failure MUST fail with HTTP
+400. Registry lookup failures or other unexpected activation errors MUST
+fail with HTTP 500. Missing or invalid request fields MUST fail during
+request decoding or validation before any subscription state is changed.
+
+**R42.** The tx-history streamer MUST use the broker's typed data-input
+channel rather than polling. The coin-history subsystem for every family
+listed in R41 MUST call the broker's typed send path using the
+`TX_HISTORY:<ticker>` streamer identity whenever it detects one or more
+new transaction history records for that ticker. Tendermint-family and
+Z-coin-family coins are not optional exceptions: if those activated coin
+families are present on a target, their history subsystems MUST be wired
+to the same reactive publication contract as the UTXO-style, BCH-family,
+and Qtum-family paths. The streamer MUST report ready immediately after
+the data-input receiver is registered. For each received update batch,
+it MUST emit one normal event per transaction record in that batch. If
+an update batch is empty, no event is emitted.
+
+**R43.** Normal `TX_HISTORY:<ticker>` event payloads MUST be the same
+JSON object shape used for that coin family's single transaction entry
+in the public transaction-history RPC surface, not the paginated history
+response wrapper. For UTXO-style, BCH-family, Qtum-family, and
+Tendermint-family coins, this is the public `TransactionDetails` record:
+the payload includes transaction data (`tx_hex`/`tx_hash` for signed
+transactions, or the family-specific unsigned/Sia transaction data),
+address arrays (`from`, `to`), decimal amount fields (`total_amount`,
+`spent_by_me`, `received_by_me`, `my_balance_change`), `block_height`,
+`timestamp`, optional `fee_details`, `coin`, `internal_id`, optional
+`kmd_rewards`, `transaction_type`, and optional `memo`. For
+Z-coin-family coins, the payload is the public Z-history transaction
+detail record: `tx_hash`, `from`, `to`, `spent_by_me`,
+`received_by_me`, `my_balance_change`, `block_height`,
+`confirmations`, `timestamp`, `transaction_fee`, `coin`, and
+`internal_id`.
+
+**R44.** Z-coin-family tx-history support is part of the R41
+compatibility set and therefore MUST include a producer that forwards
+new wallet-visible transaction notifications to this streamer. Those
+updates may require resolving wallet notifications into full transaction
+detail records before emission. If that resolution fails for a received
+update batch, the streamer MUST emit one SSE error event for
+`TX_HISTORY:<ticker>` with the R4 error indicator set true and a JSON
+object payload containing an `error` field. The failed batch MUST NOT
+terminate the streamer. For all families, `stream::disable` MUST
+interact with tx-history exactly as it does with every other streamer
+under R21: it removes only the named client's subscription to
+`TX_HISTORY:<ticker>`, shuts the streamer down only when the last
+subscriber leaves, and does not remove other subscriptions for that
+client.
+
+**R45.** Platform gate: `stream::tx_history::enable` MUST be available
+on ALL targets for every R41 family that the target exposes as an
+activated coin. A target that exposes one of those families MUST also
+expose the corresponding reactive history-update path required by R42.
+Consistent with R15, WebAssembly builds instantiate the broker and
+accept the activation even though the native HTTP SSE transport is
+absent. Native builds additionally expose resulting events through
+`GET /event-stream`; WebAssembly delivery is through the non-HTTP broker
+receiver path bound outside this chapter.
+
+## 10.19 Provenance Footer
 
 - *Inputs:* the baseline workspace at the pinned baseline-revision
   commit; chapter 01 (clean-room rules); chapter 31 (the central
   application-context substrate the broker handle of R27 and the
   `event_stream_access_control()` accessor are bound on); the
   chapter-bound identifier set for the broker substrate, the HTTP
-  endpoint, the RPC namespace, and the seven concrete streamers;
+  endpoint, the RPC namespace, and the eight concrete streamers;
   public protocol documentation (HTML Living Standard SSE, WHATWG
   CORS, EIP-1559 fee model); the libp2p gossipsub introspection surface
   (peer/topic/mesh enumeration) that dictates the `NETWORK` payload
@@ -654,17 +794,18 @@ failure into the bound activation error variant of R23.
   identifiers introduced with in-chapter justification; public
   protocol documentation; public crate documentation; dictated-interop
   wire facts (the `stream::network::enable`,
-  `stream::fee_estimator::enable`, and `stream::disable` method
-  strings, their request fields, and the `NETWORK` /
-  `FEE_ESTIMATION:<ticker>` event field sets — all GUI/third-party-
-  visible contract surface).
+  `stream::fee_estimator::enable`, `stream::tx_history::enable`, and
+  `stream::disable` method strings, their request fields, and the
+  `NETWORK` / `FEE_ESTIMATION:<ticker>` / `TX_HISTORY:<ticker>` event
+  field sets — all GUI/third-party-visible contract surface).
 - *Sibling-allowlist consultations:* none.
 - *Forbidden corpus:* consulted (via the spec-author channel) ONLY for
   the dictated-interop facts of R21 (`stream::disable`), §10.16 (the
-  network streamer), and §10.17 (the fee-estimator streamer) — their
-  public wire method names, activation/deactivation request field
-  names/defaults, event payload field names and value shapes, cadence,
-  platform gates, and RPC success/error categories. No private
+  network streamer), §10.17 (the fee-estimator streamer), and §10.18
+  (the tx-history streamer) — their public wire method names,
+  activation/deactivation request field names/defaults, event payload
+  field names and value shapes, cadence or reactive trigger, platform
+  gates, and RPC success/error categories. No private
   identifiers, function bodies, control-flow, or string literals beyond
   dictated wire payload tokens were carried across; the behaviour is
   restated as the public contract.

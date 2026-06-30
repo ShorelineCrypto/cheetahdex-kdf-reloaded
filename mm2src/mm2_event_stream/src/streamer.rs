@@ -45,6 +45,8 @@ pub enum StreamerId {
     /// Continuous EIP-1559 fee-per-gas estimate for an EVM coin; the payload is
     /// the coin ticker the estimate is produced for.
     FeeEstimation(String),
+    /// Reactive transaction-history records for one coin ticker.
+    TxHistory(String),
     /// Carries an interactive data-asker "data needed" event; the payload is
     /// the data-type discriminator naming the kind of data being requested.
     DataNeeded(String),
@@ -60,6 +62,7 @@ impl fmt::Display for StreamerId {
             StreamerId::OrderStatus => write!(f, "ORDER_STATUS"),
             StreamerId::OrderbookUpdate { topic } => write!(f, "ORDERBOOK:{}", topic),
             StreamerId::FeeEstimation(coin) => write!(f, "FEE_ESTIMATION:{}", coin),
+            StreamerId::TxHistory(coin) => write!(f, "TX_HISTORY:{}", coin),
             StreamerId::DataNeeded(data_type) => write!(f, "DATA_NEEDED:{}", data_type),
         }
     }
@@ -98,6 +101,9 @@ impl FromStr for StreamerId {
             .filter(|ticker| !ticker.is_empty())
         {
             return Ok(StreamerId::FeeEstimation(ticker.to_owned()));
+        }
+        if let Some(ticker) = value.strip_prefix("TX_HISTORY:").filter(|ticker| !ticker.is_empty()) {
+            return Ok(StreamerId::TxHistory(ticker.to_owned()));
         }
 
         Err(ParseStreamerIdError)
@@ -183,6 +189,10 @@ mod tests {
             StreamerId::from_str("FEE_ESTIMATION:ETH"),
             Ok(StreamerId::FeeEstimation("ETH".to_owned()))
         );
+        assert_eq!(
+            StreamerId::from_str("TX_HISTORY:KMD"),
+            Ok(StreamerId::TxHistory("KMD".to_owned()))
+        );
     }
 
     #[test]
@@ -190,6 +200,7 @@ mod tests {
         assert!(StreamerId::from_str("DATA_NEEDED:pin").is_err());
         assert!(StreamerId::from_str("BALANCE:").is_err());
         assert!(StreamerId::from_str("ORDERBOOK:").is_err());
+        assert!(StreamerId::from_str("TX_HISTORY:").is_err());
         assert!(StreamerId::from_str("UNKNOWN").is_err());
     }
 }

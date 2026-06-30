@@ -140,7 +140,13 @@ where
                                 tx_details.block_height = height;
                             }
 
+                            let tx_history_record = tx_details.clone();
                             e.insert(tx_details);
+                            crate::tx_history_streaming::publish_tx_history_records(
+                                &ctx,
+                                &coin.as_ref().conf.ticker,
+                                vec![tx_history_record],
+                            );
                             if transactions_left > 0 {
                                 transactions_left -= 1;
                                 *coin.as_ref().history_sync_state.lock().unwrap() =

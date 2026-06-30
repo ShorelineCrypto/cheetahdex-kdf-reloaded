@@ -557,7 +557,7 @@ impl MmCoin for TendermintToken {
                 .map_to_mm(|e| WithdrawError::InternalError(format!("Failed to encode tx: {}", e)))?;
             let tx_hash = hex::encode_upper(sha256(&tx_bytes).as_slice());
 
-            Ok(TransactionDetails {
+            let tx_details = TransactionDetails {
                 tx_hex: tx_bytes.into(),
                 tx_hash: tx_hash.clone(),
                 from: vec![account_id.to_string()],
@@ -578,7 +578,11 @@ impl MmCoin for TendermintToken {
                 internal_id: tx_hash.as_bytes().to_vec().into(),
                 kmd_rewards: None,
                 transaction_type: TransactionType::StandardTransfer,
-            })
+            };
+            token
+                .platform_coin
+                .publish_tx_history_record(token.ticker(), &tx_details);
+            Ok(tx_details)
         };
         Box::new(fut.boxed().compat())
     }

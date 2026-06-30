@@ -47,19 +47,21 @@ Upstream `stream::` surface (census) vs reloaded:
 | `stream::swap_status::enable` | yes | — |
 | `stream::network::enable` | **no** | TODO — tag reserved (D2) |
 | `stream::fee_estimator::enable` | **no** | see #3 |
-| `stream::tx_history::enable` | **no** | TODO — needs new variant |
+| `stream::tx_history::enable` | yes | C7 — `TX_HISTORY:<ticker>` reactive streamer |
 | `stream::shutdown_signal::enable` | **no** | TODO — needs new variant |
-| `stream::disable` | **no** | TODO — generic unsubscribe |
+| `stream::disable` | yes | C6 — generic per-client unsubscribe |
 
 - [x] **`stream::network::enable`** — implemented (D2 completion). The `Network`
   streamer, its activation request/payload, and the `stream::network::enable`
   route are bound by [`10-sse-streaming.md`](./10-sse-streaming.md) §10.16
   (R28–R31) and merged on `dev`.
-- [ ] `stream::tx_history::enable` — requires a new `StreamerId` variant + spec.
+- [x] `stream::tx_history::enable` — implemented by C7. The `TxHistory`
+  streamer, activation request/response, supported-family contract, and producer
+  obligations are bound by [`10-sse-streaming.md`](./10-sse-streaming.md) §10.18
+  (R39-R45).
 - [ ] `stream::shutdown_signal::enable` — requires a new `StreamerId` variant + spec.
-- [ ] `stream::disable` — generic per-client unsubscribe RPC. Reloaded currently
-  relies on implicit deactivation (connection drop → `remove_client`); upstream
-  also exposes an explicit unsubscribe method.
+- [x] `stream::disable` — implemented by C6 as the generic per-client
+  unsubscribe RPC bound by [`10-sse-streaming.md`](./10-sse-streaming.md) R21.
 
 ## #3 — Fee estimator stream (`stream::fee_estimator::enable`)
 

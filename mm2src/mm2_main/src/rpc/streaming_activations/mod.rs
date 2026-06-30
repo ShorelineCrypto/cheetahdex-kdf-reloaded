@@ -9,6 +9,7 @@ pub mod network;
 pub mod orderbook;
 pub mod orders;
 pub mod swaps;
+pub mod tx_history;
 
 use common::HttpStatusCode;
 use derive_more::Display;
@@ -23,6 +24,7 @@ use std::str::FromStr;
 /// Common request wrapper for streaming activation RPCs.
 #[derive(Deserialize)]
 pub struct EnableStreamingRequest<T> {
+    #[serde(default)]
     pub client_id: u64,
     #[serde(flatten)]
     pub inner: T,

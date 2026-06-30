@@ -162,6 +162,7 @@ pub trait PlatformWithTokensActivationOps: Into<MmCoinEnum> {
 
     fn start_history_background_fetching(
         &self,
+        ctx: MmArc,
         metrics: MetricsArc,
         storage: impl TxHistoryStorage + 'static,
         initial_balance: BigDecimal,
@@ -317,6 +318,7 @@ where
     #[cfg(not(target_arch = "wasm32"))]
     if req.request.tx_history() {
         let abort_handler = platform_coin.start_history_background_fetching(
+            ctx.clone(),
             ctx.metrics.clone(),
             SqliteTxHistoryStorage(ctx.sqlite_connection.as_option().unwrap().clone()),
             activation_result.get_platform_balance(),

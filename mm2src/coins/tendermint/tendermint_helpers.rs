@@ -5,7 +5,8 @@ use super::tendermint_types::*;
 use super::IRIS_PREFIX;
 use crate::utxo::sat_from_big_decimal;
 use crate::utxo::utxo_common::{big_decimal_from_sat, big_decimal_from_sat_unsigned};
-use crate::{CoinBalance, HistorySyncState, MarketCoinOps, TransactionEnum, TransactionErr, WithdrawFee};
+use crate::{CoinBalance, HistorySyncState, MarketCoinOps, TransactionDetails, TransactionEnum, TransactionErr,
+            WithdrawFee};
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use common::executor::Timer;
@@ -23,6 +24,7 @@ use crypto::Secp256k1Secret;
 use futures::compat::Future01CompatExt;
 use futures::FutureExt;
 use kdf_crypto::sha256;
+use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
@@ -73,6 +75,12 @@ impl TendermintCommons for TendermintCoin {
 
 impl TendermintCoin {
     pub fn decimals(&self) -> u8 { self.protocol_info.decimals }
+
+    pub(super) fn publish_tx_history_record(&self, ticker: &str, tx_details: &TransactionDetails) {
+        if let Some(ctx) = MmArc::from_weak(&self.ctx) {
+            crate::tx_history_streaming::publish_tx_history_records(&ctx, ticker, [tx_details.clone()]);
+        }
+    }
 
     pub fn supports_htlc(&self) -> bool {
         matches!(

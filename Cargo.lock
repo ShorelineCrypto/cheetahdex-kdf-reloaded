@@ -1876,6 +1876,7 @@ dependencies = [
  "mm2_db",
  "mm2_err_handle",
  "mm2_eth",
+ "mm2_event_stream",
  "mm2_io",
  "mm2_metrics",
  "mm2_net",

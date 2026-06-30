@@ -120,6 +120,7 @@ fn preexisting_namespaces_remain_routed() {
         "order_status::enable",
         "orderbook::enable",
         "swap_status::enable",
+        "tx_history::enable",
     ]);
     assert_namespace_routed("gui_storage::", &[
         "enable_account",

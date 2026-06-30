@@ -250,6 +250,7 @@ pub use solana::{solana_coin_from_conf_and_params, SolanaActivationParams, Solan
 pub mod siacoin;
 pub mod tendermint;
 #[cfg(target_arch = "wasm32")] pub mod tx_history_db;
+pub mod tx_history_streaming;
 pub mod utxo;
 #[cfg(not(target_arch = "wasm32"))] pub mod z_coin;
 

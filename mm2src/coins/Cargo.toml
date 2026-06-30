@@ -40,6 +40,7 @@ common = { path = "../common" }
 mm2_core = { path = "../mm2_core" }
 mm2_metrics = { path = "../mm2_metrics" }
 mm2_err_handle = { path = "../mm2_err_handle" }
+mm2_event_stream = { path = "../mm2_event_stream" }
 mm2_rpc = { path = "../mm2_rpc" }
 mm2_net = { path = "../mm2_net" }
 mm2_net_config = { path = "../mm2_net_config" }
