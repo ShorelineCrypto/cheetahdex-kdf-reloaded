@@ -20,6 +20,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -61,6 +62,45 @@ impl fmt::Display for StreamerId {
             StreamerId::FeeEstimation(coin) => write!(f, "FEE_ESTIMATION:{}", coin),
             StreamerId::DataNeeded(data_type) => write!(f, "DATA_NEEDED:{}", data_type),
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParseStreamerIdError;
+
+impl FromStr for StreamerId {
+    type Err = ParseStreamerIdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value == "HEARTBEAT" {
+            return Ok(StreamerId::Heartbeat);
+        }
+        if value == "NETWORK" {
+            return Ok(StreamerId::Network);
+        }
+        if value == "SWAP_STATUS" {
+            return Ok(StreamerId::SwapStatus);
+        }
+        if value == "ORDER_STATUS" {
+            return Ok(StreamerId::OrderStatus);
+        }
+
+        if let Some(ticker) = value.strip_prefix("BALANCE:").filter(|ticker| !ticker.is_empty()) {
+            return Ok(StreamerId::Balance(ticker.to_owned()));
+        }
+        if let Some(topic) = value.strip_prefix("ORDERBOOK:").filter(|topic| !topic.is_empty()) {
+            return Ok(StreamerId::OrderbookUpdate {
+                topic: topic.to_owned(),
+            });
+        }
+        if let Some(ticker) = value
+            .strip_prefix("FEE_ESTIMATION:")
+            .filter(|ticker| !ticker.is_empty())
+        {
+            return Ok(StreamerId::FeeEstimation(ticker.to_owned()));
+        }
+
+        Err(ParseStreamerIdError)
     }
 }
 
@@ -116,4 +156,40 @@ pub trait EventStreamer: Sized + Send + 'static {
         shutdown_rx: tokio::sync::oneshot::Receiver<()>,
         data_rx: mpsc::UnboundedReceiver<Self::DataInType>,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StreamerId;
+    use std::str::FromStr;
+
+    #[test]
+    fn streamer_id_parses_enable_wire_strings() {
+        assert_eq!(StreamerId::from_str("HEARTBEAT"), Ok(StreamerId::Heartbeat));
+        assert_eq!(
+            StreamerId::from_str("BALANCE:KMD"),
+            Ok(StreamerId::Balance("KMD".to_owned()))
+        );
+        assert_eq!(StreamerId::from_str("NETWORK"), Ok(StreamerId::Network));
+        assert_eq!(StreamerId::from_str("SWAP_STATUS"), Ok(StreamerId::SwapStatus));
+        assert_eq!(StreamerId::from_str("ORDER_STATUS"), Ok(StreamerId::OrderStatus));
+        assert_eq!(
+            StreamerId::from_str("ORDERBOOK:KMD/BTC"),
+            Ok(StreamerId::OrderbookUpdate {
+                topic: "KMD/BTC".to_owned()
+            })
+        );
+        assert_eq!(
+            StreamerId::from_str("FEE_ESTIMATION:ETH"),
+            Ok(StreamerId::FeeEstimation("ETH".to_owned()))
+        );
+    }
+
+    #[test]
+    fn streamer_id_rejects_non_enable_wire_strings() {
+        assert!(StreamerId::from_str("DATA_NEEDED:pin").is_err());
+        assert!(StreamerId::from_str("BALANCE:").is_err());
+        assert!(StreamerId::from_str("ORDERBOOK:").is_err());
+        assert!(StreamerId::from_str("UNKNOWN").is_err());
+    }
 }

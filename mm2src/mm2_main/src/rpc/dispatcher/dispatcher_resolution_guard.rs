@@ -113,7 +113,10 @@ fn lightning_namespace_methods_are_routed() {
 fn preexisting_namespaces_remain_routed() {
     assert_namespace_routed("stream::", &[
         "balance::enable",
+        "disable",
+        "fee_estimator::enable",
         "heartbeat::enable",
+        "network::enable",
         "order_status::enable",
         "orderbook::enable",
         "swap_status::enable",

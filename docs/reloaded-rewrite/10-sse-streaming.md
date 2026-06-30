@@ -22,11 +22,11 @@ chapter introduces a structural split into two layers:
    `text/event-stream` wire format.
 
 Activation is bound to a new RPC namespace prefix (`stream::`) with
-exactly seven `<category>::enable` methods. Deactivation is bound to be
-implicit: when an HTTP client connection drops, its bookkeeping is
-removed and any streamer that loses its last subscriber is shut down.
-Slow clients are bound to be individually back-pressured (events dropped
-per slow client) and never block the broadcaster or other clients.
+exactly seven `<category>::enable` methods. Per-stream deactivation is
+bound to the same namespace through `stream::disable`; full client
+deactivation also occurs when an HTTP client connection drops. Slow
+clients are bound to be individually back-pressured (events dropped per
+slow client) and never block the broadcaster or other clients.
 
 This chapter binds the broker's public crate surface, the streamer trait
 contract, the wire-stable streamer origin tags, the HTTP endpoint shape,
@@ -41,7 +41,8 @@ The substrate occupies a structural seam between three subsystems:
 - the central-context substrate (the broker handle is owned as a field
   on the context and reachable from any subsystem holding the context);
 - the JSON-RPC dispatcher (the `stream::*` namespace prefix is bound as
-  a dispatcher branch routing to a streamer-activation table);
+  a dispatcher branch routing to streamer activation and deactivation
+  handlers);
 - the native HTTP server (the `/event-stream` route is bound as an
   additional handler beside the JSON-RPC handler, gated to native-only
   targets).
@@ -50,10 +51,10 @@ The substrate is *not* a redesign of the JSON-RPC surface. The seven
 streamers add a push channel beside the existing pull surface; no
 pre-existing read RPC is removed, renamed, or repurposed. Bound rules
 (R1–R6) constrain the broker; (R7–R14) constrain the streamer trait
-contract and origin tags; (R15–R20) constrain the HTTP endpoint and
-namespace; (R21–R25) constrain the originally-bound five concrete
-streamers; (R28–R31) bind the sixth (Network) streamer; (R32–R37) bind
-the seventh (fee-estimator) streamer.
+contract and origin tags; (R15–R21) constrain the HTTP endpoint and
+namespace; (R22–R26) constrain the shared activation envelope and
+concrete streamers; (R29–R32) bind the sixth (Network) streamer;
+(R33–R38) bind the seventh (fee-estimator) streamer.
 
 ## 10.3 Bound Crate Surface
 
@@ -73,18 +74,10 @@ Plus a pass-through re-export of the asynchronous-channel primitives the
 trait surfaces (`mpsc` and `oneshot`), so consumers can implement the
 trait without a direct asynchronous-runtime dependency.
 
-**R2.** The crate MUST be structured into four source modules:
-
-| Module    | Bound responsibility                                   |
-| --------- | ------------------------------------------------------ |
-| `lib`     | Re-export surface only.                                |
-| `event`   | The `Event` payload type and its constructors.        |
-| `streamer`| The `EventStreamer` trait, `StreamerId`, `Broadcaster`, `NoDataIn`. |
-| `manager` | `StreamingManager`, `ClientHandle`, lifecycle tests. |
-
-The four-module split is itself contract: an implementation that places
-the trait and the manager in the same module collapses the seam the
-substrate relies on for fan-out under a read lock.
+**R2.** The crate MUST preserve separate public API concerns for the
+event payload, streamer identity, streamer implementation contract, and
+broker coordination. No internal source-module names or file layout are
+specified by this chapter.
 
 **R3.** The broker MUST be cheap-to-clone (an inner shared handle behind
 an interior-mutable lock). Cloning the broker MUST NOT copy its
@@ -161,17 +154,14 @@ never yield a value.
 
 ## 10.7 Bound Broker State and Lifecycle
 
-**R11.** The `StreamingManager` MUST maintain exactly two internal maps:
-
-- A streamer-registry map keyed by `StreamerId`. Each entry holds the
-  single-shot shutdown sender, the set of subscriber client identifiers,
-  and a type-erased asynchronous-sender (boxed as
-  `dyn Any + Send + Sync`) wrapping the streamer's `DataInType`
-  unbounded sender.
-- A client-registry map keyed by client identifier (an unsigned 64-bit
-  integer). Each entry holds the set of wire-stable origin strings the
-  client is subscribed to, plus a bounded asynchronous sender into the
-  per-client delivery channel.
+**R11.** The `StreamingManager` MUST track active streamer identities,
+registered client identifiers, and each client's subscribed origin
+strings. It MUST be able to answer whether a streamer is active, whether
+a client is registered, and whether a registered client is subscribed to
+a given streamer origin. It MUST also retain enough lifecycle state to
+deliver events to subscribed clients and to stop a streamer when its
+last subscriber leaves. No private storage layout is specified by this
+chapter.
 
 **R12.** The broker MUST expose the following methods with these exact
 contracts:
@@ -179,7 +169,7 @@ contracts:
 | Method                           | Bound behaviour                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `new_client(client_id)`          | Allocates a bounded asynchronous channel with capacity 256, inserts a client entry with empty subscription set, returns the receiver wrapped as `ClientHandle`.                                                                                                  |
-| `add(client_id, streamer)` async | If the streamer is already registered, subscribes the client and adds the origin to the client's subscription set. Otherwise spawns the streamer's `handle` task, records the registry entry with shutdown channel and type-erased data sender, and awaits `ready_rx`. Returns the streamer's ready-reported error verbatim, or maps a dropped `ready_tx` to failure. |
+| `add(client_id, streamer)` async | Ensures the client is subscribed to the streamer's origin, reusing an already-active streamer for the same origin or starting one if none is active. The call completes only after the streamer reports ready or reports activation failure. |
 | `stop(client_id, streamer_id)`   | Unsubscribes the client from the named streamer. If the streamer's subscriber set becomes empty, fires the shutdown signal and removes the registry entry.                                                                                                       |
 | `remove_client(client_id)`       | Removes the client entirely, calling `stop` for every streamer the client was subscribed to.                                                                                                                                                                     |
 | `send<T>(streamer_id, data)`     | Looks up the streamer, downcasts the type-erased data sender to the concrete `T` sender, forwards. Errors if the streamer is not running or the type does not match.                                                                                            |
@@ -191,12 +181,10 @@ entries. The fan-out path MUST use the non-blocking try-send variant: a
 full client buffer MUST cause the event to be dropped for that client
 only, with no effect on the broadcaster or any other client.
 
-**R14.** Fan-out MUST iterate the client map under a read-only lock and
-deliver the event to every client whose subscription set contains the
-event's origin string. The broker MUST use a non-asynchronous lock (one
-that does not yield across acquisition): every critical section that
-touches the registry maps is short and must not be held across
-asynchronous suspension points.
+**R14.** Fan-out MUST deliver an event only to clients subscribed to the
+event's origin string, and MUST deliver it to every such client that can
+accept it without blocking. Broker state access MUST NOT hold
+asynchronous suspension points inside critical sections.
 
 ## 10.8 Bound HTTP Endpoint and Wire Frame
 
@@ -233,20 +221,21 @@ of the bound surface.
 **R18.** The response body MUST be a chunked stream produced by
 unfolding over the per-client receiver returned by `new_client`. When
 the underlying connection drops, the substrate MUST call
-`remove_client` for the disconnecting identifier (this is the only
-deactivation path; there is no explicit unsubscribe RPC).
+`remove_client` for the disconnecting identifier. This disconnect path
+removes every subscription for that client; the explicit per-stream
+unsubscribe path is the `stream::disable` RPC bound in R21.
 
 ## 10.9 Bound RPC Namespace
 
 **R19.** A dedicated dispatcher branch MUST be added for the `stream::`
 namespace prefix. Methods whose name begins with the four-byte prefix
-`stream::` MUST be routed to a streamer-activation table; methods
+`stream::` MUST be routed to streamer namespace handlers; methods
 without the prefix MUST be routed unchanged through the existing v2
 dispatcher.
 
 **R20.** The streamer-activation table MUST contain exactly the
-following seven entries (no aliases, no deprecated names, no additional
-methods):
+following seven activation entries (no aliases, no deprecated names, no
+additional activation methods):
 
 | Method name                  | Streamer key                              |
 | ---------------------------- | ----------------------------------------- |
@@ -260,10 +249,41 @@ methods):
 
 The `Network` origin tag reserved in R6 is now bound to its activation
 method; its request shape, payload shape, cadence, and platform gate
-are bound in §10.16 (R28–R31). This resolves D2. The fee-estimator
-entry is constrained in detail by §10.17 (R32–R37).
+are bound in §10.16 (R29–R32). This resolves D2. The fee-estimator
+entry is constrained in detail by §10.17 (R33–R38).
 
-**R21.** All activation handlers (the seven bound in R20) MUST share a
+**R21.** The streamer-deactivation table MUST contain exactly one
+generic deactivation entry:
+
+| Method name       | Scope |
+| ----------------- | ----- |
+| `stream::disable` | Disable one streamer subscription for one client. |
+
+The RPC MUST be routed on ALL targets, even though the HTTP SSE
+transport remains native-only (R15). Its request parameters MUST be
+exactly two required fields, with no defaults: `client_id` as an
+unsigned 64-bit integer, and `streamer_id` as the wire string returned
+by a successful enable RPC. The method MUST disable only the named
+streamer subscription for the named client; it MUST NOT remove the
+client's other subscriptions.
+
+On success the method MUST return the standard mmrpc response envelope
+whose `result` payload is exactly:
+
+```json
+{ "result": "Success" }
+```
+
+An unknown or unregistered client MUST fail with a disable-specific
+HTTP 400 error. A syntactically valid streamer identifier that is not
+registered or not running MUST fail with a disable-specific HTTP 400
+error. If the client exists and the streamer is active, but that client
+is not subscribed to that streamer, the call MUST be a successful
+no-op. Missing or invalid `client_id` or `streamer_id` fields MUST fail
+during request decoding or validation, before any subscription state is
+changed.
+
+**R22.** All activation handlers (the seven bound in R20) MUST share a
 common request and response envelope:
 
 - Request: a generic envelope carrying a `client_id` field (the same
@@ -279,32 +299,30 @@ common request and response envelope:
   the mmrpc `result` envelope itself; there is NO boolean field in the
   response.
 
-**R22.** The activation error type MUST be a single-variant enumeration
+**R23.** The activation error type MUST be a single-variant enumeration
 with display string `Streamer initialization failed: <reason>` and HTTP
 status mapping 500. Any failure reported by the streamer's `ready_tx`
 MUST be wrapped into this variant verbatim.
 
 ## 10.10 Bound Concrete Streamers
 
-**R23.** The substrate MUST ship exactly the following seven concrete
-streamers, each with its own activation module under a single
-streamer-activation directory:
+**R24.** The substrate MUST ship exactly the following seven concrete
+streamers:
 
-| Streamer module | Activation method            | Streamer key                          |
-| --------------- | ---------------------------- | ------------------------------------- |
-| `heartbeat`     | `stream::heartbeat::enable`  | `Heartbeat`                          |
-| `balance`       | `stream::balance::enable`    | `Balance(<ticker>)`                  |
-| `network`       | `stream::network::enable`    | `Network`                            |
-| `swaps`         | `stream::swap_status::enable`| `SwapStatus`                         |
-| `orders`        | `stream::order_status::enable`| `OrderStatus`                        |
-| `orderbook`     | `stream::orderbook::enable`  | `OrderbookUpdate { topic }`          |
-| `fee_estimator` | `stream::fee_estimator::enable` | `FeeEstimation(<ticker>)`         |
+| Activation method            | Streamer key                          |
+| ---------------------------- | ------------------------------------- |
+| `stream::heartbeat::enable`  | `Heartbeat`                          |
+| `stream::balance::enable`    | `Balance(<ticker>)`                  |
+| `stream::network::enable`    | `Network`                            |
+| `stream::swap_status::enable`| `SwapStatus`                         |
+| `stream::order_status::enable`| `OrderStatus`                        |
+| `stream::orderbook::enable`  | `OrderbookUpdate { topic }`          |
+| `stream::fee_estimator::enable` | `FeeEstimation(<ticker>)`         |
 
-The `network` streamer's request, payload, cadence, and placement are
-bound in §10.16 (R28–R31); its streamer struct is placed in the
-peer-discovery / p2p crate rather than under this directory (R31).
+The `network` streamer's request, payload, cadence, platform gate, and
+peer-discovery integration are bound in §10.16 (R29–R32).
 
-**R24.** The balance streamer's activation request MUST carry exactly
+**R25.** The balance streamer's activation request MUST carry exactly
 two fields: a coin ticker, and an interval in seconds defaulting to 30,
 floored at construction time to a minimum of 10. The streamer's
 `handle` MUST:
@@ -323,22 +341,21 @@ balance MUST NOT emit. Each emission's JSON message body MUST carry the
 ticker, both balance components as decimal strings, and a timestamp in
 milliseconds.
 
-**R25.** The non-balance streamers MUST follow the same activation
-shape (a per-streamer request struct, a streamer struct implementing
-the trait, an activation handler that constructs the streamer and
-forwards into `add`, mapping any error into the bound activation error
-variant). The fee-estimator streamer's per-streamer specifics are bound
-in §10.17 (R32–R37). The substrate MUST NOT expose any streamer that is
-not on the R23 list.
+**R26.** The non-balance streamers MUST follow the shared activation
+contract of R22 and the lifecycle contract of R8-R12, mapping activation
+failures into the bound activation error variant. The fee-estimator
+streamer's per-streamer specifics are bound
+in §10.17 (R33–R38). The substrate MUST NOT expose any streamer that is
+not on the R24 list.
 
 ## 10.11 Bound Central-Context Wiring
 
-**R26.** The central context MUST carry exactly one new public field of
+**R27.** The central context MUST carry exactly one new public field of
 type `StreamingManager`, initialised to the broker's default. Cloning
 the central context (which is itself a cheap shared handle) MUST
 observe the same broker instance.
 
-**R27.** The central context MUST expose one new accessor
+**R28.** The central context MUST expose one new accessor
 `event_stream_access_control()` returning the configured CORS origin
 string used in R16. The accessor MUST read a single named key
 (`event_stream_access_control`) from the central configuration and fall
@@ -377,6 +394,32 @@ table and not through the v2 method table, and that a method
 `stream::nonsense::enable` returns the dispatcher's "no such method"
 error.
 
+**T7.** *Explicit disable scope and response.* Two clients subscribe to
+the same streamer. The first client calls `stream::disable` with the
+`streamer_id` returned by the enable RPC. The test asserts a standard
+mmrpc success response whose payload is `{ "result": "Success" }`, the
+first client stops receiving that streamer's events, the second client
+continues receiving them, and the streamer's task remains active.
+
+**T8.** *Explicit disable no-op and last-subscriber shutdown.* A client
+exists but is not subscribed to an active streamer. Calling
+`stream::disable` for that client and streamer MUST succeed without
+changing any other client's subscriptions. Separately, disabling the
+last subscribed client MUST shut down that streamer exactly once.
+
+**T9.** *Explicit disable error and validation surface.* A
+`stream::disable` call for an unknown client MUST fail with a
+disable-specific HTTP 400 error. A call for a syntactically valid but
+not-running streamer identifier MUST fail with a disable-specific HTTP
+400 error. Missing or invalid `client_id` or `streamer_id` fields MUST
+fail at request decoding or validation.
+
+**T10.** *All-target disable routing.* A target-matrix dispatcher test
+asserts that `stream::disable` is routed through the `stream::`
+namespace on native and WebAssembly targets. Native builds additionally
+assert that this RPC is independent from the `GET /event-stream`
+transport route.
+
 ## 10.13 Deferred Work
 
 **D1.** A WebAssembly-native delivery transport (the WebAssembly target
@@ -384,7 +427,7 @@ currently has the broker but no transport adapter; a future substrate
 chapter is expected to bind an in-process callback adapter for
 embedded WebAssembly consumers).
 
-**D2.** *(Resolved by §10.16, R28–R31.)* Activation of the reserved
+**D2.** *(Resolved by §10.16, R29–R32.)* Activation of the reserved
 `Network` origin tag. Originally deferred (the tag was bound to fix the
 wire string while no consumer existed); the consumer now exists, so the
 activation method `stream::network::enable`, its request and payload
@@ -409,10 +452,10 @@ neither of which is bound).
 context. All graphical synchronisation in the baseline tree is
 pull-mode through the existing JSON-RPC read surface.
 
-**V2.** The seven activation method names bound in R20 MUST be confirmed
-absent from the baseline's v2 dispatcher method table. Adding them in
-the substrate is a pure surface addition; no baseline method is
-renamed or repurposed.
+**V2.** The seven activation method names bound in R20 and the
+`stream::disable` method bound in R21 MUST be confirmed absent from the
+baseline's v2 dispatcher method table. Adding them in the substrate is
+a pure surface addition; no baseline method is renamed or repurposed.
 
 **V3.** The seven `StreamerId` wire strings bound in R6 MUST be confirmed
 absent from the baseline tree. They are introduced by the substrate
@@ -436,11 +479,11 @@ and become part of the GUI-visible contract surface on first release.
   trait definition in R8.
 - libp2p gossipsub, <https://docs.rs/libp2p-gossipsub/latest/libp2p_gossipsub/>
   — the peer/topic/mesh introspection surface that dictates the
-  `NETWORK` event payload field set bound in R29.
+  `NETWORK` event payload field set bound in R30.
 - EIP-1559, *Fee market change for ETH 1.0 chain*,
   <https://eips.ethereum.org/EIPS/eip-1559> — the base-fee /
   priority-fee gas model whose estimate is carried by the fee-estimator
-  streamer payload bound in R35.
+  streamer payload bound in R36.
 
 ## 10.16 Bound Network Streamer Activation
 
@@ -450,14 +493,14 @@ R6. It resolves D2: a consumer for the tag now exists (a graphical
 peer-connectivity view), so the previously-deferred activation handler
 is bound here. The exact wire method name is `stream::network::enable`.
 
-**R28.** A sixth entry MUST be added to the streamer-activation table
+**R29.** A sixth entry MUST be added to the streamer-activation table
 (R20) and routed through the `stream::` dispatcher branch (R19):
 
 | Method name                | Streamer key |
 | -------------------------- | ------------ |
 | `stream::network::enable`  | `Network`    |
 
-The activation handler MUST follow the shared R21/R25 contract:
+The activation handler MUST follow the shared R22/R26 contract:
 
 - Request: the shared envelope carrying `client_id` (unsigned 64-bit,
   defaulting to 0) flattened beside a single per-streamer
@@ -471,13 +514,13 @@ The activation handler MUST follow the shared R21/R25 contract:
 
   Unknown fields inside `config` MUST be rejected. There is no minimum
   floor on `stream_interval_seconds` (unlike the balance streamer's
-  10-second floor in R24).
-- Response: the shared R21 envelope — the mmrpc-2.0 `result` carrying
+  10-second floor in R25).
+- Response: the shared R22 envelope — the mmrpc-2.0 `result` carrying
   the activated streamer's `streamer_id` (here the fixed token
   `NETWORK`). Any streamer initialisation failure MUST be surfaced
-  through the bound activation error variant (R22).
+  through the bound activation error variant (R23).
 
-**R29.** The `NETWORK` event message body MUST be a JSON object with
+**R30.** The `NETWORK` event message body MUST be a JSON object with
 exactly the following five fields, describing the node's current
 gossipsub / peer-connectivity snapshot. The field names are wire-stable
 (GUI-visible interop), byte-for-byte:
@@ -494,12 +537,12 @@ These five values are dictated by the gossipsub introspection surface
 of the peer-discovery substrate; this section binds their presence,
 names, and JSON shape, not the internal traversal that produces them.
 
-**R30.** The network streamer MUST be self-driven (input type
+**R31.** The network streamer MUST be self-driven (input type
 `NoDataIn`, R8/R10) and timer-paced:
 
 1. On activation it MUST report ready (R9) after attaching to the
    peer-discovery substrate, then begin its emission loop.
-2. Each cycle it MUST assemble the R29 snapshot from the peer-discovery
+2. Each cycle it MUST assemble the R30 snapshot from the peer-discovery
    substrate, then wait `stream_interval_seconds` before the next cycle.
 3. Emit semantics MUST be emit-on-change by default: a cycle whose
    snapshot equals the previously broadcast snapshot MUST NOT emit. The
@@ -508,25 +551,23 @@ names, and JSON shape, not the internal traversal that produces them.
 4. The streamer MUST return when its shutdown signal resolves (R9),
    i.e. when its last subscriber leaves (R12 `stop`).
 
-**R31.** Platform gate: the network streamer activation MUST be bound on
+**R32.** Platform gate: the network streamer activation MUST be bound on
 ALL targets (native and WebAssembly). It carries no native-only `cfg`
 gate, because the peer-discovery substrate it introspects is present on
-every target. Placement: the activation handler module is bound as
-`network` under the streamer-activation directory (R23); the streamer
-struct itself is bound to live in the peer-discovery / p2p networking
-crate (it introspects that crate's gossipsub state), not in
-`mm2_event_stream`.
+every target. The implementation MUST be integrated with the
+peer-discovery / p2p networking substrate that owns the gossipsub state;
+no internal placement or file layout is specified by this chapter.
 
 ## 10.17 Bound Fee-Estimator Streamer Activation
 
 This section binds the seventh concrete streamer: a continuous,
 timer-paced EIP-1559 fee-per-gas estimate for an EVM coin. It reuses the
 broker substrate (R1–R14), the HTTP/wire frame (R15–R18), the namespace
-routing (R19), and the shared activation envelope (R21–R22) unchanged;
-only the streamer-specific request shape, payload shape, cadence, and
-platform gate are bound here.
+routing (R19–R21), and the shared activation envelope (R22–R23)
+unchanged; only the streamer-specific request shape, payload shape,
+cadence, and platform gate are bound here.
 
-**R32.** The substrate MUST ship a seventh concrete streamer providing a
+**R33.** The substrate MUST ship a seventh concrete streamer providing a
 CONTINUOUS EIP-1559 fee-per-gas estimate for an EVM coin, activated by
 the wire-stable method `stream::fee_estimator::enable`. Its origin tag
 MUST be the `FeeEstimation` variant of R6 carrying the coin ticker as a
@@ -534,27 +575,27 @@ dynamic component, with the wire-stable display string
 `FEE_ESTIMATION:<ticker>`. Exactly one such streamer runs per distinct
 ticker (registry deduplication per R10/R11).
 
-**R33.** The activation request MUST use the shared R21 envelope (a
+**R34.** The activation request MUST use the shared R22 envelope (a
 `client_id` field plus a flattened inner request). The inner request
 MUST have exactly the following shape:
 
 | Field    | Type                       | Required | Default            | Notes                                                                 |
 | -------- | -------------------------- | -------- | ------------------ | --------------------------------------------------------------------- |
 | `coin`   | string (EVM coin ticker)   | yes      | —                  | Resolved via the central coin-registry accessor; a non-EVM or missing coin MUST fail activation. |
-| `config` | object (estimator config)  | yes      | (all inner fields default) | Estimator configuration object (R34). Minimal accepted form is the empty object `{}`, which selects all defaults. |
+| `config` | object (estimator config)  | yes      | (all inner fields default) | Estimator configuration object (R35). Minimal accepted form is the empty object `{}`, which selects all defaults. |
 
-**R34.** The `config` object MUST carry exactly two fields, both
+**R35.** The `config` object MUST carry exactly two fields, both
 optional with a default, and MUST reject unknown fields:
 
 | Field            | Type                          | Allowed values      | Default  | Meaning                                                                                       |
 | ---------------- | ----------------------------- | ------------------- | -------- | --------------------------------------------------------------------------------------------- |
-| `estimate_every` | number (seconds, fractional)  | positive            | `15.0`   | Target cadence in seconds between successive re-estimations (R36).                            |
+| `estimate_every` | number (seconds, fractional)  | positive            | `15.0`   | Target cadence in seconds between successive re-estimations (R37).                            |
 | `estimator_type` | string enum                   | `Simple`, `Provider`| `Simple` | `Simple` = internal historical estimator; `Provider` = external gas-API provider. The provider's name and base URL are taken from the coin's own configuration, NOT from this request. |
 
 There is no request-level floor on `estimate_every`; the only cadence
-guard is the effective-sleep gate of R36.
+guard is the effective-sleep gate of R37.
 
-**R35.** Each emitted normal event's JSON payload MUST be the EIP-1559
+**R36.** Each emitted normal event's JSON payload MUST be the EIP-1559
 fee estimate with the following exact field names and value types. All
 fee magnitudes MUST be expressed in gwei as the numeric substrate's
 decimal representation:
@@ -578,49 +619,52 @@ expresses cost as `base_fee` plus the per-tier `max_priority_fee_per_gas`
 ERROR event (the R4 error indicator set true) whose JSON payload carries
 the failure reason; a failed cycle MUST NOT terminate the streamer.
 
-**R36.** The emit trigger MUST be timer-paced, NOT emit-on-change: on
+**R37.** The emit trigger MUST be timer-paced, NOT emit-on-change: on
 each cycle the streamer re-estimates and broadcasts unconditionally,
 then waits `estimate_every` seconds minus the elapsed estimation time of
 that cycle; if the remaining wait falls below a small floor (0.1
 seconds) the next cycle begins immediately. This differs from the
-balance streamer's emit-on-change contract (R24): the fee-estimator
+balance streamer's emit-on-change contract (R25): the fee-estimator
 emits every cycle regardless of whether the estimate changed.
 
-**R37.** The fee-estimator activation MUST be available on ALL targets
+**R38.** The fee-estimator activation MUST be available on ALL targets
 (it is an EVM-coin streamer, and EVM support is cross-platform).
 Consistent with R15, WebAssembly builds instantiate the broker and
 accept this activation even though the native HTTP transport is absent.
-The activation handler MUST use the shared envelope of R21 (`client_id`
+The activation handler MUST use the shared envelope of R22 (`client_id`
 plus the flattened inner request) and MUST return the activated
-streamer's `streamer_id` per the R21 response contract (the
+streamer's `streamer_id` per the R22 response contract (the
 `FEE_ESTIMATION:<ticker>` token), mapping any streamer-initialisation
-failure into the bound activation error variant of R22.
+failure into the bound activation error variant of R23.
 
 ## 10.18 Provenance Footer
 
 - *Inputs:* the baseline workspace at the pinned baseline-revision
   commit; chapter 01 (clean-room rules); chapter 31 (the central
-  application-context substrate the broker handle of R26 and the
+  application-context substrate the broker handle of R27 and the
   `event_stream_access_control()` accessor are bound on); the
   chapter-bound identifier set for the broker substrate, the HTTP
   endpoint, the RPC namespace, and the seven concrete streamers;
   public protocol documentation (HTML Living Standard SSE, WHATWG
   CORS, EIP-1559 fee model); the libp2p gossipsub introspection surface
   (peer/topic/mesh enumeration) that dictates the `NETWORK` payload
-  field set (R29); public documentation for the asynchronous-runtime and
+  field set (R30); public documentation for the asynchronous-runtime and
   lock crates listed in 10.15.
 - *Permitted-input classes used:* baseline source; bound substrate
   identifiers introduced with in-chapter justification; public
   protocol documentation; public crate documentation; dictated-interop
-  wire facts (the `stream::network::enable` and
-  `stream::fee_estimator::enable` method strings, their request fields,
-  and the `NETWORK` / `FEE_ESTIMATION:<ticker>` event field sets — all
-  GUI/third-party-visible contract surface).
+  wire facts (the `stream::network::enable`,
+  `stream::fee_estimator::enable`, and `stream::disable` method
+  strings, their request fields, and the `NETWORK` /
+  `FEE_ESTIMATION:<ticker>` event field sets — all GUI/third-party-
+  visible contract surface).
 - *Sibling-allowlist consultations:* none.
 - *Forbidden corpus:* consulted (via the spec-author channel) ONLY for
-  the dictated-interop facts of §10.16 (the network streamer) and
-  §10.17 (the fee-estimator streamer) — their public wire method names,
-  activation request field names/defaults, event payload field names and
-  value shapes, and their cadence and platform gates. No private
-  identifiers, function bodies, control-flow, or string literals were
-  carried across; the behaviour is restated as the public contract.
+  the dictated-interop facts of R21 (`stream::disable`), §10.16 (the
+  network streamer), and §10.17 (the fee-estimator streamer) — their
+  public wire method names, activation/deactivation request field
+  names/defaults, event payload field names and value shapes, cadence,
+  platform gates, and RPC success/error categories. No private
+  identifiers, function bodies, control-flow, or string literals beyond
+  dictated wire payload tokens were carried across; the behaviour is
+  restated as the public contract.
