@@ -583,6 +583,7 @@ where
             let actual_tx_fee = ActualTxFee::Dynamic(dynamic_fee);
 
             let mut tx_builder = UtxoTxBuilder::new(coin)
+                .with_from_address(my_address.clone())
                 .add_available_inputs(unspents)
                 .add_outputs(outputs)
                 .with_fee_policy(fee_policy)
@@ -610,6 +611,7 @@ where
             let (unspents, _recently_sent_txs) = coin.get_unspent_ordered_list(&my_address).await.mm_err(Into::into)?;
 
             let mut tx_builder = UtxoTxBuilder::new(coin)
+                .with_from_address(my_address.clone())
                 .add_available_inputs(unspents)
                 .add_outputs(outputs)
                 .with_fee_policy(fee_policy)

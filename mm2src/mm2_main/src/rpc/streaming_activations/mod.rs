@@ -13,6 +13,8 @@ pub mod swaps;
 use common::HttpStatusCode;
 use derive_more::Display;
 use http::StatusCode;
+use mm2_core::mm_ctx::MmArc;
+use mm2_err_handle::prelude::*;
 use ser_error_derive::SerializeErrorType;
 use serde::{Deserialize, Serialize};
 
@@ -50,4 +52,28 @@ impl HttpStatusCode for StreamingError {
             StreamingError::InitFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
+}
+
+/// Request body for `stream::disable` — stops all active streams for the given client.
+#[derive(Deserialize)]
+pub struct DisableStreamingRequest {
+    pub client_id: u64,
+}
+
+/// Response returned when streams are successfully disabled.
+#[derive(Serialize)]
+pub struct DisableStreamingResponse {
+    pub stopped: bool,
+}
+
+/// Handler for `stream::disable`.
+///
+/// Removes the client from the event-stream manager, which stops all active
+/// streamers for which this is the last subscriber.
+pub async fn disable_streaming(
+    ctx: MmArc,
+    req: DisableStreamingRequest,
+) -> MmResult<DisableStreamingResponse, StreamingError> {
+    ctx.event_stream_manager.remove_client(req.client_id);
+    Ok(DisableStreamingResponse { stopped: true })
 }
