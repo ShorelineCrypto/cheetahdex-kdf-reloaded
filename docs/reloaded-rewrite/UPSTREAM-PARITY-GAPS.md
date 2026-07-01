@@ -21,20 +21,18 @@ Branch hierarchy for remediation: each item gets its own feature branch cut from
 
 **Confirmed real. CRD scope: deliberately narrowed; upstream has more.**
 
-CRD reference: [`10-sse-streaming.md`](./10-sse-streaming.md). R6 binds the
-`StreamerId` enum to exactly six variants (`Heartbeat`, `Balance`, `Network`,
-`SwapStatus`, `OrderStatus`, `OrderbookUpdate`). R20/R23 bind exactly **five**
-active `stream::<category>::enable` activation methods. The `Network` tag is
-reserved by R6 with a fixed wire string (`NETWORK`) but **D2 explicitly defers
-its activation handler** ("no activation handler is bound until the consumer
-exists").
+CRD reference: [`10-sse-streaming.md`](./10-sse-streaming.md). R6/R20/R24 now
+bind the implemented streamers. The remaining open streaming parity gap in this
+tracker is `stream::shutdown_signal::enable`.
 
 Code evidence:
-- `mm2src/mm2_event_stream/src/streamer.rs` — `StreamerId` enum carries
-  `Network` but has no `FeeEstimator` / `TxHistory` / `ShutdownSignal` variants.
-- `mm2src/mm2_main/src/rpc/streaming_activations/` — modules present:
-  `balance`, `heartbeat`, `orderbook`, `orders`, `swaps`. No `network` module.
-- Dispatcher routes only the five `*::enable` arms.
+- `mm2src/mm2_event_stream/src/streamer.rs` carries implemented variants for
+  `Network`, `FeeEstimation`, and `TxHistory`, but no `ShutdownSignal` variant.
+- `mm2src/mm2_main/src/rpc/streaming_activations/` contains implemented
+  activation modules for `network`, `fee_estimator`, and `tx_history`; it has no
+  `shutdown_signal` module.
+- Dispatcher routes the implemented `stream::*` activation arms and
+  `stream::disable`; it has no `stream::shutdown_signal::enable` arm.
 
 Upstream `stream::` surface (census) vs reloaded:
 
@@ -45,8 +43,8 @@ Upstream `stream::` surface (census) vs reloaded:
 | `stream::order_status::enable` | yes | — |
 | `stream::orderbook::enable` | yes | — |
 | `stream::swap_status::enable` | yes | — |
-| `stream::network::enable` | **no** | TODO — tag reserved (D2) |
-| `stream::fee_estimator::enable` | **no** | see #3 |
+| `stream::network::enable` | yes | implemented (D2 completion) |
+| `stream::fee_estimator::enable` | yes | implemented (#3 completion) |
 | `stream::tx_history::enable` | yes | C7 — `TX_HISTORY:<ticker>` reactive streamer |
 | `stream::shutdown_signal::enable` | **no** | TODO — needs new variant |
 | `stream::disable` | yes | C6 — generic per-client unsubscribe |
@@ -63,7 +61,7 @@ Upstream `stream::` surface (census) vs reloaded:
 - [x] `stream::disable` — implemented by C6 as the generic per-client
   unsubscribe RPC bound by [`10-sse-streaming.md`](./10-sse-streaming.md) R21.
 
-## #3 — Fee estimator stream (`stream::fee_estimator::enable`)
+## #3 — Fee estimator stream (`stream::fee_estimator::enable`) — **RESOLVED**
 
 **Confirmed real.** The EIP-1559 fee estimator is exposed upstream as a streamer
 (`stream::fee_estimator::enable`), not a legacy method. The on-demand
@@ -83,26 +81,23 @@ concrete streamer (§10.17, R32–R37).
   [`10-sse-streaming.md`](./10-sse-streaming.md) §10.17 (R32–R37) and merged on
   `dev`.
 
-## #1 — NFT activation (`enable_nft`)
+## #1 — NFT activation (`enable_nft`) — **RESOLVED**
 
-**Confirmed real. Design divergence.** Upstream activates the NFT subsystem via
-`enable_nft`; reloaded has **no** such method anywhere in the workspace (0 hits).
+**Resolved.** Upstream activates the NFT subsystem via `enable_nft`; reloaded now
+exposes that method directly.
 
 CRD reference: [`19-nft-module-layout.md`](./19-nft-module-layout.md) binds the
-NFT subsystem to **seven** JSON-RPC methods (inventory, metadata, transfer
-history, withdrawal, wipe). Reloaded routes exactly those seven: `clear_nft_db`,
-`get_nft_list`, `get_nft_metadata`, `get_nft_transfers`, `refresh_nft_metadata`,
-`update_nft`, `withdraw_nft`. In reloaded's design, `update_nft` performs the
-initialise/refresh role that upstream's `enable_nft` performs as a distinct
-activation entry point.
+NFT subsystem activation entry point in §19.6.2 and records the transition from
+the earlier `update_nft` initialization role to the explicit `enable_nft`
+activation contract.
 
-Interop impact: the Komodo DeFi SDK (and the Gleec GUI built on it) calls
-`enable_nft` directly; its absence is the likely cause of the NFT "Bad state: No
-element" runtime error observed in the GUI.
+Code evidence:
+- `mm2src/mm2_main/src/rpc/dispatcher/dispatcher.rs` routes `enable_nft`.
+- `mm2src/coins/nft/activation.rs` implements the mmrpc-2.0 `enable_nft`
+  handler, request, response, and activation error surface.
 
-- [ ] **`enable_nft`** — add the activation entry point so SDK NFT enablement
-  succeeds. Requires a clean-room spec section reconciling upstream `enable_nft`
-  semantics with reloaded's existing `update_nft` initialisation path.
+- [x] **`enable_nft`** — implemented and bound by
+  [`19-nft-module-layout.md`](./19-nft-module-layout.md) §19.6.2.
 
 ## #4 — Experimental liquidity routing (DOCUMENTED ONLY — NOT to be implemented)
 

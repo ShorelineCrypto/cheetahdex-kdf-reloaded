@@ -4,10 +4,14 @@
 /// snapshots the node's gossipsub / peer-connectivity state and emits it as an
 /// SSE event. The streamer struct itself lives in the `mm2_p2p` crate, beside
 /// the gossipsub introspection accessors it consumes.
+use derive_more::Display;
+use http::StatusCode;
 use mm2_p2p::network_streamer::NetworkStreamer;
+use ser_error_derive::SerializeErrorType;
 use serde::Deserialize;
+use serde::Serialize;
 
-use super::{EnableStreamingRequest, EnableStreamingResponse, StreamingError};
+use super::{EnableStreamingRequest, EnableStreamingResponse};
 use crate::mm2::lp_network::P2PContext;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -47,11 +51,26 @@ impl Default for NetworkStreamingConfig {
 
 fn default_stream_interval_seconds() -> f64 { 5.0 }
 
+#[derive(Debug, Display, Serialize, SerializeErrorType)]
+#[serde(tag = "error_type", content = "error_data")]
+pub enum NetworkStreamingError {
+    #[display(fmt = "Could not add network streamer: {}", _0)]
+    InitFailed(String),
+}
+
+impl common::HttpStatusCode for NetworkStreamingError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            NetworkStreamingError::InitFailed(_) => StatusCode::BAD_REQUEST,
+        }
+    }
+}
+
 /// RPC handler for `stream::network::enable`.
 pub async fn enable_network(
     ctx: MmArc,
     req: EnableStreamingRequest<EnableNetworkRequest>,
-) -> MmResult<EnableStreamingResponse, StreamingError> {
+) -> MmResult<EnableStreamingResponse, NetworkStreamingError> {
     let client_id = req.client_id;
     let config = req.inner.config;
 
@@ -61,7 +80,7 @@ pub async fn enable_network(
     ctx.event_stream_manager
         .add(client_id, streamer)
         .await
-        .map_err(|e| MmError::new(StreamingError::InitFailed(e)))?;
+        .map_err(|e| MmError::new(NetworkStreamingError::InitFailed(e)))?;
 
     Ok(EnableStreamingResponse::new(streamer_id))
 }
@@ -69,6 +88,7 @@ pub async fn enable_network(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::HttpStatusCode;
     use serde_json::json;
 
     #[test]
@@ -106,5 +126,13 @@ mod tests {
         let (cmd_tx, _rx) = futures::channel::mpsc::channel(1);
         let streamer = NetworkStreamer::new(None, false, cmd_tx);
         assert_eq!(streamer.streamer_id().to_string(), "NETWORK");
+    }
+
+    #[test]
+    fn init_failure_maps_to_bad_request() {
+        assert_eq!(
+            NetworkStreamingError::InitFailed("setup failed".to_owned()).status_code(),
+            StatusCode::BAD_REQUEST
+        );
     }
 }

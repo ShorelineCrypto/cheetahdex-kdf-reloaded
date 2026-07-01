@@ -460,6 +460,31 @@ contract. A build exposing either family MUST NOT satisfy this test by
 returning HTTP 501 or by accepting activation while no reactive
 history-update path can produce events.
 
+**T14.** *Network streamer activation and payload.* A dispatcher test
+MUST route `stream::network::enable` through the `stream::` namespace and
+return the shared R22 success envelope with `streamer_id: "NETWORK"`.
+Request-decoding tests MUST cover defaulted `client_id`, defaulted
+network config, explicit `stream_interval_seconds` and `always_send`,
+and rejection of unknown `config` fields. A streamer test MUST inject or
+mock the peer-discovery snapshot source and assert that the first normal
+event uses origin `NETWORK` and carries exactly the five R30 payload
+fields. A cadence test MUST assert emit-on-change by default and
+emit-every-cycle when `always_send` is true.
+
+**T15.** *Fee-estimator activation, payload, cadence, and errors.* A
+dispatcher test MUST route `stream::fee_estimator::enable` through the
+`stream::` namespace and return the shared R22 success envelope with
+`streamer_id: "FEE_ESTIMATION:<coin>"` for an activated EVM coin.
+Request-decoding tests MUST cover required `coin`, required `config`,
+defaults from an empty `config` object, `Simple` and `Provider`
+estimator selection, and rejection of unknown `config` fields. A streamer
+test MUST use a deterministic EIP-1559 estimator and assert normal-event
+payload fields and gwei units per R36. A cadence test MUST assert that
+two equal estimates still produce two normal events on successive cycles.
+Error-path tests MUST assert the R38.1 activation status mapping and
+that per-cycle estimation failures emit SSE error events without
+stopping the streamer.
+
 ## 10.13 Deferred Work
 
 **D1.** A WebAssembly-native delivery transport (the WebAssembly target
@@ -557,8 +582,15 @@ The activation handler MUST follow the shared R22/R26 contract:
   10-second floor in R25).
 - Response: the shared R22 envelope — the mmrpc-2.0 `result` carrying
   the activated streamer's `streamer_id` (here the fixed token
-  `NETWORK`). Any streamer initialisation failure MUST be surfaced
-  through the bound activation error category (R23).
+  `NETWORK`). Activation-time errors MUST use the streamer-specific
+  mapping in R29.1 rather than the generic R23 mapping.
+
+**R29.1.** The network streamer activation error surface is
+streamer-specific and overrides the generic R23 status mapping for
+activation-time failures: a valid request that cannot activate the
+network stream MUST fail with HTTP 400. Missing or invalid request
+fields MUST fail during request decoding or validation before any
+subscription state is changed.
 
 **R30.** The `NETWORK` event message body MUST be a JSON object with
 exactly the following five fields, describing the node's current
@@ -603,9 +635,10 @@ no internal placement or file layout is specified by this chapter.
 This section binds the seventh concrete streamer: a continuous,
 timer-paced EIP-1559 fee-per-gas estimate for an EVM coin. It reuses the
 broker substrate (R1–R14), the HTTP/wire frame (R15–R18), the namespace
-routing (R19–R21), and the shared activation envelope (R22–R23)
-unchanged; only the streamer-specific request shape, payload shape,
-cadence, and platform gate are bound here.
+routing (R19–R21), and the shared activation envelope (R22), while
+binding a streamer-specific activation error surface in R38.1. Only the
+streamer-specific request shape, payload shape, cadence, platform gate,
+and activation error mapping are bound here.
 
 **R33.** The substrate MUST ship a seventh concrete streamer providing a
 CONTINUOUS EIP-1559 fee-per-gas estimate for an EVM coin, activated by
@@ -674,8 +707,19 @@ accept this activation even though the native HTTP transport is absent.
 The activation handler MUST use the shared envelope of R22 (`client_id`
 plus the flattened inner request) and MUST return the activated
 streamer's `streamer_id` per the R22 response contract (the
-`FEE_ESTIMATION:<ticker>` token), mapping any streamer-initialisation
-failure into the bound activation error category of R23.
+`FEE_ESTIMATION:<ticker>` token). Activation-time errors MUST use the
+streamer-specific mapping in R38.1 rather than the generic R23 mapping.
+
+**R38.1.** The fee-estimator activation error surface is
+streamer-specific and overrides the generic R23 status mapping for the
+following activation-time failures. A missing or inactive `coin` MUST
+fail with HTTP 404. An activated non-EVM coin MUST fail with HTTP 501.
+A valid request that cannot activate the fee-estimator stream MUST fail
+with HTTP 400. Unexpected activation failures MUST fail with HTTP 500.
+Missing or invalid request fields MUST fail during request decoding or
+validation before any subscription state is changed. Once the streamer
+is active, per-cycle estimation failures MUST be emitted as SSE error
+events per R36 and MUST NOT terminate the streamer.
 
 ## 10.18 Bound Tx-History Streamer Activation
 
@@ -717,9 +761,9 @@ means both accepting `stream::tx_history::enable` and providing the
 family's reactive history-update producer required by R42; accepting the
 activation as a dormant stream is nonconforming. A missing or inactive
 coin MUST fail with HTTP 404. An activated coin outside those families
-MUST fail with HTTP 501. Broker add/start failure MUST fail with HTTP
-400. Registry lookup failures or other unexpected activation errors MUST
-fail with HTTP 500. Missing or invalid request fields MUST fail during
+MUST fail with HTTP 501. A valid request that cannot activate the
+tx-history stream MUST fail with HTTP 400. Unexpected activation errors
+MUST fail with HTTP 500. Missing or invalid request fields MUST fail during
 request decoding or validation before any subscription state is changed.
 
 **R42.** The tx-history streamer MUST use the broker's typed data-input
@@ -799,13 +843,4 @@ receiver path bound outside this chapter.
   `NETWORK` / `FEE_ESTIMATION:<ticker>` / `TX_HISTORY:<ticker>` event
   field sets — all GUI/third-party-visible contract surface).
 - *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* consulted (via the spec-author channel) ONLY for
-  the dictated-interop facts of R21 (`stream::disable`), §10.16 (the
-  network streamer), §10.17 (the fee-estimator streamer), and §10.18
-  (the tx-history streamer) — their public wire method names,
-  activation/deactivation request field names/defaults, event payload
-  field names and value shapes, cadence or reactive trigger, platform
-  gates, and RPC success/error categories. No private
-  identifiers, function bodies, control-flow, or string literals beyond
-  dictated wire payload tokens were carried across; the behaviour is
-  restated as the public contract.
+- *Forbidden corpus:* not consulted.

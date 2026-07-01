@@ -7,14 +7,19 @@
 use async_trait::async_trait;
 use common::executor::Timer;
 use common::log;
+use derive_more::Display;
 use futures::future::{select, Either};
+use http::StatusCode;
 use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
+use ser_error_derive::SerializeErrorType;
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 use std::convert::TryFrom;
 
-use super::{EnableStreamingRequest, EnableStreamingResponse, StreamingError};
+use super::{EnableStreamingRequest, EnableStreamingResponse};
 use coins::eth::fee_estimation::ser::FeePerGasEstimated;
+use coins::eth::EthCoin;
 use coins::{lp_coinfind, MmCoinEnum};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -62,17 +67,48 @@ pub struct FeeEstimatorStreamer {
     ticker: String,
     estimate_every: f64,
     use_simple: bool,
-    ctx: MmArc,
+    coin: EthCoin,
 }
 
 impl FeeEstimatorStreamer {
-    pub fn new(ticker: String, estimate_every: f64, estimator_type: FeeEstimatorType, ctx: MmArc) -> Self {
+    pub fn new(ticker: String, estimate_every: f64, estimator_type: FeeEstimatorType, coin: EthCoin) -> Self {
         Self {
             ticker,
             estimate_every,
             use_simple: matches!(estimator_type, FeeEstimatorType::Simple),
-            ctx,
+            coin,
         }
+    }
+}
+
+#[derive(Debug, Display, Serialize, SerializeErrorType)]
+#[serde(tag = "error_type", content = "error_data")]
+pub enum FeeEstimatorStreamingError {
+    #[display(fmt = "Coin {} is not activated", _0)]
+    CoinIsNotActive(String),
+    #[display(fmt = "EIP-1559 fee-estimator streaming is not supported for {}", _0)]
+    NotSupportedFor(String),
+    #[display(fmt = "Could not add fee-estimator streamer: {}", _0)]
+    BrokerError(String),
+    #[display(fmt = "Unexpected fee-estimator activation error: {}", _0)]
+    Internal(String),
+}
+
+impl common::HttpStatusCode for FeeEstimatorStreamingError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            FeeEstimatorStreamingError::CoinIsNotActive(_) => StatusCode::NOT_FOUND,
+            FeeEstimatorStreamingError::NotSupportedFor(_) => StatusCode::NOT_IMPLEMENTED,
+            FeeEstimatorStreamingError::BrokerError(_) => StatusCode::BAD_REQUEST,
+            FeeEstimatorStreamingError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+fn require_evm_coin(ticker: &str, coin: MmCoinEnum) -> Result<EthCoin, FeeEstimatorStreamingError> {
+    match coin {
+        MmCoinEnum::EthCoin(coin) => Ok(coin),
+        _ => Err(FeeEstimatorStreamingError::NotSupportedFor(ticker.to_owned())),
     }
 }
 
@@ -89,57 +125,41 @@ impl EventStreamer for FeeEstimatorStreamer {
         shutdown_rx: oneshot::Receiver<()>,
         _data_rx: mpsc::UnboundedReceiver<mm2_event_stream::NoDataIn>,
     ) {
-        // Resolve the coin and require it to be an activated EVM coin.
-        let coin = match lp_coinfind(&self.ctx, &self.ticker).await {
-            Ok(Some(MmCoinEnum::EthCoin(coin))) => coin,
-            Ok(Some(_)) => {
-                let _ = ready_tx.send(Err(format!(
-                    "Coin {} is not an EVM coin; fee estimation is unsupported",
-                    self.ticker
-                )));
-                return;
-            },
-            Ok(None) => {
-                let _ = ready_tx.send(Err(format!("Coin {} is not activated", self.ticker)));
-                return;
-            },
-            Err(e) => {
-                let _ = ready_tx.send(Err(format!("Error finding coin {}: {}", self.ticker, e)));
-                return;
-            },
-        };
-
         let _ = ready_tx.send(Ok(()));
 
-        let sid = StreamerId::FeeEstimation(self.ticker.clone());
+        let ticker = self.ticker;
+        let estimate_every = self.estimate_every;
+        let use_simple = self.use_simple;
+        let coin = self.coin;
+        let sid = StreamerId::FeeEstimation(ticker.clone());
         let mut shutdown = shutdown_rx;
 
         loop {
             let start = common::now_float();
 
             // Re-estimate and broadcast unconditionally (timer-paced, not emit-on-change).
-            match coin.get_eip1559_gas_fee(self.use_simple).await {
+            match coin.get_eip1559_gas_fee(use_simple).await {
                 Ok(fee) => match FeePerGasEstimated::try_from(fee) {
                     Ok(estimate) => match serde_json::to_value(&estimate) {
                         Ok(payload) => broadcaster.broadcast(Event::new(sid.clone(), payload)),
                         Err(e) => {
-                            log::error!("Fee estimate serialization error for {}: {}", self.ticker, e);
+                            log::error!("Fee estimate serialization error for {}: {}", ticker, e);
                             broadcaster.broadcast(Event::err(sid.clone(), json!({ "error": e.to_string() })));
                         },
                     },
                     Err(e) => {
-                        log::error!("Fee estimate conversion error for {}: {}", self.ticker, e);
+                        log::error!("Fee estimate conversion error for {}: {}", ticker, e);
                         broadcaster.broadcast(Event::err(sid.clone(), json!({ "error": e.to_string() })));
                     },
                 },
                 Err(e) => {
-                    log::error!("Fee estimation error for {}: {}", self.ticker, e);
+                    log::error!("Fee estimation error for {}: {}", ticker, e);
                     broadcaster.broadcast(Event::err(sid.clone(), json!({ "error": e.to_string() })));
                 },
             }
 
             // Wait `estimate_every` minus the elapsed estimation time of this cycle.
-            let wait = self.estimate_every - (common::now_float() - start);
+            let wait = estimate_every - (common::now_float() - start);
             if wait < RESTART_FLOOR {
                 // Below the floor: begin the next cycle immediately, but still
                 // honour an already-fired shutdown signal.
@@ -162,25 +182,34 @@ impl EventStreamer for FeeEstimatorStreamer {
 pub async fn enable_fee_estimator(
     ctx: MmArc,
     req: EnableStreamingRequest<EnableFeeEstimatorRequest>,
-) -> MmResult<EnableStreamingResponse, StreamingError> {
+) -> MmResult<EnableStreamingResponse, FeeEstimatorStreamingError> {
     let client_id = req.client_id;
     let ticker = req.inner.coin.clone();
     let estimate_every = req.inner.config.estimate_every;
     let estimator_type = req.inner.config.estimator_type;
 
-    let streamer = FeeEstimatorStreamer::new(ticker, estimate_every, estimator_type, ctx.clone());
+    let coin = lp_coinfind(&ctx, &ticker)
+        .await
+        .map_err(|e| MmError::new(FeeEstimatorStreamingError::Internal(e)))?
+        .ok_or_else(|| MmError::new(FeeEstimatorStreamingError::CoinIsNotActive(ticker.clone())))?;
+    let coin = require_evm_coin(&ticker, coin).map_err(MmError::new)?;
+
+    let streamer = FeeEstimatorStreamer::new(ticker, estimate_every, estimator_type, coin);
     let streamer_id = streamer.streamer_id().to_string();
     ctx.event_stream_manager
         .add(client_id, streamer)
         .await
-        .map_err(|e| MmError::new(StreamingError::InitFailed(e)))?;
+        .map_err(|e| MmError::new(FeeEstimatorStreamingError::BrokerError(e)))?;
 
     Ok(EnableStreamingResponse::new(streamer_id))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FeeEstimatorConfig, FeeEstimatorType};
+    use super::*;
+    use coins::{CoinsContext, TestCoin};
+    use common::HttpStatusCode;
+    use mm2_core::mm_ctx::MmCtxBuilder;
     use mm2_event_stream::StreamerId;
 
     #[test]
@@ -210,5 +239,96 @@ mod tests {
             serde_json::from_str(r#"{"estimate_every": 5.5, "estimator_type": "Provider"}"#).unwrap();
         assert_eq!(cfg.estimate_every, 5.5);
         assert!(matches!(cfg.estimator_type, FeeEstimatorType::Provider));
+    }
+
+    #[test]
+    fn activation_errors_map_to_r38_1_status_codes() {
+        assert_eq!(
+            FeeEstimatorStreamingError::CoinIsNotActive("ETH".to_owned()).status_code(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            FeeEstimatorStreamingError::NotSupportedFor("KMD".to_owned()).status_code(),
+            StatusCode::NOT_IMPLEMENTED
+        );
+        assert_eq!(
+            FeeEstimatorStreamingError::BrokerError("setup failed".to_owned()).status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            FeeEstimatorStreamingError::Internal("lookup failed".to_owned()).status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn require_evm_coin_rejects_activated_non_evm_coin() {
+        let err = require_evm_coin("RICK", MmCoinEnum::Test(TestCoin::new("RICK"))).unwrap_err();
+        assert!(matches!(err, FeeEstimatorStreamingError::NotSupportedFor(ticker) if ticker == "RICK"));
+    }
+
+    #[tokio::test]
+    async fn enable_fee_estimator_missing_coin_fails_before_subscription() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let _handle = ctx.event_stream_manager.new_client(7);
+
+        let err = match enable_fee_estimator(ctx.clone(), EnableStreamingRequest {
+            client_id: 7,
+            inner: EnableFeeEstimatorRequest {
+                coin: "MISSING".to_owned(),
+                config: FeeEstimatorConfig {
+                    estimate_every: 15.0,
+                    estimator_type: FeeEstimatorType::Simple,
+                },
+            },
+        })
+        .await
+        {
+            Ok(_) => panic!("missing coin activation unexpectedly succeeded"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(
+            err.into_inner(),
+            FeeEstimatorStreamingError::CoinIsNotActive(ticker) if ticker == "MISSING"
+        ));
+        let streamer_id = StreamerId::FeeEstimation("MISSING".to_owned());
+        assert!(!ctx.event_stream_manager.is_active(&streamer_id));
+        assert!(!ctx.event_stream_manager.client_subscribed_to(7, &streamer_id));
+    }
+
+    #[tokio::test]
+    async fn enable_fee_estimator_non_evm_coin_fails_before_subscription() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let coins_ctx = CoinsContext::from_ctx(&ctx).unwrap();
+        coins_ctx
+            .add_coin(MmCoinEnum::Test(TestCoin::new("RICK")))
+            .await
+            .unwrap();
+        let _handle = ctx.event_stream_manager.new_client(7);
+
+        let err = match enable_fee_estimator(ctx.clone(), EnableStreamingRequest {
+            client_id: 7,
+            inner: EnableFeeEstimatorRequest {
+                coin: "RICK".to_owned(),
+                config: FeeEstimatorConfig {
+                    estimate_every: 15.0,
+                    estimator_type: FeeEstimatorType::Simple,
+                },
+            },
+        })
+        .await
+        {
+            Ok(_) => panic!("non-EVM coin activation unexpectedly succeeded"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(
+            err.into_inner(),
+            FeeEstimatorStreamingError::NotSupportedFor(ticker) if ticker == "RICK"
+        ));
+        let streamer_id = StreamerId::FeeEstimation("RICK".to_owned());
+        assert!(!ctx.event_stream_manager.is_active(&streamer_id));
+        assert!(!ctx.event_stream_manager.client_subscribed_to(7, &streamer_id));
     }
 }
