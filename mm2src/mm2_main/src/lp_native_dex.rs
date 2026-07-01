@@ -544,6 +544,12 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
     let ctx_id = ctx.ffi_handle().map_to_mm(MmInitError::Internal)?;
 
     spawn_rpc(ctx_id);
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    if let Err(err) =
+        crate::mm2::rpc::streaming_activations::shutdown_signal::install_shutdown_signal_listener(ctx.clone())
+    {
+        warn!("Could not install shutdown-signal listener: {}", err);
+    }
     let ctx_c = ctx.clone();
     spawn(async move {
         if let Err(err) = ctx_c.init_metrics() {

@@ -361,6 +361,15 @@ async fn rpc_streaming_dispatcher(
         "network::enable" => handle_mmrpc(ctx, request, streaming_activations::network::enable_network).await,
         "order_status::enable" => handle_mmrpc(ctx, request, streaming_activations::orders::enable_order_status).await,
         "orderbook::enable" => handle_mmrpc(ctx, request, streaming_activations::orderbook::enable_orderbook).await,
+        #[cfg(all(unix, not(target_arch = "wasm32")))]
+        "shutdown_signal::enable" => {
+            handle_mmrpc(
+                ctx,
+                request,
+                streaming_activations::shutdown_signal::enable_shutdown_signal,
+            )
+            .await
+        },
         "swap_status::enable" => handle_mmrpc(ctx, request, streaming_activations::swaps::enable_swap_status).await,
         "tx_history::enable" => handle_mmrpc(ctx, request, streaming_activations::tx_history::enable_tx_history).await,
         "disable" => handle_mmrpc(ctx, request, streaming_activations::disable_streaming).await,
@@ -573,6 +582,32 @@ mod tests {
 
         let err = block_on(dispatcher_v2(request, ctx)).unwrap_err();
         assert!(matches!(err.into_inner(), DispatcherError::NoSuchMethod));
+    }
+
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    #[test]
+    fn shutdown_signal_enable_routes_through_stream_namespace() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let _handle = ctx.event_stream_manager.new_client(9);
+        let request = MmRpcRequest {
+            mmrpc: MmRpcVersion::V2,
+            userpass: Some("unused-after-dispatch".to_owned()),
+            method: "stream::shutdown_signal::enable".to_owned(),
+            params: json!({ "client_id": 9 }),
+            id: Some(1),
+        };
+
+        let response = match block_on(dispatcher_v2(request, ctx.clone())) {
+            Ok(response) => response,
+            Err(_) => panic!("shutdown-signal activation route returned dispatcher error"),
+        };
+        assert!(response.status().is_success());
+        let body: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(body["result"], json!({ "streamer_id": "SHUTDOWN_SIGNAL" }));
+        assert_eq!(body["id"], json!(1));
+        assert!(ctx
+            .event_stream_manager
+            .client_subscribed_to(9, &mm2_event_stream::StreamerId::ShutdownSignal));
     }
 }
 

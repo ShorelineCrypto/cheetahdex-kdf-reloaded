@@ -47,6 +47,8 @@ pub enum StreamerId {
     FeeEstimation(String),
     /// Reactive transaction-history records for one coin ticker.
     TxHistory(String),
+    /// Process termination signal notifications.
+    ShutdownSignal,
     /// Carries an interactive data-asker "data needed" event; the payload is
     /// the data-type discriminator naming the kind of data being requested.
     DataNeeded(String),
@@ -63,6 +65,7 @@ impl fmt::Display for StreamerId {
             StreamerId::OrderbookUpdate { topic } => write!(f, "ORDERBOOK:{}", topic),
             StreamerId::FeeEstimation(coin) => write!(f, "FEE_ESTIMATION:{}", coin),
             StreamerId::TxHistory(coin) => write!(f, "TX_HISTORY:{}", coin),
+            StreamerId::ShutdownSignal => write!(f, "SHUTDOWN_SIGNAL"),
             StreamerId::DataNeeded(data_type) => write!(f, "DATA_NEEDED:{}", data_type),
         }
     }
@@ -86,6 +89,9 @@ impl FromStr for StreamerId {
         }
         if value == "ORDER_STATUS" {
             return Ok(StreamerId::OrderStatus);
+        }
+        if value == "SHUTDOWN_SIGNAL" {
+            return Ok(StreamerId::ShutdownSignal);
         }
 
         if let Some(ticker) = value.strip_prefix("BALANCE:").filter(|ticker| !ticker.is_empty()) {
@@ -179,6 +185,7 @@ mod tests {
         assert_eq!(StreamerId::from_str("NETWORK"), Ok(StreamerId::Network));
         assert_eq!(StreamerId::from_str("SWAP_STATUS"), Ok(StreamerId::SwapStatus));
         assert_eq!(StreamerId::from_str("ORDER_STATUS"), Ok(StreamerId::OrderStatus));
+        assert_eq!(StreamerId::from_str("SHUTDOWN_SIGNAL"), Ok(StreamerId::ShutdownSignal));
         assert_eq!(
             StreamerId::from_str("ORDERBOOK:KMD/BTC"),
             Ok(StreamerId::OrderbookUpdate {

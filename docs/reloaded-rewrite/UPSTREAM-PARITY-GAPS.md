@@ -17,22 +17,22 @@ Branch hierarchy for remediation: each item gets its own feature branch cut from
 
 ---
 
-## #2 — Event streaming: missing `stream::` streamers
+## #2 — Event streaming: missing `stream::` streamer implementation
 
-**Confirmed real. CRD scope: deliberately narrowed; upstream has more.**
+**Resolved by C8.**
 
-CRD reference: [`10-sse-streaming.md`](./10-sse-streaming.md). R6/R20/R24 now
-bind the implemented streamers. The remaining open streaming parity gap in this
-tracker is `stream::shutdown_signal::enable`.
+CRD reference: [`10-sse-streaming.md`](./10-sse-streaming.md). R6/R20/R24 and
+§10.19 now bind `stream::shutdown_signal::enable` as the ninth streamer. The
+remaining streaming parity gap in this tracker was the reloaded code
+implementation for that method; C8 adds it on native non-Windows targets.
 
-Code evidence:
-- `mm2src/mm2_event_stream/src/streamer.rs` carries implemented variants for
-  `Network`, `FeeEstimation`, and `TxHistory`, but no `ShutdownSignal` variant.
-- `mm2src/mm2_main/src/rpc/streaming_activations/` contains implemented
-  activation modules for `network`, `fee_estimator`, and `tx_history`; it has no
-  `shutdown_signal` module.
-- Dispatcher routes the implemented `stream::*` activation arms and
-  `stream::disable`; it has no `stream::shutdown_signal::enable` arm.
+Reloaded implementation evidence:
+- The public streamer-origin set includes `ShutdownSignal`.
+- The `stream::` dispatcher routes `stream::shutdown_signal::enable` on native
+  non-Windows targets and leaves it unavailable through the normal
+  missing-method path elsewhere.
+- A native non-Windows shutdown-notification producer publishes supported
+  process signal names to the streaming manager before runtime stop begins.
 
 Upstream `stream::` surface (census) vs reloaded:
 
@@ -46,7 +46,7 @@ Upstream `stream::` surface (census) vs reloaded:
 | `stream::network::enable` | yes | implemented (D2 completion) |
 | `stream::fee_estimator::enable` | yes | implemented (#3 completion) |
 | `stream::tx_history::enable` | yes | C7 — `TX_HISTORY:<ticker>` reactive streamer |
-| `stream::shutdown_signal::enable` | **no** | TODO — needs new variant |
+| `stream::shutdown_signal::enable` | yes | C8 — native non-Windows `SHUTDOWN_SIGNAL` reactive streamer |
 | `stream::disable` | yes | C6 — generic per-client unsubscribe |
 
 - [x] **`stream::network::enable`** — implemented (D2 completion). The `Network`
@@ -57,7 +57,10 @@ Upstream `stream::` surface (census) vs reloaded:
   streamer, activation request/response, supported-family contract, and producer
   obligations are bound by [`10-sse-streaming.md`](./10-sse-streaming.md) §10.18
   (R39-R45).
-- [ ] `stream::shutdown_signal::enable` — requires a new `StreamerId` variant + spec.
+- [x] `stream::shutdown_signal::enable` — implemented by C8. The native
+  non-Windows `ShutdownSignal` streamer, activation route, and
+  shutdown-notification producer are bound by
+  [`10-sse-streaming.md`](./10-sse-streaming.md) §10.19 (R46-R51).
 - [x] `stream::disable` — implemented by C6 as the generic per-client
   unsubscribe RPC bound by [`10-sse-streaming.md`](./10-sse-streaming.md) R21.
 

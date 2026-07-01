@@ -119,9 +119,14 @@ fn preexisting_namespaces_remain_routed() {
         "network::enable",
         "order_status::enable",
         "orderbook::enable",
+        "shutdown_signal::enable",
         "swap_status::enable",
         "tx_history::enable",
     ]);
+    assert!(
+        DISPATCHER_SOURCE.contains("#[cfg(all(unix, not(target_arch = \"wasm32\")))]"),
+        "shutdown-signal streaming route lost its native non-Windows cfg gate"
+    );
     assert_namespace_routed("gui_storage::", &[
         "enable_account",
         "add_account",

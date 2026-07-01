@@ -8,6 +8,8 @@ pub mod heartbeat;
 pub mod network;
 pub mod orderbook;
 pub mod orders;
+#[cfg(all(unix, not(target_arch = "wasm32")))]
+pub mod shutdown_signal;
 pub mod swaps;
 pub mod tx_history;
 

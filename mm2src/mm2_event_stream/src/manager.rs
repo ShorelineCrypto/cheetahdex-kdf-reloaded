@@ -226,6 +226,11 @@ impl StreamingManager {
             .unwrap_or(false)
     }
 
+    pub fn client_registered(&self, client_id: u64) -> bool {
+        let inner = self.inner.read();
+        inner.clients.contains_key(&client_id)
+    }
+
     /// Remove a client entirely (e.g., SSE connection closed).
     /// Unsubscribes from all streamers and cleans up.
     pub fn remove_client(&self, client_id: u64) {
@@ -404,6 +409,16 @@ mod tests {
             mgr.stop_checked(1, &StreamerId::Heartbeat),
             Err(StopStreamError::StreamerNotActive)
         );
+    }
+
+    #[test]
+    fn client_registered_reports_registered_clients() {
+        let mgr = StreamingManager::default();
+        assert!(!mgr.client_registered(1));
+        let _h1 = mgr.new_client(1);
+        assert!(mgr.client_registered(1));
+        mgr.remove_client(1);
+        assert!(!mgr.client_registered(1));
     }
 
     #[tokio::test]
