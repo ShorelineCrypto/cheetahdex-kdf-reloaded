@@ -69,20 +69,43 @@ error whose public discriminant identifies that no sender address was supplied.
 If `from` is present, the implementation shall resolve it to the selected
 activated HD address and use that address as the only withdrawal sender.
 
-R49.5. EVM-family native-coin and fungible-token task withdrawals shall be
-supported. For EVM-family software-HD withdrawals, both direct `withdraw` and
-`task::withdraw::init` shall use the activated software key/address for balance
-checks, nonce selection, signing, and the completed transaction's sender when
-`from` is omitted. When `from` is present, both paths shall resolve it as an HD
-address selector and use the selected activated HD address and derived key
-instead. For EVM-family hardware-wallet task withdrawals, omitting `from` shall
-use the enabled HD address already associated with the activated wallet; when
-`from` is present, the task shall use the selected HD address and derivation
-path for the hardware-signing flow. Unless activation has selected a different
-enabled address, the default enabled HD address is the address-id tuple
-`account_id: 0`, `chain: External`, `address_id: 0`.
+R49.5. EVM-family software-HD native-coin and fungible-token withdrawals shall
+be supported through both direct `withdraw` and `task::withdraw::init`. When
+`from` is omitted, both paths shall use the activated software key/address for
+balance checks, nonce selection, signing, and the completed transaction's
+sender. When `from` is present, both paths shall resolve it as an HD address
+selector and use the selected activated HD address and derived key instead.
 
-R49.6. `task::withdraw::init` shall return only the standard task-init response:
+R49.6. EVM-family Trezor/hardware-wallet native-coin and ERC20-like fungible
+token withdrawals shall be supported through `task::withdraw::init`. The direct
+legacy `withdraw` method is not required to support Trezor user-action signing;
+clients that need Trezor PIN, passphrase, or device-confirmation handling shall
+use the task path.
+
+R49.7. For an EVM-family Trezor/hardware-wallet task withdrawal with `from`
+omitted, the task shall use the enabled HD address and derivation path already
+associated with the activated wallet. That address shall be used as the sender
+for balance checks, nonce selection, hardware-wallet signing, and the completed
+transaction's `from` field. Unless activation has selected a different enabled
+address, the default enabled HD address is the address-id tuple `account_id: 0`,
+`chain: External`, `address_id: 0`.
+
+R49.8. For an EVM-family Trezor/hardware-wallet task withdrawal with `from`
+present, the task shall resolve `from` as an HD address selector according to
+R49.2. The selected activated HD address shall be used as the sender for
+balance checks and nonce selection, and the selected derivation path shall be
+used for hardware-wallet signing. The completed transaction-details object
+shall report the selected sender in `from`. A selector that cannot be resolved
+to an activated compatible EVM HD address shall fail the task with a structured
+withdrawal error.
+
+R49.9. TRON-family withdrawals are out of scope for the EVM Trezor task-signing
+path. If a TRON-family coin or TRC20-like token is activated with a
+Trezor/hardware-wallet signing policy and submitted through
+`task::withdraw::init`, the task shall fail with a structured unsupported
+withdrawal error and shall not enter a Trezor signing user-action flow.
+
+R49.10. `task::withdraw::init` shall return only the standard task-init response:
 
 - `task_id` (integer) -- identifier for subsequent `status`, `user_action`, and
   `cancel` calls.
@@ -119,128 +142,176 @@ the activated software key/address as the sender. Repeat the task withdrawal
 with a valid `from` selector for a different activated HD address; the task
 shall use the selected address.
 
+T49.8. Start an EVM-family Trezor/hardware-wallet native-coin withdrawal task
+without `from`. The init call shall return `task_id`. The task shall sign with
+the enabled HD address and derivation path associated with the activated wallet,
+and successful terminal status shall return a transaction-details object whose
+`from` contains that enabled address and whose `tx_hex` and `tx_hash` are
+present.
+
+T49.9. Start an EVM-family Trezor/hardware-wallet ERC20-like fungible-token
+withdrawal task with a valid `from` derivation-path selector for a non-default
+activated HD address. The task shall sign with the selected derivation path, and
+successful terminal status shall return a transaction-details object whose
+`from` contains the selected address and whose `tx_hex` and `tx_hash` are
+present.
+
+T49.10. Start an EVM-family Trezor/hardware-wallet withdrawal task with a valid
+address-id selector that resolves to the same sender as a derivation-path
+selector. Both selectors shall result in the same sender address and successful
+transaction-details field contract.
+
+T49.11. Start a TRON-family native or TRC20-like token withdrawal task under a
+Trezor/hardware-wallet signing policy. The task shall reach a terminal
+structured unsupported withdrawal error and shall not require a Trezor PIN or
+passphrase user action.
+
 ## 49.3 Status request and retention
 
-R49.7. `task::withdraw::status` shall accept:
+R49.11. `task::withdraw::status` shall accept:
 
-- `task_id` (integer, required) -- task identifier returned by R49.6.
+- `task_id` (integer, required) -- task identifier returned by R49.10.
 - `forget_if_finished` (boolean, optional, default true) -- whether a terminal
   task shall be removed after this status read.
 
-R49.8. When `forget_if_finished` is omitted, it shall behave as `true`. If the
+R49.12. When `forget_if_finished` is omitted, it shall behave as `true`. If the
 requested task is terminal and `forget_if_finished` is true, the status call
 shall return the terminal status once and remove the task from the task
 registry. A later status call for the same `task_id` shall fail as an unknown
 task.
 
-R49.9. If `forget_if_finished` is false, a terminal status read shall not remove
+R49.13. If `forget_if_finished` is false, a terminal status read shall not remove
 the task. Repeated status calls for the same `task_id` shall continue to return
 the same terminal task-status object until the task is forgotten by another
 terminal read with `forget_if_finished` true or by implementation-defined
 registry cleanup outside the compatibility contract.
 
-R49.10. A status call for a task that is cancelling or no longer registered
+R49.14. A status call for a task that is cancelling or no longer registered
 shall fail as an unknown task. Cancellation is not represented as a public
 withdraw task-status variant.
 
-T49.8. Poll an in-progress withdrawal without `forget_if_finished`. The request
+T49.12. Poll an in-progress withdrawal without `forget_if_finished`. The request
 shall be accepted, and omission shall be equivalent to `forget_if_finished:
 true` for any later terminal read.
 
-T49.9. Poll a successful terminal withdrawal without `forget_if_finished`. The
+T49.13. Poll a successful terminal withdrawal without `forget_if_finished`. The
 first call shall return the terminal success status, and the next call for the
 same `task_id` shall fail as an unknown task.
 
-T49.10. Poll a terminal withdrawal with `forget_if_finished: false` twice. Both
+T49.14. Poll a terminal withdrawal with `forget_if_finished: false` twice. Both
 calls shall return the same terminal status and shall not forget the task.
 
-T49.11. Poll a terminal withdrawal with `forget_if_finished: false`, then poll
+T49.15. Poll a terminal withdrawal with `forget_if_finished: false`, then poll
 with `forget_if_finished: true`, then poll again. The second poll shall return
 the terminal status and forget the task; the third poll shall fail as an
 unknown task.
 
 ## 49.4 Status response wire shape
 
-R49.11. `task::withdraw::status` shall return the standard mmrpc 2.0 response
+R49.15. `task::withdraw::status` shall return the standard mmrpc 2.0 response
 envelope. For any registered task status, including terminal task failure, the
 RPC call itself is successful and the mmrpc response contains a top-level
 `result` member. Transport, decode, authorization, or unknown-task failures are
 RPC errors and are not task-status objects.
 
-R49.12. The `result` member of a successful status-RPC call shall be a
+R49.16. The `result` member of a successful status-RPC call shall be a
 task-status object serialized with:
 
 - `status` -- one of `InProgress`, `UserActionRequired`, `Ok`, or `Error`.
 - `details` -- the payload for that status.
 
-R49.13. `status: "InProgress"` shall carry a withdrawal progress value in
+R49.17. `status: "InProgress"` shall carry a withdrawal progress value in
 `details`. Clients shall treat the value as a progress indicator only and shall
 continue polling.
 
-R49.14. `status: "UserActionRequired"` shall carry a hardware-wallet action
-request in `details`. Clients shall present or collect the requested action and
-submit it through `task::withdraw::user_action` (R49.18).
+R49.18. `status: "UserActionRequired"` shall carry a hardware-wallet action
+request in `details`. For the EVM Trezor task path, the request may identify a
+Trezor PIN request as `EnterTrezorPin` or a Trezor passphrase request as
+`EnterTrezorPassphrase`. Clients shall present or collect the requested action
+and submit it through `task::withdraw::user_action` (R49.22).
 
-R49.15. `status: "Ok"` shall carry the completed transaction-details object
+R49.19. `status: "Ok"` shall carry the completed transaction-details object
 directly in `details`. Clients shall not expect an additional `result` field
 inside `details`.
 
-R49.16. `status: "Error"` shall carry the serialized structured withdrawal
+R49.20. `status: "Error"` shall carry the serialized structured withdrawal
 error directly in `details`. The error payload shall include the public
 `error_type` discriminator and any bound `error_data`; compatibility metadata
 such as human-readable error text or trace fields may also be present. Clients
 shall classify terminal task failure from `result.status == "Error"` and
 `result.details.error_type`, not from the mmrpc top-level error envelope.
 
-T49.12. Poll an in-progress withdrawal task. The mmrpc response shall contain a
+T49.16. Poll an in-progress withdrawal task. The mmrpc response shall contain a
 top-level `result` object whose `status` is `InProgress` and whose `details`
 contains a progress value.
 
-T49.13. Complete a withdrawal successfully and poll its status. The mmrpc
+T49.17. Complete a withdrawal successfully and poll its status. The mmrpc
 response shall contain a top-level `result` object whose `status` is `Ok` and
 whose `details` is the transaction-details object, including `tx_hex`,
 `tx_hash`, `from`, `to`, `total_amount`, `fee_details`, `coin`, `internal_id`,
 and `transaction_type`.
 
-T49.14. Force a withdrawal task to fail after init, for example by using an
+T49.18. Force a withdrawal task to fail after init, for example by using an
 invalid sender selector on an HD wallet. The mmrpc response for the status call
 shall still contain top-level `result`; inside that result, `status` shall be
 `Error` and `details.error_type` shall identify the withdrawal error.
 
-T49.15. Poll a missing or already-forgotten task. The response shall be an
+T49.19. Poll a missing or already-forgotten task. The response shall be an
 mmrpc error response, not a successful task-status object.
 
 ## 49.5 User action and cancellation
 
-R49.17. `task::withdraw::user_action` shall accept:
+R49.21. `task::withdraw::user_action` shall accept:
 
-- `task_id` (integer, required) -- task identifier returned by R49.6.
+- `task_id` (integer, required) -- task identifier returned by R49.10.
 - `user_action` (object, required) -- hardware-wallet action payload for the
-  action currently requested by R49.14.
+  action currently requested by R49.18.
 
-R49.18. `user_action` shall be meaningful only while the task is in the
+R49.22. For the EVM Trezor task path, `user_action` shall accept the matching
+public action payload for the current Trezor request:
+
+- `{"action_type": "TrezorPin", "pin": "<pin-matrix-response>"}`
+- `{"action_type": "TrezorPassphrase", "passphrase": "<passphrase>"}`
+
+Submitting a mismatched Trezor action for the current request shall fail with a
+structured task-action error identifying the expected action type.
+
+R49.23. `user_action` shall be meaningful only while the task is in the
 `UserActionRequired` state. Submitting a user action for a task that is not
 waiting for that action shall fail with a structured task-action error. Pure
 software-signing withdrawals shall not require a `user_action` round trip.
 
-R49.19. `task::withdraw::cancel` shall accept `task_id` and attempt to abort an
+R49.24. `task::withdraw::cancel` shall accept `task_id` and attempt to abort an
 in-flight withdrawal task. Cancelling a task that has already reached a
 terminal state shall fail with the standard cancel-task terminal-state error.
 
-T49.16. Drive a hardware-wallet withdrawal to `UserActionRequired`, submit the
-matching `user_action`, and continue polling. The task shall leave the
+T49.20. Drive an EVM Trezor/hardware-wallet withdrawal task to
+`UserActionRequired` with a PIN request, submit
+`{"action_type": "TrezorPin", "pin": "<pin-matrix-response>"}` through
+`task::withdraw::user_action`, and continue polling. The task shall leave the
 awaiting-user-action state and either progress or terminate.
 
-T49.17. Submit `user_action` for a software-signing withdrawal task that is not
+T49.21. Drive an EVM Trezor/hardware-wallet withdrawal task to
+`UserActionRequired` with a passphrase request, submit
+`{"action_type": "TrezorPassphrase", "passphrase": "<passphrase>"}` through
+`task::withdraw::user_action`, and continue polling. The task shall leave the
+awaiting-user-action state and either progress or terminate.
+
+T49.22. Submit a Trezor passphrase action while the withdrawal task is awaiting
+a Trezor PIN, or submit a Trezor PIN action while the task is awaiting a Trezor
+passphrase. The call shall fail with a structured task-action error identifying
+the expected action type.
+
+T49.23. Submit `user_action` for a software-signing withdrawal task that is not
 awaiting user input. The call shall fail with a structured task-action error.
 
-T49.18. Cancel an in-progress withdrawal task, then poll its status. The task
+T49.24. Cancel an in-progress withdrawal task, then poll its status. The task
 shall not later return a public cancellation status; a status poll shall fail
-as an unknown or unavailable task according to R49.10.
+as an unknown or unavailable task according to R49.14.
 
 ## 49.6 Completed transaction payload
 
-R49.20. A successful direct `withdraw` response and a successful
+R49.25. A successful direct `withdraw` response and a successful
 `task::withdraw::status` terminal payload shall use the same transaction-details
 object. A completed withdrawal shall include at least:
 
@@ -264,6 +335,7 @@ shall treat `tx_hex` and `tx_hash` as mandatory for a completed withdrawal
 transaction and shall use the remaining metadata for history, balance, and
 confirmation display.
 
-T49.19. For the same supported coin family and signing policy, compare a
-successful direct `withdraw` result with the `details` payload of a successful
-task withdrawal. Both shall expose the same transaction-details field contract.
+T49.25. For the same supported coin family and signing policy where both direct
+`withdraw` and task withdrawal are supported, compare a successful direct
+`withdraw` result with the `details` payload of a successful task withdrawal.
+Both shall expose the same transaction-details field contract.
