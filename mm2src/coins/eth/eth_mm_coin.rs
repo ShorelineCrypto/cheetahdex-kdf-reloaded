@@ -1,6 +1,7 @@
 //! MmCoin, ParseCoinAssocTypes, and V2 swap trait implementations for EthCoin.
 
 use super::*;
+use crate::rpc_command::init_withdraw::{InitWithdrawCoin, WithdrawInProgressStatus, WithdrawTaskHandle};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct EthTxFeeDetails {
@@ -24,6 +25,22 @@ impl EthTxFeeDetails {
             gas_price,
             total_fee,
         })
+    }
+}
+
+#[async_trait]
+impl InitWithdrawCoin for EthCoin {
+    async fn init_withdraw(
+        &self,
+        ctx: MmArc,
+        req: WithdrawRequest,
+        task_handle: &WithdrawTaskHandle,
+    ) -> Result<TransactionDetails, MmError<WithdrawError>> {
+        validate_evm_withdraw_request(self, &req)?;
+        task_handle
+            .update_in_progress_status(WithdrawInProgressStatus::GeneratingTransaction)
+            .mm_err(WithdrawError::from)?;
+        withdraw_impl(ctx, self.clone(), req).await
     }
 }
 

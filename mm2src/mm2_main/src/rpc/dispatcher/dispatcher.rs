@@ -43,7 +43,7 @@ use coins::rpc_command::init_account_balance::{init_account_balance, init_accoun
 use coins::rpc_command::init_create_account::{init_create_new_account, init_create_new_account_status,
                                               init_create_new_account_user_action};
 use coins::rpc_command::init_scan_for_new_addresses::{init_scan_for_new_addresses, init_scan_for_new_addresses_status};
-use coins::rpc_command::init_withdraw::{init_withdraw, withdraw_status, withdraw_user_action};
+use coins::rpc_command::init_withdraw::{init_withdraw, withdraw_cancel, withdraw_status, withdraw_user_action};
 use coins::rpc_command::swap_gas_fee_policy::{get_swap_gas_fee_policy, set_swap_gas_fee_policy};
 use coins::rpc_command::token_allowance::{approve_token, get_token_allowance};
 use coins::siacoin::SiaCoin;
@@ -494,6 +494,7 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "withdraw::init" => handle_mmrpc(ctx, request, init_withdraw).await,
         "withdraw::status" => handle_mmrpc(ctx, request, withdraw_status).await,
         "withdraw::user_action" => handle_mmrpc(ctx, request, withdraw_user_action).await,
+        "withdraw::cancel" => handle_mmrpc(ctx, request, withdraw_cancel).await,
         // MetaMask connection task family (ch. 47) is WASM-only: MetaMask is a
         // browser EIP-1193 wallet. On native these arms are absent, so the
         // method falls through to the native catch-all's method-not-found.

@@ -67,6 +67,7 @@ fn task_namespace_methods_are_routed() {
         "withdraw::init",
         "withdraw::status",
         "withdraw::user_action",
+        "withdraw::cancel",
     ]);
 }
 
