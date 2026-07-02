@@ -5,7 +5,10 @@ use super::*;
 // LP-17: bring alloy `Provider` trait into scope so `RootProvider`'s
 // inherent + trait methods (`client()`, `get_block_number()`, etc.) are
 // callable from the helpers below.
+use crate::hd_wallet::{HDAccountOps, HDWalletCoinOps, HDWalletOps};
+use crate::{CoinWithDerivationMethod, CryptoCtx, KeyPairPolicy};
 use alloy::providers::Provider as _;
+use crypto::{Bip44DerivationPath, HDPathToCoin};
 
 #[cfg_attr(test, mockable)]
 pub async fn make_gas_station_request(url: &str) -> GasStationResult {
@@ -360,6 +363,36 @@ impl EthCoinImpl {
     pub fn address_from_str(&self, address: &str) -> Result<Address, String> {
         Ok(try_s!(valid_addr_from_str(address)))
     }
+
+    pub(crate) fn call_request_from(
+        &self,
+        from: Address,
+        to: Address,
+        value: Option<U256>,
+        data: Option<Bytes>,
+    ) -> Web3RpcFut<Bytes> {
+        let request = CallRequest {
+            from: Some(from),
+            to,
+            gas: None,
+            gas_price: None,
+            value,
+            data,
+        };
+
+        let provider = self.alloy_provider();
+        let fut = async move {
+            use crate::eth::alloy_compat::assert_send_future;
+            assert_send_future(
+                provider
+                    .client()
+                    .request::<_, Bytes>("eth_call", (request, BlockNumber::Latest)),
+            )
+            .await
+            .map_err(|e| MmError::new(Web3RpcError::Transport(e.to_string())))
+        };
+        Box::new(fut.boxed().compat())
+    }
 }
 
 pub async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest) -> RawTransactionResult {
@@ -388,6 +421,160 @@ pub async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest)
     })
 }
 
+pub(crate) fn validate_evm_withdraw_request(coin: &EthCoin, _req: &WithdrawRequest) -> MmResult<(), WithdrawError> {
+    if !matches!(coin.coin_type, EthCoinType::Eth | EthCoinType::Erc20 { .. }) {
+        return MmError::err(WithdrawError::CoinDoesntSupportInitWithdraw {
+            coin: coin.ticker.clone(),
+        });
+    }
+
+    Ok(())
+}
+
+pub(crate) struct EvmWithdrawSender {
+    address: Address,
+    key_pair: Option<KeyPair>,
+}
+
+impl EvmWithdrawSender {
+    pub(crate) fn address(&self) -> Address { self.address }
+
+    fn checksum_address(&self) -> String { checksum_address(&format!("{:#02x}", self.address)) }
+
+    fn sign_tx(&self, coin: &EthCoin, tx: UnSignedEthTx) -> Result<SignedEthTx, EthSignerError> {
+        match self.key_pair {
+            Some(ref key_pair) => Ok(tx.sign(key_pair.secret(), coin.chain_id)),
+            None => coin.sign_tx_for_send(tx),
+        }
+    }
+}
+
+pub(crate) async fn resolve_evm_withdraw_sender(
+    ctx: &MmArc,
+    coin: &EthCoin,
+    req: &WithdrawRequest,
+) -> MmResult<EvmWithdrawSender, WithdrawError> {
+    let from = match req.from.clone() {
+        Some(from) => from,
+        None => {
+            return Ok(EvmWithdrawSender {
+                address: coin.my_address,
+                key_pair: None,
+            })
+        },
+    };
+
+    let hd_wallet = match coin.derivation_method() {
+        DerivationMethod::Iguana(_) => {
+            let error = "'from' is not supported if the EVM coin is initialized with a single private key";
+            return MmError::err(WithdrawError::UnexpectedFromAddress(error.to_owned()));
+        },
+        DerivationMethod::HDWallet(hd_wallet) => hd_wallet,
+    };
+
+    let crate::HDAddressId {
+        account_id,
+        chain,
+        address_id,
+    } = match from {
+        crate::WithdrawFrom::AddressId(id) => id,
+        crate::WithdrawFrom::DerivationPath { derivation_path } => {
+            let derivation_path = Bip44DerivationPath::from_str(&derivation_path)
+                .map_to_mm(|e| WithdrawError::UnexpectedFromAddress(format!("{:?}", e)))?;
+            let coin_type = derivation_path.coin_type();
+            let expected_coin_type = hd_wallet.coin_type();
+            if coin_type != expected_coin_type {
+                let error = format!(
+                    "Derivation path '{}' must have '{}' coin type",
+                    derivation_path, expected_coin_type
+                );
+                return MmError::err(WithdrawError::UnexpectedFromAddress(error));
+            }
+            crate::HDAddressId::from(derivation_path)
+        },
+    };
+
+    let hd_account = hd_wallet
+        .get_account(account_id)
+        .await
+        .or_mm_err(|| WithdrawError::UnknownAccount { account_id })?;
+    let is_address_activated = hd_account
+        .is_address_activated(chain, address_id)
+        .mm_err(|e| WithdrawError::UnexpectedFromAddress(e.to_string()))?;
+    let hd_address = coin
+        .derive_address(&hd_account, chain, address_id)
+        .mm_err(|e| WithdrawError::UnexpectedFromAddress(e.to_string()))?;
+    if !is_address_activated {
+        let error = format!("'{}' address is not activated", hd_address.address);
+        return MmError::err(WithdrawError::UnexpectedFromAddress(error));
+    }
+
+    let crypto_ctx = CryptoCtx::from_ctx(ctx).mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
+    let global_hd = match crypto_ctx.key_pair_policy() {
+        KeyPairPolicy::GlobalHDAccount(global_hd) => global_hd,
+        KeyPairPolicy::Iguana => {
+            let error = "EVM withdrawal with explicit 'from' requires a software-HD wallet";
+            return MmError::err(WithdrawError::UnexpectedFromAddress(error.to_owned()));
+        },
+    };
+    let secret = global_hd
+        .derive_secp256k1_secret(&hd_address.derivation_path)
+        .mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
+    let key_pair =
+        KeyPair::from_secret_slice(secret.as_slice()).map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
+    if key_pair.address() != hd_address.address {
+        let error = format!(
+            "Derived signer address '{:#02x}' does not match selected HD address '{:#02x}'",
+            key_pair.address(),
+            hd_address.address
+        );
+        return MmError::err(WithdrawError::InternalError(error));
+    }
+
+    Ok(EvmWithdrawSender {
+        address: hd_address.address,
+        key_pair: Some(key_pair),
+    })
+}
+
+#[cfg_attr(test, mockable)]
+pub(crate) fn evm_withdraw_balance(coin: EthCoin, sender: Address) -> BalanceFut<U256> {
+    let fut = async move {
+        use crate::eth::alloy_compat::assert_send_future;
+        match coin.coin_type {
+            EthCoinType::Eth => assert_send_future(
+                coin.web3
+                    .client()
+                    .request::<_, U256>("eth_getBalance", (sender, BlockNumber::Latest)),
+            )
+            .await
+            .map_err(|e| MmError::new(BalanceError::Transport(e.to_string()))),
+            EthCoinType::Erc20 { ref token_addr, .. } => {
+                let function = ERC20_CONTRACT.function("balanceOf")?;
+                let data = function.encode_input(&[Token::Address(sender)])?;
+
+                let res = coin
+                    .call_request_from(sender, *token_addr, None, Some(data.into()))
+                    .compat()
+                    .await
+                    .mm_err(BalanceError::from)?;
+                let decoded = function.decode_output(&res.0)?;
+                match decoded[0] {
+                    Token::Uint(number) => Ok(number),
+                    _ => {
+                        let error = format!("Expected U256 as balanceOf result but got {:?}", decoded);
+                        MmError::err(BalanceError::InvalidResponse(error))
+                    },
+                }
+            },
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => MmError::err(BalanceError::Internal(
+                "TRON balance lookup not wired through EVM withdraw".to_owned(),
+            )),
+        }
+    };
+    Box::new(fut.boxed().compat())
+}
+
 pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> WithdrawResult {
     // TRON uses a dedicated pipeline: its transaction format, address
     // encoding, signing digest and fee model all differ from the EVM flow.
@@ -409,10 +596,15 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         return crate::eth::tron::withdraw::withdraw_tron(coin, req).await;
     }
 
+    validate_evm_withdraw_request(&coin, &req)?;
+    let sender = resolve_evm_withdraw_sender(&ctx, &coin, &req).await?;
     let to_addr = coin
         .address_from_str(&req.to)
         .map_to_mm(WithdrawError::InvalidAddress)?;
-    let my_balance = coin.my_balance().compat().await.mm_err(Into::into)?;
+    let my_balance = evm_withdraw_balance(coin.clone(), sender.address)
+        .compat()
+        .await
+        .mm_err(Into::into)?;
     let my_balance_dec = u256_to_big_decimal(my_balance, coin.decimals).mm_err(Into::into)?;
 
     let (mut wei_amount, dec_amount) = if req.max {
@@ -465,7 +657,7 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             let estimate_gas_req = CallRequest {
                 value: Some(eth_value_for_estimate),
                 data: Some(data.clone().into()),
-                from: Some(coin.my_address),
+                from: Some(sender.address),
                 to: call_addr,
                 gas: None,
                 // gas price must be supplied because some smart contracts base their
@@ -504,7 +696,7 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             Ok(0.5)
         })
         .await?;
-    let nonce_fut = get_addr_nonce(coin.my_address, coin.web3_instances.clone()).compat();
+    let nonce_fut = get_addr_nonce(sender.address, coin.web3_instances.clone()).compat();
     let nonce = match select(nonce_fut, Timer::sleep(30.)).await {
         Either::Left((nonce_res, _)) => nonce_res.map_to_mm(WithdrawError::Transport)?,
         Either::Right(_) => return MmError::err(WithdrawError::Transport("Get address nonce timed out".to_owned())),
@@ -552,7 +744,7 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         // for delegated broadcast, so `nonce` is intentionally omitted (the
         // framework's computed `tx.nonce` is consumed only by the local path).
         let mut tx_object = serde_json::json!({
-            "from": format!("{:#x}", coin.my_address),
+            "from": format!("{:#x}", sender.address),
             "to": format!("{:#x}", call_addr),
             "value": format!("{:#x}", eth_value),
             "gas": format!("{:#x}", gas),
@@ -610,7 +802,7 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
 
         let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
         let mut spent_by_me = amount_decimal.clone();
-        let received_by_me = if to_addr == coin.my_address {
+        let received_by_me = if to_addr == sender.address {
             amount_decimal.clone()
         } else {
             0.into()
@@ -619,10 +811,9 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         if coin.coin_type == EthCoinType::Eth {
             spent_by_me += &fee_details.total_fee;
         }
-        let my_address = coin.my_address().map_to_mm(WithdrawError::InternalError)?;
         return Ok(TransactionDetails {
             to: vec![checksum_address(&format!("{:#02x}", to_addr))],
-            from: vec![my_address],
+            from: vec![sender.checksum_address()],
             total_amount: amount_decimal,
             my_balance_change: &received_by_me - &spent_by_me,
             spent_by_me,
@@ -643,13 +834,13 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         });
     }
 
-    let signed = coin
-        .sign_tx_for_send(tx)
+    let signed = sender
+        .sign_tx(&coin, tx)
         .map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
     let bytes = rlp::encode(&signed);
     let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
     let mut spent_by_me = amount_decimal.clone();
-    let received_by_me = if to_addr == coin.my_address {
+    let received_by_me = if to_addr == sender.address {
         amount_decimal.clone()
     } else {
         0.into()
@@ -658,10 +849,9 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
     if coin.coin_type == EthCoinType::Eth {
         spent_by_me += &fee_details.total_fee;
     }
-    let my_address = coin.my_address().map_to_mm(WithdrawError::InternalError)?;
     Ok(TransactionDetails {
         to: vec![checksum_address(&format!("{:#02x}", to_addr))],
-        from: vec![my_address],
+        from: vec![sender.checksum_address()],
         total_amount: amount_decimal,
         my_balance_change: &received_by_me - &spent_by_me,
         spent_by_me,

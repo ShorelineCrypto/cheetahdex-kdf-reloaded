@@ -388,7 +388,18 @@ where
         + CoinWithDerivationMethod
         + GetWithdrawSenderAddress<Address = Address, Pubkey = Public>,
 {
+    validate_task_withdraw_sender(&coin, &req)?;
     InitUtxoWithdraw::new(ctx, coin, req, task_handle).await?.build().await
+}
+
+fn validate_task_withdraw_sender<T>(coin: &T, req: &WithdrawRequest) -> MmResult<(), WithdrawError>
+where
+    T: CoinWithDerivationMethod,
+{
+    if matches!(coin.derivation_method(), DerivationMethod::HDWallet(_)) && req.from.is_none() {
+        return MmError::err(WithdrawError::FromAddressNotFound);
+    }
+    Ok(())
 }
 
 pub async fn get_withdraw_from_address<T>(
@@ -629,6 +640,21 @@ where
 mod tests {
     use super::*;
 
+    struct DummyDerivationCoin {
+        derivation_method: DerivationMethod<String, ()>,
+    }
+
+    impl CoinWithDerivationMethod for DummyDerivationCoin {
+        type Address = String;
+        type HDWallet = ();
+
+        fn derivation_method(&self) -> &DerivationMethod<Self::Address, Self::HDWallet> { &self.derivation_method }
+    }
+
+    fn withdraw_req(from: Option<WithdrawFrom>) -> WithdrawRequest {
+        WithdrawRequest::new("RICK".to_owned(), from, "receiver".to_owned(), 1.into(), false, None)
+    }
+
     #[test]
     fn non_btc_min_trading_vol_dynamic_is_dust_based() {
         let min_sat = non_btc_min_trading_vol_sat(1000, &TxFee::Dynamic(EstimateFeeMethod::Standard));
@@ -644,5 +670,40 @@ mod tests {
         // fee_per_kb=5000 -> ceil(5000*496/1000)=2480, then *10=24800 > dust-based 10000
         let min_sat = non_btc_min_trading_vol_sat(1000, &TxFee::FixedPerKb(5000));
         assert_eq!(min_sat, 24_800);
+    }
+
+    #[test]
+    fn task_withdraw_hd_wallet_requires_explicit_sender() {
+        let coin = DummyDerivationCoin {
+            derivation_method: DerivationMethod::HDWallet(()),
+        };
+        let err = validate_task_withdraw_sender(&coin, &withdraw_req(None))
+            .unwrap_err()
+            .into_inner();
+
+        assert!(matches!(err, WithdrawError::FromAddressNotFound));
+    }
+
+    #[test]
+    fn task_withdraw_hd_wallet_accepts_explicit_address_id_sender() {
+        let coin = DummyDerivationCoin {
+            derivation_method: DerivationMethod::HDWallet(()),
+        };
+        let from = WithdrawFrom::AddressId(HDAddressId {
+            account_id: 0,
+            chain: Bip44Chain::External,
+            address_id: 0,
+        });
+
+        validate_task_withdraw_sender(&coin, &withdraw_req(Some(from))).unwrap();
+    }
+
+    #[test]
+    fn task_withdraw_iguana_does_not_require_sender() {
+        let coin = DummyDerivationCoin {
+            derivation_method: DerivationMethod::Iguana("sender".to_owned()),
+        };
+
+        validate_task_withdraw_sender(&coin, &withdraw_req(None)).unwrap();
     }
 }
