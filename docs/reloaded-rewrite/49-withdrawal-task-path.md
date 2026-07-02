@@ -105,6 +105,11 @@ Trezor/hardware-wallet signing policy and submitted through
 `task::withdraw::init`, the task shall fail with a structured unsupported
 withdrawal error and shall not enter a Trezor signing user-action flow.
 
+Implementation status. TODO(reloaded): the EVM Trezor task-withdraw signing
+path specified by R49.6 through R49.9 and T49.8 through T49.11 is not yet
+implemented in reloaded. Software-HD EVM withdrawal support is implemented; the
+Trezor user-action signing path remains pending.
+
 R49.10. `task::withdraw::init` shall return only the standard task-init response:
 
 - `task_id` (integer) -- identifier for subsequent `status`, `user_action`, and
