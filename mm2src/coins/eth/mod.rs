@@ -95,6 +95,10 @@ mod eth_impl;
 mod eth_market_ops;
 mod eth_mm_coin;
 mod eth_swap_ops;
+// EVM Trezor hardware-wallet activation (device-sourced address/pubkey). Native,
+// non-iOS only — the Trezor signing policy exists only there (CRD §50).
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+mod eth_trezor_activation;
 // EVM Trezor hardware-wallet withdrawal (device-driven signing). Native, non-iOS
 // only — the Trezor signing policy exists only there (CRD §50).
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
@@ -106,6 +110,9 @@ mod wire_types;
 pub use eth_impl::*;
 pub use eth_mm_coin::EthTxFeeDetails;
 pub use eth_types::*;
+// EVM Trezor activation entrypoints (native, non-iOS).
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+pub use eth_trezor_activation::{eth_coin_activate_with_trezor, eth_coin_from_conf_and_request_with_trezor};
 
 pub(crate) use crate::DerivationMethod;
 pub(crate) use crate::{CommonSwapOpsV2, DexFee, FindPaymentSpendError, FundingTxSpend, GenPreimageResult,

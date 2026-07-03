@@ -23,14 +23,25 @@ use common::executor::spawn;
 use common::log::info;
 use common::mm_number::BigDecimal;
 use common::Future01CompatExt;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+use crypto::hw_rpc_task::{HwConnectStatuses, HwRpcTaskAwaitingStatus, TrezorRpcTaskConnectProcessor};
 #[cfg(target_arch = "wasm32")] use crypto::CryptoCtx;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+use crypto::CryptoCtx;
 use futures::future::{abortable, AbortHandle};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use mm2_metrics::MetricsArc;
+use rpc_task::RpcTaskHandle;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+use std::time::Duration;
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+use crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensInProgressStatus;
+use crate::init_platform_coin_with_tokens::{InitPlatformCoinWithTokensActivationOps, InitPlatformCoinWithTokensTask};
 
 // The EVM token is itself an `EthCoin` (with an `Erc20` coin-type), so the
 // platform coin and the token share a Rust type.
@@ -89,6 +100,11 @@ pub enum EthActivationPolicy {
     Iguana,
     #[cfg(target_arch = "wasm32")]
     Metamask,
+    /// Trezor hardware-wallet policy (CRD R35.1.4 / §50). Native, non-iOS only;
+    /// requires the interactive `task::enable_eth` path so connect / PIN /
+    /// passphrase / address-confirmation states can be surfaced and answered.
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+    Trezor,
 }
 
 /// EVM platform protocol info resolved from coin configuration.
@@ -313,6 +329,16 @@ impl PlatformWithTokensActivationOps for EthCoin {
                     error,
                 })?
             },
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthActivationPolicy::Trezor => {
+                // The Trezor policy needs the interactive connect / PIN /
+                // passphrase / address-confirmation exchange, which only the
+                // task path (`task::enable_eth`) can drive; the non-task
+                // one-shot activator has no task handle to surface those states.
+                return MmError::err(EthWithTokensActivationError::Transport(
+                    "Trezor activation requires the interactive task::enable_eth path".to_owned(),
+                ));
+            },
         };
         Ok(platform_coin)
     }
@@ -392,10 +418,128 @@ impl PlatformWithTokensActivationOps for EthCoin {
 pub type EthTaskManagerShared =
     crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensTaskManagerShared<EthCoin>;
 
-impl crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensActivationOps for EthCoin {
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+impl InitPlatformCoinWithTokensActivationOps for EthCoin {
     fn rpc_task_manager(activation_ctx: &crate::context::CoinsActivationContext) -> &EthTaskManagerShared {
         &activation_ctx.init_eth_task_manager
     }
+
+    async fn enable_platform_coin_with_task(
+        ctx: MmArc,
+        ticker: String,
+        coin_conf: Json,
+        activation_request: EthWithTokensActivationRequest,
+        protocol_conf: EthProtocolInfo,
+        priv_key: &[u8],
+        task_handle: &RpcTaskHandle<InitPlatformCoinWithTokensTask<Self>>,
+    ) -> Result<Self, MmError<EthWithTokensActivationError>> {
+        // The Trezor policy sources the coin's address / account public key from
+        // the connected device, driving the interaction through `task_handle`
+        // (R50.1 / R50.4). Every other policy is non-interactive and builds the
+        // coin exactly as the one-shot activator (R48.6.1).
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+        if matches!(activation_request.priv_key_policy, EthActivationPolicy::Trezor) {
+            return enable_eth_platform_coin_trezor(
+                ctx,
+                ticker,
+                coin_conf,
+                activation_request,
+                protocol_conf,
+                task_handle,
+            )
+            .await;
+        }
+
+        let _ = task_handle;
+        <Self as PlatformWithTokensActivationOps>::enable_platform_coin(
+            ctx,
+            ticker,
+            coin_conf,
+            activation_request,
+            protocol_conf,
+            priv_key,
+        )
+        .await
+    }
+}
+
+/// Build an EVM platform coin under the Trezor policy: require an initialized
+/// hardware-wallet context (R35.1.5, mirroring the MetaMask "must be connected"
+/// precedent), then source the enabled address / account public key from the
+/// device and build the coin under `EthSigner::Trezor` (R50.1 / R50.4). Connect
+/// / PIN / passphrase / confirmation are surfaced through the activation task's
+/// status / user-action vocabulary.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+async fn enable_eth_platform_coin_trezor(
+    ctx: MmArc,
+    ticker: String,
+    platform_conf: Json,
+    activation_request: EthWithTokensActivationRequest,
+    protocol_conf: EthProtocolInfo,
+    task_handle: &RpcTaskHandle<InitPlatformCoinWithTokensTask<EthCoin>>,
+) -> Result<EthCoin, MmError<EthWithTokensActivationError>> {
+    if activation_request.nodes.is_empty() {
+        return MmError::err(EthWithTokensActivationError::AtLeastOneNodeRequired);
+    }
+
+    // R35.1.5: a Trezor device must already be initialized (mirror MetaMask).
+    let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(|e| EthWithTokensActivationError::Internal(e.to_string()))?;
+    crypto_ctx.hw_ctx().or_mm_err(|| {
+        EthWithTokensActivationError::Transport(
+            "Trezor device is not initialized; connect a Trezor (task::init_trezor) first".to_string(),
+        )
+    })?;
+
+    let urls: Vec<String> = activation_request.nodes.iter().map(|node| node.url.clone()).collect();
+    let mut req = json!({
+        "urls": urls,
+        "tx_history": activation_request.tx_history,
+    });
+    if let Some(addr) = &activation_request.swap_contract_address {
+        req["swap_contract_address"] = json!(addr);
+    }
+    if let Some(addr) = &activation_request.fallback_swap_contract {
+        req["fallback_swap_contract"] = json!(addr);
+    }
+    if let Some(required_confirmations) = activation_request.required_confirmations {
+        req["required_confirmations"] = json!(required_confirmations);
+    }
+
+    let protocol = CoinProtocol::ETH {
+        chain_id: protocol_conf.chain_id,
+    };
+
+    let processor = eth_activation_trezor_connect_processor(task_handle);
+    coins::eth::eth_coin_activate_with_trezor(&ctx, &ticker, &platform_conf, &req, protocol, &processor)
+        .await
+        .map_to_mm(|error| EthWithTokensActivationError::PlatformCoinCreationError { ticker, error })
+}
+
+/// Device connect / interaction time budget shared with the withdraw path (R50.16).
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+const TREZOR_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+const TREZOR_PIN_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Map the device connect / PIN / passphrase / confirmation requests onto the
+/// platform activation task's in-progress / awaiting-status vocabulary (R48.6.2
+/// / R50.13 / R50.14).
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+fn eth_activation_trezor_connect_processor(
+    task_handle: &RpcTaskHandle<InitPlatformCoinWithTokensTask<EthCoin>>,
+) -> TrezorRpcTaskConnectProcessor<'_, InitPlatformCoinWithTokensTask<EthCoin>> {
+    TrezorRpcTaskConnectProcessor::new(task_handle, HwConnectStatuses {
+        on_connect: InitPlatformCoinWithTokensInProgressStatus::WaitingForTrezorToConnect,
+        on_connected: InitPlatformCoinWithTokensInProgressStatus::ActivatingCoin,
+        on_connection_failed: InitPlatformCoinWithTokensInProgressStatus::Finishing,
+        on_button_request: InitPlatformCoinWithTokensInProgressStatus::WaitingForUserToConfirmPubkey,
+        on_pin_request: HwRpcTaskAwaitingStatus::EnterTrezorPin,
+        on_passphrase_request: HwRpcTaskAwaitingStatus::EnterTrezorPassphrase,
+        on_ready: InitPlatformCoinWithTokensInProgressStatus::ActivatingCoin,
+    })
+    .with_connect_timeout(TREZOR_CONNECT_TIMEOUT)
+    .with_pin_timeout(TREZOR_PIN_TIMEOUT)
 }
 
 #[cfg(test)]

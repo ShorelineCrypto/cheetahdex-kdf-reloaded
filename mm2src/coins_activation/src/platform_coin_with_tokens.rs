@@ -303,20 +303,38 @@ where
     )
     .await
     .mm_err(Into::into)?;
+
+    finalize_platform_coin_activation::<Platform>(ctx, &req.ticker, platform_coin, &req.request).await
+}
+
+/// Shared post-build activation tail: enable the inline tokens, enumerate
+/// balances, start any background history fetch, and register the platform coin
+/// with its tokens. Used by both the one-shot activation routine and the
+/// long-running task path (CRD ch. 48) so the two produce identical results.
+pub(crate) async fn finalize_platform_coin_activation<Platform>(
+    ctx: MmArc,
+    ticker: &str,
+    platform_coin: Platform,
+    request: &Platform::ActivationRequest,
+) -> Result<Platform::ActivationResult, MmError<EnablePlatformCoinWithTokensError>>
+where
+    Platform: PlatformWithTokensActivationOps,
+    EnablePlatformCoinWithTokensError: From<Platform::ActivationError>,
+{
     let mut mm_tokens = Vec::new();
     for initializer in platform_coin.token_initializers() {
         let tokens = initializer
-            .enable_tokens_as_mm_coins(ctx.clone(), &req.request)
+            .enable_tokens_as_mm_coins(ctx.clone(), request)
             .await
             .mm_err(Into::into)?;
         mm_tokens.extend(tokens);
     }
 
     let activation_result = platform_coin.get_activation_result().await.mm_err(Into::into)?;
-    log::info!("{} current block {}", req.ticker, activation_result.current_block());
+    log::info!("{} current block {}", ticker, activation_result.current_block());
 
     #[cfg(not(target_arch = "wasm32"))]
-    if req.request.tx_history() {
+    if request.tx_history() {
         let abort_handler = platform_coin.start_history_background_fetching(
             ctx.clone(),
             ctx.metrics.clone(),
@@ -333,4 +351,57 @@ where
         .mm_err(|e| EnablePlatformCoinWithTokensError::PlatformIsAlreadyActivated(e.ticker))?;
 
     Ok(activation_result)
+}
+
+/// Task-driven platform activation (CRD ch. 48): identical to
+/// [`enable_platform_coin_with_tokens`] except the platform coin is built via
+/// [`InitPlatformCoinWithTokensActivationOps::enable_platform_coin_with_task`],
+/// which threads the task handle so an interactive (hardware-wallet) signing
+/// policy can drive the device. The non-interactive policies build the coin
+/// exactly as the one-shot routine does (R48.6.1 / R48.6.2).
+pub(crate) async fn enable_platform_coin_with_tokens_for_task<Platform>(
+    ctx: MmArc,
+    task_handle: &rpc_task::RpcTaskHandle<
+        crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensTask<Platform>,
+    >,
+    req: EnablePlatformCoinWithTokensReq<Platform::ActivationRequest>,
+) -> Result<Platform::ActivationResult, MmError<EnablePlatformCoinWithTokensError>>
+where
+    Platform: crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensActivationOps,
+    Platform::ActivationResult: serde::Serialize + Clone + Send + Sync + 'static,
+    EnablePlatformCoinWithTokensError: From<Platform::ActivationError>,
+{
+    use crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensInProgressStatus;
+
+    if let Ok(Some(_)) = lp_coinfind(&ctx, &req.ticker).await {
+        return MmError::err(EnablePlatformCoinWithTokensError::PlatformIsAlreadyActivated(
+            req.ticker,
+        ));
+    }
+
+    let (platform_conf, platform_protocol) = coin_conf_with_protocol(&ctx, &req.ticker).mm_err(Into::into)?;
+
+    let priv_key = &*ctx.secp256k1_key_pair().private().secret;
+
+    task_handle
+        .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::ActivatingCoin)
+        .mm_err(|e| EnablePlatformCoinWithTokensError::Internal(e.to_string()))?;
+
+    let platform_coin = Platform::enable_platform_coin_with_task(
+        ctx.clone(),
+        req.ticker.clone(),
+        platform_conf,
+        req.request.clone(),
+        platform_protocol,
+        priv_key,
+        task_handle,
+    )
+    .await
+    .mm_err(Into::into)?;
+
+    task_handle
+        .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::RequestingWalletBalance)
+        .mm_err(|e| EnablePlatformCoinWithTokensError::Internal(e.to_string()))?;
+
+    finalize_platform_coin_activation::<Platform>(ctx, &req.ticker, platform_coin, &req.request).await
 }

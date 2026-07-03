@@ -113,8 +113,8 @@ fn trezor_connect_processor(task_handle: &WithdrawTaskHandle) -> TrezorRpcTaskCo
         on_connected: WithdrawInProgressStatus::Preparing,
         on_connection_failed: WithdrawInProgressStatus::Finishing,
         on_button_request: WithdrawInProgressStatus::WaitingForUserToConfirmSigning,
-        on_pin_request: WithdrawAwaitingStatus::WaitForTrezorPin,
-        on_passphrase_request: WithdrawAwaitingStatus::WaitForTrezorPassphrase,
+        on_pin_request: WithdrawAwaitingStatus::EnterTrezorPin,
+        on_passphrase_request: WithdrawAwaitingStatus::EnterTrezorPassphrase,
         on_ready: WithdrawInProgressStatus::Preparing,
     })
     .with_connect_timeout(TREZOR_CONNECT_TIMEOUT)

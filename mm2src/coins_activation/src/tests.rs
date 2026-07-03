@@ -745,6 +745,8 @@ mod platform_coin_task_activation {
     use crate::init_platform_coin_with_tokens::{InitPlatformCoinWithTokensInProgressStatus,
                                                 InitPlatformCoinWithTokensTaskManagerShared};
     use coins::eth::EthCoin;
+    use crypto::hw_rpc_task::HwRpcTaskUserAction;
+    use crypto::trezor::TrezorPassphraseResponse;
     use rpc_task::rpc_common::RpcTaskUserActionRequest;
     use rpc_task::{RpcTaskError, RpcTaskManager};
 
@@ -765,7 +767,8 @@ mod platform_coin_task_activation {
     /// `status` reports no task, while `cancel` and `user_action` surface the
     /// `NoSuchTask` framework discriminant — and crucially neither panics
     /// (R48.6.3: `user_action` is routed and validates its `task_id` even
-    /// though the shipped EVM policies never enter the awaiting state).
+    /// though the shipped non-interactive policies never enter the awaiting
+    /// state).
     #[test]
     fn unknown_task_id_yields_framework_discriminants() {
         let manager: InitPlatformCoinWithTokensTaskManagerShared<EthCoin> = RpcTaskManager::new_shared();
@@ -783,7 +786,10 @@ mod platform_coin_task_activation {
         }
 
         // user_action: unknown task -> NoSuchTask (non-panicking, no fabricated confirmation).
-        match guard.on_user_action(unknown_task_id, ()) {
+        let action = HwRpcTaskUserAction::TrezorPassphrase(TrezorPassphraseResponse {
+            passphrase: String::new(),
+        });
+        match guard.on_user_action(unknown_task_id, action) {
             Err(e) => assert!(matches!(e.into_inner(), RpcTaskError::NoSuchTask(id) if id == unknown_task_id)),
             Ok(()) => panic!("user_action on an unknown task_id must fail"),
         }
@@ -814,12 +820,14 @@ mod platform_coin_task_activation {
     }
 
     /// R48.1.4: `user_action` keeps wire parity with the published surface —
-    /// the request carries `{task_id, user_action}`. The MVP user action is the
-    /// unit type, which deserializes from a `null` payload.
+    /// the request carries `{task_id, user_action}`. The user action is the
+    /// hardware-wallet vocabulary (R48.6.2); a Trezor passphrase answer
+    /// deserializes from its tagged `action_type` form.
     #[test]
-    fn user_action_request_deserializes_unit_payload() {
-        let json = r#"{"task_id": 7, "user_action": null}"#;
-        let req: RpcTaskUserActionRequest<()> = serde_json::from_str(json).unwrap();
+    fn user_action_request_deserializes_hw_payload() {
+        let json = r#"{"task_id": 7, "user_action": {"action_type": "TrezorPassphrase", "passphrase": "pp"}}"#;
+        let req: RpcTaskUserActionRequest<HwRpcTaskUserAction> = serde_json::from_str(json).unwrap();
         assert_eq!(req.task_id, 7);
+        assert!(matches!(req.user_action, HwRpcTaskUserAction::TrezorPassphrase(_)));
     }
 }

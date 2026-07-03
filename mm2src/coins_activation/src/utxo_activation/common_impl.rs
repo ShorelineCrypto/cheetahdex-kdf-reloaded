@@ -80,8 +80,8 @@ pub fn xpub_extractor_rpc_statuses() -> HwConnectStatuses<UtxoStandardInProgress
         on_connected: UtxoStandardInProgressStatus::ActivatingCoin,
         on_connection_failed: UtxoStandardInProgressStatus::Finishing,
         on_button_request: UtxoStandardInProgressStatus::WaitingForUserToConfirmPubkey,
-        on_pin_request: UtxoStandardAwaitingStatus::WaitForTrezorPin,
-        on_passphrase_request: UtxoStandardAwaitingStatus::WaitForTrezorPassphrase,
+        on_pin_request: UtxoStandardAwaitingStatus::EnterTrezorPin,
+        on_passphrase_request: UtxoStandardAwaitingStatus::EnterTrezorPassphrase,
         on_ready: UtxoStandardInProgressStatus::ActivatingCoin,
     }
 }

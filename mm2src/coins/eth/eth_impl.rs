@@ -3269,7 +3269,7 @@ pub async fn eth_coin_from_conf_and_request_with_metamask(
 /// the [`EthSigner`] is constructed and where the coin address comes from
 /// (`signer.address()`). The `Local` path is byte-identical to the prior
 /// `eth_coin_from_conf_and_request` behaviour.
-async fn eth_coin_from_conf_and_request_with_signer(
+pub(crate) async fn eth_coin_from_conf_and_request_with_signer(
     ctx: &MmArc,
     ticker: &str,
     conf: &Json,

@@ -29,11 +29,12 @@
 //! byte-identical `init` params and success results.
 
 use crate::context::CoinsActivationContext;
-use crate::platform_coin_with_tokens::{enable_platform_coin_with_tokens, EnablePlatformCoinWithTokensError,
+use crate::platform_coin_with_tokens::{enable_platform_coin_with_tokens_for_task, EnablePlatformCoinWithTokensError,
                                        EnablePlatformCoinWithTokensReq, PlatformWithTokensActivationOps};
 use crate::prelude::CurrentBlock;
 use async_trait::async_trait;
 use common::{log, SuccessResponse};
+use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use rpc_task::rpc_common::{InitRpcTaskResponse, RpcTaskStatusError, RpcTaskStatusRequest, RpcTaskUserActionError,
@@ -41,6 +42,7 @@ use rpc_task::rpc_common::{InitRpcTaskResponse, RpcTaskStatusError, RpcTaskStatu
 use rpc_task::{RpcTask, RpcTaskError, RpcTaskHandle, RpcTaskManager, RpcTaskManagerShared, RpcTaskStatusAlias,
                RpcTaskTypes};
 use serde_derive::Serialize;
+use serde_json::Value as Json;
 
 pub type InitPlatformCoinWithTokensTaskManagerShared<Platform> =
     RpcTaskManagerShared<InitPlatformCoinWithTokensTask<Platform>>;
@@ -58,6 +60,12 @@ pub enum InitPlatformCoinWithTokensInProgressStatus {
     ActivatingCoin,
     RequestingWalletBalance,
     Finishing,
+    /// A hardware-wallet signing policy is waiting for the Trezor device to be
+    /// connected (R48.6.2). Only reached by an interactive (Trezor) policy.
+    WaitingForTrezorToConnect,
+    /// The device is prompting the user to confirm the account public key /
+    /// address read during activation. Only reached by an interactive policy.
+    WaitingForUserToConfirmPubkey,
 }
 
 /// Per-platform-coin task registration (R48.4.1).
@@ -66,12 +74,37 @@ pub enum InitPlatformCoinWithTokensInProgressStatus {
 /// supplying only the per-coin task-manager accessor. Everything else — the
 /// task struct, the lifecycle handlers, and the `RpcTask` impl — is generic over
 /// the platform coin.
+///
+/// The `enable_platform_coin_with_task` hook is the "policy addition, not
+/// framework change" seam (R48.6.2): its default builds the platform coin
+/// exactly as the one-shot routine does (ignoring the task handle), so the
+/// shipped non-interactive policies behave identically; an interactive
+/// (hardware-wallet) policy overrides it to drive the device via the threaded
+/// task handle.
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub trait InitPlatformCoinWithTokensActivationOps: PlatformWithTokensActivationOps + Send + Sync + 'static
 where
     <Self as PlatformWithTokensActivationOps>::ActivationResult: serde::Serialize + Clone + Send + Sync + 'static,
     EnablePlatformCoinWithTokensError: From<<Self as PlatformWithTokensActivationOps>::ActivationError>,
 {
     fn rpc_task_manager(activation_ctx: &CoinsActivationContext) -> &InitPlatformCoinWithTokensTaskManagerShared<Self>;
+
+    /// Build the platform coin during a task-driven activation, threading the
+    /// task handle so an interactive signing policy can drive its device
+    /// (surfacing connect / PIN / passphrase through the task's status /
+    /// user-action vocabulary). A non-interactive policy ignores the handle and
+    /// builds the coin exactly as [`PlatformWithTokensActivationOps::enable_platform_coin`]
+    /// does, so it never enters the awaiting state (R48.6.1 / R48.6.2).
+    async fn enable_platform_coin_with_task(
+        ctx: MmArc,
+        ticker: String,
+        coin_conf: Json,
+        activation_request: <Self as PlatformWithTokensActivationOps>::ActivationRequest,
+        protocol_conf: <Self as PlatformWithTokensActivationOps>::PlatformProtocolInfo,
+        priv_key: &[u8],
+        task_handle: &RpcTaskHandle<InitPlatformCoinWithTokensTask<Self>>,
+    ) -> Result<Self, MmError<<Self as PlatformWithTokensActivationOps>::ActivationError>>;
 }
 
 /// The long-running platform activation task. Its `run` calls the one-shot
@@ -90,34 +123,32 @@ where
     type Item = Platform::ActivationResult;
     type Error = EnablePlatformCoinWithTokensError;
     type InProgressStatus = InitPlatformCoinWithTokensInProgressStatus;
-    // The shipped EVM/Tendermint signing policies (local/context, MetaMask)
-    // complete activation without an interactive confirmation (R48.6.1), so the
-    // MVP carries unit awaiting/user-action types — the same shape the MetaMask
-    // connection task uses. The hardware (Trezor) policy that needs a non-unit
-    // awaiting state is a future policy addition (R48.6.2), not a framework
-    // change.
-    type AwaitingStatus = ();
-    type UserAction = ();
+    // The shipped non-interactive policies (local/context, MetaMask, Tendermint)
+    // complete activation without an interactive confirmation (R48.6.1), so they
+    // never enter the awaiting state. The awaiting/user-action types default to
+    // the hardware-wallet vocabulary (R48.6.2) so an interactive Trezor policy
+    // can surface PIN / passphrase / connect states and receive the matching
+    // user actions through `task::enable_<platform>::user_action`.
+    type AwaitingStatus = HwRpcTaskAwaitingStatus;
+    type UserAction = HwRpcTaskUserAction;
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl<Platform> RpcTask for InitPlatformCoinWithTokensTask<Platform>
 where
-    Platform: PlatformWithTokensActivationOps + Send + Sync + 'static,
+    Platform: InitPlatformCoinWithTokensActivationOps,
     Platform::ActivationResult: serde::Serialize + Clone + Send + Sync + 'static,
     EnablePlatformCoinWithTokensError: From<Platform::ActivationError>,
 {
     fn initial_status(&self) -> Self::InProgressStatus { InitPlatformCoinWithTokensInProgressStatus::ActivatingCoin }
 
     async fn run(self, task_handle: &RpcTaskHandle<Self>) -> Result<Self::Item, MmError<Self::Error>> {
-        // The one-shot routine is a single opaque call: surface the dominant
-        // balance-enumeration phase before invoking it, then run it verbatim.
-        task_handle
-            .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::RequestingWalletBalance)
-            .mm_err(|e| EnablePlatformCoinWithTokensError::Internal(e.to_string()))?;
-
-        let result = enable_platform_coin_with_tokens::<Platform>(self.ctx, self.request).await?;
+        // The interactive-capable activation routine builds the platform coin
+        // through the per-platform `enable_platform_coin_with_task` hook (so a
+        // hardware policy can drive the threaded device) and then runs the
+        // shared token/balance/history/register tail (R48.2.3 / R48.6.2).
+        let result = enable_platform_coin_with_tokens_for_task::<Platform>(self.ctx, task_handle, self.request).await?;
 
         task_handle
             .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::Finishing)

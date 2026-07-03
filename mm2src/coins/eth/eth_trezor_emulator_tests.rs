@@ -48,7 +48,7 @@ use crypto::trezor::utxo::TrezorUtxoCoin;
 use crypto::trezor::{ProcessTrezorResponse, TrezorPassphraseResponse, TrezorPinMatrix3x3Response,
                      TrezorProcessingError, TrezorRequestProcessor};
 use crypto::{Bip32DerPathOps, Bip44Chain, Bip44PathToAccount, Bip44PathToCoin, ChildNumber, CryptoCtx, DerivationPath,
-             EcdsaCurve, HwClient, Secp256k1ExtendedPublicKey};
+             EcdsaCurve, HwClient, HwProcessingError, Secp256k1ExtendedPublicKey, TrezorConnectProcessor};
 use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
 use mm2_eth::keys::public_to_address;
 use primitives::hash::H264;
@@ -955,7 +955,7 @@ enum SubmitAction {
 struct UserActionRun {
     /// Terminal task result (`Ok` details or the structured error).
     result: Result<TransactionDetails, WithdrawError>,
-    /// The awaiting discriminants observed, in order (e.g. `"WaitForTrezorPassphrase"`).
+    /// The awaiting discriminants observed, in order (e.g. `"EnterTrezorPassphrase"`).
     awaiting_seen: Vec<String>,
     /// The `Result` of every `task::withdraw::user_action` RPC call, in order.
     user_action_results: Vec<Result<(), String>>,
@@ -1017,8 +1017,8 @@ fn drive_withdraw_with_user_action(
             },
             WithdrawCompatRpcStatus::UserActionRequired(awaiting) => {
                 let discr = match &awaiting {
-                    WithdrawAwaitingStatus::WaitForTrezorPin => "WaitForTrezorPin",
-                    WithdrawAwaitingStatus::WaitForTrezorPassphrase => "WaitForTrezorPassphrase",
+                    WithdrawAwaitingStatus::EnterTrezorPin => "EnterTrezorPin",
+                    WithdrawAwaitingStatus::EnterTrezorPassphrase => "EnterTrezorPassphrase",
                 };
                 println!("  UserActionRequired: {discr}");
                 awaiting_seen.push(discr.to_owned());
@@ -1057,10 +1057,10 @@ fn drive_withdraw_with_user_action(
 
 /// T50.6: native EVM Trezor withdraw against a device with **passphrase
 /// protection ON**. The task surfaces the passphrase request as
-/// `UserActionRequired(WaitForTrezorPassphrase)`; the host submits the
+/// `UserActionRequired(EnterTrezorPassphrase)`; the host submits the
 /// passphrase via `task::withdraw::user_action`, the device signs, and the
 /// recovered sender of the signed tx equals the *hidden* (passphrase) wallet's
-/// address. This proves `on_passphrase_request` -> `WaitForTrezorPassphrase` ->
+/// address. This proves `on_passphrase_request` -> `EnterTrezorPassphrase` ->
 /// `user_action` -> `ack_passphrase` end-to-end.
 #[test]
 fn emulator_trezor_withdraw_passphrase_user_action() {
@@ -1118,12 +1118,12 @@ fn emulator_trezor_withdraw_passphrase_user_action() {
     // The task must have surfaced (at least) the passphrase request, and every
     // awaiting discriminant observed must be the passphrase one.
     assert!(
-        run.awaiting_seen.iter().any(|s| s == "WaitForTrezorPassphrase"),
-        "expected at least one WaitForTrezorPassphrase awaiting status, saw {:?}",
+        run.awaiting_seen.iter().any(|s| s == "EnterTrezorPassphrase"),
+        "expected at least one EnterTrezorPassphrase awaiting status, saw {:?}",
         run.awaiting_seen
     );
     assert!(
-        run.awaiting_seen.iter().all(|s| s == "WaitForTrezorPassphrase"),
+        run.awaiting_seen.iter().all(|s| s == "EnterTrezorPassphrase"),
         "unexpected non-passphrase awaiting status among {:?}",
         run.awaiting_seen
     );
@@ -1157,7 +1157,7 @@ fn emulator_trezor_withdraw_passphrase_user_action() {
 }
 
 /// T50.7: with the task awaiting a passphrase
-/// (`UserActionRequired(WaitForTrezorPassphrase)`), submitting a PIN action
+/// (`UserActionRequired(EnterTrezorPassphrase)`), submitting a PIN action
 /// instead is rejected by the mutual action-type guard added in `crypto`
 /// (`HwRpcTaskUserAction` -> `TrezorPassphraseResponse` conversion). The task
 /// fails cleanly with a structured error naming the expected action type — no
@@ -1212,7 +1212,7 @@ fn emulator_trezor_withdraw_passphrase_action_mismatch() {
     println!("USER_ACTION_RESULTS = {:?}", run.user_action_results);
 
     assert!(
-        run.awaiting_seen.iter().any(|s| s == "WaitForTrezorPassphrase"),
+        run.awaiting_seen.iter().any(|s| s == "EnterTrezorPassphrase"),
         "expected the task to await a passphrase, saw {:?}",
         run.awaiting_seen
     );
@@ -1239,7 +1239,7 @@ fn emulator_trezor_withdraw_passphrase_action_mismatch() {
 /// positions (obtainable via DebugLink in debug mode). That matrix handling is
 /// out of scope for this host-passphrase harness and would be flaky, so this
 /// test is ignored. The PIN plumbing itself
-/// (`WaitForTrezorPin` / `HwRpcTaskUserAction::TrezorPin` /
+/// (`EnterTrezorPin` / `HwRpcTaskUserAction::TrezorPin` /
 /// `PinMatrixRequest::ack_pin`) is exercised by the connect-processor path and
 /// by the mutual action-type guard in T50.7. Run explicitly with
 /// `--ignored` once a matrix-mapping helper is added.
@@ -1259,4 +1259,131 @@ fn emulator_trezor_withdraw_pin_user_action() {
     // helper exists, replace this body with the live round-trip and run with
     // `--ignored`.
     println!("SKIP emulator_trezor_withdraw_pin_user_action (T50.5): PIN-matrix mapping helper not implemented");
+}
+
+// ---------------------------------------------------------------------------
+// EVM Trezor activation (task::enable_eth policy) — CRD ch35/ch48/ch50
+// ---------------------------------------------------------------------------
+
+/// A minimal [`TrezorConnectProcessor`] that auto-acks every connect / button /
+/// ready event and answers a `PassphraseRequest` with an empty passphrase (the
+/// clean SLIP-14 device never asks). A PIN request is unexpected and fails
+/// loudly. Used to exercise the activation device-read path without spinning up
+/// the full platform-activation RPC task.
+struct AutoConnectProcessor;
+
+#[async_trait::async_trait]
+impl TrezorRequestProcessor for AutoConnectProcessor {
+    type Error = String;
+
+    async fn on_button_request(&self) -> MmResult<(), TrezorProcessingError<String>> { Ok(()) }
+
+    async fn on_pin_request(&self) -> MmResult<TrezorPinMatrix3x3Response, TrezorProcessingError<String>> {
+        MmError::err(TrezorProcessingError::ProcessorError(
+            "unexpected PIN request during activation".to_owned(),
+        ))
+    }
+
+    async fn on_passphrase_request(&self) -> MmResult<String, TrezorProcessingError<String>> { Ok(String::new()) }
+
+    async fn on_ready(&self) -> MmResult<(), TrezorProcessingError<String>> { Ok(()) }
+}
+
+#[async_trait::async_trait]
+impl TrezorConnectProcessor for AutoConnectProcessor {
+    async fn on_connect(&self) -> MmResult<Duration, HwProcessingError<String>> { Ok(Duration::from_secs(60)) }
+
+    async fn on_connected(&self) -> MmResult<(), HwProcessingError<String>> { Ok(()) }
+
+    async fn on_connection_failed(&self) -> MmResult<(), HwProcessingError<String>> { Ok(()) }
+}
+
+/// Activate a native EVM coin under the Trezor signing policy: the coin's
+/// address + account public key are sourced FROM THE DEVICE at activation
+/// (`eth_coin_activate_with_trezor`, the routine the `task::enable_eth`
+/// Trezor policy drives), and the activated coin's address must equal the
+/// device's SLIP-14 EVM address. Then a full withdraw is driven through the
+/// activated coin and the recovered sender of the signed tx must equal that
+/// same device address (activate -> withdraw end-to-end).
+#[test]
+fn emulator_trezor_activate_eth_native() {
+    let addr = emulator_addr();
+    if !emulator_reachable(&addr) {
+        println!("SKIP emulator_trezor_activate_eth_native: emulator unreachable at {addr}");
+        return;
+    }
+    emulator_setup();
+    let _restore = Slip14Restore;
+
+    let material = fetch_device_material();
+    let device_addr = material.eth_address;
+    println!("DEVICE_ADDR = {:#x}", device_addr);
+    let ctx = ctx_with_hw(material.client, material.internal_pubkey);
+
+    // 100 ETH balance, nonce 0 — enough to later withdraw 1 ETH + gas.
+    let node = spawn_mock_node("0x56bc75e2d63100000", "0x0", "0x0");
+
+    let conf = serde_json::json!({
+        "coin": "ETH",
+        "name": "ethereum",
+        "chain_id": 1,
+        "protocol": {"type": "ETH"},
+    });
+    let req = serde_json::json!({
+        "urls": [node.url.clone()],
+        "swap_contract_address": "0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94",
+        "tx_history": false,
+    });
+
+    let processor = AutoConnectProcessor;
+    let coin = block_on(super::eth_coin_activate_with_trezor(
+        &ctx,
+        "ETH",
+        &conf,
+        &req,
+        crate::CoinProtocol::ETH { chain_id: Some(1) },
+        &processor,
+    ))
+    .expect("activate eth under Trezor policy");
+
+    // R50.1 / R50.4: the activated coin's address is the device SLIP-14 address.
+    let activated_addr = coin.my_address().expect("activated coin address");
+    println!("ACTIVATED_ADDR = {}", activated_addr);
+    assert_eq!(
+        activated_addr.to_lowercase(),
+        format!("{:#x}", device_addr).to_lowercase(),
+        "activated coin address must be the device SLIP-14 EVM address"
+    );
+
+    // Full activate -> withdraw: the activated (Trezor-signer) coin signs a
+    // withdrawal on the device; the recovered sender must be the same address.
+    let withdraw_req = WithdrawRequest {
+        amount: 1.into(),
+        from: None,
+        to: RECIPIENT.to_string(),
+        coin: "ETH".to_string(),
+        max: false,
+        fee: Some(WithdrawFee::EthGas {
+            gas: 150000,
+            gas_price: 1.into(),
+        }),
+    };
+
+    let _confirm = ConfirmLoop::spawn(120);
+    let details =
+        drive_withdraw(&ctx, coin, withdraw_req, Duration::from_secs(120)).expect("activated coin withdraw Ok");
+
+    let expected_from = checksum_address(&format!("{:#02x}", device_addr));
+    println!("FROM = {:?}", details.from);
+    println!("TX_HASH = {}", details.tx_hash);
+    assert_eq!(details.from, vec![expected_from]);
+    assert!(!details.tx_hex.0.is_empty(), "tx_hex must be present");
+
+    let signed = signed_eth_tx_from_bytes(&details.tx_hex.0).expect("decode signed tx");
+    println!("RECOVERED_SENDER = {:#x}", signed.sender());
+    assert_eq!(
+        signed.sender(),
+        device_addr,
+        "recovered sender of the activated-coin withdraw must be the device address"
+    );
 }
