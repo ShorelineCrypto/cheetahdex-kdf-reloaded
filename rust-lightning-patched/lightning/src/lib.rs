@@ -138,7 +138,7 @@ mod prelude {
 	#[cfg(feature = "hashbrown")]
 	extern crate hashbrown;
 
-	pub use alloc::{vec, vec::Vec, string::String, collections::VecDeque, boxed::Box};
+	pub use alloc::{vec, vec::Vec, string::String, boxed::Box};
 	#[cfg(not(feature = "hashbrown"))]
 	pub use std::collections::{HashMap, HashSet, hash_map};
 	#[cfg(feature = "hashbrown")]
