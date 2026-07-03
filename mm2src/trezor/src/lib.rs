@@ -18,9 +18,9 @@ pub use client::{TrezorClient, TrezorSession};
 pub use error::{OperationFailure, TrezorError, TrezorResult};
 pub use ethereum::{TrezorEthSignature, TrezorEthTxInput};
 pub use hw_common::primitives::{DerivationPath, EcdsaCurve};
-pub use response::{ButtonRequest, PinMatrixRequest, TrezorResponse};
+pub use response::{ButtonRequest, PassphraseRequest, PinMatrixRequest, TrezorResponse};
 pub use response_processor::{ProcessTrezorResponse, TrezorProcessingError, TrezorRequestProcessor};
-pub use user_interaction::{TrezorPinMatrix3x3Response, TrezorUserInteraction};
+pub use user_interaction::{TrezorPassphraseResponse, TrezorPinMatrix3x3Response, TrezorUserInteraction};
 
 pub(crate) fn serialize_derivation_path(path: &DerivationPath) -> Vec<u32> {
     path.iter().map(|index| index.0).collect()

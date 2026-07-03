@@ -83,6 +83,8 @@ trezor_message_impl!(Success, MessageType::Success);
 trezor_message_impl!(Failure, MessageType::Failure);
 trezor_message_impl!(PinMatrixRequest, MessageType::PinMatrixRequest);
 trezor_message_impl!(PinMatrixAck, MessageType::PinMatrixAck);
+trezor_message_impl!(PassphraseRequest, MessageType::PassphraseRequest);
+trezor_message_impl!(PassphraseAck, MessageType::PassphraseAck);
 trezor_message_impl!(ButtonRequest, MessageType::ButtonRequest);
 trezor_message_impl!(ButtonAck, MessageType::ButtonAck);
 // Bitcoin
