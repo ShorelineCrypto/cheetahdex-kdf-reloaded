@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod error;
+pub mod ethereum;
 #[allow(dead_code)] mod proto;
 pub mod response;
 mod response_processor;
@@ -15,6 +16,7 @@ pub mod utxo;
 
 pub use client::{TrezorClient, TrezorSession};
 pub use error::{OperationFailure, TrezorError, TrezorResult};
+pub use ethereum::{TrezorEthSignature, TrezorEthTxInput};
 pub use hw_common::primitives::{DerivationPath, EcdsaCurve};
 pub use response::{ButtonRequest, PinMatrixRequest, TrezorResponse};
 pub use response_processor::{ProcessTrezorResponse, TrezorProcessingError, TrezorRequestProcessor};
