@@ -122,8 +122,17 @@ pub(crate) use mm2_eth::keys::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
 
 #[cfg(test)] mod eth_tests;
+// Emulator-gated EVM Trezor signing integration tests (CRD §50.8). Native,
+// non-iOS, and only when the `trezor-emulator-tests` feature is on; they drive a
+// real `task::withdraw` against a running Trezor emulator.
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    not(target_os = "ios"),
+    feature = "trezor-emulator-tests"
+))]
+mod eth_trezor_emulator_tests;
 #[cfg(target_arch = "wasm32")] mod eth_wasm_tests;
-
 // ─── EthCoin newtype ────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
