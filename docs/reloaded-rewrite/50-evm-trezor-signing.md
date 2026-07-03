@@ -81,6 +81,23 @@ The signing device is required to run the acceptance tests, so T50.* are
 validated against a Trezor **emulator** harness (implementation/test-infra note,
 §50.8).
 
+**Implementation status (informative).** The signing architecture of this
+chapter -- the `EthSigner::Trezor` seam variant, device-driven legacy EIP-155
+signing over the public Trezor Ethereum protocol, byte-shape parity, the
+withdrawal-task status progression, and the PIN/passphrase user-action flow
+(R50.4-R50.23) -- is implemented and validated end-to-end against a Trezor
+emulator (the `trezor-emulator-tests` acceptance suite covers T50.1, T50.2,
+T50.4, T50.6, T50.7, T50.10, T50.11; T50.3 is subsumed by T50.2; T50.5 (PIN
+round-trip) is an emulator-harness `#[ignore]` pending a DebugLink PIN-matrix
+helper; T50.8/T50.9 device-availability faults need transport-level fault
+injection). The remaining pending piece is **activation** under the Trezor
+hardware `priv_key_policy` (R50.1-R50.3): creating a Trezor-policy EVM coin via
+`task::enable_eth` requires the platform-coin task-activation framework to carry
+an interactive (non-unit) awaiting/user-action state (ch. 48 R48.6.2), which is
+tracked separately. Until it lands, the validated withdrawal signing path is
+reachable only for a Trezor-policy EVM coin constructed directly (as the
+acceptance suite does), not yet through the public activation RPC.
+
 ---
 
 ## 50.1 Activation binding: device-sourced address and key
