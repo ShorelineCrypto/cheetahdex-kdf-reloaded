@@ -1293,8 +1293,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
             Initialized::new(
                 maker_coin_start_block,
                 taker_coin_start_block,
-                taker_payment_trade_fee.amount.into(),
-                maker_payment_spend_trade_fee.amount.into(),
+                taker_payment_trade_fee.amount,
+                maker_payment_spend_trade_fee.amount,
             ),
             sm,
         )
@@ -1327,11 +1327,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
         };
 
         // Validate started_at difference.
-        let started_at_diff = if sm.started_at > maker_negotiation.started_at {
-            sm.started_at - maker_negotiation.started_at
-        } else {
-            maker_negotiation.started_at - sm.started_at
-        };
+        let started_at_diff = sm.started_at.abs_diff(maker_negotiation.started_at);
         if started_at_diff > MAX_STARTED_AT_DIFF {
             let reason = AbortReason::NegotiationFailed(format!(
                 "started_at difference too large: {} > {}",
@@ -1403,7 +1399,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
             sm.p2p_topic.clone(),
             taker_negotiation_msg,
             super::NEGOTIATE_SEND_INTERVAL,
-            sm.p2p_keypair.clone(),
+            sm.p2p_keypair,
         );
 
         // Wait for maker to acknowledge negotiation.
@@ -1505,7 +1501,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for N
             sm.p2p_topic.clone(),
             funding_info_msg,
             super::TX_INFO_SEND_INTERVAL,
-            sm.p2p_keypair.clone(),
+            sm.p2p_keypair,
         );
 
         Self::change_state(
@@ -1834,7 +1830,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
                 .await;
             if let Err(e) = confirm_result {
                 warn!("Swap {}: maker payment not confirmed in time: {}", sm.uuid, e);
-                let reason = AbortReason::MakerPaymentNotConfirmedInTime(format!("{}", e));
+                let reason = AbortReason::MakerPaymentNotConfirmedInTime(e.to_string());
                 return Self::change_state(
                     TakerFundingRefundRequired::new(
                         self.maker_coin_start_block,
@@ -2176,7 +2172,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             sm.p2p_topic.clone(),
             preimage_msg,
             super::TX_INFO_SEND_INTERVAL,
-            sm.p2p_keypair.clone(),
+            sm.p2p_keypair,
         );
 
         // Wait for maker to spend taker payment (reveals maker secret).
@@ -2306,7 +2302,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
         {
             Ok(secret) => secret,
             Err(e) => {
-                let reason = AbortReason::CouldNotExtractSecret(format!("{}", e));
+                let reason = AbortReason::CouldNotExtractSecret(e.to_string());
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
@@ -2387,7 +2383,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 .await;
             if let Err(e) = confirm_result {
                 warn!("Swap {}: maker payment spend not confirmed in time: {}", sm.uuid, e);
-                let reason = AbortReason::MakerPaymentSpendNotConfirmedInTime(format!("{}", e));
+                let reason = AbortReason::MakerPaymentSpendNotConfirmedInTime(e.to_string());
                 return Self::change_state(
                     TakerPaymentRefundRequired::new(
                         // We don't have taker_payment bytes here; use empty as fallback

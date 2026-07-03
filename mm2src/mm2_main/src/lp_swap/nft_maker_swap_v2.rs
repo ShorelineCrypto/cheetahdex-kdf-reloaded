@@ -321,6 +321,9 @@ pub enum NftSwapV2RestartParkReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+// This is a swap state-machine decision enum; boxing the large variant would add
+// heap indirection per transition for no real memory benefit here.
+#[allow(clippy::large_enum_variant)]
 pub enum NftSwapV2RestartDecision {
     UseNftV2Path {
         maker: NftMakerStateMachineBinding,

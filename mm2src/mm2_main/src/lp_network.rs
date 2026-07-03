@@ -72,6 +72,9 @@ pub type PeerHealthcheckRpcResult<T> = Result<T, MmError<PeerHealthcheckError>>;
 
 #[derive(Debug, Serialize, Display, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
+// Variants intentionally share the idiomatic `Error` suffix; renaming them is
+// churny and hurts readability.
+#[allow(clippy::enum_variant_names)]
 pub enum PeerHealthcheckError {
     ProbeGenerationError(String),
     ProbeEncodingError(String),

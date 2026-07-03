@@ -29,6 +29,9 @@ use std::sync::Arc;
 /// human-readable messages are diagnostic and not part of the contract.
 #[derive(Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
+// Variants intentionally share the idiomatic `Error` suffix; renaming them is
+// churny and hurts readability.
+#[allow(clippy::enum_variant_names)]
 pub enum WalletConnectRpcError {
     /// An initialisation or precondition failure (client error / 400): the
     /// subsystem could not be brought up, or the request referenced something

@@ -1152,8 +1152,8 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
             Initialized::new(
                 maker_coin_start_block,
                 taker_coin_start_block,
-                maker_payment_trade_fee.amount.into(),
-                taker_payment_spend_trade_fee.amount.into(),
+                maker_payment_trade_fee.amount,
+                taker_payment_spend_trade_fee.amount,
             ),
             sm,
         )
@@ -1194,7 +1194,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
             sm.p2p_topic.clone(),
             negotiation_msg,
             super::NEGOTIATE_SEND_INTERVAL,
-            sm.p2p_keypair.clone(),
+            sm.p2p_keypair,
         );
 
         let taker_negotiation = match super::recv_swap_v2_msg(
@@ -1225,11 +1225,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
         };
 
         // Validate started_at difference.
-        let started_at_diff = if sm.started_at > taker_data.started_at {
-            sm.started_at - taker_data.started_at
-        } else {
-            taker_data.started_at - sm.started_at
-        };
+        let started_at_diff = sm.started_at.abs_diff(taker_data.started_at);
         if started_at_diff > MAX_STARTED_AT_DIFF {
             let reason = AbortReason::NegotiationFailed(format!(
                 "started_at difference too large: {} > {}",
@@ -1310,7 +1306,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for W
             sm.p2p_topic.clone(),
             negotiated_msg,
             super::NEGOTIATE_SEND_INTERVAL,
-            sm.p2p_keypair.clone(),
+            sm.p2p_keypair,
         );
 
         let funding_info = match super::recv_swap_v2_msg(
@@ -1516,7 +1512,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             sm.p2p_topic.clone(),
             payment_info_msg,
             super::TX_INFO_SEND_INTERVAL,
-            sm.p2p_keypair.clone(),
+            sm.p2p_keypair,
         );
 
         let taker_funding = match sm.taker_coin.parse_tx(&self.taker_funding) {

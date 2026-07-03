@@ -16,6 +16,8 @@ use super::{EnableStreamingRequest, EnableStreamingResponse};
 use crate::mm2::lp_dispatcher::{dispatch_lp_event, StopCtxEvent};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// The `Sig` prefix mirrors the POSIX signal names these variants represent.
+#[allow(clippy::enum_variant_names)]
 pub enum ShutdownSignalName {
     SigInt,
     SigTerm,
