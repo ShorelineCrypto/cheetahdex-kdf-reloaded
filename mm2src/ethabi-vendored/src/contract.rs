@@ -90,10 +90,10 @@ impl Contract {
     }
 
     /// Iterate over all functions of the contract in arbitrary order.
-    pub fn functions(&self) -> Functions { Functions(self.functions.values()) }
+    pub fn functions<'a>(&'a self) -> Functions<'a> { Functions(self.functions.values()) }
 
     /// Iterate over all events of the contract in arbitrary order.
-    pub fn events(&self) -> Events { Events(self.events.values()) }
+    pub fn events<'a>(&'a self) -> Events<'a> { Events(self.events.values()) }
 
     /// Returns true if contract has fallback
     pub fn fallback(&self) -> bool { self.fallback }

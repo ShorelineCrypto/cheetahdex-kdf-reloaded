@@ -67,7 +67,6 @@ pub trait L2InitialStatus {
 
 pub struct L2ActivationTask<L2: InitL2ActivationOps> {
     ctx: MmArc,
-    ticker: String,
     platform_coin: L2::PlatformCoin,
     validated_params: L2::ValidatedParams,
     protocol_conf: L2::ProtocolInfo,
@@ -151,7 +150,6 @@ where
         .map_mm_err()?;
     let task = L2ActivationTask::<L2> {
         ctx,
-        ticker,
         platform_coin,
         validated_params,
         protocol_conf,

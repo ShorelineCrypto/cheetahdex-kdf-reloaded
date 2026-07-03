@@ -1,5 +1,9 @@
 #![allow(unknown_lints)]
 #![allow(missing_docs)]
+// The vendored `error_chain!` expansion probes an old `has_error_description_deprecated`
+// cfg that no longer exists; the check is internal to the macro and cannot be
+// influenced from here without upgrading `error_chain`.
+#![allow(unexpected_cfgs)]
 
 use std::{num, string};
 use {hex, serde_json};

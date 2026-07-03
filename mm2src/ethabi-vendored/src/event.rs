@@ -116,7 +116,7 @@ impl Event {
             .flat_map(|t| t.to_vec())
             .collect::<Vec<u8>>();
 
-        let topic_tokens = try!(decode(&topic_types, &flat_topics));
+        let topic_tokens = (decode(&topic_types, &flat_topics))?;
 
         // topic may be only a 32 bytes encoded token
         if topic_tokens.len() != topics_len - to_skip {
@@ -127,7 +127,7 @@ impl Event {
 
         let data_types = data_params.iter().map(|p| p.kind.clone()).collect::<Vec<ParamType>>();
 
-        let data_tokens = try!(decode(&data_types, &data));
+        let data_tokens = (decode(&data_types, &data))?;
 
         let data_named_tokens = data_params.into_iter().map(|p| p.name).zip(data_tokens.into_iter());
 
