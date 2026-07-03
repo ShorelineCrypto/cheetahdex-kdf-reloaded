@@ -308,9 +308,36 @@ impl PlatformWithTokensActivationOps for TendermintCoin {
 pub type TendermintTaskManagerShared =
     crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensTaskManagerShared<TendermintCoin>;
 
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensActivationOps for TendermintCoin {
     fn rpc_task_manager(activation_ctx: &crate::context::CoinsActivationContext) -> &TendermintTaskManagerShared {
         &activation_ctx.init_tendermint_task_manager
+    }
+
+    /// Tendermint activation is non-interactive: it builds the coin with the
+    /// centrally-threaded local secret exactly as the one-shot activator and
+    /// never enters the awaiting state (R48.6.1). The task handle is unused.
+    async fn enable_platform_coin_with_task(
+        ctx: MmArc,
+        ticker: String,
+        coin_conf: serde_json::Value,
+        activation_request: <Self as PlatformWithTokensActivationOps>::ActivationRequest,
+        protocol_conf: <Self as PlatformWithTokensActivationOps>::PlatformProtocolInfo,
+        priv_key: &[u8],
+        _task_handle: &rpc_task::RpcTaskHandle<
+            crate::init_platform_coin_with_tokens::InitPlatformCoinWithTokensTask<Self>,
+        >,
+    ) -> Result<Self, MmError<<Self as PlatformWithTokensActivationOps>::ActivationError>> {
+        <Self as PlatformWithTokensActivationOps>::enable_platform_coin(
+            ctx,
+            ticker,
+            coin_conf,
+            activation_request,
+            protocol_conf,
+            priv_key,
+        )
+        .await
     }
 }
 

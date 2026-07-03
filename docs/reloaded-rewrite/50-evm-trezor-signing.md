@@ -90,13 +90,14 @@ emulator (the `trezor-emulator-tests` acceptance suite covers T50.1, T50.2,
 T50.4, T50.6, T50.7, T50.10, T50.11; T50.3 is subsumed by T50.2; T50.5 (PIN
 round-trip) is an emulator-harness `#[ignore]` pending a DebugLink PIN-matrix
 helper; T50.8/T50.9 device-availability faults need transport-level fault
-injection). The remaining pending piece is **activation** under the Trezor
-hardware `priv_key_policy` (R50.1-R50.3): creating a Trezor-policy EVM coin via
-`task::enable_eth` requires the platform-coin task-activation framework to carry
-an interactive (non-unit) awaiting/user-action state (ch. 48 R48.6.2), which is
-tracked separately. Until it lands, the validated withdrawal signing path is
-reachable only for a Trezor-policy EVM coin constructed directly (as the
-acceptance suite does), not yet through the public activation RPC.
+injection). **Activation** under the Trezor hardware `priv_key_policy`
+(R50.1-R50.4) is also implemented and emulator-validated: `EthActivationPolicy::Trezor`
+activates an EVM platform coin through the `task::enable_eth` task variant,
+deriving the coin's address and account public key from the device (interactive
+connect / PIN / passphrase surfaced as the platform task's awaiting states,
+realizing the ch. 48 R48.6.2 awaiting-user-action machinery). The whole Trezor
+EVM path -- activate then withdraw -- is therefore reachable through the public
+task RPC surface.
 
 ---
 

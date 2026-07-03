@@ -110,12 +110,11 @@ R49.6 through R49.9 and T49.8 through T49.11, and the PIN/passphrase user-action
 contract of R49.18/R49.22 (T49.20 through T49.22), are implemented in reloaded
 and validated end-to-end against a Trezor emulator (see chapter 50 and the
 `trezor-emulator-tests` acceptance suite). Software-HD EVM withdrawal support is
-also implemented. The remaining pending piece is EVM coin *activation* under the
-Trezor hardware `priv_key_policy` (obtaining a Trezor-policy EVM coin via
-`task::enable_eth`, ch. 35 R35.1.4 / R35.3.2); until that lands, a Trezor-policy
-EVM coin cannot yet be created through the public activation RPC. That activation
-gap is a platform-activation-framework addition (ch. 48 R48.6.2) tracked
-separately from the withdrawal signing path.
+also implemented. EVM coin *activation* under the Trezor hardware
+`priv_key_policy` (obtaining a Trezor-policy EVM coin via `task::enable_eth`,
+ch. 35 R35.1.4 / R35.3.2, ch. 50 R50.1-R50.4) is also implemented and
+emulator-validated, so the Trezor EVM withdraw path is now reachable through the
+public activation RPC.
 
 R49.10. `task::withdraw::init` shall return only the standard task-init response:
 
