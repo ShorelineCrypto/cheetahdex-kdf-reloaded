@@ -36,6 +36,13 @@ impl InitWithdrawCoin for EthCoin {
         req: WithdrawRequest,
         task_handle: &WithdrawTaskHandle,
     ) -> Result<TransactionDetails, MmError<WithdrawError>> {
+        // CRD §50 / R49.6: an EVM coin under the Trezor signing policy is signed
+        // by the device through the task path; route to the dedicated device flow
+        // (which performs its own validation, incl. the R50.20 TRON rejection).
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+        if matches!(self.signer, EthSigner::Trezor(_)) {
+            return crate::eth::eth_trezor_withdraw::withdraw_trezor_impl(ctx, self.clone(), req, task_handle).await;
+        }
         validate_evm_withdraw_request(self, &req)?;
         task_handle
             .update_in_progress_status(WithdrawInProgressStatus::GeneratingTransaction)
@@ -72,6 +79,16 @@ impl MmCoin for EthCoin {
 
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         let ctx = try_f!(MmArc::from_weak(&self.ctx).or_mm_err(|| WithdrawError::InternalError("!ctx".to_owned())));
+        // CRD R50.24 / R49.6: the direct legacy `withdraw` method does not support
+        // Trezor user-action signing; clients must use the `task::withdraw` API.
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+        if matches!(self.signer, EthSigner::Trezor(_)) {
+            return Box::new(futures01::future::err(MmError::new(
+                WithdrawError::UnsupportedUnderTrezor(
+                    "Trezor EVM withdrawals require the 'task::withdraw' API for device user-action signing".to_owned(),
+                ),
+            )));
+        }
         Box::new(Box::pin(withdraw_impl(ctx, self.clone(), req)).compat())
     }
 

@@ -6,6 +6,16 @@ edition = "2021"
 [features]
 zhtlc-native-tests = []
 zhtlc = []
+# UDP transport for the Trezor emulator (native only, off by default). Lets
+# downstream test builds drive the whole stack against a Trezor emulator. `coins`
+# reaches the `trezor` crate only through `crypto`, so this only forwards to it.
+trezor-udp = ["crypto/trezor-udp"]
+# Emulator-gated EVM Trezor signing integration tests (native only, off by
+# default). Compiles the `#[cfg(test)]` `eth_trezor_emulator_tests` module, which
+# drives a real `task::withdraw` against a running Trezor emulator (chain state is
+# mocked; signing goes to the device). Needs the UDP transport plus the crypto
+# test-helper that installs a hardware-wallet context (CRD §50.8, T50.*).
+trezor-emulator-tests = ["trezor-udp", "crypto/test-helpers"]
 # The lightning `log_*!` macros check `cfg(feature = "max_level_*")` at compile-time.
 # Declaring them avoids unexpected-cfg warnings without enabling any of them.
 max_level_off = []

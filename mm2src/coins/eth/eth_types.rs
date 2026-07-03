@@ -248,12 +248,34 @@ pub struct Erc20TokenInfo {
 /// as the coin did before this seam was introduced. `Metamask` (WASM-only)
 /// delegates signing — and, for transactions, broadcast — to a connected
 /// browser MetaMask session over EIP-1193; the framework holds no secret
-/// (CRD §47.5).
+/// (CRD §47.5). `Trezor` (native, non-iOS) delegates signing to a local Trezor
+/// hardware device driven through the interactive withdrawal task; the
+/// framework holds no local secret either (CRD §50, sibling of `Metamask`).
 #[derive(Clone)]
 pub(crate) enum EthSigner {
     Local(KeyPair),
     #[cfg(target_arch = "wasm32")]
     Metamask(crypto::MetamaskArc),
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+    Trezor(EthTrezorSigner),
+}
+
+/// Trezor hardware-wallet EVM signing state held **without** a live device
+/// handle (CRD §50.1). The device connection is established at sign time through
+/// the withdrawal task's ctx + task handle, mirroring the UTXO Trezor withdraw
+/// path. This struct only carries the enabled/selected address, its account
+/// public key, and the BIP-44 derivation path, so the coin can report its
+/// address / public key and select the signing path without holding any local
+/// secret.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[derive(Clone)]
+pub(crate) struct EthTrezorSigner {
+    /// BIP-44 derivation path of the enabled address (e.g. `m/44'/60'/0'/0/0`).
+    pub(crate) derivation_path: crypto::DerivationPath,
+    /// Address controlled by the device at `derivation_path`.
+    pub(crate) address: Address,
+    /// Uncompressed secp256k1 public key (64-byte `X || Y`) for the address.
+    pub(crate) public: Public,
 }
 
 impl std::fmt::Debug for EthSigner {
@@ -262,6 +284,8 @@ impl std::fmt::Debug for EthSigner {
             EthSigner::Local(_) => f.write_str("EthSigner::Local"),
             #[cfg(target_arch = "wasm32")]
             EthSigner::Metamask(_) => f.write_str("EthSigner::Metamask"),
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(_) => f.write_str("EthSigner::Trezor"),
         }
     }
 }
@@ -269,18 +293,22 @@ impl std::fmt::Debug for EthSigner {
 impl EthSigner {
     /// The address controlled by this signing policy. For `Local` this is the
     /// key pair's address (unchanged behaviour); for `Metamask` it is the
-    /// connected account proven at connect time (CRD R47.5.3/R47.5.14).
+    /// connected account proven at connect time (CRD R47.5.3/R47.5.14); for
+    /// `Trezor` it is the device-sourced enabled/selected address (CRD R50.1).
     pub(crate) fn address(&self) -> Address {
         match self {
             EthSigner::Local(key_pair) => key_pair.address(),
             #[cfg(target_arch = "wasm32")]
             EthSigner::Metamask(ctx) => ctx.eth_account(),
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(signer) => signer.address,
         }
     }
 
     /// The uncompressed secp256k1 public key (64-byte `X || Y`, no `0x04`
     /// prefix). For `Metamask` it is the connected account's public key as
-    /// recovered at connect time (CRD R47.5.14).
+    /// recovered at connect time (CRD R47.5.14); for `Trezor` it is the account
+    /// public key sourced from the device at activation (CRD R50.1).
     pub(crate) fn public(&self) -> Public {
         match self {
             EthSigner::Local(key_pair) => *key_pair.public(),
@@ -292,16 +320,22 @@ impl EthSigner {
                 #[allow(deprecated)]
                 Public::from_slice(&AsRef::<[u8]>::as_ref(&uncompressed)[1..65])
             },
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(signer) => signer.public,
         }
     }
 
-    /// The local signing secret, or `None` under the MetaMask policy. The
-    /// framework never holds a MetaMask account key (CRD R47.5.7/R47.5.14).
+    /// The local signing secret, or `None` under a non-local-key policy. The
+    /// framework never holds a MetaMask account key (CRD R47.5.7/R47.5.14) nor
+    /// a Trezor account key (CRD R50.1) — those secrets never leave the wallet
+    /// / device.
     pub(crate) fn local_secret(&self) -> Option<&mm2_eth::keys::Secret> {
         match self {
             EthSigner::Local(key_pair) => Some(key_pair.secret()),
             #[cfg(target_arch = "wasm32")]
             EthSigner::Metamask(_) => None,
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(_) => None,
         }
     }
 }

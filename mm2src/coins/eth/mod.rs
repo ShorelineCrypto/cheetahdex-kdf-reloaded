@@ -95,6 +95,10 @@ mod eth_impl;
 mod eth_market_ops;
 mod eth_mm_coin;
 mod eth_swap_ops;
+// EVM Trezor hardware-wallet withdrawal (device-driven signing). Native, non-iOS
+// only — the Trezor signing policy exists only there (CRD §50).
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+mod eth_trezor_withdraw;
 mod eth_types;
 pub mod wc_integration;
 mod wire_types;
@@ -118,8 +122,17 @@ pub(crate) use mm2_eth::keys::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
 
 #[cfg(test)] mod eth_tests;
+// Emulator-gated EVM Trezor signing integration tests (CRD §50.8). Native,
+// non-iOS, and only when the `trezor-emulator-tests` feature is on; they drive a
+// real `task::withdraw` against a running Trezor emulator.
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    not(target_os = "ios"),
+    feature = "trezor-emulator-tests"
+))]
+mod eth_trezor_emulator_tests;
 #[cfg(target_arch = "wasm32")] mod eth_wasm_tests;
-
 // ─── EthCoin newtype ────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
