@@ -9,7 +9,8 @@
 
 use super::*;
 use crate::hd_wallet::{HDAccountOps, HDWalletCoinOps, HDWalletOps};
-use crate::rpc_command::init_withdraw::{WithdrawAwaitingStatus, WithdrawInProgressStatus, WithdrawTaskHandle};
+use crate::rpc_command::init_withdraw::{WithdrawAwaitingStatus, WithdrawInProgressStatus, WithdrawTask,
+                                        WithdrawTaskHandle};
 use crate::{CoinWithDerivationMethod, DerivationMethod, WithdrawError, WithdrawRequest, WithdrawResult};
 use crypto::hw_rpc_task::{HwConnectStatuses, TrezorRpcTaskConnectProcessor};
 use crypto::trezor::client::TrezorClient;
@@ -98,16 +99,16 @@ async fn resolve_evm_trezor_withdraw_sender(
     Ok((hd_address.address, hd_address.derivation_path))
 }
 
-/// Connect to the Trezor device, surfacing device connect and PIN requests
-/// through the withdrawal task's status / awaiting-status vocabulary (R50.13 /
-/// R50.14), bounded by the shared connect / PIN timeouts (R50.16).
-async fn trezor_client(ctx: &MmArc, task_handle: &WithdrawTaskHandle) -> MmResult<TrezorClient, WithdrawError> {
-    let crypto_ctx = CryptoCtx::from_ctx(ctx).mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
-    let hw_ctx = crypto_ctx
-        .hw_ctx()
-        .or_mm_err(|| WithdrawError::NoTrezorDeviceAvailable)?;
-
-    let processor = TrezorRpcTaskConnectProcessor::new(task_handle, HwConnectStatuses {
+/// Connect to the Trezor device, surfacing device connect and PIN / passphrase
+/// requests through the withdrawal task's status / awaiting-status vocabulary
+/// (R50.13 / R50.14), bounded by the shared connect / PIN timeouts (R50.16).
+///
+/// Returns both the connected client and the request processor so the *same*
+/// processor drives the subsequent signing exchange — a signing session is a
+/// fresh device session, so a PIN / passphrase-protected device re-requests its
+/// secret at signing time and it must be surfaced the same way.
+fn trezor_connect_processor(task_handle: &WithdrawTaskHandle) -> TrezorRpcTaskConnectProcessor<'_, WithdrawTask> {
+    TrezorRpcTaskConnectProcessor::new(task_handle, HwConnectStatuses {
         on_connect: WithdrawInProgressStatus::WaitingForTrezorToConnect,
         on_connected: WithdrawInProgressStatus::Preparing,
         on_connection_failed: WithdrawInProgressStatus::Finishing,
@@ -117,9 +118,19 @@ async fn trezor_client(ctx: &MmArc, task_handle: &WithdrawTaskHandle) -> MmResul
         on_ready: WithdrawInProgressStatus::Preparing,
     })
     .with_connect_timeout(TREZOR_CONNECT_TIMEOUT)
-    .with_pin_timeout(TREZOR_PIN_TIMEOUT);
+    .with_pin_timeout(TREZOR_PIN_TIMEOUT)
+}
 
-    hw_ctx.trezor(&processor).await.mm_err(WithdrawError::from)
+async fn trezor_client(
+    ctx: &MmArc,
+    processor: &TrezorRpcTaskConnectProcessor<'_, WithdrawTask>,
+) -> MmResult<TrezorClient, WithdrawError> {
+    let crypto_ctx = CryptoCtx::from_ctx(ctx).mm_err(|e| WithdrawError::InternalError(e.to_string()))?;
+    let hw_ctx = crypto_ctx
+        .hw_ctx()
+        .or_mm_err(|| WithdrawError::NoTrezorDeviceAvailable)?;
+
+    hw_ctx.trezor(processor).await.mm_err(WithdrawError::from)
 }
 
 /// R50.20: TRON-family coins/tokens are unsupported under the Trezor signing
@@ -188,8 +199,12 @@ pub(crate) async fn withdraw_trezor_impl(
         chain_id,
     };
 
-    // R50.13: connect to the device (connect / PIN surfaced as task statuses).
-    let trezor_client = trezor_client(&ctx, task_handle).await?;
+    // R50.13: connect to the device (connect / PIN / passphrase surfaced as task
+    // statuses / user actions). The processor is reused for the signing exchange
+    // so a PIN / passphrase re-requested in the fresh signing session is surfaced
+    // the same way.
+    let processor = trezor_connect_processor(task_handle);
+    let trezor_client = trezor_client(&ctx, &processor).await?;
 
     task_handle
         .update_in_progress_status(WithdrawInProgressStatus::WaitingForUserToConfirmSigning)
@@ -199,7 +214,10 @@ pub(crate) async fn withdraw_trezor_impl(
     // (streaming the payload in chunks if needed) and read `(v, r, s)`.
     let signature = {
         let mut session = trezor_client.session().await.mm_err(WithdrawError::from)?;
-        session.sign_eth_tx(input).await.mm_err(WithdrawError::from)?
+        session
+            .sign_eth_tx_with_processor(input, &processor)
+            .await
+            .mm_err(WithdrawError::from)?
     };
 
     task_handle

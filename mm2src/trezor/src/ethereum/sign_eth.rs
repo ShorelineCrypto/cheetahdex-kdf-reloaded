@@ -2,7 +2,8 @@ use crate::client::TrezorSession;
 use crate::ethereum::ETH_MAX_CHUNK_LEN;
 use crate::proto::messages_ethereum as proto_ethereum;
 use crate::result_handler::ResultHandler;
-use crate::{TrezorError, TrezorResponse, TrezorResult};
+use crate::{ProcessTrezorResponse, TrezorError, TrezorProcessingError, TrezorRequestProcessor, TrezorResponse,
+            TrezorResult};
 use mm2_err_handle::prelude::*;
 
 /// Transport-neutral input for signing a legacy (EIP-155) Ethereum transaction.
@@ -106,6 +107,61 @@ impl<'a> TrezorSession<'a> {
                 _ => {
                     let error = "'EthereumTxRequest' is missing signature fields".to_owned();
                     MmError::err(TrezorError::ProtocolError(error))
+                },
+            };
+        }
+    }
+
+    /// Sign a legacy (EIP-155) Ethereum transaction on the device, driving every
+    /// device interaction (button / PIN / passphrase) through `processor`.
+    ///
+    /// Unlike [`sign_eth_tx`](Self::sign_eth_tx) — which uses `ack_all` and so
+    /// aborts on a PIN or passphrase request — this variant surfaces those
+    /// requests to the processor. A signing session is a *fresh* device session
+    /// (a new `Initialize` with no cached passphrase), so a passphrase-protected
+    /// (or PIN-protected) device re-requests its secret at signing time; this
+    /// method lets the caller answer it (e.g. as an RPC-task user action).
+    pub async fn sign_eth_tx_with_processor<Processor>(
+        &mut self,
+        input: TrezorEthTxInput,
+        processor: &Processor,
+    ) -> MmResult<TrezorEthSignature, TrezorProcessingError<Processor::Error>>
+    where
+        Processor: TrezorRequestProcessor + Sync,
+    {
+        let mut offset = initial_chunk(&input.data).len();
+
+        let req = build_sign_tx_message(&input);
+        let mut tx_request = self
+            .eth_sign_tx(req)
+            .await
+            .mm_err(TrezorProcessingError::TrezorError)?
+            .process(processor)
+            .await?;
+
+        loop {
+            if let Some(len) = tx_request.data_length {
+                if len > 0 {
+                    let chunk = next_chunk(&input.data, offset, len as usize);
+                    offset += chunk.len();
+                    let ack = proto_ethereum::EthereumTxAck {
+                        data_chunk: chunk.to_vec(),
+                    };
+                    tx_request = self
+                        .eth_tx_ack(ack)
+                        .await
+                        .mm_err(TrezorProcessingError::TrezorError)?
+                        .process(processor)
+                        .await?;
+                    continue;
+                }
+            }
+
+            return match (tx_request.signature_v, tx_request.signature_r, tx_request.signature_s) {
+                (Some(v), Some(r), Some(s)) => Ok(TrezorEthSignature { v, r, s }),
+                _ => {
+                    let error = "'EthereumTxRequest' is missing signature fields".to_owned();
+                    MmError::err(TrezorProcessingError::TrezorError(TrezorError::ProtocolError(error)))
                 },
             };
         }
