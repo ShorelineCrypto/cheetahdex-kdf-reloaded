@@ -357,7 +357,11 @@ impl TendermintCoin {
 
             let request = AbciRequest::new(
                 Some(ABCI_SIMULATE_TX_PATH.to_string()),
-                SimulateRequest { tx_bytes, tx: None }.encode_to_vec(),
+                SimulateRequest {
+                    tx_bytes,
+                    ..Default::default()
+                }
+                .encode_to_vec(),
                 ABCI_REQUEST_HEIGHT,
                 ABCI_REQUEST_PROVE,
             );
@@ -426,7 +430,11 @@ impl TendermintCoin {
 
             let request = AbciRequest::new(
                 Some(ABCI_SIMULATE_TX_PATH.to_string()),
-                SimulateRequest { tx_bytes, tx: None }.encode_to_vec(),
+                SimulateRequest {
+                    tx_bytes,
+                    ..Default::default()
+                }
+                .encode_to_vec(),
                 ABCI_REQUEST_HEIGHT,
                 ABCI_REQUEST_PROVE,
             );
