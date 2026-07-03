@@ -80,6 +80,12 @@ impl EthCoinImpl {
             EthSigner::Local(key_pair) => Ok(tx.sign(key_pair.secret(), self.chain_id)),
             #[cfg(target_arch = "wasm32")]
             EthSigner::Metamask(_) => Err(EthSignerError::SwapSendUnsupported),
+            // CRD R50.24 / R47.5.13: a Trezor device driven only through the
+            // interactive withdrawal task cannot satisfy the swap protocol's
+            // framework-scheduled, non-interactive HTLC signing. Rejected like
+            // MetaMask.
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(_) => Err(EthSignerError::SwapSendUnsupported),
         }
     }
 
@@ -92,6 +98,10 @@ impl EthCoinImpl {
             EthSigner::Local(key_pair) => Ok(tx.sign(key_pair.secret(), self.chain_id)),
             #[cfg(target_arch = "wasm32")]
             EthSigner::Metamask(_) => Err(EthSignerError::OfflineSigningUnsupported),
+            // CRD R50.24 / R47.5.13: a Trezor device never yields a detached,
+            // re-broadcastable signed raw transaction. Rejected like MetaMask.
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(_) => Err(EthSignerError::OfflineSigningUnsupported),
         }
     }
 
@@ -575,33 +585,46 @@ pub(crate) fn evm_withdraw_balance(coin: EthCoin, sender: Address) -> BalanceFut
     Box::new(fut.boxed().compat())
 }
 
-pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> WithdrawResult {
-    // TRON uses a dedicated pipeline: its transaction format, address
-    // encoding, signing digest and fee model all differ from the EVM flow.
-    if matches!(coin.coin_type, EthCoinType::Tron | EthCoinType::Trc20 { .. }) {
-        // CRD R47.5.6a: the non-EVM-keypair TRON family is rejected under the
-        // MetaMask signing policy as an unsupported withdraw. The delegated
-        // sign-and-broadcast model (`eth_sendTransaction`, R47.5.6) is EVM-only
-        // and cannot drive TRON's distinct transaction format/signing digest,
-        // and the framework holds no local TRON secret under MetaMask. (TRON is
-        // not activated under the MetaMask policy in practice, so this is a
-        // defensive early rejection rather than a reachable runtime path.)
-        #[cfg(target_arch = "wasm32")]
-        if matches!(coin.signer, EthSigner::Metamask(_)) {
-            return MmError::err(WithdrawError::UnsupportedUnderMetamask(
-                "TRON withdraw is not supported under the MetaMask signing policy".to_owned(),
-            ));
-        }
-        let _ = ctx;
-        return crate::eth::tron::withdraw::withdraw_tron(coin, req).await;
-    }
+/// The unsigned EVM withdrawal transaction plus the derived metadata every
+/// signing policy needs to assemble the completed `TransactionDetails` (CRD
+/// R49.25 / R50.22). Produced by [`build_evm_withdraw_plan`] and consumed by
+/// both the software / MetaMask path (`withdraw_impl`) and the Trezor
+/// device-signing path (`withdraw_trezor_impl`).
+pub(crate) struct EvmWithdrawPlan {
+    /// Unsigned legacy EIP-155 transaction ready to be signed for `chain_id`.
+    pub(crate) unsigned: UnSignedEthTx,
+    /// Recipient address parsed from `req.to` (used for the `to` field and the
+    /// self-send `received_by_me` check).
+    pub(crate) to_addr: Address,
+    /// The transaction's action target: `to_addr` for a native send, or the
+    /// token contract for an ERC20 transfer.
+    pub(crate) call_addr: Address,
+    /// Withdrawn amount in the coin's smallest unit (post max/fee adjustment).
+    pub(crate) wei_amount: U256,
+    pub(crate) gas: U256,
+    pub(crate) gas_price: U256,
+    /// Ticker the fee is denominated in (the platform coin for ERC20 tokens).
+    pub(crate) fee_coin: String,
+}
 
-    validate_evm_withdraw_request(&coin, &req)?;
-    let sender = resolve_evm_withdraw_sender(&ctx, &coin, &req).await?;
+/// Shared unsigned-transaction construction for an EVM withdrawal, reused by the
+/// software / MetaMask path and the Trezor device-signing path. Given the
+/// already-resolved `sender_address`, it validates and resolves the recipient,
+/// checks the balance, applies max / amount and fee handling, resolves the gas
+/// and gas price, holds the shared nonce lock while fetching the nonce, and
+/// builds the unsigned legacy EIP-155 transaction. The returned nonce-lock guard
+/// must be held by the caller through signing so a concurrent withdrawal cannot
+/// reuse the selected nonce.
+pub(crate) async fn build_evm_withdraw_plan(
+    ctx: &MmArc,
+    coin: &EthCoin,
+    req: &WithdrawRequest,
+    sender_address: Address,
+) -> MmResult<(EvmWithdrawPlan, common::custom_futures::TimedMutexGuard<'static, ()>), WithdrawError> {
     let to_addr = coin
         .address_from_str(&req.to)
         .map_to_mm(WithdrawError::InvalidAddress)?;
-    let my_balance = evm_withdraw_balance(coin.clone(), sender.address)
+    let my_balance = evm_withdraw_balance(coin.clone(), sender_address)
         .compat()
         .await
         .mm_err(Into::into)?;
@@ -621,14 +644,14 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         });
     };
     let (mut eth_value, data, call_addr, fee_coin) = match &coin.coin_type {
-        EthCoinType::Eth => (wei_amount, vec![], to_addr, coin.ticker()),
+        EthCoinType::Eth => (wei_amount, vec![], to_addr, coin.ticker().to_owned()),
         EthCoinType::Erc20 { platform, token_addr } => {
             let function = ERC20_CONTRACT.function("transfer")?;
             let data = function.encode_input(&[Token::Address(to_addr), Token::Uint(wei_amount)])?;
-            (0.into(), data, *token_addr, platform.as_str())
+            (0.into(), data, *token_addr, platform.clone())
         },
-        // TRON is diverted to the dedicated pipeline at the top of this function;
-        // this arm is unreachable but kept for exhaustiveness.
+        // TRON is diverted to the dedicated pipeline before this helper is
+        // reached; this arm is unreachable but kept for exhaustiveness.
         EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
             return MmError::err(WithdrawError::InternalError(
                 "TRON withdraw must route through tron::withdraw::withdraw_tron".to_owned(),
@@ -637,10 +660,10 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
     };
     let eth_value_dec = u256_to_big_decimal(eth_value, coin.decimals).mm_err(Into::into)?;
 
-    let (gas, gas_price) = match req.fee {
+    let (gas, gas_price) = match &req.fee {
         Some(WithdrawFee::EthGas { gas_price, gas }) => {
-            let gas_price = wei_from_big_decimal(&gas_price, 9).mm_err(Into::into)?;
-            (gas.into(), gas_price)
+            let gas_price = wei_from_big_decimal(gas_price, 9).mm_err(Into::into)?;
+            (U256::from(*gas), gas_price)
         },
         Some(fee_policy) => {
             let error = format!("Expected 'EthGas' fee type, found {:?}", fee_policy);
@@ -657,7 +680,7 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             let estimate_gas_req = CallRequest {
                 value: Some(eth_value_for_estimate),
                 data: Some(data.clone().into()),
-                from: Some(sender.address),
+                from: Some(sender_address),
                 to: call_addr,
                 gas: None,
                 // gas price must be supplied because some smart contracts base their
@@ -687,21 +710,21 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         eth_value -= total_fee;
         wei_amount -= total_fee;
     };
-    let _nonce_lock = NONCE_LOCK
+    let nonce_lock = NONCE_LOCK
         .lock(|_start, _now| {
             if ctx.is_stopping() {
-                let error = "MM is stopping, aborting withdraw_impl in NONCE_LOCK".to_owned();
+                let error = "MM is stopping, aborting withdraw in NONCE_LOCK".to_owned();
                 return MmError::err(WithdrawError::InternalError(error));
             }
             Ok(0.5)
         })
         .await?;
-    let nonce_fut = get_addr_nonce(sender.address, coin.web3_instances.clone()).compat();
+    let nonce_fut = get_addr_nonce(sender_address, coin.web3_instances.clone()).compat();
     let nonce = match select(nonce_fut, Timer::sleep(30.)).await {
         Either::Left((nonce_res, _)) => nonce_res.map_to_mm(WithdrawError::Transport)?,
         Either::Right(_) => return MmError::err(WithdrawError::Transport("Get address nonce timed out".to_owned())),
     };
-    let tx = UnSignedEthTx {
+    let unsigned = UnSignedEthTx {
         nonce,
         value: eth_value,
         action: Action::Call(call_addr),
@@ -709,6 +732,87 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         gas,
         gas_price,
     };
+
+    Ok((
+        EvmWithdrawPlan {
+            unsigned,
+            to_addr,
+            call_addr,
+            wei_amount,
+            gas,
+            gas_price,
+            fee_coin,
+        },
+        nonce_lock,
+    ))
+}
+
+/// Assemble the completed `TransactionDetails` from a withdrawal plan and the
+/// final signed-transaction bytes / hash. Shared by the software path and the
+/// Trezor path so both emit the identical completed-payload field set (CRD
+/// R49.25 / R50.22 / R50.23).
+pub(crate) fn build_evm_withdraw_details(
+    coin: &EthCoin,
+    plan: &EvmWithdrawPlan,
+    from_checksum: String,
+    from_addr: Address,
+    tx_hex: BytesJson,
+    tx_hash: String,
+) -> MmResult<TransactionDetails, WithdrawError> {
+    let amount_decimal = u256_to_big_decimal(plan.wei_amount, coin.decimals).mm_err(Into::into)?;
+    let mut spent_by_me = amount_decimal.clone();
+    let received_by_me = if plan.to_addr == from_addr {
+        amount_decimal.clone()
+    } else {
+        0.into()
+    };
+    let fee_details = EthTxFeeDetails::new(plan.gas, plan.gas_price, &plan.fee_coin).mm_err(Into::into)?;
+    if coin.coin_type == EthCoinType::Eth {
+        spent_by_me += &fee_details.total_fee;
+    }
+    Ok(TransactionDetails {
+        to: vec![checksum_address(&format!("{:#02x}", plan.to_addr))],
+        from: vec![from_checksum],
+        total_amount: amount_decimal,
+        my_balance_change: &received_by_me - &spent_by_me,
+        spent_by_me,
+        received_by_me,
+        tx_hex,
+        tx_hash,
+        block_height: 0,
+        fee_details: Some(fee_details.into()),
+        coin: coin.ticker.clone(),
+        internal_id: vec![].into(),
+        timestamp: now_ms() / 1000,
+        kmd_rewards: None,
+        transaction_type: Default::default(),
+    })
+}
+
+pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> WithdrawResult {
+    // TRON uses a dedicated pipeline: its transaction format, address
+    // encoding, signing digest and fee model all differ from the EVM flow.
+    if matches!(coin.coin_type, EthCoinType::Tron | EthCoinType::Trc20 { .. }) {
+        // CRD R47.5.6a: the non-EVM-keypair TRON family is rejected under the
+        // MetaMask signing policy as an unsupported withdraw. The delegated
+        // sign-and-broadcast model (`eth_sendTransaction`, R47.5.6) is EVM-only
+        // and cannot drive TRON's distinct transaction format/signing digest,
+        // and the framework holds no local TRON secret under MetaMask. (TRON is
+        // not activated under the MetaMask policy in practice, so this is a
+        // defensive early rejection rather than a reachable runtime path.)
+        #[cfg(target_arch = "wasm32")]
+        if matches!(coin.signer, EthSigner::Metamask(_)) {
+            return MmError::err(WithdrawError::UnsupportedUnderMetamask(
+                "TRON withdraw is not supported under the MetaMask signing policy".to_owned(),
+            ));
+        }
+        let _ = ctx;
+        return crate::eth::tron::withdraw::withdraw_tron(coin, req).await;
+    }
+
+    validate_evm_withdraw_request(&coin, &req)?;
+    let sender = resolve_evm_withdraw_sender(&ctx, &coin, &req).await?;
+    let (plan, _nonce_lock) = build_evm_withdraw_plan(&ctx, &coin, &req, sender.address).await?;
 
     // CRD R47.5.6/R47.5.7 -- delegated sign-and-broadcast under the MetaMask
     // policy. Unlike the Local (Iguana) path below -- which signs `tx` offline
@@ -745,13 +849,13 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
         // framework's computed `tx.nonce` is consumed only by the local path).
         let mut tx_object = serde_json::json!({
             "from": format!("{:#x}", sender.address),
-            "to": format!("{:#x}", call_addr),
-            "value": format!("{:#x}", eth_value),
-            "gas": format!("{:#x}", gas),
-            "gasPrice": format!("{:#x}", gas_price),
+            "to": format!("{:#x}", plan.call_addr),
+            "value": format!("{:#x}", plan.unsigned.value),
+            "gas": format!("{:#x}", plan.gas),
+            "gasPrice": format!("{:#x}", plan.gas_price),
         });
-        if !tx.data.is_empty() {
-            tx_object["data"] = serde_json::json!(format!("0x{}", hex::encode(&tx.data)));
+        if !plan.unsigned.data.is_empty() {
+            tx_object["data"] = serde_json::json!(format!("0x{}", hex::encode(&plan.unsigned.data)));
         }
 
         let tx_hash = metamask_arc
@@ -800,72 +904,32 @@ pub async fn withdraw_impl(ctx: MmArc, coin: EthCoin, req: WithdrawRequest) -> W
             found
         };
 
-        let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
-        let mut spent_by_me = amount_decimal.clone();
-        let received_by_me = if to_addr == sender.address {
-            amount_decimal.clone()
-        } else {
-            0.into()
-        };
-        let fee_details = EthTxFeeDetails::new(gas, gas_price, fee_coin).mm_err(Into::into)?;
-        if coin.coin_type == EthCoinType::Eth {
-            spent_by_me += &fee_details.total_fee;
-        }
-        return Ok(TransactionDetails {
-            to: vec![checksum_address(&format!("{:#02x}", to_addr))],
-            from: vec![sender.checksum_address()],
-            total_amount: amount_decimal,
-            my_balance_change: &received_by_me - &spent_by_me,
-            spent_by_me,
-            received_by_me,
-            // CRD R47.5.6/R47.5.6a/R47.5.7: already broadcast by the wallet, so no
-            // detached re-broadcastable bytes exist; `tx_hex` is filled
-            // best-effort from the node above and is empty if the tx had not yet
-            // appeared within the poll window.
+        // CRD R47.5.6/R47.5.6a/R47.5.7: already broadcast by the wallet, so no
+        // detached re-broadcastable bytes exist; `tx_hex` is filled best-effort
+        // from the node above and is empty if the tx had not yet appeared within
+        // the poll window.
+        return build_evm_withdraw_details(
+            &coin,
+            &plan,
+            sender.checksum_address(),
+            sender.address,
             tx_hex,
-            tx_hash: tx_hash.trim_start_matches("0x").to_lowercase(),
-            block_height: 0,
-            fee_details: Some(fee_details.into()),
-            coin: coin.ticker.clone(),
-            internal_id: vec![].into(),
-            timestamp: now_ms() / 1000,
-            kmd_rewards: None,
-            transaction_type: Default::default(),
-        });
+            tx_hash.trim_start_matches("0x").to_lowercase(),
+        );
     }
 
     let signed = sender
-        .sign_tx(&coin, tx)
+        .sign_tx(&coin, plan.unsigned.clone())
         .map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
     let bytes = rlp::encode(&signed);
-    let amount_decimal = u256_to_big_decimal(wei_amount, coin.decimals).mm_err(Into::into)?;
-    let mut spent_by_me = amount_decimal.clone();
-    let received_by_me = if to_addr == sender.address {
-        amount_decimal.clone()
-    } else {
-        0.into()
-    };
-    let fee_details = EthTxFeeDetails::new(gas, gas_price, fee_coin).mm_err(Into::into)?;
-    if coin.coin_type == EthCoinType::Eth {
-        spent_by_me += &fee_details.total_fee;
-    }
-    Ok(TransactionDetails {
-        to: vec![checksum_address(&format!("{:#02x}", to_addr))],
-        from: vec![sender.checksum_address()],
-        total_amount: amount_decimal,
-        my_balance_change: &received_by_me - &spent_by_me,
-        spent_by_me,
-        received_by_me,
-        tx_hex: bytes.into(),
-        tx_hash: format!("{:02x}", signed.tx_hash()),
-        block_height: 0,
-        fee_details: Some(fee_details.into()),
-        coin: coin.ticker.clone(),
-        internal_id: vec![].into(),
-        timestamp: now_ms() / 1000,
-        kmd_rewards: None,
-        transaction_type: Default::default(),
-    })
+    build_evm_withdraw_details(
+        &coin,
+        &plan,
+        sender.checksum_address(),
+        sender.address,
+        bytes.into(),
+        format!("{:02x}", signed.tx_hash()),
+    )
 }
 
 pub async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest) -> RawTransactionResult {

@@ -6,6 +6,10 @@ edition = "2021"
 [features]
 zhtlc-native-tests = []
 zhtlc = []
+# UDP transport for the Trezor emulator (native only, off by default). Lets
+# downstream test builds drive the whole stack against a Trezor emulator. `coins`
+# reaches the `trezor` crate only through `crypto`, so this only forwards to it.
+trezor-udp = ["crypto/trezor-udp"]
 # The lightning `log_*!` macros check `cfg(feature = "max_level_*")` at compile-time.
 # Declaring them avoids unexpected-cfg warnings without enabling any of them.
 max_level_off = []

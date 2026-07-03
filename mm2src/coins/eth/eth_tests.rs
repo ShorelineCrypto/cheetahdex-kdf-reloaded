@@ -1771,3 +1771,98 @@ fn test_wei_to_gwei_roundtrip() {
     let back = wei_to_gwei_decimal(wei).unwrap();
     assert_eq!(gwei, back);
 }
+
+// ---------------------------------------------------------------------------
+// EVM Trezor signing policy (CRD §50). These fixtures build an EthCoin with an
+// `EthSigner::Trezor` policy directly (no device, no task handle): the signer
+// stores only the address / public key / derivation path (R50.1).
+// ---------------------------------------------------------------------------
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+fn trezor_eth_coin_for_test(coin_type: EthCoinType) -> (MmArc, EthCoin) {
+    // Fixed key material only to source a stable address + public key for the
+    // Trezor signer fixture; no secret is stored on the coin (CRD R50.1).
+    let key_pair = KeyPair::from_secret_slice(
+        &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
+    )
+    .unwrap();
+    let address = key_pair.address();
+    let public = *key_pair.public();
+    let derivation_path = DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap();
+
+    let web3 = crate::eth::alloy_compat::build_provider(vec!["http://dummy.dummy".into()], vec![]).unwrap();
+    let conf = json!({ "netid": mm2_net_config::SUPPORTED_NETIDS[0], "coins": [] });
+    let ctx = MmCtxBuilder::new().with_conf(conf).into_mm_arc();
+    let ticker = match coin_type {
+        EthCoinType::Eth => "ETH",
+        EthCoinType::Erc20 { .. } => "JST",
+        EthCoinType::Tron => "TRX",
+        EthCoinType::Trc20 { .. } => "TRC20",
+    }
+    .to_string();
+
+    let eth_coin = EthCoin(Arc::new(EthCoinImpl {
+        coin_type,
+        decimals: 18,
+        gas_station_url: None,
+        gas_station_decimals: ETH_GAS_STATION_DECIMALS,
+        history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
+        gas_station_policy: GasStationPricePolicy::MeanAverageFast,
+        my_address: address,
+        sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
+        signer: EthSigner::Trezor(EthTrezorSigner {
+            derivation_path,
+            address,
+            public,
+        }),
+        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        fallback_swap_contract: None,
+        ticker,
+        web3_instances: vec![Web3Instance {
+            web3: web3.clone(),
+            is_parity: true,
+        }],
+        web3,
+        ctx: ctx.weak(),
+        required_confirmations: 1.into(),
+        tron_api: None,
+        nft_swap_v2_contract: None,
+        swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
+        erc20_tokens_infos: Default::default(),
+        chain_id: Some(1),
+        logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+        derivation_method: DerivationMethod::Iguana(address),
+        swap_v2_contracts: None,
+        gas_limit_v2: EthGasLimitV2::default(),
+    }));
+    (ctx, eth_coin)
+}
+
+/// R50.24 / R49.6: the direct legacy `withdraw` method rejects a Trezor-policy
+/// coin, steering clients to the `task::withdraw` API. No device interaction.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[test]
+fn direct_withdraw_rejected_for_trezor_signer() {
+    use futures::compat::Future01CompatExt;
+    let (_ctx, coin) = trezor_eth_coin_for_test(EthCoinType::Eth);
+    let req = WithdrawRequest {
+        amount: 1.into(),
+        from: None,
+        to: "0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94".to_string(),
+        coin: "ETH".to_string(),
+        max: false,
+        fee: None,
+    };
+    let err = block_on(coin.withdraw(req).compat()).unwrap_err();
+    assert!(matches!(err.into_inner(), WithdrawError::UnsupportedUnderTrezor(_)));
+}
+
+/// R50.20: a TRON-family coin under the Trezor policy is rejected as unsupported
+/// before any device exchange (no connect, PIN, passphrase, or signing).
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[test]
+fn trezor_withdraw_rejects_tron_without_device() {
+    let (_ctx, coin) = trezor_eth_coin_for_test(EthCoinType::Tron);
+    let err = crate::eth::eth_trezor_withdraw::ensure_trezor_withdraw_supported(&coin).unwrap_err();
+    assert!(matches!(err.into_inner(), WithdrawError::UnsupportedUnderTrezor(_)));
+}

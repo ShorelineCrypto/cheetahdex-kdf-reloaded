@@ -508,6 +508,15 @@ pub enum WithdrawError {
     #[cfg(target_arch = "wasm32")]
     #[display(fmt = "Unsupported under the MetaMask signing policy: {}", _0)]
     UnsupportedUnderMetamask(String),
+    /// CRD R50.20 / R50.24: the requested withdraw is unsupported under the
+    /// Trezor hardware-wallet signing policy. Used for the TRON family (which
+    /// the EVM Trezor signing path cannot drive) and to steer clients from the
+    /// direct legacy `withdraw` method to the `task::withdraw` API required for
+    /// Trezor device user-action signing. Native, non-iOS only — the Trezor
+    /// signing policy exists only there.
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+    #[display(fmt = "Unsupported under the Trezor signing policy: {}", _0)]
+    UnsupportedUnderTrezor(String),
 }
 impl HttpStatusCode for WithdrawError {
     fn status_code(&self) -> StatusCode {
@@ -527,6 +536,9 @@ impl HttpStatusCode for WithdrawError {
             // CRD R47.6.7: unsupported operation under MetaMask maps to 400.
             #[cfg(target_arch = "wasm32")]
             WithdrawError::UnsupportedUnderMetamask(_) => StatusCode::BAD_REQUEST,
+            // CRD R50.20 / R50.24: unsupported operation under Trezor maps to 400.
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            WithdrawError::UnsupportedUnderTrezor(_) => StatusCode::BAD_REQUEST,
             WithdrawError::NoTrezorDeviceAvailable
             | WithdrawError::TrezorDisconnected
             | WithdrawError::FoundUnexpectedDevice(_) => StatusCode::GONE,

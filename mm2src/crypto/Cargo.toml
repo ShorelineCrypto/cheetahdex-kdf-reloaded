@@ -7,6 +7,9 @@ edition = "2021"
 
 [features]
 test-helpers = []
+# UDP transport for the Trezor emulator (native only, off by default). Used by the
+# test/CI harness so the whole stack can talk to a Trezor emulator over UDP.
+trezor-udp = ["trezor/trezor-udp"]
 
 [dependencies]
 # Cryptographic primitives for AES-256-CBC encryption

@@ -95,6 +95,10 @@ mod eth_impl;
 mod eth_market_ops;
 mod eth_mm_coin;
 mod eth_swap_ops;
+// EVM Trezor hardware-wallet withdrawal (device-driven signing). Native, non-iOS
+// only — the Trezor signing policy exists only there (CRD §50).
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+mod eth_trezor_withdraw;
 mod eth_types;
 pub mod wc_integration;
 mod wire_types;
