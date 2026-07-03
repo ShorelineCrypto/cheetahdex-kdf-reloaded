@@ -24,15 +24,15 @@ impl<'a> Deserialize<'a> for Operation {
     where
         D: Deserializer<'a>,
     {
-        let v: Value = try!(Deserialize::deserialize(deserializer));
+        let v: Value = (Deserialize::deserialize(deserializer))?;
         let cloned = v.clone();
-        let map = try!(cloned
+        let map = (cloned
             .as_object()
-            .ok_or_else(|| SerdeError::custom("Invalid operation")));
-        let s = try!(map
+            .ok_or_else(|| SerdeError::custom("Invalid operation")))?;
+        let s = (map
             .get("type")
             .and_then(Value::as_str)
-            .ok_or_else(|| SerdeError::custom("Invalid operation type")));
+            .ok_or_else(|| SerdeError::custom("Invalid operation type")))?;
 
         // This is a workaround to support non-spec compliant function and event names,
         // see: https://github.com/paritytech/parity/issues/4122

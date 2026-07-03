@@ -72,5 +72,5 @@ pub trait FunctionOutputDecoder {
     type Output;
 
     /// Decodes the given bytes output for the contract function
-    fn decode(&self, &[u8]) -> Result<Self::Output>;
+    fn decode(&self, _: &[u8]) -> Result<Self::Output>;
 }
