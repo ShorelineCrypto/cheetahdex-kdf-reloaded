@@ -177,3 +177,11 @@ spl-token = { version = "8", default-features = false }
 [build-dependencies]
 prost-build = { version = "0.12", default-features = false }
 tonic-build = { version = "0.11", features = ["prost"] }
+
+[dev-dependencies]
+# Stage 1 of the ethabi -> alloy migration: the dual-codec differential gate
+# (eth::abi_alloy_differential_tests) runs alloy alongside ethabi in tests only.
+# These resolve to the same alloy-core 1.5 already in the tree via the `alloy`
+# umbrella. Remove once ethabi is gone.
+alloy-dyn-abi = "1.5"
+alloy-json-abi = "1.5"

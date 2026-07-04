@@ -128,6 +128,7 @@ pub(crate) use eth_hd_wallet::EthHDWallet;
 pub(crate) use mm2_eth::keys::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
 
+#[cfg(test)] mod abi_alloy_differential_tests;
 #[cfg(test)] mod abi_golden_tests;
 #[cfg(test)] mod eth_tests;
 // Emulator-gated EVM Trezor signing integration tests (CRD §50.8). Native,
