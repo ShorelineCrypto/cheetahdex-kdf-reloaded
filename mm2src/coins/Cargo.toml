@@ -66,8 +66,8 @@ db_common = { path = "../db_common" }
 derive_more = "0.99"
 ed25519-dalek = "1.0.1"
 ed25519-dalek-bip32 = "0.2.0"
-ethabi = { path = "../ethabi-vendored" }
-ethereum-types = { version = "0.4", default-features = false, features = ["std", "serialize"] }
+ethabi = "17.2"
+ethereum-types.workspace = true
 mm2_eth = { path = "../mm2_eth" }
 # Waiting for https://github.com/rust-lang/rust/issues/54725 to use on Stable.
 #enum_dispatch = "0.1"

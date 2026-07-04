@@ -21,7 +21,7 @@ impl EthTxFeeDetails {
 
         Ok(EthTxFeeDetails {
             coin: coin.to_owned(),
-            gas: gas.into(),
+            gas: gas.as_u64(),
             gas_price,
             total_fee,
         })
@@ -385,7 +385,7 @@ impl CommonSwapOpsV2 for EthCoin {
     fn derive_htlc_pubkey_v2(&self, _swap_unique_data: &[u8]) -> Public { self.signer.public() }
 
     fn derive_htlc_pubkey_v2_bytes(&self, swap_unique_data: &[u8]) -> Vec<u8> {
-        self.derive_htlc_pubkey_v2(swap_unique_data).to_vec()
+        self.derive_htlc_pubkey_v2(swap_unique_data).as_bytes().to_vec()
     }
 }
 

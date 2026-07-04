@@ -489,7 +489,10 @@ fn decode_call(name: &str, calldata: &[u8]) -> Result<Vec<Token>, NftSwapV2Error
             ),
         });
     }
-    Ok(function.decode_input(calldata)?)
+    // ethabi 17's `decode_input` expects parameter bytes WITHOUT the 4-byte
+    // selector (the vendored ethabi 6.1 fork used to strip it internally). The
+    // selector was validated above, so skip it here.
+    Ok(function.decode_input(&calldata[4..])?)
 }
 
 /// Validate decoded `erc{721,1155}MakerPayment` calldata against the

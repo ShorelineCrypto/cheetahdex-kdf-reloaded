@@ -116,7 +116,7 @@ pub async fn approve_token(ctx: MmArc, req: ApproveTokenRequest) -> MmResult<Str
         .await
         .map_to_mm(|e| Erc20AllowanceError::TransactionError(e.get_plain_text_format()))?;
 
-    Ok(format!("0x{:02x}", BytesJson(tx.hash.to_vec())))
+    Ok(format!("0x{:02x}", BytesJson(tx.hash.as_bytes().to_vec())))
 }
 
 #[cfg(test)]

@@ -1253,7 +1253,7 @@ impl EthCoin {
                 },
             };
             *self.history_sync_state.lock().unwrap() = HistorySyncState::InProgress(json!({
-                "blocks_left": u64::from(saved_traces.earliest_block),
+                "blocks_left": saved_traces.earliest_block.as_u64(),
             }));
 
             let mut existing_history = match self.load_history_from_file(ctx).compat().await {
@@ -1282,8 +1282,8 @@ impl EthCoin {
                     .eth_traces(
                         vec![self.my_address],
                         vec![],
-                        BlockNumber::Number(before_earliest.into()),
-                        BlockNumber::Number((saved_traces.earliest_block).into()),
+                        BlockNumber::Number(before_earliest.as_u64()),
+                        BlockNumber::Number(saved_traces.earliest_block.as_u64()),
                         None,
                     )
                     .compat()
@@ -1305,8 +1305,8 @@ impl EthCoin {
                     .eth_traces(
                         vec![],
                         vec![self.my_address],
-                        BlockNumber::Number(before_earliest.into()),
-                        BlockNumber::Number((saved_traces.earliest_block).into()),
+                        BlockNumber::Number(before_earliest.as_u64()),
+                        BlockNumber::Number(saved_traces.earliest_block.as_u64()),
                         None,
                     )
                     .compat()
@@ -1344,8 +1344,8 @@ impl EthCoin {
                     .eth_traces(
                         vec![self.my_address],
                         vec![],
-                        BlockNumber::Number((saved_traces.latest_block + 1).into()),
-                        BlockNumber::Number(current_block.into()),
+                        BlockNumber::Number((saved_traces.latest_block + 1).as_u64()),
+                        BlockNumber::Number(current_block.as_u64()),
                         None,
                     )
                     .compat()
@@ -1367,8 +1367,8 @@ impl EthCoin {
                     .eth_traces(
                         vec![],
                         vec![self.my_address],
-                        BlockNumber::Number((saved_traces.latest_block + 1).into()),
-                        BlockNumber::Number(current_block.into()),
+                        BlockNumber::Number((saved_traces.latest_block + 1).as_u64()),
+                        BlockNumber::Number(current_block.as_u64()),
                         None,
                     )
                     .compat()
@@ -1548,7 +1548,7 @@ impl EthCoin {
                     coin: self.ticker.clone(),
                     fee_details: fee_details.map(|d| d.into()),
                     block_height: trace.block_number,
-                    tx_hash: format!("{:02x}", BytesJson(raw.hash.to_vec())),
+                    tx_hash: format!("{:02x}", BytesJson(raw.hash.as_bytes().to_vec())),
                     tx_hex: BytesJson(rlp::encode(&raw)),
                     internal_id,
                     timestamp: block_ts,
@@ -1644,7 +1644,7 @@ impl EthCoin {
                 },
             };
             *self.history_sync_state.lock().unwrap() = HistorySyncState::InProgress(json!({
-                "blocks_left": u64::from(saved_events.earliest_block),
+                "blocks_left": saved_events.earliest_block.as_u64(),
             }));
 
             // AP: AFAIK ETH RPC doesn't support conditional filters like `get this OR this` so we have
@@ -1662,8 +1662,8 @@ impl EthCoin {
                         token_addr,
                         Some(self.my_address),
                         None,
-                        BlockNumber::Number(before_earliest.into()),
-                        BlockNumber::Number((saved_events.earliest_block - 1).into()),
+                        BlockNumber::Number(before_earliest.as_u64()),
+                        BlockNumber::Number((saved_events.earliest_block - 1).as_u64()),
                         None,
                     )
                     .compat()
@@ -1686,8 +1686,8 @@ impl EthCoin {
                         token_addr,
                         None,
                         Some(self.my_address),
-                        BlockNumber::Number(before_earliest.into()),
-                        BlockNumber::Number((saved_events.earliest_block - 1).into()),
+                        BlockNumber::Number(before_earliest.as_u64()),
+                        BlockNumber::Number((saved_events.earliest_block - 1).as_u64()),
                         None,
                     )
                     .compat()
@@ -1725,8 +1725,8 @@ impl EthCoin {
                         token_addr,
                         Some(self.my_address),
                         None,
-                        BlockNumber::Number((saved_events.latest_block + 1).into()),
-                        BlockNumber::Number(current_block.into()),
+                        BlockNumber::Number((saved_events.latest_block + 1).as_u64()),
+                        BlockNumber::Number(current_block.as_u64()),
                         None,
                     )
                     .compat()
@@ -1749,8 +1749,8 @@ impl EthCoin {
                         token_addr,
                         None,
                         Some(self.my_address),
-                        BlockNumber::Number((saved_events.latest_block + 1).into()),
-                        BlockNumber::Number(current_block.into()),
+                        BlockNumber::Number((saved_events.latest_block + 1).as_u64()),
+                        BlockNumber::Number(current_block.as_u64()),
                         None,
                     )
                     .compat()
@@ -1902,7 +1902,7 @@ impl EthCoin {
                     let provider = self.alloy_provider();
                     match assert_send_future(
                         provider
-                            .get_block_by_number(BlockNumberOrTag::Number(block_number.into()))
+                            .get_block_by_number(BlockNumberOrTag::Number(block_number.as_u64()))
                             .into_future(),
                     )
                     .await
@@ -1936,8 +1936,8 @@ impl EthCoin {
                     from: vec![checksum_address(&format!("{:#02x}", from_addr))],
                     coin: self.ticker.clone(),
                     fee_details: fee_details.map(|d| d.into()),
-                    block_height: block_number.into(),
-                    tx_hash: format!("{:02x}", BytesJson(raw.hash.to_vec())),
+                    block_height: block_number.as_u64(),
+                    tx_hash: format!("{:02x}", BytesJson(raw.hash.as_bytes().to_vec())),
                     tx_hex: BytesJson(rlp::encode(&raw)),
                     internal_id: BytesJson(internal_id.to_vec()),
                     timestamp: block_ts,
@@ -2102,7 +2102,7 @@ impl EthCoin {
         match self.coin_type {
             EthCoinType::Eth => {
                 let payment_func = try_tx_fus!(SWAP_CONTRACT.function("ethPayment"));
-                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data));
+                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data[4..]));
 
                 let state_f = self.payment_status(swap_contract_address, decoded[0].clone());
                 Box::new(
@@ -2140,7 +2140,7 @@ impl EthCoin {
                 token_addr,
             } => {
                 let payment_func = try_tx_fus!(SWAP_CONTRACT.function("erc20Payment"));
-                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data));
+                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data[4..]));
                 let state_f = self.payment_status(swap_contract_address, decoded[0].clone());
 
                 Box::new(
@@ -2189,7 +2189,7 @@ impl EthCoin {
         match self.coin_type {
             EthCoinType::Eth => {
                 let payment_func = try_tx_fus!(SWAP_CONTRACT.function("ethPayment"));
-                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data));
+                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data[4..]));
 
                 let state_f = self.payment_status(swap_contract_address, decoded[0].clone());
                 Box::new(
@@ -2227,7 +2227,7 @@ impl EthCoin {
                 token_addr,
             } => {
                 let payment_func = try_tx_fus!(SWAP_CONTRACT.function("erc20Payment"));
-                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data));
+                let decoded = try_tx_fus!(payment_func.decode_input(&payment.data[4..]));
                 let state_f = self.payment_status(swap_contract_address, decoded[0].clone());
                 Box::new(
                     state_f
@@ -2608,7 +2608,7 @@ impl EthCoin {
                     }
 
                     let function = try_s!(SWAP_CONTRACT.function("ethPayment"));
-                    let decoded = try_s!(function.decode_input(&tx_input));
+                    let decoded = try_s!(function.decode_input(&tx_input[4..]));
                     if decoded[0] != Token::FixedBytes(swap_id.clone()) {
                         return ERR!("Invalid 'swap_id' {:?}, expected {:?}", decoded, swap_id);
                     }
@@ -2650,7 +2650,7 @@ impl EthCoin {
                     }
 
                     let function = try_s!(SWAP_CONTRACT.function("erc20Payment"));
-                    let decoded = try_s!(function.decode_input(&tx_input));
+                    let decoded = try_s!(function.decode_input(&tx_input[4..]));
                     if decoded[0] != Token::FixedBytes(swap_id.clone()) {
                         return ERR!("Invalid 'swap_id' {:?}, expected {:?}", decoded, swap_id);
                     }
@@ -2749,7 +2749,7 @@ impl EthCoin {
         };
 
         let payment_func = try_s!(SWAP_CONTRACT.function(func_name));
-        let decoded = try_s!(payment_func.decode_input(&tx.data));
+        let decoded = try_s!(payment_func.decode_input(&tx.data[4..]));
         let id = match &decoded[0] {
             Token::FixedBytes(bytes) => bytes.clone(),
             _ => panic!(),
@@ -2965,7 +2965,16 @@ pub trait TryToAddress {
 }
 
 impl TryToAddress for BytesJson {
-    fn try_to_address(&self) -> Result<Address, String> { Ok(Address::from(self.0.as_slice())) }
+    fn try_to_address(&self) -> Result<Address, String> {
+        {
+            let s = self.0.as_slice();
+            if s.len() == 20 {
+                Ok(Address::from_slice(s))
+            } else {
+                Err(format!("invalid address length: {}", s.len()))
+            }
+        }
+    }
 }
 
 impl<T: TryToAddress> TryToAddress for Option<T> {
@@ -2979,7 +2988,7 @@ impl<T: TryToAddress> TryToAddress for Option<T> {
 
 pub fn addr_from_raw_pubkey(pubkey: &[u8]) -> Result<Address, String> {
     let pubkey = try_s!(PublicKey::from_slice(pubkey).map_err(|e| ERRL!("{:?}", e)));
-    let eth_public = Public::from(&pubkey.serialize_uncompressed()[1..65]);
+    let eth_public = Public::from_slice(&pubkey.serialize_uncompressed()[1..65]);
     Ok(public_to_address(&eth_public))
 }
 
@@ -3035,7 +3044,7 @@ pub fn wei_to_gwei_decimal(amount: U256) -> NumConversResult<BigDecimal> { u256_
 impl Transaction for SignedEthTx {
     fn tx_hex(&self) -> Vec<u8> { rlp::encode(self).to_vec() }
 
-    fn tx_hash(&self) -> BytesJson { self.hash.to_vec().into() }
+    fn tx_hash(&self) -> BytesJson { self.hash.as_bytes().to_vec().into() }
 }
 
 /// LP-17: alloy-flavoured replacement for the legacy
@@ -3183,7 +3192,7 @@ pub async fn get_token_decimals(web3: &super::alloy_compat::KdfProvider, token_a
         .map_err(|e| ERRL!("{}", e)));
     let tokens = try_s!(function.decode_output(&res.0));
     let decimals: u64 = match tokens[0] {
-        Token::Uint(dec) => dec.into(),
+        Token::Uint(dec) => dec.as_u64(),
         _ => return ERR!("Invalid decimals type {:?}", tokens),
     };
     Ok(decimals as u8)
@@ -3536,7 +3545,7 @@ pub fn increase_gas_price_by_stage(gas_price: U256, level: &FeeApproxStage) -> U
 pub(crate) fn decode_contract_call(func: &ethabi::Function, data: &[u8]) -> Result<Vec<Token>, ethabi::Error> {
     // The first 4 bytes are the function selector
     if data.len() < 4 {
-        return Err(ethabi::ErrorKind::InvalidData.into());
+        return Err(ethabi::Error::InvalidData);
     }
     func.decode_input(&data[4..])
 }

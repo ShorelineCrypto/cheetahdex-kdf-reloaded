@@ -82,7 +82,7 @@ fn eth_coin_for_test_with_netid(
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract,
         ticker,
         web3_instances: vec![Web3Instance {
@@ -170,7 +170,7 @@ fn eth_hd_coin_for_test(coin_type: EthCoinType) -> (MmArc, EthCoin, Address) {
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(activated_key),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         ticker,
         web3_instances: vec![Web3Instance {
@@ -340,12 +340,12 @@ fn send_and_refund_erc20_payment() {
         ticker: "ETH".into(),
         coin_type: EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: Address::from("0xc0eb7AeD740E1796992A08962c15661bDEB58003"),
+            token_addr: Address::from_slice(&hex::decode("c0eb7AeD740E1796992A08962c15661bDEB58003").unwrap()),
         },
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         web3_instances: vec![Web3Instance {
             web3: web3.clone(),
@@ -418,7 +418,7 @@ fn send_and_refund_eth_payment() {
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         web3_instances: vec![Web3Instance {
             web3: web3.clone(),
@@ -499,7 +499,7 @@ fn test_nonce_several_urls() {
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         web3_instances: vec![
             Web3Instance {
@@ -568,7 +568,7 @@ fn test_wait_for_payment_spend_timeout() {
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         ticker: "ETH".into(),
         web3_instances: vec![Web3Instance {
@@ -625,7 +625,7 @@ fn test_search_for_swap_tx_spend_was_spent() {
     .unwrap();
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
-    let swap_contract_address = Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94");
+    let swap_contract_address = Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap());
     let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         coin_type: EthCoinType::Eth,
@@ -738,12 +738,12 @@ fn test_search_for_swap_tx_spend_was_refunded() {
     .unwrap();
     let ctx = MmCtxBuilder::new().into_mm_arc();
 
-    let swap_contract_address = Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94");
+    let swap_contract_address = Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap());
     let my_addr = key_pair.address();
     let coin = EthCoin(Arc::new(EthCoinImpl {
         coin_type: EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: Address::from("0xc0eb7aed740e1796992a08962c15661bdeb58003"),
+            token_addr: Address::from_slice(&hex::decode("c0eb7aed740e1796992a08962c15661bdeb58003").unwrap()),
         },
         decimals: 18,
         gas_station_url: None,
@@ -848,7 +848,7 @@ fn test_withdraw_impl_fee_details() {
     let (ctx, coin) = eth_coin_for_test(
         EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: Address::from("0x2b294F029Fde858b2c62184e8390591755521d8E"),
+            token_addr: Address::from_slice(&hex::decode("2b294F029Fde858b2c62184e8390591755521d8E").unwrap()),
         },
         vec!["http://dummy.dummy".into()],
         None,
@@ -907,7 +907,7 @@ fn task_withdraw_evm_token_accepts_omitted_from_sender() {
     let (_ctx, coin) = eth_coin_for_test(
         EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: Address::from("0x2b294F029Fde858b2c62184e8390591755521d8E"),
+            token_addr: Address::from_slice(&hex::decode("2b294F029Fde858b2c62184e8390591755521d8E").unwrap()),
         },
         vec!["http://dummy.dummy".into()],
         None,
@@ -931,7 +931,7 @@ fn task_withdraw_evm_token_accepts_omitted_from_sender() {
 fn task_withdraw_evm_token_explicit_hd_from_resolves_selected_sender() {
     let (ctx, coin, selected_addr) = eth_hd_coin_for_test(EthCoinType::Erc20 {
         platform: "ETH".to_string(),
-        token_addr: Address::from("0x2b294F029Fde858b2c62184e8390591755521d8E"),
+        token_addr: Address::from_slice(&hex::decode("2b294F029Fde858b2c62184e8390591755521d8E").unwrap()),
     });
     let withdraw_req = WithdrawRequest {
         amount: 1.into(),
@@ -1245,7 +1245,7 @@ fn test_get_fee_to_send_taker_fee() {
         let (_ctx, coin) = eth_coin_for_test_with_netid(
             EthCoinType::Erc20 {
                 platform: "ETH".to_string(),
-                token_addr: Address::from("0xaD22f63404f7305e4713CcBd4F296f34770513f4"),
+                token_addr: Address::from_slice(&hex::decode("aD22f63404f7305e4713CcBd4F296f34770513f4").unwrap()),
             },
             vec!["http://dummy.dummy".into()],
             None,
@@ -1272,7 +1272,7 @@ fn test_get_fee_to_send_taker_fee_insufficient_balance() {
     let (_ctx, coin) = eth_coin_for_test(
         EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: Address::from("0xaD22f63404f7305e4713CcBd4F296f34770513f4"),
+            token_addr: Address::from_slice(&hex::decode("aD22f63404f7305e4713CcBd4F296f34770513f4").unwrap()),
         },
         vec!["http://eth1.cipig.net:8555".into()],
         None,
@@ -1326,7 +1326,7 @@ fn validate_dex_fee_invalid_sender_erc() {
     let (_ctx, coin) = eth_coin_for_test(
         EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: "0xa1d6df714f91debf4e0802a542e13067f31b8262".into(),
+            token_addr: Address::from_slice(&hex::decode("a1d6df714f91debf4e0802a542e13067f31b8262").unwrap()),
         },
         vec!["http://eth1.cipig.net:8555".into()],
         None,
@@ -1361,7 +1361,7 @@ fn sender_compressed_pub(tx: &SignedEthTx) -> [u8; 33] {
     let tx_pubkey = tx.public.unwrap();
     let mut raw_pubkey = [0; 65];
     raw_pubkey[0] = 0x04;
-    raw_pubkey[1..].copy_from_slice(&tx_pubkey);
+    raw_pubkey[1..].copy_from_slice(tx_pubkey.as_bytes());
     let secp_public = PublicKey::from_slice(&raw_pubkey).unwrap();
     secp_public.serialize()
 }
@@ -1405,7 +1405,7 @@ fn validate_dex_fee_erc_confirmed_before_min_block() {
     let (_ctx, coin) = eth_coin_for_test(
         EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: "0xa1d6df714f91debf4e0802a542e13067f31b8262".into(),
+            token_addr: Address::from_slice(&hex::decode("a1d6df714f91debf4e0802a542e13067f31b8262").unwrap()),
         },
         vec!["http://eth1.cipig.net:8555".into()],
         None,
@@ -1467,7 +1467,7 @@ fn test_negotiate_swap_contract_addr_no_fallback() {
 
 #[test]
 fn test_negotiate_swap_contract_addr_has_fallback() {
-    let fallback = "0x8500AFc0bc5214728082163326C2FF0C73f4a871".into();
+    let fallback = Address::from_slice(&hex::decode("8500AFc0bc5214728082163326C2FF0C73f4a871").unwrap());
 
     let (_, coin) = eth_coin_for_test(
         EthCoinType::Eth,
@@ -1477,7 +1477,7 @@ fn test_negotiate_swap_contract_addr_has_fallback() {
 
     let input = None;
     let result = coin.negotiate_swap_contract_addr(input).unwrap();
-    assert_eq!(Some(fallback.to_vec().into()), result);
+    assert_eq!(Some(fallback.as_bytes().to_vec().into()), result);
 
     let slice: &[u8] = &[1; 1];
     let error = coin.negotiate_swap_contract_addr(Some(slice)).unwrap_err().into_inner();
@@ -1499,7 +1499,7 @@ fn test_negotiate_swap_contract_addr_has_fallback() {
 
     let slice: &[u8] = fallback.as_ref();
     let result = coin.negotiate_swap_contract_addr(Some(slice)).unwrap();
-    assert_eq!(Some(fallback.to_vec().into()), result);
+    assert_eq!(Some(fallback.as_bytes().to_vec().into()), result);
 }
 
 #[test]
@@ -1573,7 +1573,7 @@ fn test_message_hash() {
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         web3_instances: vec![Web3Instance {
             web3: web3.clone(),
@@ -1620,7 +1620,7 @@ fn test_sign_verify_message() {
         my_address: my_addr,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         web3_instances: vec![Web3Instance {
             web3: web3.clone(),
@@ -1815,7 +1815,7 @@ fn trezor_eth_coin_for_test(coin_type: EthCoinType) -> (MmArc, EthCoin) {
             address,
             public,
         }),
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
         fallback_swap_contract: None,
         ticker,
         web3_instances: vec![Web3Instance {

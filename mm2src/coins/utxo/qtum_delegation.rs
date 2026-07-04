@@ -351,10 +351,14 @@ impl QtumCoin {
     fn remove_delegation_output(&self, gas_limit: u64, gas_price: u64) -> QtumStakingAbiResult<ContractCallOutput> {
         let function: &ethabi::Function = QTUM_DELEGATE_CONTRACT.function("removeDelegation")?;
         let params = function.encode_input(&[])?;
-        let script_pubkey =
-            generate_contract_call_script_pubkey(&params, gas_limit, gas_price, &QTUM_DELEGATE_CONTRACT_ADDRESS)
-                .mm_err(Into::into)?
-                .to_bytes();
+        let script_pubkey = generate_contract_call_script_pubkey(
+            &params,
+            gas_limit,
+            gas_price,
+            QTUM_DELEGATE_CONTRACT_ADDRESS.as_bytes(),
+        )
+        .mm_err(Into::into)?
+        .to_bytes();
         Ok(ContractCallOutput {
             value: OUTPUT_QTUM_AMOUNT,
             script_pubkey,
@@ -379,10 +383,14 @@ impl QtumCoin {
             Token::Bytes(pod.into()),
         ])?;
 
-        let script_pubkey =
-            generate_contract_call_script_pubkey(&params, gas_limit, gas_price, &QTUM_DELEGATE_CONTRACT_ADDRESS)
-                .mm_err(Into::into)?
-                .to_bytes();
+        let script_pubkey = generate_contract_call_script_pubkey(
+            &params,
+            gas_limit,
+            gas_price,
+            QTUM_DELEGATE_CONTRACT_ADDRESS.as_bytes(),
+        )
+        .mm_err(Into::into)?
+        .to_bytes();
         Ok(ContractCallOutput {
             value: OUTPUT_QTUM_AMOUNT,
             script_pubkey,
