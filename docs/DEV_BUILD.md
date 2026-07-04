@@ -296,22 +296,26 @@ umbrella workflow:
 **Linux is built inside a pinned Debian 11 container (glibc 2.31).** This gives
 the shipped binary a deliberately low glibc floor so it runs on any host with
 glibc >= 2.31 (Debian 11/12, Ubuntu 20.04+, RHEL/Rocky 9, …). Building on a
-newer base would refuse to start on those still-common hosts. Both the dev and
-release pipelines reuse `build-linux.yml`, so **dev snapshots inherit the same
-backwards-compatible floor.**
+newer base would refuse to start on those still-common hosts. The dev, staging,
+and release pipelines all reuse `build-linux.yml`, so **every snapshot and
+release inherits the same backwards-compatible floor.**
 
 ### 7.2) Dev snapshots — `dev-build.yml`
 
-Unsigned, all-platform snapshot builds. Triggered by:
+Unsigned, all-platform snapshot builds, **manual only** (`workflow_dispatch`).
+Use the "Run workflow" button to snapshot any ref on demand. Artifacts are
+uploaded as GitHub Actions run artifacts; they are **not** checksummed, signed,
+or published as a GitHub Release.
 
-- **manual dispatch** (`workflow_dispatch`); or
-- **pushing a `v*` tag whose commit is on `dev` or `staging`** (and not `main`).
+### 7.3) Staging snapshots — `staging-build.yml`
 
-A `gate` job enforces the branch rule, because GitHub tag triggers cannot be
-scoped to a branch. Artifacts are uploaded as GitHub Actions run artifacts; they
-are **not** checksummed, signed, or published as a GitHub Release.
+Unsigned, all-platform snapshot builds that run **automatically on every push to
+`staging`** (also runnable via `workflow_dispatch`). `staging` is the
+feature-frozen, stabilizing pre-release line, so testers/QA always have current
+beta/rc binaries without a manual trigger. Same output posture as dev snapshots:
+run artifacts only — **not** checksummed, signed, or published as a Release.
 
-### 7.3) Signed releases — `release.yml`
+### 7.4) Signed releases — `release.yml`
 
 Pushing a `v*` tag whose commit is on `main` triggers the signed release
 pipeline (checksums + GPG-signed manifest + drafted GitHub Release). See

@@ -66,5 +66,9 @@ The deprecated upstream `mm2.1` branch is not used in Reloaded.
 - Platform builds (Windows, macOS, iOS, Android, WASM) live under
   `.github/workflows/build-*.yml` and are dispatched manually until each
   runner is verified — see [CI_RUNNERS.md](./CI_RUNNERS.md).
-- The umbrella `dev-build.yml` fans out to every platform-build child via
-  `workflow_call` once the runners are available.
+- The umbrella `dev-build.yml` (manual) fans out to every platform-build child
+  via `workflow_call` for on-demand `dev` snapshots.
+- `staging-build.yml` runs the same fan-out **automatically on every push to
+  `staging`**, giving testers fresh unsigned beta/rc binaries.
+- `release.yml` runs on `main` `v*` tags and produces the signed, published
+  release (see [DEV_BUILD.md](./DEV_BUILD.md) §7 and [RELEASE.md](./RELEASE.md)).
