@@ -908,3 +908,36 @@ fn abi_contracts_expose_expected_functions() {
         }
     }
 }
+
+/// Event topic-0 anchor. Production builds `eth_getLogs` topic filters from
+/// `Contract::event(name).signature()` (see `eth_impl`: ERC-20 `Transfer`, v1
+/// swap `ReceiverSpent` / `SenderRefunded`). Freeze those topic-0 hashes against
+/// an independently computed keccak256 of the canonical event signature — and
+/// the well-known EIP-20 `Transfer` topic as external ground truth. Replaces the
+/// codec-specific `parse_log` test dropped in the alloy migration; this anchors
+/// the event API production actually relies on.
+#[test]
+fn abi_event_topic0_signatures() {
+    let cases: &[(&Contract, &str, &str)] = &[
+        (&ERC20_CONTRACT, "Transfer", "Transfer(address,address,uint256)"),
+        (&SWAP_CONTRACT, "PaymentSent", "PaymentSent(bytes32)"),
+        (&SWAP_CONTRACT, "ReceiverSpent", "ReceiverSpent(bytes32,bytes32)"),
+        (&SWAP_CONTRACT, "SenderRefunded", "SenderRefunded(bytes32)"),
+    ];
+    for (contract, name, sig) in cases {
+        let topic0 = contract
+            .event(name)
+            .unwrap_or_else(|e| panic!("event `{name}`: {e:?}"))
+            .signature();
+        assert_eq!(
+            topic0.as_bytes(),
+            &keccak256_bytes(sig.as_bytes())[..],
+            "event `{name}` topic0 != keccak256(\"{sig}\")"
+        );
+    }
+    // Canonical EIP-20 Transfer topic0 as external ground truth.
+    assert_eq!(
+        hex::encode(ERC20_CONTRACT.event("Transfer").unwrap().signature().as_bytes()),
+        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    );
+}
