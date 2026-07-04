@@ -102,16 +102,16 @@ impl From<serde_json::Error> for Web3RpcError {
     fn from(e: serde_json::Error) -> Self { Web3RpcError::InvalidResponse(e.to_string()) }
 }
 
-impl From<ethabi::Error> for Web3RpcError {
-    fn from(e: ethabi::Error) -> Web3RpcError {
+impl From<crate::eth::abi::AbiError> for Web3RpcError {
+    fn from(e: crate::eth::abi::AbiError) -> Web3RpcError {
         // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
         // It's an internal error if there are any issues during working with a smart contract ABI.
         Web3RpcError::Internal(e.to_string())
     }
 }
 
-impl From<ethabi::Error> for WithdrawError {
-    fn from(e: ethabi::Error) -> Self {
+impl From<crate::eth::abi::AbiError> for WithdrawError {
+    fn from(e: crate::eth::abi::AbiError) -> Self {
         // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
         // It's an internal error if there are any issues during working with a smart contract ABI.
         WithdrawError::InternalError(e.to_string())
@@ -145,16 +145,16 @@ impl From<Web3RpcError> for BalanceError {
     }
 }
 
-impl From<ethabi::Error> for TradePreimageError {
-    fn from(e: ethabi::Error) -> Self {
+impl From<crate::eth::abi::AbiError> for TradePreimageError {
+    fn from(e: crate::eth::abi::AbiError) -> Self {
         // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
         // It's an internal error if there are any issues during working with a smart contract ABI.
         TradePreimageError::InternalError(e.to_string())
     }
 }
 
-impl From<ethabi::Error> for BalanceError {
-    fn from(e: ethabi::Error) -> Self {
+impl From<crate::eth::abi::AbiError> for BalanceError {
+    fn from(e: crate::eth::abi::AbiError) -> Self {
         // Currently, we use the `ethabi` crate to work with a smart contract ABI known at compile time.
         // It's an internal error if there are any issues during working with a smart contract ABI.
         BalanceError::Internal(e.to_string())
@@ -635,12 +635,12 @@ pub enum EthAssocTypesError {
 pub type ValidatePaymentError = ValidateSwapV2TxError;
 pub type ValidatePaymentResult<T> = MmResult<T, ValidatePaymentError>;
 
-impl From<ethabi::Error> for FindPaymentSpendError {
-    fn from(e: ethabi::Error) -> Self { FindPaymentSpendError::ABIError(e.to_string()) }
+impl From<crate::eth::abi::AbiError> for FindPaymentSpendError {
+    fn from(e: crate::eth::abi::AbiError) -> Self { FindPaymentSpendError::ABIError(e.to_string()) }
 }
 
-impl From<ethabi::Error> for ValidateSwapV2TxError {
-    fn from(e: ethabi::Error) -> Self { ValidateSwapV2TxError::ABIError(e.to_string()) }
+impl From<crate::eth::abi::AbiError> for ValidateSwapV2TxError {
+    fn from(e: crate::eth::abi::AbiError) -> Self { ValidateSwapV2TxError::ABIError(e.to_string()) }
 }
 
 impl From<std::array::TryFromSliceError> for ValidateSwapV2TxError {

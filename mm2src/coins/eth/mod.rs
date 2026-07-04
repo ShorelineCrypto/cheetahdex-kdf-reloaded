@@ -32,7 +32,6 @@ pub(crate) use common::executor::Timer;
 pub(crate) use common::log::error;
 pub(crate) use common::{now_ms, small_rng};
 pub(crate) use derive_more::Display;
-pub(crate) use ethabi::{Contract, Token};
 pub(crate) use ethereum_types::{Address, H160, H256, U256};
 pub(crate) use futures::compat::Future01CompatExt;
 pub(crate) use futures::future::{join_all, select, Either, FutureExt, TryFutureExt};
@@ -127,6 +126,11 @@ pub(crate) use common::mm_number::MmNumber;
 pub(crate) use eth_hd_wallet::EthHDWallet;
 pub(crate) use mm2_eth::keys::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
+
+// Alloy-backed ABI facade — the crate-wide `Contract`/`Token`/`Function`/
+// `AbiError` come from here (replacing ethabi).
+pub(crate) mod abi;
+pub(crate) use abi::{AbiError, Contract, Function, Token};
 
 #[cfg(test)] mod abi_golden_tests;
 #[cfg(test)] mod eth_tests;
