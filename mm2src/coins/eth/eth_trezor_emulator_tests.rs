@@ -551,7 +551,7 @@ fn build_trezor_coin(
         my_address,
         sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
         signer,
-        swap_contract_address: Address::from("0x7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94"),
+        swap_contract_address: Address::from_str("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap(),
         fallback_swap_contract: None,
         ticker: ticker.to_string(),
         web3_instances: vec![Web3Instance {
@@ -790,7 +790,7 @@ fn emulator_trezor_withdraw_erc20_with_from_path() {
         &ctx,
         EthCoinType::Erc20 {
             platform: "ETH".to_string(),
-            token_addr: Address::from(TOKEN_ADDR),
+            token_addr: Address::from_str(TOKEN_ADDR.trim_start_matches("0x")).unwrap(),
         },
         node.url.clone(),
         material.eth_account_xpub.clone(),
@@ -845,7 +845,7 @@ fn emulator_trezor_withdraw_erc20_with_from_path() {
     assert_eq!(&data[16..36], &recipient.0[..], "encoded recipient must match `to`");
     assert_eq!(
         signed.action,
-        Action::Call(Address::from(TOKEN_ADDR)),
+        Action::Call(Address::from_str(TOKEN_ADDR.trim_start_matches("0x")).unwrap()),
         "tx `to` must be the token contract"
     );
     assert!(signed.value.is_zero(), "ERC20 transfer must carry zero value");
@@ -867,7 +867,7 @@ fn emulator_trezor_withdraw_tron_unsupported() {
     let _crypto = CryptoCtx::init_with_iguana_passphrase(ctx.clone(), "trezor emulator test passphrase").unwrap();
 
     let node = spawn_mock_node("0x0", "0x0", "0x0");
-    let dummy = Address::from("0x0000000000000000000000000000000000000001");
+    let dummy = Address::from_str("0000000000000000000000000000000000000001").unwrap();
     let coin = device_trezor_iguana_coin(&ctx, EthCoinType::Tron, node.url.clone(), dummy, Public::default());
 
     let req = WithdrawRequest {
