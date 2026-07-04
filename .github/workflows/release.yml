@@ -1,0 +1,169 @@
+name: Release
+
+# Tag-driven, signed release pipeline.
+#
+# Cutting an annotated tag `v*` (from `main`, per RELEASE_CHECKLIST.md) builds
+# the release binaries, generates SHA-256 checksums, GPG-signs the checksum
+# manifest with the maintainer key, and drafts a GitHub Release with every
+# artifact attached. Signing runs ONLY here (gated behind the protected
+# `release` environment); `dev`/`staging` snapshots use the unsigned
+# `dev-build.yml` workflow instead.
+#
+# Validate a change to this file end-to-end by pushing a throwaway pre-release
+# tag (e.g. `v0.0.0-rc.test`) and deleting the drafted release + tag afterwards.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # create the GitHub Release and upload assets
+
+jobs:
+  # Linux x86-64 is built inside a pinned Debian 11 (glibc 2.31) container so the
+  # binary runs on any host with glibc >= 2.31 (Debian 11/12, Ubuntu 20.04+,
+  # RHEL 9, etc.) — a deliberately low floor for broad portability. Building on a
+  # newer base (e.g. Ubuntu 24.04 / glibc 2.39) would refuse to run on Ubuntu
+  # 22.04, Debian 12 and similar, so the release binary is intentionally built
+  # old even though the runtime container image (Dockerfile.release) is current.
+  linux:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:11
+    timeout-minutes: 90
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev protobuf-compiler cmake \
+            clang libclang-dev git curl ca-certificates
+      - name: Trust the workspace (container runs as root)
+        run: git config --global --add safe.directory '*'
+      - uses: actions/checkout@v7
+      - name: Install Rust (stable; pinned by rust-toolchain.toml)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Build kdf (release)
+        run: cargo build --bin kdf --release --target x86_64-unknown-linux-gnu
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kdf-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/release/kdf
+
+  # macOS (x86_64, aarch64, universal) and Windows reuse the existing per-platform
+  # build workflows. glibc is irrelevant on these targets.
+  macos:
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      profile: release
+
+  windows:
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      profile: release
+
+  # Collect every binary, checksum them, GPG-sign the manifest, and draft the
+  # GitHub Release. Runs in the protected `release` environment (the only place
+  # the signing key is exposed).
+  release:
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Assemble version-tagged release assets
+        run: |
+          set -eu
+          mkdir -p release-assets
+          tag="${GITHUB_REF_NAME}"
+          # Each artifact directory is named `kdf-<target>`; its payload is
+          # `kdf` (unix) or `kdf.exe` (windows).
+          for dir in artifacts/kdf-*; do
+            [ -d "$dir" ] || continue
+            target="$(basename "$dir" | sed 's/^kdf-//')"
+            if [ -f "$dir/kdf.exe" ]; then
+              cp "$dir/kdf.exe" "release-assets/kdf-${tag}-${target}.exe"
+            elif [ -f "$dir/kdf" ]; then
+              cp "$dir/kdf" "release-assets/kdf-${tag}-${target}"
+            fi
+          done
+          echo "Assembled:"
+          ls -l release-assets
+
+      - name: Generate SHA-256 checksums
+        run: |
+          set -eu
+          cd release-assets
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Import signing key and sign the checksum manifest
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -eu
+          # Accept the secret whether stored base64-encoded or as a raw armored
+          # key block.
+          printf '%s' "$GPG_PRIVATE_KEY" > /tmp/gpgkey.in
+          if base64 -d /tmp/gpgkey.in 2>/dev/null | grep -q 'PGP PRIVATE KEY'; then
+            base64 -d /tmp/gpgkey.in | gpg --batch --import
+          else
+            gpg --batch --import /tmp/gpgkey.in
+          fi
+          shred -u /tmp/gpgkey.in
+          cd release-assets
+          # No passphrase configured for the signing (sub)key.
+          gpg --batch --yes --pinentry-mode loopback \
+            --local-user FEE1ACA52C65FF3EBF31818CB5595E1752BC2A82 \
+            --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+
+      - name: Draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          gh release create "${GITHUB_REF_NAME}" release-assets/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft \
+            --verify-tag \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
+
+  # Optional: publish the runtime container image to a registry. Skipped unless
+  # the `PUBLISH_DOCKERHUB` repository variable is set to `true` and the
+  # DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets + DOCKERHUB_REPO variable exist.
+  docker:
+    needs: [linux]
+    if: ${{ vars.PUBLISH_DOCKERHUB == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch the Linux binary into the build context
+        uses: actions/download-artifact@v7
+        with:
+          name: kdf-x86_64-unknown-linux-gnu
+          path: .
+      - name: Build and push runtime image
+        env:
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DH_REPO: ${{ vars.DOCKERHUB_REPO }}
+        run: |
+          set -eu
+          chmod +x kdf
+          echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
+          docker build -f Dockerfile.release -t "$DH_REPO:${GITHUB_REF_NAME}" -t "$DH_REPO:latest" .
+          docker push "$DH_REPO:${GITHUB_REF_NAME}"
+          docker push "$DH_REPO:latest"

@@ -1,13 +1,14 @@
-# Runtime image for the release `kdf` binary (built separately on the CI builder
-# into `target-xenial/release/kdf`).
+# Runtime image for the release `kdf` binary. The release workflow
+# (.github/workflows/release.yml, `docker` job) places the pre-built Linux
+# binary as `kdf` in the build context before building this image.
 #
-# Base is a *supported* Ubuntu LTS: the previous `ubuntu:bionic` (18.04) and the
-# xenial builder are both EOL, so they cannot receive fixes for issues such as
-# gnupg CVE-2025-68973 or systemd CVE-2021-33910 without an Ubuntu Pro/ESM
-# subscription — an in-place `apt dist-upgrade` on an EOL release fetches nothing.
-# 24.04 (noble) is under standard security support, so `apt upgrade` delivers the
-# patched base packages. The binary is built against xenial's old glibc, which
-# runs forward-compatibly on newer glibc.
+# Base is a *supported* Ubuntu LTS: the previous `ubuntu:bionic` (18.04) was
+# EOL, so it could not receive fixes for issues such as gnupg CVE-2025-68973 or
+# systemd CVE-2021-33910 without an Ubuntu Pro/ESM subscription — an in-place
+# `apt dist-upgrade` on an EOL release fetches nothing. 24.04 (noble) is under
+# standard security support, so `apt upgrade` delivers the patched base
+# packages. The binary is built against Debian 11's glibc (2.31), which runs
+# forward-compatibly on 24.04's newer glibc.
 FROM ubuntu:24.04
 
 # Pull the latest security patches and keep only what a runtime needs
@@ -22,7 +23,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /mm2
-COPY target-xenial/release/kdf /app/kdf
+COPY kdf /app/kdf
 EXPOSE 7783
 ENV PATH="/app:${PATH}"
 CMD kdf
