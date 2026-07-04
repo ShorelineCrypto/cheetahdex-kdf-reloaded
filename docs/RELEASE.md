@@ -6,9 +6,8 @@ gate that must be fully ticked) — this file describes the *mechanics*.
 
 ## Overview
 
-Releases are **tag-driven**. Pushing an annotated tag matching `v*` to `main`
-triggers [`.github/workflows/release.yml`](../.github/workflows/release.yml),
-which:
+Releases are **tag-driven**. Pushing an annotated, GPG-signed `v*` tag triggers
+[`.github/workflows/release.yml`](../.github/workflows/release.yml), which:
 
 1. builds the Linux x86-64 binary inside a pinned **Debian 11** container
    (glibc 2.31 floor → runs on Debian 11/12, Ubuntu 20.04+, RHEL 9, …);
@@ -21,35 +20,54 @@ which:
 5. drafts a **GitHub Release** with every binary + `SHA256SUMS` + `SHA256SUMS.asc`
    attached.
 
-Both `release.yml` and the unsigned dev-snapshot workflow
-[`dev-build.yml`](../.github/workflows/dev-build.yml) watch `v*` tags. Because
-GitHub tag triggers cannot be scoped to a branch, each workflow begins with a
-`gate` job that inspects which branch the tagged commit lives on:
+The `gate` job in `release.yml` decides how to treat the tag (GitHub tag
+triggers cannot be branch-scoped):
 
-- tag commit on **`main`** → `release.yml` proceeds (signed, published draft);
-  `dev-build.yml` self-skips.
-- tag commit on **`dev` / `staging`** (and not `main`) → `dev-build.yml`
-  proceeds, producing unsigned per-platform CI artifacts (not signed, not
-  published as a GitHub Release); `release.yml` self-skips.
+- **Final release** — tag `vX.Y.Z` (no pre-release suffix) whose commit is on
+  **`main`** → published as the signed, **latest** GitHub Release.
+- **Pre-release** — tag `vX.Y.Z-alpha.N` / `-beta.N` / `-rc.N` whose commit is
+  on **`staging`** (or `main`) → published as a signed GitHub **pre-release**
+  (not marked "Latest"). The optional DockerHub `:latest` push is skipped for
+  pre-releases.
+- A `v*` tag whose commit is on none of those (e.g. a stray dev tag) self-skips.
 
-`dev-build.yml` can also be run manually via **workflow_dispatch**. Its Linux job
-reuses the same [`build-linux.yml`](../.github/workflows/build-linux.yml) Debian
-11 build as the release, so dev snapshots carry the same glibc 2.31 floor and
-stay backwards-compatible.
-
-Signing happens **only** in `release.yml`.
+Signing happens **only** in `release.yml`. Unsigned, untagged branch snapshots
+are produced separately by [`dev-build.yml`](../.github/workflows/dev-build.yml)
+(manual) and [`staging-build.yml`](../.github/workflows/staging-build.yml)
+(automatic on push to `staging`); both reuse the same Debian 11
+[`build-linux.yml`](../.github/workflows/build-linux.yml), so every artifact
+carries the same glibc 2.31 floor.
 
 ## Steps for the maintainer
 
+### Pre-release (beta / rc) from `staging`
+
+1. Promote `dev → staging` and bump the version to the pre-release (e.g.
+   `0.1.0-beta.1`); update `CHANGELOG.md`. Commit and push `staging`
+   (this also fires the unsigned `staging-build.yml` snapshot).
+2. Tag from `staging` and push the tag:
+   ```sh
+   git checkout staging && git pull
+   git tag -s v0.1.0-beta.1 -m "v0.1.0-beta.1"
+   git push origin v0.1.0-beta.1
+   ```
+3. Watch **Release**; it drafts a signed **pre-release**. Review the notes and
+   assets, then **publish** it in the GitHub UI (it will be marked "Pre-release",
+   not "Latest").
+
+### Final release from `main`
+
 1. Complete every box in [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md).
-2. Bump the workspace version(s) and update `CHANGELOG.md`; merge to `main`.
+2. Promote `staging → main`, set the final version (e.g. `0.1.0`), and update
+   `CHANGELOG.md`. Push `main`.
 3. Create and push an annotated, GPG-signed tag from `main`:
    ```sh
    git checkout main && git pull
-   git tag -s v0.1.0-alpha.1 -m "v0.1.0-alpha.1"
-   git push origin v0.1.0-alpha.1
+   git tag -s v0.1.0 -m "v0.1.0"
+   git push origin v0.1.0
    ```
-4. Watch the **Release** workflow. When it finishes, a **draft** release exists.
+4. Watch the **Release** workflow. When it finishes, a **draft** (latest)
+   release exists.
 5. Review the drafted notes and the attached assets, then **publish** the
    release in the GitHub UI.
 
@@ -57,8 +75,7 @@ Signing happens **only** in `release.yml`.
 
 - **`release` environment** holds `GPG_PRIVATE_KEY` (the maintainer signing
   key, no passphrase). It is the only place the key is exposed; restrict the
-  environment to protected `main` + tag refs. See the "GPG key → CI secret"
-  note below.
+  environment to tag refs (`v*`). See the "GPG key → CI secret" note below.
 - **Optional DockerHub image**: set repository variable `PUBLISH_DOCKERHUB=true`
   and provide `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets and a
   `DOCKERHUB_REPO` variable; the `docker` job then builds

@@ -317,7 +317,9 @@ run artifacts only — **not** checksummed, signed, or published as a Release.
 
 ### 7.4) Signed releases — `release.yml`
 
-Pushing a `v*` tag whose commit is on `main` triggers the signed release
-pipeline (checksums + GPG-signed manifest + drafted GitHub Release). See
+Triggered by a `v*` tag. A **final** tag (`vX.Y.Z`) whose commit is on `main`
+publishes the signed, latest GitHub Release; a **pre-release** tag
+(`vX.Y.Z-alpha.N` / `-beta.N` / `-rc.N`) whose commit is on `staging` publishes
+a signed GitHub pre-release. Both produce checksums + a GPG-signed manifest. See
 [`RELEASE.md`](RELEASE.md) for the full runbook. `release.yml` reuses the same
 per-platform build workflows (including the Debian 11 `build-linux.yml`).

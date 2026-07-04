@@ -18,12 +18,18 @@ Promotion is one-way and explicit:
 2. `reloaded-gplv2-base` → `staging` when a release candidate is ready.
 3. `staging` → `main` after QA sign-off, then tag `vX.Y.Z` (annotated, GPG-signed).
 
-Release tags use the `v*` convention (e.g. `v0.1.0-alpha.1`, `v0.1.0`), applied
-**only on `main`**. Pushing a `v*` tag is what triggers the signed release
-pipeline ([`.github/workflows/release.yml`](../.github/workflows/release.yml));
-`dev`/`staging` snapshots are built on demand via the unsigned, manually
-dispatched [`dev-build.yml`](../.github/workflows/dev-build.yml) and are never
-tagged.
+Release tags use the `v*` convention and drive the signed release pipeline
+([`.github/workflows/release.yml`](../.github/workflows/release.yml)):
+
+- **Pre-release tags** (`vX.Y.Z-alpha.N` / `-beta.N` / `-rc.N`) are cut on
+  `staging`; they publish a signed GitHub **pre-release** (not marked "Latest").
+- **Final tags** (`vX.Y.Z`) are cut on `main`; they publish the signed, latest
+  GitHub Release.
+
+Only `release.yml` signs and publishes. Unsigned, untagged branch snapshots come
+from [`dev-build.yml`](../.github/workflows/dev-build.yml) (manual) and
+[`staging-build.yml`](../.github/workflows/staging-build.yml) (automatic on push
+to `staging`).
 
 When comparing against an ancestor, use:
 
