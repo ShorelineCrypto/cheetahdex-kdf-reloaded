@@ -1,89 +1,48 @@
 name: Dev Build (all platforms)
 
-# Unsigned dev/staging snapshot builds.
+# Unsigned dev/staging snapshot builds — MANUAL only (workflow_dispatch).
 #
-# Triggered manually (workflow_dispatch) or automatically when a `v*` tag is
-# pushed whose commit lives on `dev` or `staging` (and NOT on `main`). Tags
-# whose commit is on `main` are handled by the signed `release.yml` pipeline
-# instead — the `gate` job below enforces that split, because GitHub tag
-# triggers cannot be scoped to a branch directly and both workflows watch `v*`.
+# Use the "Run workflow" button to produce a downloadable, unsigned binary set
+# from whatever ref you pick. These are disposable snapshots: not checksummed,
+# not signed, and not published as a GitHub Release. Signed, public releases are
+# cut only from `main` `v*` tags via release.yml.
 #
 # Each platform job delegates to its dedicated per-platform workflow via
 # `workflow_call`. Linux reuses build-linux.yml, which builds inside a Debian 11
-# container (glibc 2.31) so even dev binaries stay broadly backwards-compatible.
+# container (glibc 2.31) so even dev snapshots stay broadly backwards-compatible.
 # If a downstream job fails (missing runner, toolchain, etc.) the others still
 # complete and upload their artifacts.
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 jobs:
-  # Branch-scope the tag trigger. Proceeds on manual dispatch, or when the
-  # tag's commit is reachable from origin/dev or origin/staging but NOT from
-  # origin/main (main tags belong to the signed release.yml pipeline).
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      proceed: ${{ steps.g.outputs.proceed }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - id: g
-        run: |
-          set -eu
-          git fetch --quiet --no-tags origin '+refs/heads/*:refs/remotes/origin/*' || true
-          contains() { git branch -r --contains "$GITHUB_SHA" 2>/dev/null | grep -v ' -> ' | grep -qE "/$1$"; }
-          proceed=false
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            proceed=true
-          elif { contains dev || contains staging; } && ! contains main; then
-            proceed=true
-          fi
-          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
-          echo "gate: event=$GITHUB_EVENT_NAME ref=$GITHUB_REF proceed=$proceed"
-
   linux:
-    needs: gate
-    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-linux.yml
     with:
       profile: release
 
   macos:
-    needs: gate
-    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-macos.yml
     with:
       profile: release
 
   windows:
-    needs: gate
-    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-windows.yml
     with:
       profile: release
 
   ios:
-    needs: gate
-    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-ios.yml
     with:
       profile: release
 
   android:
-    needs: gate
-    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-android.yml
     with:
       profile: release
 
   wasm:
-    needs: gate
-    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-wasm.yml
     with:
       profile: dev

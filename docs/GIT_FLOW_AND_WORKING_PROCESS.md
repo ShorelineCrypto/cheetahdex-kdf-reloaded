@@ -16,7 +16,14 @@ Hierarchy: `main` ← `staging` ← `reloaded-gplv2-base` ← feature branches.
 Promotion is one-way and explicit:
 1. Feature branch → `reloaded-gplv2-base` after PR review + green CI.
 2. `reloaded-gplv2-base` → `staging` when a release candidate is ready.
-3. `staging` → `main` after QA sign-off, then tag `reloaded-X.Y.Z`.
+3. `staging` → `main` after QA sign-off, then tag `vX.Y.Z` (annotated, GPG-signed).
+
+Release tags use the `v*` convention (e.g. `v0.1.0-alpha.1`, `v0.1.0`), applied
+**only on `main`**. Pushing a `v*` tag is what triggers the signed release
+pipeline ([`.github/workflows/release.yml`](../.github/workflows/release.yml));
+`dev`/`staging` snapshots are built on demand via the unsigned, manually
+dispatched [`dev-build.yml`](../.github/workflows/dev-build.yml) and are never
+tagged.
 
 When comparing against an ancestor, use:
 
