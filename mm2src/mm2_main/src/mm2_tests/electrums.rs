@@ -1,5 +1,6 @@
 use serde_json::Value as Json;
 
+#[allow(dead_code)]
 #[cfg(target_arch = "wasm32")]
 pub fn rick_electrums() -> Vec<Json> {
     vec![
@@ -9,6 +10,7 @@ pub fn rick_electrums() -> Vec<Json> {
     ]
 }
 
+#[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn rick_electrums() -> Vec<Json> {
     vec![
