@@ -17,7 +17,7 @@
 
 use alloy_dyn_abi::{DynSolType, DynSolValue, FunctionExt, JsonAbiExt};
 use alloy_json_abi::JsonAbi;
-use ethereum_types::{Address, U256};
+use ethereum_types::{Address, H256, U256};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -181,6 +181,9 @@ impl Function {
     /// 4-byte function selector.
     pub fn short_signature(&self) -> [u8; 4] { self.inner.selector().0 }
 
+    /// The function's name.
+    pub fn name(&self) -> &str { &self.inner.name }
+
     /// Encode `tokens` as calldata: 4-byte selector followed by the ABI-encoded
     /// arguments.
     pub fn encode_input(&self, tokens: &[Token]) -> Result<Vec<u8>, AbiError> {
@@ -221,6 +224,7 @@ impl Function {
 /// up by name.
 pub struct Contract {
     functions: HashMap<String, Function>,
+    events: HashMap<String, Event>,
 }
 
 /// Resolve an ABI parameter's Solidity type string (e.g. `uint256`, `bytes20`,
@@ -245,7 +249,12 @@ impl Contract {
                 output_types,
             });
         }
-        Ok(Contract { functions })
+        let mut events = HashMap::new();
+        for (name, overloads) in &abi.events {
+            let Some(e) = overloads.first() else { continue };
+            events.insert(name.clone(), Event { inner: e.clone() });
+        }
+        Ok(Contract { functions, events })
     }
 
     /// Look up a function by name.
@@ -254,6 +263,24 @@ impl Contract {
             .get(name)
             .ok_or_else(|| AbiError::FunctionNotFound(name.to_string()))
     }
+
+    /// Look up an event by name.
+    pub fn event(&self, name: &str) -> Result<&Event, AbiError> {
+        self.events
+            .get(name)
+            .ok_or_else(|| AbiError::FunctionNotFound(name.to_string()))
+    }
+}
+
+/// A contract event. Only the topic-0 signature hash is exposed — all KDF uses
+/// events for is building `eth_getLogs` topic filters.
+pub struct Event {
+    inner: alloy_json_abi::Event,
+}
+
+impl Event {
+    /// Topic-0: `keccak256` of the canonical event signature.
+    pub fn signature(&self) -> H256 { H256::from_slice(self.inner.selector().as_slice()) }
 }
 
 /// Free-standing ABI encoding of a token sequence (no function selector), the

@@ -27,7 +27,7 @@
 //! V2 paths for NFT-for-fungible swaps, the only kind of NFT swap KDF
 //! supports today).
 
-use ethabi::{Contract, Function, Token};
+use crate::eth::abi::{Contract, Function, Token};
 use ethereum_types::{Address, U256};
 use lazy_static::lazy_static;
 
@@ -190,8 +190,8 @@ impl std::fmt::Display for NftSwapV2Error {
 
 impl std::error::Error for NftSwapV2Error {}
 
-impl From<ethabi::Error> for NftSwapV2Error {
-    fn from(e: ethabi::Error) -> Self { NftSwapV2Error::Abi(e.to_string()) }
+impl From<crate::eth::abi::AbiError> for NftSwapV2Error {
+    fn from(e: crate::eth::abi::AbiError) -> Self { NftSwapV2Error::Abi(e.to_string()) }
 }
 
 /// Arguments that uniquely identify an NFT maker payment lock-up.

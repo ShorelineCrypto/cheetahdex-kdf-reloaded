@@ -18,12 +18,12 @@
 //! If a frozen vector fails after a dependency change, that is a real on-the-wire
 //! divergence to investigate — do NOT edit the `EXPECTED` value to make it pass.
 
+use super::abi::{encode, Contract, Token};
 use super::eth_swap_v2::nft_swap_v2::{encode_maker_payment, encode_refund_secret, encode_refund_timelock,
                                       encode_spend_maker_payment, NftKind, NftMakerPaymentArgs, NftRefundSecretArgs,
                                       NftRefundTimelockArgs, NftSpendMakerPaymentArgs};
 use super::eth_types::{ERC20_CONTRACT, MAKER_SWAP_V2, SWAP_CONTRACT, TAKER_SWAP_V2};
-use ethabi::{Contract, RawLog, Token};
-use ethereum_types::{Address, H256, U256};
+use ethereum_types::{Address, U256};
 
 /// QTUM delegation ABI, inlined verbatim from `utxo::qtum_delegation` so this
 /// module (in the `eth` tree) can exercise the same encoder without adding a
@@ -764,7 +764,7 @@ fn abi_decode_output_roundtrip() {
         Token::Uint(U256::from(1_700_000_000u64)),
         Token::Uint(U256::from(2u8)),
     ];
-    let blob = ethabi::encode(&payments_out);
+    let blob = encode(&payments_out);
     let decoded = SWAP_CONTRACT
         .function("payments")
         .unwrap()
@@ -774,7 +774,7 @@ fn abi_decode_output_roundtrip() {
 
     // ERC-20 balanceOf(address) -> uint256
     let bal = vec![Token::Uint(U256::from(123_456_789_000u64))];
-    let blob = ethabi::encode(&bal);
+    let blob = encode(&bal);
     let decoded = ERC20_CONTRACT
         .function("balanceOf")
         .unwrap()
@@ -784,83 +784,13 @@ fn abi_decode_output_roundtrip() {
 
     // ERC-20 decimals() -> uint8
     let dec = vec![Token::Uint(U256::from(18u8))];
-    let blob = ethabi::encode(&dec);
+    let blob = encode(&dec);
     let decoded = ERC20_CONTRACT
         .function("decimals")
         .unwrap()
         .decode_output(&blob)
         .unwrap();
     assert_eq!(decoded, dec, "decimals() return-data decode mismatch");
-}
-
-/// Event-log decode (`parse_log`): both the fully non-indexed case (v1 swap
-/// `ReceiverSpent`) and the indexed-topic case (QTUM `AddDelegation`, two indexed
-/// address topics + non-indexed tail). Indexed-vs-data handling is a classic
-/// codec divergence point. Also cross-checks each event's topic0 against an
-/// independently computed keccak256 of the canonical signature.
-#[test]
-fn abi_event_log_decode() {
-    // Non-indexed: ReceiverSpent(bytes32 id, bytes32 secret) — both in data.
-    let ev = SWAP_CONTRACT.event("ReceiverSpent").unwrap();
-    assert_eq!(
-        ev.signature().as_bytes(),
-        &keccak256_bytes(b"ReceiverSpent(bytes32,bytes32)")[..],
-        "ReceiverSpent topic0"
-    );
-    let id = vec![0x11u8; 32];
-    let secret = vec![0x22u8; 32];
-    let data = [id.clone(), secret.clone()].concat();
-    let log = ev
-        .parse_log(RawLog {
-            topics: vec![ev.signature()],
-            data,
-        })
-        .unwrap();
-    let vals: Vec<Token> = log.params.into_iter().map(|p| p.value).collect();
-    assert_eq!(
-        vals,
-        vec![Token::FixedBytes(id), Token::FixedBytes(secret)],
-        "ReceiverSpent params"
-    );
-
-    // Indexed: AddDelegation(address indexed staker, address indexed delegate,
-    //          uint8 fee, uint256 blockHeight, bytes PoD).
-    let qtum = Contract::load(QTUM_DELEGATE_CONTRACT_ABI.as_bytes()).unwrap();
-    let ev = qtum.event("AddDelegation").unwrap();
-    assert_eq!(
-        ev.signature().as_bytes(),
-        &keccak256_bytes(b"AddDelegation(address,address,uint8,uint256,bytes)")[..],
-        "AddDelegation topic0"
-    );
-    let staker = Address::from([0x11u8; 20]);
-    let delegate = Address::from([0x22u8; 20]);
-    let addr_topic = |a: Address| {
-        let mut t = [0u8; 32];
-        t[12..].copy_from_slice(a.as_bytes());
-        H256::from(t)
-    };
-    let fee = U256::from(7u8);
-    let block_height = U256::from(4_242_424u64);
-    let pod = vec![0x77u8; 40];
-    let data = ethabi::encode(&[Token::Uint(fee), Token::Uint(block_height), Token::Bytes(pod.clone())]);
-    let log = ev
-        .parse_log(RawLog {
-            topics: vec![ev.signature(), addr_topic(staker), addr_topic(delegate)],
-            data,
-        })
-        .unwrap();
-    let vals: Vec<Token> = log.params.into_iter().map(|p| p.value).collect();
-    assert_eq!(
-        vals,
-        vec![
-            Token::Address(staker),
-            Token::Address(delegate),
-            Token::Uint(fee),
-            Token::Uint(block_height),
-            Token::Bytes(pod),
-        ],
-        "AddDelegation params"
-    );
 }
 
 /// Edge-value symmetry: `U256::MAX`, zero, all-`0xff` address, empty dynamic

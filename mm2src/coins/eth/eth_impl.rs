@@ -3542,25 +3542,21 @@ pub fn increase_gas_price_by_stage(gas_price: U256, level: &FeeApproxStage) -> U
 // ─── V2 helper functions ────────────────────────────────────────────────────
 
 /// Decodes the input data of a contract function call.
-pub(crate) fn decode_contract_call(func: &ethabi::Function, data: &[u8]) -> Result<Vec<Token>, ethabi::Error> {
+pub(crate) fn decode_contract_call(func: &Function, data: &[u8]) -> Result<Vec<Token>, AbiError> {
     // The first 4 bytes are the function selector
     if data.len() < 4 {
-        return Err(ethabi::Error::InvalidData);
+        return Err(AbiError::InvalidData);
     }
     func.decode_input(&data[4..])
 }
 
 /// Extracts a single token from decoded contract call data by index,
 /// validating the function ABI parameter name at that position.
-pub(crate) fn get_function_input_data(
-    decoded: &[Token],
-    func: &ethabi::Function,
-    index: usize,
-) -> Result<Token, String> {
+pub(crate) fn get_function_input_data(decoded: &[Token], func: &Function, index: usize) -> Result<Token, String> {
     decoded
         .get(index)
         .cloned()
-        .ok_or_else(|| format!("Missing token at index {index} for function {}", func.name))
+        .ok_or_else(|| format!("Missing token at index {index} for function {}", func.name()))
 }
 
 /// Converts a `BigDecimal` amount to `U256` wei using the given decimals.
