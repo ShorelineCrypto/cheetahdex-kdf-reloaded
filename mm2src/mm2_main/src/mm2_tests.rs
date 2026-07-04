@@ -3379,7 +3379,7 @@ fn test_convert_utxo_address() {
     log!({ "log path: {}", mm.log_path.display() });
 
     let _electrum = block_on(enable_electrum(&mm, "BCH", false, &[
-        "electroncash.de:50003",
+        "bitcoin-cash.devmole.eu:5001",
         "tbch.loping.net:60001",
         "blackie.c3-soft.com:60001",
         "bch0.kister.net:51001",
@@ -3744,9 +3744,9 @@ fn test_add_delegation_qtum() {
     .unwrap();
 
     let json = block_on(enable_electrum(&mm, "tQTUM", false, &[
-        "electrum1.cipig.net:10071",
-        "electrum2.cipig.net:10071",
-        "electrum3.cipig.net:10071",
+        "s1.qtum.info:50001",
+        "s4.qtum.info:50001",
+        "s1.qtum.info:50001",
     ]));
     println!("{}", json.balance);
 
@@ -3833,9 +3833,9 @@ fn test_remove_delegation_qtum() {
     .unwrap();
 
     let json = block_on(enable_electrum(&mm, "tQTUM", false, &[
-        "electrum1.cipig.net:10071",
-        "electrum2.cipig.net:10071",
-        "electrum3.cipig.net:10071",
+        "s1.qtum.info:50001",
+        "s4.qtum.info:50001",
+        "s1.qtum.info:50001",
     ]));
     println!("{}", json.balance);
 
@@ -3897,9 +3897,9 @@ fn test_get_staking_infos_qtum() {
         .unwrap();
 
     let json = block_on(enable_electrum(&mm, "tQTUM", false, &[
-        "electrum1.cipig.net:10071",
-        "electrum2.cipig.net:10071",
-        "electrum3.cipig.net:10071",
+        "s1.qtum.info:50001",
+        "s4.qtum.info:50001",
+        "s1.qtum.info:50001",
     ]));
     println!("{}", json.balance);
 
@@ -3951,11 +3951,7 @@ fn test_convert_qrc20_address() {
     let _electrum = block_on(enable_qrc20(
         &mm,
         "QRC20",
-        &[
-            "electrum1.cipig.net:10071",
-            "electrum2.cipig.net:10071",
-            "electrum3.cipig.net:10071",
-        ],
+        &["s1.qtum.info:50001", "s4.qtum.info:50001", "s1.qtum.info:50001"],
         "0xba8b71f3544b93e2f681f996da519a98ace0107a",
     ));
 
@@ -4380,11 +4376,7 @@ fn qrc20_activate_electrum() {
     let electrum_json = block_on(enable_qrc20(
         &mm,
         "QRC20",
-        &[
-            "electrum1.cipig.net:10071",
-            "electrum2.cipig.net:10071",
-            "electrum3.cipig.net:10071",
-        ],
+        &["s1.qtum.info:50001", "s4.qtum.info:50001", "s1.qtum.info:50001"],
         "0xba8b71f3544b93e2f681f996da519a98ace0107a",
     ));
     assert_eq!(
@@ -4428,11 +4420,7 @@ fn test_qrc20_withdraw() {
     let electrum_json = block_on(enable_qrc20(
         &mm,
         "QRC20",
-        &[
-            "electrum1.cipig.net:10071",
-            "electrum2.cipig.net:10071",
-            "electrum3.cipig.net:10071",
-        ],
+        &["s1.qtum.info:50001", "s4.qtum.info:50001", "s1.qtum.info:50001"],
         "0xba8b71f3544b93e2f681f996da519a98ace0107a",
     ));
     assert_eq!(
@@ -4508,11 +4496,7 @@ fn test_qrc20_withdraw_error() {
     let electrum_json = block_on(enable_qrc20(
         &mm,
         "QRC20",
-        &[
-            "electrum1.cipig.net:10071",
-            "electrum2.cipig.net:10071",
-            "electrum3.cipig.net:10071",
-        ],
+        &["s1.qtum.info:50001", "s4.qtum.info:50001", "s1.qtum.info:50001"],
         "0xba8b71f3544b93e2f681f996da519a98ace0107a",
     ));
     let balance = electrum_json["balance"].as_str().unwrap();
