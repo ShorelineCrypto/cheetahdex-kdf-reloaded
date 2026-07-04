@@ -276,3 +276,44 @@ cd mm2src
 cargo check -p mm2_main
 cargo build --bin kdf --target x86_64-pc-windows-msvc --release
 ```
+
+---
+
+## 7) Automated CI builds
+
+The sections above cover building locally. CI produces the downloadable binaries
+via GitHub Actions.
+
+### 7.1) Per-platform build workflows
+
+Each target has a dedicated workflow under `.github/workflows/` that accepts a
+`profile` input (`release` / `dev`) and can be run on its own or reused by an
+umbrella workflow:
+
+- `build-linux.yml`, `build-macos.yml`, `build-windows.yml`, `build-ios.yml`,
+  `build-android.yml`, `build-wasm.yml`.
+
+**Linux is built inside a pinned Debian 11 container (glibc 2.31).** This gives
+the shipped binary a deliberately low glibc floor so it runs on any host with
+glibc >= 2.31 (Debian 11/12, Ubuntu 20.04+, RHEL/Rocky 9, …). Building on a
+newer base would refuse to start on those still-common hosts. Both the dev and
+release pipelines reuse `build-linux.yml`, so **dev snapshots inherit the same
+backwards-compatible floor.**
+
+### 7.2) Dev snapshots — `dev-build.yml`
+
+Unsigned, all-platform snapshot builds. Triggered by:
+
+- **manual dispatch** (`workflow_dispatch`); or
+- **pushing a `v*` tag whose commit is on `dev` or `staging`** (and not `main`).
+
+A `gate` job enforces the branch rule, because GitHub tag triggers cannot be
+scoped to a branch. Artifacts are uploaded as GitHub Actions run artifacts; they
+are **not** checksummed, signed, or published as a GitHub Release.
+
+### 7.3) Signed releases — `release.yml`
+
+Pushing a `v*` tag whose commit is on `main` triggers the signed release
+pipeline (checksums + GPG-signed manifest + drafted GitHub Release). See
+[`RELEASE.md`](RELEASE.md) for the full runbook. `release.yml` reuses the same
+per-platform build workflows (including the Debian 11 `build-linux.yml`).

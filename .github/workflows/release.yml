@@ -2,15 +2,20 @@ name: Release
 
 # Tag-driven, signed release pipeline.
 #
-# Cutting an annotated tag `v*` (from `main`, per RELEASE_CHECKLIST.md) builds
-# the release binaries, generates SHA-256 checksums, GPG-signs the checksum
-# manifest with the maintainer key, and drafts a GitHub Release with every
-# artifact attached. Signing runs ONLY here (gated behind the protected
-# `release` environment); `dev`/`staging` snapshots use the unsigned
-# `dev-build.yml` workflow instead.
+# Triggered when a `v*` tag is pushed whose commit lives on `main` (per
+# RELEASE_CHECKLIST.md). The `gate` job enforces the main-only rule, because
+# GitHub tag triggers cannot be scoped to a branch directly and both this
+# workflow and the unsigned `dev-build.yml` snapshot pipeline watch `v*`; tags
+# on dev/staging are handled by dev-build.yml instead.
+#
+# It builds the release binaries, generates SHA-256 checksums, GPG-signs the
+# checksum manifest with the maintainer key (gated behind the protected
+# `release` environment), and drafts a GitHub Release with every artifact
+# attached. Signing runs ONLY here.
 #
 # Validate a change to this file end-to-end by pushing a throwaway pre-release
-# tag (e.g. `v0.0.0-rc.test`) and deleting the drafted release + tag afterwards.
+# tag (e.g. `v0.0.0-rc.test`) on main and deleting the drafted release + tag
+# afterwards.
 
 on:
   push:
@@ -21,48 +26,46 @@ permissions:
   contents: write # create the GitHub Release and upload assets
 
 jobs:
-  # Linux x86-64 is built inside a pinned Debian 11 (glibc 2.31) container so the
-  # binary runs on any host with glibc >= 2.31 (Debian 11/12, Ubuntu 20.04+,
-  # RHEL 9, etc.) — a deliberately low floor for broad portability. Building on a
-  # newer base (e.g. Ubuntu 24.04 / glibc 2.39) would refuse to run on Ubuntu
-  # 22.04, Debian 12 and similar, so the release binary is intentionally built
-  # old even though the runtime container image (Dockerfile.release) is current.
-  linux:
+  # Proceed only when the tag's commit is reachable from origin/main. Tags on
+  # dev/staging are the dev-build.yml pipeline's responsibility.
+  gate:
     runs-on: ubuntu-latest
-    container:
-      image: debian:11
-    timeout-minutes: 90
+    outputs:
+      proceed: ${{ steps.g.outputs.proceed }}
     steps:
-      - name: Install build dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev protobuf-compiler cmake \
-            clang libclang-dev git curl ca-certificates
-      - name: Trust the workspace (container runs as root)
-        run: git config --global --add safe.directory '*'
       - uses: actions/checkout@v7
-      - name: Install Rust (stable; pinned by rust-toolchain.toml)
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain stable
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: Build kdf (release)
-        run: cargo build --bin kdf --release --target x86_64-unknown-linux-gnu
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
         with:
-          name: kdf-x86_64-unknown-linux-gnu
-          path: target/x86_64-unknown-linux-gnu/release/kdf
+          fetch-depth: 0
+      - id: g
+        run: |
+          set -eu
+          git fetch --quiet --no-tags origin '+refs/heads/*:refs/remotes/origin/*' || true
+          contains() { git branch -r --contains "$GITHUB_SHA" 2>/dev/null | grep -v ' -> ' | grep -qE "/$1$"; }
+          proceed=false
+          if contains main; then proceed=true; fi
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
+          echo "gate: ref=$GITHUB_REF proceed=$proceed"
 
-  # macOS (x86_64, aarch64, universal) and Windows reuse the existing per-platform
-  # build workflows. glibc is irrelevant on these targets.
+  # Linux x86-64 reuses build-linux.yml, which builds inside a pinned Debian 11
+  # (glibc 2.31) container for broad portability. macOS and Windows reuse their
+  # per-platform build workflows (glibc is irrelevant there).
+  linux:
+    needs: gate
+    if: ${{ needs.gate.outputs.proceed == 'true' }}
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      profile: release
+
   macos:
+    needs: gate
+    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-macos.yml
     with:
       profile: release
 
   windows:
+    needs: gate
+    if: ${{ needs.gate.outputs.proceed == 'true' }}
     uses: ./.github/workflows/build-windows.yml
     with:
       profile: release
@@ -71,7 +74,8 @@ jobs:
   # GitHub Release. Runs in the protected `release` environment (the only place
   # the signing key is exposed).
   release:
-    needs: [linux, macos, windows]
+    needs: [gate, linux, macos, windows]
+    if: ${{ needs.gate.outputs.proceed == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -145,8 +149,8 @@ jobs:
   # the `PUBLISH_DOCKERHUB` repository variable is set to `true` and the
   # DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets + DOCKERHUB_REPO variable exist.
   docker:
-    needs: [linux]
-    if: ${{ vars.PUBLISH_DOCKERHUB == 'true' }}
+    needs: [gate, linux]
+    if: ${{ needs.gate.outputs.proceed == 'true' && vars.PUBLISH_DOCKERHUB == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

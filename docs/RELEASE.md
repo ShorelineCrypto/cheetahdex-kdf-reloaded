@@ -21,9 +21,23 @@ which:
 5. drafts a **GitHub Release** with every binary + `SHA256SUMS` + `SHA256SUMS.asc`
    attached.
 
-Signing happens **only** on tags. `dev` / `staging` snapshots use the unsigned
-[`dev-build.yml`](../.github/workflows/dev-build.yml) workflow (checksummed, not
-signed, not published as a release).
+Both `release.yml` and the unsigned dev-snapshot workflow
+[`dev-build.yml`](../.github/workflows/dev-build.yml) watch `v*` tags. Because
+GitHub tag triggers cannot be scoped to a branch, each workflow begins with a
+`gate` job that inspects which branch the tagged commit lives on:
+
+- tag commit on **`main`** → `release.yml` proceeds (signed, published draft);
+  `dev-build.yml` self-skips.
+- tag commit on **`dev` / `staging`** (and not `main`) → `dev-build.yml`
+  proceeds, producing unsigned per-platform CI artifacts (not signed, not
+  published as a GitHub Release); `release.yml` self-skips.
+
+`dev-build.yml` can also be run manually via **workflow_dispatch**. Its Linux job
+reuses the same [`build-linux.yml`](../.github/workflows/build-linux.yml) Debian
+11 build as the release, so dev snapshots carry the same glibc 2.31 floor and
+stay backwards-compatible.
+
+Signing happens **only** in `release.yml`.
 
 ## Steps for the maintainer
 
