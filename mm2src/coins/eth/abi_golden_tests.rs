@@ -22,8 +22,8 @@ use super::eth_swap_v2::nft_swap_v2::{encode_maker_payment, encode_refund_secret
                                       encode_spend_maker_payment, NftKind, NftMakerPaymentArgs, NftRefundSecretArgs,
                                       NftRefundTimelockArgs, NftSpendMakerPaymentArgs};
 use super::eth_types::{ERC20_CONTRACT, MAKER_SWAP_V2, SWAP_CONTRACT, TAKER_SWAP_V2};
-use ethabi::{Contract, Token};
-use ethereum_types::{Address, U256};
+use ethabi::{Contract, RawLog, Token};
+use ethereum_types::{Address, H256, U256};
 
 /// QTUM delegation ABI, inlined verbatim from `utxo::qtum_delegation` so this
 /// module (in the `eth` tree) can exercise the same encoder without adding a
@@ -469,3 +469,512 @@ fn abi_wire_golden_legacy() { check(&legacy_vectors(), LEGACY_EXPECTED, "legacy"
 
 #[test]
 fn abi_wire_golden_v2() { check(&v2_vectors(), V2_EXPECTED, "v2"); }
+
+// ---------------------------------------------------------------------------
+// Codec-swap safety net (ethabi 17 -> alloy).
+//
+// The `abi_wire_golden_*` tests above freeze the ENCODE direction. The tests
+// below freeze/prove every OTHER way the ABI codec is exercised in production —
+// input decode, return-data decode, event-log decode, selector derivation — plus
+// edge-value symmetry, malformed-input rejection, and ABI surface coverage. All
+// are codec-agnostic: they must pass identically before and after the alloy
+// migration. A failure after swapping codecs is a real behavioural divergence.
+// ---------------------------------------------------------------------------
+
+/// Every `contract.function(name)` calldata site KDF actually builds, paired with
+/// the exact token set and the frozen golden label it corresponds to. Drives the
+/// decode round-trip and frozen-decode tests. (NFT swap v2 uses standalone
+/// encoders, covered by the golden vectors above.) The QTUM delegation contract
+/// is loaded from the inline ABI, so cases are visited via a callback rather than
+/// returned as borrows of a local.
+fn for_each_labeled_case(mut f: impl FnMut(&str, &Contract, &str, &[Token])) {
+    let x = fixtures();
+    let qtum = Contract::load(QTUM_DELEGATE_CONTRACT_ABI.as_bytes()).unwrap();
+
+    // --- v1 swap ---
+    f("v1_ethPayment", &SWAP_CONTRACT, "ethPayment", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Address(x.addr1),
+        Token::FixedBytes(x.b20.clone()),
+        Token::Uint(x.lock64),
+    ]);
+    f("v1_erc20Payment", &SWAP_CONTRACT, "erc20Payment", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Uint(x.amount),
+        Token::Address(x.addr1),
+        Token::Address(x.addr2),
+        Token::FixedBytes(x.b20.clone()),
+        Token::Uint(x.lock64),
+    ]);
+    f("v1_receiverSpend", &SWAP_CONTRACT, "receiverSpend", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Uint(x.amount),
+        Token::FixedBytes(x.b32b.clone()),
+        Token::Address(x.addr1),
+        Token::Address(x.addr2),
+    ]);
+    f("v1_senderRefund", &SWAP_CONTRACT, "senderRefund", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Uint(x.amount),
+        Token::FixedBytes(x.b20.clone()),
+        Token::Address(x.addr1),
+        Token::Address(x.addr2),
+    ]);
+
+    // --- ERC-20 ---
+    f("erc20_approve", &ERC20_CONTRACT, "approve", &[
+        Token::Address(x.addr1),
+        Token::Uint(x.amount),
+    ]);
+    f("erc20_transfer", &ERC20_CONTRACT, "transfer", &[
+        Token::Address(x.addr1),
+        Token::Uint(x.amount),
+    ]);
+    f("erc20_transferFrom", &ERC20_CONTRACT, "transferFrom", &[
+        Token::Address(x.addr1),
+        Token::Address(x.addr2),
+        Token::Uint(x.amount),
+    ]);
+    f("erc20_balanceOf", &ERC20_CONTRACT, "balanceOf", &[Token::Address(
+        x.addr1,
+    )]);
+
+    // --- maker swap v2 ---
+    f("makerV2_erc20MakerPayment", &MAKER_SWAP_V2, "erc20MakerPayment", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Uint(x.amount),
+        Token::Address(x.addr1),
+        Token::Address(x.addr2),
+        Token::FixedBytes(x.b32b.clone()),
+        Token::FixedBytes(x.b32c.clone()),
+        Token::Uint(x.lock32),
+    ]);
+    f("makerV2_ethMakerPayment", &MAKER_SWAP_V2, "ethMakerPayment", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Address(x.addr1),
+        Token::FixedBytes(x.b32b.clone()),
+        Token::FixedBytes(x.b32c.clone()),
+        Token::Uint(x.lock32),
+    ]);
+    for (label, name) in [
+        ("makerV2_refundMakerPaymentSecret", "refundMakerPaymentSecret"),
+        ("makerV2_refundMakerPaymentTimelock", "refundMakerPaymentTimelock"),
+        ("makerV2_spendMakerPayment", "spendMakerPayment"),
+    ] {
+        f(label, &MAKER_SWAP_V2, name, &[
+            Token::FixedBytes(x.b32a.clone()),
+            Token::Uint(x.amount),
+            Token::Address(x.addr1),
+            Token::FixedBytes(x.b32b.clone()),
+            Token::FixedBytes(x.b32c.clone()),
+            Token::Address(x.addr2),
+        ]);
+    }
+
+    // --- taker swap v2 ---
+    f("takerV2_erc20TakerPayment", &TAKER_SWAP_V2, "erc20TakerPayment", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Uint(x.amount),
+        Token::Uint(x.amount2),
+        Token::Address(x.addr1),
+        Token::Address(x.addr2),
+        Token::FixedBytes(x.b32b.clone()),
+        Token::FixedBytes(x.b32c.clone()),
+        Token::Uint(x.lock32),
+        Token::Uint(x.lock32b),
+    ]);
+    f("takerV2_ethTakerPayment", &TAKER_SWAP_V2, "ethTakerPayment", &[
+        Token::FixedBytes(x.b32a.clone()),
+        Token::Uint(x.amount),
+        Token::Address(x.addr1),
+        Token::FixedBytes(x.b32b.clone()),
+        Token::FixedBytes(x.b32c.clone()),
+        Token::Uint(x.lock32),
+        Token::Uint(x.lock32b),
+    ]);
+    for (label, name) in [
+        ("takerV2_refundTakerPaymentSecret", "refundTakerPaymentSecret"),
+        ("takerV2_refundTakerPaymentTimelock", "refundTakerPaymentTimelock"),
+        ("takerV2_spendTakerPayment", "spendTakerPayment"),
+        ("takerV2_takerPaymentApprove", "takerPaymentApprove"),
+    ] {
+        f(label, &TAKER_SWAP_V2, name, &[
+            Token::FixedBytes(x.b32a.clone()),
+            Token::Uint(x.amount),
+            Token::Uint(x.amount2),
+            Token::Address(x.addr1),
+            Token::FixedBytes(x.b32b.clone()),
+            Token::FixedBytes(x.b32c.clone()),
+            Token::Address(x.addr2),
+        ]);
+    }
+
+    // --- QTUM delegation ---
+    f("qtum_addDelegation", &qtum, "addDelegation", &[
+        Token::Address(x.addr1),
+        Token::Uint(x.fee),
+        Token::Bytes(x.pod.clone()),
+    ]);
+    f("qtum_removeDelegation", &qtum, "removeDelegation", &[]);
+}
+
+fn frozen_map() -> std::collections::HashMap<&'static str, &'static str> {
+    LEGACY_EXPECTED.iter().chain(V2_EXPECTED.iter()).copied().collect()
+}
+
+/// Ethereum keccak-256 (pre-NIST padding) into raw bytes. Computed here directly
+/// from `sha3` — independent of both the ABI codec and KDF's typed hash wrappers
+/// — so selector/topic0 cross-checks have external ground truth.
+fn keccak256_bytes(input: &[u8]) -> [u8; 32] {
+    use sha3::{Digest, Keccak256};
+    let mut hasher = Keccak256::new();
+    hasher.update(input);
+    hasher.finalize().into()
+}
+
+/// Decode direction, live-encoder symmetry: for EVERY function KDF encodes,
+/// `decode_input(encode_input(tokens)[4..]) == tokens`. Extends the 6-case
+/// `abi_decode_roundtrip_strips_selector` to the full call surface.
+#[test]
+fn abi_decode_roundtrip_all_functions() {
+    for_each_labeled_case(|label, contract, name, tokens| {
+        let func = contract.function(name).unwrap();
+        let calldata = func
+            .encode_input(tokens)
+            .unwrap_or_else(|e| panic!("encode_input {label}: {e:?}"));
+        let decoded = func
+            .decode_input(&calldata[4..])
+            .unwrap_or_else(|e| panic!("decode_input {label}: {e:?}"));
+        assert_eq!(decoded.as_slice(), tokens, "decode round-trip mismatch for `{label}`");
+    });
+}
+
+/// Decode direction, frozen-bytes anchor: every FROZEN golden calldata blob must
+/// decode back to the exact known fixture tokens. Unlike the round-trip test,
+/// the bytes here are the hard-coded historical calldata, so this proves the
+/// (new) codec reads the correct fields/offsets from bytes it did not itself
+/// produce — the strongest guard against a symmetric encode+decode drift.
+#[test]
+fn abi_decode_frozen_calldata_to_fixture_values() {
+    let frozen = frozen_map();
+    for_each_labeled_case(|label, contract, name, tokens| {
+        let hexstr = frozen
+            .get(label)
+            .unwrap_or_else(|| panic!("no frozen golden calldata for `{label}`"));
+        let bytes = hex::decode(hexstr).unwrap();
+        let decoded = contract
+            .function(name)
+            .unwrap()
+            .decode_input(&bytes[4..])
+            .unwrap_or_else(|e| panic!("decode frozen {label}: {e:?}"));
+        assert_eq!(
+            decoded.as_slice(),
+            tokens,
+            "frozen calldata `{label}` decoded to wrong values"
+        );
+    });
+}
+
+/// The ABI-derived 4-byte selector of every function must equal the first four
+/// bytes of its frozen golden calldata. Ties each contract's selector to the
+/// funds-critical wire bytes, codec-independently.
+#[test]
+fn abi_function_selectors_match_frozen_calldata() {
+    let frozen = frozen_map();
+    for_each_labeled_case(|label, contract, name, _| {
+        let selector = hex::encode(contract.function(name).unwrap().short_signature());
+        assert_eq!(
+            selector,
+            &frozen[label][..8],
+            "selector for `{label}` diverged from frozen calldata prefix"
+        );
+    });
+}
+
+/// Independent selector ground truth for the functions whose canonical Solidity
+/// signatures are fixed and well known: recompute `keccak256(sig)[..4]` here and
+/// require it to equal the codec's `short_signature()` AND the codec's own
+/// `signature()` string. Catches a wrong ABI param type (which would shift the
+/// selector) and a shared miscomputation between the old and new codec. Fulfils
+/// the `v2_selectors_match_signatures` promise in this module's header.
+#[test]
+fn abi_selectors_match_keccak_signatures() {
+    let cases: Vec<(&Contract, &str, &str)> = vec![
+        (
+            &SWAP_CONTRACT,
+            "ethPayment",
+            "ethPayment(bytes32,address,bytes20,uint64)",
+        ),
+        (
+            &SWAP_CONTRACT,
+            "erc20Payment",
+            "erc20Payment(bytes32,uint256,address,address,bytes20,uint64)",
+        ),
+        (
+            &SWAP_CONTRACT,
+            "receiverSpend",
+            "receiverSpend(bytes32,uint256,bytes32,address,address)",
+        ),
+        (
+            &SWAP_CONTRACT,
+            "senderRefund",
+            "senderRefund(bytes32,uint256,bytes20,address,address)",
+        ),
+        (&ERC20_CONTRACT, "approve", "approve(address,uint256)"),
+        (&ERC20_CONTRACT, "transfer", "transfer(address,uint256)"),
+        (&ERC20_CONTRACT, "transferFrom", "transferFrom(address,address,uint256)"),
+        (&ERC20_CONTRACT, "balanceOf", "balanceOf(address)"),
+    ];
+    for (contract, name, sig) in cases {
+        let func = contract.function(name).unwrap();
+        assert_eq!(
+            &keccak256_bytes(sig.as_bytes())[..4],
+            &func.short_signature()[..],
+            "selector for `{name}` != keccak256(\"{sig}\")[..4]"
+        );
+    }
+    // Canonical ERC-20 selectors as external ground truth (EIP-20).
+    assert_eq!(
+        hex::encode(ERC20_CONTRACT.function("transfer").unwrap().short_signature()),
+        "a9059cbb"
+    );
+    assert_eq!(
+        hex::encode(ERC20_CONTRACT.function("approve").unwrap().short_signature()),
+        "095ea7b3"
+    );
+    assert_eq!(
+        hex::encode(ERC20_CONTRACT.function("transferFrom").unwrap().short_signature()),
+        "23b872dd"
+    );
+    assert_eq!(
+        hex::encode(ERC20_CONTRACT.function("balanceOf").unwrap().short_signature()),
+        "70a08231"
+    );
+}
+
+/// Return-data decode (`decode_output`): KDF reads contract getters via eth_call
+/// and decodes the returned words. Freeze the symmetry for the getters it uses —
+/// the v1 swap `payments` struct `(bytes20,uint64,uint8)` and ERC-20
+/// `balanceOf` / `decimals`.
+#[test]
+fn abi_decode_output_roundtrip() {
+    // v1 swap: payments(bytes32) -> (paymentHash bytes20, lockTime uint64, state uint8)
+    let payments_out = vec![
+        Token::FixedBytes(vec![0xABu8; 20]),
+        Token::Uint(U256::from(1_700_000_000u64)),
+        Token::Uint(U256::from(2u8)),
+    ];
+    let blob = ethabi::encode(&payments_out);
+    let decoded = SWAP_CONTRACT
+        .function("payments")
+        .unwrap()
+        .decode_output(&blob)
+        .unwrap();
+    assert_eq!(decoded, payments_out, "payments() return-data decode mismatch");
+
+    // ERC-20 balanceOf(address) -> uint256
+    let bal = vec![Token::Uint(U256::from(123_456_789_000u64))];
+    let blob = ethabi::encode(&bal);
+    let decoded = ERC20_CONTRACT
+        .function("balanceOf")
+        .unwrap()
+        .decode_output(&blob)
+        .unwrap();
+    assert_eq!(decoded, bal, "balanceOf() return-data decode mismatch");
+
+    // ERC-20 decimals() -> uint8
+    let dec = vec![Token::Uint(U256::from(18u8))];
+    let blob = ethabi::encode(&dec);
+    let decoded = ERC20_CONTRACT
+        .function("decimals")
+        .unwrap()
+        .decode_output(&blob)
+        .unwrap();
+    assert_eq!(decoded, dec, "decimals() return-data decode mismatch");
+}
+
+/// Event-log decode (`parse_log`): both the fully non-indexed case (v1 swap
+/// `ReceiverSpent`) and the indexed-topic case (QTUM `AddDelegation`, two indexed
+/// address topics + non-indexed tail). Indexed-vs-data handling is a classic
+/// codec divergence point. Also cross-checks each event's topic0 against an
+/// independently computed keccak256 of the canonical signature.
+#[test]
+fn abi_event_log_decode() {
+    // Non-indexed: ReceiverSpent(bytes32 id, bytes32 secret) — both in data.
+    let ev = SWAP_CONTRACT.event("ReceiverSpent").unwrap();
+    assert_eq!(
+        ev.signature().as_bytes(),
+        &keccak256_bytes(b"ReceiverSpent(bytes32,bytes32)")[..],
+        "ReceiverSpent topic0"
+    );
+    let id = vec![0x11u8; 32];
+    let secret = vec![0x22u8; 32];
+    let data = [id.clone(), secret.clone()].concat();
+    let log = ev
+        .parse_log(RawLog {
+            topics: vec![ev.signature()],
+            data,
+        })
+        .unwrap();
+    let vals: Vec<Token> = log.params.into_iter().map(|p| p.value).collect();
+    assert_eq!(
+        vals,
+        vec![Token::FixedBytes(id), Token::FixedBytes(secret)],
+        "ReceiverSpent params"
+    );
+
+    // Indexed: AddDelegation(address indexed staker, address indexed delegate,
+    //          uint8 fee, uint256 blockHeight, bytes PoD).
+    let qtum = Contract::load(QTUM_DELEGATE_CONTRACT_ABI.as_bytes()).unwrap();
+    let ev = qtum.event("AddDelegation").unwrap();
+    assert_eq!(
+        ev.signature().as_bytes(),
+        &keccak256_bytes(b"AddDelegation(address,address,uint8,uint256,bytes)")[..],
+        "AddDelegation topic0"
+    );
+    let staker = Address::from([0x11u8; 20]);
+    let delegate = Address::from([0x22u8; 20]);
+    let addr_topic = |a: Address| {
+        let mut t = [0u8; 32];
+        t[12..].copy_from_slice(a.as_bytes());
+        H256::from(t)
+    };
+    let fee = U256::from(7u8);
+    let block_height = U256::from(4_242_424u64);
+    let pod = vec![0x77u8; 40];
+    let data = ethabi::encode(&[Token::Uint(fee), Token::Uint(block_height), Token::Bytes(pod.clone())]);
+    let log = ev
+        .parse_log(RawLog {
+            topics: vec![ev.signature(), addr_topic(staker), addr_topic(delegate)],
+            data,
+        })
+        .unwrap();
+    let vals: Vec<Token> = log.params.into_iter().map(|p| p.value).collect();
+    assert_eq!(
+        vals,
+        vec![
+            Token::Address(staker),
+            Token::Address(delegate),
+            Token::Uint(fee),
+            Token::Uint(block_height),
+            Token::Bytes(pod),
+        ],
+        "AddDelegation params"
+    );
+}
+
+/// Edge-value symmetry: `U256::MAX`, zero, all-`0xff` address, empty dynamic
+/// bytes, and a dynamic-bytes length that is not a multiple of 32 (33 bytes) —
+/// the head/tail dynamic-offset layout is where ABI codecs most often disagree.
+#[test]
+fn abi_encode_edge_values_roundtrip() {
+    let approve = ERC20_CONTRACT.function("approve").unwrap();
+    for tokens in [
+        vec![Token::Address(Address::from([0xffu8; 20])), Token::Uint(U256::MAX)],
+        vec![Token::Address(Address::zero()), Token::Uint(U256::zero())],
+    ] {
+        let cd = approve.encode_input(&tokens).unwrap();
+        assert_eq!(
+            approve.decode_input(&cd[4..]).unwrap(),
+            tokens,
+            "approve edge round-trip"
+        );
+    }
+
+    // addDelegation carries a dynamic `bytes` tail: exercise empty and
+    // non-word-aligned lengths.
+    let qtum = Contract::load(QTUM_DELEGATE_CONTRACT_ABI.as_bytes()).unwrap();
+    let add = qtum.function("addDelegation").unwrap();
+    for pod in [vec![], vec![0xABu8; 33], vec![0xCDu8; 64]] {
+        let tokens = vec![
+            Token::Address(Address::from([0x09u8; 20])),
+            Token::Uint(U256::from(255u8)),
+            Token::Bytes(pod),
+        ];
+        let cd = add.encode_input(&tokens).unwrap();
+        assert_eq!(
+            add.decode_input(&cd[4..]).unwrap(),
+            tokens,
+            "addDelegation dynamic-bytes round-trip"
+        );
+    }
+}
+
+/// Malformed input must be REJECTED (never panic) in the funds paths: truncated
+/// or empty calldata bodies, wrong arity/type on encode, and invalid ABI JSON.
+#[test]
+fn abi_rejects_malformed_input_without_panic() {
+    let erc20_payment = SWAP_CONTRACT.function("erc20Payment").unwrap();
+    // erc20Payment has 6 static params (192 bytes); short/empty bodies must error.
+    assert!(
+        erc20_payment.decode_input(&[0u8; 10]).is_err(),
+        "truncated body must be rejected"
+    );
+    assert!(erc20_payment.decode_input(&[]).is_err(), "empty body must be rejected");
+    // Wrong arity / wrong token type on encode.
+    assert!(
+        erc20_payment.encode_input(&[]).is_err(),
+        "empty tokens must be rejected"
+    );
+    assert!(
+        ERC20_CONTRACT
+            .function("approve")
+            .unwrap()
+            .encode_input(&[Token::Bool(true), Token::Bool(false)])
+            .is_err(),
+        "wrong token types must be rejected"
+    );
+    // Invalid ABI JSON must not load.
+    assert!(
+        Contract::load(b"not json at all".as_ref()).is_err(),
+        "garbage ABI must be rejected"
+    );
+}
+
+/// ABI-surface coverage: every contract KDF depends on must load and expose the
+/// exact set of functions the code calls by name. Guards against the new codec's
+/// JSON-ABI parser dropping/renaming an entry (e.g. mishandling the v2 custom
+/// `error` items or tuple params).
+#[test]
+fn abi_contracts_expose_expected_functions() {
+    let expectations: Vec<(&str, &Contract, Vec<&str>)> = vec![
+        ("SWAP", &SWAP_CONTRACT, vec![
+            "ethPayment",
+            "erc20Payment",
+            "receiverSpend",
+            "senderRefund",
+            "payments",
+        ]),
+        ("ERC20", &ERC20_CONTRACT, vec![
+            "approve",
+            "transfer",
+            "transferFrom",
+            "balanceOf",
+            "totalSupply",
+            "decimals",
+        ]),
+        ("MAKER_V2", &MAKER_SWAP_V2, vec![
+            "ethMakerPayment",
+            "erc20MakerPayment",
+            "spendMakerPayment",
+            "refundMakerPaymentSecret",
+            "refundMakerPaymentTimelock",
+        ]),
+        ("TAKER_V2", &TAKER_SWAP_V2, vec![
+            "ethTakerPayment",
+            "erc20TakerPayment",
+            "spendTakerPayment",
+            "refundTakerPaymentSecret",
+            "refundTakerPaymentTimelock",
+            "takerPaymentApprove",
+        ]),
+    ];
+    for (label, contract, fns) in expectations {
+        for name in fns {
+            assert!(
+                contract.function(name).is_ok(),
+                "{label} contract is missing function `{name}`"
+            );
+        }
+    }
+}
