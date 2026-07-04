@@ -128,6 +128,11 @@ pub(crate) use eth_hd_wallet::EthHDWallet;
 pub(crate) use mm2_eth::keys::{sign, verify_address};
 pub(crate) use serialization::{CompactInteger, Serializable, Stream};
 
+// Alloy-backed ABI facade (ethabi API surface). Production call sites are
+// flipped to it in the next step; until then its items are only exercised by
+// its own tests, hence the temporary dead_code allowance.
+#[allow(dead_code)] pub(crate) mod abi;
+
 #[cfg(test)] mod abi_alloy_differential_tests;
 #[cfg(test)] mod abi_golden_tests;
 #[cfg(test)] mod eth_tests;

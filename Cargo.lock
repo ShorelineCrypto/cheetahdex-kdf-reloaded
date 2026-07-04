@@ -1808,6 +1808,9 @@ name = "coins"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "alloy-dyn-abi",
+ "alloy-json-abi",
+ "alloy-primitives",
  "async-std",
  "async-trait",
  "base58",

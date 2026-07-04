@@ -67,6 +67,11 @@ derive_more = "0.99"
 ed25519-dalek = "1.0.1"
 ed25519-dalek-bip32 = "0.2.0"
 ethabi = "17.2"
+# alloy ABI codec (migration target, replacing ethabi). Pinned to the
+# alloy-core 1.5 line already present via the `alloy` umbrella dependency.
+alloy-dyn-abi = "1.5"
+alloy-json-abi = "1.5"
+alloy-primitives = "1.5"
 ethereum-types.workspace = true
 mm2_eth = { path = "../mm2_eth" }
 # Waiting for https://github.com/rust-lang/rust/issues/54725 to use on Stable.
@@ -177,11 +182,3 @@ spl-token = { version = "8", default-features = false }
 [build-dependencies]
 prost-build = { version = "0.12", default-features = false }
 tonic-build = { version = "0.11", features = ["prost"] }
-
-[dev-dependencies]
-# Stage 1 of the ethabi -> alloy migration: the dual-codec differential gate
-# (eth::abi_alloy_differential_tests) runs alloy alongside ethabi in tests only.
-# These resolve to the same alloy-core 1.5 already in the tree via the `alloy`
-# umbrella. Remove once ethabi is gone.
-alloy-dyn-abi = "1.5"
-alloy-json-abi = "1.5"
