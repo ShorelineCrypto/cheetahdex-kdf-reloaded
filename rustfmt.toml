@@ -12,7 +12,6 @@ unstable_features = true
 ignore = [
     "librustzcash-patched",
     "rust-lightning-patched",
-    "sia-rust-patched",
 ]
 
 # Put single-expression functions on a single line
