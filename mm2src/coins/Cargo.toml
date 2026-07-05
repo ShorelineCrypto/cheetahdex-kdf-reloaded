@@ -64,8 +64,8 @@ crypto = { path = "../crypto" }
 cosmrs = { workspace = true }
 db_common = { path = "../db_common" }
 derive_more = "0.99"
-ed25519-dalek = "1.0.1"
-ed25519-dalek-bip32 = "0.2.0"
+ed25519-dalek = "2"
+ed25519-dalek-bip32 = "0.3.0"
 # alloy ABI codec (migration target, replacing ethabi). Pinned to the
 # alloy-core 1.5 line already present via the `alloy` umbrella dependency.
 alloy-dyn-abi = "1.5"

@@ -1390,6 +1390,18 @@ dependencies = [
 
 [[package]]
 name = "bitvec"
+version = "0.19.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55f93d0ef3363c364d5976646a38f04cf67cfe1d4c8d160cdea02cab2c116b33"
+dependencies = [
+ "funty 1.1.0",
+ "radium 0.5.3",
+ "tap",
+ "wyz 0.2.0",
+]
+
+[[package]]
+name = "bitvec"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1489fcb93a5bb47da0462ca93ad252ad6af2145cce58d10d46a83931ba9f016b"
@@ -1830,8 +1842,8 @@ dependencies = [
  "db_common",
  "derive_more 0.99.11",
  "dirs",
- "ed25519-dalek 1.0.1",
- "ed25519-dalek-bip32 0.2.0",
+ "ed25519-dalek 2.2.0",
+ "ed25519-dalek-bip32",
  "ethereum-types",
  "fomat-macros 0.2.1",
  "futures 0.1.29",
@@ -2385,7 +2397,7 @@ dependencies = [
  "cipher 0.4.4",
  "common",
  "derive_more 0.99.11",
- "ed25519-dalek-bip32 0.3.0",
+ "ed25519-dalek-bip32",
  "enum-primitive-derive",
  "futures 0.3.15",
  "hex",
@@ -2857,7 +2869,6 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf038a7b6fd7ef78ad3348b63f3a17550877b0e28f8d68bcc94894d1412158bc"
 dependencies = [
- "serde",
  "signature 1.4.0",
 ]
 
@@ -2868,6 +2879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "pkcs8",
+ "serde",
  "signature 2.2.0",
 ]
 
@@ -2894,7 +2906,6 @@ dependencies = [
  "ed25519 1.0.1",
  "rand 0.7.3",
  "serde",
- "serde_bytes",
  "sha2 0.9.9",
  "zeroize",
 ]
@@ -2912,18 +2923,6 @@ dependencies = [
  "sha2 0.10.9",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "ed25519-dalek-bip32"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d2be62a4061b872c8c0873ee4fc6f101ce7b889d039f019c5fa2af471a59908"
-dependencies = [
- "derivation-path",
- "ed25519-dalek 1.0.1",
- "hmac 0.12.1",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -4632,6 +4631,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "lexical-core"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6607c62aa161d23d17a9072cc5da0be67cdfc89d3afb1e8d9c842bebc2525ffe"
+dependencies = [
+ "arrayvec 0.5.1",
+ "bitflags 1.3.2",
+ "cfg-if 1.0.4",
+ "ryu",
+ "static_assertions",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.184"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5882,6 +5894,19 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "nom"
+version = "6.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7413f999671bd4745a7b624bd370a569fb6bc574b23c83a3c5ed2e453f3d5e2"
+dependencies = [
+ "bitvec 0.19.6",
+ "funty 1.1.0",
+ "lexical-core",
+ "memchr",
+ "version_check",
+]
+
+[[package]]
+name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
@@ -6876,6 +6901,12 @@ name = "radium"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "def50a86306165861203e7f84ecffbbdfdea79f0e51039b33de1e952358c47ac"
+
+[[package]]
+name = "radium"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "941ba9d78d8e2f7ce474c015eea4d9c6d25b6a3327f9832ee29a4de27f91bbb8"
 
 [[package]]
 name = "radium"
@@ -8319,22 +8350,22 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "sia-rust"
 version = "0.1.0"
+source = "git+https://github.com/kdf-fan-dev/sia-rust?rev=483ba79d908853d045449e762b27d1d8200af115#483ba79d908853d045449e762b27d1d8200af115"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
  "blake2b_simd 0.5.10",
  "chrono",
- "curve25519-dalek 3.2.0",
+ "curve25519-dalek 4.1.3",
  "derive_more 0.99.11",
- "ed25519-dalek 1.0.1",
+ "ed25519-dalek 2.2.0",
  "futures 0.3.15",
  "getrandom 0.2.17",
  "hex",
  "http 0.2.12",
  "js-sys",
  "log 0.4.29",
- "nom",
- "once_cell",
+ "nom 6.1.2",
  "percent-encoding",
  "reqwest",
  "rustc-hex",
@@ -8342,11 +8373,9 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "thiserror 1.0.69",
- "tokio",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-bindgen-test",
  "web-sys",
 ]
 
@@ -11177,7 +11206,7 @@ dependencies = [
  "gumdrop",
  "hex",
  "jubjub",
- "nom",
+ "nom 7.1.3",
  "percent-encoding",
  "proptest 0.10.1",
  "protobuf",
