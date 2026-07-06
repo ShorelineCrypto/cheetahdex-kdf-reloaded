@@ -686,10 +686,21 @@ source provides them. The chosen approach should be recorded when the
 port lands.
 
 **OQ2.** R0d requires the fork adoption to clear the enumerated
-advisory-flagged transitive crates. Whether the `k-0.52.12` lineage
-fully clears every listed advisory (versus clearing most and leaving a
-residual) is to be confirmed against a resolved dependency graph at
-adoption time; any residue is an open item, not a silent acceptance.
+advisory-flagged transitive crates. **Resolved at adoption (2026-07):**
+adopting the `k-0.52.12` fork did **not** clear the cluster. Only
+`owning_ref` (RUSTSEC-2022-0040) was eliminated. The remaining crates —
+`rustls`, `rustls-webpki`, `webpki`, `ring`, `mio`, `idna`,
+`remove_dir_all` — still resolve, now pulled by the **fork's own
+0.52-era transitive deps** (its WSS/TLS, trust-dns and tempfile stack)
+instead of the old `ef2afcd4` pin; the WSS `rustls`/`ring`/`webpki` line
+is additionally coupled to reloaded's `futures-rustls` transport binding.
+Separately, `ed25519-dalek 1.x` / `curve25519-dalek 3.x` persist via
+`solana-keypair` (Solana SDK), independent of libp2p. Per R0d this
+residue is **not silently accepted**: it is recorded here and formally
+accepted with per-advisory rationale in `deny.toml` (upstream-blocked —
+awaiting KomodoPlatform fork modernization / Solana SDK bumps), and the
+reloaded-owned roots (`libsqlite3-sys` via rusqlite; `metrics-util`) are
+tracked as scheduled migrations.
 
 ## 28.12 External References
 
