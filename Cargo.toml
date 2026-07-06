@@ -93,6 +93,9 @@ hkdf = "0.12.4"
 http = "0.2"
 itertools = "0.10"
 lazy_static = "1.4"
+# KomodoPlatform rust-libp2p fork (~0.52.x). Pinned by tag; features are
+# selected per-crate/per-target via `libp2p = { workspace = true, features = [..] }`.
+libp2p = { git = "https://github.com/KomodoPlatform/rust-libp2p.git", tag = "k-0.52.12", default-features = false }
 mocktopus = "0.8.0"
 parking_lot = { version = "0.12.0", default-features = false }
 rand = "0.8"

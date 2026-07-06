@@ -1,12 +1,14 @@
 use crate::request_response::Codec;
 use crate::NetworkInfo;
 use futures::StreamExt;
-use libp2p::swarm::NetworkBehaviour;
+use libp2p::core::Endpoint;
 use libp2p::{multiaddr::{Multiaddr, Protocol},
-             request_response::{InboundFailure, OutboundFailure, ProtocolName, ProtocolSupport, RequestResponse,
-                                RequestResponseConfig, RequestResponseEvent, RequestResponseMessage},
-             swarm::{NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters},
-             NetworkBehaviour, PeerId};
+             request_response::{Behaviour as RequestResponse, Config as RequestResponseConfig,
+                                Event as RequestResponseEvent, InboundFailure, Message as RequestResponseMessage,
+                                OutboundFailure, ProtocolSupport},
+             swarm::{ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, PollParameters, THandler,
+                     THandlerInEvent, THandlerOutEvent, ToSwarm},
+             PeerId};
 use log::{error, info, warn};
 use rand::seq::SliceRandom;
 use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
@@ -24,10 +26,10 @@ pub enum PeersExchangeProtocol {
     Version2,
 }
 
-impl ProtocolName for PeersExchangeProtocol {
-    fn protocol_name(&self) -> &[u8] {
+impl AsRef<str> for PeersExchangeProtocol {
+    fn as_ref(&self) -> &str {
         match self {
-            PeersExchangeProtocol::Version2 => b"/peers-exchange/2",
+            PeersExchangeProtocol::Version2 => "/peers-exchange/2",
         }
     }
 }
@@ -71,19 +73,12 @@ pub enum PeersExchangeResponse {
 }
 
 /// Behaviour that requests known peers list from other peers at random
-#[derive(NetworkBehaviour)]
-#[behaviour(poll_method = "poll", event_process = true)]
 pub struct PeersExchange {
     request_response: RequestResponse<PeersExchangeCodec>,
-    #[behaviour(ignore)]
     known_peers: Vec<PeerId>,
-    #[behaviour(ignore)]
     reserved_peers: Vec<PeerId>,
-    #[behaviour(ignore)]
-    events: VecDeque<NetworkBehaviourAction<(), <Self as NetworkBehaviour>::ConnectionHandler>>,
-    #[behaviour(ignore)]
+    events: VecDeque<ToSwarm<(), THandlerInEvent<Self>>>,
     maintain_peers_interval: Interval,
-    #[behaviour(ignore)]
     network_info: NetworkInfo,
 }
 
@@ -93,7 +88,7 @@ impl PeersExchange {
         let codec = Codec::default();
         let protocol = iter::once((PeersExchangeProtocol::Version2, ProtocolSupport::Full));
         let config = RequestResponseConfig::default();
-        let request_response = RequestResponse::new(codec, protocol, config);
+        let request_response = RequestResponse::with_codec(codec, protocol, config);
         PeersExchange {
             request_response,
             known_peers: Vec::new(),
@@ -271,25 +266,7 @@ impl PeersExchange {
         true
     }
 
-    fn poll(
-        &mut self,
-        cx: &mut Context,
-        _params: &mut impl PollParameters,
-    ) -> Poll<NetworkBehaviourAction<(), <Self as NetworkBehaviour>::ConnectionHandler>> {
-        while let Poll::Ready(Some(())) = self.maintain_peers_interval.poll_next_unpin(cx) {
-            self.maintain_known_peers();
-        }
-
-        if let Some(event) = self.events.pop_front() {
-            return Poll::Ready(event);
-        }
-
-        Poll::Pending
-    }
-}
-
-impl NetworkBehaviourEventProcess<RequestResponseEvent<PeersExchangeRequest, PeersExchangeResponse>> for PeersExchange {
-    fn inject_event(&mut self, event: RequestResponseEvent<PeersExchangeRequest, PeersExchangeResponse>) {
+    fn process_event(&mut self, event: RequestResponseEvent<PeersExchangeRequest, PeersExchangeResponse>) {
         match event {
             RequestResponseEvent::Message { message, peer } => match message {
                 RequestResponseMessage::Request { request, channel, .. } => match request {
@@ -361,15 +338,103 @@ impl NetworkBehaviourEventProcess<RequestResponseEvent<PeersExchangeRequest, Pee
     }
 }
 
+impl NetworkBehaviour for PeersExchange {
+    type ConnectionHandler = THandler<RequestResponse<PeersExchangeCodec>>;
+    type ToSwarm = ();
+
+    fn handle_established_inbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.request_response
+            .handle_established_inbound_connection(connection_id, peer, local_addr, remote_addr)
+    }
+
+    fn handle_established_outbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        peer: PeerId,
+        addr: &Multiaddr,
+        role_override: Endpoint,
+    ) -> Result<THandler<Self>, ConnectionDenied> {
+        self.request_response
+            .handle_established_outbound_connection(connection_id, peer, addr, role_override)
+    }
+
+    fn handle_pending_inbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<(), ConnectionDenied> {
+        self.request_response
+            .handle_pending_inbound_connection(connection_id, local_addr, remote_addr)
+    }
+
+    fn handle_pending_outbound_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        maybe_peer: Option<PeerId>,
+        addresses: &[Multiaddr],
+        effective_role: Endpoint,
+    ) -> Result<Vec<Multiaddr>, ConnectionDenied> {
+        self.request_response
+            .handle_pending_outbound_connection(connection_id, maybe_peer, addresses, effective_role)
+    }
+
+    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+        self.request_response.on_swarm_event(event)
+    }
+
+    fn on_connection_handler_event(
+        &mut self,
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+        event: THandlerOutEvent<Self>,
+    ) {
+        self.request_response
+            .on_connection_handler_event(peer_id, connection_id, event)
+    }
+
+    fn poll(
+        &mut self,
+        cx: &mut Context,
+        params: &mut impl PollParameters,
+    ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
+        while let Poll::Ready(Some(())) = self.maintain_peers_interval.poll_next_unpin(cx) {
+            self.maintain_known_peers();
+        }
+
+        // Drive the inner request-response behaviour, processing its generated events locally and
+        // forwarding all other swarm actions unchanged.
+        loop {
+            match self.request_response.poll(cx, params) {
+                Poll::Ready(ToSwarm::GenerateEvent(event)) => self.process_event(event),
+                Poll::Ready(other) => return Poll::Ready(other.map_out(|_| unreachable!())),
+                Poll::Pending => break,
+            }
+        }
+
+        if let Some(event) = self.events.pop_front() {
+            return Poll::Ready(event);
+        }
+
+        Poll::Pending
+    }
+}
+
 #[cfg(test)]
 mod protocol_tests {
-    use super::{PeerAddresses, PeerIdSerde, PeersExchange, PeersExchangeProtocol, ProtocolName};
+    use super::{PeerAddresses, PeerIdSerde, PeersExchange, PeersExchangeProtocol};
     use crate::{NetworkInfo, NetworkPorts, PeerId};
     use std::collections::{HashMap, HashSet};
 
     #[test]
     fn protocol_name_is_version2() {
-        assert_eq!(PeersExchangeProtocol::Version2.protocol_name(), b"/peers-exchange/2");
+        assert_eq!(PeersExchangeProtocol::Version2.as_ref(), "/peers-exchange/2");
     }
 
     #[test]
