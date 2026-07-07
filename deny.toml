@@ -91,7 +91,6 @@ ignore = [
     # that policy. anyhow and rand are trivially bumpable and are queued as
     # quick wins in the v0.2.0 dependency-hygiene backlog; rmp-serde/secp256k1
     # are pinned by deeper deps.
-    "RUSTSEC-2026-0190", # anyhow Error::downcast_mut() unsoundness
     "RUSTSEC-2026-0097", # rand unsound with a custom logger
     "RUSTSEC-2022-0092", # rmp-serde Raw/RawRef unsound
     "RUSTSEC-2022-0070", # secp256k1 0.20 use-after-free in safe code
