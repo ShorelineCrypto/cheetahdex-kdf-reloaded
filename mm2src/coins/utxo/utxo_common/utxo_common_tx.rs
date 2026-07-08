@@ -591,18 +591,32 @@ where
             if let Some(gas) = gas_fee {
                 tx_builder = tx_builder.with_gas_fee(gas);
             }
-            let (tx, data) = tx_builder
+            let (tx, _data) = tx_builder
                 .build()
                 .await
                 .mm_err(|e| TradePreimageError::from_generate_tx_error(e, ticker, decimals, is_amount_upper_bound))?;
 
-            let total_fee = if tx.outputs.len() == outputs_count {
-                // take into account the change output
-                data.fee_amount + (dynamic_fee * P2PKH_OUTPUT_LEN) / KILO_BYTE
-            } else {
-                // the change output is included already
-                data.fee_amount
-            };
+            // The estimate must be identical whether the amount is expressed as a
+            // `TradePreimageValue::UpperBound` or the equivalent `Exact` value (the
+            // max-taker-volume fixed point). The builder folds a change-output allowance
+            // into its fee inconsistently across fee policies and rounding boundaries: in
+            // the `SendExact` path the allowance can consume the change below dust so that
+            // no change output is materialised, yet the allowance stays in the fee — and
+            // the old `tx.outputs.len() == outputs_count` test then added a *second*
+            // allowance, over-counting by one P2PKH output for some fee rates.
+            //
+            // Recompute here from the built transaction size, always including exactly one
+            // P2PKH change output (a real swap tx carries one) with a single rounding step.
+            // This is an estimate used for display and max-volume math only; it does not
+            // build the broadcast transaction.
+            let tx = UtxoTx::from(tx);
+            let mut v_size = tx_size_in_v_bytes(&my_address.addr_format, &tx) as u64;
+            if tx.outputs.len() != outputs_count {
+                // a change output was materialised by the builder; drop it so the base
+                // size is change-free before adding the single allowance below
+                v_size = v_size.saturating_sub(P2PKH_OUTPUT_LEN);
+            }
+            let total_fee = (dynamic_fee * (v_size + P2PKH_OUTPUT_LEN)) / KILO_BYTE;
 
             Ok(big_decimal_from_sat(total_fee as i64, decimals))
         },

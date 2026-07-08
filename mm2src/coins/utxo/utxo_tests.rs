@@ -2508,22 +2508,35 @@ fn test_qtum_is_unspent_mature() {
 }
 
 #[test]
-#[ignore]
-// TODO it fails at least when fee is 2055837 sat per kbyte, need to investigate
 fn test_get_sender_trade_fee_dynamic_tx_fee() {
-    let rpc_client = electrum_client_for_test(&["s1.qtum.info:50001"]);
-    let mut coin_fields = utxo_coin_fields_for_test(
-        UtxoRpcClientEnum::Electrum(rpc_client),
-        Some("bob passphrase max taker vol with dynamic trade fee"),
-        false,
-    );
+    const DYNAMIC_FEE: u64 = 2055837;
+
+    UtxoStandardCoin::get_tx_fee
+        .mock_safe(|_| MockResult::Return(Box::pin(futures::future::ok(ActualTxFee::Dynamic(DYNAMIC_FEE)))));
+    UtxoStandardCoin::get_unspent_ordered_list.mock_safe(|coin, _| {
+        let cache = block_on(coin.as_ref().recently_spent_outpoints.lock());
+        let unspents = vec![UnspentInfo {
+            outpoint: OutPoint {
+                hash: 1.into(),
+                index: 0,
+            },
+            value: 222_222_000,
+            height: Default::default(),
+        }];
+        MockResult::Return(Box::pin(futures::future::ok((unspents, cache))))
+    });
+
+    let client = NativeClient(Arc::new(NativeClientImpl::default()));
+    let mut coin_fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
     coin_fields.tx_fee = TxFee::Dynamic(EstimateFeeMethod::Standard);
     let coin = utxo_coin_from_fields(coin_fields);
-    let my_balance = coin.my_spendable_balance().wait().expect("!my_balance");
-    let expected_balance = BigDecimal::from_str("2.22222").expect("!BigDecimal::from_str");
-    assert_eq!(my_balance, expected_balance);
 
-    let fee1 = block_on(coin.get_sender_trade_fee(
+    let my_balance = BigDecimal::from_str("2.22222").expect("!BigDecimal::from_str");
+
+    // The mocks call `block_on` internally, so the outer driver must not be the tokio
+    // `common::block_on` (nested runtime). `futures::executor::block_on` has no reactor
+    // requirement here because every RPC on the path is mocked.
+    let fee1 = futures::executor::block_on(coin.get_sender_trade_fee(
         TradePreimageValue::UpperBound(my_balance.clone()),
         FeeApproxStage::WithoutApprox,
     ))
@@ -2531,18 +2544,23 @@ fn test_get_sender_trade_fee_dynamic_tx_fee() {
 
     let value_without_fee = &my_balance - &fee1.amount.to_decimal();
     log!("value_without_fee "(value_without_fee));
-    let fee2 = block_on(coin.get_sender_trade_fee(
+    let fee2 = futures::executor::block_on(coin.get_sender_trade_fee(
         TradePreimageValue::Exact(value_without_fee),
         FeeApproxStage::WithoutApprox,
     ))
     .expect("!get_sender_trade_fee");
+    log!("fee1 "(fee1.amount.to_decimal())" fee2 "(fee2.amount.to_decimal()));
     assert_eq!(fee1, fee2);
 
-    // `2.21934443` value was obtained as a result of executing the `max_taker_vol` RPC call for this wallet
-    let max_taker_vol = BigDecimal::from_str("2.21934443").expect("!BigDecimal::from_str");
-    let fee3 =
-        block_on(coin.get_sender_trade_fee(TradePreimageValue::Exact(max_taker_vol), FeeApproxStage::WithoutApprox))
-            .expect("!get_sender_trade_fee");
+    // A much smaller Exact amount leaves a large change, so the builder materialises a
+    // change output (the other branch of the fee estimator). The fee must still match:
+    // the transaction shape (one input, one payment output, one change output) is the same.
+    let fee3 = futures::executor::block_on(coin.get_sender_trade_fee(
+        TradePreimageValue::Exact(BigDecimal::from(1)),
+        FeeApproxStage::WithoutApprox,
+    ))
+    .expect("!get_sender_trade_fee");
+    log!("fee3 "(fee3.amount.to_decimal()));
     assert_eq!(fee1, fee3);
 }
 
