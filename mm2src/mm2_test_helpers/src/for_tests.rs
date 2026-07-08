@@ -573,7 +573,7 @@ impl MarketMakerIt {
                 if attempts > 128 {
                     return ERR!("Out of local IPs?");
                 }
-                let ip4 = Ipv4Addr::new(127, 0, 0, rng.gen_range(1, 255));
+                let ip4 = Ipv4Addr::new(127, 0, 0, rng.gen_range(1..255));
                 let ip = IpAddr::from(ip4);
                 let mut mm_ips = try_s!(MM_IPS.lock());
                 if mm_ips.contains_key(&ip) {

@@ -1449,7 +1449,15 @@ mod tests {
                     rng.fill_bytes(&mut bytes);
                     Some(hex::encode(bytes))
                 },
-                closure_reason: { Some(rng.sample_iter(&Alphanumeric).take(30).collect::<String>()) },
+                closure_reason: {
+                    Some(
+                        (&mut rng)
+                            .sample_iter(&Alphanumeric)
+                            .map(char::from)
+                            .take(30)
+                            .collect::<String>(),
+                    )
+                },
                 claiming_tx: {
                     rng.fill_bytes(&mut bytes);
                     Some(hex::encode(bytes))
@@ -1490,7 +1498,7 @@ mod tests {
             } else {
                 HTLCStatus::Failed
             };
-            let description: String = rng.sample_iter(&Alphanumeric).take(30).collect();
+            let description: String = (&mut rng).sample_iter(&Alphanumeric).map(char::from).take(30).collect();
             let info = PaymentInfo {
                 payment_hash: {
                     rng.fill_bytes(&mut bytes);
