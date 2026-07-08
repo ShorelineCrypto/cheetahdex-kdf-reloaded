@@ -23,15 +23,18 @@ env-gated tests:
 - `polygon_check_if_my_payment_sent` (`coins/eth`) — reworked into a bounded,
   free-tier-friendly test; runs against a live RPC via `POLYGON_RPC_URL` and
   skips when unset (external-network-tests CI job).
+- `send_and_refund_eth_payment`, `send_and_refund_erc20_payment` (`coins/eth`) —
+  moved to `eth_swap_dev_tests` and rewritten to run against a throwaway
+  `geth --dev` chain with a clean-room `EtomicSwap` HTLC + ERC20 deployed
+  locally (see `for_tests/*.sol`). They exercise the real payment -> refund
+  flow and assert the on-chain state transition. They skip themselves when the
+  `geth` binary is not on `PATH`, so the default offline suite stays green.
 
 ## Group 1 — Genuine code failures worth fixing (inherited from the 2022 fork)
 
-- **`send_and_refund_erc20_payment`**, **`send_and_refund_eth_payment`**
-  (`coins/eth/eth_tests.rs`) — *"temporary ignore, will refactor later to use dev
-  chain and properly check transaction statuses."* Exercise the ETH/ERC20 swap
-  **refund** path (funds-critical). **Remaining, highest value.** Effort: med-high
-  — needs a local EVM dev chain (e.g. anvil/geth `--dev`) fixture and proper tx-
-  status assertions instead of the old hard-coded live-chain assumptions.
+_None outstanding._ The fee-error mapping, dynamic-fee preimage consistency,
+rate-limiter flakiness, and the ETH/ERC20 refund-path tests have all been fixed
+and re-enabled (see above).
 
 ## Group 2 — Dead external endpoints
 
