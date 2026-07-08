@@ -82,8 +82,6 @@ ignore = [
     # rusqlite/libsqlite3-sys: funds-critical 37-file migration (0.24 -> modern),
     # NO_PARAMS removal. Tracked as a dedicated tested migration.
     "RUSTSEC-2022-0090", # libsqlite3-sys (rusqlite)
-    # metrics-util: subsystem sits on dead metrics-runtime 0.13; full rewrite.
-    "RUSTSEC-2021-0113", # metrics-util
 
     # --- Unsound advisories (transitive) ---
     # cargo-deny schema v2 treats `unsound` advisories as hard errors; under the

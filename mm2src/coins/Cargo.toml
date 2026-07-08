@@ -91,7 +91,6 @@ libc = "0.2"
 lightning = { path = "../../rust-lightning-patched/lightning" }
 lightning-background-processor = { path = "lightning_background_processor" }
 lightning-invoice = { path = "../../rust-lightning-patched/lightning-invoice" }
-metrics = "0.12"
 mocktopus = "0.8.0"
 num-traits = "0.2"
 parking_lot = { version = "0.12.0" }
