@@ -1503,8 +1503,18 @@ fn test_negotiate_swap_contract_addr_has_fallback() {
 }
 
 #[test]
-#[ignore = "network + archive RPC: check_if_my_payment_sent scans a wide eth_getLogs range from a 2021 Polygon block; free-tier providers (incl. Alchemy, the hardcoded key here) cap eth_getLogs at ~10 blocks, so this needs a configured archive/PAYG RPC. Gate behind a network job with a configurable URL."]
 fn polygon_check_if_my_payment_sent() {
+    // Network-gated: set POLYGON_RPC_URL to run it (Alchemy or Ankr free tier is
+    // fine). Skipped otherwise so the offline suite stays green; a network CI job
+    // runs it by setting the secret.
+    let url = match std::env::var("POLYGON_RPC_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            log!("skipping polygon_check_if_my_payment_sent: set POLYGON_RPC_URL to run it");
+            return;
+        },
+    };
+
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let conf = json!({
       "coin": "MATIC",
@@ -1515,6 +1525,10 @@ fn polygon_check_if_my_payment_sent() {
       "chain_id": 137,
       "avg_blocktime": 0.03,
       "required_confirmations": 3,
+      // Small log-scan chunk so the very first eth_getLogs call is tiny and stays
+      // within free-tier getLogs range limits (Alchemy/Ankr free tiers reject wide
+      // ranges).
+      "logs_block_range": 5,
       "protocol": {
         "type": "ETH"
       }
@@ -1523,7 +1537,7 @@ fn polygon_check_if_my_payment_sent() {
     let request = json!({
         "method": "enable",
         "coin": "MATIC",
-        "urls": ["https://polygon-mainnet.g.alchemy.com/v2/9YYl6iMLmXXLoflMPHnMTC4Dcm2L2tFH"],
+        "urls": [url],
         "swap_contract_address": "0x9130b257d37a52e52f21054c4da3450c72f595ce",
     });
 
@@ -1538,24 +1552,67 @@ fn polygon_check_if_my_payment_sent() {
     ))
     .unwrap();
 
-    println!("{:02x}", coin.my_address);
+    // A known, immutable historical maker payment on Polygon mainnet (Dec 2021),
+    // emitted in block 22_185_152. We start the scan two blocks before it with a
+    // small `logs_block_range` (see conf) so `check_if_my_payment_sent` finds the
+    // PaymentSent event in its very first getLogs chunk and returns immediately —
+    // no crawl toward chain head, and the query stays within free-tier limits.
+    //
+    // `from_block` is a fixed historical constant, deliberately NOT derived from
+    // the coin's own `current_block()` (the method the tested code uses), so the
+    // fixture stays independent of the code under test. Because the event is found
+    // in that first bounded chunk, the outcome does not depend on `current_block()`.
+    // This verifies the real found-path (locating and reconstructing the payment
+    // tx) and never goes stale, since the history is immutable.
+    const PAYMENT_BLOCK: u64 = 22_185_152;
+    let from_block = PAYMENT_BLOCK - 2;
 
     let secret_hash = hex::decode("fc33114b389f0ee1212abf2867e99e89126f4860").unwrap();
-    let swap_contract_address = "9130b257d37a52e52f21054c4da3450c72f595ce".into();
+    let swap_contract_address: BytesJson = "9130b257d37a52e52f21054c4da3450c72f595ce".into();
     let my_payment = coin
         .check_if_my_payment_sent(
             1638764369,
             &[],
             &[],
             &secret_hash,
-            22185109,
-            &Some(swap_contract_address),
+            from_block,
+            &Some(swap_contract_address.clone()),
         )
         .wait()
         .unwrap()
         .unwrap();
     let expected_hash = BytesJson::from("69a20008cea0c15ee483b5bbdff942752634aa072dfd2ff715fe87eec302de11");
     assert_eq!(expected_hash, my_payment.tx_hash());
+
+    // Negative case: crawl only the last several blocks for the same payment id.
+    // Its PaymentSent event is in 2021, so scanning a recent window must NOT find
+    // it — this exercises the "scanned the whole window, nothing found -> None"
+    // branch. The head is read via the alloy provider directly, NOT the coin's
+    // `current_block()` (the method the tested code uses), so the fixture stays
+    // independent of the code under test. The window is small (a handful of
+    // `logs_block_range` chunks), so it stays within free-tier getLogs limits.
+    let recent_head = {
+        use alloy::providers::Provider as _;
+        block_on(coin.alloy_provider().get_block_number()).unwrap()
+    };
+    let recent_from_block = recent_head.saturating_sub(20);
+    let not_found = coin
+        .check_if_my_payment_sent(
+            1638764369,
+            &[],
+            &[],
+            &secret_hash,
+            recent_from_block,
+            &Some(swap_contract_address),
+        )
+        .wait()
+        .unwrap();
+    assert!(
+        not_found.is_none(),
+        "payment must not be found in the recent {}..{} window",
+        recent_from_block,
+        recent_head
+    );
 }
 
 #[test]
