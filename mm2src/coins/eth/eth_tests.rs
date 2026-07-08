@@ -475,7 +475,7 @@ fn send_and_refund_eth_payment() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "network + funded testnet account: Ropsten is decommissioned (both the Infura and linkpool URLs are dead) and ethgasstation.info is gone; this test also broadcasts a real tx. Re-enabling requires porting to a live testnet (e.g. Sepolia) with a funded key and working gas estimation, run in a network-gated job."]
 fn test_nonce_several_urls() {
     let key_pair = KeyPair::from_secret_slice(
         &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
@@ -1503,7 +1503,7 @@ fn test_negotiate_swap_contract_addr_has_fallback() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "network + archive RPC: check_if_my_payment_sent scans a wide eth_getLogs range from a 2021 Polygon block; free-tier providers (incl. Alchemy, the hardcoded key here) cap eth_getLogs at ~10 blocks, so this needs a configured archive/PAYG RPC. Gate behind a network job with a configurable URL."]
 fn polygon_check_if_my_payment_sent() {
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let conf = json!({
