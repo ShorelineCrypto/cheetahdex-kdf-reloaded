@@ -1261,20 +1261,30 @@ fn test_get_fee_to_send_taker_fee() {
 /// if the balance is insufficient.
 /// So [`EthCoin::get_fee_to_send_taker_fee`] must return [`TradePreimageError::NotSufficientBalance`].
 ///
-/// Please note this test doesn't work correctly now,
-/// because as of now [`EthCoin::get_fee_to_send_taker_fee`] doesn't process the `Exception` web3 error correctly.
+/// `estimate_gas` and `my_balance` are mocked so the check runs offline and deterministically:
+/// `estimate_gas` reverts the way an insufficient-balance transfer does, and the mocked balance
+/// cannot cover the dex fee, so the code must classify it as `NotSufficientBalance`.
 #[test]
-#[ignore]
 fn test_get_fee_to_send_taker_fee_insufficient_balance() {
     const DEX_FEE_AMOUNT: u64 = 100_000_000_000;
+    const GAS_PRICE: u64 = 40;
 
-    EthCoin::get_gas_price.mock_safe(|_| MockResult::Return(Box::new(futures01::future::ok(40.into()))));
+    EthCoin::get_gas_price.mock_safe(|_| MockResult::Return(Box::new(futures01::future::ok(GAS_PRICE.into()))));
+    // Reproduce the revert some ERC20 tokens raise when the sender can't afford the transfer.
+    EthCoinImpl::estimate_gas.mock_safe(|_, _| {
+        MockResult::Return(Box::new(futures01::future::err(MmError::new(Web3RpcError::Transport(
+            "error code -32016: The execution failed due to an exception.".to_string(),
+        )))))
+    });
+    // The wallet holds fewer tokens than the dex fee it is asked to send.
+    EthCoin::my_balance.mock_safe(|_| MockResult::Return(Box::new(futures01::future::ok(U256::from(1u64)))));
+
     let (_ctx, coin) = eth_coin_for_test(
         EthCoinType::Erc20 {
             platform: "ETH".to_string(),
             token_addr: Address::from_slice(&hex::decode("aD22f63404f7305e4713CcBd4F296f34770513f4").unwrap()),
         },
-        vec!["http://eth1.cipig.net:8555".into()],
+        vec!["http://dummy.dummy".into()],
         None,
     );
     let dex_fee_amount = u256_to_big_decimal(DEX_FEE_AMOUNT.into(), 18).expect("!u256_to_big_decimal");
