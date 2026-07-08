@@ -95,7 +95,6 @@ keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
 # ledger = { path = "../ledger" }
 libc = "0.2"
-metrics = "0.12"
 mm2_p2p = { path = "../mm2_p2p", features = ["application"] }
 num-traits = "0.2"
 rpc = { package = "kdf_rpc_types", path = "../kdf_rpc_types" }
