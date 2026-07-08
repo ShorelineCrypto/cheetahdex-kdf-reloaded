@@ -32,7 +32,7 @@ mm2_event_stream = { path = "../mm2_event_stream" }
 num-bigint = { version = "0.4", features = ["serde", "std"] }
 num-rational = { version = "0.4", features = ["serde"] }
 prost = { workspace = true }
-rand = { package = "rand", version = "0.7", features = ["std", "wasm-bindgen"] }
+rand = { package = "rand", version = "0.8", features = ["std"] }
 regex = "1"
 rmp-serde = "0.14.3"
 secp256k1 = { version = "0.20", features = ["rand"] }

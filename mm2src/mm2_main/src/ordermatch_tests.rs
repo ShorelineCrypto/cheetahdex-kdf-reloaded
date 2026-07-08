@@ -1711,7 +1711,7 @@ pub(super) fn make_random_orders(
     let mut rng = rand::thread_rng();
     let mut orders = Vec::with_capacity(n);
     for _i in 0..n {
-        let numer: u64 = rng.gen_range(2000, 10000000);
+        let numer: u64 = rng.gen_range(2000..10000000);
         let order = new_protocol::MakerOrderCreated {
             uuid: Uuid::new_v4().into(),
             base: base.clone(),
