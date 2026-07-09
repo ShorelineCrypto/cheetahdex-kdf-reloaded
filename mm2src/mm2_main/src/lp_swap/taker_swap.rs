@@ -397,6 +397,16 @@ pub async fn run_taker_swap(swap: RunTakerSwapInput, ctx: MmArc) {
                         )
                     }
                     status.status(&[&"swap", &("uuid", uuid.as_str())], &event.status_str());
+                    // Notify the swap-status streamer of the new V1 taker event
+                    // (mirrors the V2 emission in taker_swap_v2.rs).
+                    ctx.event_stream_manager
+                        .send_fn(&mm2_event_stream::StreamerId::SwapStatus, || {
+                            super::swap_events::SwapStatusEvent::TakerV1 {
+                                uuid: running_swap.uuid,
+                                event: event.clone(),
+                            }
+                        })
+                        .ok();
                     running_swap.apply_event(event);
                 }
                 match res.0 {

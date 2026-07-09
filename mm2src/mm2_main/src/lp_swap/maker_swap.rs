@@ -1781,6 +1781,16 @@ pub async fn run_maker_swap(swap: RunMakerSwapInput, ctx: MmArc) {
                         )
                     }
                     status.status(swap_tags!(), &event.status_str());
+                    // Notify the swap-status streamer of the new V1 maker event
+                    // (mirrors the V2 emission in maker_swap_v2.rs).
+                    ctx.event_stream_manager
+                        .send_fn(&mm2_event_stream::StreamerId::SwapStatus, || {
+                            super::swap_events::SwapStatusEvent::MakerV1 {
+                                uuid: running_swap.uuid,
+                                event: event.clone(),
+                            }
+                        })
+                        .ok();
                     running_swap.apply_event(event);
                 }
                 match res.0 {
