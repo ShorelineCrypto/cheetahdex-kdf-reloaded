@@ -70,11 +70,6 @@ pub async fn insert_new_swap_to_db_with_type(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn add_swap_to_db_index(ctx: &MmArc, swap: &SavedSwap) {
-    crate::mm2::database::stats_swaps::add_swap_to_index(&ctx.sqlite_connection(), swap, None)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn save_stats_swap(ctx: &MmArc, swap: &SavedSwap) -> Result<(), String> {
     let fiat_snapshot = fetch_completion_fiat_snapshot(swap).await;
 
