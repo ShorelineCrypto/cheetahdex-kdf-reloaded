@@ -5890,6 +5890,7 @@ dependencies = [
  "fomat-macros 0.2.1",
  "futures 0.3.32",
  "gstuff",
+ "hex",
  "http 0.2.12",
  "lazy_static",
  "mm2_core",
