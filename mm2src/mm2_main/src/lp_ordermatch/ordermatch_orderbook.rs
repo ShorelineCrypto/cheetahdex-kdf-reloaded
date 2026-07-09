@@ -2107,7 +2107,7 @@ pub(crate) fn orderbook_address(
     pubkey: &str,
     addr_format: UtxoAddressFormat,
 ) -> Result<OrderbookAddress, MmError<OrderbookAddrErr>> {
-    let protocol: CoinProtocol = json::from_value(conf["protocol"].clone())?;
+    let protocol: CoinProtocol = CoinProtocol::from_conf_json(conf["protocol"].clone())?;
     match protocol {
         CoinProtocol::ERC20 { .. } | CoinProtocol::ETH { .. } => coins::eth::addr_from_pubkey_str(pubkey)
             .map(OrderbookAddress::Transparent)
@@ -2123,7 +2123,7 @@ pub(crate) fn orderbook_address(
                 return MmError::err(OrderbookAddrErr::PlatformCoinConfIsNull(platform));
             }
             // TODO is there any way to make it better without duplicating the prefix in the SLP conf?
-            let platform_protocol: CoinProtocol = json::from_value(platform_conf["protocol"].clone())?;
+            let platform_protocol: CoinProtocol = CoinProtocol::from_conf_json(platform_conf["protocol"].clone())?;
             match platform_protocol {
                 CoinProtocol::BCH { slp_prefix } => coins::utxo::slp::slp_addr_from_pubkey_str(pubkey, &slp_prefix)
                     .map(OrderbookAddress::Transparent)

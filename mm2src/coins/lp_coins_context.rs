@@ -368,6 +368,32 @@ pub enum CoinProtocol {
         contract_address: String,
     },
 }
+
+impl CoinProtocol {
+    /// Deserialize a coin's `protocol` config value, tolerating the standard
+    /// `{"type": "ETH"}` form that omits `protocol_data`.
+    ///
+    /// `CoinProtocol` uses adjacent tagging (`content = "protocol_data"`), and the
+    /// `ETH` variant is a struct variant (`chain_id`), so serde otherwise rejects a
+    /// bare `{"type": "ETH"}` with `missing field protocol_data` even though its only
+    /// field is optional. Backfill an empty `protocol_data` for exactly that case and
+    /// defer to the derived deserialization (all other variants are untouched), so
+    /// both `{"type": "ETH"}` and `{"type": "ETH", "protocol_data": {"chain_id": N}}`
+    /// parse. This is the canonical way to parse a coin `protocol` from config.
+    pub fn from_conf_json(mut protocol: serde_json::Value) -> serde_json::Result<CoinProtocol> {
+        let is_eth = protocol.get("type").and_then(serde_json::Value::as_str) == Some("ETH");
+        if is_eth && protocol.get("protocol_data").is_none() {
+            if let Some(obj) = protocol.as_object_mut() {
+                obj.insert(
+                    "protocol_data".to_owned(),
+                    serde_json::Value::Object(serde_json::Map::new()),
+                );
+            }
+        }
+        serde_json::from_value(protocol)
+    }
+}
+
 pub enum RpcClientType {
     Native,
     Electrum,
@@ -431,5 +457,46 @@ impl BalanceTradeFeeUpdatedHandler for CoinsContext {
         for sub in self.balance_update_handlers.lock().await.iter() {
             sub.balance_updated(coin, new_balance).await
         }
+    }
+}
+
+#[cfg(test)]
+mod coin_protocol_tests {
+    use super::CoinProtocol;
+    use serde_json::json;
+
+    #[test]
+    fn eth_protocol_accepts_bare_and_explicit_protocol_data() {
+        // The standard `{"type":"ETH"}` form (no protocol_data) must parse.
+        match CoinProtocol::from_conf_json(json!({"type": "ETH"})).unwrap() {
+            CoinProtocol::ETH { chain_id } => assert_eq!(chain_id, None),
+            other => panic!("expected ETH, got {:?}", other),
+        }
+        // Explicit empty protocol_data.
+        match CoinProtocol::from_conf_json(json!({"type": "ETH", "protocol_data": {}})).unwrap() {
+            CoinProtocol::ETH { chain_id } => assert_eq!(chain_id, None),
+            other => panic!("expected ETH, got {:?}", other),
+        }
+        // protocol_data carrying chain_id is preserved.
+        match CoinProtocol::from_conf_json(json!({"type": "ETH", "protocol_data": {"chain_id": 137}})).unwrap() {
+            CoinProtocol::ETH { chain_id } => assert_eq!(chain_id, Some(137)),
+            other => panic!("expected ETH, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn other_variants_are_unaffected() {
+        // A struct variant with required fields still needs its protocol_data.
+        assert!(CoinProtocol::from_conf_json(json!({"type": "ERC20"})).is_err());
+        CoinProtocol::from_conf_json(json!({
+            "type": "ERC20",
+            "protocol_data": {"platform": "ETH", "contract_address": "0x0"}
+        }))
+        .unwrap();
+        // A unit variant still parses.
+        assert!(matches!(
+            CoinProtocol::from_conf_json(json!({"type": "UTXO"})).unwrap(),
+            CoinProtocol::UTXO
+        ));
     }
 }

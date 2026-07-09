@@ -415,7 +415,7 @@ fn load_coin_conf(ctx: &MmArc, ticker: &str) -> Result<serde_json::Value, MmErro
 
 /// Parse a coin's protocol descriptor from its configuration.
 fn parse_protocol(ticker: &str, conf: &serde_json::Value) -> Result<CoinProtocol, MmError<GetPrivateKeysError>> {
-    serde_json::from_value(conf["protocol"].clone()).map_to_mm(|e| GetPrivateKeysError::CoinProtocolParseError {
+    CoinProtocol::from_conf_json(conf["protocol"].clone()).map_to_mm(|e| GetPrivateKeysError::CoinProtocolParseError {
         ticker: ticker.to_owned(),
         reason: e.to_string(),
     })

@@ -55,7 +55,7 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
             r#""protocol" field is missing in coins file. The file format is deprecated, please execute ./mm2 update_config command to convert it or download a new one"#
         );
     }
-    let protocol: CoinProtocol = try_s!(json::from_value(coins_en["protocol"].clone()));
+    let protocol: CoinProtocol = try_s!(CoinProtocol::from_conf_json(coins_en["protocol"].clone()));
 
     let coin: MmCoinEnum = match &protocol {
         CoinProtocol::UTXO => {
@@ -739,7 +739,7 @@ pub fn address_by_coin_conf_and_pubkey_str(
     pubkey: &str,
     addr_format: UtxoAddressFormat,
 ) -> Result<String, String> {
-    let protocol: CoinProtocol = try_s!(json::from_value(conf["protocol"].clone()));
+    let protocol: CoinProtocol = try_s!(CoinProtocol::from_conf_json(conf["protocol"].clone()));
     match protocol {
         CoinProtocol::ERC20 { .. } | CoinProtocol::ETH { .. } => eth::addr_from_pubkey_str(pubkey),
         CoinProtocol::UTXO | CoinProtocol::QTUM | CoinProtocol::QRC20 { .. } | CoinProtocol::BCH { .. } => {
@@ -751,7 +751,8 @@ pub fn address_by_coin_conf_and_pubkey_str(
                 return ERR!("platform {} conf is null", platform);
             }
             // TODO is there any way to make it better without duplicating the prefix in the SLP conf?
-            let platform_protocol: CoinProtocol = try_s!(json::from_value(platform_conf["protocol"].clone()));
+            let platform_protocol: CoinProtocol =
+                try_s!(CoinProtocol::from_conf_json(platform_conf["protocol"].clone()));
             match platform_protocol {
                 CoinProtocol::BCH { slp_prefix } => {
                     slp_addr_from_pubkey_str(pubkey, &slp_prefix).map_err(|e| ERRL!("{}", e))
