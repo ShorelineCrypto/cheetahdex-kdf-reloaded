@@ -860,8 +860,9 @@ pub async fn enable_native(mm: &MarketMakerIt, coin: &str, urls: &[&str]) -> Jso
             "method": "enable",
             "coin": coin,
             "urls": urls,
-            // Dev chain swap contract address
-            "swap_contract_address": "0xa09ad3cd7e96586ebd05a2607ee56b56fb2db8fd",
+            // Dev chain swap contract address (EIP-55 checksummed; the ETH enable path
+            // validates the checksum via `valid_addr_from_str`, so a lowercase form is rejected).
+            "swap_contract_address": "0xa09aD3cD7e96586eBd05A2607EE56b56Fb2dB8FD",
             "mm2": 1,
         }))
         .await
