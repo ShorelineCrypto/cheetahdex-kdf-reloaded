@@ -311,6 +311,24 @@ from anywhere other than its own `protocol_data`.
 > functional change. The enum must continue to tolerate unknown `protocol_data`
 > keys (no `deny_unknown_fields`) so benign surplus keys do not fail activation.
 
+> **Status update (reloaded).** Implemented (commit 40645ebad). The `TENDERMINT`
+> arm now carries all three required/recommended fields:
+>
+> - **`denom` (required):** platform coin base denomination (e.g., `"uatom"`);
+>   passed to `TendermintProtocolInfo` and consumed by balance queries, fee
+>   calculations, and bank/HTLC/IBC message construction.
+> - **`decimals` (required):** platform coin display decimals, bounded by a custom
+>   deserializer at ≤18; enables correct scaling of amounts and fee representation.
+> - **`ibc_channels` (recommended):** optional map from destination bech32 HRP to
+>   ICS-20 channel number; passed to `TendermintProtocolInfo.ibc_channels` and
+>   available to the IBC/HTLC layer via `ibc_channel_for_prefix()` for configured
+>   channel routing (ch. 18 §18.4). Defaults to empty when absent.
+>
+> The `TENDERMINTTOKEN` arm captures `platform`, `decimals`, and `denom` correctly
+> (no change needed). Benign fields (`gas_price`, `chain_registry_name`) continue
+> to be silently dropped; the enum still tolerates unknown `protocol_data` keys
+> so surplus config does not fail activation.
+
 ---
 
 ## 36.4 Relationship to the IBC/HTLC swap layer (informative)
