@@ -65,6 +65,10 @@ winapi = "0.3"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 chrono = { version = "0.4", features = ["wasmbind"] }
 getrandom = { version = "0.2", features = ["js"] } # see https://docs.rs/getrandom/0.2.0/getrandom/#webassembly-support
+# getrandom 0.3 is pulled transitively (rand_core 0.9 / uuid) and must have its
+# wasm backend enabled. This feature plus the `--cfg getrandom_backend="wasm_js"`
+# rustflag in .cargo/config.toml are BOTH required on wasm32-unknown-unknown.
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 gstuff = { version = "0.7" }
 js-sys = "0.3.27"
 serde-wasm-bindgen = "0.4.3"
