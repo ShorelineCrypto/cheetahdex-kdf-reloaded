@@ -2142,5 +2142,6 @@ pub(crate) fn orderbook_address(
         CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => coins::eth::tron::addr_from_pubkey_str(pubkey)
             .map(OrderbookAddress::Transparent)
             .map_to_mm(OrderbookAddrErr::AddrFromPubkeyError),
+        CoinProtocol::NFT { .. } => MmError::err(OrderbookAddrErr::CoinIsNotSupported(coin.to_owned())),
     }
 }

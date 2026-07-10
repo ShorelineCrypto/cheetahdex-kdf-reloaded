@@ -414,6 +414,16 @@ pub enum CoinProtocol {
         platform: String,
         contract_address: String,
     },
+    /// NFT entry in the coins config (e.g. `NFT_ETH`). NFT support is
+    /// activated through the dedicated `enable_nft` RPC method, not
+    /// through `electrum`/`enable`. This variant exists so that startup
+    /// config parsing does not fail with a confusing serde error when an
+    /// NFT entry is present; `lp_coininit` rejects it with a helpful
+    /// message directing callers to `enable_nft`.
+    NFT {
+        /// The parent EVM platform coin ticker (e.g. `"ETH"`).
+        platform: String,
+    },
 }
 
 impl CoinProtocol {
@@ -691,5 +701,21 @@ mod coin_protocol_tests {
             }
         }))
         .is_ok());
+    }
+
+    #[test]
+    fn nft_protocol_parses_and_carries_platform() {
+        // A GLEEC-style NFT config entry {"type":"NFT","protocol_data":{"platform":"ETH"}}
+        // must deserialize without error so that startup config loading and
+        // from_conf_json callers don't see a confusing serde error (ch.19 §19.11).
+        match CoinProtocol::from_conf_json(json!({
+            "type": "NFT",
+            "protocol_data": {"platform": "ETH"}
+        }))
+        .unwrap()
+        {
+            CoinProtocol::NFT { platform } => assert_eq!(platform, "ETH"),
+            other => panic!("expected NFT, got {:?}", other),
+        }
     }
 }

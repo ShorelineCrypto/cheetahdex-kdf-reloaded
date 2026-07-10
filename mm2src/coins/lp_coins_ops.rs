@@ -131,6 +131,9 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
                 "TENDERMINTTOKEN protocol is not supported by lp_coininit - use enable_tendermint_token instead"
             )
         },
+        CoinProtocol::NFT { .. } => {
+            return ERR!("NFT protocol is not supported by lp_coininit - use enable_nft instead")
+        },
         // TRON activation routes through a dedicated builder that populates
         // `EthCoin.tron_api`. P10.2 wiring.
         CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => try_s!(
@@ -776,6 +779,9 @@ pub fn address_by_coin_conf_and_pubkey_str(
         },
         CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => {
             ERR!("address_by_coin_conf_and_pubkey_str is not supported for TRON protocol!")
+        },
+        CoinProtocol::NFT { .. } => {
+            ERR!("address_by_coin_conf_and_pubkey_str is not supported for NFT protocol - use enable_nft instead!")
         },
     }
 }

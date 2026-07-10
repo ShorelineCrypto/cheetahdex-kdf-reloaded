@@ -671,3 +671,23 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
   ticker-symbol documentation; dictated-interop wire facts.
 - *Sibling-allowlist consultations:* none.
 - *Forbidden corpus:* not consulted.
+
+## 19.13 CoinProtocol::NFT Variant
+
+NFT entries in the GLEEC coins config carry `{"type":"NFT","protocol_data":{"platform":"<EVM>"}}`.
+Because `CoinProtocol` is a closed enum, an unknown `type` tag causes `from_conf_json` to
+return a serde error, which propagates as a confusing message whenever a user calls `electrum`
+or `enable` on an NFT ticker.
+
+A permissive `NFT { platform: String }` variant was added to `CoinProtocol`
+(in `mm2src/coins/lp_coins_context.rs`) that:
+- Deserializes the GLEEC config shape without error.
+- Is explicitly rejected by `lp_coininit` with the message
+  *"NFT protocol is not supported by lp_coininit - use enable_nft instead"*.
+- Returns a `CoinIsNotSupported` error from `orderbook_address` (not applicable to NFT).
+- Is handled by the `get_private_keys` catch-all arm with a "not supported" message.
+
+NFT activation itself does **not** go through `CoinProtocol` matching; it goes through
+the dedicated `enable_nft` RPC handler which reads `NftProtocolData` directly from the
+activation request (`mm2src/coins/nft/activation.rs`). Startup config loading never calls
+`from_conf_json` on the coins array, so an NFT entry in the startup config is benign.
