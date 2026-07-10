@@ -1227,7 +1227,6 @@ async fn trade_test_rick_and_morty() {
     trade_base_rel_electrum(pairs, 1, 1, 0.0001).await;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Builds `transfer(address,uint256)` calldata for the ERC20 test fixture.
 #[cfg(not(target_arch = "wasm32"))]
 fn erc20_transfer_call(to_hex: &str, amount: u128) -> Vec<u8> {
@@ -1277,6 +1276,7 @@ fn withdraw_eth_and_verify_on_geth(mm: &MarketMakerIt, to: &str, amount: f64, ge
     assert_eq!(bal.as_str(), Some(expected.as_str()), "recipient eth balance");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn withdraw_and_send(
     mm: &MarketMakerIt,
     coin: &str,
