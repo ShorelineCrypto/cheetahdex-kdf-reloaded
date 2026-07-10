@@ -103,7 +103,7 @@ impl ZCoin {
             .compat()
             .await
             .mm_err(Into::into)? as u32;
-        let mut tx_builder = ZTxBuilder::new(ARRRConsensusParams {}, current_block.into());
+        let mut tx_builder = ZTxBuilder::new(self.z_fields.consensus_params.clone(), current_block.into());
 
         let mut ext = HashMap::new();
 
@@ -125,7 +125,7 @@ impl ZCoin {
             let z_cash_tx = ZTransaction::read(prev_tx.hex.as_slice())
                 .map_to_mm(|err| GenTxError::TxReadError { err, hex: prev_tx.hex })?;
             let decrypted = decrypt_transaction(
-                &ARRRConsensusParams {},
+                &self.z_fields.consensus_params,
                 BlockHeight::from_u32(height as u32),
                 &z_cash_tx,
                 &ext,

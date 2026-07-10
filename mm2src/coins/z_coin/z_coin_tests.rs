@@ -6,6 +6,29 @@ use mm2_core::mm_ctx::MmCtxBuilder;
 use std::time::Duration;
 use zcash_client_backend::encoding::decode_extended_spending_key;
 
+/// Full ZOMBIE `protocol_data` (mainnet Sapling params) matching the ZHTLC config
+/// contract, supplied to the builder now that the protocol payload is a required,
+/// config-sourced argument (CRD R39.1.2–R39.6.4).
+fn zombie_protocol_info() -> ZcoinProtocolInfo {
+    serde_json::from_value(json!({
+        "consensus_params": {
+            "overwinter_activation_height": 0,
+            "sapling_activation_height": 1,
+            "blossom_activation_height": null,
+            "heartwood_activation_height": null,
+            "canopy_activation_height": null,
+            "coin_type": 133,
+            "hrp_sapling_extended_spending_key": "secret-extended-key-main",
+            "hrp_sapling_extended_full_viewing_key": "zxviews",
+            "hrp_sapling_payment_address": "zs",
+            "b58_pubkey_address_prefix": [28, 184],
+            "b58_script_address_prefix": [28, 189]
+        },
+        "z_derivation_path": "m/32'/133'"
+    }))
+    .unwrap()
+}
+
 #[test]
 fn zombie_coin_send_and_refund_maker_payment() {
     let conf = json!({
@@ -28,7 +51,14 @@ fn zombie_coin_send_and_refund_maker_payment() {
     let db_dir = PathBuf::from("./for_tests");
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
     let coin = block_on(z_coin_from_conf_and_params_with_z_key(
-        &ctx, "ZOMBIE", &conf, &params, &priv_key, db_dir, z_key,
+        &ctx,
+        "ZOMBIE",
+        &conf,
+        &params,
+        &priv_key,
+        db_dir,
+        z_key,
+        zombie_protocol_info(),
     ))
     .unwrap();
 
@@ -77,7 +107,14 @@ fn zombie_coin_send_and_spend_maker_payment() {
     let db_dir = PathBuf::from("./for_tests");
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
     let coin = block_on(z_coin_from_conf_and_params_with_z_key(
-        &ctx, "ZOMBIE", &conf, &params, &priv_key, db_dir, z_key,
+        &ctx,
+        "ZOMBIE",
+        &conf,
+        &params,
+        &priv_key,
+        db_dir,
+        z_key,
+        zombie_protocol_info(),
     ))
     .unwrap();
 
@@ -128,7 +165,14 @@ fn zombie_coin_send_dex_fee() {
     let db_dir = PathBuf::from("./for_tests");
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
     let coin = block_on(z_coin_from_conf_and_params_with_z_key(
-        &ctx, "ZOMBIE", &conf, &params, &priv_key, db_dir, z_key,
+        &ctx,
+        "ZOMBIE",
+        &conf,
+        &params,
+        &priv_key,
+        db_dir,
+        z_key,
+        zombie_protocol_info(),
     ))
     .unwrap();
 
@@ -158,7 +202,14 @@ fn prepare_zombie_sapling_cache() {
     let db_dir = PathBuf::from("./for_tests");
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
     let coin = block_on(z_coin_from_conf_and_params_with_z_key(
-        &ctx, "ZOMBIE", &conf, &params, &priv_key, db_dir, z_key,
+        &ctx,
+        "ZOMBIE",
+        &conf,
+        &params,
+        &priv_key,
+        db_dir,
+        z_key,
+        zombie_protocol_info(),
     ))
     .unwrap();
 
@@ -189,7 +240,14 @@ fn zombie_coin_validate_dex_fee() {
     let db_dir = PathBuf::from("./for_tests");
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
     let coin = block_on(z_coin_from_conf_and_params_with_z_key(
-        &ctx, "ZOMBIE", &conf, &params, &priv_key, db_dir, z_key,
+        &ctx,
+        "ZOMBIE",
+        &conf,
+        &params,
+        &priv_key,
+        db_dir,
+        z_key,
+        zombie_protocol_info(),
     ))
     .unwrap();
 

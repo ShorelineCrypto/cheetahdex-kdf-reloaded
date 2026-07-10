@@ -240,16 +240,16 @@ impl SwapOps for ZCoin {
             };
 
             for shielded_out in z_tx.shielded_outputs.iter() {
-                if let Some((note, address, memo)) =
-                    try_sapling_output_recovery(&ARRRConsensusParams {}, block_height, &DEX_FEE_OVK, shielded_out)
-                {
+                if let Some((note, address, memo)) = try_sapling_output_recovery(
+                    &coin.z_fields.consensus_params,
+                    block_height,
+                    &DEX_FEE_OVK,
+                    shielded_out,
+                ) {
                     if address != coin.z_fields.dex_fee_addr {
-                        let encoded =
-                            encode_payment_address(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS, &address);
-                        let expected = encode_payment_address(
-                            z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS,
-                            &coin.z_fields.dex_fee_addr,
-                        );
+                        let hrp = coin.z_fields.consensus_params.hrp_sapling_payment_address();
+                        let encoded = encode_payment_address(hrp, &address);
+                        let expected = encode_payment_address(hrp, &coin.z_fields.dex_fee_addr);
                         return ERR!(
                             "Dex fee was sent to the invalid address {}, expected {}",
                             encoded,

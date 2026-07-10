@@ -9,7 +9,7 @@ use super::ZCoin;
 use crate::utxo::rpc_clients::{UtxoRpcClientEnum, UtxoRpcError};
 use crate::utxo::utxo_common::payment_script;
 use crate::utxo::{sat_from_big_decimal, UtxoAddressFormat};
-use crate::z_coin::{ARRRConsensusParams, SendOutputsErr, ZOutput, DEX_FEE_OVK};
+use crate::z_coin::{SendOutputsErr, ZOutput, DEX_FEE_OVK};
 use crate::{NumConversError, PrivKeyNotAllowed, TransactionEnum};
 use bigdecimal::BigDecimal;
 use chain::Transaction as UtxoTx;
@@ -142,7 +142,7 @@ pub async fn z_p2sh_spend(
         .compat()
         .await
         .mm_err(Into::into)? as u32;
-    let mut tx_builder = ZTxBuilder::new(ARRRConsensusParams {}, current_block.into());
+    let mut tx_builder = ZTxBuilder::new(coin.z_fields.consensus_params.clone(), current_block.into());
     tx_builder.set_lock_time(tx_locktime);
 
     let secp_secret = SecretKey::from_slice(htlc_privkey).expect("Keypair contains a valid secret key");

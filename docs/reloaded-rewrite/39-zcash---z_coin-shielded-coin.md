@@ -17,9 +17,10 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
   ZCoin type, dual activation modes (Native / Light), multi-lightwalletd light
   mode, the `init_z_coin` task-RPC trio with its progress states, shielded HTLC
   swap operations, and the activation result shape.
-- **§39.6 (T-PORT, mixed):** two items remain absent (WASM support and
-  activation-time sync tuning / sync-from-date); Sapling parameter integrity
-  verification is implemented in reloaded.
+- **§39.6 (T-PORT, mixed):** three items remain absent (WASM support,
+  activation-time sync tuning / sync-from-date, and sourcing consensus
+  parameters/checkpoint/HD path from `protocol_data`); Sapling parameter
+  integrity verification is implemented in reloaded.
 
 > **Binding scope (R36).** Requirements bind observable behaviour, the public
 > activation/task RPC surface and its JSON field names, and externally *dictated*
@@ -39,18 +40,72 @@ R39.1.1 The shielded coin (`ZCoin`) is a UTXO-derived coin type that adds a
 Sapling shielded layer. In reloaded it is built on the **native** target only;
 the WASM build excludes it (see §39.6.1 for the required port).
 
-R39.1.2 A shielded coin's `coins`-config `protocol` field is
-`{"type":"ZHTLC"}` optionally carrying a `protocol_data` object. Production
-configs (ARRR/PIRATE) ship `protocol_data` holding the Zcash `consensus_params`
-(Sapling activation heights, `coin_type`, the `hrp_sapling_*` human-readable
-prefixes and the `b58_*` address prefixes), an optional `check_point_block` (a
-height/time/hash/`sapling_tree` sync anchor) and an optional `z_derivation_path`;
-bare test configs (ZOMBIE) omit `protocol_data` entirely. The
-`CoinProtocol::ZHTLC` binding shall deserialize **both** shapes: a present
-`protocol_data` map must not be rejected (a unit variant that accepts no payload
-is non-conforming and yields `invalid type: map, expected unit variant
-CoinProtocol::ZHTLC` at the standalone-coin activation prelude). See §39.6.4 for
-the required consumption of `protocol_data`.
+R39.1.2 A shielded coin's `coins`-config `protocol` field is a tagged object
+with `type` = `"ZHTLC"` **and a required `protocol_data` object**. The
+coin-protocol type is an *adjacently tagged* union (the `type` string is the
+tag; the `protocol_data` object is the content). The `ZHTLC` arm is a
+**payload-carrying** variant — not a unit variant — whose content deserializes
+into a shielded protocol-info structure with three members:
+
+- `consensus_params` (object, **required**) — the Zcash consensus parameters
+  for the coin (schema in R39.1.3);
+- `check_point_block` (object, **optional**) — a sync-anchor block descriptor
+  (schema in R39.1.4);
+- `z_derivation_path` (string, **optional**) — a coin-level BIP32/ZIP32 HD path
+  (e.g. `m/32'/133'`) used for shielded key derivation (R39.1.4).
+
+Because the variant carries a required payload whose required member is
+`consensus_params`, a **bare `{"type":"ZHTLC"}` with no `protocol_data` is
+non-conformant** and shall fail coin-config deserialization (adjacently-tagged
+serde has no content to populate the required fields). Every real config carries
+`protocol_data`: production coins (ARRR/PIRATE) and the ZOMBIE test coin all
+ship a full `protocol_data` block. See R39.6.4 for the required *consumption* of
+these values by the shielded-coin builder.
+
+R39.1.3 The `consensus_params` object is the Zcash network-parameter set and has
+the following members (this is dictated config/wire interop — the field names
+and JSON shapes are fixed):
+
+| Field | JSON type | Required | Notes |
+|-------|-----------|----------|-------|
+| `overwinter_activation_height` | integer (unsigned 32-bit) | yes | Overwinter network-upgrade activation height. |
+| `sapling_activation_height` | integer (unsigned 32-bit) | yes | Sapling activation height; also the lower floor for any sync start point. |
+| `blossom_activation_height` | integer or `null` | no (nullable) | Blossom activation height, or `null` if not applicable. |
+| `heartwood_activation_height` | integer or `null` | no (nullable) | Heartwood activation height, or `null`. |
+| `canopy_activation_height` | integer or `null` | no (nullable) | Canopy activation height, or `null`. |
+| `coin_type` | integer (unsigned 32-bit) | yes | SLIP-44 coin type used in shielded HD derivation. |
+| `hrp_sapling_extended_spending_key` | string | yes | Bech32 human-readable prefix for extended spending keys. |
+| `hrp_sapling_extended_full_viewing_key` | string | yes | Bech32 HRP for extended full-viewing keys. |
+| `hrp_sapling_payment_address` | string | yes | Bech32 HRP for shielded payment addresses. |
+| `b58_pubkey_address_prefix` | array of exactly 2 integers (each 0–255) | yes | Base58Check version prefix for transparent p2pkh addresses. |
+| `b58_script_address_prefix` | array of exactly 2 integers (each 0–255) | yes | Base58Check version prefix for transparent p2sh addresses. |
+
+R39.1.4 The optional `check_point_block` object, when present, is a sync-anchor
+descriptor with all of the following members:
+
+| Field | JSON type | Notes |
+|-------|-----------|-------|
+| `height` | integer (unsigned 32-bit) | Block height of the checkpoint. |
+| `hash` | string | 32-byte block hash, hex-encoded. |
+| `time` | integer (unsigned 32-bit) | Block timestamp (Unix seconds). |
+| `sapling_tree` | string | Hex-encoded Sapling commitment-tree state as of this block. |
+
+The optional `z_derivation_path` is a coin-level HD path string (ZIP32/BIP32
+form, e.g. `m/32'/133'`). When the active key policy is HD-derived, the shielded
+spending key is derived along this path with the activation `account` appended
+as a hardened child (i.e. `m/<z_derivation_path>/account'`); it is required only
+for the HD key policy (its absence is an error only in that policy). Both
+`check_point_block` and `z_derivation_path` are consumed by the builder per
+R39.6.4.
+
+> **Upstream divergence (informative).** Reloaded currently defines the `ZHTLC`
+> coin-protocol arm as a **unit** variant (no payload) and its shielded builder
+> hardcodes Zcash-mainnet constants (see R39.6.4). Consequently reloaded's
+> current behaviour is the inverse of upstream: it accepts a bare
+> `{"type":"ZHTLC"}` and would *reject* a config that carries a `protocol_data`
+> map (an adjacently-tagged unit variant cannot absorb content). Conforming to
+> R39.1.2–R39.1.4 requires making the arm payload-carrying and updating the
+> ZOMBIE test fixtures to ship full `protocol_data` (see R39.6.4 status note).
 
 ## 39.2 Activation modes
 
@@ -141,21 +196,58 @@ invalid proofs.
 > read/hash-mismatch errors.
 
 ### 39.6.4 Consume `protocol_data` consensus parameters
-R39.6.4 The shielded-coin builder shall source its Zcash consensus parameters
-(Sapling activation heights, `coin_type`, the `hrp_sapling_*` and `b58_*`
-prefixes) and its sync checkpoint from the coin config's
-`protocol.protocol_data`, rather than from hardcoded Zcash-mainnet constants.
-Acceptance: a shielded coin whose `protocol_data` differs from Zcash mainnet
-(e.g. a testnet ZHTLC coin) derives its addresses and syncs from the
-config-declared parameters and checkpoint.
+R39.6.4 The shielded-coin builder shall source **all** of its Zcash
+network parameters, its shielded HD derivation path, and its sync checkpoint
+from the coin config's `protocol.protocol_data` (R39.1.2–R39.1.4), rather than
+from hardcoded Zcash-mainnet constants. Concretely:
 
-> **Status update (reloaded).** Not yet implemented. The builder currently uses
-> `zcash_primitives::constants::mainnet` for all consensus parameters. These
-> happen to match ARRR/PIRATE mainnet (`coin_type` 133, `zs` /
-> `secret-extended-key-main` prefixes, b58 `[28,184]` / `[28,189]`), so ARRR
-> activates correctly; but the `protocol_data` shipped in the config -- including
-> the `check_point_block` sync anchor -- is accepted for deserialization (per
-> R39.1.2) and then ignored. A non-mainnet ZHTLC coin would be mis-parameterised.
+- **Consensus parameters.** The `consensus_params` object shall be the single
+  authority for the coin's network-parameter lookups: activation heights for
+  each supported network upgrade (Overwinter/Sapling required; Blossom /
+  Heartwood / Canopy optional), the `coin_type`, the three `hrp_sapling_*`
+  human-readable prefixes, and the two `b58_*` transparent-address version
+  prefixes. These values shall feed every place the builder and the running coin
+  need network parameters: encoding/decoding the wallet's own shielded payment
+  address and the DEX fee/burn shielded addresses (via
+  `hrp_sapling_payment_address`), Sapling note trial-decryption and output
+  recovery during scanning, address handling, and shielded-swap construction.
+  A coin whose `consensus_params` differs from Zcash mainnet shall derive and
+  scan accordingly.
+- **HD derivation.** When the key policy is HD-derived, the shielded spending
+  key shall be derived along `z_derivation_path` with the activation `account`
+  appended as a hardened child (R39.1.4); with a raw/iguana key policy the path
+  is not required.
+- **Sync checkpoint.** `check_point_block` shall be the sync-start anchor. In
+  native mode the wallet database is anchored at `check_point_block.height`,
+  falling back to `sapling_activation_height` when the checkpoint is absent. In
+  light mode the anchor is the checkpoint corresponding to the resolved sync
+  start height (a height/date sync parameter, or the earliest/default), floored
+  at `sapling_activation_height`; the checkpoint's `sapling_tree` seeds the
+  wallet's initial commitment-tree state so scanning need not replay from
+  Sapling activation.
+
+Acceptance: a ZHTLC coin whose `protocol_data` declares non-Zcash-mainnet
+parameters (different HRP/b58 prefixes, `coin_type`, or activation heights)
+produces addresses and derives keys under those declared parameters and begins
+its shielded sync from the declared `check_point_block` (or from
+`sapling_activation_height` when no checkpoint is given) rather than from
+mainnet constants.
+
+> **Status update (reloaded).** Not yet implemented. Reloaded's shielded builder
+> uses the Zcash-mainnet constant set for **all** network parameters
+> (`coin_type`, the `hrp_sapling_*` prefixes, the `b58_*` prefixes and the
+> activation-height policy), and its `ZHTLC` coin-protocol arm is a **unit
+> variant** that carries no payload, so `protocol_data` is not even parsed. These
+> mainnet constants happen to match ARRR/PIRATE mainnet (`coin_type` 133, the
+> `zs` / `secret-extended-key-main` / `zxviews` prefixes, and the transparent
+> `[28,184]` / `[28,189]` b58 prefixes), and reloaded's ZOMBIE fixtures reuse
+> those same mainnet values, so both activate correctly today by coincidence. To
+> conform, reloaded must (1) make the `ZHTLC` arm carry the shielded protocol-info
+> payload (R39.1.2), (2) source consensus parameters, `z_derivation_path`, and
+> `check_point_block` from `protocol_data` as specified above, and (3) update its
+> ZOMBIE test fixtures to ship a full `protocol_data` block (bare
+> `{"type":"ZHTLC"}` becomes non-conformant once the arm carries a required
+> payload — R39.1.2). A non-mainnet ZHTLC coin is currently mis-parameterised.
 
 ---
 
@@ -405,7 +497,16 @@ is therefore a distinct method rather than a branch of `my_tx_history`:
 - A shielded HTLC swap completes maker and taker legs and a refund path (§39.5).
 - R39.6.3 is implemented with integrity-check behaviour enforced before prover
   initialization.
-- R39.6.1 and R39.6.2 remain pending ports.
+- Config-loading (R39.1.2–R39.1.4): a `{"type":"ZHTLC","protocol_data":{...}}`
+  config with a well-formed `consensus_params` (plus optional `check_point_block`
+  and `z_derivation_path`) deserializes successfully; a bare
+  `{"type":"ZHTLC"}` (no `protocol_data`) is rejected at coin-config parse time.
+- Parameter sourcing (R39.6.4, pending port): a ZHTLC coin whose `protocol_data`
+  declares non-mainnet HRP/b58 prefixes, `coin_type`, or activation heights
+  produces addresses/keys under those declared values and begins its shielded
+  sync from the declared `check_point_block` (or `sapling_activation_height`
+  when absent), not from hardcoded mainnet constants.
+- R39.6.1, R39.6.2 and R39.6.4 remain pending ports.
 - `z_coin_tx_history` (mmrpc 2.0, native-only) is **substrate-blocked** (§39.8.0,
   verdict B). On the current substrate it is dispatched and validates input:
   inactive coins return `CoinIsNotActive` (404), activated non-shielded coins

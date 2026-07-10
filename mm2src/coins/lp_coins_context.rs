@@ -341,16 +341,16 @@ pub enum CoinProtocol {
         token_contract_address: String,
         decimals: u8,
     },
-    /// ZHTLC (Zcash-HTLC) shielded coin, e.g. ARRR/PIRATE and the ZOMBIE test coin.
-    /// Production configs (ARRR) carry the Zcash consensus parameters, checkpoint
-    /// block and z-derivation path under `protocol_data`; the bare test configs
-    /// (ZOMBIE) omit it. Captured as an optional value so both shapes deserialize.
-    ///
-    /// NOTE: the ZCoin builder currently derives its consensus parameters from
-    /// hardcoded Zcash-mainnet constants (which match ARRR mainnet); this payload
-    /// is accepted for config compatibility but not yet consumed.
+    /// ZHTLC (Zcash-HTLC) shielded coin, e.g. ARRR/PIRATE and the ZOMBIE test
+    /// coin. The variant carries a **required** `protocol_data` payload
+    /// (R39.1.2): the Zcash `consensus_params`, an optional `check_point_block`
+    /// sync anchor and an optional `z_derivation_path`. The shielded-coin
+    /// builder sources all of its network parameters from this payload
+    /// (R39.6.4). Because `consensus_params` is required, a bare
+    /// `{"type":"ZHTLC"}` with no `protocol_data` is non-conformant and fails
+    /// deserialization by design.
     #[cfg(not(target_arch = "wasm32"))]
-    ZHTLC(Option<serde_json::Value>),
+    ZHTLC(ZcoinProtocolInfo),
     SIA,
     TENDERMINT {
         account_prefix: String,
@@ -510,12 +510,12 @@ mod coin_protocol_tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn zhtlc_accepts_bare_and_full_protocol_data() {
-        // Bare ZHTLC (e.g. the ZOMBIE test coin) carries no protocol_data.
-        match CoinProtocol::from_conf_json(json!({"type": "ZHTLC"})).unwrap() {
-            CoinProtocol::ZHTLC(pd) => assert!(pd.is_none()),
-            other => panic!("expected ZHTLC, got {:?}", other),
-        }
+    fn zhtlc_requires_full_protocol_data() {
+        // Bare ZHTLC (no protocol_data) is non-conformant now that the arm carries
+        // a required payload whose required member is `consensus_params` (R39.1.2).
+        assert!(CoinProtocol::from_conf_json(json!({"type": "ZHTLC"})).is_err());
+        // A ZHTLC whose protocol_data omits the required consensus_params also fails.
+        assert!(CoinProtocol::from_conf_json(json!({"type": "ZHTLC", "protocol_data": {}})).is_err());
         // Production ZHTLC (ARRR/PIRATE) ships consensus params, a checkpoint block
         // and the z-derivation path under protocol_data; all of it must be accepted.
         let arrr = json!({
@@ -544,7 +544,13 @@ mod coin_protocol_tests {
             }
         });
         match CoinProtocol::from_conf_json(arrr).unwrap() {
-            CoinProtocol::ZHTLC(pd) => assert!(pd.is_some()),
+            CoinProtocol::ZHTLC(info) => {
+                use zcash_primitives::consensus::Parameters;
+                assert!(info.check_point_block.is_some());
+                assert!(info.z_derivation_path.is_some());
+                assert_eq!(info.consensus_params.hrp_sapling_payment_address(), "zs");
+                assert_eq!(info.consensus_params.coin_type(), 133);
+            },
             other => panic!("expected ZHTLC, got {:?}", other),
         }
     }

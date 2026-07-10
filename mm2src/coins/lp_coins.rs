@@ -273,7 +273,8 @@ pub(crate) use utxo::utxo_common::big_decimal_from_sat_unsigned;
 pub(crate) use utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
 pub(crate) use utxo::UtxoActivationParams;
 pub(crate) use utxo::{BlockchainNetwork, GenerateTxError, UtxoFeeDetails, UtxoTx};
-#[cfg(not(target_arch = "wasm32"))] pub(crate) use z_coin::ZCoin;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use z_coin::{ZCoin, ZcoinProtocolInfo};
 
 // ---- Split sub-modules (extracted from monolithic lp_coins.rs) ----
 mod lp_coins_context;

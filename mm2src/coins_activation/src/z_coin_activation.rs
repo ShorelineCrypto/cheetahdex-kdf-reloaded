@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use coins::coin_balance::{EnableCoinBalance, IguanaWalletBalance};
 use coins::utxo::rpc_clients::ElectrumRpcRequest;
 use coins::utxo::{UtxoActivationParams, UtxoRpcMode};
-use coins::z_coin::{z_coin_from_conf_and_params, ZCoin, ZCoinBuildError};
+use coins::z_coin::{z_coin_from_conf_and_params, ZCoin, ZCoinBuildError, ZcoinProtocolInfo};
 use coins::{BalanceError, CoinProtocol, MarketCoinOps, PrivKeyActivationPolicy, RegisterCoinError};
 use common::executor::Timer;
 use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
@@ -141,15 +141,13 @@ impl From<ZcoinInitError> for InitStandaloneCoinError {
     fn from(_: ZcoinInitError) -> Self { todo!() }
 }
 
-pub struct ZcoinProtocolInfo;
-
 impl TryFromCoinProtocol for ZcoinProtocolInfo {
     fn try_from_coin_protocol(proto: CoinProtocol) -> Result<Self, MmError<CoinProtocol>>
     where
         Self: Sized,
     {
         match proto {
-            CoinProtocol::ZHTLC(_) => Ok(ZcoinProtocolInfo),
+            CoinProtocol::ZHTLC(info) => Ok(info),
             protocol => MmError::err(protocol),
         }
     }
@@ -174,7 +172,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         ticker: String,
         coin_conf: Json,
         activation_request: &ZcoinActivationParams,
-        _protocol_info: ZcoinProtocolInfo,
+        protocol_info: ZcoinProtocolInfo,
         task_handle: &ZcoinRpcTaskHandle,
     ) -> MmResult<Self, ZcoinInitError> {
         let utxo_mode = match &activation_request.mode {
@@ -199,9 +197,16 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         };
         let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?;
         let priv_key = crypto_ctx.mm2_internal_privkey_secret();
-        let coin = z_coin_from_conf_and_params(&ctx, &ticker, &coin_conf, &utxo_params, priv_key.as_slice())
-            .await
-            .mm_err(|e| ZcoinInitError::from_build_err(e, ticker))?;
+        let coin = z_coin_from_conf_and_params(
+            &ctx,
+            &ticker,
+            &coin_conf,
+            &utxo_params,
+            priv_key.as_slice(),
+            protocol_info,
+        )
+        .await
+        .mm_err(|e| ZcoinInitError::from_build_err(e, ticker))?;
 
         task_handle
             .update_in_progress_status(ZcoinInProgressStatus::Scanning)
