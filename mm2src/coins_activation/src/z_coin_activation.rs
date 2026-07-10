@@ -149,7 +149,7 @@ impl TryFromCoinProtocol for ZcoinProtocolInfo {
         Self: Sized,
     {
         match proto {
-            CoinProtocol::ZHTLC => Ok(ZcoinProtocolInfo),
+            CoinProtocol::ZHTLC(_) => Ok(ZcoinProtocolInfo),
             protocol => MmError::err(protocol),
         }
     }

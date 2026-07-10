@@ -478,7 +478,7 @@ fn derive_for_protocol(
         CoinProtocol::ETH { .. } | CoinProtocol::ERC20 { .. } => derive_evm(ticker, secret),
         CoinProtocol::TENDERMINT { account_prefix, .. } => derive_tendermint(ticker, account_prefix, secret),
         #[cfg(not(target_arch = "wasm32"))]
-        CoinProtocol::ZHTLC { .. } => derive_zhtlc(ticker, secret),
+        CoinProtocol::ZHTLC(_) => derive_zhtlc(ticker, secret),
         other => MmError::err(GetPrivateKeysError::KeyDerivationFailed {
             ticker: ticker.to_owned(),
             reason: format!("key export is not supported for protocol {:?}", other),

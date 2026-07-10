@@ -39,6 +39,19 @@ R39.1.1 The shielded coin (`ZCoin`) is a UTXO-derived coin type that adds a
 Sapling shielded layer. In reloaded it is built on the **native** target only;
 the WASM build excludes it (see §39.6.1 for the required port).
 
+R39.1.2 A shielded coin's `coins`-config `protocol` field is
+`{"type":"ZHTLC"}` optionally carrying a `protocol_data` object. Production
+configs (ARRR/PIRATE) ship `protocol_data` holding the Zcash `consensus_params`
+(Sapling activation heights, `coin_type`, the `hrp_sapling_*` human-readable
+prefixes and the `b58_*` address prefixes), an optional `check_point_block` (a
+height/time/hash/`sapling_tree` sync anchor) and an optional `z_derivation_path`;
+bare test configs (ZOMBIE) omit `protocol_data` entirely. The
+`CoinProtocol::ZHTLC` binding shall deserialize **both** shapes: a present
+`protocol_data` map must not be rejected (a unit variant that accepts no payload
+is non-conforming and yields `invalid type: map, expected unit variant
+CoinProtocol::ZHTLC` at the standalone-coin activation prelude). See §39.6.4 for
+the required consumption of `protocol_data`.
+
 ## 39.2 Activation modes
 
 R39.2.1 Activation is a long-running task exposed as the public RPC trio
@@ -97,7 +110,7 @@ the swap protocol.
 ## Part B -- Required ports (T-PORT)
 
 > **Status of Part B:** partially implemented in reloaded. R39.6.3 is
-> implemented; R39.6.1 and R39.6.2 remain required.
+> implemented; R39.6.1, R39.6.2 and R39.6.4 remain required.
 
 ## 39.6 Required shielded-coin ports
 
@@ -126,6 +139,23 @@ invalid proofs.
 > and output parameter files are integrity-checked against canonical digests
 > before prover initialization, and mismatches are rejected with explicit
 > read/hash-mismatch errors.
+
+### 39.6.4 Consume `protocol_data` consensus parameters
+R39.6.4 The shielded-coin builder shall source its Zcash consensus parameters
+(Sapling activation heights, `coin_type`, the `hrp_sapling_*` and `b58_*`
+prefixes) and its sync checkpoint from the coin config's
+`protocol.protocol_data`, rather than from hardcoded Zcash-mainnet constants.
+Acceptance: a shielded coin whose `protocol_data` differs from Zcash mainnet
+(e.g. a testnet ZHTLC coin) derives its addresses and syncs from the
+config-declared parameters and checkpoint.
+
+> **Status update (reloaded).** Not yet implemented. The builder currently uses
+> `zcash_primitives::constants::mainnet` for all consensus parameters. These
+> happen to match ARRR/PIRATE mainnet (`coin_type` 133, `zs` /
+> `secret-extended-key-main` prefixes, b58 `[28,184]` / `[28,189]`), so ARRR
+> activates correctly; but the `protocol_data` shipped in the config -- including
+> the `check_point_block` sync anchor -- is accepted for deserialization (per
+> R39.1.2) and then ignored. A non-mainnet ZHTLC coin would be mis-parameterised.
 
 ---
 

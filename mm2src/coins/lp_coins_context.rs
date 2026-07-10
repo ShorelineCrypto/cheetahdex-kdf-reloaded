@@ -341,8 +341,16 @@ pub enum CoinProtocol {
         token_contract_address: String,
         decimals: u8,
     },
+    /// ZHTLC (Zcash-HTLC) shielded coin, e.g. ARRR/PIRATE and the ZOMBIE test coin.
+    /// Production configs (ARRR) carry the Zcash consensus parameters, checkpoint
+    /// block and z-derivation path under `protocol_data`; the bare test configs
+    /// (ZOMBIE) omit it. Captured as an optional value so both shapes deserialize.
+    ///
+    /// NOTE: the ZCoin builder currently derives its consensus parameters from
+    /// hardcoded Zcash-mainnet constants (which match ARRR mainnet); this payload
+    /// is accepted for config compatibility but not yet consumed.
     #[cfg(not(target_arch = "wasm32"))]
-    ZHTLC,
+    ZHTLC(Option<serde_json::Value>),
     SIA,
     TENDERMINT {
         account_prefix: String,
@@ -498,5 +506,46 @@ mod coin_protocol_tests {
             CoinProtocol::from_conf_json(json!({"type": "UTXO"})).unwrap(),
             CoinProtocol::UTXO
         ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn zhtlc_accepts_bare_and_full_protocol_data() {
+        // Bare ZHTLC (e.g. the ZOMBIE test coin) carries no protocol_data.
+        match CoinProtocol::from_conf_json(json!({"type": "ZHTLC"})).unwrap() {
+            CoinProtocol::ZHTLC(pd) => assert!(pd.is_none()),
+            other => panic!("expected ZHTLC, got {:?}", other),
+        }
+        // Production ZHTLC (ARRR/PIRATE) ships consensus params, a checkpoint block
+        // and the z-derivation path under protocol_data; all of it must be accepted.
+        let arrr = json!({
+            "type": "ZHTLC",
+            "protocol_data": {
+                "consensus_params": {
+                    "overwinter_activation_height": 152855,
+                    "sapling_activation_height": 152855,
+                    "blossom_activation_height": null,
+                    "heartwood_activation_height": null,
+                    "canopy_activation_height": null,
+                    "coin_type": 133,
+                    "hrp_sapling_extended_spending_key": "secret-extended-key-main",
+                    "hrp_sapling_extended_full_viewing_key": "zxviews",
+                    "hrp_sapling_payment_address": "zs",
+                    "b58_pubkey_address_prefix": [28, 184],
+                    "b58_script_address_prefix": [28, 189]
+                },
+                "check_point_block": {
+                    "height": 1900000,
+                    "time": 1652512363,
+                    "hash": "44797f3bb78323a7717007f1e289a3689e0b5b3433385dbd8e6f6a1700000000",
+                    "sapling_tree": "01e40c26f4"
+                },
+                "z_derivation_path": "m/32'/141'"
+            }
+        });
+        match CoinProtocol::from_conf_json(arrr).unwrap() {
+            CoinProtocol::ZHTLC(pd) => assert!(pd.is_some()),
+            other => panic!("expected ZHTLC, got {:?}", other),
+        }
     }
 }
