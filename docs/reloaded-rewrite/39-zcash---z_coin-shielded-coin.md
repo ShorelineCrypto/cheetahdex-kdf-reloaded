@@ -164,8 +164,10 @@ the swap protocol.
 
 ## Part B -- Required ports (T-PORT)
 
-> **Status of Part B:** partially implemented in reloaded. R39.6.3 is
-> implemented; R39.6.1, R39.6.2 and R39.6.4 remain required.
+> **Status of Part B:** partially implemented in reloaded. R39.6.3 and R39.6.4 are
+> implemented; R39.6.1 and R39.6.2 remain required (WASM support and sync-parameter
+> control for light-mode). Note: R39.6.4 has `z_derivation_path` parsed and stored,
+> but HD-derived key policy support is deferred to a future enhancement.
 
 ## 39.6 Required shielded-coin ports
 
@@ -233,21 +235,33 @@ its shielded sync from the declared `check_point_block` (or from
 `sapling_activation_height` when no checkpoint is given) rather than from
 mainnet constants.
 
-> **Status update (reloaded).** Not yet implemented. Reloaded's shielded builder
-> uses the Zcash-mainnet constant set for **all** network parameters
-> (`coin_type`, the `hrp_sapling_*` prefixes, the `b58_*` prefixes and the
-> activation-height policy), and its `ZHTLC` coin-protocol arm is a **unit
-> variant** that carries no payload, so `protocol_data` is not even parsed. These
-> mainnet constants happen to match ARRR/PIRATE mainnet (`coin_type` 133, the
-> `zs` / `secret-extended-key-main` / `zxviews` prefixes, and the transparent
-> `[28,184]` / `[28,189]` b58 prefixes), and reloaded's ZOMBIE fixtures reuse
-> those same mainnet values, so both activate correctly today by coincidence. To
-> conform, reloaded must (1) make the `ZHTLC` arm carry the shielded protocol-info
-> payload (R39.1.2), (2) source consensus parameters, `z_derivation_path`, and
-> `check_point_block` from `protocol_data` as specified above, and (3) update its
-> ZOMBIE test fixtures to ship a full `protocol_data` block (bare
-> `{"type":"ZHTLC"}` becomes non-conformant once the arm carries a required
-> payload — R39.1.2). A non-mainnet ZHTLC coin is currently mis-parameterised.
+> **Status update (reloaded).** Implemented (commit f1a0a338e). The shielded
+> builder now sources all Zcash network parameters from the coin config's
+> `protocol.protocol_data` via the typed `ZcoinProtocolInfo` payload:
+>
+> - **Consensus parameters (R39.6.4 §1).** The builder reads
+>   `consensus_params` from `protocol_data` and uses its `coin_type`, `hrp_sapling_*`
+>   prefixes, `b58_*` prefixes, and activation-height policy throughout the running
+>   coin (address encoding/decoding, key derivation, scanning, transaction
+>   construction, and commitment-tree sync). The `ZcashConsensusParams` struct
+>   implements `zcash_primitives::consensus::Parameters` to drive consensus
+>   validation. A ZHTLC coin with non-mainnet parameters (e.g., different HRP or
+>   `coin_type`) now derives keys and addresses under those declared parameters,
+>   not Zcash-mainnet defaults.
+> - **Sync checkpoint (R39.6.4 §3).** The builder seeds the wallet's
+>   commitment-tree cache at `check_point_block.height`, deserialized from the
+>   checkpoint's `sapling_tree`, falling back to `sapling_activation_height` when
+>   absent (native mode). Light-mode checkpoint-to-height tree seeding is deferred
+>   (CRD 39.8.0b).
+> - **HD derivation path (R39.6.4 §2).** The `z_derivation_path` field is parsed
+>   from `protocol_data` and stored in `ZcoinProtocolInfo` for use when the key
+>   policy is HD-derived. The current implementation enforces
+>   `PrivKeyActivationPolicy::IguanaPrivKey` (single-key mode), so `z_derivation_path`
+>   is not consulted; support for HD-derived key policies is deferred to a future
+>   enhancement.
+> - **ZOMBIE fixtures.** Test fixtures updated to carry full `protocol_data` with
+>   Zcash-mainnet parameters; bare `{"type":"ZHTLC"}` is now non-conformant per
+>   R39.1.2.
 
 ---
 

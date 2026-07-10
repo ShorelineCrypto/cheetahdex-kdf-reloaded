@@ -642,6 +642,10 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             consensus_params,
             check_point_block: self.protocol_info.check_point_block,
         };
+        // Note: `protocol_info.z_derivation_path` is parsed from protocol_data (R39.1.4)
+        // but not used here because the current implementation enforces IguanaPrivKey
+        // (single-key mode, no HD derivation). The path would be used when
+        // HD-derived key policies are supported in a future enhancement (R39.6.4 §2).
 
         let z_coin = ZCoin {
             utxo_arc,
