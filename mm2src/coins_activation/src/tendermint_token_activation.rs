@@ -144,6 +144,9 @@ mod tests {
         let proto = CoinProtocol::TENDERMINT {
             account_prefix: "cosmos".to_owned(),
             chain_id: "cosmoshub-4".to_owned(),
+            denom: "uatom".to_owned(),
+            decimals: 6,
+            ibc_channels: std::collections::HashMap::new(),
         };
         assert!(TendermintTokenProtocol::try_from_coin_protocol(proto).is_err());
     }

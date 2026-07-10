@@ -297,6 +297,24 @@ impl<Address, HDWallet> DerivationMethod<Address, HDWallet> {
     pub fn unwrap_iguana(&self) -> &Address { self.iguana_or_err().unwrap() }
 }
 #[allow(clippy::upper_case_acronyms)]
+/// Deserialize a Tendermint `decimals` value, rejecting any value above 18 as
+/// invalid protocol data (R36.3.1). The Cosmos base-denom-to-whole-coin scale is
+/// bounded at 18 places; a higher value would make every balance/amount
+/// conversion undefined, so it fails `protocol_data` parsing rather than
+/// silently activating a mis-scaled coin.
+fn deserialize_tendermint_decimals<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let decimals = u8::deserialize(deserializer)?;
+    if decimals > 18 {
+        return Err(serde::de::Error::custom(format!(
+            "Tendermint `decimals` must be 18 or lower, got {decimals}"
+        )));
+    }
+    Ok(decimals)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "protocol_data")]
 pub enum CoinProtocol {
@@ -353,8 +371,29 @@ pub enum CoinProtocol {
     ZHTLC(ZcoinProtocolInfo),
     SIA,
     TENDERMINT {
+        /// The platform chain's native base denomination (the smallest-unit bank
+        /// denom, e.g. `uatom`, `uiris`, `uosmo`). It is the denom the platform
+        /// coin queries for its own balance, denominates fees in, and signs
+        /// bank/HTLC/IBC messages against (R36.3.1). Required.
+        denom: String,
+        /// The number of decimal places between the base denom and one whole
+        /// coin, used to scale base-unit balances/amounts (R36.3.1). Required and
+        /// bounded at 18; a value above 18 fails protocol-data parsing.
+        #[serde(deserialize_with = "deserialize_tendermint_decimals")]
+        decimals: u8,
+        /// The bech32 human-readable prefix (HRP) of the chain's account
+        /// addresses (e.g. `cosmos`, `iaa`, `osmo`). Required.
         account_prefix: String,
+        /// The Cosmos/Tendermint chain identifier (e.g. `cosmoshub-4`). Required.
         chain_id: String,
+        /// Map whose keys are a target chain's bech32 account-prefix (HRP) and
+        /// whose values are the integer ICS-20 channel number `N` on this chain's
+        /// transfer port toward that target (the integer `N` denoting the channel
+        /// identifier `channel-N`). Seeds the configured destination-prefix ->
+        /// channel resolution used by the IBC/HTLC layer (R36.3.1). Optional;
+        /// defaults to an empty map when absent.
+        #[serde(default)]
+        ibc_channels: HashMap<String, u64>,
     },
     TENDERMINTTOKEN {
         platform: String,
@@ -553,5 +592,104 @@ mod coin_protocol_tests {
             },
             other => panic!("expected ZHTLC, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn tendermint_protocol_data_parses_full_config() {
+        // A full TENDERMINT protocol_data with denom/decimals/account_prefix/
+        // chain_id and a configured ibc_channels map parses, and surplus benign
+        // keys (gas_price, chain_registry_name, and forward-compat tuning hints)
+        // are accepted and ignored -- no deny_unknown_fields (R36.3.1/R36.3.3).
+        let conf = json!({
+            "type": "TENDERMINT",
+            "protocol_data": {
+                "denom": "uatom",
+                "decimals": 6,
+                "account_prefix": "cosmos",
+                "chain_id": "cosmoshub-4",
+                "gas_price": 0.025,
+                "chain_registry_name": "cosmoshub",
+                "ibc_channels": {"osmo": 141, "iaa": 0},
+                "min_balance_for_ibc_routing": 1000
+            }
+        });
+        match CoinProtocol::from_conf_json(conf).unwrap() {
+            CoinProtocol::TENDERMINT {
+                denom,
+                decimals,
+                account_prefix,
+                chain_id,
+                ibc_channels,
+            } => {
+                assert_eq!(denom, "uatom");
+                assert_eq!(decimals, 6);
+                assert_eq!(account_prefix, "cosmos");
+                assert_eq!(chain_id, "cosmoshub-4");
+                assert_eq!(ibc_channels.get("osmo"), Some(&141));
+                assert_eq!(ibc_channels.get("iaa"), Some(&0));
+            },
+            other => panic!("expected TENDERMINT, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tendermint_protocol_data_defaults_ibc_channels_empty() {
+        // ibc_channels is optional and defaults to an empty map (R36.3.1).
+        match CoinProtocol::from_conf_json(json!({
+            "type": "TENDERMINT",
+            "protocol_data": {
+                "denom": "uiris",
+                "decimals": 6,
+                "account_prefix": "iaa",
+                "chain_id": "irishub-1"
+            }
+        }))
+        .unwrap()
+        {
+            CoinProtocol::TENDERMINT { ibc_channels, .. } => assert!(ibc_channels.is_empty()),
+            other => panic!("expected TENDERMINT, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tendermint_protocol_data_requires_denom_and_decimals() {
+        // denom and decimals are required members of TENDERMINT protocol_data.
+        assert!(CoinProtocol::from_conf_json(json!({
+            "type": "TENDERMINT",
+            "protocol_data": {"decimals": 6, "account_prefix": "cosmos", "chain_id": "cosmoshub-4"}
+        }))
+        .is_err());
+        assert!(CoinProtocol::from_conf_json(json!({
+            "type": "TENDERMINT",
+            "protocol_data": {"denom": "uatom", "account_prefix": "cosmos", "chain_id": "cosmoshub-4"}
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn tendermint_protocol_data_rejects_decimals_above_18() {
+        // decimals must be 18 or lower; a higher value fails protocol-data parsing
+        // as a bounded-input check (R36.3.1).
+        assert!(CoinProtocol::from_conf_json(json!({
+            "type": "TENDERMINT",
+            "protocol_data": {
+                "denom": "uatom",
+                "decimals": 19,
+                "account_prefix": "cosmos",
+                "chain_id": "cosmoshub-4"
+            }
+        }))
+        .is_err());
+        // The boundary value 18 is accepted.
+        assert!(CoinProtocol::from_conf_json(json!({
+            "type": "TENDERMINT",
+            "protocol_data": {
+                "denom": "aevmos",
+                "decimals": 18,
+                "account_prefix": "evmos",
+                "chain_id": "evmos_9001-2"
+            }
+        }))
+        .is_ok());
     }
 }
