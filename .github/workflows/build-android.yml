@@ -121,7 +121,8 @@ jobs:
         run: |
           FEATURES_FLAG=""
           if [ -n "${{ inputs.features }}" ]; then
-            FEATURES_FLAG="--features ${{ inputs.features }}"
+            # When building mm2_bin_lib with mm2_main features, use dependency syntax
+            FEATURES_FLAG="--features mm2_main/${{ inputs.features }}"
           fi
           cargo rustc -p mm2_bin_lib --lib \
             --target ${{ matrix.target }} \
@@ -137,7 +138,8 @@ jobs:
         run: |
           FEATURES_FLAG=""
           if [ -n "${{ inputs.features }}" ]; then
-            FEATURES_FLAG="--features ${{ inputs.features }}"
+            # When building coins with mm2_main features (passed via dependency), use syntax:
+            FEATURES_FLAG="--features mm2_main/${{ inputs.features }}"
           fi
           cargo check -p coins --target ${{ matrix.target }} $FEATURES_FLAG
 

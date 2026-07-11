@@ -69,6 +69,7 @@ jobs:
           if [ -n "${{ inputs.features }}" ]; then
             FEATURES_FLAG="--features ${{ inputs.features }}"
           fi
+          cd mm2src
           cargo build --bin kdf --target ${{ matrix.target }} --profile ${{ inputs.profile }} $FEATURES_FLAG
 
       - name: Upload artifact

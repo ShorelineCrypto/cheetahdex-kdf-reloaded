@@ -56,6 +56,7 @@ jobs:
       - name: Build kdf
         shell: powershell
         run: |
+          cd mm2src
           $FeaturesFlag = ""
           if ("${{ inputs.features }}") {
             $FeaturesFlag = "--features ${{ inputs.features }}"

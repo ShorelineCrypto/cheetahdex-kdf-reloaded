@@ -69,21 +69,11 @@ jobs:
 
       - name: cargo check -p coins (wasm32)
         shell: bash
-        run: |
-          FEATURES_FLAG=""
-          if [ -n "${{ inputs.features }}" ]; then
-            FEATURES_FLAG="--features ${{ inputs.features }}"
-          fi
-          cargo check --target wasm32-unknown-unknown -p coins $FEATURES_FLAG
+        run: cargo check --target wasm32-unknown-unknown -p coins
 
       - name: cargo check -p mm2_db (wasm32)
         shell: bash
-        run: |
-          FEATURES_FLAG=""
-          if [ -n "${{ inputs.features }}" ]; then
-            FEATURES_FLAG="--features ${{ inputs.features }}"
-          fi
-          cargo check --target wasm32-unknown-unknown -p mm2_db $FEATURES_FLAG
+        run: cargo check --target wasm32-unknown-unknown -p mm2_db
 
       - name: cargo check -p mm2_main (wasm32)
         shell: bash
