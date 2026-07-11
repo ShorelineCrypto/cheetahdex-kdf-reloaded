@@ -57,11 +57,11 @@ jobs:
         shell: powershell
         run: |
           cd mm2src
-          $FeaturesFlag = ""
           if ("${{ inputs.features }}") {
-            $FeaturesFlag = "--features ${{ inputs.features }}"
+            cargo build --bin kdf --target x86_64-pc-windows-msvc --profile ${{ inputs.profile }} --features ${{ inputs.features }}
+          } else {
+            cargo build --bin kdf --target x86_64-pc-windows-msvc --profile ${{ inputs.profile }}
           }
-          cargo build --bin kdf --target x86_64-pc-windows-msvc --profile ${{ inputs.profile }} $FeaturesFlag
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
