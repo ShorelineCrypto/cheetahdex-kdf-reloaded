@@ -24,12 +24,21 @@ on:
         description: "cargo profile"
         required: false
         default: "dev"
+      features:
+        description: "comma-separated cargo features"
+        required: false
+        default: ""
   workflow_call:
     inputs:
       profile:
         description: "cargo profile"
         required: false
         default: "dev"
+        type: string
+      features:
+        description: "comma-separated cargo features"
+        required: false
+        default: ""
         type: string
 
 jobs:
@@ -60,15 +69,30 @@ jobs:
 
       - name: cargo check -p coins (wasm32)
         shell: bash
-        run: cargo check --target wasm32-unknown-unknown -p coins
+        run: |
+          FEATURES_FLAG=""
+          if [ -n "${{ inputs.features }}" ]; then
+            FEATURES_FLAG="--features ${{ inputs.features }}"
+          fi
+          cargo check --target wasm32-unknown-unknown -p coins $FEATURES_FLAG
 
       - name: cargo check -p mm2_db (wasm32)
         shell: bash
-        run: cargo check --target wasm32-unknown-unknown -p mm2_db
+        run: |
+          FEATURES_FLAG=""
+          if [ -n "${{ inputs.features }}" ]; then
+            FEATURES_FLAG="--features ${{ inputs.features }}"
+          fi
+          cargo check --target wasm32-unknown-unknown -p mm2_db $FEATURES_FLAG
 
       - name: cargo check -p mm2_main (wasm32)
         shell: bash
-        run: cargo check --target wasm32-unknown-unknown -p mm2_main
+        run: |
+          FEATURES_FLAG=""
+          if [ -n "${{ inputs.features }}" ]; then
+            FEATURES_FLAG="--features ${{ inputs.features }}"
+          fi
+          cargo check --target wasm32-unknown-unknown -p mm2_main $FEATURES_FLAG
 
       - name: Install wasm-pack
         shell: bash

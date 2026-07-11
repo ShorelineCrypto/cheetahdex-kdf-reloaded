@@ -18,12 +18,21 @@ on:
         description: "cargo profile"
         required: false
         default: "release"
+      features:
+        description: "comma-separated cargo features"
+        required: false
+        default: ""
   workflow_call:
     inputs:
       profile:
         description: "cargo profile"
         required: false
         default: "release"
+        type: string
+      features:
+        description: "comma-separated cargo features"
+        required: false
+        default: ""
         type: string
 
 jobs:
@@ -110,10 +119,14 @@ jobs:
         # `cargo rustc --crate-type=staticlib`). The NDK clang wrappers are
         # supplied via the job `env:` block and PATH.
         run: |
+          FEATURES_FLAG=""
+          if [ -n "${{ inputs.features }}" ]; then
+            FEATURES_FLAG="--features ${{ inputs.features }}"
+          fi
           cargo rustc -p mm2_bin_lib --lib \
             --target ${{ matrix.target }} \
             --profile ${{ inputs.profile }} \
-            --crate-type=staticlib
+            --crate-type=staticlib $FEATURES_FLAG
 
       - name: Verify coins crate compiles for ${{ matrix.target }} (P14)
         # P14 modernised the Solana stack to the modular `solana-*` 2.x
@@ -122,7 +135,11 @@ jobs:
         # This step regression-tests that property without relying on
         # downstream linking.
         run: |
-          cargo check -p coins --target ${{ matrix.target }}
+          FEATURES_FLAG=""
+          if [ -n "${{ inputs.features }}" ]; then
+            FEATURES_FLAG="--features ${{ inputs.features }}"
+          fi
+          cargo check -p coins --target ${{ matrix.target }} $FEATURES_FLAG
 
       - name: Rename staticlib to libkdf.a
         run: |
