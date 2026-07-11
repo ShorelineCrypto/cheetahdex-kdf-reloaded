@@ -2,6 +2,7 @@ use super::*;
 
 impl ZCoin {
     #[inline(always)]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn z_rpc(&self) -> &(dyn ZRpcOps + Send + Sync) { self.utxo_arc.rpc_client.as_ref() }
 
     #[inline(always)]
@@ -14,6 +15,7 @@ impl ZCoin {
     pub fn my_z_address_encoded(&self) -> String { self.z_fields.my_z_addr_encoded.clone() }
 
     /// Returns all unspents included currently unspendable (not confirmed)
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) async fn my_z_unspents_ordered(&self) -> UtxoRpcResult<Vec<ZUnspent>> {
         let min_conf = 0;
         let max_conf = i32::MAX as u32;
@@ -30,6 +32,7 @@ impl ZCoin {
     }
 
     /// shielded outputs are not spendable until confirmed
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) async fn my_spendable_z_unspents_ordered(&self) -> UtxoRpcResult<Vec<ZUnspent>> {
         let min_conf = 1;
         let max_conf = i32::MAX as u32;
@@ -45,6 +48,7 @@ impl ZCoin {
         Ok(unspents)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) async fn get_one_kbyte_tx_fee(&self) -> UtxoRpcResult<BigDecimal> {
         let fee = self.get_tx_fee().await?;
         match fee {

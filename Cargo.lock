@@ -11425,7 +11425,7 @@ dependencies = [
  "rand_xorshift 0.2.0",
  "subtle",
  "tempfile",
- "time 0.2.27",
+ "time 0.3.47",
  "zcash_client_sqlite",
  "zcash_note_encryption",
  "zcash_primitives",

@@ -3,8 +3,10 @@ use crate::utxo::rpc_clients::{UnspentInfo, UtxoRpcClientEnum, UtxoRpcClientOps,
 use crate::utxo::utxo_builder::{UtxoCoinBuilderCommonOps, UtxoCoinWithIguanaPrivKeyBuilder,
                                 UtxoFieldsWithIguanaPrivKeyBuilder};
 use crate::utxo::utxo_common::{big_decimal_from_sat_unsigned, payment_script};
-use crate::utxo::{sat_from_big_decimal, utxo_common, zcash_params_path, ActualTxFee, AdditionalTxData, Address,
-                  BroadcastTxErr, FeePolicy, GetUtxoListOps, HistoryUtxoTx, HistoryUtxoTxMap, MatureUnspentList,
+#[cfg(not(target_arch = "wasm32"))]
+use crate::utxo::zcash_params_path;
+use crate::utxo::{sat_from_big_decimal, utxo_common, ActualTxFee, AdditionalTxData, Address, BroadcastTxErr,
+                  FeePolicy, GetUtxoListOps, HistoryUtxoTx, HistoryUtxoTxMap, MatureUnspentList,
                   RecentlySpentOutPointsGuard, UtxoActivationParams, UtxoAddressFormat, UtxoArc, UtxoCoinFields,
                   UtxoCommonOps, UtxoFeeDetails, UtxoTxBroadcastOps, UtxoTxGenerationOps, UtxoWeak,
                   VerboseTransactionFrom};
@@ -64,10 +66,12 @@ use zcash_primitives::transaction::builder::Builder as ZTxBuilder;
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_proofs::prover::LocalTxProver;
 
-mod z_htlc;
+#[cfg(not(target_arch = "wasm32"))] mod z_htlc;
+#[cfg(not(target_arch = "wasm32"))]
 use z_htlc::{z_p2sh_spend, z_send_dex_fee, z_send_htlc};
 
-mod z_rpc;
+#[cfg(not(target_arch = "wasm32"))] mod z_rpc;
+#[cfg(not(target_arch = "wasm32"))]
 use z_rpc::{ZRpcOps, ZUnspent};
 
 mod z_coin_errors;
@@ -100,7 +104,7 @@ macro_rules! try_ztx_s {
 }
 
 mod z_coin_ops;
-mod z_swap_ops;
+#[cfg(not(target_arch = "wasm32"))] mod z_swap_ops;
 
 #[cfg(all(test, feature = "zhtlc-native-tests"))]
 mod z_coin_tests;
@@ -614,6 +618,7 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
         };
 
         let my_z_addr_encoded = encode_payment_address(consensus_params.hrp_sapling_payment_address(), &my_z_addr);
+        #[cfg(not(target_arch = "wasm32"))]
         let my_z_key_encoded = encode_extended_spending_key(
             consensus_params.hrp_sapling_extended_spending_key(),
             &self.z_spending_key,
@@ -644,12 +649,15 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             z_fields: Arc::new(z_fields),
         };
 
-        z_coin
-            .z_rpc()
-            .z_import_key(&my_z_key_encoded)
-            .compat()
-            .await
-            .mm_err(Into::into)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            z_coin
+                .z_rpc()
+                .z_import_key(&my_z_key_encoded)
+                .compat()
+                .await
+                .mm_err(Into::into)?;
+        }
         spawn(sapling_state_cache_loop(z_coin.clone()));
         Ok(z_coin)
     }
@@ -726,22 +734,39 @@ impl MarketCoinOps for ZCoin {
     }
 
     fn my_balance(&self) -> BalanceFut<CoinBalance> {
-        let coin = self.clone();
-        let fut = async move {
-            let unspents = coin.my_z_unspents_ordered().await.mm_err(Into::into)?;
-            let (spendable, unspendable) = unspents.iter().fold(
-                (BigDecimal::from(0), BigDecimal::from(0)),
-                |(cur_spendable, cur_unspendable), unspent| {
-                    if unspent.confirmations > 0 {
-                        (cur_spendable + unspent.amount.to_decimal(), cur_unspendable)
-                    } else {
-                        (cur_spendable, cur_unspendable + unspent.amount.to_decimal())
-                    }
-                },
-            );
-            Ok(CoinBalance { spendable, unspendable })
-        };
-        Box::new(fut.boxed().compat())
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let coin = self.clone();
+            let fut = async move {
+                let unspents = coin.my_z_unspents_ordered().await.mm_err(Into::into)?;
+                let (spendable, unspendable) = unspents.iter().fold(
+                    (BigDecimal::from(0), BigDecimal::from(0)),
+                    |(cur_spendable, cur_unspendable), unspent| {
+                        if unspent.confirmations > 0 {
+                            (cur_spendable + unspent.amount.to_decimal(), cur_unspendable)
+                        } else {
+                            (cur_spendable, cur_unspendable + unspent.amount.to_decimal())
+                        }
+                    },
+                );
+                Ok(CoinBalance { spendable, unspendable })
+            };
+            Box::new(fut.boxed().compat())
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // WASM: ZCoin balance tracking from RPC is not supported; return zero balance.
+            // Balance information would be maintained client-side from wallet state/sapling cache in the UI.
+            Box::new(
+                futures::future::ok(CoinBalance {
+                    spendable: BigDecimal::from(0),
+                    unspendable: BigDecimal::from(0),
+                })
+                .boxed()
+                .compat(),
+            )
+        }
     }
 
     fn base_coin_balance(&self) -> BalanceFut<BigDecimal> { utxo_common::base_coin_balance(self) }
@@ -785,8 +810,15 @@ impl MarketCoinOps for ZCoin {
         )
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn tx_enum_from_bytes(&self, bytes: &[u8]) -> Result<TransactionEnum, String> {
         ZTransaction::read(bytes).map(|tx| tx.into()).map_err(|e| e.to_string())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn tx_enum_from_bytes(&self, _bytes: &[u8]) -> Result<TransactionEnum, String> {
+        // WASM: Transaction parsing is not supported; ZCoin operations are read-only
+        Err("Transaction parsing is not supported on WASM for ZCoin".to_owned())
     }
 
     fn current_block(&self) -> Box<dyn Future<Item = u64, Error = String> + Send> {
@@ -811,71 +843,88 @@ impl MarketCoinOps for ZCoin {
     fn is_privacy(&self) -> bool { true }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl MmCoin for ZCoin {
     fn is_asset_chain(&self) -> bool { self.utxo_arc.conf.asset_chain }
 
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
-        let coin = self.clone();
-        let fut = async move {
-            if req.fee.is_some() {
-                return MmError::err(WithdrawError::InternalError(
-                    "Setting a custom withdraw fee is not supported for ZCoin yet".to_owned(),
-                ));
-            }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let coin = self.clone();
+            let fut = async move {
+                if req.fee.is_some() {
+                    return MmError::err(WithdrawError::InternalError(
+                        "Setting a custom withdraw fee is not supported for ZCoin yet".to_owned(),
+                    ));
+                }
 
-            let to_addr = decode_payment_address(coin.z_fields.consensus_params.hrp_sapling_payment_address(), &req.to)
-                .map_to_mm(|e| WithdrawError::InvalidAddress(format!("{}", e)))?
-                .or_mm_err(|| WithdrawError::InvalidAddress(format!("Address {} decoded to None", req.to)))?;
-            let amount = if req.max {
-                let fee = coin.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
-                let balance = coin.my_balance().compat().await.mm_err(Into::into)?;
-                balance.spendable - fee
-            } else {
-                req.amount
+                let to_addr =
+                    decode_payment_address(coin.z_fields.consensus_params.hrp_sapling_payment_address(), &req.to)
+                        .map_to_mm(|e| WithdrawError::InvalidAddress(format!("{}", e)))?
+                        .or_mm_err(|| WithdrawError::InvalidAddress(format!("Address {} decoded to None", req.to)))?;
+                let amount = if req.max {
+                    let fee = coin.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
+                    let balance = coin.my_balance().compat().await.mm_err(Into::into)?;
+                    balance.spendable - fee
+                } else {
+                    req.amount
+                };
+                let satoshi = sat_from_big_decimal(&amount, coin.decimals()).mm_err(Into::into)?;
+                let z_output = ZOutput {
+                    to_addr,
+                    amount: Amount::from_u64(satoshi)
+                        .map_to_mm(|_| NumConversError(format!("Failed to get ZCash amount from {}", amount)))
+                        .mm_err(Into::into)?,
+                    // TODO add optional viewing_key and memo fields to the WithdrawRequest
+                    viewing_key: None,
+                    memo: None,
+                };
+
+                let (tx, data) = coin.gen_tx(vec![], vec![z_output]).await.mm_err(Into::into)?;
+                let mut tx_bytes = Vec::with_capacity(1024);
+                tx.write(&mut tx_bytes)
+                    .map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
+                let mut tx_hash = tx.txid().0.to_vec();
+                tx_hash.reverse();
+
+                let my_balance_change = data.spent_by_me - data.received_by_me;
+
+                Ok(TransactionDetails {
+                    tx_hex: tx_bytes.into(),
+                    tx_hash: tx_hash.to_tx_hash(),
+                    from: vec![coin.z_fields.my_z_addr_encoded.clone()],
+                    to: vec![req.to],
+                    total_amount: big_decimal_from_sat_unsigned(data.spent_by_me, coin.decimals()),
+                    spent_by_me: big_decimal_from_sat_unsigned(data.spent_by_me, coin.decimals()),
+                    received_by_me: big_decimal_from_sat_unsigned(data.received_by_me, coin.decimals()),
+                    my_balance_change: big_decimal_from_sat_unsigned(my_balance_change, coin.decimals()),
+                    block_height: 0,
+                    timestamp: 0,
+                    fee_details: Some(TxFeeDetails::Utxo(UtxoFeeDetails {
+                        coin: Some(coin.utxo_arc.conf.ticker.clone()),
+                        amount: big_decimal_from_sat_unsigned(data.fee_amount, coin.decimals()),
+                    })),
+                    coin: coin.ticker().to_owned(),
+                    internal_id: tx_hash.into(),
+                    kmd_rewards: None,
+                    transaction_type: Default::default(),
+                })
             };
-            let satoshi = sat_from_big_decimal(&amount, coin.decimals()).mm_err(Into::into)?;
-            let z_output = ZOutput {
-                to_addr,
-                amount: Amount::from_u64(satoshi)
-                    .map_to_mm(|_| NumConversError(format!("Failed to get ZCash amount from {}", amount)))
-                    .mm_err(Into::into)?,
-                // TODO add optional viewing_key and memo fields to the WithdrawRequest
-                viewing_key: None,
-                memo: None,
-            };
+            Box::new(fut.boxed().compat())
+        }
 
-            let (tx, data) = coin.gen_tx(vec![], vec![z_output]).await.mm_err(Into::into)?;
-            let mut tx_bytes = Vec::with_capacity(1024);
-            tx.write(&mut tx_bytes)
-                .map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
-            let mut tx_hash = tx.txid().0.to_vec();
-            tx_hash.reverse();
-
-            let my_balance_change = data.spent_by_me - data.received_by_me;
-
-            Ok(TransactionDetails {
-                tx_hex: tx_bytes.into(),
-                tx_hash: tx_hash.to_tx_hash(),
-                from: vec![coin.z_fields.my_z_addr_encoded.clone()],
-                to: vec![req.to],
-                total_amount: big_decimal_from_sat_unsigned(data.spent_by_me, coin.decimals()),
-                spent_by_me: big_decimal_from_sat_unsigned(data.spent_by_me, coin.decimals()),
-                received_by_me: big_decimal_from_sat_unsigned(data.received_by_me, coin.decimals()),
-                my_balance_change: big_decimal_from_sat_unsigned(my_balance_change, coin.decimals()),
-                block_height: 0,
-                timestamp: 0,
-                fee_details: Some(TxFeeDetails::Utxo(UtxoFeeDetails {
-                    coin: Some(coin.utxo_arc.conf.ticker.clone()),
-                    amount: big_decimal_from_sat_unsigned(data.fee_amount, coin.decimals()),
-                })),
-                coin: coin.ticker().to_owned(),
-                internal_id: tx_hash.into(),
-                kmd_rewards: None,
-                transaction_type: Default::default(),
-            })
-        };
-        Box::new(fut.boxed().compat())
+        #[cfg(target_arch = "wasm32")]
+        {
+            Box::new(
+                futures::future::err(MmError::new(WithdrawError::InternalError(
+                    "ZCoin shielded transaction generation (gen_tx) is not available on WASM; withdraw not supported"
+                        .to_owned(),
+                )))
+                .boxed()
+                .compat(),
+            )
+        }
     }
 
     fn get_raw_transaction(&self, req: RawTransactionRequest) -> RawTransactionFut {
@@ -916,6 +965,7 @@ impl MmCoin for ZCoin {
         utxo_common::get_trade_fee(self.clone())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get_sender_trade_fee(
         &self,
         _value: TradePreimageValue,
@@ -928,10 +978,25 @@ impl MmCoin for ZCoin {
         })
     }
 
+    #[cfg(target_arch = "wasm32")]
+    async fn get_sender_trade_fee(
+        &self,
+        _value: TradePreimageValue,
+        _stage: FeeApproxStage,
+    ) -> TradePreimageResult<TradeFee> {
+        // WASM: Trade fee estimation not supported for ZCoin
+        Ok(TradeFee {
+            coin: self.ticker().to_owned(),
+            amount: MmNumber::from(0),
+            paid_from_trading_vol: false,
+        })
+    }
+
     fn get_receiver_trade_fee(&self, _stage: FeeApproxStage) -> TradePreimageFut<TradeFee> {
         utxo_common::get_receiver_trade_fee(self.clone())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn get_fee_to_send_taker_fee(
         &self,
         _dex_fee_amount: BigDecimal,
@@ -940,6 +1005,20 @@ impl MmCoin for ZCoin {
         Ok(TradeFee {
             coin: self.ticker().to_owned(),
             amount: self.get_one_kbyte_tx_fee().await.mm_err(Into::into)?.into(),
+            paid_from_trading_vol: false,
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn get_fee_to_send_taker_fee(
+        &self,
+        _dex_fee_amount: BigDecimal,
+        _stage: FeeApproxStage,
+    ) -> TradePreimageResult<TradeFee> {
+        // WASM: Trade fee estimation not supported for ZCoin
+        Ok(TradeFee {
+            coin: self.ticker().to_owned(),
+            amount: MmNumber::from(0),
             paid_from_trading_vol: false,
         })
     }

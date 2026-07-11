@@ -254,7 +254,7 @@ mod wasm {
         pub(crate) inner: IndexedDb,
     }
 
-    #[async_trait(?Send)]
+    #[async_trait]
     impl DbInstance for ZCoinSaplingCacheDb {
         fn db_name() -> &'static str { DB_NAME }
 
