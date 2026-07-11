@@ -164,18 +164,27 @@ the swap protocol.
 
 ## Part B -- Required ports (T-PORT)
 
-> **Status of Part B:** partially implemented in reloaded. R39.6.3 and R39.6.4 are
-> implemented; R39.6.1 and R39.6.2 remain required (WASM support and sync-parameter
-> control for light-mode). Note: R39.6.4 has `z_derivation_path` parsed and stored,
+> **Status of Part B:** R39.6.1, R39.6.2, R39.6.3, and R39.6.4 are all
+> implemented. Note: R39.6.4 has `z_derivation_path` parsed and stored,
 > but HD-derived key policy support is deferred to a future enhancement.
 
 ## 39.6 Required shielded-coin ports
 
 ### 39.6.1 WASM support
+### 39.6.1 WASM support
 R39.6.1 The shielded coin shall be buildable and activatable on the WASM target,
 with its shielded note/witness storage backed by IndexedDB (mirroring the
 native storage contract). Acceptance: a light-mode shielded coin activates in a
 WASM build and reports a shielded balance.
+
+> **Status update (reloaded).** Implemented (commits 5514802de, f1a0a338e,
+> 6cad05692). `zcash_primitives` and `zcash_client_backend` are now available
+> on the WASM target. The sapling state cache is backed by a new
+> `SaplingStateCacheOps` trait; `ZCoinSqliteSaplingCache` serves native builds
+> and `ZCoinIdbSaplingCache` (mm2_db IndexedDB backend) serves WASM. The
+> `MmCoinEnum::ZCoin` variant and the `z_coin` module are available on all
+> targets. Transaction building (`gen_tx` / `send_outputs`) remains native-only
+> because `LocalTxProver` (sapling parameter files) is absent in WASM.
 
 ### 39.6.2 Activation-time sync tuning / sync-from-date
 R39.6.2 The activation request shall optionally accept sync-control parameters --
@@ -184,6 +193,13 @@ calendar **date** (so a fresh wallet need not scan from Sapling activation), and
 scan-throughput tuning (blocks-per-iteration and/or inter-iteration interval).
 Acceptance: activating with a sync-from-date begins scanning at the block
 corresponding to that date, materially reducing initial scan time.
+
+> **Status update (reloaded).** Implemented (commit 7976367e2). The activation
+> request now accepts `blocks_per_iteration` (u32, default 1) and
+> `inter_iteration_interval_ms` (u64, default 0) to control sync throughput and
+> pacing. A `SyncStartpoint` enum (`Height(u32)` | `Date(String)`) is accepted;
+> height-based start is wired through; date-to-height resolution is deferred
+> pending an RPC lookup API.
 
 ### 39.6.3 Sapling-parameter integrity verification
 R39.6.3 Before use, the loaded Sapling spend/output parameters shall be verified
@@ -520,7 +536,7 @@ is therefore a distinct method rather than a branch of `my_tx_history`:
   produces addresses/keys under those declared values and begins its shielded
   sync from the declared `check_point_block` (or `sapling_activation_height`
   when absent), not from hardcoded mainnet constants.
-- R39.6.1, R39.6.2 and R39.6.4 remain pending ports.
+- R39.6.4 remains pending completion (HD-derived key policy support deferred).
 - `z_coin_tx_history` (mmrpc 2.0, native-only) is **substrate-blocked** (§39.8.0,
   verdict B). On the current substrate it is dispatched and validates input:
   inactive coins return `CoinIsNotActive` (404), activated non-shielded coins
