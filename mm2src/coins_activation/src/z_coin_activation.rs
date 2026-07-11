@@ -64,11 +64,35 @@ pub enum ZcoinRpcMode {
     },
 }
 
+/// Sync starting point for R39.6.2 — user specifies where to anchor the
+/// initial shielded sync (by height or date) rather than always starting
+/// from checkpoint/sapling activation. Optional; defaults to checkpoint or
+/// sapling_activation_height if absent.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", content = "data")]
+pub enum SyncStartpoint {
+    #[serde(rename = "height")]
+    Height(u32),
+    #[serde(rename = "date")]
+    Date(String),
+}
+
 #[derive(Deserialize)]
 pub struct ZcoinActivationParams {
     pub mode: ZcoinRpcMode,
     pub required_confirmations: Option<u64>,
     pub requires_notarization: Option<bool>,
+    /// Optional sync starting point (height or date); R39.6.2. When specified,
+    /// overrides the default checkpoint-or-sapling-activation start point.
+    pub sync_start: Option<SyncStartpoint>,
+    /// Optional blocks-per-iteration for sync throughput tuning; R39.6.2.
+    /// Defaults to 1 (process one block per iteration). Higher values batch
+    /// multiple blocks per cycle.
+    pub blocks_per_iteration: Option<u32>,
+    /// Optional inter-iteration sleep interval in milliseconds; R39.6.2.
+    /// Defaults to 0 (no sleep between iterations). Positive values rate-limit
+    /// the sync loop to reduce RPC load.
+    pub inter_iteration_interval_ms: Option<u64>,
 }
 
 impl TxHistory for ZcoinActivationParams {
@@ -172,7 +196,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         ticker: String,
         coin_conf: Json,
         activation_request: &ZcoinActivationParams,
-        protocol_info: ZcoinProtocolInfo,
+        mut protocol_info: ZcoinProtocolInfo,
         task_handle: &ZcoinRpcTaskHandle,
     ) -> MmResult<Self, ZcoinInitError> {
         let utxo_mode = match &activation_request.mode {
@@ -195,6 +219,15 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
             check_utxo_maturity: None,
         };
+
+        // Wire sync parameters from RPC request into protocol_info (R39.6.2)
+        if let Some(blocks_per_iter) = activation_request.blocks_per_iteration {
+            protocol_info.blocks_per_iteration = blocks_per_iter.max(1);
+        }
+        if let Some(inter_iter_ms) = activation_request.inter_iteration_interval_ms {
+            protocol_info.inter_iteration_interval_ms = inter_iter_ms;
+        }
+
         let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?;
         let priv_key = crypto_ctx.mm2_internal_privkey_secret();
         let coin = z_coin_from_conf_and_params(

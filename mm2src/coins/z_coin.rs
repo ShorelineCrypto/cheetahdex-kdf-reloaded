@@ -186,10 +186,20 @@ pub struct ZcoinProtocolInfo {
     pub consensus_params: ZcoinConsensusParams,
     /// Optional sync-anchor block descriptor (R39.1.4).
     pub check_point_block: Option<CheckPointBlockInfo>,
+    /// Sync throughput tuning: blocks to process per iteration (R39.6.2).
+    /// Defaults to 1. Higher values batch multiple blocks per cycle.
+    #[serde(default = "default_blocks_per_iteration")]
+    pub blocks_per_iteration: u32,
+    /// Sync pacing: milliseconds to sleep between iterations (R39.6.2).
+    /// Defaults to 0 (no sleep). Positive values rate-limit the sync loop.
+    #[serde(default)]
+    pub inter_iteration_interval_ms: u64,
     /// Optional coin-level ZIP32/BIP32 HD path (e.g. `m/32'/133'`) used for
     /// shielded key derivation when the key policy is HD-derived (R39.1.4).
     pub z_derivation_path: Option<HDPathToCoin>,
 }
+
+fn default_blocks_per_iteration() -> u32 { 1 }
 
 /// Outgoing Viewing Key (OVK) used to encrypt the outgoing-cipher portion of
 /// every Sapling output that pays a swap dex-fee on Pirate Chain (ARRR).
@@ -287,6 +297,12 @@ pub struct ZCoinFields {
     consensus_params: ZcoinConsensusParams,
     /// Optional sync-anchor checkpoint sourced from `protocol_data` (R39.1.4).
     check_point_block: Option<CheckPointBlockInfo>,
+    /// Sync throughput tuning: blocks to process per iteration (R39.6.2).
+    /// Defaults to 1. Higher values batch multiple blocks per cycle.
+    pub blocks_per_iteration: u32,
+    /// Sync pacing: milliseconds to sleep between iterations (R39.6.2).
+    /// Defaults to 0 (no sleep). Positive values rate-limit the sync loop.
+    pub inter_iteration_interval_ms: u64,
 }
 
 impl std::fmt::Debug for ZCoinFields {
@@ -494,48 +510,63 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
             UtxoRpcClientEnum::Native(n) => n,
             _ => unimplemented!("Implemented only for native client"),
         };
+
+        // Extract sync parameters for this iteration (R39.6.2)
+        let blocks_per_iteration = coin.z_fields.blocks_per_iteration.max(1) as u64;
+        let inter_iteration_interval_ms = coin.z_fields.inter_iteration_interval_ms;
+
         while processed_height as u64 <= current_block {
-            let block = match native_client.get_block_by_height(processed_height as u64).await {
-                Ok(b) => b,
-                Err(e) => {
-                    log::error!("Error {} on getting block", e);
-                    Timer::sleep(1.).await;
-                    continue;
-                },
-            };
-            let current_sapling_root = current_tree.root();
-            let mut root_bytes = [0u8; 32];
-            current_sapling_root
-                .write(&mut root_bytes as &mut [u8])
-                .expect("Root len is 32 bytes");
+            // Process up to blocks_per_iteration blocks in this iteration (R39.6.2)
+            let batch_end = std::cmp::min(current_block, processed_height as u64 + blocks_per_iteration - 1);
 
-            let current_sapling_root = Some(H256::from(root_bytes).reversed().into());
-            if current_sapling_root != block.final_sapling_root && block.final_sapling_root != zero_root {
-                let prev_tree_state = current_tree.clone();
-                let mut cmus = Vec::new();
-                for hash in block.tx {
-                    let tx = native_client
-                        .get_transaction_bytes(&hash)
-                        .compat()
-                        .await
-                        .expect("Panic here to avoid storing invalid tree state to the DB");
-                    let tx: UtxoTx = deserialize(tx.as_slice()).expect("Panic here to avoid invalid tree state");
-                    for output in tx.shielded_outputs {
-                        current_tree
-                            .append(Node::new(output.cmu.take()))
-                            .expect("Commitment tree not full");
-                        cmus.push(output.cmu);
-                    }
-                }
-
-                let state_to_insert = SaplingBlockState {
-                    height: processed_height + 1,
-                    prev_tree_state,
-                    cmus,
+            while processed_height as u64 <= batch_end {
+                let block = match native_client.get_block_by_height(processed_height as u64).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        log::error!("Error {} on getting block", e);
+                        Timer::sleep(1.).await;
+                        continue;
+                    },
                 };
-                insert_block_state(&coin.sqlite_conn(), state_to_insert).expect("Insertion should not fail");
+                let current_sapling_root = current_tree.root();
+                let mut root_bytes = [0u8; 32];
+                current_sapling_root
+                    .write(&mut root_bytes as &mut [u8])
+                    .expect("Root len is 32 bytes");
+
+                let current_sapling_root = Some(H256::from(root_bytes).reversed().into());
+                if current_sapling_root != block.final_sapling_root && block.final_sapling_root != zero_root {
+                    let prev_tree_state = current_tree.clone();
+                    let mut cmus = Vec::new();
+                    for hash in block.tx {
+                        let tx = native_client
+                            .get_transaction_bytes(&hash)
+                            .compat()
+                            .await
+                            .expect("Panic here to avoid storing invalid tree state to the DB");
+                        let tx: UtxoTx = deserialize(tx.as_slice()).expect("Panic here to avoid invalid tree state");
+                        for output in tx.shielded_outputs {
+                            current_tree
+                                .append(Node::new(output.cmu.take()))
+                                .expect("Commitment tree not full");
+                            cmus.push(output.cmu);
+                        }
+                    }
+
+                    let state_to_insert = SaplingBlockState {
+                        height: processed_height + 1,
+                        prev_tree_state,
+                        cmus,
+                    };
+                    insert_block_state(&coin.sqlite_conn(), state_to_insert).expect("Insertion should not fail");
+                }
+                processed_height += 1;
             }
-            processed_height += 1;
+
+            // Apply inter-iteration sleep for pacing control (R39.6.2)
+            if inter_iteration_interval_ms > 0 {
+                Timer::sleep((inter_iteration_interval_ms as f64) / 1000.0).await;
+            }
         }
         coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
         drop(coin);
@@ -641,6 +672,8 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             sqlite: Mutex::new(sqlite),
             consensus_params,
             check_point_block: self.protocol_info.check_point_block,
+            blocks_per_iteration: self.protocol_info.blocks_per_iteration,
+            inter_iteration_interval_ms: self.protocol_info.inter_iteration_interval_ms,
         };
         // Note: `protocol_info.z_derivation_path` is parsed from protocol_data (R39.1.4)
         // but not used here because the current implementation enforces IguanaPrivKey
