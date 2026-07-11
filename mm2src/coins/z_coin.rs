@@ -23,8 +23,6 @@ use common::mm_number::{BigDecimal, MmNumber};
 use common::{log, now_ms};
 use crypto::privkey::key_pair_from_secret;
 use crypto::HDPathToCoin;
-use db_common::sqlite::rusqlite::types::Type;
-use db_common::sqlite::rusqlite::{Connection, Error as SqliteError, Row, ToSql, NO_PARAMS};
 use futures::compat::Future01CompatExt;
 use futures::lock::Mutex as AsyncMutex;
 use futures::{FutureExt, TryFutureExt};
@@ -39,15 +37,10 @@ use primitives::bytes::Bytes;
 use rpc::v1::types::{Bytes as BytesJson, ToTxHash, Transaction as RpcTransaction, H256 as H256Json};
 use script::{Builder as ScriptBuilder, Opcode, Script, TransactionInputSigner};
 use serde_json::Value as Json;
-use serialization::{deserialize, serialize_list, CoinVariant, Reader};
+use serialization::{deserialize, CoinVariant};
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Weak};
 use zcash_client_backend::decrypt_transaction;
 use zcash_client_backend::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
 use zcash_client_backend::wallet::AccountId;
@@ -57,11 +50,18 @@ use zcash_primitives::merkle_tree::{CommitmentTree, Hashable, IncrementalWitness
 use zcash_primitives::sapling::keys::OutgoingViewingKey;
 use zcash_primitives::sapling::note_encryption::try_sapling_output_recovery;
 use zcash_primitives::sapling::{Node, Note};
-use zcash_primitives::transaction::builder::Builder as ZTxBuilder;
 use zcash_primitives::transaction::components::{Amount, TxOut};
 use zcash_primitives::transaction::Transaction as ZTransaction;
 use zcash_primitives::{consensus, constants::mainnet as z_mainnet_constants, sapling::PaymentAddress,
                        zip32::ExtendedFullViewingKey, zip32::ExtendedSpendingKey};
+// Native-only imports
+#[cfg(not(target_arch = "wasm32"))] use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))] use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_primitives::transaction::builder::Builder as ZTxBuilder;
+#[cfg(not(target_arch = "wasm32"))]
 use zcash_proofs::prover::LocalTxProver;
 
 mod z_htlc;
@@ -72,6 +72,13 @@ use z_rpc::{ZRpcOps, ZUnspent};
 
 mod z_coin_errors;
 pub use z_coin_errors::*;
+
+pub(crate) mod z_coin_sapling_cache;
+#[cfg(target_arch = "wasm32")]
+use z_coin_sapling_cache::ZCoinIdbSaplingCache;
+#[cfg(not(target_arch = "wasm32"))]
+use z_coin_sapling_cache::ZCoinSqliteSaplingCache;
+use z_coin_sapling_cache::{SaplingBlockState, SaplingStateCacheOps, ZCoinSaplingCacheError};
 
 /// `ZP2SHSpendError` compatible `TransactionErr` handling macro.
 macro_rules! try_ztx_s {
@@ -224,11 +231,14 @@ const DEX_FEE_OVK: OutgoingViewingKey = OutgoingViewingKey([7; 32]);
 
 const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
 const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
+#[cfg(not(target_arch = "wasm32"))]
 const SAPLING_SPEND_HASH: &str =
     "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c";
+#[cfg(not(target_arch = "wasm32"))]
 const SAPLING_OUTPUT_HASH: &str =
     "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
 
+#[cfg(not(target_arch = "wasm32"))]
 fn blake2b_file_hash(path: &Path) -> Result<String, std::io::Error> {
     let mut file = File::open(path)?;
     let mut state = blake2b_simd::State::new();
@@ -245,6 +255,7 @@ fn blake2b_file_hash(path: &Path) -> Result<String, std::io::Error> {
     Ok(state.finalize().to_hex().to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn verify_zcash_params_integrity(params_dir: &Path) -> MmResult<(), ZCoinBuildError> {
     if !params_dir.exists() {
         return MmError::err(ZCoinBuildError::ZCashParamsDirNotFound {
@@ -286,12 +297,15 @@ pub struct ZCoinFields {
     my_z_addr: PaymentAddress,
     my_z_addr_encoded: String,
     z_spending_key: ExtendedSpendingKey,
+    /// Transaction prover: loads the sapling spend/output parameters.
+    /// Native only — WASM cannot build shielded transactions (no param files).
+    #[cfg(not(target_arch = "wasm32"))]
     z_tx_prover: LocalTxProver,
     /// Mutex preventing concurrent transaction generation/same input usage
     z_unspent_mutex: AsyncMutex<()>,
     sapling_state_synced: AtomicBool,
-    /// SQLite connection that is used to cache Sapling data for shielded transactions creation
-    sqlite: Mutex<Connection>,
+    /// Platform-agnostic sapling state cache (SQLite on native, IndexedDB on WASM).
+    sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync>,
     /// Zcash consensus/network parameters sourced from `protocol_data`; the
     /// single authority for this coin's network-parameter lookups (R39.6.4).
     consensus_params: ZcoinConsensusParams,
@@ -354,7 +368,6 @@ pub async fn z_coin_from_conf_and_params(
     secp_priv_key: &[u8],
     protocol_info: ZcoinProtocolInfo,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
-    let db_dir_path = ctx.dbdir();
     let z_key = ExtendedSpendingKey::master(secp_priv_key);
     z_coin_from_conf_and_params_with_z_key(
         ctx,
@@ -362,115 +375,37 @@ pub async fn z_coin_from_conf_and_params(
         conf,
         params,
         secp_priv_key,
-        db_dir_path,
+        #[cfg(not(target_arch = "wasm32"))]
+        ctx.dbdir(),
         z_key,
         protocol_info,
     )
     .await
 }
 
-fn init_db(sql: &Connection) -> Result<(), SqliteError> {
-    const INIT_SAPLING_CACHE_TABLE_STMT: &str = "CREATE TABLE IF NOT EXISTS sapling_cache (
-        height INTEGER NOT NULL PRIMARY KEY,
-        prev_tree_state BLOB NOT NULL,
-        cmus BLOB NOT NULL
-    );";
-
-    sql.execute(INIT_SAPLING_CACHE_TABLE_STMT, NO_PARAMS).map(|_| ())
-}
-
-struct SaplingBlockState {
-    height: u32,
-    prev_tree_state: CommitmentTree<Node>,
-    cmus: Vec<H256>,
-}
-
-impl TryFrom<&Row<'_>> for SaplingBlockState {
-    type Error = SqliteError;
-
-    fn try_from(row: &Row<'_>) -> Result<SaplingBlockState, SqliteError> {
-        let height = row.get(0)?;
-        let prev_state_bytes: Vec<u8> = row.get(1)?;
-        let cmus_bytes: Vec<u8> = row.get(2)?;
-
-        let prev_tree_state = CommitmentTree::read(prev_state_bytes.as_slice())
-            .map_err(|e| SqliteError::FromSqlConversionFailure(1, Type::Blob, Box::new(e)))?;
-
-        let mut reader = Reader::from_read(cmus_bytes.as_slice());
-        let cmus = reader
-            .read_list()
-            .map_err(|e| SqliteError::FromSqlConversionFailure(2, Type::Blob, Box::new(e)))?;
-        Ok(SaplingBlockState {
-            height,
-            prev_tree_state,
-            cmus,
-        })
-    }
-}
-
-fn query_latest_block(conn: &Connection) -> Result<SaplingBlockState, SqliteError> {
-    const QUERY_LATEST_BLOCK_STMT: &str =
-        "SELECT height, prev_tree_state, cmus FROM sapling_cache ORDER BY height desc LIMIT 1";
-
-    conn.query_row(QUERY_LATEST_BLOCK_STMT, NO_PARAMS, |row: &Row<'_>| {
-        SaplingBlockState::try_from(row)
-    })
-}
-
-#[allow(clippy::needless_question_mark)]
-fn query_states_after_height(conn: &Connection, height: u32) -> Result<Vec<SaplingBlockState>, SqliteError> {
-    const GET_BLOCK_STATES_AFTER_HEIGHT: &str =
-        "SELECT height, prev_tree_state, cmus from sapling_cache WHERE height >= ?1 ORDER BY height ASC;";
-
-    let mut statement = conn.prepare(GET_BLOCK_STATES_AFTER_HEIGHT)?;
-
-    #[allow(clippy::redundant_closure)]
-    let rows: Result<Vec<_>, _> = statement
-        .query_map(&[height.to_sql()?], |row: &Row<'_>| SaplingBlockState::try_from(row))?
-        .collect();
-
-    Ok(rows?)
-}
-
-fn insert_block_state(conn: &Connection, state: SaplingBlockState) -> Result<(), SqliteError> {
-    const INSERT_BLOCK_STMT: &str = "INSERT INTO sapling_cache (height, prev_tree_state, cmus) VALUES (?1, ?2, ?3);";
-    let block = state.height.to_sql()?;
-    let mut tree_bytes = Vec::new();
-    state
-        .prev_tree_state
-        .write(&mut tree_bytes)
-        .expect("write should not fail");
-
-    let prev_tree = tree_bytes.to_sql()?;
-
-    let cmus = serialize_list(&state.cmus).take();
-    let cmus = cmus.to_sql()?;
-
-    conn.execute(INSERT_BLOCK_STMT, &[block, prev_tree, cmus]).map(|_| ())
-}
-
 async fn sapling_state_cache_loop(coin: ZCoin) {
-    let query = tokio::task::block_in_place(|| query_latest_block(&coin.sqlite_conn()));
+    // Determine the starting height and tree state from the cache (R39.6.1).
+    let query = coin.z_fields.sapling_cache.query_latest_block().await;
     let (mut processed_height, mut current_tree) = match query {
-        Ok(state) => {
+        Ok(Some(state)) => {
             let mut tree = state.prev_tree_state;
             for cmu in state.cmus {
                 tree.append(Node::new(cmu.take())).expect("Commitment tree not full");
             }
             (state.height, tree)
         },
-        // Fresh wallet-DB cache: anchor the native sync start point from the
-        // coin config's `protocol_data` (R39.6.4) rather than replaying from
-        // block 0. When a `check_point_block` is declared, seed the commitment
-        // tree from its `sapling_tree` and resume at the block after the
-        // checkpoint; otherwise start at the Sapling activation height (the
-        // floor below which no shielded outputs exist) with an empty tree.
+        // Cache is empty (Ok(None)) or an error occurred: anchor from checkpoint or genesis.
+        //
+        // When a `check_point_block` is declared, seed the commitment tree from
+        // its `sapling_tree` and resume at the block after the checkpoint;
+        // otherwise start at the Sapling activation height (the floor below
+        // which no shielded outputs exist) with an empty tree.
         //
         // TODO(R39.6.4): light mode also uses `check_point_block.sapling_tree`
         // to seed the wallet's initial commitment-tree state, but the light-mode
         // compact-block scan substrate is absent/partial in reloaded
         // (CRD §39.8.0b); wiring that seeding is deferred with the scanner.
-        Err(_) => match coin.z_fields.check_point_block.as_ref() {
+        Ok(None) | Err(_) => match coin.z_fields.check_point_block.as_ref() {
             Some(check_point) => match CommitmentTree::read(check_point.sapling_tree.0.as_slice()) {
                 Ok(tree) => (check_point.height + 1, tree),
                 Err(e) => {
@@ -558,7 +493,11 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                         prev_tree_state,
                         cmus,
                     };
-                    insert_block_state(&coin.sqlite_conn(), state_to_insert).expect("Insertion should not fail");
+                    coin.z_fields
+                        .sapling_cache
+                        .insert_block_state(state_to_insert)
+                        .await
+                        .expect("Insertion should not fail");
                 }
                 processed_height += 1;
             }
@@ -580,6 +519,7 @@ pub struct ZCoinBuilder<'a> {
     conf: &'a Json,
     params: &'a UtxoActivationParams,
     secp_priv_key: &'a [u8],
+    #[cfg(not(target_arch = "wasm32"))]
     db_dir_path: PathBuf,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
@@ -611,25 +551,38 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             .await
             .mm_err(Into::into)?;
         let utxo_arc = UtxoArc::new(utxo);
-        let db_name = format!("{}_CACHE.db", self.ticker);
-        let mut db_dir_path = self.db_dir_path;
 
-        db_dir_path.push(&db_name);
-        let sqlite = tokio::task::block_in_place(move || {
-            if !db_dir_path.exists() {
-                let default_cache_path = PathBuf::from(format!("./{}", db_name));
-                if !default_cache_path.exists() {
-                    return MmError::err(ZCoinBuildError::SaplingCacheDbDoesNotExist {
-                        path: std::env::current_dir()?.join(&default_cache_path).display().to_string(),
-                    });
-                }
-                std::fs::copy(default_cache_path, &db_dir_path)?;
+        // ── Sapling state cache backend (R39.6.1) ─────────────────────────
+        // Native: open the SQLite file; WASM: open IndexedDB.
+        let sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync> = {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                use db_common::sqlite::rusqlite::Connection;
+                let db_name = format!("{}_CACHE.db", self.ticker);
+                let mut db_dir_path = self.db_dir_path;
+                db_dir_path.push(&db_name);
+                let conn = tokio::task::block_in_place(move || {
+                    if !db_dir_path.exists() {
+                        let default_cache_path = PathBuf::from(format!("./{}", db_name));
+                        if !default_cache_path.exists() {
+                            return MmError::err(ZCoinBuildError::SaplingCacheDbDoesNotExist {
+                                path: std::env::current_dir()?.join(&default_cache_path).display().to_string(),
+                            });
+                        }
+                        std::fs::copy(default_cache_path, &db_dir_path)?;
+                    }
+                    Connection::open(db_dir_path).map_err(|e| MmError::new(ZCoinBuildError::from(e)))
+                })?;
+                Arc::new(
+                    ZCoinSqliteSaplingCache::open(conn)
+                        .map_err(|e| MmError::new(ZCoinBuildError::SaplingCacheError(e.to_string())))?,
+                )
             }
-
-            let sqlite = Connection::open(db_dir_path)?;
-            init_db(&sqlite)?;
-            Ok(sqlite)
-        })?;
+            #[cfg(target_arch = "wasm32")]
+            {
+                Arc::new(ZCoinIdbSaplingCache::new(self.ticker.to_owned(), self.ctx))
+            }
+        };
 
         let (_, my_z_addr) = self
             .z_spending_key
@@ -646,14 +599,19 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             .expect("NetConfig dex_fee_z_addr must be a valid z-address")
             .expect("NetConfig dex_fee_z_addr must be a valid z-address");
 
-        let params_dir = zcash_params_path();
-        verify_zcash_params_integrity(&params_dir)?;
-        let z_tx_prover = tokio::task::block_in_place(|| {
-            LocalTxProver::new(
-                &params_dir.join(SAPLING_SPEND_NAME),
-                &params_dir.join(SAPLING_OUTPUT_NAME),
-            )
-        });
+        // Verify and load the sapling prover parameters (native only — WASM
+        // cannot build shielded transactions without the param files).
+        #[cfg(not(target_arch = "wasm32"))]
+        let z_tx_prover = {
+            let params_dir = zcash_params_path();
+            verify_zcash_params_integrity(&params_dir)?;
+            tokio::task::block_in_place(|| {
+                LocalTxProver::new(
+                    &params_dir.join(SAPLING_SPEND_NAME),
+                    &params_dir.join(SAPLING_OUTPUT_NAME),
+                )
+            })
+        };
 
         let my_z_addr_encoded = encode_payment_address(consensus_params.hrp_sapling_payment_address(), &my_z_addr);
         let my_z_key_encoded = encode_extended_spending_key(
@@ -666,10 +624,11 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             my_z_addr,
             my_z_addr_encoded,
             z_spending_key: self.z_spending_key,
+            #[cfg(not(target_arch = "wasm32"))]
             z_tx_prover,
             z_unspent_mutex: AsyncMutex::new(()),
             sapling_state_synced: AtomicBool::new(false),
-            sqlite: Mutex::new(sqlite),
+            sapling_cache,
             consensus_params,
             check_point_block: self.protocol_info.check_point_block,
             blocks_per_iteration: self.protocol_info.blocks_per_iteration,
@@ -703,7 +662,7 @@ impl<'a> ZCoinBuilder<'a> {
         conf: &'a Json,
         params: &'a UtxoActivationParams,
         secp_priv_key: &'a [u8],
-        db_dir_path: PathBuf,
+        #[cfg(not(target_arch = "wasm32"))] db_dir_path: PathBuf,
         z_spending_key: ExtendedSpendingKey,
         protocol_info: ZcoinProtocolInfo,
     ) -> ZCoinBuilder<'a> {
@@ -713,6 +672,7 @@ impl<'a> ZCoinBuilder<'a> {
             conf,
             params,
             secp_priv_key,
+            #[cfg(not(target_arch = "wasm32"))]
             db_dir_path,
             z_spending_key,
             protocol_info,
@@ -726,7 +686,7 @@ async fn z_coin_from_conf_and_params_with_z_key(
     conf: &Json,
     params: &UtxoActivationParams,
     secp_priv_key: &[u8],
-    db_dir_path: PathBuf,
+    #[cfg(not(target_arch = "wasm32"))] db_dir_path: PathBuf,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
@@ -736,6 +696,7 @@ async fn z_coin_from_conf_and_params_with_z_key(
         conf,
         params,
         secp_priv_key,
+        #[cfg(not(target_arch = "wasm32"))]
         db_dir_path,
         z_spending_key,
         protocol_info,

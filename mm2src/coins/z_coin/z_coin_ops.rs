@@ -55,6 +55,7 @@ impl ZCoin {
     }
 
     /// Generates a tx sending outputs from our address
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) async fn gen_tx(
         &self,
         t_outputs: Vec<TxOut>,
@@ -193,6 +194,7 @@ impl ZCoin {
         Ok((tx, additional_data))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn send_outputs(
         &self,
         t_outputs: Vec<TxOut>,
@@ -223,9 +225,6 @@ impl ZCoin {
         Ok(tx)
     }
 
-    #[inline(always)]
-    pub(crate) fn sqlite_conn(&self) -> MutexGuard<'_, Connection> { self.z_fields.sqlite.lock().unwrap() }
-
     pub async fn get_unspent_witness(
         &self,
         note: &Note,
@@ -233,7 +232,12 @@ impl ZCoin {
     ) -> Result<IncrementalWitness<Node>, MmError<GetUnspentWitnessErr>> {
         let mut attempts = 0;
         let states = loop {
-            let states = tokio::task::block_in_place(|| query_states_after_height(&self.sqlite_conn(), tx_height))?;
+            let states = self
+                .z_fields
+                .sapling_cache
+                .query_states_after_height(tx_height)
+                .await
+                .map_err(|e| MmError::new(GetUnspentWitnessErr::StorageError(e.to_string())))?;
             if states.is_empty() {
                 if attempts > 2 {
                     return MmError::err(GetUnspentWitnessErr::EmptyDbResult);
@@ -248,6 +252,7 @@ impl ZCoin {
         let mut tree = states[0].prev_tree_state.clone();
         let mut witness = None::<IncrementalWitness<Node>>;
 
+        use keys::hash::H256;
         let note_cmu = H256::from(note.cmu().to_bytes());
         for state in states {
             for cmu in state.cmus {

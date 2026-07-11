@@ -137,6 +137,11 @@ wasm-bindgen = { version = "0.2.50" }
 wasm-bindgen-futures = { version = "0.4.1" }
 wasm-bindgen-test = { version = "0.3.2" }
 web-sys = { version = "0.3.55", features = ["console", "Headers", "Request", "RequestInit", "RequestMode", "Response", "Window"] }
+# R39.6.1: zcash_primitives (shielded types) and zcash_client_backend (note
+# trial-decryption) are needed on WASM for sapling state sync and balance
+# reporting.  zcash_proofs (LocalTxProver) remains native-only.
+zcash_client_backend = { path = "../../librustzcash-patched/zcash_client_backend" }
+zcash_primitives = { features = ["transparent-inputs"], path = "../../librustzcash-patched/zcash_primitives" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dirs = { version = "1" }
