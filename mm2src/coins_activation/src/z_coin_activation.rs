@@ -162,7 +162,23 @@ impl From<CryptoCtxError> for ZcoinInitError {
 }
 
 impl From<ZcoinInitError> for InitStandaloneCoinError {
-    fn from(_: ZcoinInitError) -> Self { todo!() }
+    fn from(err: ZcoinInitError) -> Self {
+        match err {
+            ZcoinInitError::CoinCreationError { ticker, error } => {
+                InitStandaloneCoinError::CoinCreationError { ticker, error }
+            },
+            ZcoinInitError::CoinIsAlreadyActivated { ticker } => {
+                InitStandaloneCoinError::CoinIsAlreadyActivated { ticker }
+            },
+            ZcoinInitError::HardwareWalletsAreNotSupportedYet => {
+                InitStandaloneCoinError::PrivKeyNotAllowed("Hardware wallets are not supported yet".into())
+            },
+            ZcoinInitError::TaskTimedOut { duration } => InitStandaloneCoinError::TaskTimedOut { duration },
+            ZcoinInitError::CouldNotGetBalance(e)
+            | ZcoinInitError::CouldNotGetBlockCount(e)
+            | ZcoinInitError::Internal(e) => InitStandaloneCoinError::Internal(e),
+        }
+    }
 }
 
 impl TryFromCoinProtocol for ZcoinProtocolInfo {
