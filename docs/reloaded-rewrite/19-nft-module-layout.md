@@ -348,11 +348,19 @@ token-activation envelope specialised for the NFT protocol:
 | `protocol`          | object (coin-protocol)     | no   | Optional inline protocol descriptor for a custom (non-config) NFT entry; of NFT type carrying the platform-coin ticker. When omitted the protocol is resolved from the coin config keyed by `ticker`. |
 | `activation_params` | object                     | yes  | NFT activation parameters (below).                          |
 
+For wire compatibility with legacy token-activation envelopes,
+`enable_nft` accepts and ignores top-level `requires_notarization`,
+`priv_key_policy`, and `provider` fields when present. The canonical
+provider for activation remains `activation_params.provider`.
+
 `activation_params` carries a single required member:
 
 | Field      | Type                       | Req? | Notes                                                   |
 |------------|----------------------------|------|---------------------------------------------------------|
 | `provider` | object (tagged union)      | yes  | The indexer provider descriptor (below).                |
+
+For the same compatibility reason, `activation_params` accepts and
+ignores `requires_notarization` and `priv_key_policy` when present.
 
 `provider` is a tagged union with an externally-tagged shape:
 a `type` discriminant string selecting the provider variant and
@@ -505,8 +513,10 @@ The activation entry point has its own acceptance coverage:
 T1. **`enable_nft` wire shape.** A conformance test shall verify that
     the mmrpc-2.0 method name `enable_nft` accepts the §19.6.2 request
     fields (`ticker`, optional inline NFT `protocol`, and required
-    `activation_params.provider`) and returns the §19.6.2 success fields
-    (`platform_coin` and `nfts`) on a successful native activation.
+    `activation_params.provider`), accepts and ignores the documented
+    legacy token-activation compatibility fields, and returns the §19.6.2
+    success fields (`platform_coin` and `nfts`) on a successful native
+    activation.
 
 T2. **`enable_nft` activation failures.** A conformance test shall
     verify the functional failure categories listed in §19.6.2 for
@@ -563,10 +573,11 @@ R8. **First-class NFT activation entry point.** The subsystem shall
     expose `enable_nft` as the mmrpc-2.0 activation method for NFT
     support on the native target. The method shall accept the §19.6.2
     request shape (`ticker`, optional inline NFT `protocol`, required
-    `activation_params.provider`), and shall
-    return the §19.6.2 response shape (`nfts`, `platform_coin`). The
-    provider base URL shall be caller-supplied at RPC time; the
-    subsystem shall not embed a default indexer URL.
+    `activation_params.provider`) plus the documented legacy
+    token-activation compatibility fields, and shall return the §19.6.2
+    response shape (`nfts`, `platform_coin`). The provider base URL shall
+    be caller-supplied at RPC time; the subsystem shall not embed a
+    default indexer URL.
 
 R9. **Activation vs refresh split.** `enable_nft` shall mark NFT
     support active for the requested NFT pseudo-coin ticker and, on

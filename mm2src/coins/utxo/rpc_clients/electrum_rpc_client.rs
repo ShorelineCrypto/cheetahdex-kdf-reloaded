@@ -328,6 +328,12 @@ impl ElectrumClientImpl {
         connected
     }
 
+    pub async fn is_server_connected(&self, server_addr: &str) -> Option<bool> {
+        let connections = self.connections.lock().await;
+        let connection = connections.iter().find(|connection| connection.addr == server_addr)?;
+        Some(connection.is_connected().await)
+    }
+
     /// Check if the protocol version was checked for one of the spawned connections.
     pub async fn is_protocol_version_checked(&self) -> bool {
         for connection in self.connections.lock().await.iter() {
