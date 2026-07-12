@@ -2500,9 +2500,10 @@ fn test_process_sync_pubkey_orderbook_state_after_orders_removed() {
 
     let mut old_mem_db = clone_orderbook_memory_db(&ctx);
 
-    // pick 10 orders at random and remove them
-    let mut rng = thread_rng();
-    let to_remove = orders.choose_multiple(&mut rng, 10);
+    // Remove deterministic non-tail orders. Removing the latest inserted order can
+    // legitimately return the trie to a previous root and make sync fall back to
+    // FullTrie instead of the delta path this test is asserting.
+    let to_remove = orders.iter().take(10);
     for order in to_remove {
         remove_order(&ctx, order.uuid);
     }
