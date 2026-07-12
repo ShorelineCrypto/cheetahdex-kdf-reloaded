@@ -14,6 +14,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  RUST_BACKTRACE: "1"
+
 jobs:
   fmt:
     # Cheap fast-feedback job. Keeps a fmt-only failure from forcing a
