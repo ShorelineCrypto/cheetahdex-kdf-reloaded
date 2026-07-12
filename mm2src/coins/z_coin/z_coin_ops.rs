@@ -28,10 +28,16 @@ impl ZCoin {
         &self,
         servers: &[String],
         target_height: u64,
+        requested_start_height: Option<u64>,
     ) -> Result<u64, String> {
         self.z_fields
             .shielded_history
-            .fetch_compact_blocks_from_lightwalletd(&self.z_fields.consensus_params, servers, target_height)
+            .fetch_compact_blocks_from_lightwalletd(
+                &self.z_fields.consensus_params,
+                servers,
+                target_height,
+                requested_start_height,
+            )
             .await
     }
 

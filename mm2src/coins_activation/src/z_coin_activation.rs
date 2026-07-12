@@ -99,6 +99,14 @@ impl TxHistory for ZcoinActivationParams {
     fn tx_history(&self) -> bool { false }
 }
 
+fn requested_shielded_scan_start_height(sync_start: Option<&SyncStartpoint>) -> Option<u64> {
+    match sync_start {
+        Some(SyncStartpoint::Height(height)) => Some(u64::from(*height)),
+        Some(SyncStartpoint::Date(_)) => None,
+        None => None,
+    }
+}
+
 #[derive(Clone, Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub enum ZcoinInitError {
@@ -255,6 +263,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         if let Some(inter_iter_ms) = activation_request.inter_iteration_interval_ms {
             protocol_info.inter_iteration_interval_ms = inter_iter_ms;
         }
+        let requested_start_height = requested_shielded_scan_start_height(activation_request.sync_start.as_ref());
 
         let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?;
         let priv_key = crypto_ctx.mm2_internal_privkey_secret();
@@ -284,13 +293,17 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             light_wallet_d_servers, ..
         } = &activation_request.mode
         {
-            coin.fetch_lightwalletd_compact_blocks_to_height(light_wallet_d_servers, activation_tip)
-                .await
-                .map_err(|error| ZcoinInitError::ShieldedWalletDbScanIncomplete {
-                    ticker: ticker.clone(),
-                    activation_tip,
-                    error,
-                })?;
+            coin.fetch_lightwalletd_compact_blocks_to_height(
+                light_wallet_d_servers,
+                activation_tip,
+                requested_start_height,
+            )
+            .await
+            .map_err(|error| ZcoinInitError::ShieldedWalletDbScanIncomplete {
+                ticker: ticker.clone(),
+                activation_tip,
+                error,
+            })?;
         }
         coin.scan_shielded_wallet_db_to_height(activation_tip)
             .map_err(|error| ZcoinInitError::ShieldedWalletDbScanIncomplete {

@@ -8,6 +8,7 @@ use futures::StreamExt;
 use mm2_err_handle::prelude::*;
 use protobuf::Message;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tonic::transport::Endpoint;
 use zcash_client_backend::data_api::chain::scan_cached_blocks;
 use zcash_client_backend::proto::compact_formats as zcash_compact;
@@ -17,6 +18,11 @@ use zcash_client_sqlite::{chain::init::init_cache_database,
 use zcash_primitives::{block::BlockHash,
                        consensus::{BlockHeight, NetworkUpgrade, Parameters},
                        zip32::ExtendedFullViewingKey};
+
+const DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS: u64 = 2_880;
+const LIGHTWALLETD_BLOCK_BATCH_SIZE: u64 = 500;
+const LIGHTWALLETD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const LIGHTWALLETD_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug)]
 pub(crate) struct ZCoinShieldedHistory {
@@ -115,15 +121,17 @@ impl ZCoinShieldedHistory {
         consensus_params: &ZcoinConsensusParams,
         servers: &[String],
         target_height: u64,
+        requested_start_height: Option<u64>,
     ) -> Result<u64, String> {
-        let Some(start_height) = self.next_fetch_height(consensus_params, target_height)? else {
+        let Some(start_height) = self.next_fetch_height(consensus_params, target_height, requested_start_height)?
+        else {
             return Ok(self.scanned_height()?.unwrap_or(0));
         };
 
         let mut last_error = None;
         for server in servers {
             match self
-                .fetch_compact_blocks_from_server(server, start_height, target_height)
+                .fetch_compact_blocks_from_server(consensus_params.clone(), server, start_height, target_height)
                 .await
             {
                 Ok(fetched_height) => return Ok(fetched_height),
@@ -138,29 +146,129 @@ impl ZCoinShieldedHistory {
         &self,
         consensus_params: &ZcoinConsensusParams,
         target_height: u64,
+        requested_start_height: Option<u64>,
     ) -> Result<Option<u64>, String> {
-        let scanned_height = self.scanned_height()?.unwrap_or_else(|| {
-            consensus_params
-                .activation_height(NetworkUpgrade::Sapling)
-                .map(|h| u32::from(h).saturating_sub(1) as u64)
-                .unwrap_or(0)
-        });
-        let start_height = scanned_height + 1;
+        if let Some(scanned_height) = self.scanned_height()? {
+            return Ok((scanned_height < target_height).then_some(scanned_height + 1));
+        }
+
+        let sapling_activation_height = consensus_params
+            .activation_height(NetworkUpgrade::Sapling)
+            .map(|h| u32::from(h).saturating_sub(1) as u64)
+            .unwrap_or(0);
+        let default_recent_start = target_height.saturating_sub(DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS);
+        let requested_start_height = requested_start_height.unwrap_or(default_recent_start);
+        let start_height = requested_start_height.max(sapling_activation_height + 1);
         Ok((start_height <= target_height).then_some(start_height))
     }
 
     async fn fetch_compact_blocks_from_server(
         &self,
+        consensus_params: ZcoinConsensusParams,
         server: &str,
         start_height: u64,
         target_height: u64,
     ) -> Result<u64, String> {
+        if start_height > 0 {
+            self.ensure_lightwalletd_checkpoint(consensus_params.clone(), server, start_height - 1)
+                .await?;
+        }
+
+        let mut fetched_height = start_height.saturating_sub(1);
+        let mut batch_start = start_height;
+        while batch_start <= target_height {
+            let batch_end = std::cmp::min(target_height, batch_start + LIGHTWALLETD_BLOCK_BATCH_SIZE - 1);
+            fetched_height = self
+                .fetch_compact_block_batch_from_server(server, batch_start, batch_end)
+                .await?;
+            if fetched_height < batch_end {
+                return Err(format!(
+                    "lightwalletd returned compact blocks through {}, below requested batch end {}",
+                    fetched_height, batch_end
+                ));
+            }
+            batch_start = batch_end + 1;
+        }
+
+        Ok(fetched_height)
+    }
+
+    async fn connect_lightwalletd(
+        server: &str,
+    ) -> Result<z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transport::Channel>, String>
+    {
         let endpoint = Endpoint::from_shared(lightwalletd_endpoint(server))
             .map_err(|e| e.to_string())?
+            .connect_timeout(LIGHTWALLETD_CONNECT_TIMEOUT)
+            .timeout(LIGHTWALLETD_REQUEST_TIMEOUT)
+            .http2_keep_alive_interval(Duration::from_secs(20))
+            .keep_alive_timeout(Duration::from_secs(10))
+            .keep_alive_while_idle(true)
             .connect()
             .await
             .map_err(|e| e.to_string())?;
-        let mut client = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient::new(endpoint);
+        Ok(z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient::new(
+            endpoint,
+        ))
+    }
+
+    async fn ensure_lightwalletd_checkpoint(
+        &self,
+        consensus_params: ZcoinConsensusParams,
+        server: &str,
+        checkpoint_height: u64,
+    ) -> Result<(), String> {
+        if self.scanned_height()?.is_some() {
+            return Ok(());
+        }
+
+        let mut client = Self::connect_lightwalletd(server).await?;
+        let request = z_coin_grpc::BlockId {
+            height: checkpoint_height,
+            hash: Vec::new(),
+        };
+        let tree_state = tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, client.get_tree_state(request))
+            .await
+            .map_err(|_| format!("GetTreeState timed out at height {}", checkpoint_height))?
+            .map_err(|e| e.to_string())?
+            .into_inner();
+        self.init_wallet_checkpoint_from_tree_state(consensus_params, tree_state)
+    }
+
+    fn init_wallet_checkpoint_from_tree_state(
+        &self,
+        consensus_params: ZcoinConsensusParams,
+        tree_state: z_coin_grpc::TreeState,
+    ) -> Result<(), String> {
+        if self.scanned_height()?.is_some() {
+            return Ok(());
+        }
+
+        let hash = decode_32_byte_hex("lightwalletd tree-state block hash", &tree_state.hash)?;
+        let sapling_tree = decode_hex_field("lightwalletd tree-state sapling tree", &tree_state.tree)?;
+        let wallet_db = WalletDb::for_path(&self.wallet_db_path, consensus_params).map_err(|e| e.to_string())?;
+        init_blocks_table(
+            &wallet_db,
+            BlockHeight::from_u32(tree_state.height.try_into().map_err(|_| {
+                format!(
+                    "lightwalletd tree-state height {} does not fit into u32",
+                    tree_state.height
+                )
+            })?),
+            BlockHash(hash),
+            tree_state.time,
+            sapling_tree.as_slice(),
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    async fn fetch_compact_block_batch_from_server(
+        &self,
+        server: &str,
+        start_height: u64,
+        target_height: u64,
+    ) -> Result<u64, String> {
+        let mut client = Self::connect_lightwalletd(server).await?;
         let request = z_coin_grpc::BlockRange {
             start: Some(z_coin_grpc::BlockId {
                 height: start_height,
@@ -171,14 +279,31 @@ impl ZCoinShieldedHistory {
                 hash: Vec::new(),
             }),
         };
-        let mut stream = client
-            .get_block_range(request)
+        let response = tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, client.get_block_range(request))
             .await
+            .map_err(|_| {
+                format!(
+                    "GetBlockRange timed out for compact block batch {}..{}",
+                    start_height, target_height
+                )
+            })?
             .map_err(|e| e.to_string())?
             .into_inner();
+        let mut stream = response;
 
         let mut last_height = start_height.saturating_sub(1);
-        while let Some(block) = stream.next().await {
+        loop {
+            let Some(block) = tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, stream.next())
+                .await
+                .map_err(|_| {
+                    format!(
+                        "lightwalletd compact block stream timed out for batch {}..{}",
+                        start_height, target_height
+                    )
+                })?
+            else {
+                break;
+            };
             let block = block.map_err(|e| e.to_string())?;
             last_height = block.height;
             self.insert_compact_block(convert_compact_block(block)?)?;
@@ -370,6 +495,18 @@ fn lightwalletd_endpoint(server: &str) -> String {
     } else {
         format!("https://{}", server)
     }
+}
+
+fn decode_hex_field(name: &str, value: &str) -> Result<Vec<u8>, String> {
+    let value = value.strip_prefix("0x").unwrap_or(value);
+    hex::decode(value).map_err(|e| format!("Invalid {} hex: {}", name, e))
+}
+
+fn decode_32_byte_hex(name: &str, value: &str) -> Result<[u8; 32], String> {
+    let bytes = decode_hex_field(name, value)?;
+    bytes
+        .try_into()
+        .map_err(|bytes: Vec<u8>| format!("Invalid {} length: expected 32 bytes, got {}", name, bytes.len()))
 }
 
 fn convert_compact_block(block: z_coin_grpc::CompactBlock) -> Result<zcash_compact::CompactBlock, String> {
@@ -595,6 +732,27 @@ mod tests {
             ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn empty_wallet_uses_recent_lightwalletd_start_when_no_start_requested() {
+        let history = open_test_history();
+        let start = history.next_fetch_height(&test_params(), 10_000, None).unwrap();
+        assert_eq!(start, Some(10_000 - DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS));
+    }
+
+    #[test]
+    fn empty_wallet_honors_explicit_start_above_sapling_activation() {
+        let history = open_test_history();
+        let start = history.next_fetch_height(&test_params(), 10_000, Some(7_000)).unwrap();
+        assert_eq!(start, Some(7_000));
+    }
+
+    #[test]
+    fn existing_wallet_state_resumes_from_scanned_height() {
+        let history = open_checkpointed_test_history(42);
+        let start = history.next_fetch_height(&test_params(), 10_000, None).unwrap();
+        assert_eq!(start, Some(43));
     }
 
     #[test]
