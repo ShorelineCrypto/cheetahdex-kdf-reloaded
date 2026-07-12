@@ -117,6 +117,17 @@ pub enum ZcoinInitError {
     },
     CouldNotGetBalance(String),
     CouldNotGetBlockCount(String),
+    #[display(
+        fmt = "Shielded wallet DB scanner did not complete for {} through activation tip {}: {}",
+        ticker,
+        activation_tip,
+        error
+    )]
+    ShieldedWalletDbScanIncomplete {
+        ticker: String,
+        activation_tip: u64,
+        error: String,
+    },
     Internal(String),
 }
 
@@ -176,6 +187,7 @@ impl From<ZcoinInitError> for InitStandaloneCoinError {
             ZcoinInitError::TaskTimedOut { duration } => InitStandaloneCoinError::TaskTimedOut { duration },
             ZcoinInitError::CouldNotGetBalance(e)
             | ZcoinInitError::CouldNotGetBlockCount(e)
+            | ZcoinInitError::ShieldedWalletDbScanIncomplete { error: e, .. }
             | ZcoinInitError::Internal(e) => InitStandaloneCoinError::Internal(e),
         }
     }
@@ -255,7 +267,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             protocol_info,
         )
         .await
-        .mm_err(|e| ZcoinInitError::from_build_err(e, ticker))?;
+        .mm_err(|e| ZcoinInitError::from_build_err(e, ticker.clone()))?;
 
         task_handle
             .update_in_progress_status(ZcoinInProgressStatus::Scanning)
@@ -263,6 +275,29 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         while !coin.is_sapling_state_synced() {
             Timer::sleep(1.).await;
         }
+        let activation_tip = coin
+            .current_block()
+            .compat()
+            .await
+            .map_to_mm(ZcoinInitError::CouldNotGetBlockCount)?;
+        if let ZcoinRpcMode::Light {
+            light_wallet_d_servers, ..
+        } = &activation_request.mode
+        {
+            coin.fetch_lightwalletd_compact_blocks_to_height(light_wallet_d_servers, activation_tip)
+                .await
+                .map_err(|error| ZcoinInitError::ShieldedWalletDbScanIncomplete {
+                    ticker: ticker.clone(),
+                    activation_tip,
+                    error,
+                })?;
+        }
+        coin.scan_shielded_wallet_db_to_height(activation_tip)
+            .map_err(|error| ZcoinInitError::ShieldedWalletDbScanIncomplete {
+                ticker: ticker.clone(),
+                activation_tip,
+                error,
+            })?;
         Ok(coin)
     }
 

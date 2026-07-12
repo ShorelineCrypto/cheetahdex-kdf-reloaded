@@ -14,6 +14,58 @@ impl ZCoin {
     #[inline(always)]
     pub fn my_z_address_encoded(&self) -> String { self.z_fields.my_z_addr_encoded.clone() }
 
+    #[inline(always)]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn shielded_history(&self) -> &ZCoinShieldedHistory { &self.z_fields.shielded_history }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn shielded_wallet_db_scan_complete(&self) -> bool {
+        self.z_fields.wallet_db_scan_complete.load(AtomicOrdering::Relaxed)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn fetch_lightwalletd_compact_blocks_to_height(
+        &self,
+        servers: &[String],
+        target_height: u64,
+    ) -> Result<u64, String> {
+        self.z_fields
+            .shielded_history
+            .fetch_compact_blocks_from_lightwalletd(&self.z_fields.consensus_params, servers, target_height)
+            .await
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn scan_shielded_wallet_db_to_height(&self, target_height: u64) -> Result<u64, String> {
+        let history = self.z_fields.shielded_history.clone();
+        let consensus_params = self.z_fields.consensus_params.clone();
+        let scan_result =
+            tokio::task::block_in_place(move || history.scan_cached_blocks_to_height(consensus_params, target_height));
+
+        match scan_result {
+            Ok(scanned_height) => {
+                self.z_fields
+                    .wallet_db_scanned_through
+                    .store(scanned_height, AtomicOrdering::Relaxed);
+                self.z_fields
+                    .wallet_db_scan_complete
+                    .store(true, AtomicOrdering::Relaxed);
+                Ok(scanned_height)
+            },
+            Err(err) => {
+                if let Ok(Some(scanned_height)) = self.z_fields.shielded_history.scanned_height() {
+                    self.z_fields
+                        .wallet_db_scanned_through
+                        .store(scanned_height, AtomicOrdering::Relaxed);
+                }
+                self.z_fields
+                    .wallet_db_scan_complete
+                    .store(false, AtomicOrdering::Relaxed);
+                Err(err)
+            },
+        }
+    }
+
     /// Returns all unspents included currently unspendable (not confirmed)
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) async fn my_z_unspents_ordered(&self) -> UtxoRpcResult<Vec<ZUnspent>> {

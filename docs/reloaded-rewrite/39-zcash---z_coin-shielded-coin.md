@@ -253,28 +253,25 @@ mainnet constants.
 
 > **Status update (reloaded).** Implemented (commit f1a0a338e). The shielded
 > builder now sources all Zcash network parameters from the coin config's
-> `protocol.protocol_data` via the typed `ZcoinProtocolInfo` payload:
+> `protocol.protocol_data` payload:
 >
 > - **Consensus parameters (R39.6.4 §1).** The builder reads
 >   `consensus_params` from `protocol_data` and uses its `coin_type`, `hrp_sapling_*`
 >   prefixes, `b58_*` prefixes, and activation-height policy throughout the running
 >   coin (address encoding/decoding, key derivation, scanning, transaction
->   construction, and commitment-tree sync). The `ZcashConsensusParams` struct
->   implements `zcash_primitives::consensus::Parameters` to drive consensus
->   validation. A ZHTLC coin with non-mainnet parameters (e.g., different HRP or
->   `coin_type`) now derives keys and addresses under those declared parameters,
->   not Zcash-mainnet defaults.
+>   construction, and commitment-tree sync). A ZHTLC coin with non-mainnet
+>   parameters (e.g., different HRP or `coin_type`) now derives keys and
+>   addresses under those declared parameters, not Zcash-mainnet defaults.
 > - **Sync checkpoint (R39.6.4 §3).** The builder seeds the wallet's
 >   commitment-tree cache at `check_point_block.height`, deserialized from the
 >   checkpoint's `sapling_tree`, falling back to `sapling_activation_height` when
 >   absent (native mode). Light-mode checkpoint-to-height tree seeding is deferred
 >   (CRD 39.8.0b).
 > - **HD derivation path (R39.6.4 §2).** The `z_derivation_path` field is parsed
->   from `protocol_data` and stored in `ZcoinProtocolInfo` for use when the key
->   policy is HD-derived. The current implementation enforces
->   `PrivKeyActivationPolicy::IguanaPrivKey` (single-key mode), so `z_derivation_path`
->   is not consulted; support for HD-derived key policies is deferred to a future
->   enhancement.
+>   from `protocol_data` and retained for use when the key
+>   policy is HD-derived. The current implementation is limited to the single-key
+>   policy, so `z_derivation_path` is not consulted; support for HD-derived key
+>   policies is deferred to a future enhancement.
 > - **ZOMBIE fixtures.** Test fixtures updated to carry full `protocol_data` with
 >   Zcash-mainnet parameters; bare `{"type":"ZHTLC"}` is now non-conformant per
 >   R39.1.2.
@@ -290,80 +287,132 @@ mainnet constants.
 > RPC interface; the authoritative reference is the Komodo DeFi Framework API
 > documentation for `z_coin_tx_history`. Behaviour is specified abstractly.
 
-> **Feasibility verdict (reloaded): (B) SUBSTRATE-BLOCKED — ship the clean
-> published failure now; full data path is a forward port.** The wire contract
-> below is dictated and stable, but the *data* it serves cannot be produced on
-> reloaded's current substrate. See §39.8.0 for the verdict, the role-level
-> upstream behaviour it is measured against, the clean-failure contract the
-> reloaded build must honour today (R39.8.0a), and the missing-substrate list a
-> real implementation would require (R39.8.0b).
+### 39.8.0 Shielded history is activation-owned wallet state
 
-### 39.8.0 Feasibility verdict, upstream behaviour & clean-failure contract
+R39.8.0a A successfully activated shielded coin shall have an initialized
+shielded-wallet history store. The store is part of ZCoin activation, not the
+generic v2 UTXO history background fetcher. A terminal activation result for
+ARRR / ZCoin in Light or Native mode means the wallet database exists, contains
+the tracked account/viewing key, has scanned through the activation tip selected
+by the sync start policy, and can be queried by `z_coin_tx_history`.
 
-**Role-level behaviour this method is measured against (informative).** A
-"finished" shielded transaction history is a *wallet-derived* history: for every
-shielded transaction it must state which outputs the wallet received
-(`received_by_me`), which of the wallet's notes were spent (`spent_by_me`), the
-participating shielded address sets (`from`/`to`), the net balance change, the
-fee, and the mining height. Producing those values for a privacy-preserving
-(Sapling) coin requires trial-decrypting the chain's shielded outputs with the
-wallet's incoming-viewing key and tracking note nullifiers to detect spends —
-i.e. a **light-client shielded wallet**. In the reference behaviour this is
-realised by a light-client shielded-wallet database (the public `zcash`
-light-client wallet-DB schema: scanned blocks, wallet transactions, and
-received/spent shielded notes) that is filled by a background **compact-block
-scanner** consuming the lightwalletd gRPC stream during and after activation.
-`z_coin_tx_history` then reads one page straight out of that wallet database; the
-`internal_id` used for `FromId` paging is that database's monotonically
-increasing **signed-integer transaction row identifier**, which is why the
-shielded paging key is an integer (R39.8.4, R39.8.10) rather than the opaque
-byte-string identifier of the generic v2 method.
+R39.8.0b Activation shall not report shielded sync as finished merely because a
+Sapling commitment-tree or block-state cache has reached the backend tip. The
+terminal state is valid only after compact blocks have also been validated and
+applied to the shielded wallet database so received notes, note nullifiers,
+spend links, witnesses, and wallet transactions are available to the history and
+balance paths.
 
-**Verdict: (B) SUBSTRATE-BLOCKED.** Reloaded's `ZCoin` is a native-full-node
-port. Its only local shielded store is a commitment-tree **creation cache** used
-to build/witness outgoing shielded transactions; it has no wallet-history store,
-no incoming-viewing-key compact-block scanner, no per-note received/spent
-tracking, and therefore no signed-integer `internal_id` keyspace to page over. A
-native full node does not expose this project's shielded note ownership (the
-project manages its own shielded keys, not the node's wallet), so the
-`received_by_me` / `spent_by_me` / `from` / `to` values cannot be derived from
-the current substrate by any bounded change. Fabricating, omitting, or
-partially guessing those values would be a correctness and privacy hazard.
-Accordingly the method is **not** deliverable as a real data path now; the honest
-finish is a published, documented failure plus this forward-spec.
+R39.8.0c The generic `my_tx_history` v2 method is not the shielded transaction
+history interface. For an activated ZCoin it shall not be used to synthesize
+shielded history from the generic UTXO history store; it shall reject the coin as
+unsupported for that method. Shielded callers, including Desktop, shall use
+`z_coin_tx_history` for ARRR/ZCoin transaction display.
 
-R39.8.0a **Clean-failure contract (current substrate).** On the current
-native-only substrate the build shall still **dispatch** `z_coin_tx_history`
-over the mmrpc 2.0 envelope and apply the boundary validation of §39.8.1–§39.8.2
-so that genuine input errors return their documented discriminants — an
-unactivated `coin` returns `CoinIsNotActive` (404) and an activated non-shielded
-coin returns `NotSupportedFor` (400). For an activated shielded coin, because no
-wallet-history store exists, the method shall return the documented
-`StorageIsNotInitialized` discriminant (HTTP 500) via the standard v2 error
-envelope. It shall **never** panic, never fabricate or partially synthesize
-history entries, and never emit shielded amounts/addresses it cannot derive. The
-failure is stable and documented, so a caller receives a well-formed,
-discriminated response rather than an unknown-method error or a crash.
+R39.8.0d After a successful Light activation of ARRR, an LTC-to-ARRR swap that
+pays the wallet's shielded address shall become visible through
+`z_coin_tx_history` once the ARRR transaction is mined and scanned. Returning
+`StorageIsNotInitialized` for that activated ARRR coin is non-conformant unless
+the local wallet database is genuinely unavailable or corrupt and the coin should
+not have reached a normal terminal activation state.
 
-R39.8.0b **Missing substrate for the real implementation (forward port).**
-Delivering the full R39.8.9 data path requires porting, in order:
-1. a **light-client shielded-wallet database** (the public `zcash` light-client
-   wallet-DB schema — scanned blocks, wallet transactions, received notes with
-   value and spent-linkage) as a per-coin local store;
-2. an **incoming-viewing-key compact-block scanner** that consumes the
-   lightwalletd gRPC compact-block stream, trial-decrypts shielded outputs,
-   records received notes, and tracks nullifiers to mark spends — running as a
-   background sync loop during/after activation (this is the §39.2 light mode and
-   §39.4.2 note-scanning substrate, which reloaded also lacks; see open
-   question);
-3. a stable, monotonically increasing **signed-integer transaction identifier**
-   keyspace for `internal_id` / `FromId` paging, sourced from that wallet DB;
-4. the shared v2 history-request **`target`** field on the request envelope so
-   the dictated wire shape (R39.8.3, R39.8.5) is accepted and echoed.
+### 39.8.0.1 Activation trigger conditions
 
-Once that substrate exists, R39.8.9 specifies the handler behaviour unchanged and
-this chapter becomes a driving-spec for the real data path. Until then R39.8.0a
-is the binding behaviour.
+R39.8.0e On every `init_z_coin` activation for a ZCoin, the implementation shall
+create or open two per-coin local stores before the coin is returned active:
+
+- a compact-block cache keyed by block height, storing the serialized compact
+  block data fetched from the configured shielded backend;
+- a shielded wallet database keyed by coin/account state, storing scanned
+  blocks, tracked account viewing keys, wallet transactions, received notes,
+  sent-note metadata, and Sapling witnesses.
+
+R39.8.0f In Light mode, activation shall use the configured Electrum servers for
+the transparent backend and the configured `light_wallet_d_servers` for compact
+block and shielded note scanning. In Native mode, activation shall use the native
+Zcash-family backend as the compact-block source. Both modes shall feed the same
+shielded wallet database contract and the same `z_coin_tx_history` data path.
+
+R39.8.0g The sync start point is resolved before wallet scanning:
+
+- an explicit height starts from that height, floored at
+  `sapling_activation_height`;
+- an explicit date starts from the backend block height resolved for that date,
+  floored at `sapling_activation_height`;
+- `earliest` starts from `sapling_activation_height`;
+- an omitted start point may continue from existing local wallet/cache state
+  when that state exists; otherwise it shall use the implementation's default
+  recent-start policy, floored at `sapling_activation_height`.
+
+R39.8.0h If a caller supplies a start point that differs from existing local
+scan state, activation shall rewind or recreate the compact-block cache and
+wallet database to a safe height before rescanning. If the caller explicitly
+requests reuse of previous sync state and a valid previous state exists,
+activation may continue from that state. The activation result shall expose the
+requested start, whether the request was below Sapling activation, and the actual
+start height used.
+
+### 39.8.0.2 Storage and schema expectations
+
+R39.8.0i The native wallet database shall be compatible with the public Zcash
+light-client wallet schema used by `zcash_client_sqlite`, including at least the
+logical tables `accounts`, `blocks`, `transactions`, `received_notes`,
+`sent_notes`, and `sapling_witnesses`. The schema shall preserve the database's
+monotonically increasing signed transaction row identifier, because
+`z_coin_tx_history` exposes that identifier as `internal_id` and accepts it in
+`FromId` paging.
+
+R39.8.0j The WASM wallet database shall preserve the same logical data model in
+IndexedDB. Its table names may be namespaced for the runtime, but it shall store
+the same categories of data: accounts/viewing keys, scanned blocks, wallet
+transactions, received notes with value and optional spent linkage, sent-note
+metadata, and Sapling witnesses. It shall also provide stable per-transaction
+integer identifiers for shielded history paging.
+
+R39.8.0k The compact-block cache shall store compact blocks by height and support
+querying the latest, earliest, and ranged block data, plus rewinding to a height.
+It is not a replacement for the shielded wallet database: it is only the scanned
+block source from which wallet notes, transactions, nullifiers, and witnesses are
+derived.
+
+R39.8.0l The wallet database shall be initialized with the wallet's extended full
+viewing key and the configured checkpoint block when available. The checkpoint's
+height, hash, timestamp, and Sapling tree seed the scanned-block state so the
+wallet can start from the resolved sync point instead of replaying from Sapling
+activation.
+
+### 39.8.0.3 Scanner behavior
+
+R39.8.0m The shielded scanner shall run during activation and continue after
+activation as the coin's background shielded sync loop. During activation it
+shall report observable progress for compact-block cache update and wallet-db
+building, and activation shall wait until the wallet database is scanned through
+the current activation tip before returning success.
+
+R39.8.0n The scanner shall fetch compact blocks from the configured shielded
+backend, cache them by height, validate that scanned heights are sequential and
+that block hashes link to the previous scanned block, and rewind/rescan on chain
+continuity failures instead of accepting inconsistent wallet history.
+
+R39.8.0o The scanner shall trial-decrypt Sapling outputs with the wallet's
+incoming viewing capability, record notes belonging to tracked accounts, advance
+the Sapling commitment tree, maintain incremental witnesses, track note
+nullifiers, and mark a received note as spent when a later scanned transaction
+spends its nullifier. These records are the source of `received_by_me`,
+`spent_by_me`, and `my_balance_change`.
+
+R39.8.0p Generated shielded transactions shall coordinate with the scanner so the
+same wallet note is not selected concurrently by multiple sends or swaps. After
+broadcast, the scanner shall keep following the transaction until it is either
+scanned into the wallet database or no longer available from the backend. Change
+outputs and outgoing spends shall become reflected in balance and
+`z_coin_tx_history` only through the wallet database scan state.
+
+R39.8.0q Unconfirmed shielded outputs are not spendable merely because the local
+process created or observed them. Spendable balance, transaction history, and
+post-swap Desktop display shall reflect confirmed wallet-db scan results, with
+the existing locked-note/change tracking used only to prevent unsafe local
+double-spends while waiting for confirmation.
 
 ### 39.8.1 Envelope, method string & platform gate
 
@@ -375,10 +424,11 @@ standard v2 `{"mmrpc":"2.0","result":{...}}` success envelope; errors use the v2
 error envelope (`error`, `error_path`, `error_trace`, `error_type`,
 `error_data`).
 
-R39.8.2 The method is **native-only**, consistent with the ZCoin platform gate
-(§39.1). It is resolved against the activated coin named by `coin` and shall
-succeed only when that coin is an activated shielded (ZCoin) coin; any other
-activated coin type is rejected (see R39.8.6).
+R39.8.2 The method is available on every platform where an activated ZCoin has
+the shielded wallet database required by §39.8.0. It is resolved against the
+activated coin named by `coin` and shall succeed only when that coin is an
+activated shielded (ZCoin) coin; any other activated coin type is rejected (see
+R39.8.6).
 
 ### 39.8.2 Request parameters
 
@@ -459,44 +509,61 @@ operator-facing wording is not normative):
 | `RpcError` | 500 | A backend RPC error occurred while resolving tip height or fetching verbose transaction data. |
 | `Internal` | 500 | An otherwise-unclassified internal error (e.g. address resolution). |
 
-> **Shared error surface (corpus-faithful).** `z_coin_tx_history` returns the
-> **same shared v2 transaction-history error type (`MyTxHistoryErrorV2`)** as the
-> generic `my_tx_history` (v2) method — upstream reuses that one type for both
-> methods. The HTTP statuses in the table above are therefore *inherited* from
-> that shared type's status mapping exactly as upstream defines it
+> **Shared error surface (corpus-faithful).** `z_coin_tx_history` uses the same
+> public v2 transaction-history error discriminants and HTTP status mapping as
+> the generic `my_tx_history` (v2) method. The HTTP statuses in the table above
+> are therefore part of the shared public error contract
 > (`CoinIsNotActive` → 404; `NotSupportedFor` and `InvalidTarget` → 400;
 > `StorageIsNotInitialized`, `StorageError`, `RpcError`, and `Internal` → 500).
 > The **published wire contract is the `error_type` discriminant names**; the
-> HTTP integers are the shared type's inherited mapping rather than a
-> per-method-published value.
+> HTTP integers are the shared public status mapping rather than separate
+> per-method values.
 
-> **Reloaded alignment.** Reloaded's shared `MyTxHistoryErrorV2` HTTP status
+> **Reloaded alignment.** Reloaded's shared transaction-history HTTP status
 > mapping is aligned to the upstream values recorded in the table above
 > (`CoinIsNotActive` → 404; `NotSupportedFor` → 400; `StorageIsNotInitialized`,
-> `StorageError`, `RpcError` → 500). Because this is a single shared enum
-> consumed by both `my_tx_history` and `z_coin_tx_history`, the alignment applies
-> to both methods; the `error_type` discriminant names — the published contract —
-> are identical and unaffected. (Reloaded's enum is a faithful subset of
-> upstream's: it does not carry the `InvalidTarget` / `Internal` variants, and it
-> adds a reloaded-only wasm-guard discriminant.)
+> `StorageError`, `RpcError` → 500). The `error_type` discriminant names are the
+> published contract and remain unchanged.
 
 ### 39.8.5 Functional behaviour
 
-> **Gated by §39.8.0 (verdict B).** R39.8.9 is the **forward-spec data path**;
-> it becomes binding only once the §39.8.0b substrate is ported. On the current
-> reloaded substrate the binding behaviour is the clean failure of R39.8.0a.
+R39.8.9 For an activated shielded coin with an initialized wallet database,
+`z_coin_tx_history` shall return one requested page of shielded transaction
+details derived from wallet scan state and confirmed transaction data. Each
+entry shall expose the address sets, wallet-owned spent and received amounts,
+net wallet balance change, fee, block height, timestamp, confirmation count
+relative to the current backend tip, and the stable internal paging identifier.
+The response shall also report `skipped`, `total`, and `total_pages` metadata
+consistent with the stored shielded history and the effective paging request.
 
-R39.8.9 The handler shall: resolve the activated coin by `coin` and confirm it
-is a shielded coin; determine the current tip height from the coin's backend;
-read one page of stored shielded transaction records from the coin's local
-wallet history store honouring `limit` and `paging_options`; resolve the full
-(verbose) transaction data for those records (and for their referenced previous
-transactions) from a local cache or, on a miss, the backend; and assemble each
-record into a shielded transaction detail entry (R39.8.7) -- deriving the
-`from`/`to` address sets, the own-wallet spent/received amounts and net balance
-change, the fee, and the confirmation count relative to the tip. The response
-also reports paging metadata (`skipped`, `total`, `total_pages`) computed from
-the stored history.
+R39.8.9a The history page order shall be newest mined transaction first. For
+transactions in the same block, ordering shall be stable by the wallet
+database's transaction identifier. `PageNumber` paging skips
+`(page_number - 1) * limit` entries in that order. `FromId` paging starts after
+the entry identified by the supplied `internal_id` according to that same order;
+an unknown `FromId` is a storage/history error rather than a silent empty page.
+
+R39.8.9b The `received_by_me` amount is the sum of wallet-owned received notes
+whose transaction is the history entry's transaction. The `spent_by_me` amount
+is the sum of wallet-owned received notes whose spent-link points to the history
+entry's transaction. `my_balance_change` is `received_by_me - spent_by_me`.
+
+R39.8.9c The `from` address set shall include transparent input addresses that
+can be recovered from previous transaction outputs and shall include the wallet's
+own shielded address when the wallet spent shielded notes in the transaction. A
+fully shielded incoming transaction from another wallet may have an empty `from`
+set because the sender's shielded address is not generally recoverable.
+
+R39.8.9d The `to` address set shall include transparent output addresses that
+can be decoded from the transaction outputs, the wallet's own shielded address
+when the wallet received shielded notes in the transaction, and shielded
+addresses recoverable from outgoing viewing information for wallet-created
+outputs such as change, swap, fee, or burn outputs.
+
+R39.8.9e `transaction_fee` shall be computed from the transparent input value,
+transparent output value, and the Sapling value balance of the full transaction.
+`confirmations` shall be zero when the transaction height is above the backend
+tip; otherwise it is `current_block + 1 - block_height`.
 
 ### 39.8.6 Relationship to the generic `my_tx_history` v2 method
 
@@ -519,6 +586,15 @@ is therefore a distinct method rather than a branch of `my_tx_history`:
 > echoed but does not scope the returned shielded transactions. Reloaded keeps
 > this envelope-compatible acceptance to preserve the dictated wire contract.
 
+R39.8.11 `StorageIsNotInitialized` remains a valid error discriminant for
+history methods when the relevant local history store is genuinely absent. For
+`z_coin_tx_history`, however, a normal successful ZCoin activation initializes
+the shielded wallet database. Therefore an activated ARRR/ZCoin that reached the
+terminal activation state after wallet-db scanning shall not return
+`StorageIsNotInitialized` from `z_coin_tx_history`; if the store cannot be
+opened, the activation path shall fail or the history path shall return a
+storage error that reflects the store failure.
+
 ## 39.7 Acceptance criteria (chapter)
 
 - Baseline: a light-mode shielded coin activates via `init_z_coin`, advances
@@ -537,14 +613,20 @@ is therefore a distinct method rather than a branch of `my_tx_history`:
   sync from the declared `check_point_block` (or `sapling_activation_height`
   when absent), not from hardcoded mainnet constants.
 - R39.6.4 remains pending completion (HD-derived key policy support deferred).
-- `z_coin_tx_history` (mmrpc 2.0, native-only) is **substrate-blocked** (§39.8.0,
-  verdict B). On the current substrate it is dispatched and validates input:
-  inactive coins return `CoinIsNotActive` (404), activated non-shielded coins
-  return `NotSupportedFor` (400), and an activated shielded coin returns the
-  documented `StorageIsNotInitialized` (500) — no panic, no fabricated history
-  (R39.8.0a).
-- Forward-spec acceptance (once the §39.8.0b substrate is ported):
-  `z_coin_tx_history` returns a paginated page of shielded transaction detail
+- Shielded history activation: a Light-mode ARRR activation initializes both the
+  compact-block cache and shielded wallet database, reports compact-block and
+  wallet-db scan progress, and reaches terminal activation only after wallet-db
+  scanning is complete through the activation tip (§39.8.0).
+- ARRR post-swap display: after an LTC-to-ARRR swap pays the activated wallet's
+  shielded address and the ARRR transaction is mined and scanned,
+  `z_coin_tx_history` returns a transaction entry with positive
+  `received_by_me` and `my_balance_change`, includes the wallet shielded address
+  in `to`, reports `sync_status: Finished`, and does not return
+  `StorageIsNotInitialized` (§39.8.0d, §39.8.9).
+- Generic history separation: for an activated ZCoin, generic `my_tx_history`
+  v2 rejects the coin as unsupported for that method; Desktop uses
+  `z_coin_tx_history` for shielded history (§39.8.0c).
+- `z_coin_tx_history` returns a paginated page of shielded transaction detail
   entries for an activated shielded coin, honours `limit` and both
   `PageNumber`/`FromId` paging modes, echoes paging metadata, reports
   `sync_status: Finished`, and rejects non-shielded coins (`NotSupportedFor`)

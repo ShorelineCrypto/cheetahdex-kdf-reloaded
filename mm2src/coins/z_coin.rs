@@ -38,10 +38,10 @@ use mm2_err_handle::prelude::*;
 use primitives::bytes::Bytes;
 use rpc::v1::types::{Bytes as BytesJson, ToTxHash, Transaction as RpcTransaction, H256 as H256Json};
 use script::{Builder as ScriptBuilder, Opcode, Script, TransactionInputSigner};
-use serde_json::Value as Json;
+use serde_json::{json, Value as Json};
 use serialization::{deserialize, CoinVariant};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Weak};
 use zcash_client_backend::decrypt_transaction;
 use zcash_client_backend::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
@@ -83,6 +83,10 @@ use z_coin_sapling_cache::ZCoinIdbSaplingCache;
 #[cfg(not(target_arch = "wasm32"))]
 use z_coin_sapling_cache::ZCoinSqliteSaplingCache;
 use z_coin_sapling_cache::{SaplingBlockState, SaplingStateCacheOps, ZCoinSaplingCacheError};
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod z_coin_wallet_db;
+#[cfg(not(target_arch = "wasm32"))]
+use z_coin_wallet_db::ZCoinShieldedHistory;
 
 /// `ZP2SHSpendError` compatible `TransactionErr` handling macro.
 macro_rules! try_ztx_s {
@@ -310,6 +314,16 @@ pub struct ZCoinFields {
     sapling_state_synced: AtomicBool,
     /// Platform-agnostic sapling state cache (SQLite on native, IndexedDB on WASM).
     sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync>,
+    /// Native zcash_client_sqlite-compatible compact-block cache and wallet database.
+    #[cfg(not(target_arch = "wasm32"))]
+    shielded_history: Arc<ZCoinShieldedHistory>,
+    /// True only after the zcash_client_sqlite wallet DB has scanned through
+    /// the activation tip. This is intentionally separate from the legacy
+    /// Sapling commitment-cache flag (R39.8.0a/b).
+    #[cfg(not(target_arch = "wasm32"))]
+    wallet_db_scan_complete: AtomicBool,
+    #[cfg(not(target_arch = "wasm32"))]
+    wallet_db_scanned_through: AtomicU64,
     /// Zcash consensus/network parameters sourced from `protocol_data`; the
     /// single authority for this coin's network-parameter lookups (R39.6.4).
     consensus_params: ZcoinConsensusParams,
@@ -344,6 +358,26 @@ impl Transaction for ZTransaction {
         let mut bytes = self.txid().0.to_vec();
         bytes.reverse();
         bytes.into()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn z_coin_history_sync_status(
+    wallet_db_scan_complete: bool,
+    wallet_db_scanned_through: u64,
+    sapling_state_synced: bool,
+) -> HistorySyncState {
+    if !wallet_db_scan_complete {
+        return HistorySyncState::InProgress(json!({
+            "type": "shielded_wallet_db_scan",
+            "scanned_through": wallet_db_scanned_through
+        }));
+    }
+
+    if sapling_state_synced {
+        HistorySyncState::Finished
+    } else {
+        HistorySyncState::InProgress(json!({ "type": "sapling_state_cache_scan" }))
     }
 }
 
@@ -391,6 +425,39 @@ mod native_sapling_cache_tests {
         assert!(cache_path.exists());
 
         let _ = std::fs::remove_dir_all(db_dir);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod shielded_history_status_tests {
+    use super::*;
+
+    #[test]
+    fn unscanned_wallet_db_does_not_report_finished_even_if_sapling_cache_synced() {
+        let status = z_coin_history_sync_status(false, 10, true);
+        match status {
+            HistorySyncState::InProgress(info) => {
+                assert_eq!(info["type"], "shielded_wallet_db_scan");
+                assert_eq!(info["scanned_through"], 10);
+            },
+            HistorySyncState::Finished => panic!("wallet DB scan completion must gate Finished status"),
+            other => panic!("unexpected status {:?}", other),
+        }
+    }
+
+    #[test]
+    fn finished_requires_wallet_db_and_sapling_cache_completion() {
+        assert!(matches!(
+            z_coin_history_sync_status(true, 10, true),
+            HistorySyncState::Finished
+        ));
+
+        let status = z_coin_history_sync_status(true, 10, false);
+        match status {
+            HistorySyncState::InProgress(info) => assert_eq!(info["type"], "sapling_state_cache_scan"),
+            HistorySyncState::Finished => panic!("sapling cache completion is still required"),
+            other => panic!("unexpected status {:?}", other),
+        }
     }
 }
 
@@ -483,7 +550,8 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
             UtxoRpcClientEnum::Native(n) => n,
             UtxoRpcClientEnum::Electrum(_) => {
                 log::warn!(
-                    "Light-mode ZCoin sapling cache scanning is not implemented; marking {} cache as synced",
+                    "Light-mode ZCoin commitment-tree cache scanning is not implemented; \
+                     wallet-history scanning is handled via lightwalletd during activation; marking {} cache as synced",
                     coin.ticker()
                 );
                 coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
@@ -602,7 +670,7 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
         let sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync> = {
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let cache_path = native_sapling_cache_path(self.ticker, self.db_dir_path);
+                let cache_path = native_sapling_cache_path(self.ticker, self.db_dir_path.clone());
                 Arc::new(tokio::task::block_in_place(move || {
                     open_or_create_native_sapling_cache(cache_path)
                 })?)
@@ -617,11 +685,28 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             .z_spending_key
             .default_address()
             .map_err(|_| MmError::new(ZCoinBuildError::GetAddressError))?;
+        let extfvk = ExtendedFullViewingKey::from(&self.z_spending_key);
 
         // All network parameters are sourced from the coin config's
         // `protocol_data.consensus_params` (R39.6.4) rather than hardcoded
         // Zcash-mainnet constants.
         let consensus_params = self.protocol_info.consensus_params;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let (shielded_history, wallet_db_scanned_through) = {
+            let shielded_history = ZCoinShieldedHistory::open_or_create(
+                self.ticker,
+                self.db_dir_path.clone(),
+                consensus_params.clone(),
+                &extfvk,
+                self.protocol_info.check_point_block.as_ref(),
+            )?;
+            let scanned_through = shielded_history
+                .scanned_height()
+                .map_err(|e| MmError::new(ZCoinBuildError::SaplingCacheError(e)))?
+                .unwrap_or(0);
+            (Arc::new(shielded_history), scanned_through)
+        };
 
         let dex_fee_z_addr = mm2_net_config::net_config_or_panic(self.ctx.netid()).dex_fee_z_addr();
         let dex_fee_addr = decode_payment_address(consensus_params.hrp_sapling_payment_address(), dex_fee_z_addr)
@@ -659,6 +744,12 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             z_unspent_mutex: AsyncMutex::new(()),
             sapling_state_synced: AtomicBool::new(false),
             sapling_cache,
+            #[cfg(not(target_arch = "wasm32"))]
+            shielded_history,
+            #[cfg(not(target_arch = "wasm32"))]
+            wallet_db_scan_complete: AtomicBool::new(false),
+            #[cfg(not(target_arch = "wasm32"))]
+            wallet_db_scanned_through: AtomicU64::new(wallet_db_scanned_through),
             consensus_params,
             check_point_block: self.protocol_info.check_point_block,
             blocks_per_iteration: self.protocol_info.blocks_per_iteration,
@@ -992,7 +1083,25 @@ impl MmCoin for ZCoin {
         Box::new(futures01::future::err(()))
     }
 
-    fn history_sync_status(&self) -> HistorySyncState { HistorySyncState::NotEnabled }
+    fn history_sync_status(&self) -> HistorySyncState {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            z_coin_history_sync_status(
+                self.z_fields.wallet_db_scan_complete.load(AtomicOrdering::Relaxed),
+                self.z_fields.wallet_db_scanned_through.load(AtomicOrdering::Relaxed),
+                self.is_sapling_state_synced(),
+            )
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self.is_sapling_state_synced() {
+                HistorySyncState::Finished
+            } else {
+                HistorySyncState::InProgress(json!({ "type": "sapling_state_cache_scan" }))
+            }
+        }
+    }
 
     fn get_trade_fee(&self) -> Box<dyn Future<Item = TradeFee, Error = String> + Send> {
         utxo_common::get_trade_fee(self.clone())
