@@ -360,6 +360,40 @@ pub struct ZOutput {
     pub memo: Option<MemoBytes>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn native_sapling_cache_path(ticker: &str, mut db_dir_path: PathBuf) -> PathBuf {
+    db_dir_path.push(format!("{}_CACHE.db", ticker));
+    db_dir_path
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn open_or_create_native_sapling_cache(path: PathBuf) -> MmResult<ZCoinSqliteSaplingCache, ZCoinBuildError> {
+    use db_common::sqlite::rusqlite::Connection;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let conn = Connection::open(path).map_err(|e| MmError::new(ZCoinBuildError::from(e)))?;
+    ZCoinSqliteSaplingCache::open(conn).map_err(|e| MmError::new(ZCoinBuildError::SaplingCacheError(e.to_string())))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod native_sapling_cache_tests {
+    use super::*;
+
+    #[test]
+    fn missing_native_sapling_cache_is_created_in_dbdir() {
+        let db_dir = std::env::temp_dir().join(format!("kdf-zcoin-cache-test-{}-{}", std::process::id(), now_ms()));
+        let cache_path = native_sapling_cache_path("ARRR", db_dir.clone());
+
+        assert!(!cache_path.exists());
+        let _cache = open_or_create_native_sapling_cache(cache_path.clone()).unwrap();
+        assert!(cache_path.exists());
+
+        let _ = std::fs::remove_dir_all(db_dir);
+    }
+}
+
 impl AsRef<UtxoCoinFields> for ZCoin {
     fn as_ref(&self) -> &UtxoCoinFields { &self.utxo_arc }
 }
@@ -447,7 +481,14 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
 
         let native_client = match coin.rpc_client() {
             UtxoRpcClientEnum::Native(n) => n,
-            _ => unimplemented!("Implemented only for native client"),
+            UtxoRpcClientEnum::Electrum(_) => {
+                log::warn!(
+                    "Light-mode ZCoin sapling cache scanning is not implemented; marking {} cache as synced",
+                    coin.ticker()
+                );
+                coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
+                return;
+            },
         };
 
         // Extract sync parameters for this iteration (R39.6.2)
@@ -561,26 +602,10 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
         let sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync> = {
             #[cfg(not(target_arch = "wasm32"))]
             {
-                use db_common::sqlite::rusqlite::Connection;
-                let db_name = format!("{}_CACHE.db", self.ticker);
-                let mut db_dir_path = self.db_dir_path;
-                db_dir_path.push(&db_name);
-                let conn = tokio::task::block_in_place(move || {
-                    if !db_dir_path.exists() {
-                        let default_cache_path = PathBuf::from(format!("./{}", db_name));
-                        if !default_cache_path.exists() {
-                            return MmError::err(ZCoinBuildError::SaplingCacheDbDoesNotExist {
-                                path: std::env::current_dir()?.join(&default_cache_path).display().to_string(),
-                            });
-                        }
-                        std::fs::copy(default_cache_path, &db_dir_path)?;
-                    }
-                    Connection::open(db_dir_path).map_err(|e| MmError::new(ZCoinBuildError::from(e)))
-                })?;
-                Arc::new(
-                    ZCoinSqliteSaplingCache::open(conn)
-                        .map_err(|e| MmError::new(ZCoinBuildError::SaplingCacheError(e.to_string())))?,
-                )
+                let cache_path = native_sapling_cache_path(self.ticker, self.db_dir_path);
+                Arc::new(tokio::task::block_in_place(move || {
+                    open_or_create_native_sapling_cache(cache_path)
+                })?)
             }
             #[cfg(target_arch = "wasm32")]
             {
@@ -651,12 +676,14 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            z_coin
-                .z_rpc()
-                .z_import_key(&my_z_key_encoded)
-                .compat()
-                .await
-                .mm_err(Into::into)?;
+            if let UtxoRpcClientEnum::Native(_) = z_coin.rpc_client() {
+                z_coin
+                    .z_rpc()
+                    .z_import_key(&my_z_key_encoded)
+                    .compat()
+                    .await
+                    .mm_err(Into::into)?;
+            }
         }
         spawn(sapling_state_cache_loop(z_coin.clone()));
         Ok(z_coin)
@@ -738,6 +765,12 @@ impl MarketCoinOps for ZCoin {
         {
             let coin = self.clone();
             let fut = async move {
+                if let UtxoRpcClientEnum::Electrum(_) = coin.rpc_client() {
+                    return Ok(CoinBalance {
+                        spendable: BigDecimal::from(0),
+                        unspendable: BigDecimal::from(0),
+                    });
+                }
                 let unspents = coin.my_z_unspents_ordered().await.mm_err(Into::into)?;
                 let (spendable, unspendable) = unspents.iter().fold(
                     (BigDecimal::from(0), BigDecimal::from(0)),
