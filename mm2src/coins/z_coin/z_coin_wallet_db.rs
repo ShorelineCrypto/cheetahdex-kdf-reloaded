@@ -26,6 +26,7 @@ const DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS: u64 = 2_880;
 const LIGHTWALLETD_BLOCK_BATCH_SIZE: u64 = 500;
 const LIGHTWALLETD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const LIGHTWALLETD_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const LIGHTWALLETD_GRPC_SERVICE: &str = "pirate.wallet.sdk.rpc.CompactTxStreamer";
 
 type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
 
@@ -144,7 +145,8 @@ impl ZCoinShieldedHistory {
         };
 
         log::info!(
-            "ZCoin lightwalletd fetch plan: start_height={}, target_height={}, requested_start_height={:?}, reset_stale_empty_checkpoint={}, servers={}",
+            "ZCoin lightwalletd fetch plan: service={}, start_height={}, target_height={}, requested_start_height={:?}, reset_stale_empty_checkpoint={}, servers={}",
+            LIGHTWALLETD_GRPC_SERVICE,
             fetch_plan.start_height,
             target_height,
             requested_start_height,

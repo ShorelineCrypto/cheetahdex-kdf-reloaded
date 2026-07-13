@@ -248,8 +248,8 @@ Two provenance statements were tightened after an external audit:
 
 | Destination | Classification | Source reference | License basis | Notes |
 |---|---|---|---|---|
-| `mm2src/coins/z_coin/service.proto` | interop-reuse | `zcash/lightwalletd` upstream `walletrpc/service.proto`. | MIT (Zcash developers). | Third-party MIT-licensed protocol spec, redistributed with original copyright header preserved. |
-| `mm2src/coins/z_coin/compact_formats.proto` | interop-reuse | `zcash/lightwalletd` upstream `walletrpc/compact_formats.proto`. | MIT (Zcash developers). | Same as above. Upstream MIT header was missing in earlier history; restored in step 2.3. |
+| `mm2src/coins/z_coin/service.proto` | interop-reuse | `PirateNetwork/lightwalletd` upstream `walletrpc/service.proto`. | MIT (Zcash developers; Pirate Chain developers). | Third-party MIT-licensed protocol spec. The `pirate.wallet.sdk.rpc` package is required for ARRR lightwalletd wire compatibility. |
+| `mm2src/coins/z_coin/compact_formats.proto` | interop-reuse | `PirateNetwork/lightwalletd` upstream `walletrpc/compact_formats.proto`. | MIT (Zcash developers; Pirate Chain developers). | Same as above; compact block messages must share the same `pirate.wallet.sdk.rpc` package as the service. |
 | `mm2src/coins/utxo/bchrpc.proto` | interop-reuse | `gcash/bchd` upstream `bchrpc/pb/bchrpc.proto` (Bitcoin Cash node RPC). | ISC (gcash/bchd project license). | Drives `mm2src/coins/utxo/pb.rs` generation. Upstream file does not carry a per-file copyright header; project license applies. |
 | `mm2src/coins/eth/maker_swap_v2_abi.json` | interop-reuse | ABI of the deployed `EtomicSwapMakerV2` Solidity contract. | Derived from the deployed bytecode; ABI is a public derivation. | Bytes must match the deployed contract or `ethabi` calls fail at runtime. |
 | `mm2src/coins/eth/taker_swap_v2_abi.json` | interop-reuse | ABI of the deployed `EtomicSwapTakerV2` Solidity contract. | Same as above. | Same as above. |

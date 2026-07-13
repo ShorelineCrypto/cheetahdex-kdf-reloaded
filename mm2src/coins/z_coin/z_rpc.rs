@@ -145,5 +145,5 @@ impl AsRef<dyn ZRpcOps + Send + Sync> for UtxoRpcClientEnum {
 }
 
 pub(crate) mod z_coin_grpc {
-    tonic::include_proto!("cash.z.wallet.sdk.rpc");
+    tonic::include_proto!("pirate.wallet.sdk.rpc");
 }
