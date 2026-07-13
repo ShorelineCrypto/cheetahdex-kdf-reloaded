@@ -443,6 +443,12 @@ impl TxHistoryStorage for SqliteTxHistoryStorage {
         paging: PagingOptionsEnum<BytesJson>,
         limit: usize,
     ) -> Result<GetHistoryResult, MmError<Self::Error>> {
+        if let HistoryCoinType::L2 { platform } = &coin_type {
+            return MmError::err(SqlError::InvalidParameterName(format!(
+                "HistoryCoinType::L2 for platform {platform} is not supported by SQL tx history storage"
+            )));
+        }
+
         let selfi = self.clone();
 
         async_blocking(move || {
@@ -452,7 +458,7 @@ impl TxHistoryStorage for SqliteTxHistoryStorage {
                 HistoryCoinType::Token { platform, token_id } => {
                     (get_history_builder_preimage(&platform)?, format!("{:02x}", token_id))
                 },
-                HistoryCoinType::L2 { .. } => unimplemented!("Not implemented yet for HistoryCoinType::L2"),
+                HistoryCoinType::L2 { .. } => unreachable!("L2 history is rejected before entering async_blocking"),
             };
 
             let mut total_builder = sql_builder.clone();
@@ -795,6 +801,23 @@ mod sql_tx_history_storage_tests {
         assert_eq!(5, result.skipped);
         assert_eq!(121, result.total);
         assert_eq!(expected_internal_ids, actual_ids);
+    }
+
+    #[test]
+    fn get_history_l2_returns_error_without_panicking() {
+        let storage = SqliteTxHistoryStorage::in_memory();
+        let coin_type = HistoryCoinType::L2 {
+            platform: "ETH".to_owned(),
+        };
+        let paging = PagingOptionsEnum::PageNumber(NonZeroUsize::new(1).unwrap());
+        let limit = 4;
+
+        let err = match block_on(storage.get_history(coin_type, paging, limit)) {
+            Ok(_) => panic!("L2 history must be unsupported"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("HistoryCoinType::L2"));
     }
 
     #[test]
