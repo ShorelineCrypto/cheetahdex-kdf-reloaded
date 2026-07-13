@@ -675,11 +675,25 @@ impl<'de> Deserialize<'de> for TakerSwapEvent {
             // Historical files have been observed with and without payloads on these milestone events.
             Some("WatcherMessageSent") => return Ok(TakerSwapEvent::WatcherMessageSent),
             Some("MakerPaymentSpendConfirmed") => return Ok(TakerSwapEvent::MakerPaymentSpendConfirmed),
+            Some("TakerPaymentInstructionsReceived") if value.get("data").is_none() => {
+                return Ok(TakerSwapEvent::TakerPaymentInstructionsReceived(None));
+            },
             _ => (),
         }
         json::from_value::<TakerSwapEventDeser>(value)
             .map(TakerSwapEvent::from)
             .map_err(D::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod taker_event_deser_tests {
+    use super::*;
+
+    #[test]
+    fn payment_instructions_received_accepts_missing_data() {
+        let event: TakerSwapEvent = json::from_str(r#"{"type":"TakerPaymentInstructionsReceived"}"#).unwrap();
+        assert_eq!(event, TakerSwapEvent::TakerPaymentInstructionsReceived(None));
     }
 }
 

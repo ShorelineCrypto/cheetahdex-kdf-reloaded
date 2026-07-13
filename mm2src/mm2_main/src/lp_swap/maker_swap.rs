@@ -29,6 +29,9 @@ use parking_lot::Mutex as PaMutex;
 use primitives::hash::H264;
 use rand::Rng;
 use rpc::v1::types::{Bytes as BytesJson, H160 as H160Json, H256 as H256Json, H264 as H264Json};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer};
+use serde_json::{self as json, Value as Json};
 use std::any::TypeId;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1317,7 +1320,7 @@ pub enum MakerSwapCommand {
     Finish,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
 pub enum MakerSwapEvent {
@@ -1349,6 +1352,113 @@ pub enum MakerSwapEvent {
     MakerPaymentRefunded(TransactionIdentifier),
     MakerPaymentRefundFailed(SwapError),
     Finished,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", content = "data")]
+#[allow(clippy::large_enum_variant)]
+enum MakerSwapEventDeser {
+    Started(MakerSwapData),
+    StartFailed(SwapError),
+    Negotiated(TakerNegotiationData),
+    NegotiateFailed(SwapError),
+    MakerPaymentInstructionsReceived(Option<PaymentInstructions>),
+    TakerFeeValidated(TransactionIdentifier),
+    TakerFeeValidateFailed(SwapError),
+    MakerPaymentSent(TransactionIdentifier),
+    MakerPaymentTransactionFailed(SwapError),
+    MakerPaymentDataSendFailed(SwapError),
+    MakerPaymentWaitConfirmFailed(SwapError),
+    TakerPaymentReceived(TransactionIdentifier),
+    TakerPaymentWaitConfirmStarted,
+    TakerPaymentValidatedAndConfirmed,
+    TakerPaymentValidateFailed(SwapError),
+    TakerPaymentWaitConfirmFailed(SwapError),
+    TakerPaymentSpent(TransactionIdentifier),
+    TakerPaymentSpendFailed(SwapError),
+    TakerPaymentSpendConfirmStarted,
+    TakerPaymentSpendConfirmed,
+    TakerPaymentSpendConfirmFailed(SwapError),
+    #[serde(alias = "MakerPaymentRefundStarted")]
+    MakerPaymentWaitRefundStarted {
+        wait_until: u64,
+    },
+    MakerPaymentRefunded(TransactionIdentifier),
+    MakerPaymentRefundFailed(SwapError),
+    Finished,
+}
+
+impl From<MakerSwapEventDeser> for MakerSwapEvent {
+    fn from(event: MakerSwapEventDeser) -> Self {
+        match event {
+            MakerSwapEventDeser::Started(data) => MakerSwapEvent::Started(data),
+            MakerSwapEventDeser::StartFailed(err) => MakerSwapEvent::StartFailed(err),
+            MakerSwapEventDeser::Negotiated(data) => MakerSwapEvent::Negotiated(data),
+            MakerSwapEventDeser::NegotiateFailed(err) => MakerSwapEvent::NegotiateFailed(err),
+            MakerSwapEventDeser::MakerPaymentInstructionsReceived(instructions) => {
+                MakerSwapEvent::MakerPaymentInstructionsReceived(instructions)
+            },
+            MakerSwapEventDeser::TakerFeeValidated(tx) => MakerSwapEvent::TakerFeeValidated(tx),
+            MakerSwapEventDeser::TakerFeeValidateFailed(err) => MakerSwapEvent::TakerFeeValidateFailed(err),
+            MakerSwapEventDeser::MakerPaymentSent(tx) => MakerSwapEvent::MakerPaymentSent(tx),
+            MakerSwapEventDeser::MakerPaymentTransactionFailed(err) => {
+                MakerSwapEvent::MakerPaymentTransactionFailed(err)
+            },
+            MakerSwapEventDeser::MakerPaymentDataSendFailed(err) => MakerSwapEvent::MakerPaymentDataSendFailed(err),
+            MakerSwapEventDeser::MakerPaymentWaitConfirmFailed(err) => {
+                MakerSwapEvent::MakerPaymentWaitConfirmFailed(err)
+            },
+            MakerSwapEventDeser::TakerPaymentReceived(tx) => MakerSwapEvent::TakerPaymentReceived(tx),
+            MakerSwapEventDeser::TakerPaymentWaitConfirmStarted => MakerSwapEvent::TakerPaymentWaitConfirmStarted,
+            MakerSwapEventDeser::TakerPaymentValidatedAndConfirmed => MakerSwapEvent::TakerPaymentValidatedAndConfirmed,
+            MakerSwapEventDeser::TakerPaymentValidateFailed(err) => MakerSwapEvent::TakerPaymentValidateFailed(err),
+            MakerSwapEventDeser::TakerPaymentWaitConfirmFailed(err) => {
+                MakerSwapEvent::TakerPaymentWaitConfirmFailed(err)
+            },
+            MakerSwapEventDeser::TakerPaymentSpent(tx) => MakerSwapEvent::TakerPaymentSpent(tx),
+            MakerSwapEventDeser::TakerPaymentSpendFailed(err) => MakerSwapEvent::TakerPaymentSpendFailed(err),
+            MakerSwapEventDeser::TakerPaymentSpendConfirmStarted => MakerSwapEvent::TakerPaymentSpendConfirmStarted,
+            MakerSwapEventDeser::TakerPaymentSpendConfirmed => MakerSwapEvent::TakerPaymentSpendConfirmed,
+            MakerSwapEventDeser::TakerPaymentSpendConfirmFailed(err) => {
+                MakerSwapEvent::TakerPaymentSpendConfirmFailed(err)
+            },
+            MakerSwapEventDeser::MakerPaymentWaitRefundStarted { wait_until } => {
+                MakerSwapEvent::MakerPaymentWaitRefundStarted { wait_until }
+            },
+            MakerSwapEventDeser::MakerPaymentRefunded(tx) => MakerSwapEvent::MakerPaymentRefunded(tx),
+            MakerSwapEventDeser::MakerPaymentRefundFailed(err) => MakerSwapEvent::MakerPaymentRefundFailed(err),
+            MakerSwapEventDeser::Finished => MakerSwapEvent::Finished,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MakerSwapEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Json::deserialize(deserializer)?;
+        match value.get("type").and_then(Json::as_str) {
+            Some("MakerPaymentInstructionsReceived") if value.get("data").is_none() => {
+                return Ok(MakerSwapEvent::MakerPaymentInstructionsReceived(None));
+            },
+            _ => (),
+        }
+        json::from_value::<MakerSwapEventDeser>(value)
+            .map(MakerSwapEvent::from)
+            .map_err(D::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod maker_event_deser_tests {
+    use super::*;
+
+    #[test]
+    fn payment_instructions_received_accepts_missing_data() {
+        let event: MakerSwapEvent = json::from_str(r#"{"type":"MakerPaymentInstructionsReceived"}"#).unwrap();
+        assert_eq!(event, MakerSwapEvent::MakerPaymentInstructionsReceived(None));
+    }
 }
 
 impl MakerSwapEvent {
