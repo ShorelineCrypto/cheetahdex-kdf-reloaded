@@ -66,6 +66,12 @@ struct ZCoinStoredHistoryRow {
     sent_addresses: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LightwalletdFetchPlan {
+    start_height: u64,
+    reset_stale_empty_checkpoint: bool,
+}
+
 impl ZCoinShieldedHistory {
     pub(crate) fn open_or_create(
         ticker: &str,
@@ -123,52 +129,81 @@ impl ZCoinShieldedHistory {
         target_height: u64,
         requested_start_height: Option<u64>,
     ) -> Result<u64, String> {
-        let Some(start_height) = self.next_fetch_height(consensus_params, target_height, requested_start_height)?
+        let Some(fetch_plan) = self.lightwalletd_fetch_plan(consensus_params, target_height, requested_start_height)?
         else {
             return Ok(self.scanned_height()?.unwrap_or(0));
         };
 
-        let mut last_error = None;
+        let mut errors = Vec::new();
         for server in servers {
             match self
-                .fetch_compact_blocks_from_server(consensus_params.clone(), server, start_height, target_height)
+                .fetch_compact_blocks_from_server(consensus_params.clone(), server, fetch_plan, target_height)
                 .await
             {
                 Ok(fetched_height) => return Ok(fetched_height),
-                Err(e) => last_error = Some(format!("{}: {}", server, e)),
+                Err(e) => errors.push(format!("{}: {}", server, e)),
             }
         }
 
-        Err(last_error.unwrap_or_else(|| "No lightwalletd servers configured".to_owned()))
+        if errors.is_empty() {
+            Err("No lightwalletd servers configured".to_owned())
+        } else {
+            Err(format!("All lightwalletd servers failed: {}", errors.join("; ")))
+        }
     }
 
-    fn next_fetch_height(
+    fn lightwalletd_fetch_plan(
         &self,
         consensus_params: &ZcoinConsensusParams,
         target_height: u64,
         requested_start_height: Option<u64>,
-    ) -> Result<Option<u64>, String> {
-        if let Some(scanned_height) = self.scanned_height()? {
-            return Ok((scanned_height < target_height).then_some(scanned_height + 1));
-        }
-
+    ) -> Result<Option<LightwalletdFetchPlan>, String> {
         let sapling_activation_height = consensus_params
             .activation_height(NetworkUpgrade::Sapling)
             .map(|h| u32::from(h).saturating_sub(1) as u64)
             .unwrap_or(0);
         let default_recent_start = target_height.saturating_sub(DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS);
         let requested_start_height = requested_start_height.unwrap_or(default_recent_start);
-        let start_height = requested_start_height.max(sapling_activation_height + 1);
-        Ok((start_height <= target_height).then_some(start_height))
+        let recent_or_requested_start = requested_start_height.max(sapling_activation_height + 1);
+
+        if let Some(scanned_height) = self.scanned_height()? {
+            if scanned_height >= target_height {
+                return Ok(None);
+            }
+
+            let resumed_start = scanned_height + 1;
+            let should_reseed_empty_checkpoint =
+                resumed_start < recent_or_requested_start && self.wallet_scan_state_is_empty()?;
+            return Ok(Some(LightwalletdFetchPlan {
+                start_height: if should_reseed_empty_checkpoint {
+                    recent_or_requested_start
+                } else {
+                    resumed_start
+                },
+                reset_stale_empty_checkpoint: should_reseed_empty_checkpoint,
+            }));
+        }
+
+        Ok(
+            (recent_or_requested_start <= target_height).then_some(LightwalletdFetchPlan {
+                start_height: recent_or_requested_start,
+                reset_stale_empty_checkpoint: false,
+            }),
+        )
     }
 
     async fn fetch_compact_blocks_from_server(
         &self,
         consensus_params: ZcoinConsensusParams,
         server: &str,
-        start_height: u64,
+        fetch_plan: LightwalletdFetchPlan,
         target_height: u64,
     ) -> Result<u64, String> {
+        let start_height = fetch_plan.start_height;
+        if fetch_plan.reset_stale_empty_checkpoint {
+            self.reset_empty_wallet_scan_state()?;
+        }
+
         if start_height > 0 {
             self.ensure_lightwalletd_checkpoint(consensus_params.clone(), server, start_height - 1)
                 .await?;
@@ -191,6 +226,45 @@ impl ZCoinShieldedHistory {
         }
 
         Ok(fetched_height)
+    }
+
+    fn wallet_scan_state_is_empty(&self) -> Result<bool, String> {
+        let conn = Connection::open(&self.wallet_db_path).map_err(|e| e.to_string())?;
+        for table in ["transactions", "received_notes", "sent_notes", "sapling_witnesses"] {
+            let sql = format!("SELECT EXISTS(SELECT 1 FROM {} LIMIT 1)", table);
+            let has_rows: bool = conn
+                .query_row(&sql, NO_PARAMS, |row| row.get(0))
+                .map_err(|e| e.to_string())?;
+            if has_rows {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn reset_empty_wallet_scan_state(&self) -> Result<(), String> {
+        if !self.wallet_scan_state_is_empty()? {
+            return Err("Refusing to reset shielded wallet DB because it contains wallet scan activity".to_owned());
+        }
+
+        let wallet_conn = Connection::open(&self.wallet_db_path).map_err(|e| e.to_string())?;
+        for table in [
+            "sapling_witnesses",
+            "sent_notes",
+            "received_notes",
+            "transactions",
+            "blocks",
+        ] {
+            wallet_conn
+                .execute(&format!("DELETE FROM {}", table), NO_PARAMS)
+                .map_err(|e| e.to_string())?;
+        }
+
+        let compact_conn = Connection::open(&self.compact_blocks_path).map_err(|e| e.to_string())?;
+        compact_conn
+            .execute("DELETE FROM compactblocks", NO_PARAMS)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     async fn connect_lightwalletd(
@@ -737,22 +811,73 @@ mod tests {
     #[test]
     fn empty_wallet_uses_recent_lightwalletd_start_when_no_start_requested() {
         let history = open_test_history();
-        let start = history.next_fetch_height(&test_params(), 10_000, None).unwrap();
-        assert_eq!(start, Some(10_000 - DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS));
+        let plan = history.lightwalletd_fetch_plan(&test_params(), 10_000, None).unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 10_000 - DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS,
+                reset_stale_empty_checkpoint: false,
+            })
+        );
     }
 
     #[test]
     fn empty_wallet_honors_explicit_start_above_sapling_activation() {
         let history = open_test_history();
-        let start = history.next_fetch_height(&test_params(), 10_000, Some(7_000)).unwrap();
-        assert_eq!(start, Some(7_000));
+        let plan = history
+            .lightwalletd_fetch_plan(&test_params(), 10_000, Some(7_000))
+            .unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 7_000,
+                reset_stale_empty_checkpoint: false,
+            })
+        );
     }
 
     #[test]
     fn existing_wallet_state_resumes_from_scanned_height() {
         let history = open_checkpointed_test_history(42);
-        let start = history.next_fetch_height(&test_params(), 10_000, None).unwrap();
-        assert_eq!(start, Some(43));
+        let plan = history.lightwalletd_fetch_plan(&test_params(), 100, None).unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 43,
+                reset_stale_empty_checkpoint: false,
+            })
+        );
+    }
+
+    #[test]
+    fn stale_empty_checkpoint_uses_recent_start_and_requests_reset() {
+        let history = open_checkpointed_test_history(42);
+        let plan = history.lightwalletd_fetch_plan(&test_params(), 10_000, None).unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 10_000 - DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS,
+                reset_stale_empty_checkpoint: true,
+            })
+        );
+    }
+
+    #[test]
+    fn reset_empty_wallet_scan_state_clears_checkpoint_and_compact_cache() {
+        let history = open_checkpointed_test_history(42);
+        let mut block = zcash_compact::CompactBlock::new();
+        block.set_height(43);
+        history.insert_compact_block(block).unwrap();
+
+        assert_eq!(history.scanned_height().unwrap(), Some(42));
+        history.reset_empty_wallet_scan_state().unwrap();
+        assert_eq!(history.scanned_height().unwrap(), None);
+
+        let compact_conn = Connection::open(history.compact_blocks_path()).unwrap();
+        let compact_count: u32 = compact_conn
+            .query_row("SELECT COUNT(*) FROM compactblocks", NO_PARAMS, |row| row.get(0))
+            .unwrap();
+        assert_eq!(compact_count, 0);
     }
 
     #[test]
