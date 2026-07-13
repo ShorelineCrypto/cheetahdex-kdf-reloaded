@@ -154,7 +154,7 @@ rust-ini = { version = "0.13" }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
 tokio = { version = "1.7" }
 tokio-rustls = { version = "0.23" }
-tonic = { version = "0.11", features = ["tls", "channel"] }
+tonic = { version = "0.11", features = ["tls", "tls-webpki-roots", "channel"] }
 webpki-roots = { version = "0.22" }
 zcash_client_backend = { path = "../../librustzcash-patched/zcash_client_backend" }
 zcash_client_sqlite = { path = "../../librustzcash-patched/zcash_client_sqlite" }

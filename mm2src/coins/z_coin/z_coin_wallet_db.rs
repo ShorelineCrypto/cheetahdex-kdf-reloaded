@@ -2,14 +2,15 @@ use super::z_rpc::z_coin_grpc;
 use super::{CheckPointBlockInfo, ZCoinBuildError, ZcoinConsensusParams};
 use crate::utxo::utxo_common::big_decimal_from_sat_unsigned;
 use common::mm_number::BigDecimal;
-use common::{calc_total_pages, PagingOptionsEnum};
+use common::{calc_total_pages, log, PagingOptionsEnum};
 use db_common::sqlite::rusqlite::{params, Connection, OptionalExtension, NO_PARAMS};
 use futures::StreamExt;
 use mm2_err_handle::prelude::*;
 use protobuf::Message;
+use std::error::Error as StdError;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tonic::transport::Endpoint;
+use std::time::{Duration, Instant};
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use zcash_client_backend::data_api::chain::scan_cached_blocks;
 use zcash_client_backend::proto::compact_formats as zcash_compact;
 use zcash_client_sqlite::{chain::init::init_cache_database,
@@ -23,6 +24,8 @@ const DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS: u64 = 2_880;
 const LIGHTWALLETD_BLOCK_BATCH_SIZE: u64 = 500;
 const LIGHTWALLETD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const LIGHTWALLETD_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ZCoinShieldedHistory {
@@ -131,8 +134,21 @@ impl ZCoinShieldedHistory {
     ) -> Result<u64, String> {
         let Some(fetch_plan) = self.lightwalletd_fetch_plan(consensus_params, target_height, requested_start_height)?
         else {
+            log::info!(
+                "ZCoin shielded wallet DB already scanned through requested lightwalletd target height {}",
+                target_height
+            );
             return Ok(self.scanned_height()?.unwrap_or(0));
         };
+
+        log::info!(
+            "ZCoin lightwalletd fetch plan: start_height={}, target_height={}, requested_start_height={:?}, reset_stale_empty_checkpoint={}, servers={}",
+            fetch_plan.start_height,
+            target_height,
+            requested_start_height,
+            fetch_plan.reset_stale_empty_checkpoint,
+            servers.len()
+        );
 
         let mut errors = Vec::new();
         for server in servers {
@@ -141,7 +157,10 @@ impl ZCoinShieldedHistory {
                 .await
             {
                 Ok(fetched_height) => return Ok(fetched_height),
-                Err(e) => errors.push(format!("{}: {}", server, e)),
+                Err(e) => {
+                    log::warn!("ZCoin lightwalletd server {} failed: {}", server, e);
+                    errors.push(format!("{}: {}", server, e));
+                },
             }
         }
 
@@ -199,13 +218,27 @@ impl ZCoinShieldedHistory {
         fetch_plan: LightwalletdFetchPlan,
         target_height: u64,
     ) -> Result<u64, String> {
+        let started = Instant::now();
         let start_height = fetch_plan.start_height;
+        log::info!(
+            "ZCoin lightwalletd server {} scan started: compact block range {}..={}",
+            server,
+            start_height,
+            target_height
+        );
+
+        let mut client = Self::connect_lightwalletd(server).await?;
+
         if fetch_plan.reset_stale_empty_checkpoint {
+            log::info!(
+                "ZCoin shielded wallet DB has stale empty checkpoint; resetting before fetching from height {}",
+                start_height
+            );
             self.reset_empty_wallet_scan_state()?;
         }
 
         if start_height > 0 {
-            self.ensure_lightwalletd_checkpoint(consensus_params.clone(), server, start_height - 1)
+            self.ensure_lightwalletd_checkpoint(&mut client, consensus_params.clone(), start_height - 1)
                 .await?;
         }
 
@@ -214,7 +247,7 @@ impl ZCoinShieldedHistory {
         while batch_start <= target_height {
             let batch_end = std::cmp::min(target_height, batch_start + LIGHTWALLETD_BLOCK_BATCH_SIZE - 1);
             fetched_height = self
-                .fetch_compact_block_batch_from_server(server, batch_start, batch_end)
+                .fetch_compact_block_batch_from_server(&mut client, batch_start, batch_end)
                 .await?;
             if fetched_height < batch_end {
                 return Err(format!(
@@ -225,6 +258,12 @@ impl ZCoinShieldedHistory {
             batch_start = batch_end + 1;
         }
 
+        log::info!(
+            "ZCoin lightwalletd server {} scan fetched compact blocks through {} in {:?}",
+            server,
+            fetched_height,
+            started.elapsed()
+        );
         Ok(fetched_height)
     }
 
@@ -267,20 +306,26 @@ impl ZCoinShieldedHistory {
             .map_err(|e| e.to_string())
     }
 
-    async fn connect_lightwalletd(
-        server: &str,
-    ) -> Result<z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transport::Channel>, String>
-    {
-        let endpoint = Endpoint::from_shared(lightwalletd_endpoint(server))
-            .map_err(|e| e.to_string())?
+    async fn connect_lightwalletd(server: &str) -> Result<LightwalletdClient, String> {
+        let endpoint_url = lightwalletd_endpoint(server);
+        let endpoint = Endpoint::from_shared(endpoint_url.clone())
+            .map_err(|e| lightwalletd_error_with_sources(&e))?
             .connect_timeout(LIGHTWALLETD_CONNECT_TIMEOUT)
-            .timeout(LIGHTWALLETD_REQUEST_TIMEOUT)
+            .timeout(LIGHTWALLETD_REQUEST_TIMEOUT);
+        let endpoint = if endpoint_url.starts_with("https://") {
+            endpoint
+                .tls_config(ClientTlsConfig::new())
+                .map_err(|e| lightwalletd_error_with_sources(&e))?
+        } else {
+            endpoint
+        };
+        let endpoint = endpoint
             .http2_keep_alive_interval(Duration::from_secs(20))
             .keep_alive_timeout(Duration::from_secs(10))
             .keep_alive_while_idle(true)
             .connect()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| lightwalletd_error_with_sources(&e))?;
         Ok(z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient::new(
             endpoint,
         ))
@@ -288,15 +333,18 @@ impl ZCoinShieldedHistory {
 
     async fn ensure_lightwalletd_checkpoint(
         &self,
+        client: &mut LightwalletdClient,
         consensus_params: ZcoinConsensusParams,
-        server: &str,
         checkpoint_height: u64,
     ) -> Result<(), String> {
         if self.scanned_height()?.is_some() {
             return Ok(());
         }
 
-        let mut client = Self::connect_lightwalletd(server).await?;
+        log::info!(
+            "ZCoin lightwalletd requesting wallet checkpoint tree state at height {}",
+            checkpoint_height
+        );
         let request = z_coin_grpc::BlockId {
             height: checkpoint_height,
             hash: Vec::new(),
@@ -304,7 +352,7 @@ impl ZCoinShieldedHistory {
         let tree_state = tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, client.get_tree_state(request))
             .await
             .map_err(|_| format!("GetTreeState timed out at height {}", checkpoint_height))?
-            .map_err(|e| e.to_string())?
+            .map_err(|e| lightwalletd_error_with_sources(&e))?
             .into_inner();
         self.init_wallet_checkpoint_from_tree_state(consensus_params, tree_state)
     }
@@ -338,11 +386,16 @@ impl ZCoinShieldedHistory {
 
     async fn fetch_compact_block_batch_from_server(
         &self,
-        server: &str,
+        client: &mut LightwalletdClient,
         start_height: u64,
         target_height: u64,
     ) -> Result<u64, String> {
-        let mut client = Self::connect_lightwalletd(server).await?;
+        let started = Instant::now();
+        log::info!(
+            "ZCoin lightwalletd requesting compact block batch {}..={}",
+            start_height,
+            target_height
+        );
         let request = z_coin_grpc::BlockRange {
             start: Some(z_coin_grpc::BlockId {
                 height: start_height,
@@ -361,7 +414,7 @@ impl ZCoinShieldedHistory {
                     start_height, target_height
                 )
             })?
-            .map_err(|e| e.to_string())?
+            .map_err(|e| lightwalletd_error_with_sources(&e))?
             .into_inner();
         let mut stream = response;
 
@@ -378,7 +431,7 @@ impl ZCoinShieldedHistory {
             else {
                 break;
             };
-            let block = block.map_err(|e| e.to_string())?;
+            let block = block.map_err(|e| lightwalletd_error_with_sources(&e))?;
             last_height = block.height;
             self.insert_compact_block(convert_compact_block(block)?)?;
         }
@@ -389,6 +442,12 @@ impl ZCoinShieldedHistory {
                 last_height, target_height
             ))
         } else {
+            log::info!(
+                "ZCoin lightwalletd fetched compact block batch {}..={} in {:?}",
+                start_height,
+                target_height,
+                started.elapsed()
+            );
             Ok(last_height)
         }
     }
@@ -420,8 +479,22 @@ impl ZCoinShieldedHistory {
     ) -> Result<u64, String> {
         let initial_scanned_height = self.scanned_height()?.unwrap_or(0);
         if initial_scanned_height >= target_height {
+            log::info!(
+                "ZCoin shielded wallet DB scan skipped: scanned_height={}, target_height={}",
+                initial_scanned_height,
+                target_height
+            );
             return Ok(initial_scanned_height);
         }
+
+        let started = Instant::now();
+        log::info!(
+            "ZCoin shielded wallet DB scan started: scanned_height={}, target_height={}, compact_blocks_path={}, wallet_db_path={}",
+            initial_scanned_height,
+            target_height,
+            self.compact_blocks_path.display(),
+            self.wallet_db_path.display()
+        );
 
         let block_db = BlockDb::for_path(&self.compact_blocks_path).map_err(|e| e.to_string())?;
         let wallet_db =
@@ -431,6 +504,11 @@ impl ZCoinShieldedHistory {
 
         let scanned_height = self.scanned_height()?.unwrap_or(0);
         if scanned_height >= target_height {
+            log::info!(
+                "ZCoin shielded wallet DB scan finished through height {} in {:?}",
+                scanned_height,
+                started.elapsed()
+            );
             Ok(scanned_height)
         } else {
             Err(format!(
@@ -519,6 +597,17 @@ impl ZCoinShieldedHistory {
 
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
+}
+
+fn lightwalletd_error_with_sources(error: &(dyn StdError + 'static)) -> String {
+    let mut details = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        details.push_str(": ");
+        details.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    details
 }
 
 impl ZCoinStoredHistoryRow {
