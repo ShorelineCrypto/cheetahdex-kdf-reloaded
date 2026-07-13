@@ -45,10 +45,12 @@ use serialization::{deserialize, CoinVariant};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Weak};
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_client_backend::data_api::WalletRead;
 use zcash_client_backend::decrypt_transaction;
 use zcash_client_backend::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
 use zcash_client_backend::wallet::AccountId;
-use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade, Parameters, H0};
+use zcash_primitives::consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters, H0};
 use zcash_primitives::memo::MemoBytes;
 use zcash_primitives::merkle_tree::{CommitmentTree, Hashable, IncrementalWitness};
 use zcash_primitives::sapling::keys::OutgoingViewingKey;
@@ -63,6 +65,8 @@ use zcash_primitives::{consensus, constants::mainnet as z_mainnet_constants, sap
 #[cfg(not(target_arch = "wasm32"))] use std::io::Read;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_client_sqlite::WalletDb;
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_primitives::transaction::builder::Builder as ZTxBuilder;
 #[cfg(not(target_arch = "wasm32"))]

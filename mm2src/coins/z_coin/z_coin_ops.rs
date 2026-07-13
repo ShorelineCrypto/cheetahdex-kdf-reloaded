@@ -128,6 +128,10 @@ impl ZCoin {
             Timer::sleep(0.5).await
         }
         let tx_fee = self.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
+        if matches!(self.rpc_client(), UtxoRpcClientEnum::Electrum(_)) {
+            return self.gen_tx_from_shielded_wallet_db(t_outputs, z_outputs, tx_fee);
+        }
+
         let t_output_sat: u64 = t_outputs.iter().fold(0, |cur, out| cur + u64::from(out.value));
         let z_output_sat: u64 = z_outputs.iter().fold(0, |cur, out| cur + u64::from(out.amount));
         let total_output_sat = t_output_sat + z_output_sat;
@@ -250,6 +254,117 @@ impl ZCoin {
             received_by_me,
             spent_by_me: sat_from_big_decimal(&total_input_amount, self.decimals()).mm_err(Into::into)?,
             fee_amount: sat_from_big_decimal(&tx_fee, self.decimals()).mm_err(Into::into)?,
+            unused_change: None,
+            kmd_rewards: None,
+        };
+        Ok((tx, additional_data))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn gen_tx_from_shielded_wallet_db(
+        &self,
+        t_outputs: Vec<TxOut>,
+        z_outputs: Vec<ZOutput>,
+        tx_fee: BigDecimal,
+    ) -> Result<(ZTransaction, AdditionalTxData), MmError<GenTxError>> {
+        if !t_outputs.is_empty() {
+            return MmError::err(GenTxError::UnsupportedLightWalletOutput);
+        }
+        if !self.shielded_wallet_db_scan_complete() {
+            return MmError::err(GenTxError::ShieldedWalletDb(
+                "shielded wallet DB scan is not complete".to_owned(),
+            ));
+        }
+
+        let z_output_sat: u64 = z_outputs.iter().fold(0, |cur, out| cur + u64::from(out.amount));
+        let tx_fee_sat = sat_from_big_decimal(&tx_fee, self.decimals()).mm_err(Into::into)?;
+        let total_required_sat = z_output_sat
+            .checked_add(tx_fee_sat)
+            .or_mm_err(|| GenTxError::NumConversion(NumConversError("ZCoin total output overflow".to_owned())))?;
+        let target_value = Amount::from_u64(total_required_sat).map_to_mm(|_| {
+            GenTxError::NumConversion(NumConversError(format!(
+                "Failed to get ZCash target amount from {}",
+                total_required_sat
+            )))
+        })?;
+
+        let wallet_db = WalletDb::for_path(
+            self.z_fields.shielded_history.wallet_db_path(),
+            self.z_fields.consensus_params.clone(),
+        )
+        .map_to_mm(|e| GenTxError::ShieldedWalletDb(e.to_string()))?;
+        let (height, anchor_height) = wallet_db
+            .get_target_and_anchor_heights()
+            .map_to_mm(|e| GenTxError::ShieldedWalletDb(e.to_string()))?
+            .or_mm_err(|| GenTxError::ShieldedWalletDb("shielded wallet DB scan is required".to_owned()))?;
+        let selected_notes = wallet_db
+            .select_spendable_notes(AccountId::default(), target_value, anchor_height)
+            .map_to_mm(|e| GenTxError::ShieldedWalletDb(e.to_string()))?;
+        let selected_value_sat = selected_notes
+            .iter()
+            .try_fold(0u64, |sum, note| sum.checked_add(u64::from(note.note_value)))
+            .or_mm_err(|| GenTxError::NumConversion(NumConversError("ZCoin selected note overflow".to_owned())))?;
+        if selected_value_sat < total_required_sat {
+            return MmError::err(GenTxError::InsufficientBalance {
+                coin: self.ticker().into(),
+                available: big_decimal_from_sat_unsigned(selected_value_sat, self.decimals()),
+                required: big_decimal_from_sat_unsigned(total_required_sat, self.decimals()),
+            });
+        }
+
+        let extfvk = ExtendedFullViewingKey::from(&self.z_fields.z_spending_key);
+        let mut tx_builder = ZTxBuilder::new(self.z_fields.consensus_params.clone(), height);
+        for selected in selected_notes {
+            let from = extfvk
+                .fvk
+                .vk
+                .to_payment_address(selected.diversifier)
+                .or_mm_err(|| GenTxError::ShieldedWalletDb("failed to reconstruct note address".to_owned()))?;
+            let note = from
+                .create_note(selected.note_value.into(), selected.rseed)
+                .or_mm_err(|| GenTxError::ShieldedWalletDb("failed to reconstruct spendable note".to_owned()))?;
+            let merkle_path = selected
+                .witness
+                .path()
+                .or_mm_err(|| GenTxError::FailedToGetMerklePath)?;
+            tx_builder.add_sapling_spend(
+                self.z_fields.z_spending_key.clone(),
+                selected.diversifier,
+                note,
+                merkle_path,
+            )?;
+        }
+
+        let mut received_by_me = 0u64;
+        for z_out in z_outputs {
+            if z_out.to_addr == self.z_fields.my_z_addr {
+                received_by_me += u64::from(z_out.amount);
+            }
+            tx_builder.add_sapling_output(z_out.viewing_key, z_out.to_addr, z_out.amount, z_out.memo)?;
+        }
+
+        let change_sat = selected_value_sat - total_required_sat;
+        if change_sat > 0 {
+            received_by_me += change_sat;
+            tx_builder.add_sapling_output(
+                None,
+                self.z_fields.my_z_addr.clone(),
+                Amount::from_u64(change_sat).map_to_mm(|_| {
+                    GenTxError::NumConversion(NumConversError(format!(
+                        "Failed to get ZCash change amount from {}",
+                        change_sat
+                    )))
+                })?,
+                None,
+            )?;
+        }
+
+        let branch_id = BranchId::for_height(&self.z_fields.consensus_params, height);
+        let (tx, _) = tokio::task::block_in_place(|| tx_builder.build(branch_id, &self.z_fields.z_tx_prover))?;
+        let additional_data = AdditionalTxData {
+            received_by_me,
+            spent_by_me: selected_value_sat,
+            fee_amount: tx_fee_sat,
             unused_change: None,
             kmd_rewards: None,
         };
