@@ -1342,7 +1342,10 @@ pub enum MakerSwapEvent {
     TakerPaymentSpendConfirmStarted,
     TakerPaymentSpendConfirmed,
     TakerPaymentSpendConfirmFailed(SwapError),
-    MakerPaymentWaitRefundStarted { wait_until: u64 },
+    #[serde(alias = "MakerPaymentRefundStarted")]
+    MakerPaymentWaitRefundStarted {
+        wait_until: u64,
+    },
     MakerPaymentRefunded(TransactionIdentifier),
     MakerPaymentRefundFailed(SwapError),
     Finished,
@@ -2043,6 +2046,17 @@ mod maker_swap_tests {
             117, 225, 216, 108, 98, 226, 119, 232, 94, 184, 42, 106,
         ];
         signed_eth_tx_from_bytes(&tx_bytes).unwrap()
+    }
+
+    #[test]
+    fn maker_swap_event_accepts_legacy_refund_started_name() {
+        let event: MakerSavedEvent =
+            json::from_str(r#"{"timestamp":1,"event":{"type":"MakerPaymentRefundStarted","data":{"wait_until":2}}}"#)
+                .expect("legacy maker refund event must deserialize");
+
+        assert_eq!(event.event, MakerSwapEvent::MakerPaymentWaitRefundStarted {
+            wait_until: 2
+        });
     }
 
     #[test]
