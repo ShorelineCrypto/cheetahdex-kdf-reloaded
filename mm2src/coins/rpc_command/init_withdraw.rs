@@ -163,6 +163,8 @@ impl RpcTask for WithdrawTask {
             },
             MmCoinEnum::QtumCoin(ref qtum) => qtum.init_withdraw(self.ctx, self.request, task_handle).await,
             MmCoinEnum::EthCoin(ref eth) => eth.init_withdraw(self.ctx, self.request, task_handle).await,
+            #[cfg(not(target_arch = "wasm32"))]
+            MmCoinEnum::ZCoin(ref z_coin) => z_coin.init_withdraw(self.ctx, self.request, task_handle).await,
             _ => MmError::err(WithdrawError::CoinDoesntSupportInitWithdraw {
                 coin: self.coin.ticker().to_owned(),
             }),

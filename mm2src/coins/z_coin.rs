@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+use crate::rpc_command::init_withdraw::{InitWithdrawCoin, WithdrawInProgressStatus, WithdrawTaskHandle};
 use crate::utxo::rpc_clients::{UnspentInfo, UtxoRpcClientEnum, UtxoRpcClientOps, UtxoRpcError, UtxoRpcFut,
                                UtxoRpcResult};
 use crate::utxo::utxo_builder::{UtxoCoinBuilderCommonOps, UtxoCoinWithIguanaPrivKeyBuilder,
@@ -975,6 +977,22 @@ impl MarketCoinOps for ZCoin {
     }
 
     fn is_privacy(&self) -> bool { true }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait]
+impl InitWithdrawCoin for ZCoin {
+    async fn init_withdraw(
+        &self,
+        _ctx: MmArc,
+        req: WithdrawRequest,
+        task_handle: &WithdrawTaskHandle,
+    ) -> Result<TransactionDetails, MmError<WithdrawError>> {
+        task_handle
+            .update_in_progress_status(WithdrawInProgressStatus::GeneratingTransaction)
+            .mm_err(WithdrawError::from)?;
+        self.withdraw(req).compat().await
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
