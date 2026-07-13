@@ -857,8 +857,18 @@ impl MarketCoinOps for ZCoin {
             let coin = self.clone();
             let fut = async move {
                 if let UtxoRpcClientEnum::Electrum(_) = coin.rpc_client() {
+                    if !coin.shielded_wallet_db_scan_complete() {
+                        log::warn!(
+                            "ZCoin light-mode balance requested before shielded wallet DB scan completed for {}",
+                            coin.ticker()
+                        );
+                    }
+                    let balance_sat = coin
+                        .shielded_history()
+                        .balance(coin.z_fields.consensus_params.clone())
+                        .map_err(|e| MmError::new(crate::BalanceError::Internal(e)))?;
                     return Ok(CoinBalance {
-                        spendable: BigDecimal::from(0),
+                        spendable: big_decimal_from_sat_unsigned(balance_sat, coin.decimals()),
                         unspendable: BigDecimal::from(0),
                     });
                 }

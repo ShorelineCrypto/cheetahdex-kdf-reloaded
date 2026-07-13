@@ -13,8 +13,10 @@ use std::time::{Duration, Instant};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use zcash_client_backend::data_api::chain::scan_cached_blocks;
 use zcash_client_backend::proto::compact_formats as zcash_compact;
+use zcash_client_backend::wallet::AccountId;
 use zcash_client_sqlite::{chain::init::init_cache_database,
-                          wallet::init::{init_accounts_table, init_blocks_table, init_wallet_db},
+                          wallet::{get_balance,
+                                   init::{init_accounts_table, init_blocks_table, init_wallet_db}},
                           BlockDb, WalletDb};
 use zcash_primitives::{block::BlockHash,
                        consensus::{BlockHeight, NetworkUpgrade, Parameters},
@@ -164,11 +166,13 @@ impl ZCoinShieldedHistory {
             }
         }
 
-        if errors.is_empty() {
-            Err("No lightwalletd servers configured".to_owned())
+        let error = if errors.is_empty() {
+            "No lightwalletd servers configured".to_owned()
         } else {
-            Err(format!("All lightwalletd servers failed: {}", errors.join("; ")))
-        }
+            format!("All lightwalletd servers failed: {}", errors.join("; "))
+        };
+        log::warn!("ZCoin lightwalletd fetch failed: {}", error);
+        Err(error)
     }
 
     fn lightwalletd_fetch_plan(
@@ -470,6 +474,12 @@ impl ZCoinShieldedHistory {
             Ok(height.map(u64::from))
         })
         .map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn balance(&self, consensus_params: ZcoinConsensusParams) -> Result<u64, String> {
+        let wallet_db = WalletDb::for_path(&self.wallet_db_path, consensus_params).map_err(|e| e.to_string())?;
+        let balance = get_balance(&wallet_db, AccountId::default()).map_err(|e| e.to_string())?;
+        Ok(balance.into())
     }
 
     pub(crate) fn scan_cached_blocks_to_height(
@@ -1032,6 +1042,14 @@ mod tests {
         );
         assert!(page.transactions[1].to.contains(&"zs-wallet".to_owned()));
         assert_eq!(page.transactions[1].confirmations, 3);
+    }
+
+    #[test]
+    fn balance_uses_unspent_mined_received_notes() {
+        let history = open_test_history();
+        insert_history_fixture(&history);
+
+        assert_eq!(history.balance(test_params()).unwrap(), 125_000_000);
     }
 
     #[test]
