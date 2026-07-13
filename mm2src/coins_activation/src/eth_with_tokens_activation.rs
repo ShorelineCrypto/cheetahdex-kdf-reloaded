@@ -158,7 +158,8 @@ impl TokenInitializer for Erc20TokenInitializer {
                 .unwrap_or_else(|| self.platform_coin.required_confirmations());
             let token = self
                 .platform_coin
-                .erc20_token_from_conf(params.ticker, token_addr, required_confirmations)
+                .erc20_token_from_conf_or_contract(params.ticker, token_addr, required_confirmations)
+                .await
                 .map_to_mm(EthTokenInitError::Internal)?;
             tokens.push(token);
         }

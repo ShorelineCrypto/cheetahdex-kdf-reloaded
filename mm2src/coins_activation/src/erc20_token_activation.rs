@@ -100,7 +100,8 @@ impl TokenActivationOps for EthCoin {
             .unwrap_or_else(|| platform_coin.required_confirmations());
 
         let token = platform_coin
-            .erc20_token_from_conf(ticker, token_addr, required_confirmations)
+            .erc20_token_from_conf_or_contract(ticker, token_addr, required_confirmations)
+            .await
             .map_to_mm(EnableTokenError::Internal)?;
 
         // Register the token on the platform coin so the platform's balance
