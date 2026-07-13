@@ -171,6 +171,12 @@ impl MmCoin for EthCoin {
         value: TradePreimageValue,
         stage: FeeApproxStage,
     ) -> TradePreimageResult<TradeFee> {
+        if matches!(self.coin_type, EthCoinType::Tron | EthCoinType::Trc20 { .. }) {
+            return MmError::err(TradePreimageError::InternalError(
+                "TRON V1 sender trade fee is not supported".to_string(),
+            ));
+        }
+
         let gas_price = self.get_gas_price().compat().await.mm_err(Into::into)?;
         let gas_price = increase_gas_price_by_stage(gas_price, &stage);
         let gas_limit = match self.coin_type {
@@ -209,11 +215,7 @@ impl MmCoin for EthCoin {
                     U256::from(300_000)
                 }
             },
-            // Trade-fee preimage for V1 ETH-style HTLC swaps; TRON uses a
-            // bandwidth/energy fee model handled separately. Wired in P10.2.5.
-            EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
-                unimplemented!("TRON V1 sender trade fee not wired (pending P10.2.5)")
-            },
+            EthCoinType::Tron | EthCoinType::Trc20 { .. } => unreachable!("TRON rejected before gas-price request"),
         };
 
         let total_fee = gas_limit * gas_price;

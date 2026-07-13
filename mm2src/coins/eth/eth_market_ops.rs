@@ -207,10 +207,6 @@ impl MarketCoinOps for EthCoin {
         from_block: u64,
         swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        let unverified: UnverifiedTransaction = try_tx_fus!(rlp::decode(tx_bytes));
-        let tx = try_tx_fus!(SignedEthTx::new(unverified));
-        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
-
         let func_name = match self.coin_type {
             EthCoinType::Eth => "ethPayment",
             EthCoinType::Erc20 { .. } => "erc20Payment",
@@ -218,9 +214,15 @@ impl MarketCoinOps for EthCoin {
             // prevents this code path from being reached. Real TRON swap
             // wiring lands in P10.2.5.
             EthCoinType::Tron | EthCoinType::Trc20 { .. } => {
-                unimplemented!("TRON V1 swap watchers not wired (pending P10.2.5)")
+                return Box::new(futures01::future::err(TransactionErr::Plain(
+                    "TRON V1 swap spend watchers are not supported".to_string(),
+                )));
             },
         };
+
+        let unverified: UnverifiedTransaction = try_tx_fus!(rlp::decode(tx_bytes));
+        let tx = try_tx_fus!(SignedEthTx::new(unverified));
+        let swap_contract_address = try_tx_fus!(swap_contract_address.try_to_address());
 
         let payment_func = try_tx_fus!(SWAP_CONTRACT.function(func_name));
         let decoded = try_tx_fus!(payment_func.decode_input(&tx.data[4..]));

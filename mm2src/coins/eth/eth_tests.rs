@@ -1784,3 +1784,25 @@ fn trezor_withdraw_rejects_tron_without_device() {
     let err = crate::eth::eth_trezor_withdraw::ensure_trezor_withdraw_supported(&coin).unwrap_err();
     assert!(matches!(err.into_inner(), WithdrawError::UnsupportedUnderTrezor(_)));
 }
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[test]
+fn tron_v1_sender_trade_fee_returns_error_without_network() {
+    let (_ctx, coin) = trezor_eth_coin_for_test(EthCoinType::Tron);
+    let err = block_on(coin.get_sender_trade_fee(TradePreimageValue::Exact(1.into()), FeeApproxStage::WithoutApprox))
+        .unwrap_err();
+    assert!(
+        matches!(err.into_inner(), TradePreimageError::InternalError(msg) if msg.contains("TRON V1 sender trade fee"))
+    );
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[test]
+fn tron_v1_wait_for_tx_spend_returns_error_without_decoding() {
+    let (_ctx, coin) = trezor_eth_coin_for_test(EthCoinType::Tron);
+    let err = coin
+        .wait_for_tx_spend(&[], 0, 0, &coin.swap_contract_address())
+        .wait()
+        .unwrap_err();
+    assert!(matches!(err, TransactionErr::Plain(msg) if msg.contains("TRON V1 swap spend watchers")));
+}
