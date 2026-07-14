@@ -13,7 +13,8 @@ use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClien
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
-use crate::utxo::utxo_common::{address_from_pubkey, my_public_key, trade_preimage_sender_address, UtxoTxBuilder};
+use crate::utxo::utxo_common::{address_from_pubkey, get_htlc_key_pair_v2, my_public_key,
+                               trade_preimage_sender_address, UtxoTxBuilder};
 use crate::utxo::utxo_common_tests;
 use crate::utxo::utxo_standard::{utxo_standard_coin_with_priv_key, UtxoStandardCoin};
 #[cfg(not(target_arch = "wasm32"))] use crate::WithdrawFee;
@@ -171,6 +172,7 @@ fn utxo_coin_fields_for_test(
         tx_fee: TxFee::FixedPerKb(1000),
         rpc_client,
         priv_key_policy,
+        hw_ctx: None,
         derivation_method,
         history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
         tx_cache: DummyVerboseCache::default().into_shared(),
@@ -307,6 +309,7 @@ fn test_v2_my_addr_uses_enabled_hd_address_for_hd_wallet() {
 fn test_v2_try_my_addr_errors_without_enabled_hd_address() {
     let client = native_client_for_test();
     let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
+    fields.priv_key_policy = PrivKeyPolicy::Trezor;
     fields.derivation_method = DerivationMethod::HDWallet(UtxoHDWallet {
         hd_wallet_storage: HDWalletCoinStorage::default(),
         address_format: UtxoAddressFormat::Standard,
@@ -330,15 +333,72 @@ fn test_v2_try_my_addr_errors_without_enabled_hd_address() {
     let coin = utxo_coin_from_fields(fields);
     let err = block_on(coin.try_my_addr()).unwrap_err();
     assert!(err.contains("No enabled HD address found"));
+
+    let err = coin.try_derive_htlc_pubkey_v2(b"swap-v2-unique-data").unwrap_err();
+    assert!(err.contains("No enabled HD address found"));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn test_v2_trezor_accessors_refuse_before_negotiation() {
+fn test_v2_trezor_accessors_use_enabled_hardware_hd_address() {
     let client = native_client_for_test();
     let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
     fields.priv_key_policy = PrivKeyPolicy::Trezor;
+    fields.conf.trezor_coin = Some(TrezorUtxoCoin::Komodo);
+    let hd_account = UtxoHDAccount {
+        account_id: 0,
+        extended_pubkey: Secp256k1ExtendedPublicKey::from_str(
+            "xpub6DEHSksajpRPM59RPw7Eg6PKdU7E2ehxJWtYdrfQ6JFmMGBsrR6jA78ANCLgzKYm4s5UqQ4ydLEYPbh3TRVvn5oAZVtWfi4qJLMntpZ8uGJ",
+        )
+        .unwrap(),
+        account_derivation_path: HDPathToAccount::from_str("m/44'/141'/0'").unwrap(),
+        external_addresses_number: 1,
+        internal_addresses_number: 0,
+    };
+    let derived_pubkey = hd_account
+        .extended_pubkey
+        .derive_child(Bip44Chain::External.to_child_number())
+        .unwrap()
+        .derive_child(ChildNumber::from(0))
+        .unwrap();
+    let enabled_pubkey = Public::Compressed(H264::from(derived_pubkey.public_key().serialize()));
+    let expected_enabled_address = address_from_pubkey(
+        &enabled_pubkey,
+        fields.conf.pub_addr_prefix,
+        fields.conf.pub_t_addr_prefix,
+        fields.conf.checksum_type,
+        fields.conf.bech32_hrp.clone(),
+        UtxoAddressFormat::Standard,
+    );
     fields.derivation_method = DerivationMethod::HDWallet(UtxoHDWallet {
+        hd_wallet_storage: HDWalletCoinStorage::default(),
+        address_format: UtxoAddressFormat::Standard,
+        derivation_path: HDPathToCoin::from_str("m/44'/141'").unwrap(),
+        accounts: HDAccountsMutex::new(HDAccountsMap::from([(0, hd_account)])),
+        gap_limit: 3,
+    });
+
+    let coin = utxo_coin_from_fields(fields);
+
+    let actual_addr = block_on(coin.try_my_addr()).unwrap();
+    assert_eq!(actual_addr, expected_enabled_address);
+
+    let actual_pubkey = coin.try_derive_htlc_pubkey_v2(b"swap-v2-unique-data").unwrap();
+    assert_eq!(actual_pubkey, enabled_pubkey);
+    assert_eq!(
+        coin.try_derive_htlc_pubkey_v2_bytes(b"swap-v2-unique-data").unwrap(),
+        enabled_pubkey.to_vec()
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn test_v2_trezor_enabled_pubkey_tracks_enabled_hardware_address_record() {
+    let client = native_client_for_test();
+    let mut first = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client.clone()), None, false);
+    first.priv_key_policy = PrivKeyPolicy::Trezor;
+    first.conf.trezor_coin = Some(TrezorUtxoCoin::Komodo);
+    first.derivation_method = DerivationMethod::HDWallet(UtxoHDWallet {
         hd_wallet_storage: HDWalletCoinStorage::default(),
         address_format: UtxoAddressFormat::Standard,
         derivation_path: HDPathToCoin::from_str("m/44'/141'").unwrap(),
@@ -358,13 +418,51 @@ fn test_v2_trezor_accessors_refuse_before_negotiation() {
         gap_limit: 3,
     });
 
+    let mut second = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
+    second.priv_key_policy = PrivKeyPolicy::Trezor;
+    second.conf.trezor_coin = Some(TrezorUtxoCoin::Komodo);
+    second.derivation_method = DerivationMethod::HDWallet(UtxoHDWallet {
+        hd_wallet_storage: HDWalletCoinStorage::default(),
+        address_format: UtxoAddressFormat::Standard,
+        derivation_path: HDPathToCoin::from_str("m/44'/141'").unwrap(),
+        accounts: HDAccountsMutex::new(HDAccountsMap::from([(
+            0,
+            UtxoHDAccount {
+                account_id: 0,
+                extended_pubkey: Secp256k1ExtendedPublicKey::from_str(
+                    "xpub6DEHSksajpRPQq2FdGT6JoieiQZUpTZ3WZn8fcuLJhFVmtCpXbuXxp5aPzaokwcLV2V9LE55Dwt8JYkpuMv7jXKwmyD28WbHYjBH2zhbW2p",
+                )
+                .unwrap(),
+                account_derivation_path: HDPathToAccount::from_str("m/44'/141'/1'").unwrap(),
+                external_addresses_number: 1,
+                internal_addresses_number: 0,
+            },
+        )])),
+        gap_limit: 3,
+    });
+
+    let first_pubkey = utxo_coin_from_fields(first)
+        .try_derive_htlc_pubkey_v2(b"swap-v2-unique-data")
+        .unwrap();
+    let second_pubkey = utxo_coin_from_fields(second)
+        .try_derive_htlc_pubkey_v2(b"swap-v2-unique-data")
+        .unwrap();
+
+    assert_ne!(first_pubkey, second_pubkey);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn test_v2_trezor_htlc_keypair_reports_unsupported_script_mode() {
+    let client = native_client_for_test();
+    let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
+    fields.priv_key_policy = PrivKeyPolicy::Trezor;
+    fields.conf.trezor_coin = Some(TrezorUtxoCoin::Komodo);
+
     let coin = utxo_coin_from_fields(fields);
-
-    let addr_err = block_on(coin.try_my_addr()).unwrap_err();
-    assert!(addr_err.contains("deferred for Trezor hardware wallets"));
-
-    let htlc_err = coin.try_derive_htlc_pubkey_v2(b"swap-v2-unique-data").unwrap_err();
-    assert!(htlc_err.contains("deferred for Trezor hardware wallets"));
+    let err = get_htlc_key_pair_v2(&coin, b"swap-v2-unique-data").unwrap_err();
+    assert!(err.contains("hardware_wallet:unsupported_script_signing_mode"));
+    assert!(!err.contains("deferred"));
 }
 
 #[test]

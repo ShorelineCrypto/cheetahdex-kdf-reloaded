@@ -1,6 +1,7 @@
 # Upstream Parity Gaps — TODO Tracker
 
-**Status:** active backlog.
+**Status:** active backlog plus recent parity completions awaiting wallet/CI
+soak testing.
 
 This document tracks confirmed functional gaps between the reloaded tree and
 the upstream Komodo DeFi Framework wire surface, as established by the changelog
@@ -8,12 +9,15 @@ parity audit (Jan 2022 → present) cross-referenced against
 [`rpc-method-census.md`](./rpc-method-census.md) (the upstream wire-method
 parity reference) and the reloaded dispatcher routing.
 
-Each gap below has been confirmed at **both** the CRD-specification level and the
-reloaded-code level (the audit method and evidence are recorded inline). Items
-are numbered to match the parity report delivered to the maintainer.
+Each unresolved gap below has been confirmed at **both** the
+CRD-specification level and the reloaded-code level (the audit method and
+evidence are recorded inline). Items are numbered to match the parity report
+delivered to the maintainer.
 
-Branch hierarchy for remediation: each item gets its own feature branch cut from
-`dev`; branches are left local (not pushed/merged) pending review.
+Resolved chapters are normally removed from this active tracker. The resolved
+chapters retained below are intentionally still present because their
+implementation or documentation changed in the current two-day proving window
+and still needs ordinary wallet/CI soak testing before archival.
 
 ---
 
@@ -157,22 +161,32 @@ resolved until their owning CRD chapter and implementation are both updated.
 
 CRD reference: [`15-swap-v2-utxo-path.md`](./15-swap-v2-utxo-path.md).
 
-The clean-room chapter-15 pass confirmed that software-HD UTXO Standard Swap V2
-address derivation must use the enabled HD address. It also confirmed that
-Trezor/hardware-wallet HTLC public-key derivation is deferred rather than
-silently substituted with host-side key material.
+The clean-room chapter-15 pass confirmed that software-HD and Trezor-backed UTXO
+Standard Swap V2 address and HTLC public-key identity must use the enabled HD
+address record. That record now carries the display address, compressed public
+key, and full derivation path. Wallet-funded maker-payment and taker-funding
+transactions use the enabled address path for Trezor P2PKH input signing, with
+P2SH HTLC and OP_RETURN outputs marked external and change marked by path when
+the signer can represent it.
 
 - [x] Promote/confirm the chapter-15 HD/Trezor requirements with a clean-room
   Spec Reader pass and Dirty Gate pass.
 - [x] Replace the HD local-address runtime stub with enabled-HD-address
   behavior.
-- [x] Replace the Trezor runtime panic with explicit deferred/unsupported
-  behavior before V2 negotiation or transaction construction.
+- [x] Replace the Trezor address/public-key deferral with enabled hardware-HD
+  address metadata selection.
+- [x] Add structured Trezor wallet-funded signing failures for unsupported coin
+  mapping/script mode, missing derivation metadata, user rejection/cancel,
+  transport/disconnect, unexpected device, and invalid device responses.
 - [x] Add unit coverage for HD trade-preimage sender derivation, HD V2 local
-  address selection, missing enabled HD address errors, and Trezor deferral.
-- [ ] Future work: implement full Trezor/hardware-wallet UTXO Standard Swap V2
-  HTLC public-key derivation and signing once chapter-15 D2 is brought into
-  scope; this should include emulator-backed coverage.
+  address selection, missing enabled HD address errors, Trezor enabled address
+  pubkey selection, and unsupported Trezor HTLC script signing.
+- [ ] Future work: extend the Trezor UTXO signer to support the V2 arbitrary
+  P2SH HTLC input scripts, then add emulator-backed wallet-funded and HTLC spend
+  coverage. The current signer only supports standard P2PKH inputs, so V2 HTLC
+  spend/finalization fails at the first local HTLC-signing step with a
+  structured `hardware_wallet:unsupported_script_signing_mode` error and never
+  falls back to host private keys.
 
 ### Solana / SPL swap and history surface — **TODO**
 

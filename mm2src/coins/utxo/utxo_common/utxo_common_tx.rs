@@ -58,26 +58,14 @@ pub fn tx_size_in_v_bytes(from_addr_format: &UtxoAddressFormat, tx: &UtxoTx) -> 
 pub(crate) async fn trade_preimage_sender_address(coin: &UtxoCoinFields) -> TradePreimageResult<Address> {
     match &coin.derivation_method {
         DerivationMethod::Iguana(my_address) => Ok(my_address.clone()),
-        DerivationMethod::HDWallet(hd_wallet) => match coin.priv_key_policy {
-            PrivKeyPolicy::Trezor => MmError::err(TradePreimageError::InternalError(
-                crate::utxo::utxo_standard_swap_v2::trezor_v2_address_error(),
-            )),
-            _ => {
-                let accounts = hd_wallet.accounts.lock().await;
-                let default_account = accounts.get(&0).ok_or_else(|| {
-                    MmError::new(TradePreimageError::InternalError(
-                        "No enabled HD account found for UTXO trade preimage sender address selection".to_owned(),
-                    ))
-                })?;
-                crate::utxo::utxo_standard_swap_v2::enabled_hd_address_from_account(
-                    coin,
-                    &hd_wallet.address_format,
-                    default_account,
-                    "UTXO trade preimage sender address selection",
-                )
-                .map_to_mm(TradePreimageError::InternalError)
-            },
-        },
+        DerivationMethod::HDWallet(hd_wallet) => crate::utxo::utxo_standard_swap_v2::enabled_hd_address_info(
+            coin,
+            hd_wallet,
+            "UTXO trade preimage sender address selection",
+        )
+        .await
+        .map(|info| info.address)
+        .map_to_mm(TradePreimageError::InternalError),
     }
 }
 

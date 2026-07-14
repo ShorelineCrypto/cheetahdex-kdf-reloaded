@@ -15,7 +15,7 @@ use chain::TxHashAlgo;
 use common::executor::{spawn, Timer};
 use crypto::GlobalHDAccountArc;
 use crypto::{Bip32DerPathError, Bip32DerPathOps, Bip44DerPathError, CryptoCtx, CryptoCtxError, CryptoInitError,
-             HDPathToCoin, HwWalletType};
+             HDPathToCoin, HardwareWalletArc, HwWalletType};
 use derive_more::Display;
 use futures::channel::mpsc;
 use futures::compat::Future01CompatExt;
@@ -221,6 +221,7 @@ pub trait UtxoFieldsWithIguanaPrivKeyBuilder: UtxoCoinBuilderCommonOps {
             dust_amount,
             rpc_client,
             priv_key_policy,
+            hw_ctx: None,
             derivation_method,
             history_sync_state: Mutex::new(initial_history_state),
             tx_cache,
@@ -328,6 +329,7 @@ pub trait UtxoFieldsWithGlobalHDBuilder: UtxoCoinBuilderCommonOps + UtxoFieldsWi
             dust_amount,
             rpc_client,
             priv_key_policy,
+            hw_ctx: None,
             derivation_method,
             history_sync_state: Mutex::new(initial_history_state),
             tx_cache,
@@ -352,7 +354,7 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
         if !self.supports_trezor(&conf) {
             return MmError::err(UtxoCoinBuildError::CoinDoesntSupportTrezor);
         }
-        self.check_if_trezor_is_initialized()?;
+        let hw_ctx = self.trezor_hw_ctx()?;
 
         // For now, use a default script pubkey.
         // TODO change the type of `recently_spent_outpoints` to `AsyncMutex<HashMap<Bytes, RecentlySpentOutPoints>>`
@@ -393,6 +395,7 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
             dust_amount,
             rpc_client,
             priv_key_policy: PrivKeyPolicy::Trezor,
+            hw_ctx: Some(hw_ctx),
             derivation_method: DerivationMethod::HDWallet(hd_wallet),
             history_sync_state: Mutex::new(initial_history_state),
             block_headers_storage,
@@ -431,13 +434,13 @@ pub trait UtxoFieldsWithHardwareWalletBuilder: UtxoCoinBuilderCommonOps {
     fn supports_trezor(&self, conf: &UtxoCoinConf) -> bool { conf.trezor_coin.is_some() }
 
     #[inline]
-    fn check_if_trezor_is_initialized(&self) -> UtxoCoinBuildResult<()> {
+    fn trezor_hw_ctx(&self) -> UtxoCoinBuildResult<HardwareWalletArc> {
         let crypto_ctx = CryptoCtx::from_ctx(self.ctx()).mm_err(Into::into)?;
         let hw_ctx = crypto_ctx
             .hw_ctx()
             .or_mm_err(|| UtxoCoinBuildError::HwContextNotInitialized)?;
         match hw_ctx.hw_wallet_type() {
-            HwWalletType::Trezor => Ok(()),
+            HwWalletType::Trezor => Ok(hw_ctx.clone()),
         }
     }
 }
