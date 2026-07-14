@@ -598,13 +598,26 @@ payment, taker-payment spend, and maker-payment spend. It MUST
 NOT change the normal non-optional payment confirmation waits
 that enforce the order's configured confirmation policy.
 
-**R44.** UTXO trade-preimage and taker-volume estimation MUST
-derive the sender address from the active derivation method. Under
-Iguana derivation it MUST use the Iguana address. Under
-hierarchical-deterministic derivation it MUST derive the address
-from the active public key and the HD wallet address format. These
-paths MUST NOT reject HD activation solely because an Iguana
-private key or Iguana address is unavailable.
+**R44.** UTXO trade-preimage and taker-volume estimation, and
+every version-two swap path that needs the local UTXO address
+through the public version-two parse/coin interface, MUST derive
+the sender address from the active derivation method. Under
+single-address derivation it MUST use the activated single
+address. Under hierarchical-deterministic derivation it MUST use
+the currently enabled HD address recorded by the active HD wallet
+state. It MUST NOT reconstruct an arbitrary root-public-key
+address when a different HD address is enabled, and it MUST NOT
+reject HD activation solely because a single-address private key
+or single-address value is unavailable.
+
+The interface contract is: callers receive the same address type
+as the UTXO coin normally uses; the HD case is selected by the
+coin's active derivation method; failure to read an enabled HD
+address MUST be reported as a structured derivation/address
+selection error by call sites that already have an error channel.
+In public version-two interfaces that are currently infallible,
+the implementation MUST ensure the enabled-address invariant
+before invoking the infallible accessor.
 
 ## 15.13 Tests
 
@@ -653,10 +666,33 @@ remains zero, one remains one, and values greater than one are
 capped to one.
 
 **T10.** *HD trade-preview sender derivation.* A unit test
-constructs an HD UTXO coin field set and asserts that
-trade-preimage sender derivation returns the address built from
-the active public key and the HD address format instead of
-requiring Iguana derivation.
+constructs an HD UTXO coin field set with a known enabled HD
+address and asserts that trade-preimage sender derivation returns
+that enabled address. The test MUST use an enabled address that is
+distinguishable from the address that would be obtained by
+blindly applying the default UTXO address format to the root
+activated public key. The test asserts that HD estimation does not
+require a single-address private key or single-address value.
+
+**T11.** *HD version-two local address contract.* A unit test
+constructs a version-two-capable UTXO coin under HD derivation
+with a known enabled HD address and asserts that the public
+version-two local-address accessor returns that same enabled
+address. A companion error-path test exercises an HD wallet state
+with no readable enabled address and asserts a structured
+address-selection failure at the nearest fallible call boundary,
+with no swap negotiation message emitted and no transaction
+constructed.
+
+**T12.** *Hardware-wallet HTLC public-key deferral.* A unit test
+or task-level integration test activates a UTXO coin under a
+Trezor/hardware-wallet key policy and starts the earliest
+version-two swap path that would require a local HTLC public key.
+Until hardware support is implemented, the path MUST terminate
+before P2P negotiation or transaction construction with a
+structured unsupported/deferred error. It MUST NOT synthesize a
+software public key, fall back to a single-address key, export a
+host private key, or wait for a hardware-wallet signing prompt.
 
 ## 15.14 Deferred Work
 
@@ -664,11 +700,33 @@ requiring Iguana derivation.
 R28. The substrate emits explicit deferred-variant rejection
 errors in those arms; chapter 16 binds the replacement.
 
-**D2.** Hardware-wallet support in R36. The
-chapter-bound version-two swap-fee keypair accessor returns the
-deferred-variant error under the hardware-wallet keypair-policy
-arm. The hash-time-locked-contract public-key derivation path
-for the hardware-wallet keypair-policy arm is deferred.
+**D2.** Hardware-wallet support in R36 and R44. Upstream UTXO
+version-two swap HTLC public-key derivation is unsupported for
+the Trezor/hardware-wallet keypair-policy arm, so reloaded keeps
+this as a deferred requirement rather than pretending that a
+host-side key exists.
+
+The current required behavior is explicit refusal: when a
+Trezor/hardware-wallet UTXO coin reaches a version-two swap
+operation that needs a local HTLC public key or local swap sender
+address, the operation MUST fail before P2P negotiation,
+transaction construction, or broadcast with a structured
+unsupported/deferred hardware-wallet error. It MUST NOT panic, it
+MUST NOT fall back to a software single-address key, it MUST NOT
+derive from a host mnemonic, and it MUST NOT request a device
+signature for a transaction whose HTLC public key was not obtained
+from the device policy.
+
+The future reloaded behavior, when D2 is implemented, is:
+the HTLC public key MUST be obtained from the active
+hardware-wallet derivation path associated with the enabled HD
+address for the coin; the returned public key MUST be the
+compressed public key used in version-two peer negotiation and
+script construction; the matching device path MUST be retained
+for later hardware signing; and failure modes such as no
+initialized device, unexpected device, user cancellation, or
+unsupported coin/path MUST surface through the hardware task or
+swap-start error contract without exporting private key material.
 
 **D3.** Per-swap hierarchical-deterministic key isolation. The
 substrate currently does not thread the swap-unique data into

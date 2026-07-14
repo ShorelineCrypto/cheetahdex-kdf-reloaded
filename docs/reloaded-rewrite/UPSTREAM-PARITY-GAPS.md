@@ -153,21 +153,26 @@ The following items were found during the runtime-stub and wallet-log hardening
 pass. They are tracked here so they are not lost, but they are not marked as
 resolved until their owning CRD chapter and implementation are both updated.
 
-### UTXO Standard Swap V2 HD/Trezor stubs — **TODO**
+### UTXO Standard Swap V2 HD/Trezor stubs — **PARTIALLY RESOLVED**
 
 CRD reference: [`15-swap-v2-utxo-path.md`](./15-swap-v2-utxo-path.md).
 
-Known implementation gaps:
-- HD-wallet sender-address derivation in the UTXO Standard Swap V2
-  `ParseCoinAssocTypes` implementation.
-- Hardware-wallet/Trezor HTLC public-key derivation in the UTXO Standard Swap V2
-  `CommonSwapOpsV2` implementation.
+The clean-room chapter-15 pass confirmed that software-HD UTXO Standard Swap V2
+address derivation must use the enabled HD address. It also confirmed that
+Trezor/hardware-wallet HTLC public-key derivation is deferred rather than
+silently substituted with host-side key material.
 
-- [ ] Promote or confirm the chapter-15 HD/Trezor requirements with a clean-room
-  Spec Reader pass.
-- [ ] Replace the runtime stubs with explicit compatible behavior.
-- [ ] Add unit coverage for HD address derivation and emulator-backed Trezor
-  coverage where the signing/public-key surface is available.
+- [x] Promote/confirm the chapter-15 HD/Trezor requirements with a clean-room
+  Spec Reader pass and Dirty Gate pass.
+- [x] Replace the HD local-address runtime stub with enabled-HD-address
+  behavior.
+- [x] Replace the Trezor runtime panic with explicit deferred/unsupported
+  behavior before V2 negotiation or transaction construction.
+- [x] Add unit coverage for HD trade-preimage sender derivation, HD V2 local
+  address selection, missing enabled HD address errors, and Trezor deferral.
+- [ ] Future work: implement full Trezor/hardware-wallet UTXO Standard Swap V2
+  HTLC public-key derivation and signing once chapter-15 D2 is brought into
+  scope; this should include emulator-backed coverage.
 
 ### Solana / SPL swap and history surface — **TODO**
 

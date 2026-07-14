@@ -55,19 +55,28 @@ pub fn tx_size_in_v_bytes(from_addr_format: &UtxoAddressFormat, tx: &UtxoTx) -> 
     }
 }
 
-pub(crate) fn trade_preimage_sender_address(coin: &UtxoCoinFields) -> TradePreimageResult<Address> {
-    match coin.derivation_method {
-        DerivationMethod::Iguana(ref my_address) => Ok(my_address.clone()),
-        DerivationMethod::HDWallet(UtxoHDWallet { ref address_format, .. }) => {
-            let my_public_key = my_public_key(coin).mm_err(Into::into)?;
-            Ok(address_from_pubkey(
-                my_public_key,
-                coin.conf.pub_addr_prefix,
-                coin.conf.pub_t_addr_prefix,
-                coin.conf.checksum_type,
-                coin.conf.bech32_hrp.clone(),
-                address_format.clone(),
-            ))
+pub(crate) async fn trade_preimage_sender_address(coin: &UtxoCoinFields) -> TradePreimageResult<Address> {
+    match &coin.derivation_method {
+        DerivationMethod::Iguana(my_address) => Ok(my_address.clone()),
+        DerivationMethod::HDWallet(hd_wallet) => match coin.priv_key_policy {
+            PrivKeyPolicy::Trezor => MmError::err(TradePreimageError::InternalError(
+                crate::utxo::utxo_standard_swap_v2::trezor_v2_address_error(),
+            )),
+            _ => {
+                let accounts = hd_wallet.accounts.lock().await;
+                let default_account = accounts.get(&0).ok_or_else(|| {
+                    MmError::new(TradePreimageError::InternalError(
+                        "No enabled HD account found for UTXO trade preimage sender address selection".to_owned(),
+                    ))
+                })?;
+                crate::utxo::utxo_standard_swap_v2::enabled_hd_address_from_account(
+                    coin,
+                    &hd_wallet.address_format,
+                    default_account,
+                    "UTXO trade preimage sender address selection",
+                )
+                .map_to_mm(TradePreimageError::InternalError)
+            },
         },
     }
 }
@@ -569,7 +578,7 @@ where
     let tx_fee = coin.get_tx_fee().await.mm_err(Into::into)?;
     // [`FeePolicy::DeductFromOutput`] is used if the value is [`TradePreimageValue::UpperBound`] only
     let is_amount_upper_bound = matches!(fee_policy, FeePolicy::DeductFromOutput(_));
-    let my_address = trade_preimage_sender_address(coin.as_ref())?;
+    let my_address = trade_preimage_sender_address(coin.as_ref()).await?;
 
     match tx_fee {
         // if it's a dynamic fee, we should generate a swap transaction to get an actual trade fee

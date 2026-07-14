@@ -1149,7 +1149,7 @@ where
     match &coin.as_ref().priv_key_policy {
         PrivKeyPolicy::KeyPair(kp) => Ok(*kp),
         PrivKeyPolicy::HDWallet { activated_key, .. } => Ok(*activated_key),
-        PrivKeyPolicy::Trezor => Err("get_htlc_key_pair_v2 not implemented for Trezor (ch15 phase 3)".to_string()),
+        PrivKeyPolicy::Trezor => Err(crate::utxo::utxo_standard_swap_v2::trezor_v2_htlc_error()),
     }
 }
 
