@@ -130,7 +130,8 @@ pub struct Erc20TokenInitializer {
     platform_coin: EthCoin,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TokenInitializer for Erc20TokenInitializer {
     type Token = EthCoin;
     type TokenActivationRequest = Erc20ActivationRequest;

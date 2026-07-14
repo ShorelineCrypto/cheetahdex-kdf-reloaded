@@ -76,7 +76,8 @@ pub struct Erc20InitResult {
     required_confirmations: u64,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TokenActivationOps for EthCoin {
     type PlatformCoin = EthCoin;
     type ActivationParams = Erc20ActivationRequest;

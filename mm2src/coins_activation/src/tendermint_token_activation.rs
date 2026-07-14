@@ -71,7 +71,8 @@ pub struct TendermintTokenInitResult {
     platform_coin: String,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TokenActivationOps for TendermintToken {
     type PlatformCoin = TendermintCoin;
     type ActivationParams = TendermintTokenActivationParams;
