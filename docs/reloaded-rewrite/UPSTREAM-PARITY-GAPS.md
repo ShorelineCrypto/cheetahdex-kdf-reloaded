@@ -147,6 +147,89 @@ R21. The superset has been removed; all three shapes now agree.
   and the corrected R21. Done on `dev` (commit `fd075e66e`); the shared struct and
   all activation handlers compile and the streaming_activations tests pass.
 
+## Runtime-stub backlog — unfinished / TODO
+
+The following items were found during the runtime-stub and wallet-log hardening
+pass. They are tracked here so they are not lost, but they are not marked as
+resolved until their owning CRD chapter and implementation are both updated.
+
+### UTXO Standard Swap V2 HD/Trezor stubs — **TODO**
+
+CRD reference: [`15-swap-v2-utxo-path.md`](./15-swap-v2-utxo-path.md).
+
+Known implementation gaps:
+- HD-wallet sender-address derivation in the UTXO Standard Swap V2
+  `ParseCoinAssocTypes` implementation.
+- Hardware-wallet/Trezor HTLC public-key derivation in the UTXO Standard Swap V2
+  `CommonSwapOpsV2` implementation.
+
+- [ ] Promote or confirm the chapter-15 HD/Trezor requirements with a clean-room
+  Spec Reader pass.
+- [ ] Replace the runtime stubs with explicit compatible behavior.
+- [ ] Add unit coverage for HD address derivation and emulator-backed Trezor
+  coverage where the signing/public-key surface is available.
+
+### Solana / SPL swap and history surface — **TODO**
+
+CRD reference: [`40-solana-coin.md`](./40-solana-coin.md).
+
+The Solana/SPL modules still contain broad unimplemented areas around market
+operations, swap operations, history, raw transaction handling, and fee
+preimage/conversion flows.
+
+- [ ] Decide whether Solana/SPL is in scope for the current release.
+- [ ] If in scope, run a clean-room CRD pass before implementation.
+- [ ] If out of scope, mark the unsupported RPC/swap paths explicitly and return
+  structured errors instead of panics.
+
+### Lightning Network market/swap/history surface — **TODO**
+
+CRD reference: [`41-lightning-network.md`](./41-lightning-network.md).
+
+Lightning support still contains large feature stubs in market operations, swap
+operations, and transaction-history-style surfaces.
+
+- [ ] Decide whether Lightning is in scope for the current release.
+- [ ] If in scope, split implementation into activation, payment/channel, swap,
+  and history work packages.
+- [ ] If out of scope, bind the unsupported behavior in the CRD and make runtime
+  paths return structured errors.
+
+### Ledger APDU transport — **TODO**
+
+CRD reference: [`50-evm-trezor-signing.md`](./50-evm-trezor-signing.md) for the
+current hardware-wallet policy surface. A separate Ledger chapter may be needed
+if Ledger support is brought into scope.
+
+- [ ] Decide whether Ledger transport support is in scope.
+- [ ] If in scope, define the public hardware-wallet transport contract and add
+  simulator or mock-device tests.
+- [ ] If out of scope, ensure any runtime entry point reports unsupported
+  hardware transport instead of panicking.
+
+### Low-S signature verification helper — **TODO**
+
+The `kdf_keys` low-S helper is crypto-sensitive and currently not on an active
+KDF call path.
+
+- [ ] Confirm whether any enabled signing or verification path requires this
+  helper.
+- [ ] If required, implement against the public secp256k1 rule and add boundary
+  tests.
+- [ ] If not required, document it as intentionally unavailable until the owning
+  feature is implemented.
+
+### Wallet app sequencing warnings — **TODO / needs reproduction**
+
+Wallet logs still show transient-looking conditions such as duplicate activation
+requests, balance polling before activation completion, inactive stream polling,
+and bad external provider endpoints.
+
+- [ ] Re-test with a current KDF build.
+- [ ] If still reproducible, classify each symptom as KDF compatibility behavior,
+  app call-ordering behavior, or external-provider failure.
+- [ ] Fix only the KDF-owned compatibility cases in this repository.
+
 ---
 
 ## Audit method (for reproducibility)
