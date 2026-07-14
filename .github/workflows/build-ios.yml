@@ -94,16 +94,11 @@ jobs:
         # P14 modernised the Solana stack to the modular `solana-*` 2.x
         # crates, removing the `solana-remote-wallet` -> `hidapi` ->
         # `libudev` chain that previously broke iOS cross-builds.
-        # This step regression-tests that property.
+        # This step regression-tests that property. Package-qualified
+        # `mm2_main/*` feature flags from callers are intentionally not passed
+        # here because this is a coins-only check.
         run: |
-          FEATURES_FLAG=""
-          if [ -n "${{ inputs.features }}" ]; then
-            # Transform comma-separated features to mm2_main/feat1,mm2_main/feat2 format
-            FEATURES_TRANSFORMED="mm2_main/${{ inputs.features }}"
-            FEATURES_TRANSFORMED="${FEATURES_TRANSFORMED//,/,mm2_main/}"
-            FEATURES_FLAG="--features $FEATURES_TRANSFORMED"
-          fi
-          cargo check -p coins --target ${{ matrix.target }} $FEATURES_FLAG
+          cargo check -p coins --target ${{ matrix.target }}
 
       - name: Rename staticlib to libkdf.a
         run: |
