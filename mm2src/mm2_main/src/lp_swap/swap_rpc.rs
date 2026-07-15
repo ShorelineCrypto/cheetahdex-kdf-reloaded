@@ -294,6 +294,24 @@ pub enum MyRecentSwapsErr {
 
 pub type MyRecentSwapsResult = Result<MyRecentSwapsResponse, MmError<MyRecentSwapsErr>>;
 
+fn recent_swap_or_log(uuid: &Uuid, loaded: SavedSwapResult<Option<SavedSwap>>) -> Option<SavedSwap> {
+    match loaded {
+        Ok(Some(swap)) => Some(swap),
+        Ok(None) => {
+            error!("No such swap with the uuid '{}'", uuid);
+            None
+        },
+        Err(e) => {
+            error!("Error loading a swap with the uuid '{}': {}", uuid, e);
+            None
+        },
+    }
+}
+
+fn recent_swap_status_json(uuid: &Uuid, loaded: SavedSwapResult<Option<SavedSwap>>) -> Option<Json> {
+    recent_swap_or_log(uuid, loaded).map(|swap| json::to_value(MySwapStatusResponse::from(&swap)).unwrap())
+}
+
 pub async fn my_recent_swaps(ctx: MmArc, req: MyRecentSwapsReq) -> MyRecentSwapsResult {
     let db_result = match MySwapsStorage::new(ctx.clone())
         .my_recent_swaps_with_filters(&req.filter, Some(&req.paging_options))
@@ -305,15 +323,9 @@ pub async fn my_recent_swaps(ctx: MmArc, req: MyRecentSwapsReq) -> MyRecentSwaps
 
     let mut swaps = Vec::with_capacity(db_result.uuids_and_types.len());
     for (uuid, _swap_type) in db_result.uuids_and_types.iter() {
-        let swap = match SavedSwap::load_my_swap_from_db(&ctx, *uuid).await {
-            Ok(Some(swap)) => swap,
-            Ok(None) => {
-                error!("No such swap with the uuid '{}'", uuid);
-                continue;
-            },
-            Err(e) => return Err(MmError::new(MyRecentSwapsErr::UnableToLoadSavedSwaps(e.into_inner()))),
-        };
-        swaps.push(swap);
+        if let Some(swap) = recent_swap_or_log(uuid, SavedSwap::load_my_swap_from_db(&ctx, *uuid).await) {
+            swaps.push(swap);
+        }
     }
 
     Ok(MyRecentSwapsResponse {
@@ -340,18 +352,9 @@ pub async fn my_recent_swaps_rpc(ctx: MmArc, req: Json) -> Result<Response<Vec<u
     // iterate over uuids trying to parse the corresponding files content and add to result vector
     let mut swaps = Vec::with_capacity(db_result.uuids_and_types.len());
     for (uuid, _swap_type) in db_result.uuids_and_types.iter() {
-        let swap_json = match SavedSwap::load_my_swap_from_db(&ctx, *uuid).await {
-            Ok(Some(swap)) => json::to_value(MySwapStatusResponse::from(&swap)).unwrap(),
-            Ok(None) => {
-                error!("No such swap with the uuid '{}'", uuid);
-                Json::Null
-            },
-            Err(e) => {
-                error!("Error loading a swap with the uuid '{}': {}", uuid, e);
-                Json::Null
-            },
-        };
-        swaps.push(swap_json);
+        if let Some(swap_json) = recent_swap_status_json(uuid, SavedSwap::load_my_swap_from_db(&ctx, *uuid).await) {
+            swaps.push(swap_json);
+        }
     }
 
     let res_js = json!({
@@ -658,6 +661,21 @@ mod lp_swap_tests {
 
     /// Tests use the legacy mainnet netid 8762 fee parameters.
     fn test_net_cfg() -> &'static dyn NetConfig { mm2_net_config::net_config_or_panic(8762) }
+
+    #[test]
+    fn recent_swap_status_json_skips_missing_swap() {
+        let uuid = Uuid::new_v4();
+
+        assert!(recent_swap_status_json(&uuid, Ok(None)).is_none());
+    }
+
+    #[test]
+    fn recent_swap_status_json_skips_unloadable_swap() {
+        let uuid = Uuid::new_v4();
+        let load_result = MmError::err(SavedSwapError::ErrorDeserializing("missing field `data`".into()));
+
+        assert!(recent_swap_status_json(&uuid, load_result).is_none());
+    }
 
     #[test]
     fn test_dex_fee_amount() {
