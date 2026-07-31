@@ -1334,6 +1334,9 @@ pub struct UtxoActivationParams {
     pub requires_notarization: Option<bool>,
     pub address_format: Option<UtxoAddressFormat>,
     pub gap_limit: Option<u32>,
+    /// Minimum number of known external addresses to expose for every HD account.
+    #[serde(default)]
+    pub min_addresses_number: Option<u32>,
     #[serde(default)]
     pub scan_policy: EnableCoinScanPolicy,
     #[serde(default = "PrivKeyActivationPolicy::context_priv_key")]
@@ -1399,6 +1402,7 @@ impl UtxoActivationParams {
             requires_notarization,
             address_format,
             gap_limit: None,
+            min_addresses_number: None,
             scan_policy,
             priv_key_policy,
             check_utxo_maturity,
@@ -2020,6 +2024,17 @@ async fn send_outputs_from_my_address_impl<T>(
 where
     T: UtxoCommonOps + GetUtxoListOps,
 {
+    send_outputs_from_my_address_impl_with_underdust_output(coin, outputs, None).await
+}
+
+async fn send_outputs_from_my_address_impl_with_underdust_output<T>(
+    coin: T,
+    outputs: Vec<TransactionOutput>,
+    allowed_underdust_output: Option<usize>,
+) -> Result<UtxoTx, TransactionErr>
+where
+    T: UtxoCommonOps + GetUtxoListOps,
+{
     let sender = try_tx_s!(
         active_utxo_sender_address(coin.as_ref(), "UTXO Swap V2 wallet-funded transaction sender selection").await
     );
@@ -2032,6 +2047,7 @@ where
         FeePolicy::SendExact,
         recently_sent_txs,
         outputs,
+        allowed_underdust_output,
     )
     .await
 }
@@ -2047,6 +2063,7 @@ async fn generate_and_send_tx_from_sender<T>(
     fee_policy: FeePolicy,
     mut recently_spent: RecentlySpentOutPointsGuard<'_>,
     outputs: Vec<TransactionOutput>,
+    allowed_underdust_output: Option<usize>,
 ) -> Result<UtxoTx, TransactionErr>
 where
     T: UtxoCommonOps,
@@ -2056,6 +2073,9 @@ where
         .add_available_inputs(unspents)
         .add_outputs(outputs)
         .with_fee_policy(fee_policy);
+    if let Some(output_index) = allowed_underdust_output {
+        builder = builder.allow_underdust_output(output_index);
+    }
     if let Some(required) = required_inputs {
         builder = builder.add_required_inputs(required);
     }
@@ -2225,6 +2245,7 @@ pub fn address_by_conf_and_pubkey_str(
         requires_notarization: None,
         address_format: None,
         gap_limit: None,
+        min_addresses_number: None,
         scan_policy: EnableCoinScanPolicy::default(),
         priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
         check_utxo_maturity: None,

@@ -17,6 +17,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Small KMD direct-burn DEX fees retain the legacy wire shape.** Netid 8762
+  KMD taker-fee construction now permits the positive 75% fee-collection
+  output selected by the `v2.6.0-beta` policy even when that split component
+  is below KMD's generic spendable-output dust threshold. The exception is
+  scoped to that protocol-defined output; ordinary outputs and change retain
+  the existing dust checks. Code: `mm2src/coins/utxo/`.
+- **HD UTXO activation honours `min_addresses_number`.** API-v2 UTXO
+  activation now persists and returns the requested minimum number of external
+  addresses for each HD account, so an empty account activated with the
+  wallet-standard value `1` has external address `0` available to balance,
+  order, and swap-preimage paths. Empty HD accounts also retain the activated
+  ticker's zero-valued entry in `total_balance` instead of returning an untyped
+  empty object. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
+- **DEX-fee wire compatibility on both production netids.** Netid 8762 KMD
+  takers now use the `v2.6.0-beta`-compatible discounted fee and two-output
+  75/25 fee/OP_RETURN structure, while non-KMD takers remain single-output.
+  Netid 6133 follows the v3/dev single-output fee structure. Both networks now
+  use only the taker coin's minimum transaction amount as the fee floor,
+  removing the erroneous additional `0.0001` floor. Fixes #1. Code:
+  `mm2src/mm2_net_config/`, `mm2src/mm2_main/src/lp_swap/`,
+  `mm2src/coins/utxo/`.
 - **`CoinProtocol::NFT` variant accepted.** A permissive NFT variant is added to `CoinProtocol` so NFT-typed coin configs no longer fail deserialization. Code: `mm2src/coins/lp_coins.rs`.
 - **NFT subsystem activation RPC parity.** `enable_nft` is routed as the explicit NFT subsystem activation method, with CRD coverage for the activation contract. Code: `docs/reloaded-rewrite/19-nft-module-layout.md`, `mm2src/mm2_main/`, `mm2src/coins/nft/`.
 - **SSE activation response wire shape.** `stream::*::enable` success payloads now expose the upstream-compatible `streamer_id` field without the reloaded-only `active` boolean. Code: `docs/reloaded-rewrite/10-sse-streaming.md`, `mm2src/mm2_main/`.

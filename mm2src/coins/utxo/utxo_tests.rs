@@ -36,6 +36,7 @@ use std::convert::TryFrom;
 use std::iter;
 use std::mem::discriminant;
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Test-only DEX-fee destination pubkey, resolved through `mm2_net_config`
 /// for the community netid. Replaces direct use of
@@ -85,6 +86,20 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
 /// Returned client won't work by default, requires some mocks to be usable
 #[cfg(not(target_arch = "wasm32"))]
 fn native_client_for_test() -> NativeClient { NativeClient(Arc::new(NativeClientImpl::default())) }
+
+#[test]
+fn test_utxo_activation_params_min_addresses_number() {
+    let params: UtxoActivationParams = json::from_value(json!({
+        "mode": { "rpc": "Native" },
+        "min_addresses_number": 1
+    }))
+    .unwrap();
+    assert_eq!(params.min_addresses_number, Some(1));
+
+    let params_without_minimum: UtxoActivationParams =
+        json::from_value(json!({ "mode": { "rpc": "Native" } })).unwrap();
+    assert_eq!(params_without_minimum.min_addresses_number, None);
+}
 
 fn utxo_coin_fields_for_test(
     rpc_client: UtxoRpcClientEnum,
@@ -3641,6 +3656,107 @@ fn test_qtum_with_check_utxo_maturity_false() {
 }
 
 #[test]
+fn test_minimum_external_addresses_are_activated_once() {
+    let storage_updates = Arc::new(AtomicUsize::new(0));
+    let storage_updates_mock = storage_updates.clone();
+    HDWalletMockStorage::update_external_addresses_number.mock_safe(
+        move |_, _, account_id, new_external_addresses_number| {
+            assert_eq!(account_id, 0);
+            assert_eq!(new_external_addresses_number, 1);
+            storage_updates_mock.fetch_add(1, Ordering::SeqCst);
+            MockResult::Return(Box::pin(futures::future::ok(())))
+        },
+    );
+
+    let balance_requests = Arc::new(AtomicUsize::new(0));
+    let balance_requests_mock = balance_requests.clone();
+    NativeClient::display_balances.mock_safe(move |_, addresses: Vec<Address>, _| {
+        assert_eq!(addresses.len(), 1);
+        assert_eq!(addresses[0].to_string(), "RRqF4cYniMwYs66S4QDUUZ4GJQFQF69rBE");
+        balance_requests_mock.fetch_add(1, Ordering::SeqCst);
+        let balances = addresses
+            .into_iter()
+            .map(|address| (address, BigDecimal::from(0)))
+            .collect();
+        MockResult::Return(Box::new(futures01::future::ok(balances)))
+    });
+
+    let client = NativeClient(Arc::new(NativeClientImpl::default()));
+    let coin = utxo_coin_from_fields(utxo_coin_fields_for_test(
+        UtxoRpcClientEnum::Native(client),
+        None,
+        false,
+    ));
+    let hd_wallet = UtxoHDWallet {
+        hd_wallet_storage: HDWalletCoinStorage::default(),
+        address_format: UtxoAddressFormat::Standard,
+        derivation_path: HDPathToCoin::from_str("m/44'/141'").unwrap(),
+        accounts: HDAccountsMutex::new(HDAccountsMap::new()),
+        gap_limit: 20,
+    };
+    let mut hd_account = UtxoHDAccount {
+        account_id: 0,
+        extended_pubkey: Secp256k1ExtendedPublicKey::from_str(
+            "xpub6DEHSksajpRPM59RPw7Eg6PKdU7E2ehxJWtYdrfQ6JFmMGBsrR6jA78ANCLgzKYm4s5UqQ4ydLEYPbh3TRVvn5oAZVtWfi4qJLMntpZ8uGJ",
+        )
+        .unwrap(),
+        account_derivation_path: HDPathToAccount::from_str("m/44'/141'/0'").unwrap(),
+        external_addresses_number: 0,
+        internal_addresses_number: 0,
+    };
+    let mut addresses = Vec::new();
+
+    block_on(crate::coin_balance::common_impl::ensure_minimum_external_addresses(
+        &coin,
+        &hd_wallet,
+        &mut hd_account,
+        0,
+        &mut addresses,
+    ))
+    .unwrap();
+
+    assert_eq!(hd_account.external_addresses_number, 0);
+    assert!(addresses.is_empty());
+    assert_eq!(storage_updates.load(Ordering::SeqCst), 0);
+    assert_eq!(balance_requests.load(Ordering::SeqCst), 0);
+
+    block_on(crate::coin_balance::common_impl::ensure_minimum_external_addresses(
+        &coin,
+        &hd_wallet,
+        &mut hd_account,
+        1,
+        &mut addresses,
+    ))
+    .unwrap();
+
+    assert_eq!(hd_account.external_addresses_number, 1);
+    assert_eq!(addresses.len(), 1);
+    assert_eq!(addresses[0].address, "RRqF4cYniMwYs66S4QDUUZ4GJQFQF69rBE");
+    assert_eq!(
+        addresses[0].derivation_path,
+        RpcDerivationPath(DerivationPath::from_str("m/44'/141'/0'/0/0").unwrap())
+    );
+    assert_eq!(addresses[0].chain, Bip44Chain::External);
+    assert_eq!(
+        addresses[0].balance,
+        crate::coin_balance::coin_balance_map_for_ticker(TEST_COIN_NAME, CoinBalance::default())
+    );
+
+    block_on(crate::coin_balance::common_impl::ensure_minimum_external_addresses(
+        &coin,
+        &hd_wallet,
+        &mut hd_account,
+        1,
+        &mut addresses,
+    ))
+    .unwrap();
+
+    assert_eq!(addresses.len(), 1);
+    assert_eq!(storage_updates.load(Ordering::SeqCst), 1);
+    assert_eq!(balance_requests.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn test_account_balance_rpc() {
     let mut addresses_map: HashMap<String, u64> = HashMap::new();
     let mut balances_by_der_path: HashMap<String, HDAddressBalance> = HashMap::new();
@@ -4980,20 +5096,20 @@ mod swap_v2_taker_payment_spend_tests {
 /// §16.6 — Pre-burn output unit tests for the V2 taker-payment-spend.
 #[cfg(test)]
 mod swap_v2_pre_burn_tests {
-    use crate::utxo::rpc_clients::UtxoRpcClientEnum;
+    use crate::utxo::rpc_clients::{UnspentInfo, UtxoRpcClientEnum};
     use crate::utxo::utxo_common;
     use crate::utxo::utxo_standard::UtxoStandardCoin;
     use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test, utxo_coin_from_fields};
-    use crate::utxo::{output_script, ScriptType, UtxoTx};
-    use crate::{DexFee, DexFeeBurnDestination, GenTakerPaymentSpendArgs, MmCoin,
-                ValidateTakerPaymentSpendPreimageError};
-    use chain::TransactionOutput;
+    use crate::utxo::{output_script, ActualTxFee, GenerateTxError, ScriptType, UtxoTx};
+    use crate::{calc_dex_fee_for_burn_account, calc_dex_fee_for_op_return, DexFee, DexFeeBurnDestination,
+                GenTakerPaymentSpendArgs, MmCoin, ValidateTakerPaymentSpendPreimageError};
+    use chain::{OutPoint, TransactionOutput};
     use common::block_on;
     use common::mm_number::MmNumber;
     use kdf_crypto::ChecksumType;
     use keys::{Address, AddressFormat as UtxoAddressFormat};
     use mm2_net_config::net_config_or_panic;
-    use script::Opcode;
+    use script::{Builder, Opcode};
 
     const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
     const TAKER_PAYMENT_TIME_LOCK: u32 = 0x6810_0000;
@@ -5001,8 +5117,7 @@ mod swap_v2_pre_burn_tests {
     const SWAP_UNIQUE_DATA: &[u8] = b"ch16 pre-burn unit tests";
 
     /// Build a non-KMD `UtxoStandardCoin` (ticker = "RICK") with the standard
-    /// test fixture; `should_burn_dex_fee` is `true`, `should_burn_directly`
-    /// is `false`.
+    /// test fixture; both burn opt-ins are false.
     fn rick_coin() -> UtxoStandardCoin {
         let fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
         utxo_coin_from_fields(fields)
@@ -5044,46 +5159,55 @@ mod swap_v2_pre_burn_tests {
         }
     }
 
-    /// §16.3.2 — burn-enabled netid + non-KMD coin produces
-    /// `WithBurn { PreBurnAccount }` with the configured 75/25 split.
+    /// A non-KMD UTXO taker on netid 8762 retains the single-output form.
     #[test]
-    fn should_compute_dex_fee_with_burn_split_for_burn_enabled_coin() {
+    fn should_keep_non_kmd_fee_standard_on_netid_8762() {
         let coin = rick_coin();
-        let net_cfg = net_config_or_panic(6133);
+        let net_cfg = net_config_or_panic(8762);
         let total = MmNumber::from("1");
-        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
-        match dex_fee {
-            DexFee::WithBurn {
-                fee_amount,
-                burn_amount,
-                burn_destination: DexFeeBurnDestination::PreBurnAccount { burn_pubkey },
-            } => {
-                assert_eq!(fee_amount, &total * &MmNumber::from((3, 4)));
-                assert_eq!(burn_amount, &total * &MmNumber::from((1, 4)));
-                assert_eq!(burn_pubkey.as_slice(), net_cfg.burn_addr_raw_pubkey());
-            },
-            other => panic!("expected WithBurn{{PreBurnAccount}}, got {:?}", other),
-        }
-    }
-
-    /// §16.3.2 — when the burn portion would be below `min_tx_amount`,
-    /// the factory falls back to `Standard`.
-    #[test]
-    fn should_fall_back_to_standard_when_burn_share_is_dust() {
-        let coin = rick_coin();
-        let net_cfg = net_config_or_panic(6133);
-        // dust = 1000 sat = 0.00001 KMD; pick a base fee so 25% < 0.00001.
-        let total = MmNumber::from("0.00002");
         let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
         assert_eq!(dex_fee, DexFee::Standard(total));
     }
 
-    /// §16.3.2 — KMD-style coin (`should_burn_directly = true`) uses
-    /// `KmdOpReturn`.
+    /// The dormant burn-account helper retains its 75/25 split and dust guard.
     #[test]
-    fn should_emit_kmd_op_return_for_should_burn_directly_coin() {
+    fn should_fall_back_to_standard_when_burn_account_share_is_dust() {
+        let burn_pubkey = vec![0x02; 33];
+        let valid_total = MmNumber::from("1");
+        let valid = calc_dex_fee_for_burn_account(
+            valid_total.clone(),
+            MmNumber::from("0.00001"),
+            MmNumber::from((3, 4)),
+            burn_pubkey.clone(),
+        );
+        assert_eq!(valid, DexFee::WithBurn {
+            fee_amount: &valid_total * &MmNumber::from((3, 4)),
+            burn_amount: &valid_total * &MmNumber::from((1, 4)),
+            burn_destination: DexFeeBurnDestination::PreBurnAccount { burn_pubkey },
+        });
+
+        let total = MmNumber::from("0.00002");
+        let dex_fee = calc_dex_fee_for_burn_account(
+            total.clone(),
+            MmNumber::from("0.00001"),
+            MmNumber::from((3, 4)),
+            vec![0x02; 33],
+        );
+        assert_eq!(dex_fee, DexFee::Standard(total));
+    }
+
+    #[test]
+    fn should_fall_back_to_standard_for_non_positive_op_return_split() {
+        let total = MmNumber::from("1");
+        let dex_fee = calc_dex_fee_for_op_return(total.clone(), MmNumber::from("0.00001"), MmNumber::from(1));
+        assert_eq!(dex_fee, DexFee::Standard(total));
+    }
+
+    /// Netid 8762 KMD uses the legacy 75/25 OP_RETURN split.
+    #[test]
+    fn should_emit_kmd_op_return_split_on_netid_8762() {
         let coin = kmd_coin();
-        let net_cfg = net_config_or_panic(6133);
+        let net_cfg = net_config_or_panic(8762);
         let total = MmNumber::from("1");
         let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
         match dex_fee {
@@ -5092,23 +5216,154 @@ mod swap_v2_pre_burn_tests {
                 burn_amount,
                 burn_destination: DexFeeBurnDestination::KmdOpReturn,
             } => {
-                assert_eq!(fee_amount, MmNumber::from(0));
-                assert_eq!(burn_amount, total);
+                assert_eq!(fee_amount, &total * &MmNumber::from((3, 4)));
+                assert_eq!(burn_amount, &total * &MmNumber::from((1, 4)));
             },
             other => panic!("expected WithBurn{{KmdOpReturn}}, got {:?}", other),
         }
     }
 
-    /// §16.3.2 — when the taker pubkey *is* the burn pubkey, no fee is
-    /// charged.
+    /// Netid 6133 keeps the standard form even for a coin whose direct-burn
+    /// predicate is true.
     #[test]
-    fn should_emit_no_fee_when_taker_pubkey_is_burn_pubkey() {
+    fn should_keep_kmd_fee_standard_on_netid_6133() {
+        let coin = kmd_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let total = MmNumber::from("1");
+        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
+        assert_eq!(dex_fee, DexFee::Standard(total));
+    }
+
+    /// Issue #1 wire regression: the descriptor must become the two outputs
+    /// accepted by a v2.6.0-beta netid-8762 counterparty.
+    #[test]
+    fn should_build_v2_6_0_beta_kmd_taker_fee_outputs() {
+        let coin = kmd_coin();
+        let net_cfg = net_config_or_panic(8762);
+        let trade_amount = MmNumber::from("15.86");
+        let total = &trade_amount * &MmNumber::from((9, 7770));
+        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total);
+        let fee_address = maker_address_for(&coin);
+
+        let outputs = utxo_common::generate_taker_fee_tx_outputs(&coin, &dex_fee, &fee_address).unwrap();
+
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].value, 1_377_799);
+        assert_eq!(
+            outputs[0].script_pubkey,
+            output_script(&fee_address, ScriptType::P2PKH).to_bytes()
+        );
+        assert_eq!(outputs[1].value, 459_266);
+        assert_eq!(
+            outputs[1].script_pubkey,
+            Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
+        );
+    }
+
+    /// A small netid-8762 KMD trade legitimately has a fee-collection leg
+    /// below KMD's generic output dust after the legacy 75/25 split. Only that
+    /// protocol-defined output is exempt; the OP_RETURN leg is already
+    /// unspendable and under-dust change is still folded into the miner fee.
+    #[test]
+    fn should_build_small_v2_6_0_beta_kmd_taker_fee_without_weakening_dust_policy() {
+        let kmd = kmd_coin();
+        let net_cfg = net_config_or_panic(8762);
+        let trade_amount = MmNumber::from("0.01");
+        let total = &trade_amount * &MmNumber::from((9, 7770));
+        let dex_fee = DexFee::new_from_taker_coin(&kmd as &dyn MmCoin, net_cfg, total);
+        let fee_address = maker_address_for(&kmd);
+        let outputs = utxo_common::generate_taker_fee_tx_outputs(&kmd, &dex_fee, &fee_address).unwrap();
+
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].value, 868);
+        assert_eq!(
+            outputs[0].script_pubkey,
+            output_script(&fee_address, ScriptType::P2PKH).to_bytes()
+        );
+        assert_eq!(outputs[1].value, 289);
+        assert_eq!(
+            outputs[1].script_pubkey,
+            Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
+        );
+        let allowed_underdust_output = utxo_common::taker_fee_allowed_underdust_output(&dex_fee);
+        assert_eq!(allowed_underdust_output, Some(utxo_common::DEFAULT_FEE_VOUT));
+
+        // Use the non-KMD fixture to exercise the pure builder without KMD
+        // interest RPCs. Its dust and fixed transaction fee are both 1,000.
+        let builder_coin = rick_coin();
+        let unspents = vec![UnspentInfo {
+            value: 3_156,
+            outpoint: OutPoint::default(),
+            height: None,
+        }];
+
+        let generic_error = block_on(
+            utxo_common::UtxoTxBuilder::new(&builder_coin)
+                .add_available_inputs(unspents.clone())
+                .add_outputs(outputs.clone())
+                .with_fee(ActualTxFee::FixedPerKb(1_000))
+                .build(),
+        )
+        .unwrap_err()
+        .into_inner();
+        assert!(matches!(generic_error, GenerateTxError::OutputValueLessThanDust {
+            value: 868,
+            dust: 1_000
+        }));
+
+        let (tx, tx_data) = block_on(
+            utxo_common::UtxoTxBuilder::new(&builder_coin)
+                .add_available_inputs(unspents)
+                .add_outputs(outputs)
+                .with_fee(ActualTxFee::FixedPerKb(1_000))
+                .allow_underdust_output(allowed_underdust_output.unwrap())
+                .build(),
+        )
+        .unwrap();
+        assert_eq!(tx.outputs.len(), 2);
+        assert_eq!(tx.outputs[0].value, 868);
+        assert_eq!(tx.outputs[1].value, 289);
+        assert_eq!(tx_data.unused_change, Some(999));
+
+        let unrelated_underdust_output = TransactionOutput {
+            value: 999,
+            script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+        };
+        let scoped_error = block_on(
+            utxo_common::UtxoTxBuilder::new(&builder_coin)
+                .add_available_inputs(vec![UnspentInfo {
+                    value: 10_000,
+                    outpoint: OutPoint::default(),
+                    height: None,
+                }])
+                .add_outputs(vec![
+                    TransactionOutput {
+                        value: 868,
+                        script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+                    },
+                    unrelated_underdust_output,
+                ])
+                .with_fee(ActualTxFee::FixedPerKb(1_000))
+                .allow_underdust_output(utxo_common::DEFAULT_FEE_VOUT)
+                .build(),
+        )
+        .unwrap_err()
+        .into_inner();
+        assert!(matches!(scoped_error, GenerateTxError::OutputValueLessThanDust {
+            value: 999,
+            dust: 1_000
+        }));
+    }
+
+    /// An inactive netid-6133 burn key must not turn a standard fee into NoFee.
+    #[test]
+    fn should_not_waive_fee_for_inactive_burn_key_on_netid_6133() {
         let coin = rick_coin();
         let net_cfg = net_config_or_panic(6133);
         let total = MmNumber::from("1");
         let burn_pubkey = net_cfg.burn_addr_raw_pubkey();
-        let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total, burn_pubkey);
-        assert_eq!(dex_fee, DexFee::NoFee);
+        let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total.clone(), burn_pubkey);
+        assert_eq!(dex_fee, DexFee::Standard(total));
     }
 
     /// §16.5.1 — `gen_taker_payment_spend_preimage` for `WithBurn{PreBurnAccount}`
