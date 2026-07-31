@@ -17,6 +17,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **DEX-fee wire compatibility on both production netids.** Netid 8762 KMD
+  takers now use the `v2.6.0-beta`-compatible discounted fee and two-output
+  75/25 fee/OP_RETURN structure, while non-KMD takers remain single-output.
+  Netid 6133 follows the v3/dev single-output fee structure. Both networks now
+  use only the taker coin's minimum transaction amount as the fee floor,
+  removing the erroneous additional `0.0001` floor. Fixes #1. Code:
+  `mm2src/mm2_net_config/`, `mm2src/mm2_main/src/lp_swap/`,
+  `mm2src/coins/utxo/`.
 - **`CoinProtocol::NFT` variant accepted.** A permissive NFT variant is added to `CoinProtocol` so NFT-typed coin configs no longer fail deserialization. Code: `mm2src/coins/lp_coins.rs`.
 - **NFT subsystem activation RPC parity.** `enable_nft` is routed as the explicit NFT subsystem activation method, with CRD coverage for the activation contract. Code: `docs/reloaded-rewrite/19-nft-module-layout.md`, `mm2src/mm2_main/`, `mm2src/coins/nft/`.
 - **SSE activation response wire shape.** `stream::*::enable` success payloads now expose the upstream-compatible `streamer_id` field without the reloaded-only `active` boolean. Code: `docs/reloaded-rewrite/10-sse-streaming.md`, `mm2src/mm2_main/`.

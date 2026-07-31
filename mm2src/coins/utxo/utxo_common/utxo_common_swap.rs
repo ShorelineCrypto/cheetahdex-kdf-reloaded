@@ -57,7 +57,7 @@ where
 /// Builds the transaction outputs for a taker fee payment.
 ///
 /// Returns 0 outputs for `NoFee`, 1 for `Standard`, or 2 for `WithBurn`.
-fn generate_taker_fee_tx_outputs(
+pub(crate) fn generate_taker_fee_tx_outputs(
     coin: &impl UtxoCommonOps,
     dex_fee: &DexFee,
     fee_address: &Address,

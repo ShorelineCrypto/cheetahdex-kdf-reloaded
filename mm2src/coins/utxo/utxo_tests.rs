@@ -4985,15 +4985,15 @@ mod swap_v2_pre_burn_tests {
     use crate::utxo::utxo_standard::UtxoStandardCoin;
     use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test, utxo_coin_from_fields};
     use crate::utxo::{output_script, ScriptType, UtxoTx};
-    use crate::{DexFee, DexFeeBurnDestination, GenTakerPaymentSpendArgs, MmCoin,
-                ValidateTakerPaymentSpendPreimageError};
+    use crate::{calc_dex_fee_for_burn_account, calc_dex_fee_for_op_return, DexFee, DexFeeBurnDestination,
+                GenTakerPaymentSpendArgs, MmCoin, ValidateTakerPaymentSpendPreimageError};
     use chain::TransactionOutput;
     use common::block_on;
     use common::mm_number::MmNumber;
     use kdf_crypto::ChecksumType;
     use keys::{Address, AddressFormat as UtxoAddressFormat};
     use mm2_net_config::net_config_or_panic;
-    use script::Opcode;
+    use script::{Builder, Opcode};
 
     const MAKER_SECRET_HASH: [u8; 32] = [0xbb; 32];
     const TAKER_PAYMENT_TIME_LOCK: u32 = 0x6810_0000;
@@ -5001,8 +5001,7 @@ mod swap_v2_pre_burn_tests {
     const SWAP_UNIQUE_DATA: &[u8] = b"ch16 pre-burn unit tests";
 
     /// Build a non-KMD `UtxoStandardCoin` (ticker = "RICK") with the standard
-    /// test fixture; `should_burn_dex_fee` is `true`, `should_burn_directly`
-    /// is `false`.
+    /// test fixture; both burn opt-ins are false.
     fn rick_coin() -> UtxoStandardCoin {
         let fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
         utxo_coin_from_fields(fields)
@@ -5044,46 +5043,55 @@ mod swap_v2_pre_burn_tests {
         }
     }
 
-    /// §16.3.2 — burn-enabled netid + non-KMD coin produces
-    /// `WithBurn { PreBurnAccount }` with the configured 75/25 split.
+    /// A non-KMD UTXO taker on netid 8762 retains the single-output form.
     #[test]
-    fn should_compute_dex_fee_with_burn_split_for_burn_enabled_coin() {
+    fn should_keep_non_kmd_fee_standard_on_netid_8762() {
         let coin = rick_coin();
-        let net_cfg = net_config_or_panic(6133);
+        let net_cfg = net_config_or_panic(8762);
         let total = MmNumber::from("1");
-        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
-        match dex_fee {
-            DexFee::WithBurn {
-                fee_amount,
-                burn_amount,
-                burn_destination: DexFeeBurnDestination::PreBurnAccount { burn_pubkey },
-            } => {
-                assert_eq!(fee_amount, &total * &MmNumber::from((3, 4)));
-                assert_eq!(burn_amount, &total * &MmNumber::from((1, 4)));
-                assert_eq!(burn_pubkey.as_slice(), net_cfg.burn_addr_raw_pubkey());
-            },
-            other => panic!("expected WithBurn{{PreBurnAccount}}, got {:?}", other),
-        }
-    }
-
-    /// §16.3.2 — when the burn portion would be below `min_tx_amount`,
-    /// the factory falls back to `Standard`.
-    #[test]
-    fn should_fall_back_to_standard_when_burn_share_is_dust() {
-        let coin = rick_coin();
-        let net_cfg = net_config_or_panic(6133);
-        // dust = 1000 sat = 0.00001 KMD; pick a base fee so 25% < 0.00001.
-        let total = MmNumber::from("0.00002");
         let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
         assert_eq!(dex_fee, DexFee::Standard(total));
     }
 
-    /// §16.3.2 — KMD-style coin (`should_burn_directly = true`) uses
-    /// `KmdOpReturn`.
+    /// The dormant burn-account helper retains its 75/25 split and dust guard.
     #[test]
-    fn should_emit_kmd_op_return_for_should_burn_directly_coin() {
+    fn should_fall_back_to_standard_when_burn_account_share_is_dust() {
+        let burn_pubkey = vec![0x02; 33];
+        let valid_total = MmNumber::from("1");
+        let valid = calc_dex_fee_for_burn_account(
+            valid_total.clone(),
+            MmNumber::from("0.00001"),
+            MmNumber::from((3, 4)),
+            burn_pubkey.clone(),
+        );
+        assert_eq!(valid, DexFee::WithBurn {
+            fee_amount: &valid_total * &MmNumber::from((3, 4)),
+            burn_amount: &valid_total * &MmNumber::from((1, 4)),
+            burn_destination: DexFeeBurnDestination::PreBurnAccount { burn_pubkey },
+        });
+
+        let total = MmNumber::from("0.00002");
+        let dex_fee = calc_dex_fee_for_burn_account(
+            total.clone(),
+            MmNumber::from("0.00001"),
+            MmNumber::from((3, 4)),
+            vec![0x02; 33],
+        );
+        assert_eq!(dex_fee, DexFee::Standard(total));
+    }
+
+    #[test]
+    fn should_fall_back_to_standard_for_non_positive_op_return_split() {
+        let total = MmNumber::from("1");
+        let dex_fee = calc_dex_fee_for_op_return(total.clone(), MmNumber::from("0.00001"), MmNumber::from(1));
+        assert_eq!(dex_fee, DexFee::Standard(total));
+    }
+
+    /// Netid 8762 KMD uses the legacy 75/25 OP_RETURN split.
+    #[test]
+    fn should_emit_kmd_op_return_split_on_netid_8762() {
         let coin = kmd_coin();
-        let net_cfg = net_config_or_panic(6133);
+        let net_cfg = net_config_or_panic(8762);
         let total = MmNumber::from("1");
         let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
         match dex_fee {
@@ -5092,23 +5100,59 @@ mod swap_v2_pre_burn_tests {
                 burn_amount,
                 burn_destination: DexFeeBurnDestination::KmdOpReturn,
             } => {
-                assert_eq!(fee_amount, MmNumber::from(0));
-                assert_eq!(burn_amount, total);
+                assert_eq!(fee_amount, &total * &MmNumber::from((3, 4)));
+                assert_eq!(burn_amount, &total * &MmNumber::from((1, 4)));
             },
             other => panic!("expected WithBurn{{KmdOpReturn}}, got {:?}", other),
         }
     }
 
-    /// §16.3.2 — when the taker pubkey *is* the burn pubkey, no fee is
-    /// charged.
+    /// Netid 6133 keeps the standard form even for a coin whose direct-burn
+    /// predicate is true.
     #[test]
-    fn should_emit_no_fee_when_taker_pubkey_is_burn_pubkey() {
+    fn should_keep_kmd_fee_standard_on_netid_6133() {
+        let coin = kmd_coin();
+        let net_cfg = net_config_or_panic(6133);
+        let total = MmNumber::from("1");
+        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total.clone());
+        assert_eq!(dex_fee, DexFee::Standard(total));
+    }
+
+    /// Issue #1 wire regression: the descriptor must become the two outputs
+    /// accepted by a v2.6.0-beta netid-8762 counterparty.
+    #[test]
+    fn should_build_v2_6_0_beta_kmd_taker_fee_outputs() {
+        let coin = kmd_coin();
+        let net_cfg = net_config_or_panic(8762);
+        let trade_amount = MmNumber::from("15.86");
+        let total = &trade_amount * &MmNumber::from((9, 7770));
+        let dex_fee = DexFee::new_from_taker_coin(&coin as &dyn MmCoin, net_cfg, total);
+        let fee_address = maker_address_for(&coin);
+
+        let outputs = utxo_common::generate_taker_fee_tx_outputs(&coin, &dex_fee, &fee_address).unwrap();
+
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].value, 1_377_799);
+        assert_eq!(
+            outputs[0].script_pubkey,
+            output_script(&fee_address, ScriptType::P2PKH).to_bytes()
+        );
+        assert_eq!(outputs[1].value, 459_266);
+        assert_eq!(
+            outputs[1].script_pubkey,
+            Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
+        );
+    }
+
+    /// An inactive netid-6133 burn key must not turn a standard fee into NoFee.
+    #[test]
+    fn should_not_waive_fee_for_inactive_burn_key_on_netid_6133() {
         let coin = rick_coin();
         let net_cfg = net_config_or_panic(6133);
         let total = MmNumber::from("1");
         let burn_pubkey = net_cfg.burn_addr_raw_pubkey();
-        let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total, burn_pubkey);
-        assert_eq!(dex_fee, DexFee::NoFee);
+        let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total.clone(), burn_pubkey);
+        assert_eq!(dex_fee, DexFee::Standard(total));
     }
 
     /// §16.5.1 — `gen_taker_payment_spend_preimage` for `WithBurn{PreBurnAccount}`
