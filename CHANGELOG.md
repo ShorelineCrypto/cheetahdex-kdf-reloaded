@@ -17,6 +17,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Small KMD direct-burn DEX fees retain the legacy wire shape.** Netid 8762
+  KMD taker-fee construction now permits the positive 75% fee-collection
+  output selected by the `v2.6.0-beta` policy even when that split component
+  is below KMD's generic spendable-output dust threshold. The exception is
+  scoped to that protocol-defined output; ordinary outputs and change retain
+  the existing dust checks. Code: `mm2src/coins/utxo/`.
 - **HD UTXO activation honours `min_addresses_number`.** API-v2 UTXO
   activation now persists and returns the requested minimum number of external
   addresses for each HD account, so an empty account activated with the

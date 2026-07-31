@@ -231,7 +231,11 @@ applies it to the unsplit total, preserving the netid-8762 legacy
 contract. The burn-account path applies it to both split
 components. Both paths MUST fall back for a non-positive
 component. The substrate MUST NOT carry a separate dust
-configuration.
+configuration. Consequently, once a direct-path descriptor is
+`WithBurn`, coin-layer taker-fee construction MUST preserve it even
+when base-unit conversion leaves its positive fee-collection leg
+below `min_tx_amount`; the narrowly scoped builder exception is
+bound by chapter 08 R15A.
 
 **R11.** The factory and the two split helpers MUST be pure with
 respect to the coin and the network configuration: they MUST NOT
@@ -433,6 +437,13 @@ split, while a non-KMD UTXO taker MUST produce `Standard`.
 maker CHTA, trade amount 15.86, and eight coin decimals, the test
 MUST assert total 1,837,065 base units, fee leg 1,377,799, and burn
 leg 459,266 after the coin-layer conversion.
+
+**T2A.** *Small direct-burn regression.* For netid 8762, taker
+KMD, trade amount 0.01, and eight coin decimals, the test MUST
+assert fee leg 868 and OP_RETURN burn leg 289 after conversion and
+MUST prove that the chapter-08 R15A policy permits that exact
+two-output transaction without disabling ordinary UTXO dust or
+change handling.
 
 **T3.** *Netid-6133 compatibility matrix.* KMD and non-KMD takers
 MUST both produce `Standard`; the inactive burn key and direct-burn

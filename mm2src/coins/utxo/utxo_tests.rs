@@ -5096,14 +5096,14 @@ mod swap_v2_taker_payment_spend_tests {
 /// §16.6 — Pre-burn output unit tests for the V2 taker-payment-spend.
 #[cfg(test)]
 mod swap_v2_pre_burn_tests {
-    use crate::utxo::rpc_clients::UtxoRpcClientEnum;
+    use crate::utxo::rpc_clients::{UnspentInfo, UtxoRpcClientEnum};
     use crate::utxo::utxo_common;
     use crate::utxo::utxo_standard::UtxoStandardCoin;
     use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test, utxo_coin_from_fields};
-    use crate::utxo::{output_script, ScriptType, UtxoTx};
+    use crate::utxo::{output_script, ActualTxFee, GenerateTxError, ScriptType, UtxoTx};
     use crate::{calc_dex_fee_for_burn_account, calc_dex_fee_for_op_return, DexFee, DexFeeBurnDestination,
                 GenTakerPaymentSpendArgs, MmCoin, ValidateTakerPaymentSpendPreimageError};
-    use chain::TransactionOutput;
+    use chain::{OutPoint, TransactionOutput};
     use common::block_on;
     use common::mm_number::MmNumber;
     use kdf_crypto::ChecksumType;
@@ -5258,6 +5258,101 @@ mod swap_v2_pre_burn_tests {
             outputs[1].script_pubkey,
             Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
         );
+    }
+
+    /// A small netid-8762 KMD trade legitimately has a fee-collection leg
+    /// below KMD's generic output dust after the legacy 75/25 split. Only that
+    /// protocol-defined output is exempt; the OP_RETURN leg is already
+    /// unspendable and under-dust change is still folded into the miner fee.
+    #[test]
+    fn should_build_small_v2_6_0_beta_kmd_taker_fee_without_weakening_dust_policy() {
+        let kmd = kmd_coin();
+        let net_cfg = net_config_or_panic(8762);
+        let trade_amount = MmNumber::from("0.01");
+        let total = &trade_amount * &MmNumber::from((9, 7770));
+        let dex_fee = DexFee::new_from_taker_coin(&kmd as &dyn MmCoin, net_cfg, total);
+        let fee_address = maker_address_for(&kmd);
+        let outputs = utxo_common::generate_taker_fee_tx_outputs(&kmd, &dex_fee, &fee_address).unwrap();
+
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].value, 868);
+        assert_eq!(
+            outputs[0].script_pubkey,
+            output_script(&fee_address, ScriptType::P2PKH).to_bytes()
+        );
+        assert_eq!(outputs[1].value, 289);
+        assert_eq!(
+            outputs[1].script_pubkey,
+            Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
+        );
+        let allowed_underdust_output = utxo_common::taker_fee_allowed_underdust_output(&dex_fee);
+        assert_eq!(allowed_underdust_output, Some(utxo_common::DEFAULT_FEE_VOUT));
+
+        // Use the non-KMD fixture to exercise the pure builder without KMD
+        // interest RPCs. Its dust and fixed transaction fee are both 1,000.
+        let builder_coin = rick_coin();
+        let unspents = vec![UnspentInfo {
+            value: 3_156,
+            outpoint: OutPoint::default(),
+            height: None,
+        }];
+
+        let generic_error = block_on(
+            utxo_common::UtxoTxBuilder::new(&builder_coin)
+                .add_available_inputs(unspents.clone())
+                .add_outputs(outputs.clone())
+                .with_fee(ActualTxFee::FixedPerKb(1_000))
+                .build(),
+        )
+        .unwrap_err()
+        .into_inner();
+        assert!(matches!(generic_error, GenerateTxError::OutputValueLessThanDust {
+            value: 868,
+            dust: 1_000
+        }));
+
+        let (tx, tx_data) = block_on(
+            utxo_common::UtxoTxBuilder::new(&builder_coin)
+                .add_available_inputs(unspents)
+                .add_outputs(outputs)
+                .with_fee(ActualTxFee::FixedPerKb(1_000))
+                .allow_underdust_output(allowed_underdust_output.unwrap())
+                .build(),
+        )
+        .unwrap();
+        assert_eq!(tx.outputs.len(), 2);
+        assert_eq!(tx.outputs[0].value, 868);
+        assert_eq!(tx.outputs[1].value, 289);
+        assert_eq!(tx_data.unused_change, Some(999));
+
+        let unrelated_underdust_output = TransactionOutput {
+            value: 999,
+            script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+        };
+        let scoped_error = block_on(
+            utxo_common::UtxoTxBuilder::new(&builder_coin)
+                .add_available_inputs(vec![UnspentInfo {
+                    value: 10_000,
+                    outpoint: OutPoint::default(),
+                    height: None,
+                }])
+                .add_outputs(vec![
+                    TransactionOutput {
+                        value: 868,
+                        script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+                    },
+                    unrelated_underdust_output,
+                ])
+                .with_fee(ActualTxFee::FixedPerKb(1_000))
+                .allow_underdust_output(utxo_common::DEFAULT_FEE_VOUT)
+                .build(),
+        )
+        .unwrap_err()
+        .into_inner();
+        assert!(matches!(scoped_error, GenerateTxError::OutputValueLessThanDust {
+            value: 999,
+            dust: 1_000
+        }));
     }
 
     /// An inactive netid-6133 burn key must not turn a standard fee into NoFee.

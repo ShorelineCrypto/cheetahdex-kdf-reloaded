@@ -234,6 +234,23 @@ Structural validation — output count match, address match, value match — is
 the coin layer's responsibility; the substrate guarantees only that the
 numbers returned by `compute_dex_fee` are non-degenerate per R10–R11.
 
+**R15A.** *Legacy KMD direct-burn output dust exception.* Once the unsplit
+total has passed the direct-path check in R11, a
+`WithBurn { burn_destination: KmdOpReturn, .. }` taker-fee transaction MUST
+emit the exact two outputs bound by R15 even when base-unit conversion makes
+the positive fee-collection P2PKH leg smaller than the taker coin's
+minimum-transferable amount. The transaction builder MUST exempt exactly
+output zero of this direct-burn taker-fee transaction from its generic
+per-output dust guard.
+
+This exception MUST NOT change the descriptor arithmetic, raise the total,
+merge the outputs, or fall back to `Standard`. It MUST NOT exempt standard
+fee outputs, burn-account outputs, change, or any unrelated transaction
+output. The `OP_RETURN` output remains outside spendable-output dust policy
+by its script semantics. This narrow rule preserves the small-trade wire
+shape emitted by the netid-8762 `v2.6.0-beta` implementation without
+weakening the generic UTXO builder's dust and change handling.
+
 ## 8.6 Bound Network-Parameter Surface (cross-link to Chapter 06)
 
 **R16.** The fee substrate MUST source the following parameters
@@ -289,6 +306,14 @@ and that netid 6133 emits a standard descriptor for both KMD and non-KMD
 takers. The netid-8762 KMD case MUST cover the issue-1 values: trade amount
 15.86, discounted total 1,837,065 base units at eight decimals, fee output
 1,377,799, and burn output 459,266.
+
+**T5A.** *Small KMD direct-burn construction.* For netid 8762, taker KMD,
+trade amount 0.01, and eight coin decimals, the tests MUST assert the exact
+two converted output values: 868 base units to the fee-collection P2PKH and
+289 base units to the `OP_RETURN` burn output. The same 868-base-unit P2PKH
+MUST fail the generic builder without the R15A exemption, while the
+direct-burn taker-fee policy MUST build successfully. A separate under-dust
+P2PKH and under-dust change MUST remain subject to the generic policy.
 
 **T6.** *No-arithmetic-outside-accessors guard (linter or audit).* A
 substrate-internal audit (test or lint) MUST confirm that no call site
