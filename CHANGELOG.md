@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **HD UTXO activation honours `min_addresses_number`.** API-v2 UTXO
+  activation now persists and returns the requested minimum number of external
+  addresses for each HD account, so an empty account activated with the
+  wallet-standard value `1` has external address `0` available to balance,
+  order, and swap-preimage paths. Empty HD accounts also retain the activated
+  ticker's zero-valued entry in `total_balance` instead of returning an untyped
+  empty object. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
 - **DEX-fee wire compatibility on both production netids.** Netid 8762 KMD
   takers now use the `v2.6.0-beta`-compatible discounted fee and two-output
   75/25 fee/OP_RETURN structure, while non-KMD takers remain single-output.

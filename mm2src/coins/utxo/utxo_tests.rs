@@ -36,6 +36,7 @@ use std::convert::TryFrom;
 use std::iter;
 use std::mem::discriminant;
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Test-only DEX-fee destination pubkey, resolved through `mm2_net_config`
 /// for the community netid. Replaces direct use of
@@ -85,6 +86,20 @@ pub fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
 /// Returned client won't work by default, requires some mocks to be usable
 #[cfg(not(target_arch = "wasm32"))]
 fn native_client_for_test() -> NativeClient { NativeClient(Arc::new(NativeClientImpl::default())) }
+
+#[test]
+fn test_utxo_activation_params_min_addresses_number() {
+    let params: UtxoActivationParams = json::from_value(json!({
+        "mode": { "rpc": "Native" },
+        "min_addresses_number": 1
+    }))
+    .unwrap();
+    assert_eq!(params.min_addresses_number, Some(1));
+
+    let params_without_minimum: UtxoActivationParams =
+        json::from_value(json!({ "mode": { "rpc": "Native" } })).unwrap();
+    assert_eq!(params_without_minimum.min_addresses_number, None);
+}
 
 fn utxo_coin_fields_for_test(
     rpc_client: UtxoRpcClientEnum,
@@ -3638,6 +3653,107 @@ fn test_qtum_with_check_utxo_maturity_false() {
     // Don't use `block_on` here because it's used within a mock of [`QtumCoin::get_all_unspent_ordered_list`].
     coin.get_unspent_ordered_list(&address).compat().wait().unwrap();
     assert!(unsafe { GET_ALL_UNSPENT_ORDERED_LIST_CALLED });
+}
+
+#[test]
+fn test_minimum_external_addresses_are_activated_once() {
+    let storage_updates = Arc::new(AtomicUsize::new(0));
+    let storage_updates_mock = storage_updates.clone();
+    HDWalletMockStorage::update_external_addresses_number.mock_safe(
+        move |_, _, account_id, new_external_addresses_number| {
+            assert_eq!(account_id, 0);
+            assert_eq!(new_external_addresses_number, 1);
+            storage_updates_mock.fetch_add(1, Ordering::SeqCst);
+            MockResult::Return(Box::pin(futures::future::ok(())))
+        },
+    );
+
+    let balance_requests = Arc::new(AtomicUsize::new(0));
+    let balance_requests_mock = balance_requests.clone();
+    NativeClient::display_balances.mock_safe(move |_, addresses: Vec<Address>, _| {
+        assert_eq!(addresses.len(), 1);
+        assert_eq!(addresses[0].to_string(), "RRqF4cYniMwYs66S4QDUUZ4GJQFQF69rBE");
+        balance_requests_mock.fetch_add(1, Ordering::SeqCst);
+        let balances = addresses
+            .into_iter()
+            .map(|address| (address, BigDecimal::from(0)))
+            .collect();
+        MockResult::Return(Box::new(futures01::future::ok(balances)))
+    });
+
+    let client = NativeClient(Arc::new(NativeClientImpl::default()));
+    let coin = utxo_coin_from_fields(utxo_coin_fields_for_test(
+        UtxoRpcClientEnum::Native(client),
+        None,
+        false,
+    ));
+    let hd_wallet = UtxoHDWallet {
+        hd_wallet_storage: HDWalletCoinStorage::default(),
+        address_format: UtxoAddressFormat::Standard,
+        derivation_path: HDPathToCoin::from_str("m/44'/141'").unwrap(),
+        accounts: HDAccountsMutex::new(HDAccountsMap::new()),
+        gap_limit: 20,
+    };
+    let mut hd_account = UtxoHDAccount {
+        account_id: 0,
+        extended_pubkey: Secp256k1ExtendedPublicKey::from_str(
+            "xpub6DEHSksajpRPM59RPw7Eg6PKdU7E2ehxJWtYdrfQ6JFmMGBsrR6jA78ANCLgzKYm4s5UqQ4ydLEYPbh3TRVvn5oAZVtWfi4qJLMntpZ8uGJ",
+        )
+        .unwrap(),
+        account_derivation_path: HDPathToAccount::from_str("m/44'/141'/0'").unwrap(),
+        external_addresses_number: 0,
+        internal_addresses_number: 0,
+    };
+    let mut addresses = Vec::new();
+
+    block_on(crate::coin_balance::common_impl::ensure_minimum_external_addresses(
+        &coin,
+        &hd_wallet,
+        &mut hd_account,
+        0,
+        &mut addresses,
+    ))
+    .unwrap();
+
+    assert_eq!(hd_account.external_addresses_number, 0);
+    assert!(addresses.is_empty());
+    assert_eq!(storage_updates.load(Ordering::SeqCst), 0);
+    assert_eq!(balance_requests.load(Ordering::SeqCst), 0);
+
+    block_on(crate::coin_balance::common_impl::ensure_minimum_external_addresses(
+        &coin,
+        &hd_wallet,
+        &mut hd_account,
+        1,
+        &mut addresses,
+    ))
+    .unwrap();
+
+    assert_eq!(hd_account.external_addresses_number, 1);
+    assert_eq!(addresses.len(), 1);
+    assert_eq!(addresses[0].address, "RRqF4cYniMwYs66S4QDUUZ4GJQFQF69rBE");
+    assert_eq!(
+        addresses[0].derivation_path,
+        RpcDerivationPath(DerivationPath::from_str("m/44'/141'/0'/0/0").unwrap())
+    );
+    assert_eq!(addresses[0].chain, Bip44Chain::External);
+    assert_eq!(
+        addresses[0].balance,
+        crate::coin_balance::coin_balance_map_for_ticker(TEST_COIN_NAME, CoinBalance::default())
+    );
+
+    block_on(crate::coin_balance::common_impl::ensure_minimum_external_addresses(
+        &coin,
+        &hd_wallet,
+        &mut hd_account,
+        1,
+        &mut addresses,
+    ))
+    .unwrap();
+
+    assert_eq!(addresses.len(), 1);
+    assert_eq!(storage_updates.load(Ordering::SeqCst), 1);
+    assert_eq!(balance_requests.load(Ordering::SeqCst), 1);
 }
 
 #[test]

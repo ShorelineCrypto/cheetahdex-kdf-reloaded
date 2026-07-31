@@ -1334,6 +1334,9 @@ pub struct UtxoActivationParams {
     pub requires_notarization: Option<bool>,
     pub address_format: Option<UtxoAddressFormat>,
     pub gap_limit: Option<u32>,
+    /// Minimum number of known external addresses to expose for every HD account.
+    #[serde(default)]
+    pub min_addresses_number: Option<u32>,
     #[serde(default)]
     pub scan_policy: EnableCoinScanPolicy,
     #[serde(default = "PrivKeyActivationPolicy::context_priv_key")]
@@ -1399,6 +1402,7 @@ impl UtxoActivationParams {
             requires_notarization,
             address_format,
             gap_limit: None,
+            min_addresses_number: None,
             scan_policy,
             priv_key_policy,
             check_utxo_maturity,
@@ -2225,6 +2229,7 @@ pub fn address_by_conf_and_pubkey_str(
         requires_notarization: None,
         address_format: None,
         gap_limit: None,
+        min_addresses_number: None,
         scan_policy: EnableCoinScanPolicy::default(),
         priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
         check_utxo_maturity: None,

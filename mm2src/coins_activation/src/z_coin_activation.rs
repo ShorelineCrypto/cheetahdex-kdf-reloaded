@@ -251,6 +251,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             requires_notarization: activation_request.requires_notarization,
             address_format: None,
             gap_limit: None,
+            min_addresses_number: None,
             scan_policy: Default::default(),
             priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
             check_utxo_maturity: None,
