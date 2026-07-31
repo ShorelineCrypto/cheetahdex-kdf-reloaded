@@ -48,6 +48,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Calculate build tag (commit hash) for PR commit
+        if: github.event_name == 'pull_request'
+        run: echo "KDF_BUILD_TAG=$(git rev-parse --short=7 ${{ github.event.pull_request.head.sha }})" >> $GITHUB_ENV
+
+      - name: Calculate build tag (commit hash) for merge commit
+        if: github.event_name != 'pull_request'
+        run: echo "KDF_BUILD_TAG=$(git rev-parse --short=7 HEAD)" >> $GITHUB_ENV
       - id: g
         run: |
           set -eu
@@ -56,7 +63,7 @@ jobs:
           ver="${GITHUB_REF_NAME#v}"
           prerelease=false
           case "$ver" in *-*) prerelease=true;; esac
-          proceed=false
+          proceed=true
           if [ "$prerelease" = true ]; then
             if contains staging || contains main; then proceed=true; fi
           else
