@@ -9,13 +9,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - **Z-coin (ARRR/ZHTLC) WASM support — R39.6.1.** The shielded coin module is now available on the `wasm32-unknown-unknown` target. `zcash_primitives` and `zcash_client_backend` are added as WASM dependencies. The sapling state cache is abstracted behind a `SaplingStateCacheOps` trait with a SQLite backend for native and an IndexedDB backend (mm2_db) for WASM. `MmCoinEnum::ZCoin` and the `z_coin` module are now gated for all targets. Transaction building (`gen_tx`/`send_outputs`) remains native-only pending WASM delivery of the sapling parameter files. Code: `mm2src/coins/z_coin/`, `mm2src/coins/Cargo.toml`, `mm2src/coins/lp_coins.rs`, `mm2src/coins/lp_coins_context.rs`.
-- **Z-coin sync-parameter control — R39.6.2.** The `task::enable_z_coin::init` activation request accepts two optional throughput-tuning fields: `blocks_per_iteration` (u32, default 1) and `inter_iteration_interval_ms` (u64, default 0). A `sync_start` field accepting `{"type":"Height","data":<u32>}` or `{"type":"Date","data":"<YYYY-MM-DD>"}` is also accepted; height-based start is wired through the sync loop; date-to-height resolution is deferred. Code: `mm2src/coins_activation/src/z_coin_activation.rs`, `mm2src/coins/z_coin.rs`.
+- **Z-coin sync-parameter control — R39.6.2.** The `task::enable_z_coin::init` activation request now honours the externally-dictated sync controls (confirmed against the public komodoplatform API reference and KDF-family wallets): a `sync_params` field **inside the Light-mode `rpc_data`** (`activation_params.mode.rpc_data.sync_params`), shaped as the externally-tagged union `{"height": <uint>}` / `{"date": <unix-seconds>}` / `"earliest"`; plus top-level `scan_blocks_per_iteration` (u32) and `scan_interval_ms` (u64, `scan_interval` accepted as an alias). Height starts pass through, date starts resolve to a block height via a binary search over backend block timestamps, and `earliest` maps to Sapling activation. (Supersedes the earlier, incorrect top-level `sync_start` / `{"type","data"}` shape.) Code: `mm2src/coins_activation/src/z_coin_activation.rs`, `mm2src/coins/z_coin.rs`.
+- **Z-coin HD-derived shielded key policy — R39.6.4 §2.** Under an HD (BIP39) wallet, the shielded Sapling spending key is now derived from the wallet seed along the coin's `z_derivation_path` with the activation `account` appended as a hardened child (`m/<z_derivation_path>/account'`); the legacy Iguana policy keeps deriving the ZIP32 master from the iguana secret. A new optional `account` field (u32, default 0) on `task::enable_z_coin::init` selects the account (ignored under the Iguana policy). Only the shielded key is HD-derived; the transparent UTXO side remains iguana-derived. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins_activation/src/z_coin_activation.rs`.
+- **Z-coin activation reports the resolved shielded sync start — R39.8.0h.** When a `sync_params` is supplied, the activation result now includes a `first_sync_block` object `{ requested, is_pre_sapling, actual }`, where `requested` is the resolved start height (from a height or a date), `is_pre_sapling` flags a request below Sapling activation, and `actual` floors the start at Sapling activation. Code: `mm2src/coins_activation/src/z_coin_activation.rs`.
 - **Tendermint `denom` / `decimals` / `ibc_channels` in `CoinProtocol`.** `CoinProtocol::TENDERMINT` now carries optional `denom`, `decimals`, and `ibc_channels` fields (R36.3.3), aligned with the komodo-coins config schema for ATOM-family coins. Code: `mm2src/coins/tendermint/`.
 - **V1 swap and taker order-status SSE.** The SSE streaming infrastructure now emits live maker/taker swap and order-status events under the existing `stream::*` namespace. Code: `mm2src/mm2_main/`.
 - **SSE streamer parity endpoints.** The CRD and implementation now cover `stream::disable`, `stream::fee_estimator::enable`, `stream::tx_history::enable`, and native non-Windows `stream::shutdown_signal::enable`, completing the currently bound `stream::*` parity surface. Code: `docs/reloaded-rewrite/10-sse-streaming.md`, `mm2src/mm2_main/`.
 - **RPC-dump development build workflow.** A manual `dev-build-rpc.yml` workflow builds with the RPC dump feature set, and the cross-platform build workflows pass feature flags consistently on Linux, macOS, Windows, iOS, and Android. Code: `.github/workflows/`.
 
 ### Fixed
+
+- **Z-coin (ARRR/ZHTLC) shielded sync honours the requested sync start.**
+  The activation request's shielded sync point (`mode.rpc_data.sync_params`)
+  was being dropped on the wire — the daemon expected a top-level `sync_start`
+  with a different shape, so the parameter deserialized to nothing and the
+  fetch plan always saw `requested_start_height=None`. On top of that, once a
+  shielded wallet had scanned to the chain tip, activation short-circuited on
+  the already-scanned state and reused the stale local cache, so the wallet
+  displayed a balance almost instantly regardless of the requested start. The
+  request now parses the dictated wire (`sync_params` as
+  `{"height"|"date":N}`/`"earliest"` inside the Light `rpc_data`), and
+  activation compares the requested start against the wallet's sync anchor and,
+  when they differ (earlier or later), rewinds/recreates the compact-block
+  cache and wallet database and rescans from the requested start, re-seeding
+  the commitment tree from the light backend — matching upstream behaviour. An
+  unchanged start still resumes from the tip without a rescan, and a start
+  beyond the tip is clamped. Partial fix for #2: the sync start is now honoured,
+  but full ZHTLC activation-wire conformance is still tracked as follow-up —
+  the dictated two-phase scan progress (`UpdatingBlocksCache` /
+  `BuildingWalletDb`) plus result `ticker`, request-level `zcash_params_path`
+  and `skip_sync_params`, an unconditional `first_sync_block`, and the dictated
+  `1000` blocks-per-iteration default remain divergences (marked TODO in CRD
+  §39.3 / §39.6.2 / §39.8.0h). Code:
+  `mm2src/coins_activation/src/z_coin_activation.rs`,
+  `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
 
 - **Small KMD direct-burn DEX fees retain the legacy wire shape.** Netid 8762
   KMD taker-fee construction now permits the positive 75% fee-collection

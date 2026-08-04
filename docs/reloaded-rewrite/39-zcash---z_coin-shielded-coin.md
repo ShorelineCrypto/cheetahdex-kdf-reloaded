@@ -17,10 +17,14 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
   ZCoin type, dual activation modes (Native / Light), multi-lightwalletd light
   mode, the `init_z_coin` task-RPC trio with its progress states, shielded HTLC
   swap operations, and the activation result shape.
-- **§39.6 (T-PORT, mixed):** three items remain absent (WASM support,
-  activation-time sync tuning / sync-from-date, and sourcing consensus
-  parameters/checkpoint/HD path from `protocol_data`); Sapling parameter
-  integrity verification is implemented in reloaded.
+- **§39.6 (T-PORT, implemented):** WASM support, activation-time sync tuning /
+  sync-from-date, Sapling parameter integrity verification, sourcing consensus
+  parameters / checkpoint / HD path from `protocol_data`, and HD-derived
+  shielded key-policy derivation are all implemented. One narrow platform gap
+  remains: WASM shielded-transaction *building* (blocked by the absent
+  `LocalTxProver` parameter files; §39.6.1). The transparent UTXO side of a
+  shielded coin is iguana-derived even under an HD wallet; only the shielded
+  Sapling key is HD-derived, per R39.6.4 §2.
 
 > **Binding scope (R36).** Requirements bind observable behaviour, the public
 > activation/task RPC surface and its JSON field names, and externally *dictated*
@@ -114,13 +118,18 @@ R39.2.1 Activation is a long-running task exposed as the public RPC trio
 
 R39.2.2 The activation request carries a `mode` object (a tagged union with tag
 field `rpc` and payload field `rpc_data`) selecting one of:
-- **Native** -- talks to a full Zcash-family node; no extra fields.
-- **Light** -- a light client carrying `electrum_servers` (the UTXO-side
-  transparent backend) and `light_wallet_d_servers` (a **list** of lightwalletd
-  gRPC endpoints) for the shielded side.
+- **Native** -- talks to a full Zcash-family node; no `rpc_data` payload.
+- **Light** -- a light client whose `rpc_data` object carries `electrum_servers`
+  (the UTXO-side transparent backend) and `light_wallet_d_servers` (a **list** of
+  lightwalletd gRPC endpoints) for the shielded side. The **same `rpc_data`
+  object** is also where the optional shielded **sync starting point**
+  `sync_params` (and its companion `skip_sync_params` boolean) live in the
+  dictated wire (R39.6.2) — **not** at the top level of the activation params.
 
 R39.2.3 The request also carries optional `required_confirmations` and
-`requires_notarization` fields.
+`requires_notarization` fields (top-level on the activation params). Sync-tuning
+fields that sit at the top level (`scan_blocks_per_iteration`, `scan_interval_ms`,
+`zcash_params_path`) are specified in R39.6.2.
 
 R39.2.4 The light mode shall accept **more than one** lightwalletd endpoint so a
 deployment can list several servers.
@@ -129,14 +138,40 @@ deployment can list several servers.
 
 R39.3.1 The activation task shall report progress through observable in-progress
 states covering at least: activating the coin, scanning the shielded chain,
-requesting the wallet balance, and finishing.
+requesting the wallet balance, and finishing. On the dictated public task-status
+wire these serialize (at minimum) as `ActivatingCoin`, the two scan phases
+`UpdatingBlocksCache` and `BuildingWalletDb` (each carrying `current_scanned_block`
+and `latest_block` unsigned counters), `RequestingWalletBalance`, and
+`Finishing`; the hardware-wallet states of R39.3.2
+(`WaitingForTrezorToConnect`, `WaitingForUserToConfirmPubkey`) appear on the same
+status wire. These variant names are part of the externally observable task-RPC
+surface. (Verified identical between the `v2.6.0-beta` reference and the
+current upstream `dev` head.)
+
+> **TODO — missing implementation (convergence item #1).** Reloaded currently
+> collapses the two dictated scan phases (`UpdatingBlocksCache` /
+> `BuildingWalletDb`) into a single `Scanning` in-progress status with no
+> progress payload. A client that switches on the individual dictated
+> scan-phase names, or renders a progress bar from `current_scanned_block` /
+> `latest_block`, will not observe them from a reloaded daemon. Convergence
+> requires emitting the two dictated phase names carrying their
+> `current_scanned_block` / `latest_block` unsigned counters.
 
 R39.3.2 When the wallet is hardware-backed, the task shall additionally surface
 states asking the user to connect the device and to confirm the pubkey, and shall
 accept the confirmation via `init_z_coin_user_action`.
 
-R39.3.3 On success the task result shall report `current_block` and a
-`wallet_balance` carrying the shielded balance.
+R39.3.3 On success the task result shall report `ticker`, `current_block`, and a
+`wallet_balance` carrying the shielded balance. (`ticker` and `current_block`
+are verified present on the dictated result of both `v2.6.0-beta` and the
+current upstream `dev` head.)
+
+> **TODO — missing implementation (convergence item #1).** Reloaded's activation
+> result (`ZcoinActivationResult`) currently serializes only `current_block`,
+> `wallet_balance`, and (optionally) `first_sync_block`; it omits the dictated
+> top-level `ticker`. A client that keys the result off `ticker` will not find
+> it against a reloaded daemon. Convergence requires adding `ticker` to the
+> serialized activation result.
 
 ## 39.4 Sapling parameters & scanning (R31 externally dictated)
 
@@ -165,8 +200,9 @@ the swap protocol.
 ## Part B -- Required ports (T-PORT)
 
 > **Status of Part B:** R39.6.1, R39.6.2, R39.6.3, and R39.6.4 are all
-> implemented. Note: R39.6.4 has `z_derivation_path` parsed and stored,
-> but HD-derived key policy support is deferred to a future enhancement.
+> implemented, including HD-derived shielded key-policy support (R39.6.4 §2).
+> The transparent (UTXO) side of a shielded coin remains iguana-derived; only
+> the shielded Sapling spending key is HD-derived, as R39.6.4 §2 requires.
 
 ## 39.6 Required shielded-coin ports
 
@@ -187,19 +223,87 @@ WASM build and reports a shielded balance.
 > because `LocalTxProver` (sapling parameter files) is absent in WASM.
 
 ### 39.6.2 Activation-time sync tuning / sync-from-date
-R39.6.2 The activation request shall optionally accept sync-control parameters --
-at minimum a **sync starting point** expressed either as a block height or as a
-calendar **date** (so a fresh wallet need not scan from Sapling activation), and
-scan-throughput tuning (blocks-per-iteration and/or inter-iteration interval).
-Acceptance: activating with a sync-from-date begins scanning at the block
-corresponding to that date, materially reducing initial scan time.
+R39.6.2 The activation request shall optionally accept sync-control parameters so
+a fresh wallet need not scan from Sapling activation. This surface is
+**externally dictated interop** (the public `task::enable_z_coin::init` /
+`init_z_coin` request schema, as also emitted by KDF-family wallets); the JSON
+field names, their nesting, and their value shapes below are fixed by that
+contract. (The whole surface described here was verified **identical** between
+the `v2.6.0-beta` reference and the current upstream `dev` head.)
 
-> **Status update (reloaded).** Implemented (commit 7976367e2). The activation
-> request now accepts `blocks_per_iteration` (u32, default 1) and
-> `inter_iteration_interval_ms` (u64, default 0) to control sync throughput and
-> pacing. A `SyncStartpoint` enum (`Height(u32)` | `Date(String)`) is accepted;
-> height-based start is wired through; date-to-height resolution is deferred
-> pending an RPC lookup API.
+**Sync starting point (`sync_params`) \u2014 nested, not top-level.** The sync start
+point is a field named `sync_params` carried **inside the Light-mode `rpc_data`
+object** (`activation_params.mode.rpc_data.sync_params`), alongside
+`electrum_servers` and `light_wallet_d_servers`. It is **not** a top-level field
+on `activation_params`. It is optional and, when present, is an **externally
+tagged** union (lowercase variant names) taking one of exactly three JSON forms:
+
+| Form | JSON shape | Meaning |
+|------|-----------|---------|
+| height | `{"height": <unsigned integer>}` | Start syncing from this block height. |
+| date | `{"date": <unsigned integer>}` | Start from the block matching this Unix timestamp (seconds). |
+| earliest | `"earliest"` (the bare JSON string) | Start from the coin's Sapling activation height. |
+
+An adjacently-tagged `{"type": "height"|"date", "data": ...}` shape and a
+top-level `sync_start` field are **both wrong** for this surface and shall not be
+treated as the dictated wire.
+
+A sibling optional boolean `skip_sync_params` (also inside the Light `rpc_data`)
+requests resuming from the last locally-synced block; `sync_params` is consulted
+only when no prior synced state exists.
+
+**Scan-throughput tuning \u2014 top-level.** Two optional throughput fields sit at the
+**top level** of `activation_params` (not inside `rpc_data`):
+
+- `scan_blocks_per_iteration` \u2014 unsigned **non-zero** integer, blocks scanned per
+  iteration (dictated default 1000);
+- `scan_interval_ms` \u2014 unsigned integer, milliseconds to pause between scan
+  iterations (dictated default 0 = no pause).
+
+**Sapling parameter path \u2014 top-level, optional.** `zcash_params_path` is an
+optional string on `activation_params` giving the filesystem directory of the
+Sapling proving/verifying parameter files. It is part of the dictated request
+schema (consumed on native targets; see §39.4 / R39.6.3).
+
+Acceptance: activating with a `sync_params` `{"date": T}` begins scanning at the
+block corresponding to `T`, materially reducing initial scan time; `"earliest"`
+scans from Sapling activation; `{"height": N}` scans from height `N` (resolution
+semantics in R39.8.0g).
+
+> **Client/doc discrepancy (informative).** The dictated daemon wire and the
+> public API reference name the pacing field `scan_interval_ms`. Some
+> desktop-wallet clients emit `scan_interval` instead. The upstream daemon
+> defines **no** alias for the shorter spelling, so against an upstream daemon a
+> `scan_interval` field is silently ignored and the default applies; emit
+> `scan_interval_ms` for the value to take effect. (Reloaded additionally accepts
+> `scan_interval` as an alias \u2014 see the status note.)
+
+> **Status update (reloaded).** Implemented, with documented divergences from the
+> dictated wire:
+>
+> - **Sync start point:** conformant. Reloaded accepts `sync_params` nested in
+>   the Light-mode `rpc_data` in all three dictated forms (`{"height": N}`,
+>   `{"date": T}`, `"earliest"`). Height and earliest starts are applied directly;
+>   a date start is resolved to the matching block height before the initial
+>   shielded scan (R39.8.0g).
+> - **Throughput field names:** reloaded's canonical field names are
+>   `blocks_per_iteration` and `inter_iteration_interval_ms`, but it accepts the
+>   dictated `scan_blocks_per_iteration` as an alias for the former and both
+>   `scan_interval_ms` (dictated) and `scan_interval` (desktop-wallet spelling) as
+>   aliases for the latter, so all dictated and client spellings deserialize.
+> - **Throughput default divergence — TODO, missing implementation
+>   (convergence item #4).** Reloaded defaults blocks-per-iteration to **1** (not
+>   the dictated **1000**), so a caller relying on the dictated default scans far
+>   more slowly against reloaded unless the field is supplied explicitly.
+>   Convergence requires changing the default to `1000`.
+> - **`skip_sync_params` — TODO, missing implementation (convergence item #3).**
+>   Not modelled by reloaded's request; a supplied value is currently ignored.
+>   Convergence requires accepting the boolean and, when set, forcing a resume
+>   from existing local sync state regardless of any `sync_params`.
+> - **`zcash_params_path` — TODO, missing implementation (convergence item #2).**
+>   Not accepted in reloaded's activation request; reloaded resolves the Sapling
+>   parameter directory from a fixed local path rather than the request field.
+>   Convergence requires honoring the request-supplied directory (native).
 
 ### 39.6.3 Sapling-parameter integrity verification
 R39.6.3 Before use, the loaded Sapling spend/output parameters shall be verified
@@ -265,13 +369,21 @@ mainnet constants.
 > - **Sync checkpoint (R39.6.4 §3).** The builder seeds the wallet's
 >   commitment-tree cache at `check_point_block.height`, deserialized from the
 >   checkpoint's `sapling_tree`, falling back to `sapling_activation_height` when
->   absent (native mode). Light-mode checkpoint-to-height tree seeding is deferred
->   (CRD 39.8.0b).
-> - **HD derivation path (R39.6.4 §2).** The `z_derivation_path` field is parsed
->   from `protocol_data` and retained for use when the key
->   policy is HD-derived. The current implementation is limited to the single-key
->   policy, so `z_derivation_path` is not consulted; support for HD-derived key
->   policies is deferred to a future enhancement.
+>   absent (native mode). In light mode the wallet's initial commitment-tree
+>   state is instead seeded from the lightwalletd `GetTreeState` at the resolved
+>   sync start height (one below the first fetched compact block), which supports
+>   an arbitrary resolved start rather than only the config checkpoint height
+>   (see the R39.8.0h status note).
+> - **HD derivation path (R39.6.4 §2).** Implemented. The shielded spending key
+>   is selected by the active key policy before the builder runs: under the HD
+>   (BIP39) policy it is derived from the wallet's BIP39 seed along the coin's
+>   `z_derivation_path` (purpose' / coin_type', both hardened) with the
+>   activation `account` appended as a hardened child
+>   (`m/<z_derivation_path>/account'`); under the legacy Iguana policy it is the
+>   ZIP32 master of the iguana secret. `account` is an optional `init_z_coin`
+>   request field defaulting to `0`, ignored under the Iguana policy. Under the
+>   HD policy a missing `z_derivation_path` is a build error. The transparent
+>   UTXO side of the coin remains iguana-derived (out of R39.6.4 §2 scope).
 > - **ZOMBIE fixtures.** Test fixtures updated to carry full `protocol_data` with
 >   Zcash-mainnet parameters; bare `{"type":"ZHTLC"}` is now non-conformant per
 >   R39.1.2.
@@ -333,13 +445,14 @@ block and shielded note scanning. In Native mode, activation shall use the nativ
 Zcash-family backend as the compact-block source. Both modes shall feed the same
 shielded wallet database contract and the same `z_coin_tx_history` data path.
 
-R39.8.0g The sync start point is resolved before wallet scanning:
+R39.8.0g The sync start point (supplied via `mode.rpc_data.sync_params`; R39.6.2)
+is resolved before wallet scanning:
 
-- an explicit height starts from that height, floored at
+- an explicit `{"height": N}` starts from height `N`, floored at
   `sapling_activation_height`;
-- an explicit date starts from the backend block height resolved for that date,
-  floored at `sapling_activation_height`;
-- `earliest` starts from `sapling_activation_height`;
+- an explicit `{"date": T}` starts from the backend block height resolved for
+  the Unix timestamp `T`, floored at `sapling_activation_height`;
+- `"earliest"` starts from `sapling_activation_height`;
 - an omitted start point may continue from existing local wallet/cache state
   when that state exists; otherwise it shall use the implementation's default
   recent-start policy, floored at `sapling_activation_height`.
@@ -351,6 +464,47 @@ requests reuse of previous sync state and a valid previous state exists,
 activation may continue from that state. The activation result shall expose the
 requested start, whether the request was below Sapling activation, and the actual
 start height used.
+
+> **Status update (reloaded).** Implemented. "Existing local scan state" is
+> interpreted as the wallet's **sync anchor** — one block above the earliest
+> block stored in the shielded wallet database, i.e. the height the current scan
+> was actually started from. On activation with an explicit `sync_params`
+> (R39.6.2):
+>
+> - If the requested start **differs from the current anchor in either
+>   direction** (earlier to gain history, or later to narrow the window), the
+>   compact-block cache and wallet database are rewound/recreated, the initial
+>   commitment-tree state is re-seeded from the light backend at the resolved
+>   start, and the wallet is rescanned from there. This comparison is evaluated
+>   **before** the "already scanned through the tip" short-circuit, so a changed
+>   sync start/date is honored even when the wallet was previously fully scanned
+>   (rather than reusing the stale cache).
+> - If the requested start **equals the current anchor**, local state is reused
+>   and scanning resumes from the tip, so an unchanged re-activation (a client
+>   that re-sends the same start every launch) does not rescan history.
+> - A requested start **beyond the current tip** is clamped to the tip; if that
+>   still differs from the anchor it rebuilds and scans the (empty) tip window,
+>   matching "sync from a future point".
+>
+> Because the wallet is re-seeded at `requested_start - 1` on rebuild, the anchor
+> afterwards equals the requested start, so the next unchanged activation matches
+> and resumes. In light mode the re-seed uses the lightwalletd `GetTreeState` at
+> the resolved start height (see the R39.6.4 §3 status note). The activation
+> result exposes `first_sync_block` — an object `{ requested, is_pre_sapling,
+> actual }` — where `requested` is the resolved start (height, or the block
+> resolved from a requested date), `is_pre_sapling` is
+> `requested < sapling_activation_height`, and `actual` floors `requested` at
+> `sapling_activation_height`.
+>
+> **TODO — missing implementation (convergence item #4).** The dictated wire
+> (both `v2.6.0-beta` and `dev`) emits `first_sync_block` **unconditionally** in
+> the activation result. Reloaded emits it **optionally**, present only when a
+> `sync_params` start was supplied and omitted otherwise. A client that always
+> reads `first_sync_block` from the result must currently tolerate its absence
+> against a reloaded daemon. Convergence requires emitting `first_sync_block`
+> unconditionally (computing a default start when none was requested).
+
+
 
 ### 39.8.0.2 Storage and schema expectations
 
@@ -612,7 +766,8 @@ storage error that reflects the store failure.
   produces addresses/keys under those declared values and begins its shielded
   sync from the declared `check_point_block` (or `sapling_activation_height`
   when absent), not from hardcoded mainnet constants.
-- R39.6.4 remains pending completion (HD-derived key policy support deferred).
+- R39.6.4 is implemented, including HD-derived shielded key-policy support
+  (the transparent UTXO side remains iguana-derived, which is outside R39.6.4 §2).
 - Shielded history activation: a Light-mode ARRR activation initializes both the
   compact-block cache and shielded wallet database, reports compact-block and
   wallet-db scan progress, and reaches terminal activation only after wallet-db

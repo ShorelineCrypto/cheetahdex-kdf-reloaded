@@ -26,7 +26,7 @@ use common::executor::{spawn, Timer};
 use common::mm_number::{BigDecimal, MmNumber};
 use common::{log, now_ms};
 use crypto::privkey::key_pair_from_secret;
-use crypto::HDPathToCoin;
+use crypto::{CryptoCtx, HDPathToCoin, KeyPairPolicy};
 use futures::compat::Future01CompatExt;
 use futures::lock::Mutex as AsyncMutex;
 use futures::{FutureExt, TryFutureExt};
@@ -59,7 +59,7 @@ use zcash_primitives::sapling::{Node, Note};
 use zcash_primitives::transaction::components::{Amount, TxOut};
 use zcash_primitives::transaction::Transaction as ZTransaction;
 use zcash_primitives::{consensus, constants::mainnet as z_mainnet_constants, sapling::PaymentAddress,
-                       zip32::ExtendedFullViewingKey, zip32::ExtendedSpendingKey};
+                       zip32::ChildIndex, zip32::ExtendedFullViewingKey, zip32::ExtendedSpendingKey};
 // Native-only imports
 #[cfg(not(target_arch = "wasm32"))] use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))] use std::io::Read;
@@ -477,9 +477,10 @@ pub async fn z_coin_from_conf_and_params(
     conf: &Json,
     params: &UtxoActivationParams,
     secp_priv_key: &[u8],
+    account: u32,
     protocol_info: ZcoinProtocolInfo,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
-    let z_key = ExtendedSpendingKey::master(secp_priv_key);
+    let z_key = shielded_spending_key_for_policy(ctx, secp_priv_key, account, &protocol_info)?;
     z_coin_from_conf_and_params_with_z_key(
         ctx,
         ticker,
@@ -492,6 +493,93 @@ pub async fn z_coin_from_conf_and_params(
         protocol_info,
     )
     .await
+}
+
+/// Selects the shielded (Sapling ZIP32) spending key according to the active key
+/// policy (R39.6.4 §2):
+///
+/// - **Iguana / legacy passphrase:** the spending key is the ZIP32 master derived
+///   directly from the coin's iguana secret (the deployed behavior).
+/// - **HD (BIP39) wallet:** the spending key is derived from the wallet's BIP39
+///   seed along the coin's `z_derivation_path` with the activation `account`
+///   appended as a hardened child (`m/<z_derivation_path>/account'`). In this
+///   policy `z_derivation_path` is required; its absence is an error.
+///
+/// # Errors
+/// Returns [`ZCoinBuildError::HdDerivationError`] when the crypto context is
+/// unavailable or the HD policy is active but `z_derivation_path` is absent.
+fn shielded_spending_key_for_policy(
+    ctx: &MmArc,
+    secp_priv_key: &[u8],
+    account: u32,
+    protocol_info: &ZcoinProtocolInfo,
+) -> Result<ExtendedSpendingKey, MmError<ZCoinBuildError>> {
+    let crypto_ctx = CryptoCtx::from_ctx(ctx).mm_err(|e| ZCoinBuildError::HdDerivationError(e.to_string()))?;
+    match crypto_ctx.key_pair_policy() {
+        KeyPairPolicy::Iguana => Ok(ExtendedSpendingKey::master(secp_priv_key)),
+        KeyPairPolicy::GlobalHDAccount(hd_ctx) => {
+            let z_derivation_path = protocol_info.z_derivation_path.as_ref().or_mm_err(|| {
+                ZCoinBuildError::HdDerivationError(
+                    "z_derivation_path is required for HD-derived shielded key policy".to_owned(),
+                )
+            })?;
+            Ok(derive_hd_shielded_spending_key(
+                hd_ctx.root_seed_bytes(),
+                z_derivation_path,
+                account,
+            ))
+        },
+    }
+}
+
+/// Derives the shielded (Sapling ZIP32) extended spending key for an HD wallet
+/// along the coin's `z_derivation_path` with the activation `account` appended
+/// as a hardened child: `m/<z_derivation_path>/account'` (R39.6.4 §2).
+///
+/// `z_derivation_path` is the coin-level path (purpose' / coin_type'); both of
+/// its levels are hardened per ZIP32/BIP44, as is the appended account.
+pub fn derive_hd_shielded_spending_key(
+    root_seed: &[u8],
+    z_derivation_path: &HDPathToCoin,
+    account: u32,
+) -> ExtendedSpendingKey {
+    let master = ExtendedSpendingKey::master(root_seed);
+    ExtendedSpendingKey::from_path(&master, &[
+        ChildIndex::Hardened(z_derivation_path.purpose() as u32),
+        ChildIndex::Hardened(z_derivation_path.coin_type()),
+        ChildIndex::Hardened(account),
+    ])
+}
+
+#[cfg(test)]
+mod hd_shielded_key_tests {
+    use super::*;
+    use std::str::FromStr;
+    use zcash_client_backend::encoding::encode_extended_spending_key;
+
+    #[test]
+    fn hd_shielded_spending_key_uses_zip32_path_with_hardened_account() {
+        let seed = [7u8; 64];
+        let path = HDPathToCoin::from_str("m/32'/133'").unwrap();
+        let hrp = "secret-extended-key-main";
+
+        // The account is appended to `z_derivation_path` as a hardened child, i.e.
+        // `m/32'/133'/account'` (R39.6.4 §2).
+        let derived0 = encode_extended_spending_key(hrp, &derive_hd_shielded_spending_key(&seed, &path, 0));
+        let expected0 = encode_extended_spending_key(
+            hrp,
+            &ExtendedSpendingKey::from_path(&ExtendedSpendingKey::master(&seed), &[
+                ChildIndex::Hardened(32),
+                ChildIndex::Hardened(133),
+                ChildIndex::Hardened(0),
+            ]),
+        );
+        assert_eq!(derived0, expected0);
+
+        // Distinct accounts derive distinct spending keys.
+        let derived1 = encode_extended_spending_key(hrp, &derive_hd_shielded_spending_key(&seed, &path, 1));
+        assert_ne!(derived0, derived1);
+    }
 }
 
 async fn sapling_state_cache_loop(coin: ZCoin) {
@@ -761,10 +849,11 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             blocks_per_iteration: self.protocol_info.blocks_per_iteration,
             inter_iteration_interval_ms: self.protocol_info.inter_iteration_interval_ms,
         };
-        // Note: `protocol_info.z_derivation_path` is parsed from protocol_data (R39.1.4)
-        // but not used here because the current implementation enforces IguanaPrivKey
-        // (single-key mode, no HD derivation). The path would be used when
-        // HD-derived key policies are supported in a future enhancement (R39.6.4 §2).
+        // The shielded spending key is selected by key policy before the builder
+        // runs: under the HD (BIP39) policy it is derived from the wallet seed
+        // along `protocol_info.z_derivation_path` with the activation account
+        // (R39.6.4 §2, see `shielded_spending_key_for_policy`); under the legacy
+        // Iguana policy it is the ZIP32 master of the iguana secret.
 
         let z_coin = ZCoin {
             utxo_arc,

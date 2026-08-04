@@ -11,6 +11,15 @@ impl ZCoin {
     #[inline(always)]
     pub fn is_sapling_state_synced(&self) -> bool { self.z_fields.sapling_state_synced.load(AtomicOrdering::Relaxed) }
 
+    /// The Sapling network-upgrade activation height for this coin, sourced from
+    /// the coin config's `protocol_data.consensus_params` (R39.6.4). This is the
+    /// hard floor below which no shielded output can exist and thus the lower
+    /// bound for any shielded sync start point (R39.8.0g).
+    #[inline(always)]
+    pub fn sapling_activation_height(&self) -> u64 {
+        u64::from(self.z_fields.consensus_params.sapling_activation_height)
+    }
+
     #[inline(always)]
     pub fn my_z_address_encoded(&self) -> String { self.z_fields.my_z_addr_encoded.clone() }
 

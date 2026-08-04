@@ -76,6 +76,7 @@ struct ZCoinStoredHistoryRow {
 struct LightwalletdFetchPlan {
     start_height: u64,
     reset_stale_empty_checkpoint: bool,
+    reset_scan_state: bool,
 }
 
 impl ZCoinShieldedHistory {
@@ -145,12 +146,13 @@ impl ZCoinShieldedHistory {
         };
 
         log::info!(
-            "ZCoin lightwalletd fetch plan: service={}, start_height={}, target_height={}, requested_start_height={:?}, reset_stale_empty_checkpoint={}, servers={}",
+            "ZCoin lightwalletd fetch plan: service={}, start_height={}, target_height={}, requested_start_height={:?}, reset_stale_empty_checkpoint={}, reset_scan_state={}, servers={}",
             LIGHTWALLETD_GRPC_SERVICE,
             fetch_plan.start_height,
             target_height,
             requested_start_height,
             fetch_plan.reset_stale_empty_checkpoint,
+            fetch_plan.reset_scan_state,
             servers.len()
         );
 
@@ -183,38 +185,91 @@ impl ZCoinShieldedHistory {
         target_height: u64,
         requested_start_height: Option<u64>,
     ) -> Result<Option<LightwalletdFetchPlan>, String> {
-        let sapling_activation_height = consensus_params
+        // Sapling is the earliest height at which any shielded output can exist,
+        // so it is the hard floor for every sync start point (R39.8.0g).
+        let sapling_floor = consensus_params
             .activation_height(NetworkUpgrade::Sapling)
-            .map(|h| u32::from(h).saturating_sub(1) as u64)
-            .unwrap_or(0);
-        let default_recent_start = target_height.saturating_sub(DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS);
-        let requested_start_height = requested_start_height.unwrap_or(default_recent_start);
-        let recent_or_requested_start = requested_start_height.max(sapling_activation_height + 1);
+            .map(|h| u32::from(h) as u64)
+            .unwrap_or(1)
+            .max(1);
+        let default_recent_start = target_height
+            .saturating_sub(DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS)
+            .max(sapling_floor);
+        // A caller-supplied start is floored at Sapling activation and clamped to
+        // the current tip: a request beyond the tip has no earlier history to
+        // fetch and must never trigger a destructive reset (R39.8.0g/h).
+        let explicit_requested_start =
+            requested_start_height.map(|height| height.max(sapling_floor).min(target_height));
 
         if let Some(scanned_height) = self.scanned_height()? {
+            if let Some(requested_start) = explicit_requested_start {
+                // The wallet's current sync-start anchor is one block above its
+                // earliest stored block (its seed): the height the current scan was
+                // actually started from. When the caller's requested start differs
+                // from it — in *either* direction — the wallet is anchored on a
+                // different point than requested, so activation must rewind/recreate
+                // the compact-block cache and wallet database and rescan from the
+                // requested start (R39.8.0h). This is checked before the
+                // already-scanned short-circuit below so that a changed sync
+                // start/date is honored even when the wallet is fully scanned.
+                let wallet_sync_start = self.wallet_anchor_height()?.map(|anchor| anchor + 1);
+                if Some(requested_start) != wallet_sync_start {
+                    return Ok(Some(LightwalletdFetchPlan {
+                        start_height: requested_start,
+                        reset_stale_empty_checkpoint: false,
+                        reset_scan_state: true,
+                    }));
+                }
+                // Requested start matches the current anchor: reuse local state and
+                // continue from the tip (no rescan on unchanged re-activations).
+                if scanned_height >= target_height {
+                    return Ok(None);
+                }
+                return Ok(Some(LightwalletdFetchPlan {
+                    start_height: scanned_height + 1,
+                    reset_stale_empty_checkpoint: false,
+                    reset_scan_state: false,
+                }));
+            }
+
+            // No explicit start requested: continue from existing local state.
             if scanned_height >= target_height {
                 return Ok(None);
             }
-
             let resumed_start = scanned_height + 1;
+            // If the wallet is still empty and its seed checkpoint predates the
+            // default recent window, jump forward to that window instead of
+            // replaying long-dead history.
             let should_reseed_empty_checkpoint =
-                resumed_start < recent_or_requested_start && self.wallet_scan_state_is_empty()?;
+                resumed_start < default_recent_start && self.wallet_scan_state_is_empty()?;
             return Ok(Some(LightwalletdFetchPlan {
                 start_height: if should_reseed_empty_checkpoint {
-                    recent_or_requested_start
+                    default_recent_start
                 } else {
                     resumed_start
                 },
                 reset_stale_empty_checkpoint: should_reseed_empty_checkpoint,
+                reset_scan_state: false,
             }));
         }
 
-        Ok(
-            (recent_or_requested_start <= target_height).then_some(LightwalletdFetchPlan {
-                start_height: recent_or_requested_start,
-                reset_stale_empty_checkpoint: false,
-            }),
-        )
+        let start_height = explicit_requested_start.unwrap_or(default_recent_start);
+        Ok((start_height <= target_height).then_some(LightwalletdFetchPlan {
+            start_height,
+            reset_stale_empty_checkpoint: false,
+            reset_scan_state: false,
+        }))
+    }
+
+    /// The wallet's sync anchor: the earliest block height stored in the shielded
+    /// wallet database (the seed checkpoint), or `None` when no block is stored.
+    fn wallet_anchor_height(&self) -> Result<Option<u64>, String> {
+        let conn = Connection::open(&self.wallet_db_path).map_err(|e| e.to_string())?;
+        conn.query_row("SELECT MIN(height) FROM blocks", NO_PARAMS, |row| {
+            let height: Option<u32> = row.get(0)?;
+            Ok(height.map(u64::from))
+        })
+        .map_err(|e| e.to_string())
     }
 
     async fn fetch_compact_blocks_from_server(
@@ -241,6 +296,12 @@ impl ZCoinShieldedHistory {
                 start_height
             );
             self.reset_empty_wallet_scan_state()?;
+        } else if fetch_plan.reset_scan_state {
+            log::info!(
+                "ZCoin shielded wallet DB scan state reset requested before fetching from height {}",
+                start_height
+            );
+            self.reset_wallet_scan_state()?;
         }
 
         if start_height > 0 {
@@ -292,6 +353,10 @@ impl ZCoinShieldedHistory {
             return Err("Refusing to reset shielded wallet DB because it contains wallet scan activity".to_owned());
         }
 
+        self.reset_wallet_scan_state()
+    }
+
+    fn reset_wallet_scan_state(&self) -> Result<(), String> {
         let wallet_conn = Connection::open(&self.wallet_db_path).map_err(|e| e.to_string())?;
         for table in [
             "sapling_witnesses",
@@ -918,6 +983,7 @@ mod tests {
             Some(LightwalletdFetchPlan {
                 start_height: 10_000 - DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS,
                 reset_stale_empty_checkpoint: false,
+                reset_scan_state: false,
             })
         );
     }
@@ -933,6 +999,7 @@ mod tests {
             Some(LightwalletdFetchPlan {
                 start_height: 7_000,
                 reset_stale_empty_checkpoint: false,
+                reset_scan_state: false,
             })
         );
     }
@@ -946,6 +1013,108 @@ mod tests {
             Some(LightwalletdFetchPlan {
                 start_height: 43,
                 reset_stale_empty_checkpoint: false,
+                reset_scan_state: false,
+            })
+        );
+    }
+
+    #[test]
+    fn existing_wallet_state_later_explicit_start_rebuilds() {
+        // A start later than the wallet's current sync anchor differs from it, so
+        // activation rewinds/recreates and rescans from the requested start rather
+        // than silently reusing the older, wider scan (R39.8.0h).
+        let history = open_checkpointed_test_history(42);
+        let plan = history
+            .lightwalletd_fetch_plan(&test_params(), 10_000, Some(7_000))
+            .unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 7_000,
+                reset_stale_empty_checkpoint: false,
+                reset_scan_state: true,
+            })
+        );
+    }
+
+    #[test]
+    fn existing_wallet_state_earlier_explicit_start_triggers_reset() {
+        // A start earlier than the wallet anchor requires rewinding and re-seeding
+        // to obtain the missing earlier history (R39.8.0h).
+        let history = open_checkpointed_test_history(2_000);
+        let plan = history
+            .lightwalletd_fetch_plan(&test_params(), 10_000, Some(1_000))
+            .unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 1_000,
+                reset_stale_empty_checkpoint: false,
+                reset_scan_state: true,
+            })
+        );
+    }
+
+    #[test]
+    fn matching_explicit_start_resumes_without_reset() {
+        // A requested start equal to the wallet's current sync anchor (anchor + 1)
+        // reuses local state and resumes from the scanned tip — no rescan on an
+        // unchanged re-activation.
+        let history = open_checkpointed_test_history(42);
+        let plan = history.lightwalletd_fetch_plan(&test_params(), 100, Some(43)).unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 43,
+                reset_stale_empty_checkpoint: false,
+                reset_scan_state: false,
+            })
+        );
+    }
+
+    #[test]
+    fn fully_scanned_wallet_reuses_state_when_requested_start_matches_anchor() {
+        // A wallet already scanned through the tip with an unchanged requested
+        // start has nothing to do.
+        let history = open_test_history();
+        insert_history_fixture(&history);
+        let plan = history.lightwalletd_fetch_plan(&test_params(), 11, Some(11)).unwrap();
+        assert_eq!(plan, None);
+    }
+
+    #[test]
+    fn fully_scanned_wallet_rebuilds_when_requested_start_differs() {
+        // Regression: a wallet already scanned through the tip must still rewind
+        // when the caller changes the requested sync start, instead of
+        // short-circuiting to "nothing to do" and reusing the stale cache.
+        let history = open_test_history();
+        insert_history_fixture(&history);
+        let plan = history.lightwalletd_fetch_plan(&test_params(), 11, Some(5)).unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 5,
+                reset_stale_empty_checkpoint: false,
+                reset_scan_state: true,
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_start_beyond_tip_is_clamped_to_tip_and_rebuilds() {
+        // A start past the current tip is clamped to the tip. Since that still
+        // differs from the wallet's anchor, it rebuilds and scans from the tip
+        // (an empty, near-instant scan), matching "sync from a future point".
+        let history = open_checkpointed_test_history(42);
+        let plan = history
+            .lightwalletd_fetch_plan(&test_params(), 10_000, Some(7_000_000))
+            .unwrap();
+        assert_eq!(
+            plan,
+            Some(LightwalletdFetchPlan {
+                start_height: 10_000,
+                reset_stale_empty_checkpoint: false,
+                reset_scan_state: true,
             })
         );
     }
@@ -959,6 +1128,7 @@ mod tests {
             Some(LightwalletdFetchPlan {
                 start_height: 10_000 - DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS,
                 reset_stale_empty_checkpoint: true,
+                reset_scan_state: false,
             })
         );
     }

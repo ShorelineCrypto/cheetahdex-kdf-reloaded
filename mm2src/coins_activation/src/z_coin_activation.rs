@@ -20,6 +20,7 @@ use rpc_task::RpcTaskError;
 use ser_error_derive::SerializeErrorType;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as Json;
+use std::future::Future;
 use std::time::Duration;
 
 pub type ZcoinTaskManagerShared = InitStandaloneCoinTaskManagerShared<ZCoin>;
@@ -31,6 +32,24 @@ pub type ZcoinUserAction = HwRpcTaskUserAction;
 pub struct ZcoinActivationResult {
     pub current_block: u64,
     pub wallet_balance: EnableCoinBalance,
+    /// The resolved shielded sync start block, exposed only when the caller
+    /// supplied a `sync_start` (R39.8.0h). Absent when no start was requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_sync_block: Option<FirstSyncBlock>,
+}
+
+/// Details of the block from which the initial shielded sync was anchored,
+/// reported back to the caller when a `sync_start` was supplied (R39.8.0h).
+#[derive(Clone, Serialize)]
+pub struct FirstSyncBlock {
+    /// The start height the caller requested (a height directly, or the block
+    /// resolved from a requested calendar date).
+    pub requested: u64,
+    /// Whether `requested` is below this coin's Sapling activation height.
+    pub is_pre_sapling: bool,
+    /// The height actually used to anchor the sync: `requested`, floored at the
+    /// Sapling activation height.
+    pub actual: u64,
 }
 
 impl CurrentBlock for ZcoinActivationResult {
@@ -61,20 +80,29 @@ pub enum ZcoinRpcMode {
     Light {
         electrum_servers: Vec<ElectrumRpcRequest>,
         light_wallet_d_servers: Vec<String>,
+        /// Optional shielded sync starting point (R39.6.2). Externally dictated
+        /// wire location: nested inside the Light-mode `rpc_data` alongside the
+        /// server lists, exactly as sent by KDF-family wallets.
+        #[serde(default)]
+        sync_params: Option<ZcoinSyncParams>,
     },
 }
 
-/// Sync starting point for R39.6.2 — user specifies where to anchor the
-/// initial shielded sync (by height or date) rather than always starting
-/// from checkpoint/sapling activation. Optional; defaults to checkpoint or
-/// sapling_activation_height if absent.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "type", content = "data")]
-pub enum SyncStartpoint {
-    #[serde(rename = "height")]
-    Height(u32),
-    #[serde(rename = "date")]
-    Date(String),
+/// Shielded sync starting point (R39.6.2). This is the externally *dictated*
+/// wire shape used by KDF-family wallets for `mode.rpc_data.sync_params`:
+///
+/// - `{"height": <block-height>}` — start from an explicit block height;
+/// - `{"date": <unix-timestamp>}` — start from the block matching a date;
+/// - `"earliest"` — start from Sapling activation.
+///
+/// Externally tagged with lowercase variant names so the serde representation is
+/// exactly the dictated JSON.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ZcoinSyncParams {
+    Date(u64),
+    Height(u64),
+    Earliest,
 }
 
 #[derive(Deserialize)]
@@ -82,29 +110,108 @@ pub struct ZcoinActivationParams {
     pub mode: ZcoinRpcMode,
     pub required_confirmations: Option<u64>,
     pub requires_notarization: Option<bool>,
-    /// Optional sync starting point (height or date); R39.6.2. When specified,
-    /// overrides the default checkpoint-or-sapling-activation start point.
-    pub sync_start: Option<SyncStartpoint>,
-    /// Optional blocks-per-iteration for sync throughput tuning; R39.6.2.
-    /// Defaults to 1 (process one block per iteration). Higher values batch
-    /// multiple blocks per cycle.
+    /// Sync-throughput tuning: blocks processed per iteration (R39.6.2). The
+    /// dictated wire name is `scan_blocks_per_iteration`; `blocks_per_iteration`
+    /// is accepted as an alias. Defaults to 1.
+    #[serde(default, alias = "scan_blocks_per_iteration")]
     pub blocks_per_iteration: Option<u32>,
-    /// Optional inter-iteration sleep interval in milliseconds; R39.6.2.
-    /// Defaults to 0 (no sleep between iterations). Positive values rate-limit
-    /// the sync loop to reduce RPC load.
+    /// Sync pacing interval (R39.6.2). The public-API dictated wire name is
+    /// `scan_interval_ms`; the desktop wallet sends `scan_interval`. Both are
+    /// accepted as aliases. Defaults to 0.
+    #[serde(default, alias = "scan_interval_ms", alias = "scan_interval")]
     pub inter_iteration_interval_ms: Option<u64>,
+    /// HD account index for the shielded key derivation (R39.6.4 §2). Used only
+    /// under the HD (BIP39) key policy, where the shielded spending key is
+    /// derived at `m/<z_derivation_path>/account'`. Ignored under the legacy
+    /// Iguana policy. Defaults to `0`.
+    #[serde(default)]
+    pub account: Option<u32>,
+}
+
+impl ZcoinActivationParams {
+    /// The shielded sync starting point, extracted from the Light-mode
+    /// `rpc_data` where the dictated wire places it. `None` in Native mode or
+    /// when no sync point was supplied.
+    fn sync_params(&self) -> Option<&ZcoinSyncParams> {
+        match &self.mode {
+            ZcoinRpcMode::Light { sync_params, .. } => sync_params.as_ref(),
+            ZcoinRpcMode::Native => None,
+        }
+    }
 }
 
 impl TxHistory for ZcoinActivationParams {
     fn tx_history(&self) -> bool { false }
 }
 
-fn requested_shielded_scan_start_height(sync_start: Option<&SyncStartpoint>) -> Option<u64> {
-    match sync_start {
-        Some(SyncStartpoint::Height(height)) => Some(u64::from(*height)),
-        Some(SyncStartpoint::Date(_)) => None,
-        None => None,
+async fn resolve_requested_shielded_scan_start_height<F, Fut>(
+    target_timestamp: u64,
+    tip_height: u64,
+    mut get_block_timestamp: F,
+) -> Result<u64, String>
+where
+    F: FnMut(u64) -> Fut,
+    Fut: Future<Output = Result<u64, String>>,
+{
+    let mut low = 0u64;
+    let mut high = tip_height;
+    let mut resolved_height = 0u64;
+
+    while low <= high {
+        let mid = low + (high - low) / 2;
+        let block_timestamp = get_block_timestamp(mid).await?;
+        if block_timestamp <= target_timestamp {
+            resolved_height = mid;
+            low = mid + 1;
+        } else {
+            high = mid.saturating_sub(1);
+        }
     }
+
+    Ok(resolved_height)
+}
+
+async fn requested_shielded_scan_start_height(
+    coin: &ZCoin,
+    sync_params: Option<&ZcoinSyncParams>,
+) -> Result<Option<u64>, ZcoinInitError> {
+    match sync_params {
+        None => Ok(None),
+        Some(ZcoinSyncParams::Height(height)) => Ok(Some(*height)),
+        Some(ZcoinSyncParams::Earliest) => Ok(Some(coin.sapling_activation_height())),
+        Some(ZcoinSyncParams::Date(target_timestamp)) => {
+            let tip_height = coin
+                .current_block()
+                .compat()
+                .await
+                .map_err(ZcoinInitError::CouldNotGetBlockCount)?;
+            let resolved_height =
+                resolve_requested_shielded_scan_start_height(*target_timestamp, tip_height, |height| async move {
+                    coin.rpc_client()
+                        .get_block_timestamp(height)
+                        .await
+                        .map_err(|error| error.to_string())
+                })
+                .await
+                .map_err(|error| ZcoinInitError::CouldNotResolveSyncStartDate {
+                    sync_start: target_timestamp.to_string(),
+                    error,
+                })?;
+            Ok(Some(resolved_height))
+        },
+    }
+}
+
+/// Builds the [`FirstSyncBlock`] report from the resolved requested start height
+/// and the coin's Sapling activation height (R39.8.0h). Returns `None` when no
+/// start was requested. `actual` floors `requested` at Sapling activation, the
+/// lowest height at which shielded outputs can exist.
+fn first_sync_block_from_requested(requested: Option<u64>, sapling_activation_height: u64) -> Option<FirstSyncBlock> {
+    requested.map(|requested| FirstSyncBlock {
+        requested,
+        is_pre_sapling: requested < sapling_activation_height,
+        actual: requested.max(sapling_activation_height),
+    })
 }
 
 #[derive(Clone, Display, Serialize, SerializeErrorType)]
@@ -125,6 +232,11 @@ pub enum ZcoinInitError {
     },
     CouldNotGetBalance(String),
     CouldNotGetBlockCount(String),
+    #[display(fmt = "Could not resolve sync start date {}: {}", sync_start, error)]
+    CouldNotResolveSyncStartDate {
+        sync_start: String,
+        error: String,
+    },
     #[display(
         fmt = "Shielded wallet DB scanner did not complete for {} through activation tip {}: {}",
         ticker,
@@ -195,6 +307,7 @@ impl From<ZcoinInitError> for InitStandaloneCoinError {
             ZcoinInitError::TaskTimedOut { duration } => InitStandaloneCoinError::TaskTimedOut { duration },
             ZcoinInitError::CouldNotGetBalance(e)
             | ZcoinInitError::CouldNotGetBlockCount(e)
+            | ZcoinInitError::CouldNotResolveSyncStartDate { error: e, .. }
             | ZcoinInitError::ShieldedWalletDbScanIncomplete { error: e, .. }
             | ZcoinInitError::Internal(e) => InitStandaloneCoinError::Internal(e),
         }
@@ -264,8 +377,6 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         if let Some(inter_iter_ms) = activation_request.inter_iteration_interval_ms {
             protocol_info.inter_iteration_interval_ms = inter_iter_ms;
         }
-        let requested_start_height = requested_shielded_scan_start_height(activation_request.sync_start.as_ref());
-
         let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?;
         let priv_key = crypto_ctx.mm2_internal_privkey_secret();
         let coin = z_coin_from_conf_and_params(
@@ -274,10 +385,14 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             &coin_conf,
             &utxo_params,
             priv_key.as_slice(),
+            activation_request.account.unwrap_or(0),
             protocol_info,
         )
         .await
         .mm_err(|e| ZcoinInitError::from_build_err(e, ticker.clone()))?;
+
+        let requested_start_height =
+            requested_shielded_scan_start_height(&coin, activation_request.sync_params()).await?;
 
         task_handle
             .update_in_progress_status(ZcoinInProgressStatus::Scanning)
@@ -319,7 +434,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         &self,
         _ctx: MmArc,
         task_handle: &ZcoinRpcTaskHandle,
-        _activation_request: &Self::ActivationRequest,
+        activation_request: &Self::ActivationRequest,
     ) -> MmResult<Self::ActivationResult, ZcoinInitError> {
         task_handle
             .update_in_progress_status(ZcoinInProgressStatus::RequestingWalletBalance)
@@ -330,6 +445,14 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             .await
             .map_to_mm(ZcoinInitError::CouldNotGetBlockCount)?;
 
+        // Expose the resolved shielded sync start point when the caller supplied
+        // one (R39.8.0h). Height requests resolve without RPC; date requests are
+        // resolved deterministically against the same backend used during scan.
+        let requested_start_height =
+            requested_shielded_scan_start_height(self, activation_request.sync_params()).await?;
+        let first_sync_block =
+            first_sync_block_from_requested(requested_start_height, self.sapling_activation_height());
+
         let balance = self.my_balance().compat().await.mm_err(Into::into)?;
         Ok(ZcoinActivationResult {
             current_block,
@@ -337,6 +460,108 @@ impl InitStandaloneCoinActivationOps for ZCoin {
                 address: self.my_z_address_encoded(),
                 balance,
             }),
+            first_sync_block,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn zcoin_sync_params_match_the_dictated_wire_shapes() {
+        // `{"height": N}` / `{"date": N}` / `"earliest"`, exactly as sent by
+        // KDF-family wallets in `mode.rpc_data.sync_params`.
+        assert_eq!(
+            serde_json::from_value::<ZcoinSyncParams>(json!({ "height": 3_785_000 })).unwrap(),
+            ZcoinSyncParams::Height(3_785_000)
+        );
+        assert_eq!(
+            serde_json::from_value::<ZcoinSyncParams>(json!({ "date": 1_775_037_600u64 })).unwrap(),
+            ZcoinSyncParams::Date(1_775_037_600)
+        );
+        assert_eq!(
+            serde_json::from_value::<ZcoinSyncParams>(json!("earliest")).unwrap(),
+            ZcoinSyncParams::Earliest
+        );
+    }
+
+    #[test]
+    fn activation_params_parse_the_desktop_wallet_wire_format() {
+        // Mirrors the exact request the desktop wallet emits: sync_params nested
+        // in the Light rpc_data, plus scan_blocks_per_iteration / scan_interval
+        // at the activation-params level.
+        let params: ZcoinActivationParams = serde_json::from_value(json!({
+            "mode": {
+                "rpc": "Light",
+                "rpc_data": {
+                    "electrum_servers": [{ "url": "electrum1.example:10008" }],
+                    "light_wallet_d_servers": ["https://lightd1.example:443"],
+                    "sync_params": { "height": 3_785_000 }
+                }
+            },
+            "scan_blocks_per_iteration": 5000,
+            "scan_interval": 0
+        }))
+        .unwrap();
+
+        assert_eq!(params.blocks_per_iteration, Some(5000));
+        assert_eq!(params.inter_iteration_interval_ms, Some(0));
+        assert_eq!(params.sync_params(), Some(&ZcoinSyncParams::Height(3_785_000)));
+    }
+
+    #[test]
+    fn activation_params_without_sync_params_yield_none() {
+        let params: ZcoinActivationParams = serde_json::from_value(json!({
+            "mode": {
+                "rpc": "Light",
+                "rpc_data": {
+                    "electrum_servers": [{ "url": "electrum1.example:10008" }],
+                    "light_wallet_d_servers": ["https://lightd1.example:443"]
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(params.sync_params(), None);
+        assert_eq!(params.blocks_per_iteration, None);
+    }
+
+    #[test]
+    fn resolve_requested_shielded_scan_start_height_finds_the_last_block_before_the_target_timestamp() {
+        let resolved = futures::executor::block_on(resolve_requested_shielded_scan_start_height(
+            350,
+            3,
+            |height| async move {
+                let timestamps = [100u64, 200u64, 300u64, 400u64];
+                Ok::<u64, String>(timestamps[height as usize])
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(resolved, 2);
+    }
+
+    #[test]
+    fn first_sync_block_is_none_without_a_requested_start() {
+        assert!(first_sync_block_from_requested(None, 1_000).is_none());
+    }
+
+    #[test]
+    fn first_sync_block_reports_requested_at_or_above_sapling() {
+        let block = first_sync_block_from_requested(Some(5_000), 1_000).unwrap();
+        assert_eq!(block.requested, 5_000);
+        assert!(!block.is_pre_sapling);
+        assert_eq!(block.actual, 5_000);
+    }
+
+    #[test]
+    fn first_sync_block_floors_pre_sapling_request_at_activation() {
+        let block = first_sync_block_from_requested(Some(500), 1_000).unwrap();
+        assert_eq!(block.requested, 500);
+        assert!(block.is_pre_sapling);
+        assert_eq!(block.actual, 1_000);
     }
 }

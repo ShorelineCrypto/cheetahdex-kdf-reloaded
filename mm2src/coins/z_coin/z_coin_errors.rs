@@ -163,6 +163,8 @@ pub enum ZCoinBuildError {
         path: String,
     },
     ZCashParamsNotFound,
+    #[display(fmt = "HD shielded key derivation failed: {}", _0)]
+    HdDerivationError(String),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
