@@ -9,7 +9,7 @@ use coins::utxo::rpc_clients::ElectrumRpcRequest;
 use coins::utxo::{UtxoActivationParams, UtxoRpcMode};
 use coins::z_coin::{z_coin_from_conf_and_params, ZCoin, ZCoinBuildError, ZcoinProtocolInfo};
 use coins::{BalanceError, CoinProtocol, MarketCoinOps, PrivKeyActivationPolicy, RegisterCoinError};
-use common::executor::Timer;
+use common::{executor::Timer, log};
 use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
 use crypto::{CryptoCtx, CryptoCtxError, CryptoInitError};
 use derive_more::Display;
@@ -30,12 +30,14 @@ pub type ZcoinUserAction = HwRpcTaskUserAction;
 
 #[derive(Clone, Serialize)]
 pub struct ZcoinActivationResult {
+    pub ticker: String,
     pub current_block: u64,
     pub wallet_balance: EnableCoinBalance,
-    /// The resolved shielded sync start block, exposed only when the caller
-    /// supplied a `sync_start` (R39.8.0h). Absent when no start was requested.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_sync_block: Option<FirstSyncBlock>,
+    /// The resolved shielded sync start block (R39.8.0h). Emitted
+    /// unconditionally to match the dictated activation result: when the caller
+    /// supplied a `sync_params` it reflects that request, otherwise it reflects
+    /// the height the shielded scan was actually anchored at.
+    pub first_sync_block: FirstSyncBlock,
 }
 
 /// Details of the block from which the initial shielded sync was anchored,
@@ -60,7 +62,18 @@ impl CurrentBlock for ZcoinActivationResult {
 #[non_exhaustive]
 pub enum ZcoinInProgressStatus {
     ActivatingCoin,
-    Scanning,
+    /// Compact-block cache download phase (R39.3.1). Serializes as the dictated
+    /// `{"UpdatingBlocksCache": {current_scanned_block, latest_block}}`.
+    UpdatingBlocksCache {
+        current_scanned_block: u64,
+        latest_block: u64,
+    },
+    /// Wallet-database build/scan phase (R39.3.1). Serializes as the dictated
+    /// `{"BuildingWalletDb": {current_scanned_block, latest_block}}`.
+    BuildingWalletDb {
+        current_scanned_block: u64,
+        latest_block: u64,
+    },
     RequestingWalletBalance,
     Finishing,
     /// This status doesn't require the user to send `UserAction`,
@@ -85,6 +98,11 @@ pub enum ZcoinRpcMode {
         /// server lists, exactly as sent by KDF-family wallets.
         #[serde(default)]
         sync_params: Option<ZcoinSyncParams>,
+        /// Optional resume flag (R39.6.2 `skip_sync_params`): when true, resume
+        /// from existing local sync state and consult `sync_params` only when no
+        /// prior synced state exists. Sibling of `sync_params` in `rpc_data`.
+        #[serde(default)]
+        skip_sync_params: Option<bool>,
     },
 }
 
@@ -112,7 +130,7 @@ pub struct ZcoinActivationParams {
     pub requires_notarization: Option<bool>,
     /// Sync-throughput tuning: blocks processed per iteration (R39.6.2). The
     /// dictated wire name is `scan_blocks_per_iteration`; `blocks_per_iteration`
-    /// is accepted as an alias. Defaults to 1.
+    /// is accepted as an alias. Defaults to 1000.
     #[serde(default, alias = "scan_blocks_per_iteration")]
     pub blocks_per_iteration: Option<u32>,
     /// Sync pacing interval (R39.6.2). The public-API dictated wire name is
@@ -126,6 +144,11 @@ pub struct ZcoinActivationParams {
     /// Iguana policy. Defaults to `0`.
     #[serde(default)]
     pub account: Option<u32>,
+    /// Optional Sapling parameter directory (R39.6.2 `zcash_params_path`). When
+    /// present it overrides the platform-default parameter location. Native
+    /// only; ignored where shielded proving is unavailable.
+    #[serde(default)]
+    pub zcash_params_path: Option<String>,
 }
 
 impl ZcoinActivationParams {
@@ -136,6 +159,15 @@ impl ZcoinActivationParams {
         match &self.mode {
             ZcoinRpcMode::Light { sync_params, .. } => sync_params.as_ref(),
             ZcoinRpcMode::Native => None,
+        }
+    }
+
+    /// Whether the caller asked to resume from existing local sync state
+    /// (R39.6.2 `skip_sync_params`). `false` in Native mode or when unset.
+    fn skip_sync_params(&self) -> bool {
+        match &self.mode {
+            ZcoinRpcMode::Light { skip_sync_params, .. } => skip_sync_params.unwrap_or(false),
+            ZcoinRpcMode::Native => false,
         }
     }
 }
@@ -202,16 +234,15 @@ async fn requested_shielded_scan_start_height(
     }
 }
 
-/// Builds the [`FirstSyncBlock`] report from the resolved requested start height
-/// and the coin's Sapling activation height (R39.8.0h). Returns `None` when no
-/// start was requested. `actual` floors `requested` at Sapling activation, the
-/// lowest height at which shielded outputs can exist.
-fn first_sync_block_from_requested(requested: Option<u64>, sapling_activation_height: u64) -> Option<FirstSyncBlock> {
-    requested.map(|requested| FirstSyncBlock {
+/// Builds the [`FirstSyncBlock`] report from a resolved start height and the
+/// coin's Sapling activation height (R39.8.0h). `actual` floors `requested` at
+/// Sapling activation, the lowest height at which shielded outputs can exist.
+fn first_sync_block(requested: u64, sapling_activation_height: u64) -> FirstSyncBlock {
+    FirstSyncBlock {
         requested,
         is_pre_sapling: requested < sapling_activation_height,
         actual: requested.max(sapling_activation_height),
-    })
+    }
 }
 
 #[derive(Clone, Display, Serialize, SerializeErrorType)]
@@ -340,6 +371,17 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         &activation_ctx.init_z_coin_task_manager
     }
 
+    async fn acquire_activation_guard(
+        ctx: MmArc,
+        ticker: &str,
+    ) -> Result<Option<Box<dyn Send>>, MmError<Self::ActivationError>> {
+        let activation_ctx = CoinsActivationContext::from_ctx(&ctx).map_to_mm(ZcoinInitError::Internal)?;
+        let lock = activation_ctx
+            .z_coin_activation_lock(ticker)
+            .map_to_mm(ZcoinInitError::Internal)?;
+        Ok(Some(Box::new(lock.lock_owned().await)))
+    }
+
     async fn init_standalone_coin(
         ctx: MmArc,
         ticker: String,
@@ -377,6 +419,8 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         if let Some(inter_iter_ms) = activation_request.inter_iteration_interval_ms {
             protocol_info.inter_iteration_interval_ms = inter_iter_ms;
         }
+        let scan_blocks_per_iteration = protocol_info.blocks_per_iteration.max(1);
+        let scan_interval_ms = protocol_info.inter_iteration_interval_ms;
         let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(Into::into)?;
         let priv_key = crypto_ctx.mm2_internal_privkey_secret();
         let coin = z_coin_from_conf_and_params(
@@ -386,6 +430,10 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             &utxo_params,
             priv_key.as_slice(),
             activation_request.account.unwrap_or(0),
+            activation_request
+                .zcash_params_path
+                .as_ref()
+                .map(std::path::PathBuf::from),
             protocol_info,
         )
         .await
@@ -393,10 +441,17 @@ impl InitStandaloneCoinActivationOps for ZCoin {
 
         let requested_start_height =
             requested_shielded_scan_start_height(&coin, activation_request.sync_params()).await?;
+        let skip_sync_params = activation_request.skip_sync_params();
+        log::info!(
+            "ZCoin shielded sync settings for {}: sync_params={:?}, resolved_start_height={:?}, skip_sync_params={}, scan_blocks_per_iteration={}, scan_interval_ms={}",
+            ticker,
+            activation_request.sync_params(),
+            requested_start_height,
+            skip_sync_params,
+            scan_blocks_per_iteration,
+            scan_interval_ms
+        );
 
-        task_handle
-            .update_in_progress_status(ZcoinInProgressStatus::Scanning)
-            .mm_err(Into::into)?;
         while !coin.is_sapling_state_synced() {
             Timer::sleep(1.).await;
         }
@@ -405,14 +460,25 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             .compat()
             .await
             .map_to_mm(ZcoinInitError::CouldNotGetBlockCount)?;
+
         if let ZcoinRpcMode::Light {
             light_wallet_d_servers, ..
         } = &activation_request.mode
         {
+            // Phase 1 — `UpdatingBlocksCache`: download compact blocks from
+            // lightwalletd, reporting incremental progress (R39.3.1).
+            let cache_progress = |current_scanned_block: u64, latest_block: u64| {
+                let _ = task_handle.update_in_progress_status(ZcoinInProgressStatus::UpdatingBlocksCache {
+                    current_scanned_block,
+                    latest_block,
+                });
+            };
             coin.fetch_lightwalletd_compact_blocks_to_height(
                 light_wallet_d_servers,
                 activation_tip,
                 requested_start_height,
+                skip_sync_params,
+                &cache_progress,
             )
             .await
             .map_err(|error| ZcoinInitError::ShieldedWalletDbScanIncomplete {
@@ -421,7 +487,16 @@ impl InitStandaloneCoinActivationOps for ZCoin {
                 error,
             })?;
         }
-        coin.scan_shielded_wallet_db_to_height(activation_tip)
+
+        // Phase 2 — `BuildingWalletDb`: scan cached blocks into the wallet DB,
+        // reporting incremental progress (R39.3.1).
+        let build_progress = |current_scanned_block: u64, latest_block: u64| {
+            let _ = task_handle.update_in_progress_status(ZcoinInProgressStatus::BuildingWalletDb {
+                current_scanned_block,
+                latest_block,
+            });
+        };
+        coin.scan_shielded_wallet_db_to_height(activation_tip, build_progress)
             .map_err(|error| ZcoinInitError::ShieldedWalletDbScanIncomplete {
                 ticker: ticker.clone(),
                 activation_tip,
@@ -445,16 +520,22 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             .await
             .map_to_mm(ZcoinInitError::CouldNotGetBlockCount)?;
 
-        // Expose the resolved shielded sync start point when the caller supplied
-        // one (R39.8.0h). Height requests resolve without RPC; date requests are
-        // resolved deterministically against the same backend used during scan.
+        // Expose the resolved shielded sync start point (R39.8.0h), emitted
+        // unconditionally to match the dictated result. When the caller supplied
+        // a `sync_params` it is reported directly (height requests resolve
+        // without RPC; date requests resolve deterministically against the same
+        // backend used during scan); otherwise it falls back to the height the
+        // shielded scan was actually anchored at, then to Sapling activation.
         let requested_start_height =
             requested_shielded_scan_start_height(self, activation_request.sync_params()).await?;
-        let first_sync_block =
-            first_sync_block_from_requested(requested_start_height, self.sapling_activation_height());
+        let effective_start_height = requested_start_height
+            .or_else(|| self.shielded_wallet_sync_start_height())
+            .unwrap_or_else(|| self.sapling_activation_height());
+        let first_sync_block = first_sync_block(effective_start_height, self.sapling_activation_height());
 
         let balance = self.my_balance().compat().await.mm_err(Into::into)?;
         Ok(ZcoinActivationResult {
+            ticker: self.ticker().to_owned(),
             current_block,
             wallet_balance: EnableCoinBalance::Iguana(IguanaWalletBalance {
                 address: self.my_z_address_encoded(),
@@ -468,6 +549,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coins::CoinBalance;
     use serde_json::json;
 
     #[test]
@@ -545,13 +627,8 @@ mod tests {
     }
 
     #[test]
-    fn first_sync_block_is_none_without_a_requested_start() {
-        assert!(first_sync_block_from_requested(None, 1_000).is_none());
-    }
-
-    #[test]
     fn first_sync_block_reports_requested_at_or_above_sapling() {
-        let block = first_sync_block_from_requested(Some(5_000), 1_000).unwrap();
+        let block = first_sync_block(5_000, 1_000);
         assert_eq!(block.requested, 5_000);
         assert!(!block.is_pre_sapling);
         assert_eq!(block.actual, 5_000);
@@ -559,9 +636,77 @@ mod tests {
 
     #[test]
     fn first_sync_block_floors_pre_sapling_request_at_activation() {
-        let block = first_sync_block_from_requested(Some(500), 1_000).unwrap();
+        let block = first_sync_block(500, 1_000);
         assert_eq!(block.requested, 500);
         assert!(block.is_pre_sapling);
         assert_eq!(block.actual, 1_000);
+    }
+
+    #[test]
+    fn zcoin_scan_progress_status_wire_shape_is_stable() {
+        assert_eq!(
+            serde_json::to_value(ZcoinInProgressStatus::UpdatingBlocksCache {
+                current_scanned_block: 1_234,
+                latest_block: 5_678,
+            })
+            .unwrap(),
+            json!({
+                "UpdatingBlocksCache": {
+                    "current_scanned_block": 1_234,
+                    "latest_block": 5_678,
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(ZcoinInProgressStatus::BuildingWalletDb {
+                current_scanned_block: 2_345,
+                latest_block: 5_678,
+            })
+            .unwrap(),
+            json!({
+                "BuildingWalletDb": {
+                    "current_scanned_block": 2_345,
+                    "latest_block": 5_678,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn zcoin_activation_result_wire_shape_is_stable() {
+        let result = ZcoinActivationResult {
+            ticker: "ARRR".to_owned(),
+            current_block: 5_678,
+            wallet_balance: EnableCoinBalance::Iguana(IguanaWalletBalance {
+                address: "zs-test-address".to_owned(),
+                balance: CoinBalance::default(),
+            }),
+            first_sync_block: FirstSyncBlock {
+                requested: 1_234,
+                is_pre_sapling: false,
+                actual: 1_234,
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            json!({
+                "ticker": "ARRR",
+                "current_block": 5_678,
+                "wallet_balance": {
+                    "wallet_type": "Iguana",
+                    "address": "zs-test-address",
+                    "balance": {
+                        "spendable": "0",
+                        "unspendable": "0",
+                    }
+                },
+                "first_sync_block": {
+                    "requested": 1_234,
+                    "is_pre_sapling": false,
+                    "actual": 1_234,
+                }
+            })
+        );
     }
 }

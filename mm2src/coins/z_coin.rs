@@ -39,6 +39,10 @@ use mm2_err_handle::prelude::*;
 #[cfg(test)] use mocktopus::macros::*;
 use primitives::bytes::Bytes;
 use rpc::v1::types::{Bytes as BytesJson, ToTxHash, Transaction as RpcTransaction, H256 as H256Json};
+use sapling::keys::{FullViewingKey, OutgoingViewingKey};
+use sapling::note_encryption::try_sapling_output_recovery;
+use sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey};
+use sapling::{CommitmentTree, IncrementalWitness, Node, Note, PaymentAddress};
 use script::{Builder as ScriptBuilder, Opcode, Script, TransactionInputSigner};
 use serde_json::{json, Value as Json};
 use serialization::{deserialize, CoinVariant};
@@ -46,29 +50,36 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Weak};
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_client_backend::data_api::WalletRead;
+use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, InputSource, TargetValue, WalletCommitmentTrees,
+                                     WalletRead};
 use zcash_client_backend::decrypt_transaction;
-use zcash_client_backend::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
-use zcash_client_backend::wallet::AccountId;
-use zcash_primitives::consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters, H0};
-use zcash_primitives::memo::MemoBytes;
-use zcash_primitives::merkle_tree::{CommitmentTree, Hashable, IncrementalWitness};
-use zcash_primitives::sapling::keys::OutgoingViewingKey;
-use zcash_primitives::sapling::note_encryption::try_sapling_output_recovery;
-use zcash_primitives::sapling::{Node, Note};
-use zcash_primitives::transaction::components::{Amount, TxOut};
+use zcash_keys::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_primitives::merkle_tree::read_commitment_tree;
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_primitives::transaction::builder::{BuildConfig, Builder as ZTxBuilder};
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_primitives::transaction::fees::fixed::FeeRule as FixedFeeRule;
 use zcash_primitives::transaction::Transaction as ZTransaction;
-use zcash_primitives::{consensus, constants::mainnet as z_mainnet_constants, sapling::PaymentAddress,
-                       zip32::ChildIndex, zip32::ExtendedFullViewingKey, zip32::ExtendedSpendingKey};
+use zcash_protocol::consensus::{self, BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters, H0};
+use zcash_protocol::constants::mainnet as z_mainnet_constants;
+use zcash_protocol::memo::MemoBytes;
+use zcash_protocol::value::Zatoshis as Amount;
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_protocol::ShieldedProtocol;
+#[cfg(not(target_arch = "wasm32"))]
+use zcash_transparent::builder::TransparentSigningSet;
+use zcash_transparent::bundle::TxOut;
+use zip32::ChildIndex;
 // Native-only imports
 #[cfg(not(target_arch = "wasm32"))] use std::fs::File;
 #[cfg(not(target_arch = "wasm32"))] use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))] use std::num::NonZeroU32;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_client_sqlite::WalletDb;
-#[cfg(not(target_arch = "wasm32"))]
-use zcash_primitives::transaction::builder::Builder as ZTxBuilder;
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_proofs::prover::LocalTxProver;
 
@@ -95,6 +106,7 @@ pub(crate) mod z_coin_wallet_db;
 use z_coin_wallet_db::ZCoinShieldedHistory;
 
 /// `ZP2SHSpendError` compatible `TransactionErr` handling macro.
+#[cfg(not(target_arch = "wasm32"))]
 macro_rules! try_ztx_s {
     ($e: expr) => {
         match $e {
@@ -156,14 +168,24 @@ pub struct ZcoinConsensusParams {
     b58_script_address_prefix: [u8; 2],
 }
 
-impl consensus::Parameters for ZcoinConsensusParams {
-    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
-        match nu {
-            NetworkUpgrade::Overwinter => Some(BlockHeight::from_u32(self.overwinter_activation_height)),
-            NetworkUpgrade::Sapling => Some(BlockHeight::from_u32(self.sapling_activation_height)),
-            NetworkUpgrade::Blossom => self.blossom_activation_height.map(BlockHeight::from_u32),
-            NetworkUpgrade::Heartwood => self.heartwood_activation_height.map(BlockHeight::from_u32),
-            NetworkUpgrade::Canopy => self.canopy_activation_height.map(BlockHeight::from_u32),
+impl ZcoinConsensusParams {
+    fn network_type_hint(&self) -> NetworkType {
+        use zcash_protocol::constants::{regtest, testnet};
+
+        if self.hrp_sapling_payment_address == testnet::HRP_SAPLING_PAYMENT_ADDRESS
+            && self.hrp_sapling_extended_spending_key == testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
+        {
+            NetworkType::Test
+        } else if self.hrp_sapling_payment_address == regtest::HRP_SAPLING_PAYMENT_ADDRESS
+            && self.hrp_sapling_extended_spending_key == regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY
+        {
+            NetworkType::Regtest
+        } else {
+            // KDF-family production Z-coins use independently configured
+            // Sapling encodings. Modern librustzcash requires one stock network
+            // type for internal unified-key persistence; all externally visible
+            // Sapling encodings continue to use the configured values below.
+            NetworkType::Main
         }
     }
 
@@ -178,6 +200,21 @@ impl consensus::Parameters for ZcoinConsensusParams {
     fn b58_pubkey_address_prefix(&self) -> [u8; 2] { self.b58_pubkey_address_prefix }
 
     fn b58_script_address_prefix(&self) -> [u8; 2] { self.b58_script_address_prefix }
+}
+
+impl consensus::Parameters for ZcoinConsensusParams {
+    fn network_type(&self) -> NetworkType { self.network_type_hint() }
+
+    fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
+        match nu {
+            NetworkUpgrade::Overwinter => Some(BlockHeight::from_u32(self.overwinter_activation_height)),
+            NetworkUpgrade::Sapling => Some(BlockHeight::from_u32(self.sapling_activation_height)),
+            NetworkUpgrade::Blossom => self.blossom_activation_height.map(BlockHeight::from_u32),
+            NetworkUpgrade::Heartwood => self.heartwood_activation_height.map(BlockHeight::from_u32),
+            NetworkUpgrade::Canopy => self.canopy_activation_height.map(BlockHeight::from_u32),
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu6_2 => None,
+        }
+    }
 }
 
 /// Sync-anchor block descriptor from `protocol.protocol_data.check_point_block`
@@ -208,7 +245,8 @@ pub struct ZcoinProtocolInfo {
     /// Optional sync-anchor block descriptor (R39.1.4).
     pub check_point_block: Option<CheckPointBlockInfo>,
     /// Sync throughput tuning: blocks to process per iteration (R39.6.2).
-    /// Defaults to 1. Higher values batch multiple blocks per cycle.
+    /// Defaults to 1000 (the dictated activation default). Higher values batch
+    /// multiple blocks per cycle.
     #[serde(default = "default_blocks_per_iteration")]
     pub blocks_per_iteration: u32,
     /// Sync pacing: milliseconds to sleep between iterations (R39.6.2).
@@ -220,7 +258,7 @@ pub struct ZcoinProtocolInfo {
     pub z_derivation_path: Option<HDPathToCoin>,
 }
 
-fn default_blocks_per_iteration() -> u32 { 1 }
+fn default_blocks_per_iteration() -> u32 { 1000 }
 
 /// Outgoing Viewing Key (OVK) used to encrypt the outgoing-cipher portion of
 /// every Sapling output that pays a swap dex-fee on Pirate Chain (ARRR).
@@ -336,7 +374,7 @@ pub struct ZCoinFields {
     /// Optional sync-anchor checkpoint sourced from `protocol_data` (R39.1.4).
     check_point_block: Option<CheckPointBlockInfo>,
     /// Sync throughput tuning: blocks to process per iteration (R39.6.2).
-    /// Defaults to 1. Higher values batch multiple blocks per cycle.
+    /// Defaults to 1000. Higher values batch multiple blocks per cycle.
     pub blocks_per_iteration: u32,
     /// Sync pacing: milliseconds to sleep between iterations (R39.6.2).
     /// Defaults to 0 (no sleep). Positive values rate-limit the sync loop.
@@ -361,7 +399,7 @@ impl Transaction for ZTransaction {
     }
 
     fn tx_hash(&self) -> BytesJson {
-        let mut bytes = self.txid().0.to_vec();
+        let mut bytes = self.txid().as_ref().to_vec();
         bytes.reverse();
         bytes.into()
     }
@@ -478,6 +516,7 @@ pub async fn z_coin_from_conf_and_params(
     params: &UtxoActivationParams,
     secp_priv_key: &[u8],
     account: u32,
+    #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
     protocol_info: ZcoinProtocolInfo,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
     let z_key = shielded_spending_key_for_policy(ctx, secp_priv_key, account, &protocol_info)?;
@@ -489,6 +528,8 @@ pub async fn z_coin_from_conf_and_params(
         secp_priv_key,
         #[cfg(not(target_arch = "wasm32"))]
         ctx.dbdir(),
+        #[cfg(not(target_arch = "wasm32"))]
+        zcash_params_path,
         z_key,
         protocol_info,
     )
@@ -545,9 +586,9 @@ pub fn derive_hd_shielded_spending_key(
 ) -> ExtendedSpendingKey {
     let master = ExtendedSpendingKey::master(root_seed);
     ExtendedSpendingKey::from_path(&master, &[
-        ChildIndex::Hardened(z_derivation_path.purpose() as u32),
-        ChildIndex::Hardened(z_derivation_path.coin_type()),
-        ChildIndex::Hardened(account),
+        ChildIndex::hardened(z_derivation_path.purpose() as u32),
+        ChildIndex::hardened(z_derivation_path.coin_type()),
+        ChildIndex::hardened(account),
     ])
 }
 
@@ -569,9 +610,9 @@ mod hd_shielded_key_tests {
         let expected0 = encode_extended_spending_key(
             hrp,
             &ExtendedSpendingKey::from_path(&ExtendedSpendingKey::master(&seed), &[
-                ChildIndex::Hardened(32),
-                ChildIndex::Hardened(133),
-                ChildIndex::Hardened(0),
+                ChildIndex::hardened(32),
+                ChildIndex::hardened(133),
+                ChildIndex::hardened(0),
             ]),
         );
         assert_eq!(derived0, expected0);
@@ -589,7 +630,17 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
         Ok(Some(state)) => {
             let mut tree = state.prev_tree_state;
             for cmu in state.cmus {
-                tree.append(Node::new(cmu.take())).expect("Commitment tree not full");
+                let node = match Option::from(Node::from_bytes(cmu.take())) {
+                    Some(node) => node,
+                    None => {
+                        log::error!("Invalid Sapling note commitment in the local state cache");
+                        return;
+                    },
+                };
+                if tree.append(node).is_err() {
+                    log::error!("Sapling commitment tree is full while restoring the local state cache");
+                    return;
+                }
             }
             (state.height, tree)
         },
@@ -600,12 +651,11 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
         // otherwise start at the Sapling activation height (the floor below
         // which no shielded outputs exist) with an empty tree.
         //
-        // TODO(R39.6.4): light mode also uses `check_point_block.sapling_tree`
-        // to seed the wallet's initial commitment-tree state, but the light-mode
-        // compact-block scan substrate is absent/partial in reloaded
-        // (CRD §39.8.0b); wiring that seeding is deferred with the scanner.
+        // Light mode seeds the modern shielded wallet scanner directly from
+        // `check_point_block`; this legacy commitment-tree cache loop exits for
+        // Electrum-backed activations and is not the lightwalletd scan path.
         Ok(None) | Err(_) => match coin.z_fields.check_point_block.as_ref() {
-            Some(check_point) => match CommitmentTree::read(check_point.sapling_tree.0.as_slice()) {
+            Some(check_point) => match read_commitment_tree(check_point.sapling_tree.0.as_slice()) {
                 Ok(tree) => (check_point.height + 1, tree),
                 Err(e) => {
                     log::error!(
@@ -643,9 +693,9 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
         let native_client = match coin.rpc_client() {
             UtxoRpcClientEnum::Native(n) => n,
             UtxoRpcClientEnum::Electrum(_) => {
-                log::warn!(
-                    "Light-mode ZCoin commitment-tree cache scanning is not implemented; \
-                     wallet-history scanning is handled via lightwalletd during activation; marking {} cache as synced",
+                log::debug!(
+                    "Light-mode ZCoin legacy commitment-tree cache loop skipped for {}; \
+                     wallet-history scanning is handled by the modern lightwalletd wallet scanner",
                     coin.ticker()
                 );
                 coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
@@ -670,11 +720,7 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                         continue;
                     },
                 };
-                let current_sapling_root = current_tree.root();
-                let mut root_bytes = [0u8; 32];
-                current_sapling_root
-                    .write(&mut root_bytes as &mut [u8])
-                    .expect("Root len is 32 bytes");
+                let root_bytes = current_tree.root().to_bytes();
 
                 let current_sapling_root = Some(H256::from(root_bytes).reversed().into());
                 if current_sapling_root != block.final_sapling_root && block.final_sapling_root != zero_root {
@@ -688,9 +734,25 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                             .expect("Panic here to avoid storing invalid tree state to the DB");
                         let tx: UtxoTx = deserialize(tx.as_slice()).expect("Panic here to avoid invalid tree state");
                         for output in tx.shielded_outputs {
-                            current_tree
-                                .append(Node::new(output.cmu.take()))
-                                .expect("Commitment tree not full");
+                            let node = match Option::from(Node::from_bytes(output.cmu.take())) {
+                                Some(node) => node,
+                                None => {
+                                    log::error!(
+                                        "Invalid Sapling note commitment in transaction {:?} at height {}",
+                                        hash,
+                                        processed_height
+                                    );
+                                    return;
+                                },
+                            };
+                            if current_tree.append(node).is_err() {
+                                log::error!(
+                                    "Sapling commitment tree is full while processing transaction {:?} at height {}",
+                                    hash,
+                                    processed_height
+                                );
+                                return;
+                            }
                             cmus.push(output.cmu);
                         }
                     }
@@ -728,6 +790,10 @@ pub struct ZCoinBuilder<'a> {
     secp_priv_key: &'a [u8],
     #[cfg(not(target_arch = "wasm32"))]
     db_dir_path: PathBuf,
+    /// Optional caller-supplied Sapling parameter directory (R39.6.2
+    /// `zcash_params_path`). When `None` the fixed platform default is used.
+    #[cfg(not(target_arch = "wasm32"))]
+    zcash_params_path: Option<PathBuf>,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
 }
@@ -775,11 +841,10 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             }
         };
 
-        let (_, my_z_addr) = self
-            .z_spending_key
-            .default_address()
-            .map_err(|_| MmError::new(ZCoinBuildError::GetAddressError))?;
-        let extfvk = ExtendedFullViewingKey::from(&self.z_spending_key);
+        let (_, my_z_addr) = self.z_spending_key.default_address();
+        #[cfg(not(target_arch = "wasm32"))]
+        #[allow(deprecated)]
+        let extfvk = self.z_spending_key.to_extended_full_viewing_key();
 
         // All network parameters are sourced from the coin config's
         // `protocol_data.consensus_params` (R39.6.4) rather than hardcoded
@@ -804,14 +869,13 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
 
         let dex_fee_z_addr = mm2_net_config::net_config_or_panic(self.ctx.netid()).dex_fee_z_addr();
         let dex_fee_addr = decode_payment_address(consensus_params.hrp_sapling_payment_address(), dex_fee_z_addr)
-            .expect("NetConfig dex_fee_z_addr must be a valid z-address")
             .expect("NetConfig dex_fee_z_addr must be a valid z-address");
 
         // Verify and load the sapling prover parameters (native only — WASM
         // cannot build shielded transactions without the param files).
         #[cfg(not(target_arch = "wasm32"))]
         let z_tx_prover = {
-            let params_dir = zcash_params_path();
+            let params_dir = self.zcash_params_path.clone().unwrap_or_else(zcash_params_path);
             verify_zcash_params_integrity(&params_dir)?;
             tokio::task::block_in_place(|| {
                 LocalTxProver::new(
@@ -884,6 +948,7 @@ impl<'a> ZCoinBuilder<'a> {
         params: &'a UtxoActivationParams,
         secp_priv_key: &'a [u8],
         #[cfg(not(target_arch = "wasm32"))] db_dir_path: PathBuf,
+        #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
         z_spending_key: ExtendedSpendingKey,
         protocol_info: ZcoinProtocolInfo,
     ) -> ZCoinBuilder<'a> {
@@ -895,6 +960,8 @@ impl<'a> ZCoinBuilder<'a> {
             secp_priv_key,
             #[cfg(not(target_arch = "wasm32"))]
             db_dir_path,
+            #[cfg(not(target_arch = "wasm32"))]
+            zcash_params_path,
             z_spending_key,
             protocol_info,
         }
@@ -908,6 +975,7 @@ async fn z_coin_from_conf_and_params_with_z_key(
     params: &UtxoActivationParams,
     secp_priv_key: &[u8],
     #[cfg(not(target_arch = "wasm32"))] db_dir_path: PathBuf,
+    #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
@@ -919,6 +987,8 @@ async fn z_coin_from_conf_and_params_with_z_key(
         secp_priv_key,
         #[cfg(not(target_arch = "wasm32"))]
         db_dir_path,
+        #[cfg(not(target_arch = "wasm32"))]
+        zcash_params_path,
         z_spending_key,
         protocol_info,
     );
@@ -1044,7 +1114,9 @@ impl MarketCoinOps for ZCoin {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn tx_enum_from_bytes(&self, bytes: &[u8]) -> Result<TransactionEnum, String> {
-        ZTransaction::read(bytes).map(|tx| tx.into()).map_err(|e| e.to_string())
+        ZTransaction::read(bytes, BranchId::Sapling)
+            .map(|tx| tx.into())
+            .map_err(|e| e.to_string())
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1109,8 +1181,7 @@ impl MmCoin for ZCoin {
 
                 let to_addr =
                     decode_payment_address(coin.z_fields.consensus_params.hrp_sapling_payment_address(), &req.to)
-                        .map_to_mm(|e| WithdrawError::InvalidAddress(format!("{}", e)))?
-                        .or_mm_err(|| WithdrawError::InvalidAddress(format!("Address {} decoded to None", req.to)))?;
+                        .map_to_mm(|e| WithdrawError::InvalidAddress(format!("{}", e)))?;
                 let amount = if req.max {
                     let fee = coin.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
                     let balance = coin.my_balance().compat().await.mm_err(Into::into)?;
@@ -1133,7 +1204,7 @@ impl MmCoin for ZCoin {
                 let mut tx_bytes = Vec::with_capacity(1024);
                 tx.write(&mut tx_bytes)
                     .map_to_mm(|e| WithdrawError::InternalError(e.to_string()))?;
-                let mut tx_hash = tx.txid().0.to_vec();
+                let mut tx_hash = tx.txid().as_ref().to_vec();
                 tx_hash.reverse();
 
                 let my_balance_change = data.spent_by_me - data.received_by_me;
@@ -1187,13 +1258,9 @@ impl MmCoin for ZCoin {
 
     fn validate_address(&self, address: &str) -> ValidateAddressResult {
         match decode_payment_address(self.z_fields.consensus_params.hrp_sapling_payment_address(), address) {
-            Ok(Some(_)) => ValidateAddressResult {
+            Ok(_) => ValidateAddressResult {
                 is_valid: true,
                 reason: None,
-            },
-            Ok(None) => ValidateAddressResult {
-                is_valid: false,
-                reason: Some("decode_payment_address returned None".to_owned()),
             },
             Err(e) => ValidateAddressResult {
                 is_valid: false,
@@ -1488,7 +1555,7 @@ fn derive_z_key_from_mm_seed() {
     let encoded = encode_extended_spending_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY, &z_spending_key);
     assert_eq!(encoded, "secret-extended-key-main1qqqqqqqqqqqqqqytwz2zjt587n63kyz6jawmflttqu5rxavvqx3lzfs0tdr0w7g5tgntxzf5erd3jtvva5s52qx0ms598r89vrmv30r69zehxy2r3vesghtqd6dfwdtnauzuj8u8eeqfx7qpglzu6z54uzque6nzzgnejkgq569ax4lmk0v95rfhxzxlq3zrrj2z2kqylx2jp8g68lqu6alczdxd59lzp4hlfuj3jp54fp06xsaaay0uyass992g507tdd7psua5w6q76dyq3");
 
-    let (_, address) = z_spending_key.default_address().unwrap();
+    let (_, address) = z_spending_key.default_address();
     let encoded_addr = encode_payment_address(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS, &address);
     assert_eq!(
         encoded_addr,
@@ -1501,7 +1568,7 @@ fn derive_z_key_from_mm_seed() {
     let encoded = encode_extended_spending_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY, &z_spending_key);
     assert_eq!(encoded, "secret-extended-key-main1qqqqqqqqqqqqqq8jnhc9stsqwts6pu5ayzgy4szplvy03u227e50n3u8e6dwn5l0q5s3s8xfc03r5wmyh5s5dq536ufwn2k89ngdhnxy64sd989elwas6kr7ygztsdkw6k6xqyvhtu6e0dhm4mav8rus0fy8g0hgy9vt97cfjmus0m2m87p4qz5a00um7gwjwk494gul0uvt3gqyjujcclsqry72z57kr265jsajactgfn9m3vclqvx8fsdnwp4jwj57ffw560vvwks9g9hpu");
 
-    let (_, address) = z_spending_key.default_address().unwrap();
+    let (_, address) = z_spending_key.default_address();
     let encoded_addr = encode_payment_address(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS, &address);
     assert_eq!(
         encoded_addr,

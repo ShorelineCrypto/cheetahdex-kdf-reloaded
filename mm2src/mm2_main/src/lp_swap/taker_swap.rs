@@ -2828,7 +2828,7 @@ mod taker_swap_tests {
 
         assert_eq!(unsafe { SWAP_CONTRACT_ADDRESS_CALLED }, 1);
         let expected_addr = addr_from_str("0xa09ad3cd7e96586ebd05a2607ee56b56fb2db8fd").unwrap();
-        let expected = BytesJson::from(expected_addr.0.as_ref());
+        let expected = BytesJson::from(&expected_addr.0[..]);
         assert_eq!(taker_swap.r().data.maker_coin_swap_contract_address, Some(expected));
         assert_eq!(
             taker_swap.r().data.taker_coin_swap_contract_address,

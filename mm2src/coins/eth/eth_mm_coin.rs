@@ -348,9 +348,7 @@ impl MmCoin for EthCoin {
         log!("Warning: set_requires_notarization doesn't take any effect on ETH/ERC20 coins");
     }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        Some(BytesJson::from(self.swap_contract_address.0.as_ref()))
-    }
+    fn swap_contract_address(&self) -> Option<BytesJson> { Some(BytesJson::from(&self.swap_contract_address.0[..])) }
 
     fn mature_confirmations(&self) -> Option<u32> { None }
 

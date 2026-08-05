@@ -50,6 +50,14 @@ members = [
     "mm2src/kdf_walletconnect",
     "mm2src/mm2_metamask",
 ]
+# Patched published crates remain ordinary path dependencies rather than
+# first-party workspace members. Excluding them also permits their own focused
+# upstream-style unit tests to be run via `--manifest-path`.
+exclude = [
+    "vendor-patches/zcash_client_backend-0.23.0",
+    "vendor-patches/zcash_primitives-0.28.0",
+    "vendor-patches/zcash_transparent-0.8.0",
+]
 
 # https://doc.rust-lang.org/beta/cargo/reference/features.html#feature-resolver-version-2
 resolver = "2"
@@ -160,3 +168,6 @@ debug = false
 # resolves without affecting any std build (no-std is never enabled here).
 [patch.crates-io]
 core2 = { path = "core2-shim" }
+zcash_client_backend = { path = "vendor-patches/zcash_client_backend-0.23.0" }
+zcash_primitives = { path = "vendor-patches/zcash_primitives-0.28.0" }
+zcash_transparent = { path = "vendor-patches/zcash_transparent-0.8.0" }

@@ -8,7 +8,7 @@ use db_common::sqlite::rusqlite::Error as SqliteError;
 use derive_more::Display;
 use rpc::v1::types::Bytes as BytesJson;
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_primitives::transaction::builder::Error as ZTxBuilderError;
+type ZTxBuilderError = zcash_primitives::transaction::builder::Error<std::convert::Infallible>;
 
 #[derive(Debug, Display)]
 pub enum GenTxError {
@@ -134,6 +134,11 @@ pub enum ZCoinBuildError {
     Rpc(UtxoRpcError),
     #[display(fmt = "Sapling cache storage error: {}", _0)]
     SaplingCacheError(String),
+    #[display(fmt = "Shielded database schema error at {}: {}", path, reason)]
+    ShieldedDbSchema {
+        path: String,
+        reason: String,
+    },
     #[display(fmt = "Sapling cache DB does not exist at {}. Please download it.", path)]
     SaplingCacheDbDoesNotExist {
         path: String,
