@@ -1,6 +1,6 @@
 # Plan: secp256k1 0.20 → 0.29.1 migration
 
-> **Status:** planned / not started.
+> **Status:** in progress.
 > This plan scopes a workspace-wide migration from `secp256k1 0.20` to
 > `secp256k1 0.29.1`. It is separate from the current wasm CI workaround and
 > should only be executed when the project is ready to accept the API churn and
