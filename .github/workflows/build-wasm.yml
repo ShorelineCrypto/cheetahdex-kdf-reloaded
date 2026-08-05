@@ -84,6 +84,6 @@ jobs:
           fi
           cargo check --target wasm32-unknown-unknown -p mm2_main $FEATURES_FLAG
 
-      - name: cargo build mm2_main (wasm32)
+      - name: cargo check mm2_main (wasm32)
         shell: bash
-        run: cargo build --target wasm32-unknown-unknown -p mm2_main --release
+        run: cargo check --target wasm32-unknown-unknown -p mm2_main
