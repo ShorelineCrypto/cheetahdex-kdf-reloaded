@@ -1953,7 +1953,6 @@ dependencies = [
  "prost 0.14.4",
  "prost-build 0.12.6",
  "prost-types 0.12.6",
- "protobuf",
  "rand 0.8.6",
  "regex",
  "rmp-serde",
@@ -7133,12 +7132,6 @@ checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
 dependencies = [
  "prost 0.14.4",
 ]
-
-[[package]]
-name = "protobuf"
-version = "2.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45604fc7a88158e7d514d8e22e14ac746081e7a70d7690074dd0029ee37458d6"
 
 [[package]]
 name = "proxy_signature"

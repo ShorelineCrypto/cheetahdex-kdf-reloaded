@@ -100,7 +100,6 @@ prost = { workspace = true }
 # while KDF's existing gRPC surface remains on prost 0.12.
 prost_14 = { package = "prost", version = "=0.14.4" }
 prost-types = { workspace = true }
-protobuf = "2.20"
 rand = { version = "0.8", features = ["std", "small_rng"] }
 rmp-serde = "0.14.3"
 rpc = { package = "kdf_rpc_types", path = "../kdf_rpc_types" }

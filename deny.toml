@@ -75,9 +75,6 @@ ignore = [
     # --- WalletConnect (via tungstenite) ---
     "RUSTSEC-2023-0065", # tungstenite DoS on large frames
 
-    # --- Vendored zcash stack (via protobuf) ---
-    "RUSTSEC-2024-0437", # protobuf recursion / uncontrolled allocation
-
     # --- Unsound advisories (transitive) ---
     # cargo-deny schema v2 treats `unsound` advisories as hard errors; under the
     # prior tooling these were non-blocking warnings. Accepted here to preserve
