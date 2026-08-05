@@ -126,15 +126,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **ARRR/ZCoin and direct-withdraw coin previews through `task::withdraw`.** ZCoin/ARRR shielded withdraws, plus BCH, QRC20, SLP, Solana/SPL, Sia, and Tendermint native/token withdraws, are routed through the task-withdraw API instead of failing preview/status with `CoinDoesntSupportInitWithdraw` when clients use the task path. Lightning remains intentionally unsupported by withdraw because invoices are the payment entrypoint. Code: `mm2src/coins/rpc_command/init_withdraw.rs`, `mm2src/coins/z_coin.rs`.
 - **ARRR/ZCoin light-mode shielded withdrawal construction.** Shielded ARRR withdraw previews in light mode now build spends from the scanned `<TICKER>_RELOADED_WALLET.db` note/witness data instead of entering the native zcashd `ZRpcOps` path, preventing preview-time KDF crashes on Electrum-backed activations. Code: `mm2src/coins/z_coin/`.
 - **Orderbook address handling for Tendermint/Sia/Solana-family configs.** Orderbook and best-orders rendering no longer panic when a P2P order references non-UTXO protocol configs encountered by multi-coin wallet sessions. Tendermint addresses are derived from the order pubkey where possible; unsupported address families now return structured per-order errors and are skipped instead of crashing KDF. Code: `mm2src/mm2_main/src/lp_ordermatch/`.
-- **Legacy maker-swap refund event compatibility.** Saved swap files using the historical `MakerPaymentRefundStarted` event name now deserialize as `MakerPaymentWaitRefundStarted`, so old refund-path swaps no longer disappear from swap history/status with an unknown-variant error. Code: `mm2src/mm2_main/src/lp_swap/`.
+- **Legacy maker-swap refund event compatibility.** Data-less historical
+  `MakerPaymentRefundStarted` and `MakerPaymentRefundFinished` milestones now
+  deserialize as their distinct unit events, so old refund-path swaps no longer
+  disappear from swap history/status with `missing field data`. The known
+  payload-bearing refund-start form remains accepted and preserves its
+  `wait_until` deadline as a wait-refund milestone. Code:
+  `mm2src/mm2_main/src/lp_swap/`.
 - **Legacy swap instruction-event compatibility.** Saved maker/taker swap files whose `MakerPaymentInstructionsReceived` or `TakerPaymentInstructionsReceived` event omitted the optional `data` field now deserialize as `None`, preventing repeated `missing field data` errors in swap history/status polling. Code: `mm2src/mm2_main/src/lp_swap/`.
 - **Legacy swap-history resilience.** `my_recent_swaps` now logs and omits missing or corrupt saved-swap rows instead of returning `null` entries or failing typed recent-swap consumers, preventing wallet swap pages and order processing from being destabilized by incompatible historical swap files. Code: `mm2src/mm2_main/src/lp_swap/`.
 - **Ordermatch trie-delta removal test made deterministic.** The orderbook sync test no longer depends on nondeterministic ordering when asserting a delta after removed orders. Code: `mm2src/mm2_main/src/ordermatch_tests.rs`.
 - **Coin activation/runtime hardening for multi-asset wallets.** ERC20/BEP20 tokens with missing or zero config decimals now fall back to on-chain `decimals()`, NFT activation lazily opens the native async SQLite store instead of failing with `async_sqlite_connection is not initialized`, and Tendermint RPC node selection falls back from `/health` to `abci_info` before declaring all nodes unavailable. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
 - **Runtime stubs converted to explicit no-op/errors where safe.** Unsupported TRON V1 swap paths now return structured errors, L2 SQL transaction-history queries return an unsupported-history error instead of panicking, wasm crash-report initialization is an intentional no-op, and public-key trait methods for enabled coin families no longer panic when called by production paths. Code: `mm2src/coins/`, `mm2src/common/`.
+- **Background retry and diagnostic noise hardening.** Persistent QRC20 history
+  failures now back off from 10 seconds to a bounded five-minute retry interval
+  and reset after recovery. Native Electrum reconnect loops retain the first or
+  changed endpoint error at `ERROR` while identical retries move to `DEBUG`;
+  redundant rustls handshake/alert internals are omitted from the application
+  log while the endpoint-specific KDF error remains. Optional
+  `eth_feeHistory`, late request-response completions, routine peer exchange,
+  and duplicate peer-exchange dial diagnostics no longer appear as operator
+  errors. Code: `mm2src/coins/`, `mm2src/common/`, `mm2src/mm2_p2p/`.
 
 ### Changed / dependencies
 
+- **Security and yanked dependency refresh.** Transitive `ruint` is upgraded
+  from 1.18.0 to the security-fixed 1.20.0 for RUSTSEC-2026-0220. Compatible
+  patch updates also replace the yanked `ahash 0.7.6`,
+  `crossbeam-channel 0.5.1`, and `rmp-serde 0.14.3` releases; MessagePack stays
+  on the wire-compatible 0.14 line. Obsolete `libsqlite3-sys` and `rand`
+  advisory exceptions are removed from the audit policy.
 - **Stable modern `librustzcash` stack with schema-safe shielded rescan.**
   Z-coin now uses the coherent stable crates.io line
   (`zcash_client_backend 0.23.0`, `zcash_client_sqlite 0.21.1`, and

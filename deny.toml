@@ -78,29 +78,15 @@ ignore = [
     # --- Vendored zcash stack (via protobuf) ---
     "RUSTSEC-2024-0437", # protobuf recursion / uncontrolled allocation
 
-    # --- Scheduled reloaded-owned migrations (dedicated future work) ---
-    # rusqlite/libsqlite3-sys: funds-critical 37-file migration (0.24 -> modern),
-    # NO_PARAMS removal. Tracked as a dedicated tested migration.
-    "RUSTSEC-2022-0090", # libsqlite3-sys (rusqlite)
-
     # --- Unsound advisories (transitive) ---
     # cargo-deny schema v2 treats `unsound` advisories as hard errors; under the
     # prior tooling these were non-blocking warnings. Accepted here to preserve
     # that policy.
-    # - rand (RUSTSEC-2026-0097): reloaded's own ~12 crates were migrated off the
-    #   affected rand 0.7 to rand 0.8 (0.8.6, patched). The advisory nonetheless
-    #   remains because rand 0.7.3 is still pulled *transitively* by upstream /
-    #   vendored dependencies we cannot bump here: cuckoofilter (via the libp2p
-    #   0.52 fork), ed25519-dalek 1.x (Solana SDK), and proptest 0.10 (vendored
-    #   zcash dev-dependency). It clears automatically once those upstreams drop
-    #   rand 0.7. The unsound trigger (a custom logger re-entering rand during
-    #   reseed) does not occur here.
     # - rmp-serde (RUSTSEC-2022-0092): a *direct* dependency, but the patched 1.x
     #   line changes the MessagePack enum encoding (integer variant index ->
     #   variant name), which would break P2P wire compatibility with GLEEC and
     #   existing nodes. Blocked pending a custom integer-variant serializer.
     # - secp256k1 0.20 (RUSTSEC-2022-0070): pinned by deeper dependencies.
-    "RUSTSEC-2026-0097", # rand unsound with a custom logger
     "RUSTSEC-2022-0092", # rmp-serde Raw/RawRef unsound
     "RUSTSEC-2022-0070", # secp256k1 0.20 use-after-free in safe code
 ]
