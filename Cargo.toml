@@ -133,7 +133,7 @@ mm2_metrics = { path = "mm2src/mm2_metrics" }
 mm2_number = { path = "mm2src/mm2_number" }
 prost = "0.12"
 prost-types = "0.12"
-sia-rust = { git = "https://github.com/kdf-reloaded/sia-rust", rev = "0e65d62b52bb99dd638bbb6763d475977db7433a" }
+sia-rust = { git = "https://github.com/kdf-reloaded/sia-rust", rev = "e1c07251afd8669df0b686edcfb1141eff0fcaff" }
 # using the same version as cosmrs
 tendermint-rpc = { version = "0.35", default-features = false }
 thiserror = "1"
