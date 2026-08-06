@@ -40,6 +40,7 @@ pub mod wc_integration;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
+#[cfg(not(target_arch = "wasm32"))]
 use bitcoin::network::constants::Network as BitcoinNetwork;
 pub use chain::Transaction as UtxoTx;
 use chain::{OutPoint, TransactionOutput, TxHashAlgo};
@@ -437,6 +438,7 @@ pub enum BlockchainNetwork {
     Regtest,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<BlockchainNetwork> for BitcoinNetwork {
     fn from(network: BlockchainNetwork) -> Self {
         match network {

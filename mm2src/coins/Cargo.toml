@@ -37,7 +37,6 @@ base64 = "0.10.0"
 base58 = "0.2.0"
 bigdecimal = { version = "0.3", features = ["serde"] }
 bip32 = { version = "0.2.2", default-features = false, features = ["alloc", "secp256k1-ffi"] }
-bitcoin = "0.27.1"
 bitcoin_hashes = "0.10.0"
 blake2b_simd = "1"
 kdf_crypto = { path = "../kdf_crypto" }
@@ -163,8 +162,18 @@ hyper-rustls = { version = "0.23", default-features = false, features = ["http1"
 # keeping bitcoin 0.27.1 / secp256k1 0.20 out of the WASM dependency graph.
 # `lightning-invoice`'s one outside consumer (utxo.rs's
 # `lightning_invoice::Currency` re-export) is now also cfg-gated to match.
+# `bitcoin` itself moved here too: utxo.rs's only two direct `bitcoin::`
+# usages outside this module (`BitcoinNetwork`/`LightningCurrency` `From`
+# impls) were dead code with zero callers anywhere in the tree — gated them
+# to not(wasm32) rather than deleting, since they're plausibly a forgotten
+# wire-up rather than intentional dead code (see the GLEEC KDF
+# chain/ext-bitcoin feature-flag precedent below for why that's not a
+# theoretical concern). Lightning's own real bitcoin-crate usage — the
+# `kdf_tx_to_bitcoin` wire-byte round-trip in `lightning/ln_platform.rs`,
+# which needs no `kdf_chain`-level conversion trait at all — is unaffected.
 # See docs/plans/secp256k1-migration.md ("Scope reduction: decouple
 # Lightning first").
+bitcoin = "0.27.1"
 lightning = { path = "../../rust-lightning-patched/lightning" }
 lightning-background-processor = { path = "lightning_background_processor" }
 lightning-invoice = { path = "../../rust-lightning-patched/lightning-invoice" }
