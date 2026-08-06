@@ -21,10 +21,30 @@ and while preserving every local KDF patch already applied on top.
   `lightning-net-tokio 0.0.106` / `lightning-background-processor 0.0.106`
   (`lightning-persister` is reloaded's own crate, not upstream LDK's).
 - It pulls `bitcoin 0.27.1`, which pulls `secp256k1 0.20.3` /
-  `secp256k1-sys 0.4.0` — see `secp256k1-migration.md`'s "Scope reduction"
-  section. That plan deliberately does **not** touch this pin; the two
-  projects are independent by design (Lightning's WASM footprint is being
-  fixed separately via a Cargo.toml scoping correction, not a version bump).
+  `secp256k1-sys 0.4.0`. As of 2026-08-06 (`secp256k1-migration.md`'s "Scope
+  reduction" section), `bitcoin`/`lightning`/`lightning-invoice`/
+  `lightning-background-processor` are correctly scoped to `not(wasm32)` —
+  Lightning has zero WASM footprint, confirmed by `cargo tree --target
+  wasm32-unknown-unknown -p coins`. That plan's secp256k1 0.20→0.29 work
+  does **not** touch this pin — the two projects are fully independent now.
+  This uplift can bump (or vendor-patch) `bitcoin`/`secp256k1` on whatever
+  timeline it needs, native-only, with no WASM coupling to worry about.
+- **The actual `bitcoin`-crate touchpoint from reloaded's own code is
+  narrow and self-contained**, worth knowing before scoping the inventory
+  step below: `mm2src/coins/lightning/ln_platform.rs`'s `kdf_tx_to_bitcoin`
+  serializes a `chain::Transaction` with KDF's own wire codec and
+  re-deserializes the bytes via `bitcoin::consensus::encode::deserialize` —
+  a byte round-trip, not a type-level conversion trait, and it's the *only*
+  place reloaded's own code bridges `kdf_chain`'s types into `bitcoin`'s.
+  (`kdf_chain` itself — the clean-room GPL-2.0 rewrite of the old
+  `mm2_bitcoin/chain` — doesn't depend on the `bitcoin` crate at all, unlike
+  the sibling GLEEC KDF codebase's `mm2_bitcoin/chain`, which has a
+  feature-gated `ext-bitcoin` conversion layer; see
+  [GLEECBTC/komodo-defi-framework#2722](https://github.com/GLEECBTC/komodo-defi-framework/pull/2722)
+  for what that coupling looks like there and how a feature-default change
+  silently broke their `mm2_main` build over it. Reloaded doesn't share that
+  exposure, but it's the same underlying `bitcoin`/Lightning boundary, and a
+  useful reference for what *not* to reintroduce during this uplift.)
 - `docs/reloaded-rewrite/41-lightning-network.md` §41.8 already did a
   feasibility pass on a full uplift for one specific feature
   (`update_channel` / live per-channel fee/policy mutation) and **explicitly
