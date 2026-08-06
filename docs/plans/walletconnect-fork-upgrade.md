@@ -1,26 +1,39 @@
 # Plan: WalletConnect relay transport — tungstenite bump
 
-> **Status:** not started — scoping only, 2026-08-06.
+> **Status:** scoped, **deferred** — 2026-08-06. See "Priority assessment"
+> below: this is not currently worth the ownership/maintenance cost it would
+> take on. Revisit if the threat model changes or upstream fixes it for free.
 
 ## Goal
 
 Clear `RUSTSEC-2023-0065` (tungstenite DoS via unbounded frame buffering on
 large frames) from the WalletConnect relay client's native transport, without
 changing the WalletConnect pairing/relay wire protocol or breaking the WASM
-transport path.
+transport path — *if and when* this is judged worth doing (see below).
 
-## Confirmed root cause and ownership (2026-08-06)
+## Confirmed root cause and ownership (corrected 2026-08-06)
 
-`deny.toml` currently labels this "upstream/fork-blocked", but tracing the
-actual dependency chain shows **reloaded/Komodo already owns every fork in
-the path** — this is not blocked on a third party, it's just unstarted work:
+**Correction:** an earlier version of this doc claimed "reloaded/Komodo
+already owns every fork in the path" and that `deny.toml`'s "upstream/
+fork-blocked" label was wrong. That was a mistaken assumption on my part,
+corrected by the user: the `KomodoPlatform`/`komodoplatform` GitHub org
+(both casings, same org — `rust-libp2p`, `tokio-tungstenite-wasm`,
+`walletconnectrust`) belongs to **Gleec**, who acquired Komodo (the company)
+roughly nine months prior to this writing. Reloaded does not control that
+org. `deny.toml`'s original "upstream/fork-blocked" framing was correct;
+this doc's "corrected" version was the actual error. PRs can technically be
+opened there, but per the user's direct experience (see
+`GLEECBTC/komodo-defi-framework#2722`, filed by the user, still sitting
+unmerged), the Gleec team is not currently active/responsive on Komodo-
+universe repos — practically upstream-blocked even though not literally
+impossible.
 
 ```
 kdf_walletconnect
- └─ relay_client (git: komodoplatform/walletconnectrust, tag k-0.1.3)
+ └─ relay_client (git: komodoplatform/walletconnectrust, tag k-0.1.3)  [Gleec-owned org]
      └─ tokio-tungstenite-wasm 0.1.1-alpha.0
-        (git: KomodoPlatform/tokio-tungstenite-wasm, rev 8fc7e2f
-         — itself a Komodo fork of TannerRogalsky/tokio-tungstenite-wasm)
+        (git: KomodoPlatform/tokio-tungstenite-wasm, rev 8fc7e2f  [Gleec-owned org]
+         — itself a fork of TannerRogalsky/tokio-tungstenite-wasm)
          └─ [target.not(wasm32)] tokio-tungstenite = "0.16"
              └─ tungstenite 0.16.0   ← the flagged crate
          └─ [target.wasm32] raw `web-sys::WebSocket` (no tungstenite at all)
@@ -33,7 +46,43 @@ branches on `target_arch = "wasm32"` — the WASM build path uses a raw
 advisory only affects the **native** relay transport. That also means the
 WASM path is not at risk here and needs no change.
 
-The fix is a two-hop, fully-owned fork bump:
+## Priority assessment (2026-08-06)
+
+Applying the ownership/responsibility framework the user articulated: as
+long as reloaded consumes this exact code unmodified, the security posture
+is effectively shared with/inherited from Gleec's own KDF (which pulls the
+identical `tungstenite 0.16.0` through the identical fork chain) — fixing it
+here means *forking it ourselves*, which shifts ongoing maintenance
+responsibility for that fork onto reloaded permanently (every future
+tungstenite/websocket security advisory becomes reloaded's problem to track
+and re-port, not Gleec's). That cost is only worth paying if the threat is
+concrete enough to justify it.
+
+**RUSTSEC-2023-0065 is a DoS only** (unbounded memory growth from an
+oversized frame/message — no key material exposure, no RCE, no
+authentication bypass). Reloaded's exposure is a **WebSocket client**
+connecting outbound to a WalletConnect relay server — not a public-facing
+server accepting arbitrary inbound connections. The realistic attacker is a
+malicious or compromised relay endpoint (or a break in TLS) able to crash
+the local KDF process by sending an oversized frame. That's a real
+node-availability risk while the WalletConnect feature is active (a crash
+mid-swap could leave funds in an HTLC needing manual recovery), but it's
+bounded to that one feature and doesn't touch key material or fund custody
+directly — not in the same tier as a signing/key-derivation bug.
+
+**Recommendation: defer.** Keep the `deny.toml` ignore line. This isn't
+worth taking on permanent fork-maintenance responsibility for right now,
+given it's DoS-only, client-side, and scoped to an optional feature.
+Revisit if: Gleec updates the fork upstream (then it's a free tag bump, no
+ownership cost); the WalletConnect relay usage pattern changes to something
+more exposed (e.g. connecting to untrusted/arbitrary relays rather than a
+known operator); or reloaded ends up needing to fork this dependency chain
+for an unrelated reason anyway (at which point fixing this becomes nearly
+free as a side effect). The mechanical plan below is preserved in case any
+of those trigger it.
+
+The fix, if undertaken, is a two-hop fork bump (now correctly framed as
+*forking Gleec's code*, not "our own fork"):
 
 1. In `KomodoPlatform/tokio-tungstenite-wasm`, bump `tokio-tungstenite =
    "0.16"` (native target block) to a current release (pulls a current,
@@ -50,10 +99,11 @@ The fix is a two-hop, fully-owned fork bump:
 
 ## Scope
 
-- `KomodoPlatform/tokio-tungstenite-wasm` (external repo, owned — needs a
-  PR/commit there first)
-- `komodoplatform/walletconnectrust` (external repo, owned — needs a
-  PR/commit there second, referencing the updated dep)
+- `KomodoPlatform/tokio-tungstenite-wasm` (Gleec-owned external repo — would
+  need our own fork-of-a-fork if Gleec doesn't merge a PR there, per the
+  priority assessment above)
+- `komodoplatform/walletconnectrust` (Gleec-owned external repo — same
+  caveat)
 - `Cargo.toml` (workspace) — `pairing_api`/`relay_client`/`relay_rpc`/
   `wc_common` git `tag` bump (this repo's side, last)
 - `mm2src/kdf_walletconnect/` — no expected direct code change (it consumes

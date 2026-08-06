@@ -1,6 +1,14 @@
 # Plan: Solana SDK ed25519-dalek 1.x → 2.x
 
-> **Status:** not started — scoping only, 2026-08-06.
+> **Status: scoped, deferred by choice — 2026-08-06.** Checked reloaded's
+> actual Solana signing code (see "Confirmed root cause" below): the
+> vulnerable-pattern precondition for RUSTSEC-2022-0093 doesn't appear to be
+> met, and both advisories are DoS/side-channel-class rather than directly
+> key-compromising for reloaded's usage. Per the risk-inheritance framework
+> in `v0.2.0-dependency-hygiene.md`, forking Solana Labs/Anza's SDK to fix
+> this isn't worth the permanent maintenance ownership it would take on
+> right now. Not queued as next work. The options/plan below are preserved
+> in case that changes.
 
 ## Goal
 
@@ -36,9 +44,26 @@ path is gone now that the libp2p 0.52 fork migration is merged (confirmed via
 `cargo tree -i curve25519-dalek@3.2.0` — the only remaining path is through
 `solana-keypair`/`solana-signature`/`ed25519-dalek 1.0.1`). So clearing this
 advisory no longer needs to wait on libp2p fork modernization (section A) —
-it's purely a Solana-side fix now. Update `v0.2.0-dependency-hygiene.md`'s
-section B note about the libp2p coupling once this lands; it's stale as of
-the libp2p merge.
+it's purely a Solana-side fix now.
+
+**Exploitability check against reloaded's actual code (2026-08-06):**
+RUSTSEC-2022-0093's "double public key signing oracle" attack requires a
+keypair reconstructed from a public key and secret key sourced
+*independently* (e.g. an externally-supplied/untrusted public key paired
+with a locally-held secret) — that's the precondition that makes the
+mismatch exploitable. `mm2src/coins/solana/solana_types.rs`'s
+`generate_keypair_from_slice` always derives the keypair from a single
+32-byte seed (`ed25519_dalek::SigningKey::from_bytes(&secret)` →
+`.to_keypair_bytes()` → `solana_keypair::keypair_from_seed`), so secret and
+public key are always paired/derived together, never independently
+sourced. This precondition does not appear to be met anywhere in reloaded's
+Solana signing path (grep confirms `generate_keypair_from_slice` is the
+only keypair-construction site in `coins/solana/`). Not a guarantee — a
+full audit of every `ed25519_dalek`/`solana_keypair` call site would be
+needed for certainty — but no evidence of the vulnerable pattern.
+`curve25519-dalek`'s timing-variability issue (RUSTSEC-2024-0344) is a
+local/co-located side-channel concern, not practically remote-exploitable
+over a network.
 
 ## Options
 
@@ -72,12 +97,17 @@ this repo (see `v0.2.0-dependency-hygiene.md`'s "Done" list) — that precedent
 is worth reviewing first since it's the closest prior art in this exact
 codebase.
 
-**Recommendation:** start with a real inventory of `mm2src/coins/solana/`'s
-actual `solana-keypair`/`solana-signature` call sites (step 1 below) before
-picking between B and C — if usage is as narrow as it looks, C is likely
-less total work than it sounds and permanently removes the upstream
-dependency, matching how `sia-rust` was already handled. Option A costs
-nothing today; keep it as the fallback if B/C prove larger than expected.
+**Recommendation (superseded 2026-08-06, see status header): deferred.**
+Given the exploitability check above found no evidence the vulnerable
+pattern applies to reloaded's code, and both advisories are DoS/side-
+channel-class rather than directly key-compromising, this isn't worth
+forking Solana Labs/Anza's SDK for right now (option B), let alone
+reimplementing the signer to escape it entirely (option C) — both are real
+ownership-cost decisions that should wait for a concrete reason. **Option A
+(upstream tracking) is the current choice: do nothing, watch for upstream
+to relax the pin.** If reloaded ends up needing `coins/solana/`'s keypair
+handling touched for an unrelated reason, revisit C then — the `sia-rust`
+dalek 1→2 precedent means it's a known-tractable pattern, not a blocker.
 
 ## Scope
 
