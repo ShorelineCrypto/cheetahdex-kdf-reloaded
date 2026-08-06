@@ -64,6 +64,7 @@ pub use kdf_crypto::{dhash160, sha256, ChecksumType};
 use keys::bytes::Bytes;
 pub use keys::{Address, AddressFormat as UtxoAddressFormat, AddressHashEnum, KeyPair, Private, Public, Secret,
                Type as ScriptType};
+#[cfg(not(target_arch = "wasm32"))]
 use lightning_invoice::Currency as LightningCurrency;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -446,6 +447,7 @@ impl From<BlockchainNetwork> for BitcoinNetwork {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<BlockchainNetwork> for LightningCurrency {
     fn from(network: BlockchainNetwork) -> Self {
         match network {
