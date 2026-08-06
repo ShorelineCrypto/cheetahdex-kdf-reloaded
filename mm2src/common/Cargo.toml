@@ -22,7 +22,7 @@ bigdecimal = { version = "0.3", features = ["serde"] }
 kdf_crypto = { path = "../kdf_crypto" }
 bytes = "1.1"
 cfg-if = "1.0"
-crossbeam = "0.7"
+crossbeam = "0.8"
 derive_more = "0.99"
 findshlibs = "0.5"
 fnv = "1.0.6"
@@ -36,7 +36,6 @@ http-body = "0.1"
 itertools = "0.10"
 keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
-lightning = { path = "../../rust-lightning-patched/lightning" }
 log = { version = "0.4.8", features = ["std"] }
 mm2_number = { path = "../mm2_number" }
 num-bigint = { version = "0.4", features = ["serde", "std"] }
@@ -87,6 +86,11 @@ hyper = { version = "0.14.11", features = ["client", "http2", "server", "tcp"] }
 # got "invalid certificate: UnknownIssuer" for https://ropsten.infura.io on iOS using default-features
 hyper-rustls = { version = "0.23", default-features = false, features = ["http1", "http2", "webpki-tokio"] }
 libc = { version = "0.2" }
+# log.rs's `impl LightningLogger for LogState` is itself
+# `#[cfg(not(target_arch = "wasm32"))]`; see
+# docs/plans/secp256k1-migration.md ("Scope reduction: decouple Lightning
+# first") for why this stays out of the WASM dependency graph.
+lightning = { path = "../../rust-lightning-patched/lightning" }
 log4rs = { version = "1.0", default-features = false, features = ["console_appender", "pattern_encoder"] }
 tokio = { version = "1.7", features = ["io-util", "rt-multi-thread", "net"] }
 
