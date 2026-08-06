@@ -22,7 +22,7 @@ bigdecimal = { version = "0.3", features = ["serde"] }
 kdf_crypto = { path = "../kdf_crypto" }
 bytes = "1.1"
 cfg-if = "1.0"
-crossbeam = "0.7"
+crossbeam = "0.8"
 derive_more = "0.99"
 findshlibs = "0.5"
 fnv = "1.0.6"
