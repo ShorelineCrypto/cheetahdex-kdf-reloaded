@@ -25,7 +25,7 @@ distinct native `secp256k1-sys` builds:
 
 | `secp256k1` | `secp256k1-sys` | Pulled by |
 |---|---|---|
-| 0.20.3 | **0.4.0** | `bip32 0.2.2` (direct HD path used by `crypto`/`kdf_keys`/`hw_common`/`mm2_p2p`/`mm2_main`/`mm2_eth`/`kdf_walletconnect`, all of which also depend on `secp256k1 = "0.20"` directly) **and** `bitcoin 0.27.1` (pulled in by the vendored `rust-lightning-patched` LDK fork) |
+| 0.20.3 | **0.4.0** | `bip32 0.2.2` (direct HD path used by `crypto`/`kdf_keys`/`hw_common`/`mm2_p2p`/`mm2_main`/`mm2_eth`/`kdf_walletconnect`, all of which also depend on `secp256k1 = "0.20"` directly) **and** `bitcoin 0.27.1` (a **direct, unconditional dependency of `coins` itself** for UTXO tx/script handling — line 40 of its `Cargo.toml` — *not* just something pulled in via the vendored `rust-lightning-patched` LDK fork, which shares the same pin; see "Scope reduction" below) |
 | 0.29.1 | 0.10.1 | `bip32 0.6.0-pre.1` → the Zcash stack (`zcash_client_backend`/`zcash_keys`/`zcash_script`/`zcash_primitives`, all in `vendor-patches/`) |
 | 0.30.0 | 0.10.1 | `alloy-consensus` (transitively via the workspace `alloy = "2.0"` EVM dep) |
 
@@ -52,33 +52,51 @@ independent of which two versions they are. Eliminating the older
 0.29.1 / 0.30.0 pair already coexists today without conflict because they
 share the same `secp256k1-sys 0.10.1`.
 
-## Scope reduction: decouple Lightning first (cheap, do this regardless)
+## Scope reduction: Lightning wasm-gating — landed, smaller win than first scoped
 
-`mm2src/coins/lp_coins.rs:225` already gates the entire `lightning` module
-behind `#[cfg(not(target_arch = "wasm32"))]` (the module's own `mod.rs`
-comment says as much). But `coins/Cargo.toml`'s `lightning`,
-`lightning-invoice`, and `lightning-background-processor` dependencies (lines
-91–93) are declared **unconditionally**, unlike `lightning-persister` /
-`lightning-net-tokio` which are already correctly scoped under
-`[target.'cfg(not(target_arch = "wasm32"))'.dependencies]` (lines 163–164).
-That mismatch is why `bitcoin 0.27.1` (and its `secp256k1 0.20`/
-`secp256k1-sys 0.4.0`) shows up in the wasm32 dependency graph at all today
-for a module that never runs there.
+**Done** (`1c94c2196`, on `dep-hygiene`): `mm2src/coins/lp_coins.rs:225`
+already gates the entire `lightning` module behind
+`#[cfg(not(target_arch = "wasm32"))]`, but `coins/Cargo.toml`'s `lightning`,
+`lightning-invoice`, and `lightning-background-processor` (plus
+`common/Cargo.toml`'s own unconditional `lightning` dep, used only by
+`log.rs`'s already-`not(wasm32)`-gated `impl LightningLogger`) were
+unconditional. Moved all of them to match their actual (already-gated) Rust
+usage — `lightning-invoice` needed one extra step, gating a dead
+`impl From<BlockchainNetwork> for LightningCurrency` in `utxo.rs` that had
+no call sites anywhere in the tree. Verified: native build/clippy clean,
+`cargo check --target wasm32-unknown-unknown -p coins -p common` clean,
+`cargo test -p coins --lib` — 653 passed, 57 failed (all confirmed
+pre-existing/environment: `FailedToConnectToElectrums` — this sandbox has no
+outbound network to the real electrum servers those tests dial; unrelated to
+this change).
 
-**Action (independent, low-risk, do before or alongside phase 1 below):**
-move `lightning`, `lightning-invoice`, and `lightning-background-processor`
-into the existing `not(wasm32)` target block in `mm2src/coins/Cargo.toml`.
-Zero functional change (the consuming code is already excluded), but it
-removes the entire `rust-lightning-patched` → `bitcoin 0.27.1` subtree from
-the WASM build, which means **this migration does not need to also touch or
-upgrade the vendored LDK fork** (see `docs/plans/lightning-ldk-upgrade.md` —
-that's a separate, much larger, funds-sensitive project with its own
-timeline). It does *not* by itself clear the link error, since `crypto`,
-`kdf_keys`, `hw_common`, `mm2_p2p`, `mm2_main`, `mm2_eth`, and
-`kdf_walletconnect` all still depend on `secp256k1 = "0.20"` directly — the
-full migration below is still required — but it removes the hardest,
-riskiest sub-dependency (a heavily patched, ancient LDK fork) from this
-migration's critical path for a 3-line change.
+**This does NOT clear the WASM link blocker**, and the original version of
+this section overclaimed that it would — corrected 2026-08-06 after actually
+implementing it and re-running `cargo tree -i secp256k1-sys@0.4.0 --target
+wasm32-unknown-unknown -p coins`. `coins/Cargo.toml` has its own **direct**
+`bitcoin = "0.27.1"` dependency (line 40, unconditional — for the crate's own
+UTXO transaction/script handling, entirely independent of Lightning), and
+*that* pulls `secp256k1 0.20.3` / `secp256k1-sys 0.4.0` into the wasm32 graph
+regardless of anything Lightning-related. So `bitcoin 0.27.1` was never
+purely "the Lightning fork's dependency" — it's a first-class, direct
+dependency of `coins` itself, shared by (not owned by) the Lightning module.
+
+**What this changes for the migration plan:** the same sharing is actually
+useful. `lightning`, `lightning-invoice`, and `coins` all pin the *exact
+same* `bitcoin = "0.27.1"`. A vendor-patch of that one shared dependency
+(same pattern as `vendor-patches/zcash_client_backend-0.23.0`'s
+`KDF-PATCH.md`, but source-level, not manifest-only — `bitcoin 0.27.1`'s own
+Rust source calls secp256k1 0.20 APIs directly and needs real porting, not
+just a version-constraint edit) would fix `coins`'s UTXO secp256k1 usage
+**and** Lightning's simultaneously, without requiring a full LDK version
+uplift (LDK 0.0.106's own code only touches `bitcoin`'s stable public types,
+not `secp256k1` directly in most places — needs verification during
+inventory). That's a materially better strategy than the original framing of
+this section ("avoid touching bitcoin/LDK entirely") since avoiding
+`bitcoin 0.27.1` isn't actually possible — `coins` needs *a* `bitcoin` crate
+regardless. Add "vendor-patch `bitcoin 0.27.1`'s secp256k1 usage forward to
+0.29/0.30" as an explicit candidate approach to evaluate in phase 1 below,
+alongside a straight `coins`-side `bitcoin` crate version bump.
 
 ## Target version
 
@@ -116,27 +134,45 @@ Direct `secp256k1 = "0.20"` consumers (verified 2026-08-06, `grep -rn
   confirm during inventory whether it only consumes re-exported types from
   `hw_common`/`crypto` (in which case it needs no direct bump, just a
   transitive re-check)
-- Lightning-related crates: **excluded from this migration's WASM-blocking
-  scope** per the decoupling above; leave `rust-lightning-patched`'s own
-  `bitcoin 0.27.1`/`secp256k1 0.20` alone unless/until
-  `docs/plans/lightning-ldk-upgrade.md` is executed. Native (non-wasm)
-  builds already tolerate the dual `secp256k1-sys` family today, so there is
-  no native-side reason to touch Lightning's pin as part of this plan.
+- **`bitcoin = "0.27.1"` itself** (`mm2src/coins/Cargo.toml`, direct,
+  unconditional) — **in scope**, not excludable. This is the piece the
+  original version of this plan got wrong (see "Scope reduction" above):
+  it's not just a Lightning artifact, `coins` needs *a* `bitcoin` crate for
+  its own UTXO code regardless. Two live options, first inventory task:
+  (a) vendor-patch `bitcoin 0.27.1`'s own secp256k1 usage forward to
+  0.29/0.30 (source-level port, not manifest-only — see "Scope reduction"),
+  which also fixes `rust-lightning-patched`'s pin for free since it shares
+  the exact same `bitcoin = "0.27.1"` requirement; or (b) bump `coins`'s
+  `bitcoin` dependency to a newer major version outright (larger API surface
+  change: `Address`, `Script`, `Transaction` types have all moved across
+  0.27 → 0.30+, on top of the secp256k1 churn).
+- `rust-lightning-patched` (`lightning`, `lightning-invoice`,
+  `lightning-background-processor`): **not separately in scope** as a
+  version uplift (that's `docs/plans/lightning-ldk-upgrade.md`, deferred) —
+  but its shared `bitcoin 0.27.1` pin gets fixed as a side effect of
+  whichever option above is chosen for `coins`, since it's the same
+  dependency edge. No LDK API/behavior changes needed for *this* plan.
 
 ## Planned order
 
-0. **Lightning wasm-gating fix** (above) — land first, independently, as a
-   trivial dep-hygiene commit; it shrinks this plan's blast radius before
-   the real migration starts.
-1. Inventory all remaining `secp256k1` call sites and classify them:
+0. **Lightning wasm-gating fix** — **done** (`1c94c2196`, `dep-hygiene`
+   branch). Shrank the wasm32 build graph (drops the `lightning`/
+   `lightning-background-processor` crates entirely) and fixed a
+   Cargo.toml/cfg-gate mismatch, but does **not** reduce this plan's
+   remaining scope the way originally claimed — see "Scope reduction" above.
+1. Inventory all remaining `secp256k1` call sites (including `bitcoin
+   0.27.1`'s own, now explicitly in scope) and classify them:
    - mechanical API rename only;
    - type-shape change;
    - recovery/signature-sensitive;
    - HD/key-export/swap-sensitive.
+   Also resolve the `bitcoin 0.27.1` vendor-patch-vs-version-bump decision
+   (Scope, above) during this phase — it changes how big phase 4 is.
 2. Migrate leaf crates that only consume the API internally.
 3. Migrate shared crypto/key crates (`crypto`, `kdf_keys`, `hw_common`).
 4. Migrate coin, swap, transport, and WalletConnect crates (`coins`,
-   `mm2_p2p`, `mm2_main`, `mm2_eth`, `kdf_walletconnect`).
+   `mm2_p2p`, `mm2_main`, `mm2_eth`, `kdf_walletconnect`), including the
+   `bitcoin 0.27.1` work from step 1.
 5. Re-run native, Windows GNU, and wasm32 verification after each phase.
 6. Restore the WASM CI gate: re-add the `wasm-pack build` (or equivalent
    `cargo build --target wasm32-unknown-unknown -p mm2_bin_lib --lib`) link
