@@ -35,7 +35,7 @@ prost = { workspace = true }
 rand = { package = "rand", version = "0.8", features = ["std"] }
 regex = "1"
 rmp-serde = "0.14.3"
-secp256k1 = { version = "0.20", features = ["rand"] }
+secp256k1 = { version = "0.29", features = ["rand"] }
 serde = { workspace = true }
 serde_bytes = "0.11.5"
 serde_json = { workspace = true }

@@ -36,7 +36,7 @@ async-trait = "0.1.52"
 base64 = "0.10.0"
 base58 = "0.2.0"
 bigdecimal = { version = "0.3", features = ["serde"] }
-bip32 = { version = "0.2.2", default-features = false, features = ["alloc", "secp256k1-ffi"] }
+bip32 = { version = "0.6.0-pre.1", default-features = false, features = ["alloc", "secp256k1-ffi"] }
 bitcoin = "0.27.1"
 bitcoin_hashes = "0.10.0"
 blake2b_simd = "1"
@@ -105,7 +105,7 @@ rmp-serde = "0.14.3"
 rpc = { package = "kdf_rpc_types", path = "../kdf_rpc_types" }
 rpc_task = { path = "../rpc_task" }
 script = { package = "kdf_script", path = "../kdf_script" }
-secp256k1 = { version = "0.20" }
+secp256k1 = { version = "0.29" }
 ser_error = { path = "../derives/ser_error" }
 ser_error_derive = { path = "../derives/ser_error_derive" }
 serde = "1.0"
@@ -173,7 +173,11 @@ zcash_client_sqlite = { version = "=0.21.1", features = ["transparent-inputs"] }
 sapling = { package = "sapling-crypto", version = "=0.7.0" }
 zcash_primitives = { version = "=0.28.0", features = ["non-standard-fees", "transparent-inputs"] }
 zcash_proofs = "=0.28.0"
-zcash_secp256k1 = { package = "secp256k1", version = "=0.29.1" }
+# secp256k1 0.20->0.29 migration unified this crate onto the same secp256k1
+# line the Zcash stack already used, so the `zcash_secp256k1` alias (used only
+# by z_htlc.rs, now imports plain `secp256k1` instead) is gone -- Cargo
+# rejects depending on the same resolved (name, version) twice under two
+# local names. See docs/plans/secp256k1-migration.md.
 
 # Solana stack — modular `solana-*` 2.x crates plus `spl-token` 8 and
 # the `spl-associated-token-account-client` helper. The legacy
