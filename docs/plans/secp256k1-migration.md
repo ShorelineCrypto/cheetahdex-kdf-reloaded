@@ -1,6 +1,17 @@
 # Plan: secp256k1 0.20 → 0.29.x migration
 
-> **Status:** in progress — scoping refined and root cause empirically confirmed 2026-08-06 (see "Confirmed root cause" below). Not yet started. This plan scopes a workspace-wide migration from `secp256k1 0.20` to a `secp256k1` line that shares the `secp256k1-sys 0.10.x` native build with the Zcash/alloy stacks already in the tree. It is separate from the current wasm CI workaround (`.github/workflows/build-wasm.yml` was downgraded from a `wasm-pack build` link step to per-crate `cargo check` in commit `4a54d4415`, "ci: replace wasm-pack with wasm build check" — that commit is the *symptom-hiding* workaround; this plan is the actual fix) and should only be executed when the project is ready to accept the API churn and the wider dependency ripple.
+> **Status: DONE, verified 2026-08-06** on branch `dep/secp256k1-0.29` (merged
+> `dep-hygiene` in to test the combined state). The workspace-wide bump landed,
+> the real WASM link (`cargo build --target wasm32-unknown-unknown -p
+> mm2_bin_lib --lib` — the actual `wasm-pack build` equivalent, not just
+> `cargo check`) **succeeds** with no `duplicate symbol` errors, `cargo tree
+> -p coins --target wasm32-unknown-unknown -i secp256k1-sys@0.4.0` returns
+> nothing, and `cargo build --workspace` is clean. This closes out
+> `.github/workflows/build-wasm.yml`'s downgrade from `wasm-pack build` to
+> `cargo check` (commit `4a54d4415`) as no longer necessary — re-adding the
+> real link step to CI is the one remaining follow-up, tracked in "Planned
+> order" below. See "Verification results (2026-08-06)" near the bottom for
+> the full evidence trail.
 
 ## Goal
 
@@ -116,20 +127,79 @@ the `secp256k1` crate directly too, not just through `bip32`.)
     reduction" above for why the first wasn't sufficient). This is a real,
     confirmed reduction in remaining scope this time: `bitcoin 0.27.1` and
     `rust-lightning-patched` are fully out of this plan.
-1.  Inventory all remaining `secp256k1` call sites — `bip32`'s own version
-    coupling (Scope, above) makes this a `secp256k1` + `bip32` joint
-    inventory, not `secp256k1` alone — and classify them:
-    -   mechanical API rename only;
-    -   type-shape change;
-    -   recovery/signature-sensitive;
-    -   HD/key-export/swap-sensitive.
-2.  Migrate leaf crates that only consume the API internally.
-3.  Migrate shared crypto/key crates (`crypto`, `kdf_keys`, `hw_common`) —
-    this is where the `bip32` 0.2.2→~0.6.x bump lands.
-4.  Migrate coin, swap, transport, and WalletConnect crates (`coins`,
-    `mm2_p2p`, `mm2_main`, `mm2_eth`, `kdf_walletconnect`).
-5.  Re-run native, Windows GNU, and wasm32 verification after each phase.
-6.  Restore the WASM CI gate: re-add the `wasm-pack build` (or equivalent `cargo build --target wasm32-unknown-unknown -p mm2_bin_lib --lib`) link step to `.github/workflows/build-wasm.yml`, since that's the only check that actually exercises this failure mode — the current `cargo check` jobs will stay green throughout this entire migration without proving anything about the link step.
+1.  **Inventory** — **done**, see `docs/plans` conversation log 2026-08-06.
+    Real inventory across all 8 direct consumers + `bip32` found zero
+    tweak-math, Schnorr, or context-marker usage anywhere in scope — every
+    touchpoint was a mechanical rename or import-path move. Full detail in
+    commit `3312dcb57`'s message.
+2.  **Migrate leaf crates** — **done**, folded into the single mechanical
+    pass (commit `3312dcb57`) rather than a separate phase, since the
+    inventory showed no risk-tiering was actually needed.
+3.  **Migrate shared crypto/key crates** (`crypto`, `kdf_keys`, `hw_common`)
+    — **done**, same commit. `bip32` 0.2.2→0.6.0-pre.1 landed here; no
+    call-site changes needed beyond the version bump (re-export paths for
+    `ExtendedPrivateKey`/`ChildNumber`/`DerivationPath`/`Prefix` are
+    unchanged, and `bip32`'s own `secp256k1-ffi` glue absorbs the
+    tweak-API generation difference internally).
+4.  **Migrate coin, swap, transport, and WalletConnect crates** (`coins`,
+    `mm2_p2p`, `mm2_main`, `mm2_eth`, `kdf_walletconnect`) — **done**, same
+    commit. `coins/lightning/*.rs` needed explicit `bitcoin::secp256k1::*`
+    imports at a handful of sites where it mixes KDF's own (now-0.29)
+    `secp256k1` with LDK's `bitcoin`-crate-pinned (still-0.20) one — see
+    that commit's message point 4 for the full explanation. Zero behavior
+    change; Lightning still compiles against exactly the secp256k1 line LDK
+    itself expects.
+5.  **Re-run native, wasm32, and link verification** — **done**, see
+    "Verification results" below. (Windows GNU release build not available
+    in this sandbox — flagging as the one unverified item from the original
+    "Required verification" list; do this before merging to `dev`.)
+6.  **Restore the WASM CI gate** — **not yet done.** Re-add the `wasm-pack
+    build` (or equivalent `cargo build --target wasm32-unknown-unknown -p
+    mm2_bin_lib --lib`) link step to `.github/workflows/build-wasm.yml`,
+    replacing/supplementing the `cargo check` jobs from `4a54d4415` — those
+    never would have caught this bug, and won't catch a regression either.
+    This is the one remaining action item on this plan.
+
+## Verification results (2026-08-06)
+
+All on `dep/secp256k1-0.29` (branched from `dev`, with `dep-hygiene` merged
+in to test the real combined state — that branch carries the Lightning/
+`bitcoin` WASM-scoping fix this plan's "Scope reduction" section depends on):
+
+- `cargo build --workspace` — clean, zero errors, zero secp256k1-related
+  warnings.
+- `cargo tree -p coins --target wasm32-unknown-unknown -e normal` — exactly
+  one `secp256k1-sys` version (`0.10.1`) in the WASM graph.
+  `cargo tree ... -i secp256k1-sys@0.4.0` returns nothing.
+- **`cargo build --target wasm32-unknown-unknown -p mm2_bin_lib --lib`
+  (the actual cdylib link) succeeds.** No `duplicate symbol` error. This is
+  the check that matters — `cargo check` was never sufficient proof, per
+  the root-cause section above — and it's clean.
+- `cargo test -p crypto -p kdf_keys -p mm2_p2p -p mm2_eth --lib`: 103/103
+  passing, including the golden-vector regression tests
+  (`keypair::tests::verify_known_signatures`,
+  `keypair::tests::deterministic_signing`,
+  `keys::tests::sign_and_verify_round_trip`,
+  `keys::tests::keypair_address_matches_known_vector`) — this satisfies the
+  "byte-identical signing/derivation" requirement without needing new test
+  vectors, since these already assert against hardcoded expected values.
+- `cargo test -p coins --lib`: 654 passed / 56 failed — matches the
+  `dep-hygiene`-only baseline from the same day (653/57) within test-order
+  noise. Spot-checked failures (`test_sign_verify_message`, etc.) all fail
+  identically with `FailedToConnectToElectrums` — this sandbox has no
+  outbound network, unrelated to this migration.
+- `cargo test -p mm2_main --lib`: 320 passed / 102 failed. Spot-checked the
+  non-network-looking failures (e.g.
+  `lp_swap::recreate_swap_data::tests::test_recreate_maker_swap`, a pure
+  `assert_eq!` on in-memory structs) against an isolated `git worktree` of
+  plain `dev` — **fails identically there**, confirming it's a pre-existing
+  fixture/enum-list drift bug unrelated to this migration, not a
+  regression. The rest are `mm2::mm2_tests::*`/`orderbook_sync_tests`/
+  `lightning_tests` integration tests that spawn a real node subprocess and
+  need network — same class of pre-existing environment limitation as the
+  `coins` failures above.
+- Windows GNU release build: **not run** (no Windows cross-toolchain in
+  this sandbox). Do this before merging to `dev`.
 
 ## Risk areas
 

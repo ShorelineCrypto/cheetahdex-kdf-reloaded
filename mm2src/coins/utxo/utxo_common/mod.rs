@@ -83,7 +83,8 @@ pub(crate) use mm2_metrics::MetricsArc;
 pub(crate) use primitives::hash::H512;
 pub(crate) use rpc::v1::types::{Bytes as BytesJson, ToTxHash, TransactionInputEnum, H256 as H256Json};
 pub(crate) use script::{Builder, Opcode, Script, ScriptAddress, TransactionInputSigner, UnsignedTransactionInput};
-pub(crate) use secp256k1::{PublicKey, Signature};
+pub(crate) use secp256k1::ecdsa::Signature;
+pub(crate) use secp256k1::PublicKey;
 pub(crate) use serde_json::{self as json};
 pub(crate) use serialization::{deserialize, serialize, serialize_list, serialize_with_flags, CoinVariant,
                                CompactInteger, Serializable, Stream, SERIALIZE_TRANSACTION_WITNESS};
