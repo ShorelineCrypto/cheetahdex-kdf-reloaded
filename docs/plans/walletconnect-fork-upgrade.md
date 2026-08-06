@@ -13,26 +13,25 @@ transport path — *if and when* this is judged worth doing (see below).
 
 ## Confirmed root cause and ownership (corrected 2026-08-06)
 
-**Correction:** an earlier version of this doc claimed "reloaded/Komodo
-already owns every fork in the path" and that `deny.toml`'s "upstream/
-fork-blocked" label was wrong. That was a mistaken assumption on my part,
-corrected by the user: the `KomodoPlatform`/`komodoplatform` GitHub org
-(both casings, same org — `rust-libp2p`, `tokio-tungstenite-wasm`,
-`walletconnectrust`) belongs to **Gleec**, who acquired Komodo (the company)
-roughly nine months prior to this writing. Reloaded does not control that
-org. `deny.toml`'s original "upstream/fork-blocked" framing was correct;
-this doc's "corrected" version was the actual error. PRs can technically be
-opened there, but per the user's direct experience (see
-`GLEECBTC/komodo-defi-framework#2722`, filed by the user, still sitting
-unmerged), the Gleec team is not currently active/responsive on Komodo-
-universe repos — practically upstream-blocked even though not literally
-impossible.
+**Correction:** an earlier version of this doc claimed the fork chain here
+was reloaded-controlled and that `deny.toml`'s "upstream/fork-blocked" label
+was mistaken. That was inaccurate, corrected by the project owner: the
+`KomodoPlatform`/`komodoplatform` GitHub org (both casings, same org —
+`rust-libp2p`, `tokio-tungstenite-wasm`, `walletconnectrust`) is maintained
+by Gleec, who acquired the Komodo company roughly nine months prior to this
+writing. Reloaded does not maintain that org. `deny.toml`'s original
+"upstream/fork-blocked" framing was correct; this doc's earlier "correction"
+was the actual mistake. Pull requests can be opened there — the project
+owner has done so before (see `GLEECBTC/komodo-defi-framework#2722`) — but
+review/merge activity on Komodo-universe repos currently appears limited, so
+in practice a fix here would still mean maintaining an independent fork
+rather than waiting on a merge.
 
 ```
 kdf_walletconnect
- └─ relay_client (git: komodoplatform/walletconnectrust, tag k-0.1.3)  [Gleec-owned org]
+ └─ relay_client (git: komodoplatform/walletconnectrust, tag k-0.1.3)  [Gleec-maintained]
      └─ tokio-tungstenite-wasm 0.1.1-alpha.0
-        (git: KomodoPlatform/tokio-tungstenite-wasm, rev 8fc7e2f  [Gleec-owned org]
+        (git: KomodoPlatform/tokio-tungstenite-wasm, rev 8fc7e2f  [Gleec-maintained]
          — itself a fork of TannerRogalsky/tokio-tungstenite-wasm)
          └─ [target.not(wasm32)] tokio-tungstenite = "0.16"
              └─ tungstenite 0.16.0   ← the flagged crate
@@ -48,15 +47,15 @@ WASM path is not at risk here and needs no change.
 
 ## Priority assessment (2026-08-06)
 
-Applying the ownership/responsibility framework the user articulated: as
-long as reloaded consumes this exact code unmodified, the security posture
-is effectively shared with/inherited from Gleec's own KDF (which pulls the
+Applying the responsibility framework the project owner articulated: as
+long as reloaded consumes this exact code unmodified, its security posture
+is effectively shared with the upstream KDF project (which pulls the
 identical `tungstenite 0.16.0` through the identical fork chain) — fixing it
-here means *forking it ourselves*, which shifts ongoing maintenance
-responsibility for that fork onto reloaded permanently (every future
-tungstenite/websocket security advisory becomes reloaded's problem to track
-and re-port, not Gleec's). That cost is only worth paying if the threat is
-concrete enough to justify it.
+here would mean maintaining an independent fork, which shifts ongoing
+maintenance of that dependency onto reloaded permanently: every future
+tungstenite/websocket security advisory would need to be tracked and
+re-ported locally, rather than arriving as part of an upstream update. That
+cost is only worth taking on if the threat is concrete enough to justify it.
 
 **RUSTSEC-2023-0065 is a DoS only** (unbounded memory growth from an
 oversized frame/message — no key material exposure, no RCE, no
@@ -70,19 +69,19 @@ mid-swap could leave funds in an HTLC needing manual recovery), but it's
 bounded to that one feature and doesn't touch key material or fund custody
 directly — not in the same tier as a signing/key-derivation bug.
 
-**Recommendation: defer.** Keep the `deny.toml` ignore line. This isn't
-worth taking on permanent fork-maintenance responsibility for right now,
-given it's DoS-only, client-side, and scoped to an optional feature.
-Revisit if: Gleec updates the fork upstream (then it's a free tag bump, no
-ownership cost); the WalletConnect relay usage pattern changes to something
-more exposed (e.g. connecting to untrusted/arbitrary relays rather than a
-known operator); or reloaded ends up needing to fork this dependency chain
+**Recommendation: defer.** Keep the `deny.toml` ignore line. Taking on
+permanent fork-maintenance for this isn't warranted right now, given it's
+DoS-only, client-side, and scoped to an optional feature. Revisit if: the
+upstream fork is updated (then it's a free tag bump, no added maintenance);
+the WalletConnect relay usage pattern changes to something more exposed
+(e.g. connecting to untrusted/arbitrary relays rather than a known
+operator); or reloaded ends up maintaining a fork of this dependency chain
 for an unrelated reason anyway (at which point fixing this becomes nearly
 free as a side effect). The mechanical plan below is preserved in case any
 of those trigger it.
 
-The fix, if undertaken, is a two-hop fork bump (now correctly framed as
-*forking Gleec's code*, not "our own fork"):
+The fix, if undertaken, would mean maintaining a fork of Gleec's
+repositories at two hops:
 
 1. In `KomodoPlatform/tokio-tungstenite-wasm`, bump `tokio-tungstenite =
    "0.16"` (native target block) to a current release (pulls a current,
@@ -99,10 +98,10 @@ The fix, if undertaken, is a two-hop fork bump (now correctly framed as
 
 ## Scope
 
-- `KomodoPlatform/tokio-tungstenite-wasm` (Gleec-owned external repo — would
-  need our own fork-of-a-fork if Gleec doesn't merge a PR there, per the
-  priority assessment above)
-- `komodoplatform/walletconnectrust` (Gleec-owned external repo — same
+- `KomodoPlatform/tokio-tungstenite-wasm` (Gleec-maintained repository —
+  would need a maintained fork if a pull request there isn't merged, per
+  the priority assessment above)
+- `komodoplatform/walletconnectrust` (Gleec-maintained repository — same
   caveat)
 - `Cargo.toml` (workspace) — `pairing_api`/`relay_client`/`relay_rpc`/
   `wc_common` git `tag` bump (this repo's side, last)
