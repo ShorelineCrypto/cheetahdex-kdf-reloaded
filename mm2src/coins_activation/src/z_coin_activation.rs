@@ -502,6 +502,18 @@ impl InitStandaloneCoinActivationOps for ZCoin {
                 activation_tip,
                 error,
             })?;
+
+        // The scan above is a one-shot up to the activation tip. Light mode has no
+        // other component advancing the wallet DB afterwards, so without this the
+        // balance would stay frozen at the activation height until the coin is
+        // activated again.
+        if let ZcoinRpcMode::Light {
+            light_wallet_d_servers, ..
+        } = &activation_request.mode
+        {
+            coin.spawn_post_activation_shielded_sync(light_wallet_d_servers.clone());
+        }
+
         Ok(coin)
     }
 

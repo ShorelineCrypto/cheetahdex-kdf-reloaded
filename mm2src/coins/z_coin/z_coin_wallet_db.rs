@@ -5,11 +5,13 @@ use common::mm_number::BigDecimal;
 use common::{calc_total_pages, log, PagingOptionsEnum};
 use db_common::sqlite::rusqlite::{params, types::ValueRef, Connection, OpenFlags};
 use futures::StreamExt;
+use lazy_static::lazy_static;
 use mm2_err_handle::prelude::*;
 use parking_lot::Mutex;
 use prost_14::Message as ProstMessage;
 use rand::rngs::OsRng;
 use sapling::zip32::ExtendedFullViewingKey;
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,6 +37,32 @@ const LIGHTWALLETD_GRPC_SERVICE: &str = "pirate.wallet.sdk.rpc.CompactTxStreamer
 
 type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
 type ReloadedWalletDb = WalletDb<Connection, ZcoinConsensusParams, SystemClock, OsRng>;
+
+// Serializes wallet-database mutation per database file, across coin instances.
+//
+// Disabling a shielded coin drops it from the registry, but a background sync
+// pass that is already running holds its own strong reference and keeps going
+// for the rest of that pass. A re-activation started in that window rebuilds the
+// same files — `reset_wallet_scan_state` renames the wallet and compact-block
+// databases out from under the in-flight scan. SQLite's own locking prevents
+// corruption from concurrent *statements*, but not from a rename, so the scan
+// and rebuild entry points take this lock instead.
+//
+// Keyed by wallet-database path rather than held in `ZCoinShieldedHistory`,
+// because the two racing parties are different instances pointed at the same
+// files. Only synchronous sections are guarded, so it is never held across an
+// await.
+lazy_static! {
+    static ref WALLET_DB_MUTATION_LOCKS: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>> = Mutex::new(HashMap::new());
+}
+
+fn wallet_db_mutation_lock(wallet_db_path: &Path) -> Arc<Mutex<()>> {
+    WALLET_DB_MUTATION_LOCKS
+        .lock()
+        .entry(wallet_db_path.to_path_buf())
+        .or_default()
+        .clone()
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct ZCoinShieldedHistory {
@@ -122,6 +150,11 @@ impl ZCoinShieldedHistory {
         match classify_wallet_db(&paths.wallet_db_path, consensus_params.clone()) {
             WalletDbGeneration::AbsentOrEmpty | WalletDbGeneration::SelectedCurrent => {},
             WalletDbGeneration::ReferenceLegacy => {
+                // Renaming the wallet database aside is a rebuild path (R39.8.0ad).
+                // This runs during activation, so it is exactly the party that can
+                // race a background scan still finishing on a previous instance.
+                let mutation_lock = wallet_db_mutation_lock(&paths.wallet_db_path);
+                let _guard = mutation_lock.lock();
                 let backup_path = preserve_database_for_rebuild(&paths.wallet_db_path, "legacy-v2")
                     .map_err(|reason| {
                         MmError::new(ZCoinBuildError::ShieldedDbSchema {
@@ -440,8 +473,16 @@ impl ZCoinShieldedHistory {
                     start_height,
                     error
                 );
-                preserve_database_for_rebuild(&self.compact_blocks_path, "invalid-chain")?;
-                initialize_compact_db(&self.compact_blocks_path)?;
+                // Replacing the compact cache is a rebuild path (R39.8.0ad): a
+                // background scan on another instance may be reading it. Scoped to
+                // these two synchronous calls only — the enclosing async fn takes
+                // the same non-reentrant lock via the reset paths above.
+                {
+                    let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
+                    let _guard = mutation_lock.lock();
+                    preserve_database_for_rebuild(&self.compact_blocks_path, "invalid-chain")?;
+                    initialize_compact_db(&self.compact_blocks_path)?;
+                }
             },
         }
         progress(fetched_height, target_height);
@@ -491,6 +532,8 @@ impl ZCoinShieldedHistory {
     }
 
     fn reset_wallet_scan_state(&self) -> Result<(), String> {
+        let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
+        let _guard = mutation_lock.lock();
         *self.initial_chain_state.lock() = None;
         preserve_database_for_rebuild(&self.wallet_db_path, "rescan")?;
         preserve_database_for_rebuild(&self.compact_blocks_path, "rescan")?;
@@ -502,6 +545,8 @@ impl ZCoinShieldedHistory {
         if !self.wallet_scan_state_is_empty()? {
             return Err("Refusing to rebuild an unscanned shielded wallet DB that contains transactions".to_owned());
         }
+        let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
+        let _guard = mutation_lock.lock();
         *self.initial_chain_state.lock() = None;
         preserve_database_for_rebuild(&self.wallet_db_path, "checkpoint")?;
         initialize_wallet_db(&self.wallet_db_path, self.consensus_params.clone())
@@ -849,6 +894,10 @@ impl ZCoinShieldedHistory {
         inter_iteration_interval_ms: u64,
         progress: F,
     ) -> Result<u64, String> {
+        // Held for the whole scan so a concurrent rebuild cannot rename the
+        // database files out from under it. See `WALLET_DB_MUTATION_LOCKS`.
+        let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
+        let _guard = mutation_lock.lock();
         self.scan_cached_blocks_to_height_with_sleeper(
             consensus_params,
             target_height,

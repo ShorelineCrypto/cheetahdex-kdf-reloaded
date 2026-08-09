@@ -66,6 +66,7 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
 - Hardware wallet — Ledger transport (scaffolding only; crate not built into any artifact).
 - Siacoin atomic-swap operations (HD-wallet stubs only; not wired to any default activation flow).
 - HD wallet dispatch in swap/ordermatch paths (legacy iguana-key fallback retained for parity with upstream and GLEEC; documented in code).
+- Light-mode shielded sync: unconfirmed shielded receipts are not represented in the balance (D39.8.0b). See [below](#light-mode-shielded-pending-balances--work-in-progress).
 - *(further entries to be enumerated.)*
 
 ### Settings to set for GLEEC-compatible operation
@@ -133,6 +134,18 @@ unchanged and activation returns a typed schema error; it is never silently
 deleted or treated as an empty wallet. Manual intervention is required only for
 that explicit unknown/corrupt-file error, not for ordinary switching between
 Reloaded and GLEEC KDF.
+
+### Light-mode shielded pending balances — work in progress
+
+Reloaded reports `unspendable: 0` unconditionally for Light-mode shielded
+balances: the balance is read from the scanned wallet database, which by
+construction holds only mined, scanned notes. An incoming shielded payment is
+therefore not represented at all until it is mined and scanned, rather than
+appearing first as a pending amount. Representing it requires consuming
+lightwalletd's `GetMempoolTx` stream, which Reloaded does not currently call.
+Reloaded's own Native mode does count 0-confirmation notes as unspendable.
+
+Specified in CRD chapter 39 §39.8.0.6; tracked as unimplemented under D39.8.0c.
 
 ## Forward-compatibility commitment
 

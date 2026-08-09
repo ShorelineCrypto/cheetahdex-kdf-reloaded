@@ -56,8 +56,10 @@ pub fn spawn_electrum(
                 skip_validation: req.disable_cert_verification,
             }
         },
+        // Not a missing feature: 'ws'/'wss' are the browser/WASM transport, the same
+        // way 'TCP'/'SSL' are rejected by the WASM client below.
         ElectrumProtocol::WS | ElectrumProtocol::WSS => {
-            return ERR!("'ws' and 'wss' protocols are not supported yet. Consider using 'TCP' or 'SSL'")
+            return ERR!("'ws' and 'wss' are browser-only Electrum protocols and cannot be used by a native node. Use 'TCP' or 'SSL'")
         },
     };
 

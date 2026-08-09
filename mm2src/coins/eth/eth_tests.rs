@@ -1149,6 +1149,47 @@ fn test_get_fee_to_send_taker_fee_insufficient_balance() {
     );
 }
 
+/// A wallet can hold plenty of the token being sent yet none of the platform coin the
+/// gas is paid in — BSC reports this as `-32000 "gas required exceeds allowance (0)"`.
+/// The shortfall must be reported against the *platform* ticker, because that is what
+/// makes callers classify it as `NotSufficientBaseCoinBalance` ("not enough ETH/BNB
+/// for fees") instead of surfacing the raw provider error.
+#[test]
+fn test_get_fee_to_send_taker_fee_insufficient_gas_balance() {
+    const DEX_FEE_AMOUNT: u64 = 100_000_000_000;
+    const GAS_PRICE: u64 = 40;
+
+    EthCoin::get_gas_price.mock_safe(|_| MockResult::Return(Box::new(futures01::future::ok(GAS_PRICE.into()))));
+    EthCoinImpl::estimate_gas.mock_safe(|_, _| {
+        MockResult::Return(Box::new(futures01::future::err(MmError::new(Web3RpcError::Transport(
+            "error code -32000: gas required exceeds allowance (0)".to_string(),
+        )))))
+    });
+    // Plenty of the token being sent, so the sent-coin check must not fire...
+    EthCoin::my_balance.mock_safe(|_| MockResult::Return(Box::new(futures01::future::ok(U256::from(u64::MAX)))));
+    // ...but no platform coin at all to pay the gas with.
+    EthCoin::base_coin_balance.mock_safe(|_| MockResult::Return(Box::new(futures01::future::ok(BigDecimal::from(0)))));
+
+    let (_ctx, coin) = eth_coin_for_test(
+        EthCoinType::Erc20 {
+            platform: "ETH".to_string(),
+            token_addr: Address::from_slice(&hex::decode("aD22f63404f7305e4713CcBd4F296f34770513f4").unwrap()),
+        },
+        vec!["http://dummy.dummy".into()],
+        None,
+    );
+    let dex_fee_amount = u256_to_big_decimal(DEX_FEE_AMOUNT.into(), 18).expect("!u256_to_big_decimal");
+
+    let error = block_on(coin.get_fee_to_send_taker_fee(dex_fee_amount, FeeApproxStage::WithoutApprox)).unwrap_err();
+    log!((error));
+    match error.get_inner() {
+        // Reported against the platform coin, not the token: that ticker mismatch is
+        // what `CheckBalanceError::from_trade_preimage_error` keys on.
+        TradePreimageError::NotSufficientBalance { coin, .. } => assert_eq!(coin, "ETH"),
+        other => panic!("Expected TradePreimageError::NotSufficientBalance for the platform coin, got {other:?}"),
+    }
+}
+
 #[test]
 fn validate_dex_fee_invalid_sender_eth() {
     let (_ctx, coin) = eth_coin_for_test(

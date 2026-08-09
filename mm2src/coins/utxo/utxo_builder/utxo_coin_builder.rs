@@ -105,6 +105,14 @@ pub enum UtxoCoinBuildError {
         electrum_servers: Vec<ElectrumRpcRequest>,
         seconds: u64,
     },
+    #[display(
+        fmt = "No usable Electrum servers for {}: none are configured, or every configured server was rejected as \
+               unusable by this build (native builds cannot use 'ws'/'wss' servers).",
+        ticker
+    )]
+    NoUsableElectrumServers {
+        ticker: String,
+    },
     ElectrumProtocolVersionCheckError(String),
     #[display(fmt = "Can not detect the user home directory")]
     CantDetectUserHome,
@@ -618,6 +626,16 @@ pub trait UtxoCoinBuilderCommonOps {
 
         if args.negotiate_version {
             event_handlers.push(ElectrumProtoVerifier { on_connect_tx }.into_shared());
+        }
+
+        // Distinguish "nothing to try" from "everything we tried failed": waiting five
+        // seconds only to report an empty candidate list gives no hint that the coin's
+        // `electrum` entry is missing, or that every entry was dropped as unusable
+        // (native builds skip 'ws'/'wss' servers, so a WSS-only coin lands here).
+        if servers.is_empty() {
+            return MmError::err(UtxoCoinBuildError::NoUsableElectrumServers {
+                ticker: self.ticker().to_owned(),
+            });
         }
 
         let all_servers = servers.clone();

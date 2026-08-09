@@ -203,7 +203,7 @@ the swap protocol.
 ## 39.6 Required shielded-coin ports
 
 ### 39.6.1 WASM support
-### 39.6.1 WASM support
+
 R39.6.1 The shielded coin shall be buildable and activatable on the WASM target,
 with its shielded note/witness storage backed by IndexedDB (mirroring the
 native storage contract). Acceptance: a light-mode shielded coin activates in a
@@ -215,8 +215,8 @@ WASM build and reports a shielded balance.
 > `SaplingStateCacheOps` trait; `ZCoinSqliteSaplingCache` serves native builds
 > and `ZCoinIdbSaplingCache` (mm2_db IndexedDB backend) serves WASM. The
 > `MmCoinEnum::ZCoin` variant and the `z_coin` module are available on all
-> targets. Transaction building (`gen_tx` / `send_outputs`) remains native-only
-> because `LocalTxProver` (sapling parameter files) is absent in WASM.
+> targets. Shielded transaction *building* remains native-only, because the
+> Sapling local prover (and the parameter files it needs) is unavailable in WASM.
 
 ### 39.6.2 Activation-time sync tuning / sync-from-date
 R39.6.2 The activation request shall optionally accept sync-control parameters so
@@ -550,25 +550,22 @@ before using it as the compact-chain anchor.
 ### 39.8.0.3 Scanner behavior
 
 R39.8.0m The shielded scanner shall run during activation and continue after
-activation as the coin's background shielded sync loop. During activation it
-shall report observable progress for compact-block cache update and wallet-db
-building, and activation shall wait until the wallet database is scanned through
-the current activation tip before returning success. Concurrent activation tasks
-for the same shielded ticker shall be serialized for the complete task, including
-database construction, download, scan, result calculation, and registration, so
-one task cannot rebuild or rename a database while another task is using it.
-Different tickers shall remain independent, and cancellation shall release the
-serialization guard.
+activation as the coin's background shielded sync loop (§39.8.0.5). During
+activation it shall report observable progress for compact-block cache update and
+wallet-db building, and activation shall wait until the wallet database is scanned
+through the current activation tip before returning success. Concurrent activation
+tasks for the same shielded ticker shall be serialized for the complete task,
+including database construction, download, scan, result calculation, and
+registration, so one task cannot rebuild or rename a database while another task
+is using it. Different tickers shall remain independent, and cancellation shall
+release the serialization guard.
 
-> **Status update (reloaded).** The activation portion is implemented for
-> Light mode, including complete-through-tip gating, two-phase progress,
-> same-ticker serialization, and the R39.6.2 pacing controls. The
-> **post-activation background Light scanner is not yet wired**: the modern
-> compact-block downloader and wallet scanner currently run only from
-> activation, while the older background Sapling-state loop is Native-only.
-> Re-activation resumes and catches up from validated local state, but that does
-> not satisfy the continuous-background clause above. D39.8.0b records the
-> remaining work; this upgrade does not claim full R39.8.0m conformance.
+> **Status (reloaded, 2026-08-09).** Implemented for Light mode: activation with
+> complete-through-tip gating, two-phase progress, same-ticker serialization, and
+> the R39.6.2 pacing controls; plus the post-activation background shielded sync
+> task of §39.8.0.5. Native mode is still served only by the legacy
+> commitment-tree catch-up loop and does not yet maintain the modern wallet
+> database after activation.
 
 R39.8.0n The scanner shall fetch compact blocks from the configured shielded
 backend, cache them by height, validate that scanned heights are sequential and
@@ -627,7 +624,20 @@ R39.8.0q Unconfirmed shielded outputs are not spendable merely because the local
 process created or observed them. Spendable balance, transaction history, and
 post-swap Desktop display shall reflect confirmed wallet-db scan results, with
 the existing locked-note/change tracking used only to prevent unsafe local
-double-spends while waiting for confirmation.
+double-spends while waiting for confirmation. Reporting an unconfirmed receipt as
+a *pending* (non-spendable) amount is required separately by §39.8.0.6 and does
+not relax this requirement.
+
+> **Status update (reloaded, 2026-08-09).** Light mode satisfies the spendable
+> half of this requirement: its balance is read from the scanned wallet database,
+> which by construction contains only mined, scanned notes. It does not yet
+> satisfy §39.8.0.6, because it reports a zero pending amount unconditionally, so
+> an incoming shielded transaction stays invisible until its block is mined *and*
+> scanned rather than appearing as a pending amount first. Native mode already
+> distinguishes the two, counting zero-confirmation notes as the non-spendable
+> portion of the balance. Until §39.8.0.6 is implemented, the expected
+> user-visible latency for an incoming shielded payment in Light mode is one
+> block plus up to one background sync period (§39.8.0.5).
 
 ### 39.8.0.4 Native persistence generations and rebuild boundary
 
@@ -893,13 +903,24 @@ selected-current row of R39.8.0w now binds its exact migration and semantic
 schema identities. The implementation still must not classify a database as
 current from `user_version = 8` or the migration-table name alone.
 
-D39.8.0b The modern Light compact-block and wallet scanner shall be moved into
-a coin-lifetime background task after activation without weakening the existing
-activation-through-tip gate. The task needs an explicit poll policy, reorg and
-endpoint-failover handling, cancellation on coin disable/context shutdown, and
-serialization with re-activation or database rebuild. Until this is implemented
-and tested, a running Light wallet catches up only when ARRR/ZCoin is activated
-again.
+D39.8.0b *(Specified 2026-08-09; see §39.8.0.5.)* The modern Light compact-block
+and wallet scanner shall be moved into a coin-lifetime background task after
+activation without weakening the existing activation-through-tip gate. The task
+needs an explicit poll policy, reorg and endpoint-failover handling, cancellation
+on coin disable/context shutdown, and serialization with re-activation or
+database rebuild.
+
+This item is now superseded by normative requirements rather than by a note:
+R39.8.0aa (coin-lifetime task, resume-from-local-state, no re-anchoring),
+R39.8.0ab (bounded poll policy and its latency budget — the period itself is the
+implementation's choice, not a dictated value), R39.8.0ac (termination on coin
+disable/shutdown in bounded time), R39.8.0ad (wallet-database-scoped
+serialization against activation rebuild/rename), and R39.8.0ae (endpoint
+failover; reorg recovery inherited from R39.8.0n). Tests are T39.8.0f.
+
+Residual: unconfirmed shielded receipts are still not represented in the balance,
+because the background pass consumes only mined compact blocks. That gap is now
+specified by §39.8.0.6 and tracked as D39.8.0c.
 
 #### Baseline Verifications
 
@@ -930,6 +951,186 @@ versions, before the current-generation fingerprint of D39.8.0a is closed.
 - SQLite schema-table and application-version interfaces:
   <https://www.sqlite.org/schematab.html> and
   <https://www.sqlite.org/pragma.html#pragma_user_version>.
+
+### 39.8.0.5 Post-activation background shielded sync (Light mode)
+
+R39.8.0aa A Light-mode shielded coin shall keep its shielded wallet database
+current for the whole time the coin is active, not only up to the tip observed
+during activation. On successful completion of a Light activation the
+implementation shall start exactly one coin-lifetime background sync task per
+activated shielded coin, whose only job is to advance the compact-block cache and
+then the shielded wallet database toward the current backend tip. The task shall
+resume from the wallet's own local sync state and shall never re-anchor,
+rewind-by-policy, or otherwise change the sync start point established by
+R39.8.0g--R39.8.0h; changing the sync anchor remains an activation-only
+operation. The task shall not weaken the activation-through-tip gate of R39.8.0m:
+activation still returns only after its own scan is complete, and the background
+task exists to cover chain growth afterwards. A pass that finds the backend tip
+at or below the wallet's already-scanned height shall do no work.
+
+R39.8.0ab The background task shall have an explicit, bounded poll policy. **No
+poll period is dictated by any external contract**; the exact value is the
+implementation's choice, constrained as follows:
+
+- the period shall be strictly positive and finite — neither a busy loop nor an
+  unbounded wait — and it shall be a named, documented constant or configuration
+  value rather than an incidental literal;
+- passes shall not overlap: a new pass shall begin only after the previous pass
+  has finished or failed, so a slow catch-up cannot fan out concurrent scans of
+  the same wallet database;
+- the period shall be short enough that it is not the dominant term in
+  incoming-payment visibility latency. The steady-state latency budget for a
+  mined shielded receipt is *one block interval plus at most one poll period*, so
+  the poll period shall not exceed the coin's nominal block interval;
+- a failed pass (backend unreachable, fetch error, scan error) shall be treated
+  as transient: it shall not terminate the task, shall not tighten the poll
+  cadence into a hot retry, and shall be retried on a subsequent scheduled pass;
+- a failed scan shall leave the wallet conservatively marked as not
+  scan-complete, so spending and shielded-transaction construction stay blocked
+  until a later pass succeeds (consistent with R39.8.0q).
+
+> **Rationale (informative).** The GPLv2 baseline's Native shielded catch-up loop
+> already establishes the same shape — a periodic catch-up pass followed by a
+> fixed sleep, terminating when the coin is dropped — and its period is an order
+> of ten seconds. Any period from a few seconds up to the coin's block interval
+> satisfies R39.8.0ab; picking one exact number is an implementation decision and
+> is deliberately not specified here.
+
+R39.8.0ac The background task shall terminate when the coin is disabled or the
+application context shuts down. It shall not keep the coin alive: holding only a
+non-owning reference to the coin and returning when that reference can no longer
+be upgraded is a sufficient termination condition, and an explicit cancellation
+handle is equally acceptable. Termination shall be observable in bounded time —
+at most one poll period plus the duration of an in-flight pass — and shall
+release every resource the task holds, including the serialization guard of
+R39.8.0ad. A pass still running at the moment of disable shall not be able to
+corrupt or resurrect state for a coin that has been disabled.
+
+R39.8.0ad Background scanning and activation-time database construction shall be
+mutually exclusive per shielded wallet database. The implementation shall
+serialize on the identity of the wallet database itself (its on-disk location,
+not merely the ticker), and both the background scan entry point and the
+activation rebuild/replace/rename entry points shall take that guard. The
+guarantee is that no activation may create, rebuild, replace, rename, or remove a
+wallet database file while a scan of that same database is in flight, and no scan
+may run against a database whose files a concurrent activation is in the middle
+of replacing. Distinct wallet databases — including different tickers, and the
+legacy versus current namespaces of R39.8.0x — shall remain independent, and the
+guard shall be released on completion, failure, and cancellation alike. This
+guard is additional to, not a substitute for, the per-ticker activation
+serialization of R39.8.0m: it also covers the window in which a background pass
+started before coin disable is still running while a re-activation begins.
+
+R39.8.0ae A pass shall tolerate an individual unavailable shielded backend. When
+several `light_wallet_d_servers` are configured (R39.2.4), the implementation
+shall attempt the configured endpoints in turn and shall declare the pass failed
+only after every configured endpoint has failed. Chain-continuity recovery is not
+restated here: a background pass uses the same fetch/validate/scan path as
+activation and therefore inherits the sequential-height and hash-link validation
+and the rewind/refetch-on-discontinuity behaviour of R39.8.0n, including the
+handling of a reorg that invalidates already-cached blocks.
+
+### 39.8.0.6 Pending (unconfirmed) shielded receipts
+
+R39.8.0af A **pending shielded receipt** is a wallet-owned Sapling output that
+the wallet has observed in a transaction the backend reports as present in the
+mempool, and that is not yet present in the shielded wallet database as a scanned
+received note. Its amount is the note value recovered by trial-decrypting that
+output with the wallet's incoming viewing capability; an output that does not
+trial-decrypt to a tracked account is not a receipt and shall be ignored.
+
+R39.8.0ag A pending shielded receipt shall be reported to the caller **only** as
+part of the non-spendable portion of the coin balance (the `unspendable` field of
+the balance object), aligning Light mode with the Native-mode behaviour of
+counting zero-confirmation notes as non-spendable. It shall never contribute to:
+
+- the spendable balance;
+- any tradable/available-volume figure, order maximum, or swap-funding decision;
+- note selection or input selection for building any shielded transaction,
+  including swap payments, fee/burn outputs, and change.
+
+Pending receipts shall likewise not appear in `z_coin_tx_history`, which remains
+derived from wallet-database scan state (R39.8.9). R39.8.0q continues to govern:
+observing a receipt never makes it spendable; only a wallet-database scan does.
+
+R39.8.0ah A pending shielded receipt shall be invalidated — removed from the
+pending set and no longer added to the non-spendable balance — as soon as any of
+the following holds:
+
+- its transaction has been scanned into the shielded wallet database (the same
+  value then appears through normal scanned-note accounting);
+- its transaction is no longer reported by the backend as being in the mempool
+  and has not been mined (dropped or replaced);
+- its transaction's expiry height has been passed by the wallet's scanned tip.
+
+**Double-counting constraint.** The same value shall never be counted twice. An
+amount shall not appear simultaneously in the spendable balance (from the wallet
+database) and in the pending non-spendable amount, and the transition between the
+two shall be atomic from the caller's point of view: a balance query shall never
+observe a state in which a receipt has been counted from both sources, nor a
+state in which a receipt that is still in flight has been dropped from the
+pending set before the scan that supersedes it is durable. Repeated observation
+of the same mempool transaction across successive polls shall contribute its
+value at most once, keyed by transaction identifier and output index.
+
+R39.8.0ai The pending-receipt source is the lightwalletd streaming mempool
+method, which is dictated interop:
+
+| Element | Contract |
+|---|---|
+| method | `GetMempoolTx` |
+| request | `Exclude`, carrying a repeated `txid` byte field holding identifiers (optionally shortened to a prefix) the client already holds |
+| response | a **stream** of `CompactTx`, each carrying the transaction `index`, `hash`, optional `fee`, its `CompactSpend` nullifiers, and its `CompactOutput` entries |
+| recovery | a `CompactOutput` carries the note commitment, ephemeral key, and the truncated note ciphertext, which is sufficient for trial decryption of the note value by the wallet's incoming viewing capability; the memo is not recoverable from a compact output |
+
+The implementation shall treat the mempool view as advisory and possibly stale by
+seconds, shall pass already-known transaction identifiers in `Exclude` so a poll
+does not re-stream what it already holds, and shall degrade gracefully: an
+endpoint that errors on, or does not support, this method shall cause the pending
+amount to be reported as zero rather than failing the balance query or the
+background sync pass of §39.8.0.5.
+
+R39.8.0aj The pending-receipt view shall be refreshed on the same coin-lifetime
+schedule as the background sync of R39.8.0ab, or on balance query, or both; the
+choice is the implementation's, subject to the constraint that the reported
+pending amount shall not be older than one poll period and shall not be computed
+from a mempool snapshot taken before the wallet-database height it is combined
+with.
+
+#### Tests
+
+T39.8.0f Background-sync tests shall prove that, after a Light activation
+completes, a block mined afterwards becomes visible in balance and
+`z_coin_tx_history` without re-activation and within the stated latency budget of
+R39.8.0ab; that the background task does not change the wallet's sync anchor
+across passes; that a pass failure is transient and a later pass recovers; that a
+failed scan leaves the coin blocked from spending until a pass succeeds; that
+disabling the coin terminates the task within one poll period plus one in-flight
+pass; and that a re-activation which rebuilds the wallet database cannot proceed
+while a background pass is scanning that same database, nor a pass begin against
+a database mid-rebuild (R39.8.0ad). A multi-endpoint fixture shall prove that a
+pass survives the failure of any proper subset of the configured endpoints and
+fails only when all of them fail.
+
+T39.8.0g Pending-receipt tests shall use a mempool fixture to prove that a
+wallet-owned unconfirmed shielded output is reported in the non-spendable balance
+and never in the spendable balance or any tradable volume; that it is not offered
+for note selection; that it does not appear in `z_coin_tx_history`; that once the
+transaction is mined and scanned the total balance is unchanged across the
+transition (no double count, no gap) and the value has moved to spendable; that a
+dropped or expired mempool transaction removes the pending amount; that the same
+transaction observed on repeated polls contributes once; and that an endpoint
+which does not serve `GetMempoolTx` yields a zero pending amount rather than a
+balance error.
+
+#### Deferred Work
+
+D39.8.0c Pending shielded receipts (§39.8.0.6) are specified but not yet
+implemented: Light mode reports a zero pending amount unconditionally, so an
+incoming shielded payment is invisible until it is mined and scanned. Closing
+this item requires consuming the dictated `GetMempoolTx` stream described in
+R39.8.0ai and wiring the resulting values into the non-spendable balance only,
+under the double-counting and invalidation constraints of R39.8.0ah.
 
 ### 39.8.1 Envelope, method string & platform gate
 
@@ -1141,6 +1342,18 @@ storage error that reflects the store failure.
   `received_by_me` and `my_balance_change`, includes the wallet shielded address
   in `to`, reports `sync_status: Finished`, and does not return
   `StorageIsNotInitialized` (§39.8.0d, §39.8.9).
+- Post-activation shielded sync (§39.8.0.5): after a Light-mode activation
+  completes, a subsequently mined shielded receipt becomes visible in balance and
+  `z_coin_tx_history` without re-activation, within one block interval plus at
+  most one poll period; the background task keeps the wallet's sync anchor
+  unchanged, survives a single-endpoint failure, stops when the coin is disabled,
+  and cannot run concurrently with an activation that rebuilds or renames the
+  same wallet database.
+- Pending shielded receipts (§39.8.0.6, not yet implemented — D39.8.0c): an
+  unconfirmed wallet-owned shielded receipt observed through `GetMempoolTx`
+  appears only in the non-spendable balance, never in spendable or tradable
+  amounts, is not double-counted when the transaction is mined and scanned, and
+  disappears if the transaction is dropped or expires.
 - Generic history separation: for an activated ZCoin, generic `my_tx_history`
   v2 rejects the coin as unsupported for that method; Desktop uses
   `z_coin_tx_history` for shielded history (§39.8.0c).

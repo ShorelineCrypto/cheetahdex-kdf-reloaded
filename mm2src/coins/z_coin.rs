@@ -782,6 +782,88 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
     }
 }
 
+/// Poll period for [`post_activation_shielded_sync`].
+///
+/// R39.8.0ab fixes no particular number; it requires a named constant that is
+/// strictly positive, finite, and no larger than the coin's nominal block
+/// interval, giving a latency budget of one block plus one period. Pirate's
+/// nominal interval is 60 s, so half of that keeps a pass per block without
+/// polling the backend harder than the chain produces work.
+#[cfg(not(target_arch = "wasm32"))]
+const SHIELDED_SYNC_POLL_PERIOD_SECS: f64 = 30.;
+
+/// Keeps a Light-mode shielded wallet database current after activation
+/// (CRD ch.39 §39.8.0.5).
+///
+/// Activation scans the wallet database once, up to whatever the chain tip was
+/// at that moment. Nothing else advances it in Light mode, so without this task
+/// the database stays anchored at that height for the rest of the session and
+/// incoming shielded transactions stay invisible until the coin is activated
+/// again. Native mode is served by its own commitment-tree task, which returns
+/// early for Electrum-backed activations.
+///
+/// Each pass resumes from the wallet's own local sync state
+/// (`requested_start_height: None` plus `skip_sync_params: true`), so it tops up
+/// from the last scanned height and never re-anchors the wallet — anchor changes
+/// remain activation-only per R39.8.0g/h.
+#[cfg(not(target_arch = "wasm32"))]
+async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<String>) {
+    let ticker = coin.ticker().to_owned();
+    let (utxo_weak, z_fields_weak) = coin.into_weak_parts();
+
+    // Terminates by itself once the coin is disabled and the last strong
+    // reference is dropped.
+    loop {
+        Timer::sleep(SHIELDED_SYNC_POLL_PERIOD_SECS).await;
+        let coin = match ZCoin::from_weak_parts(&utxo_weak, &z_fields_weak) {
+            Some(coin) => coin,
+            None => return,
+        };
+
+        let tip = match coin.rpc_client().get_block_count().compat().await {
+            Ok(tip) => tip,
+            Err(e) => {
+                log::warn!("ZCoin periodic sync for {ticker}: could not get block count: {e}");
+                continue;
+            },
+        };
+
+        if tip <= coin.z_fields.wallet_db_scanned_through.load(AtomicOrdering::Relaxed) {
+            continue;
+        }
+
+        let no_progress = |_: u64, _: u64| {};
+        if let Err(e) = coin
+            .fetch_lightwalletd_compact_blocks_to_height(&light_wallet_d_servers, tip, None, true, &no_progress)
+            .await
+        {
+            log::warn!("ZCoin periodic sync for {ticker}: compact block fetch to height {tip} failed: {e}");
+            continue;
+        }
+
+        match coin.scan_shielded_wallet_db_to_height(tip, no_progress) {
+            Ok(scanned_height) => {
+                log::debug!("ZCoin periodic sync for {ticker}: wallet DB scanned through {scanned_height}")
+            },
+            // `scan_shielded_wallet_db_to_height` clears the scan-complete flag on
+            // failure, which blocks spending until a later pass succeeds. That is
+            // the intended conservative behaviour: the wallet's view of its own
+            // notes is incomplete, so it must not build transactions from it.
+            Err(e) => log::warn!("ZCoin periodic sync for {ticker}: wallet DB scan to height {tip} failed: {e}"),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ZCoin {
+    /// Starts the periodic light-mode shielded wallet sync described on
+    /// [`post_activation_shielded_sync`]. Call once, after the activation scan has
+    /// completed, for Light-mode activations only.
+    pub fn spawn_post_activation_shielded_sync(&self, light_wallet_d_servers: Vec<String>) {
+        spawn(post_activation_shielded_sync(self.clone(), light_wallet_d_servers));
+    }
+}
+
 pub struct ZCoinBuilder<'a> {
     ctx: &'a MmArc,
     ticker: &'a str,
