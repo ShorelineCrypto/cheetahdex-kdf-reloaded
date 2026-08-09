@@ -222,15 +222,18 @@ acceptance gate for B.
 
 Each stage is independently shippable and independently revertible.
 
-> **Progress (2026-08-09).** Workstream B is complete. In workstream A, the
-> transport and subscription lifecycle have landed — notification routing, the
-> script-hash watcher registry, `subscribe_scripthash` /
-> `resubscribe_watched_scripthashes`, and re-arming on every newly connected
-> server. **Nothing subscribes yet and nothing consumes the wake signal**, so
-> balance updates remain purely poll-driven; stage 4 below is what makes the
-> feature user-visible. That wiring needs per-coin-variant work in the balance
-> streamer (resolving each coin's Electrum client and script pubkey), which is
-> why it was left as its own step rather than rushed alongside the transport.
+> **Progress (2026-08-09).** Both workstreams are implemented. Workstream A
+> landed as notification routing, the script-hash watcher registry,
+> `subscribe_scripthash` / `resubscribe_watched_scripthashes`, re-arming on every
+> newly connected server, and the balance streamer subscribing its coin's
+> address and racing notifications against the poll deadline. Workstream B
+> landed as mempool-derived pending receipts.
+>
+> Still open from the plan: the subscription cap for HD wallets (open decision
+> 1), the QRC20 trigger question (open decision 2), and whether the wake should
+> also drive transaction-history refresh (open decision 3). Coverage is
+> Electrum-backed UTXO, QTUM and BCH; EVM and ZHTLC remain out of scope for push
+> for the reasons given above.
 
 1. **Refresh-trigger abstraction** + balance streamer awaits it. No behaviour
    change on its own; everything else builds on it.
