@@ -48,7 +48,7 @@ use serde_json::{json, Value as Json};
 use serialization::{deserialize, CoinVariant};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, InputSource, TargetValue, WalletCommitmentTrees,
                                      WalletRead};
@@ -368,6 +368,13 @@ pub struct ZCoinFields {
     wallet_db_scan_complete: AtomicBool,
     #[cfg(not(target_arch = "wasm32"))]
     wallet_db_scanned_through: AtomicU64,
+    /// Wallet-owned mempool outputs not yet scanned into the wallet database,
+    /// keyed by (txid, output index) so repeated observation across polls
+    /// contributes a value at most once (CRD ch.39 R39.8.0af/ah). Replaced
+    /// wholesale by each poll, so a dropped or mined transaction disappears
+    /// without bespoke invalidation.
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_receipts: Mutex<HashMap<([u8; 32], u32), u64>>,
     /// Zcash consensus/network parameters sourced from `protocol_data`; the
     /// single authority for this coin's network-parameter lookups (R39.6.4).
     consensus_params: ZcoinConsensusParams,
@@ -843,7 +850,12 @@ async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<
 
         match coin.scan_shielded_wallet_db_to_height(tip, no_progress) {
             Ok(scanned_height) => {
-                log::debug!("ZCoin periodic sync for {ticker}: wallet DB scanned through {scanned_height}")
+                log::debug!("ZCoin periodic sync for {ticker}: wallet DB scanned through {scanned_height}");
+                // Deliberately after the scan: a transaction mined between the
+                // two reads is then already excluded by the scanned-state
+                // check below, so its value can never be counted from both the
+                // wallet database and the pending set (R39.8.0ah).
+                coin.refresh_pending_receipts(&light_wallet_d_servers, tip).await;
             },
             // `scan_shielded_wallet_db_to_height` clears the scan-complete flag on
             // failure, which blocks spending until a later pass succeeds. That is
@@ -861,6 +873,54 @@ impl ZCoin {
     /// completed, for Light-mode activations only.
     pub fn spawn_post_activation_shielded_sync(&self, light_wallet_d_servers: Vec<String>) {
         spawn(post_activation_shielded_sync(self.clone(), light_wallet_d_servers));
+    }
+
+    /// Re-derive the pending-receipt set from the backend's current mempool.
+    ///
+    /// The set is rebuilt from scratch on every poll rather than mutated, which
+    /// is what makes invalidation free: a transaction that was mined, dropped,
+    /// or expired simply does not reappear (R39.8.0ah). Receipts whose
+    /// transaction the wallet database has already scanned are excluded here so
+    /// their value is never counted from both sources.
+    async fn refresh_pending_receipts(&self, light_wallet_d_servers: &[String], tip: u64) {
+        let observed = self
+            .z_fields
+            .shielded_history
+            .fetch_pending_receipts(light_wallet_d_servers, tip)
+            .await;
+
+        let mut rebuilt = HashMap::with_capacity(observed.len());
+        for receipt in observed {
+            match self.z_fields.shielded_history.transaction_is_scanned(&receipt.txid) {
+                Ok(true) => continue,
+                Ok(false) => {},
+                // If we cannot tell whether it is already scanned, leave it out:
+                // under-reporting a pending amount is a display gap, whereas
+                // over-reporting risks showing the same value twice.
+                Err(e) => {
+                    log::debug!(
+                        "ZCoin pending receipts for {}: scan-state check failed: {e}",
+                        self.ticker()
+                    );
+                    continue;
+                },
+            }
+            rebuilt.insert((receipt.txid, receipt.output_index), receipt.value);
+        }
+
+        // One assignment under the lock, so a concurrent balance query sees
+        // either the whole previous set or the whole new one.
+        *self.z_fields.pending_receipts.lock().unwrap() = rebuilt;
+    }
+
+    /// Total value of currently-pending wallet-owned mempool outputs, in
+    /// zatoshi. Reported only as non-spendable balance (R39.8.0ag).
+    pub(crate) fn pending_receipts_total(&self) -> u64 {
+        self.z_fields
+            .pending_receipts
+            .lock()
+            .map(|set| set.values().copied().fold(0u64, |acc, v| acc.saturating_add(v)))
+            .unwrap_or(0)
     }
 }
 
@@ -990,6 +1050,8 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             wallet_db_scan_complete: AtomicBool::new(false),
             #[cfg(not(target_arch = "wasm32"))]
             wallet_db_scanned_through: AtomicU64::new(wallet_db_scanned_through),
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_receipts: Mutex::new(HashMap::new()),
             consensus_params,
             check_point_block: self.protocol_info.check_point_block,
             blocks_per_iteration: self.protocol_info.blocks_per_iteration,
@@ -1117,9 +1179,14 @@ impl MarketCoinOps for ZCoin {
                         .shielded_history()
                         .balance(coin.z_fields.consensus_params.clone())
                         .map_err(|e| MmError::new(crate::BalanceError::Internal(e)))?;
+                    // Pending mempool receipts are reported here and only here
+                    // (R39.8.0ag): `my_spendable_balance` reads the spendable
+                    // field, so an unmined note can never size a trade or fund
+                    // a swap. Native mode reaches the same result by counting
+                    // its own zero-confirmation notes as unspendable.
                     return Ok(CoinBalance {
                         spendable: big_decimal_from_sat_unsigned(balance_sat, coin.decimals()),
-                        unspendable: BigDecimal::from(0),
+                        unspendable: big_decimal_from_sat_unsigned(coin.pending_receipts_total(), coin.decimals()),
                     });
                 }
                 let unspents = coin.my_z_unspents_ordered().await.mm_err(Into::into)?;

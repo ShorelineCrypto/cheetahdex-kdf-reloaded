@@ -3435,4 +3435,189 @@ mod tests {
             "7b506df8a2b119fb143664a1c0b5eddfa7de5fe8458f07829818c59e5b39ddbb"
         );
     }
+
+    /// CRD ch.39 T39.8.0g acceptance gate.
+    ///
+    /// This test exists because the failure mode of trial decryption is
+    /// silent: wrong key or type plumbing yields "no notes found", which is
+    /// indistinguishable from an empty mempool and identical to the behaviour
+    /// before pending receipts existed. A test that only asserted "no crash" or
+    /// "empty result" would pass against a completely broken implementation, so
+    /// this one builds a real encrypted output for a known viewing key and
+    /// asserts both that it is detected and that the recovered value is right.
+    #[test]
+    fn pending_receipt_detection_recovers_the_note_value() {
+        use sapling::keys::PreparedIncomingViewingKey;
+        use sapling::note_encryption::{sapling_note_encryption, try_sapling_compact_note_decryption,
+                                       CompactOutputDescription, Zip212Enforcement};
+        use sapling::value::NoteValue;
+        use sapling::{Note, Rseed};
+        use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
+
+        const VALUE: u64 = 123_456_789;
+
+        let mut rng = OsRng;
+        let extsk = sapling::zip32::ExtendedSpendingKey::master(&[0u8; 32]);
+        let extfvk = extsk.to_extended_full_viewing_key();
+        let (_, payment_address) = extfvk.default_address();
+
+        let note = Note::from_parts(
+            payment_address,
+            NoteValue::from_raw(VALUE),
+            Rseed::AfterZip212([0u8; 32]),
+        );
+        let encryptor = sapling_note_encryption(None, note.clone(), [0u8; 512], &mut rng);
+        let enc_ciphertext = encryptor.encrypt_note_plaintext();
+        let epk = sapling::note_encryption::SaplingDomain::epk_bytes(encryptor.epk());
+
+        let compact = CompactOutputDescription {
+            ephemeral_key: epk,
+            cmu: note.cmu(),
+            enc_ciphertext: enc_ciphertext[..COMPACT_NOTE_SIZE]
+                .try_into()
+                .expect("compact prefix is COMPACT_NOTE_SIZE bytes"),
+        };
+
+        let ivk = PreparedIncomingViewingKey::new(&extfvk.fvk.vk.ivk());
+        let (decrypted, _addr) = try_sapling_compact_note_decryption(&ivk, &compact, Zip212Enforcement::On)
+            .expect("a wallet-owned output must trial-decrypt with the wallet's own viewing key");
+
+        assert_eq!(
+            Note::value(&decrypted).inner(),
+            VALUE,
+            "the recovered pending amount must equal the note value, not merely be non-zero"
+        );
+
+        // A different wallet's key must not match, or every mempool output on
+        // the network would be reported as an incoming payment.
+        let other = sapling::zip32::ExtendedSpendingKey::master(&[7u8; 32]).to_extended_full_viewing_key();
+        let other_ivk = PreparedIncomingViewingKey::new(&other.fvk.vk.ivk());
+        assert!(
+            try_sapling_compact_note_decryption(&other_ivk, &compact, Zip212Enforcement::On).is_none(),
+            "an output belonging to another wallet must not decrypt"
+        );
+    }
+}
+
+/// A wallet-owned Sapling output observed in a mempool transaction that the
+/// wallet database has not yet scanned (CRD ch.39 R39.8.0af).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PendingReceipt {
+    /// Transaction identifier, as reported by the backend.
+    pub(crate) txid: [u8; 32],
+    /// Index of the decrypting output within that transaction. Together with
+    /// `txid` this keys the receipt, so repeated observation across polls
+    /// contributes its value at most once (R39.8.0ah).
+    pub(crate) output_index: u32,
+    /// Note value in zatoshi.
+    pub(crate) value: u64,
+}
+
+impl ZCoinShieldedHistory {
+    /// Trial-decrypt the backend's current mempool and return every
+    /// wallet-owned output it contains that the wallet database has not
+    /// already scanned.
+    ///
+    /// Returns an empty set rather than an error when the backend cannot be
+    /// reached or the response is unusable: a pending view is advisory, and
+    /// R39.8.0ai requires it to degrade to zero rather than fail the balance.
+    pub(crate) async fn fetch_pending_receipts(&self, servers: &[String], tip: u64) -> Vec<PendingReceipt> {
+        use sapling::keys::PreparedIncomingViewingKey;
+        use sapling::note::ExtractedNoteCommitment;
+        use sapling::note_encryption::{try_sapling_compact_note_decryption, CompactOutputDescription};
+        use sapling::Note;
+        use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
+        use zcash_primitives::transaction::components::sapling::zip212_enforcement;
+
+        let ivk = PreparedIncomingViewingKey::new(&self.extfvk.fvk.vk.ivk());
+        // Mempool transactions will be mined at the next height at the
+        // earliest, so enforcement is evaluated against the tip.
+        let enforcement = zip212_enforcement(&self.consensus_params, BlockHeight::from_u32(tip as u32));
+
+        for server in servers {
+            let mut client = match Self::connect_lightwalletd(server).await {
+                Ok(client) => client,
+                Err(e) => {
+                    log::debug!("ZCoin mempool poll: {server} unreachable: {e}");
+                    continue;
+                },
+            };
+            let stream = match client.get_mempool_tx(z_coin_grpc::Exclude { txid: Vec::new() }).await {
+                Ok(resp) => resp.into_inner(),
+                Err(e) => {
+                    log::debug!("ZCoin mempool poll: {server} rejected GetMempoolTx: {e}");
+                    continue;
+                },
+            };
+            futures::pin_mut!(stream);
+
+            let mut found = Vec::new();
+            while let Some(tx) = stream.next().await {
+                let tx = match tx {
+                    Ok(tx) => tx,
+                    Err(e) => {
+                        log::debug!("ZCoin mempool poll: stream from {server} ended early: {e}");
+                        break;
+                    },
+                };
+                let txid: [u8; 32] = match tx.hash.as_slice().try_into() {
+                    Ok(hash) => hash,
+                    // A malformed identifier cannot be reconciled against the
+                    // wallet database later, so the entry is unusable.
+                    Err(_) => continue,
+                };
+                for (index, output) in tx.outputs.iter().enumerate() {
+                    let Some(cmu) =
+                        Option::from(ExtractedNoteCommitment::from_bytes(
+                            &match output.cmu.as_slice().try_into() {
+                                Ok(bytes) => bytes,
+                                Err(_) => continue,
+                            },
+                        ))
+                    else {
+                        continue;
+                    };
+                    let epk: [u8; 32] = match output.epk.as_slice().try_into() {
+                        Ok(bytes) => bytes,
+                        Err(_) => continue,
+                    };
+                    let enc_ciphertext: [u8; COMPACT_NOTE_SIZE] = match output.ciphertext.as_slice().try_into() {
+                        Ok(bytes) => bytes,
+                        Err(_) => continue,
+                    };
+                    let description = CompactOutputDescription {
+                        ephemeral_key: EphemeralKeyBytes(epk),
+                        cmu,
+                        enc_ciphertext,
+                    };
+                    if let Some((note, _addr)) = try_sapling_compact_note_decryption(&ivk, &description, enforcement) {
+                        found.push(PendingReceipt {
+                            txid,
+                            output_index: index as u32,
+                            value: Note::value(&note).inner(),
+                        });
+                    }
+                }
+            }
+            return found;
+        }
+
+        Vec::new()
+    }
+
+    /// True when `txid` already has scanned wallet-database state, meaning its
+    /// value is accounted for through normal note accounting and must not also
+    /// be counted as pending (R39.8.0ah).
+    pub(crate) fn transaction_is_scanned(&self, txid: &[u8; 32]) -> Result<bool, String> {
+        let conn = Connection::open_with_flags(&self.wallet_db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| e.to_string())?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transactions WHERE txid = ?1;",
+                params![&txid[..]],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(count > 0)
+    }
 }

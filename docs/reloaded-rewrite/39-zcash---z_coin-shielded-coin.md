@@ -1125,12 +1125,14 @@ balance error.
 
 #### Deferred Work
 
-D39.8.0c Pending shielded receipts (§39.8.0.6) are specified but not yet
-implemented: Light mode reports a zero pending amount unconditionally, so an
-incoming shielded payment is invisible until it is mined and scanned. Closing
-this item requires consuming the dictated `GetMempoolTx` stream described in
-R39.8.0ai and wiring the resulting values into the non-spendable balance only,
-under the double-counting and invalidation constraints of R39.8.0ah.
+D39.8.0c *(Resolved 2026-08-09.)* Pending shielded receipts (§39.8.0.6) are
+implemented. The background sync task polls the dictated `GetMempoolTx` stream
+after each wallet scan, trial-decrypts every compact output with the wallet's
+incoming viewing key, excludes any transaction the wallet database has already
+scanned, and rebuilds the pending set wholesale so a mined, dropped or expired
+transaction disappears without bespoke invalidation. The total surfaces only in
+the non-spendable balance field. Backend failure degrades the pending view to
+zero rather than failing the balance.
 
 ### 39.8.1 Envelope, method string & platform gate
 
