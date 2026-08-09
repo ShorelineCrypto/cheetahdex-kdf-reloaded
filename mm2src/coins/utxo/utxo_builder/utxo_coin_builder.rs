@@ -878,6 +878,14 @@ fn spawn_electrum_version_loop(
                 client_name.clone(),
                 electrum_addr,
             ));
+
+            // A script-hash subscription belongs to a single session, so a
+            // reconnect or a server swap drops it without saying so. Re-arm
+            // every watched hash on each newly connected server rather than
+            // assuming any survived (R38.6.5).
+            if let Some(client) = weak_client.upgrade() {
+                spawn(async move { ElectrumClient(client).resubscribe_watched_scripthashes().await });
+            }
         }
 
         log!("Electrum server.version loop stopped");

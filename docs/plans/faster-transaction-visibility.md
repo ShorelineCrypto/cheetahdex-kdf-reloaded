@@ -222,6 +222,16 @@ acceptance gate for B.
 
 Each stage is independently shippable and independently revertible.
 
+> **Progress (2026-08-09).** Workstream B is complete. In workstream A, the
+> transport and subscription lifecycle have landed — notification routing, the
+> script-hash watcher registry, `subscribe_scripthash` /
+> `resubscribe_watched_scripthashes`, and re-arming on every newly connected
+> server. **Nothing subscribes yet and nothing consumes the wake signal**, so
+> balance updates remain purely poll-driven; stage 4 below is what makes the
+> feature user-visible. That wiring needs per-coin-variant work in the balance
+> streamer (resolving each coin's Electrum client and script pubkey), which is
+> why it was left as its own step rather than rushed alongside the transport.
+
 1. **Refresh-trigger abstraction** + balance streamer awaits it. No behaviour
    change on its own; everything else builds on it.
 2. **A1 + A2** — routing and the scripthash registry, subscriptions created but
