@@ -388,7 +388,7 @@ const BLOCKCHAIN_SCRIPTHASH_SUB_ID: &str = "blockchain.scripthash.subscribe";
 // Threading one through every connection would buy nothing the key does not
 // already give us.
 lazy_static! {
-    static ref SCRIPTHASH_WATCHERS: std::sync::Mutex<HashMap<String, futures_mpsc::UnboundedSender<String>>> =
+    static ref SCRIPTHASH_WATCHERS: std::sync::Mutex<HashMap<String, Vec<futures_mpsc::UnboundedSender<String>>>> =
         std::sync::Mutex::new(HashMap::new());
 }
 
@@ -397,19 +397,37 @@ lazy_static! {
 /// The receiver is a wake signal, not a data feed: it carries the script hash
 /// only so the consumer knows which address to re-read. Balances are always
 /// re-read authoritatively, never inferred from the notification.
+///
+/// More than one consumer may care about the same hash -- the balance streamer
+/// and the transaction-history loop both watch a coin's address -- so watchers
+/// accumulate rather than replace. Storing one sender per hash would let
+/// whichever registered last silently starve the other.
 pub fn watch_scripthash(script_hash: String, sender: futures_mpsc::UnboundedSender<String>) {
     SCRIPTHASH_WATCHERS
         .lock()
         .expect("scripthash watcher registry poisoned")
-        .insert(script_hash, sender);
+        .entry(script_hash)
+        .or_default()
+        .push(sender);
 }
 
-/// Stop watching `script_hash`. Safe to call for an unregistered hash.
+/// Drop any watcher of `script_hash` whose receiver is gone, removing the entry
+/// once none remain. Safe to call for an unregistered hash.
+///
+/// Consumers signal departure by dropping their receiver; this is the sweep
+/// that reclaims the registration. It deliberately does not drop live watchers,
+/// because one consumer going away must not silence the others.
 pub fn unwatch_scripthash(script_hash: &str) {
-    SCRIPTHASH_WATCHERS
-        .lock()
-        .expect("scripthash watcher registry poisoned")
-        .remove(script_hash);
+    let mut watchers = match SCRIPTHASH_WATCHERS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(senders) = watchers.get_mut(script_hash) {
+        senders.retain(|sender| !sender.is_closed());
+        if senders.is_empty() {
+            watchers.remove(script_hash);
+        }
+    }
 }
 
 /// Deliver a status change to whoever registered for it.
@@ -421,8 +439,11 @@ fn notify_scripthash_change(script_hash: &str) {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(sender) = watchers.get(script_hash) {
-        if sender.unbounded_send(script_hash.to_owned()).is_err() {
+    if let Some(senders) = watchers.get_mut(script_hash) {
+        // Departed consumers are pruned as a side effect, so a registration
+        // cannot outlive its receiver for the life of the process.
+        senders.retain(|sender| sender.unbounded_send(script_hash.to_owned()).is_ok());
+        if senders.is_empty() {
             watchers.remove(script_hash);
         }
     }
@@ -1516,6 +1537,46 @@ mod connection_error_tests {
         unwatch_scripthash("aabb");
     }
 
+    /// Two consumers watching the same address must both be woken.
+    ///
+    /// The balance streamer and the transaction-history loop both watch a
+    /// coin's address, so a registry holding one sender per hash would let
+    /// whichever registered second silently starve the first -- a failure that
+    /// looks exactly like "that subsystem just never updates".
+    #[test]
+    fn multiple_watchers_of_one_hash_are_all_woken() {
+        let (tx_a, mut rx_a) = futures_mpsc::unbounded();
+        let (tx_b, mut rx_b) = futures_mpsc::unbounded();
+        watch_scripthash("shared".to_owned(), tx_a);
+        watch_scripthash("shared".to_owned(), tx_b);
+
+        notify_scripthash_change("shared");
+
+        assert_eq!(rx_a.try_next().unwrap(), Some("shared".to_owned()), "first watcher");
+        assert_eq!(rx_b.try_next().unwrap(), Some("shared".to_owned()), "second watcher");
+        unwatch_scripthash("shared");
+    }
+
+    /// One consumer departing must not silence the other.
+    #[test]
+    fn departed_watcher_does_not_silence_its_peer() {
+        let (tx_gone, rx_gone) = futures_mpsc::unbounded();
+        let (tx_live, mut rx_live) = futures_mpsc::unbounded();
+        watch_scripthash("peer".to_owned(), tx_gone);
+        watch_scripthash("peer".to_owned(), tx_live);
+        drop(rx_gone);
+
+        unwatch_scripthash("peer");
+        notify_scripthash_change("peer");
+
+        assert_eq!(
+            rx_live.try_next().unwrap(),
+            Some("peer".to_owned()),
+            "the surviving watcher must still be notified"
+        );
+        unwatch_scripthash("peer");
+    }
+
     /// A notification for a hash nobody registered must be a no-op rather than
     /// an error: servers may push subscriptions we never asked for, and that
     /// must not disturb the connection.
@@ -1547,17 +1608,79 @@ mod connection_error_tests {
         unwatch_scripthash("eeff");
     }
 
-    /// Unwatching stops delivery; a later notification must not resurrect it.
+    /// Unwatching reclaims a departed watcher's registration.
+    ///
+    /// It prunes by receiver liveness rather than by key, because several
+    /// consumers may share a hash and one leaving must not silence the rest.
     #[test]
-    fn unwatch_stops_delivery() {
-        let (tx, mut rx) = futures_mpsc::unbounded();
+    fn unwatch_reclaims_a_departed_watcher() {
+        let (tx, rx) = futures_mpsc::unbounded();
         watch_scripthash("1122".to_owned(), tx);
+        drop(rx);
+
         unwatch_scripthash("1122");
 
+        // With the entry reclaimed, a fresh watcher starts clean and is the
+        // only recipient.
+        let (tx2, mut rx2) = futures_mpsc::unbounded();
+        watch_scripthash("1122".to_owned(), tx2);
         notify_scripthash_change("1122");
+        assert_eq!(rx2.try_next().unwrap(), Some("1122".to_owned()));
+        assert!(rx2.try_next().is_err(), "exactly one delivery, not a duplicate");
+        unwatch_scripthash("1122");
+    }
 
-        // Unwatching drops the registry's sender, which closes the channel, so
-        // the receiver reports end-of-stream rather than a delivered message.
-        assert_eq!(rx.try_next(), Ok(None), "an unwatched hash must not be delivered");
+    /// Stress the watcher registry far past any realistic wallet, to answer
+    /// whether a subscription cap is needed.
+    ///
+    /// Realistic worst case today is one subscription per activated
+    /// Electrum-backed coin, because the balance streamer watches a single
+    /// address per coin. This registers three orders of magnitude more and
+    /// asserts both correctness and that the work stays trivial, so the
+    /// no-cap decision rests on a measurement rather than an assumption.
+    #[test]
+    fn watcher_registry_handles_far_more_than_any_realistic_wallet() {
+        use std::time::Instant;
+
+        const COUNT: usize = 10_000;
+
+        let mut receivers = Vec::with_capacity(COUNT);
+        let hashes: Vec<String> = (0..COUNT).map(|i| format!("stress{i:059}")).collect();
+
+        let registered = Instant::now();
+        for hash in &hashes {
+            let (tx, rx) = futures_mpsc::unbounded();
+            watch_scripthash(hash.clone(), tx);
+            receivers.push(rx);
+        }
+        let register_elapsed = registered.elapsed();
+
+        let notified = Instant::now();
+        for hash in &hashes {
+            notify_scripthash_change(hash);
+        }
+        let notify_elapsed = notified.elapsed();
+
+        // Every watcher must receive exactly its own hash: a registry that
+        // collapsed or cross-wired entries under load would be worse than one
+        // that simply refused the work.
+        for (rx, hash) in receivers.iter_mut().zip(hashes.iter()) {
+            assert_eq!(rx.try_next().unwrap(), Some(hash.clone()));
+        }
+
+        for hash in &hashes {
+            unwatch_scripthash(hash);
+        }
+
+        // Generous bounds: the point is to catch a pathological cost such as a
+        // per-notification scan of the whole registry, not to benchmark.
+        assert!(
+            register_elapsed.as_millis() < 2_000,
+            "registering {COUNT} watchers took {register_elapsed:?}"
+        );
+        assert!(
+            notify_elapsed.as_millis() < 2_000,
+            "notifying {COUNT} watchers took {notify_elapsed:?}"
+        );
     }
 }

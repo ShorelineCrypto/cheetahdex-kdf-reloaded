@@ -229,11 +229,12 @@ Each stage is independently shippable and independently revertible.
 > address and racing notifications against the poll deadline. Workstream B
 > landed as mempool-derived pending receipts.
 >
-> Still open from the plan: the subscription cap for HD wallets (open decision
-> 1), the QRC20 trigger question (open decision 2), and whether the wake should
-> also drive transaction-history refresh (open decision 3). Coverage is
-> Electrum-backed UTXO, QTUM and BCH; EVM and ZHTLC remain out of scope for push
-> for the reasons given above.
+> Open decision 3 (history refresh) is resolved: the history loop now wakes on
+> the same signal. Open decision 1 (subscription cap) is resolved as **no cap** —
+> the streamer watches one address per coin and `my_address()` is unavailable for
+> HD derivation, so the realistic maximum is one subscription per activated
+> Electrum coin; a 10,000-watcher stress test registers and notifies in
+> milliseconds. Open decision 2 (QRC20 trigger) remains.
 
 1. **Refresh-trigger abstraction** + balance streamer awaits it. No behaviour
    change on its own; everything else builds on it.

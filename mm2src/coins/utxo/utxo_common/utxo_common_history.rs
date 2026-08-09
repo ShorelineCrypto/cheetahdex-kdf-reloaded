@@ -35,6 +35,33 @@ where
         .map(|tx| (H256Json::from(tx.tx_hash.as_bytes()), tx))
         .collect();
 
+    // Watch this coin's address so a confirmed transaction shortens the wait
+    // below instead of costing a full idle interval. Electrum-backed coins only;
+    // a native-RPC coin has nothing to subscribe to and keeps pure polling.
+    let (wake_tx, mut wake_rx) = futures::channel::mpsc::unbounded::<String>();
+    let watched_script_hash = match (&coin.as_ref().rpc_client, coin.as_ref().derivation_method.iguana()) {
+        (UtxoRpcClientEnum::Electrum(electrum), Some(address)) => {
+            let script_hash = hex::encode(electrum_script_hash(&output_script(&address, ScriptType::P2PKH)));
+            match electrum.subscribe_scripthash(script_hash.clone()).await {
+                Ok(()) => {
+                    crate::utxo::rpc_clients::watch_scripthash(script_hash.clone(), wake_tx);
+                    Some(script_hash)
+                },
+                // Losing the subscription only costs latency: the idle wait
+                // below still expires on its own.
+                Err(e) => {
+                    common::log::debug!(
+                        "tx_history for {}: script-hash subscription unavailable ({}); polling only",
+                        coin.as_ref().conf.ticker,
+                        e
+                    );
+                    None
+                },
+            }
+        },
+        _ => None,
+    };
+
     let mut success_iteration = 0i32;
     loop {
         if ctx.is_stopping() {
@@ -45,6 +72,10 @@ where
             let coins = coins_ctx.coins.lock().await;
             if !coins.contains_key(&coin.as_ref().conf.ticker) {
                 log_tag!(ctx, "", "tx_history", "coin" => coin.as_ref().conf.ticker; fmt = "Loop stopped");
+                if let Some(ref script_hash) = watched_script_hash {
+                    wake_rx.close();
+                    crate::utxo::rpc_clients::unwatch_scripthash(script_hash);
+                }
                 break;
             };
         }
@@ -66,8 +97,19 @@ where
         let need_update = history_map.iter().any(|(_, tx)| tx.should_update());
         match (&my_balance, &actual_balance) {
             (Some(prev_balance), Some(actual_balance)) if prev_balance == actual_balance && !need_update => {
-                // my balance hasn't been changed, there is no need to reload tx_history
-                Timer::sleep(30.).await;
+                // Balance unchanged, so there is nothing to reload yet. Wait for
+                // the idle interval or for a server to report that the watched
+                // address moved, whichever comes first; the balance is re-read
+                // at the top of the loop either way, so the notification only
+                // decides *when* to look, never *what* is true.
+                let idle = Timer::sleep(30.);
+                futures::pin_mut!(idle);
+                let woken = futures::StreamExt::next(&mut wake_rx);
+                futures::pin_mut!(woken);
+                if let futures::future::Either::Right(_) = futures::future::select(idle, woken).await {
+                    // Collapse a burst into one pass.
+                    while wake_rx.try_next().is_ok() {}
+                }
                 continue;
             },
             _ => (),

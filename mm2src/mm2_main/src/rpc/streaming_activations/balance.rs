@@ -310,6 +310,11 @@ impl EventStreamer for BalanceEventStreamer {
                 },
                 Either::Right(_) => {
                     if let Some(script_hash) = subscribed_script_hash.take() {
+                        // Drop the receiver first: the registry prunes by
+                        // receiver liveness, so closing ours is what actually
+                        // releases the registration. Other consumers watching
+                        // the same address keep theirs.
+                        wake_rx.close();
                         coins::utxo::rpc_clients::unwatch_scripthash(&script_hash);
                     }
                     break;
