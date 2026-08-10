@@ -379,6 +379,18 @@ impl Deref for ElectrumClient {
 
 const BLOCKCHAIN_HEADERS_SUB_ID: &str = "blockchain.headers.subscribe";
 const BLOCKCHAIN_SCRIPTHASH_SUB_ID: &str = "blockchain.scripthash.subscribe";
+const BLOCKCHAIN_CONTRACT_EVENT_SUB_ID: &str = "blockchain.contract.event.subscribe";
+
+/// Registry key for a Qtum contract-event subscription.
+///
+/// A QRC20 balance lives in contract storage rather than in the address's UTXO
+/// set, so a token transfer need not change the QTUM address's script hash and
+/// cannot be observed through a script-hash subscription. Contract events are
+/// therefore watched per (address, contract, topic) triple rather than per
+/// address, and share the same registry by carrying a distinct key.
+pub fn contract_event_key(address_hash160: &str, contract_addr: &str, topic: &str) -> String {
+    format!("contract:{address_hash160}:{contract_addr}:{topic}")
+}
 
 // Script hash -> the party that asked for it to be watched.
 //
@@ -999,6 +1011,21 @@ async fn electrum_process_json(raw_json: Json, arc: &JsonRpcPendingRequestsShare
                 }
                 return;
             }
+            // A contract-event notification echoes the subscription's own
+            // arguments, so the registry key is rebuilt from them exactly as it
+            // was built when subscribing.
+            if req.method == BLOCKCHAIN_CONTRACT_EVENT_SUB_ID {
+                let arg = |i: usize| req.params.get(i).and_then(|p| p.as_str());
+                if let (Some(address), Some(contract), Some(topic)) = (arg(0), arg(1), arg(2)) {
+                    notify_scripthash_change(&contract_event_key(address, contract, topic));
+                } else {
+                    common::log::debug!(
+                        "Contract-event notification with unexpected parameters: {:?}",
+                        req.params
+                    );
+                }
+                return;
+            }
             let id = match req.method.as_ref() {
                 BLOCKCHAIN_HEADERS_SUB_ID => BLOCKCHAIN_HEADERS_SUB_ID,
                 // Unknown subscription kinds are ignored rather than treated as
@@ -1522,7 +1549,7 @@ mod connection_error_tests {
         ));
     }
 
-    use super::{futures_mpsc, notify_scripthash_change, unwatch_scripthash, watch_scripthash};
+    use super::{contract_event_key, futures_mpsc, notify_scripthash_change, unwatch_scripthash, watch_scripthash};
 
     /// A registered watcher is woken with the hash that changed, so the
     /// consumer knows which address to re-read.
@@ -1628,6 +1655,51 @@ mod connection_error_tests {
         assert_eq!(rx2.try_next().unwrap(), Some("1122".to_owned()));
         assert!(rx2.try_next().is_err(), "exactly one delivery, not a duplicate");
         unwatch_scripthash("1122");
+    }
+
+    /// Contract-event keys are distinct from script-hash keys for the same
+    /// address, so a QRC20 token and its platform coin do not collide.
+    ///
+    /// A QRC20 balance lives in contract storage; if both keyed on the address
+    /// alone, a token notification would wake the platform coin's watcher and
+    /// vice versa, and one would displace the other at registration.
+    #[test]
+    fn contract_event_and_scripthash_keys_do_not_collide() {
+        let address = "abcd";
+        let event_key = contract_event_key(address, "contract1", "topic1");
+        assert_ne!(
+            event_key, address,
+            "a contract-event key must not equal the bare address"
+        );
+
+        let (tx_addr, mut rx_addr) = futures_mpsc::unbounded();
+        let (tx_event, mut rx_event) = futures_mpsc::unbounded();
+        watch_scripthash(address.to_owned(), tx_addr);
+        watch_scripthash(event_key.clone(), tx_event);
+
+        notify_scripthash_change(&event_key);
+
+        assert_eq!(
+            rx_event.try_next().unwrap(),
+            Some(event_key.clone()),
+            "token watcher woken"
+        );
+        assert!(
+            rx_addr.try_next().is_err(),
+            "the platform coin's watcher must not be woken"
+        );
+
+        unwatch_scripthash(address);
+        unwatch_scripthash(&event_key);
+    }
+
+    /// Different tokens held at the same address must key differently, or one
+    /// token's transfer would be reported as another's.
+    #[test]
+    fn contract_event_keys_differ_per_token() {
+        let a = contract_event_key("addr", "token_a", "topic");
+        let b = contract_event_key("addr", "token_b", "topic");
+        assert_ne!(a, b);
     }
 
     /// Stress the watcher registry far past any realistic wallet, to answer

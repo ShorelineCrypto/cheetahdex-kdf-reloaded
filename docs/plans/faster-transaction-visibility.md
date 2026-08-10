@@ -229,12 +229,13 @@ Each stage is independently shippable and independently revertible.
 > address and racing notifications against the poll deadline. Workstream B
 > landed as mempool-derived pending receipts.
 >
-> Open decision 3 (history refresh) is resolved: the history loop now wakes on
-> the same signal. Open decision 1 (subscription cap) is resolved as **no cap** —
-> the streamer watches one address per coin and `my_address()` is unavailable for
-> HD derivation, so the realistic maximum is one subscription per activated
-> Electrum coin; a 10,000-watcher stress test registers and notifies in
-> milliseconds. Open decision 2 (QRC20 trigger) remains.
+> All three open decisions are resolved. History refresh (3): the history loop
+> wakes on the same signal. Subscription cap (1): **no cap** — an Iguana wallet
+> contributes one subscription per activated Electrum coin, an HD wallet one per
+> known address, and a 10,000-watcher stress test registers and notifies in
+> milliseconds, so the ceiling is orders of magnitude above any real wallet.
+> QRC20 trigger (2): per-token contract-event subscription, because a token
+> balance is contract storage and need not disturb the holder's UTXOs.
 
 1. **Refresh-trigger abstraction** + balance streamer awaits it. No behaviour
    change on its own; everything else builds on it.

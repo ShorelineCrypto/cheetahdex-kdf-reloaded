@@ -398,3 +398,44 @@ where
 
     Ok(WithdrawSenderAddress::from(hd_address))
 }
+
+/// Every address the HD wallet currently knows about, across all activated
+/// accounts and both BIP44 chains.
+///
+/// Used to subscribe an HD wallet's addresses for push notifications. Without
+/// this an HD wallet gets no subscriptions at all, because the single-address
+/// accessor the Iguana path uses is unavailable under HD derivation — the whole
+/// wallet silently falls back to polling.
+///
+/// The set is bounded by the accounts' own known-address counts, i.e. the same
+/// addresses the balance already sums, so it never derives beyond what the
+/// wallet already tracks.
+pub async fn all_known_hd_addresses<T>(coin: &T) -> Vec<T::Address>
+where
+    T: HDWalletBalanceOps<HDAccount = UtxoHDAccount> + AsRef<UtxoCoinFields> + Sync,
+    T::Address: Clone,
+{
+    let fields: &UtxoCoinFields = coin.as_ref();
+    let hd_wallet = match fields.derivation_method.hd_wallet() {
+        Some(hd_wallet) => hd_wallet,
+        None => return Vec::new(),
+    };
+
+    let mut addresses = Vec::new();
+    for (_, account) in hd_wallet.get_accounts().await {
+        for chain in [Bip44Chain::External, Bip44Chain::Internal] {
+            let known = match account.known_addresses_number(chain) {
+                Ok(known) => known,
+                // A coin that does not support this chain simply contributes
+                // nothing; it is not an error for the caller.
+                Err(_) => continue,
+            };
+            for address_id in 0..known {
+                if let Ok(derived) = coin.derive_address(&account, chain, address_id) {
+                    addresses.push(derived.address);
+                }
+            }
+        }
+    }
+    addresses
+}
