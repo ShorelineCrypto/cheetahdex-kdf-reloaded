@@ -338,21 +338,34 @@ impl EventStreamer for BalanceEventStreamer {
             // Whichever comes first: the poll deadline, or a server telling us
             // the address changed. The timer is retained as the correctness
             // floor, so a subscription that silently dies costs latency only.
-            let tick = async {
-                let sleep = Timer::sleep(interval_secs);
-                futures::pin_mut!(sleep);
-                let woken = wake_rx.next();
-                futures::pin_mut!(woken);
-                match select(sleep, woken).await {
-                    Either::Left(_) => {},
-                    // Drain anything that arrived while we were busy so a burst
-                    // of notifications collapses into a single refresh.
-                    Either::Right(_) => while wake_rx.try_next().is_ok() {},
+            //
+            // The race is confined to this block so that the borrow `tick`
+            // takes on `wake_rx` ends before the arms below run — one of them
+            // closes the receiver, and holding the borrow across the match is
+            // rejected on some targets even where the host accepts it.
+            let notified = {
+                let tick = async {
+                    let sleep = Timer::sleep(interval_secs);
+                    futures::pin_mut!(sleep);
+                    let woken = wake_rx.next();
+                    futures::pin_mut!(woken);
+                    matches!(select(sleep, woken).await, Either::Right(_))
+                };
+                let tick = core::pin::pin!(tick);
+                match select(tick, &mut shutdown).await {
+                    Either::Left((notified, _)) => Some(notified),
+                    Either::Right(_) => None,
                 }
             };
-            let tick = core::pin::pin!(tick);
-            match select(tick, &mut shutdown).await {
-                Either::Left(_) => {
+
+            // Drain anything that arrived while we were busy so a burst of
+            // notifications collapses into a single refresh.
+            if notified == Some(true) {
+                while wake_rx.try_next().is_ok() {}
+            }
+
+            match notified {
+                Some(_) => {
                     match watched_balance(&coin, &watched_address).await {
                         Ok(balance) => {
                             let spendable = balance.spendable.to_string();
@@ -400,7 +413,7 @@ impl EventStreamer for BalanceEventStreamer {
                         },
                     }
                 },
-                Either::Right(_) => {
+                None => {
                     if !subscribed_keys.is_empty() {
                         // Drop the receiver first: the registry prunes by
                         // receiver liveness, so closing ours is what actually
