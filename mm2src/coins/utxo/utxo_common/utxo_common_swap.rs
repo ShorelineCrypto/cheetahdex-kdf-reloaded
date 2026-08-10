@@ -51,13 +51,30 @@ where
     ));
 
     let outputs = try_tx_fus!(generate_taker_fee_tx_outputs(&coin, dex_fee, &fee_address));
-    send_outputs_from_my_address(coin, outputs)
+    match taker_fee_allowed_underdust_output(dex_fee) {
+        Some(output_index) => send_outputs_from_my_address_with_underdust_output(coin, outputs, output_index),
+        None => send_outputs_from_my_address(coin, outputs),
+    }
+}
+
+/// The stable netid-8762 KMD implementation applies dust to the unsplit DEX
+/// fee, then preserves both positive 75/25 split legs on the wire. Therefore
+/// only the fee-collection output of that exact descriptor may bypass the
+/// generic per-output dust check.
+pub(crate) fn taker_fee_allowed_underdust_output(dex_fee: &DexFee) -> Option<usize> {
+    match dex_fee {
+        DexFee::WithBurn {
+            burn_destination: DexFeeBurnDestination::KmdOpReturn,
+            ..
+        } => Some(DEFAULT_FEE_VOUT),
+        DexFee::NoFee | DexFee::Standard(_) | DexFee::WithBurn { .. } => None,
+    }
 }
 
 /// Builds the transaction outputs for a taker fee payment.
 ///
 /// Returns 0 outputs for `NoFee`, 1 for `Standard`, or 2 for `WithBurn`.
-fn generate_taker_fee_tx_outputs(
+pub(crate) fn generate_taker_fee_tx_outputs(
     coin: &impl UtxoCommonOps,
     dex_fee: &DexFee,
     fee_address: &Address,

@@ -37,6 +37,23 @@ where
     Box::new(fut.boxed().compat().map(|tx| tx.into()))
 }
 
+/// Sends outputs while allowing one protocol-defined output to bypass the
+/// generic spendable-output dust check.
+///
+/// This is intentionally crate-private and is used only by the legacy KMD
+/// direct-burn taker-fee path. Change handling still uses the coin's dust.
+pub(crate) fn send_outputs_from_my_address_with_underdust_output<T>(
+    coin: T,
+    outputs: Vec<TransactionOutput>,
+    output_index: usize,
+) -> TransactionFut
+where
+    T: UtxoCommonOps + GetUtxoListOps,
+{
+    let fut = send_outputs_from_my_address_impl_with_underdust_output(coin, outputs, Some(output_index));
+    Box::new(fut.boxed().compat().map(|tx| tx.into()))
+}
+
 pub fn tx_size_in_v_bytes(from_addr_format: &UtxoAddressFormat, tx: &UtxoTx) -> usize {
     let transaction_bytes = serialize(tx);
     // 2 bytes are used to indicate the length of signature and pubkey
@@ -84,6 +101,7 @@ pub struct UtxoTxBuilder<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> {
     tx_fee: u64,
     min_relay_fee: Option<u64>,
     dust: Option<u64>,
+    allowed_underdust_output: Option<usize>,
 }
 
 impl<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> UtxoTxBuilder<'a, T> {
@@ -102,6 +120,7 @@ impl<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> UtxoTxBuilder<'a, T> {
             tx_fee: 0,
             min_relay_fee: None,
             dust: None,
+            allowed_underdust_output: None,
         }
     }
 
@@ -112,6 +131,16 @@ impl<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> UtxoTxBuilder<'a, T> {
 
     pub fn with_dust(mut self, dust_amount: u64) -> Self {
         self.dust = Some(dust_amount);
+        self
+    }
+
+    /// Permits one protocol-defined output to be positive but below the
+    /// generic spendable-output dust threshold.
+    ///
+    /// This does not change the dust threshold used for any other output or
+    /// for change construction.
+    pub(crate) fn allow_underdust_output(mut self, output_index: usize) -> Self {
+        self.allowed_underdust_output = Some(output_index);
         self
     }
 
@@ -253,13 +282,17 @@ impl<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> UtxoTxBuilder<'a, T> {
         true_or!(!self.tx.outputs.is_empty(), GenerateTxError::EmptyOutputs);
 
         let mut received_by_me = 0;
-        for output in self.tx.outputs.iter() {
+        for (output_index, output) in self.tx.outputs.iter().enumerate() {
             let script: Script = output.script_pubkey.clone().into();
+            let is_allowed_underdust_output = self.allowed_underdust_output == Some(output_index);
             if script.opcodes().next() != Some(Ok(Opcode::OP_RETURN)) {
-                true_or!(output.value >= dust, GenerateTxError::OutputValueLessThanDust {
-                    value: output.value,
-                    dust
-                });
+                true_or!(
+                    output.value >= dust || (is_allowed_underdust_output && output.value > 0),
+                    GenerateTxError::OutputValueLessThanDust {
+                        value: output.value,
+                        dust
+                    }
+                );
             }
             self.sum_outputs_value += output.value;
             if output.script_pubkey == change_script_pubkey {

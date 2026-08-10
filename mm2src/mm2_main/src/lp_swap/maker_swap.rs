@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use uuid::Uuid;
 
-pub const MAKER_SUCCESS_EVENTS: [&str; 12] = [
+pub const MAKER_SUCCESS_EVENTS: [&str; 14] = [
     "Started",
     "Negotiated",
     "MakerPaymentInstructionsReceived",
@@ -50,6 +50,8 @@ pub const MAKER_SUCCESS_EVENTS: [&str; 12] = [
     "TakerPaymentSpent",
     "TakerPaymentSpendConfirmStarted",
     "TakerPaymentSpendConfirmed",
+    "MakerPaymentRefundStarted",
+    "MakerPaymentRefundFinished",
     "Finished",
 ];
 
@@ -258,8 +260,10 @@ impl MakerSwap {
             MakerSwapEvent::TakerPaymentSpendConfirmed => self.w().taker_payment_spend_confirmed = true,
             MakerSwapEvent::TakerPaymentSpendConfirmFailed(err) => self.errors.lock().push(err),
             MakerSwapEvent::MakerPaymentWaitRefundStarted { .. } => (),
+            MakerSwapEvent::MakerPaymentRefundStarted => (),
             MakerSwapEvent::MakerPaymentRefunded(tx) => self.w().maker_payment_refund = Some(tx),
             MakerSwapEvent::MakerPaymentRefundFailed(err) => self.errors.lock().push(err),
+            MakerSwapEvent::MakerPaymentRefundFinished => (),
             MakerSwapEvent::Finished => self.finished_at.store(now_ms() / 1000, Ordering::Relaxed),
         }
     }
@@ -1345,12 +1349,11 @@ pub enum MakerSwapEvent {
     TakerPaymentSpendConfirmStarted,
     TakerPaymentSpendConfirmed,
     TakerPaymentSpendConfirmFailed(SwapError),
-    #[serde(alias = "MakerPaymentRefundStarted")]
-    MakerPaymentWaitRefundStarted {
-        wait_until: u64,
-    },
+    MakerPaymentWaitRefundStarted { wait_until: u64 },
+    MakerPaymentRefundStarted,
     MakerPaymentRefunded(TransactionIdentifier),
     MakerPaymentRefundFailed(SwapError),
+    MakerPaymentRefundFinished,
     Finished,
 }
 
@@ -1379,12 +1382,11 @@ enum MakerSwapEventDeser {
     TakerPaymentSpendConfirmStarted,
     TakerPaymentSpendConfirmed,
     TakerPaymentSpendConfirmFailed(SwapError),
-    #[serde(alias = "MakerPaymentRefundStarted")]
-    MakerPaymentWaitRefundStarted {
-        wait_until: u64,
-    },
+    MakerPaymentWaitRefundStarted { wait_until: u64 },
+    MakerPaymentRefundStarted,
     MakerPaymentRefunded(TransactionIdentifier),
     MakerPaymentRefundFailed(SwapError),
+    MakerPaymentRefundFinished,
     Finished,
 }
 
@@ -1425,8 +1427,10 @@ impl From<MakerSwapEventDeser> for MakerSwapEvent {
             MakerSwapEventDeser::MakerPaymentWaitRefundStarted { wait_until } => {
                 MakerSwapEvent::MakerPaymentWaitRefundStarted { wait_until }
             },
+            MakerSwapEventDeser::MakerPaymentRefundStarted => MakerSwapEvent::MakerPaymentRefundStarted,
             MakerSwapEventDeser::MakerPaymentRefunded(tx) => MakerSwapEvent::MakerPaymentRefunded(tx),
             MakerSwapEventDeser::MakerPaymentRefundFailed(err) => MakerSwapEvent::MakerPaymentRefundFailed(err),
+            MakerSwapEventDeser::MakerPaymentRefundFinished => MakerSwapEvent::MakerPaymentRefundFinished,
             MakerSwapEventDeser::Finished => MakerSwapEvent::Finished,
         }
     }
@@ -1439,6 +1443,19 @@ impl<'de> Deserialize<'de> for MakerSwapEvent {
     {
         let value = Json::deserialize(deserializer)?;
         match value.get("type").and_then(Json::as_str) {
+            // Some historical writers used the refund-start tag with the wait milestone payload.
+            // Preserve that deadline when present, while accepting the canonical unit event too.
+            Some("MakerPaymentRefundStarted") => {
+                if let Some(wait_until) = value
+                    .get("data")
+                    .and_then(|data| data.get("wait_until"))
+                    .and_then(Json::as_u64)
+                {
+                    return Ok(MakerSwapEvent::MakerPaymentWaitRefundStarted { wait_until });
+                }
+                return Ok(MakerSwapEvent::MakerPaymentRefundStarted);
+            },
+            Some("MakerPaymentRefundFinished") => return Ok(MakerSwapEvent::MakerPaymentRefundFinished),
             Some("MakerPaymentInstructionsReceived") if value.get("data").is_none() => {
                 return Ok(MakerSwapEvent::MakerPaymentInstructionsReceived(None));
             },
@@ -1458,6 +1475,26 @@ mod maker_event_deser_tests {
     fn payment_instructions_received_accepts_missing_data() {
         let event: MakerSwapEvent = json::from_str(r#"{"type":"MakerPaymentInstructionsReceived"}"#).unwrap();
         assert_eq!(event, MakerSwapEvent::MakerPaymentInstructionsReceived(None));
+    }
+
+    #[test]
+    fn refund_milestones_accept_missing_data() {
+        let started: MakerSwapEvent = json::from_str(r#"{"type":"MakerPaymentRefundStarted"}"#).unwrap();
+        assert_eq!(started, MakerSwapEvent::MakerPaymentRefundStarted);
+
+        let started_with_null: MakerSwapEvent =
+            json::from_str(r#"{"type":"MakerPaymentRefundStarted","data":null}"#).unwrap();
+        assert_eq!(started_with_null, MakerSwapEvent::MakerPaymentRefundStarted);
+
+        let finished: MakerSwapEvent = json::from_str(r#"{"type":"MakerPaymentRefundFinished"}"#).unwrap();
+        assert_eq!(finished, MakerSwapEvent::MakerPaymentRefundFinished);
+    }
+
+    #[test]
+    fn refund_started_preserves_historical_wait_deadline() {
+        let event: MakerSwapEvent =
+            json::from_str(r#"{"type":"MakerPaymentRefundStarted","data":{"wait_until":2}}"#).unwrap();
+        assert_eq!(event, MakerSwapEvent::MakerPaymentWaitRefundStarted { wait_until: 2 });
     }
 }
 
@@ -1492,8 +1529,10 @@ impl MakerSwapEvent {
             MakerSwapEvent::MakerPaymentWaitRefundStarted { wait_until } => {
                 format!("Maker payment wait refund till {} started...", wait_until)
             },
+            MakerSwapEvent::MakerPaymentRefundStarted => "Maker payment refund started...".to_owned(),
             MakerSwapEvent::MakerPaymentRefunded(_) => "Maker payment refunded...".to_owned(),
             MakerSwapEvent::MakerPaymentRefundFailed(_) => "Maker payment refund failed...".to_owned(),
+            MakerSwapEvent::MakerPaymentRefundFinished => "Maker payment refund finished...".to_owned(),
             MakerSwapEvent::Finished => "Finished".to_owned(),
         }
     }
@@ -1519,6 +1558,8 @@ impl MakerSwapEvent {
                 | MakerSwapEvent::TakerPaymentSpent(_)
                 | MakerSwapEvent::TakerPaymentSpendConfirmStarted
                 | MakerSwapEvent::TakerPaymentSpendConfirmed
+                | MakerSwapEvent::MakerPaymentRefundStarted
+                | MakerSwapEvent::MakerPaymentRefundFinished
                 | MakerSwapEvent::Finished
         )
     }
@@ -1558,8 +1599,10 @@ impl MakerSavedEvent {
             MakerSwapEvent::TakerPaymentSpendConfirmed => Some(MakerSwapCommand::Finish),
             MakerSwapEvent::TakerPaymentSpendConfirmFailed(_) => Some(MakerSwapCommand::RefundMakerPayment),
             MakerSwapEvent::MakerPaymentWaitRefundStarted { .. } => Some(MakerSwapCommand::RefundMakerPayment),
+            MakerSwapEvent::MakerPaymentRefundStarted => Some(MakerSwapCommand::RefundMakerPayment),
             MakerSwapEvent::MakerPaymentRefunded(_) => Some(MakerSwapCommand::Finish),
             MakerSwapEvent::MakerPaymentRefundFailed(_) => Some(MakerSwapCommand::Finish),
+            MakerSwapEvent::MakerPaymentRefundFinished => Some(MakerSwapCommand::Finish),
             MakerSwapEvent::Finished => None,
         }
     }
@@ -2159,17 +2202,6 @@ mod maker_swap_tests {
     }
 
     #[test]
-    fn maker_swap_event_accepts_legacy_refund_started_name() {
-        let event: MakerSavedEvent =
-            json::from_str(r#"{"timestamp":1,"event":{"type":"MakerPaymentRefundStarted","data":{"wait_until":2}}}"#)
-                .expect("legacy maker refund event must deserialize");
-
-        assert_eq!(event.event, MakerSwapEvent::MakerPaymentWaitRefundStarted {
-            wait_until: 2
-        });
-    }
-
-    #[test]
     fn test_recover_funds_maker_swap_payment_errored_but_sent() {
         // the swap ends up with MakerPaymentTransactionFailed error but the transaction is actually
         // sent, need to find it and refund
@@ -2602,7 +2634,7 @@ mod maker_swap_tests {
 
         assert_eq!(unsafe { SWAP_CONTRACT_ADDRESS_CALLED }, 1);
         let expected_addr = addr_from_str("0xa09ad3cd7e96586ebd05a2607ee56b56fb2db8fd").unwrap();
-        let expected = BytesJson::from(expected_addr.0.as_ref());
+        let expected = BytesJson::from(&expected_addr.0[..]);
         assert_eq!(maker_swap.r().data.maker_coin_swap_contract_address, Some(expected));
         assert_eq!(
             maker_swap.r().data.taker_coin_swap_contract_address,

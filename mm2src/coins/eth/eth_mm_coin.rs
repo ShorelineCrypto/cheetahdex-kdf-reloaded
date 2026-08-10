@@ -301,11 +301,11 @@ impl MmCoin for EthCoin {
         };
 
         // `estimate_gas` reverts (e.g. Geth `-32016 "The execution failed due to an
-        // exception."`) when the wallet cannot afford the transfer it is asked to
-        // preimage. The exact RPC error text is provider-specific, so instead of
-        // matching it we check the actual balance: if it cannot cover the amount
-        // being sent, surface a precise `NotSufficientBalance`; otherwise the failure
-        // is unrelated and the original error is propagated unchanged.
+        // exception."`, BSC `-32000 "gas required exceeds allowance (0)"`) when the
+        // wallet cannot afford what it is asked to preimage. The exact RPC error text
+        // is provider-specific, so instead of matching it we check the actual
+        // balances and report whichever one falls short; any other failure is
+        // propagated unchanged.
         let gas_limit = match self.estimate_gas(estimate_gas_req).compat().await {
             Ok(gas_limit) => gas_limit,
             Err(estimate_err) => {
@@ -323,6 +323,31 @@ impl MmCoin for EthCoin {
                         required,
                     });
                 }
+
+                // The wallet can hold plenty of the coin being sent and still be
+                // unable to move it, because gas is paid in the platform coin. That
+                // is the case the provider error explains least ("gas required
+                // exceeds allowance (0)"), so check it explicitly. Reporting the
+                // shortfall against `fee_coin` is what makes it actionable: when that
+                // ticker differs from the traded one, callers map it onto
+                // `NotSufficientBaseCoinBalance` ("not enough base coin BNB") and
+                // treat the pair as having zero tradable volume instead of failing
+                // the whole RPC.
+                //
+                // A failure to read that balance must not mask the original error, so
+                // it only ever downgrades to propagating `estimate_err` below.
+                if let Ok(platform_balance) = self.base_coin_balance().compat().await {
+                    let min_gas_fee = u256_to_big_decimal(U256::from(MIN_TX_GAS_LIMIT) * gas_price, ETH_DECIMALS)
+                        .mm_err(Into::into)?;
+                    if platform_balance < min_gas_fee {
+                        return MmError::err(TradePreimageError::NotSufficientBalance {
+                            coin: fee_coin.to_string(),
+                            available: platform_balance,
+                            required: min_gas_fee,
+                        });
+                    }
+                }
+
                 return Err(estimate_err).mm_err(TradePreimageError::from);
             },
         };
@@ -348,9 +373,7 @@ impl MmCoin for EthCoin {
         log!("Warning: set_requires_notarization doesn't take any effect on ETH/ERC20 coins");
     }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        Some(BytesJson::from(self.swap_contract_address.0.as_ref()))
-    }
+    fn swap_contract_address(&self) -> Option<BytesJson> { Some(BytesJson::from(&self.swap_contract_address.0[..])) }
 
     fn mature_confirmations(&self) -> Option<u32> { None }
 
