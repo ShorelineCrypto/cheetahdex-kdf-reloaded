@@ -1,5 +1,7 @@
 use super::*;
+use futures::channel::mpsc as futures_mpsc;
 use script::Script;
+use std::collections::{HashMap, HashSet};
 
 // Response/request data types and the `electrum_script_hash` helper live in
 // the sibling `electrum_types` module (carved out via P13.5 follow-up to keep
@@ -56,8 +58,10 @@ pub fn spawn_electrum(
                 skip_validation: req.disable_cert_verification,
             }
         },
+        // Not a missing feature: 'ws'/'wss' are the browser/WASM transport, the same
+        // way 'TCP'/'SSL' are rejected by the WASM client below.
         ElectrumProtocol::WS | ElectrumProtocol::WSS => {
-            return ERR!("'ws' and 'wss' protocols are not supported yet. Consider using 'TCP' or 'SSL'")
+            return ERR!("'ws' and 'wss' are browser-only Electrum protocols and cannot be used by a native node. Use 'TCP' or 'SSL'")
         },
     };
 
@@ -201,6 +205,13 @@ pub struct ElectrumClientImpl {
     protocol_version: OrdRange<f32>,
     get_balance_concurrent_map: ConcurrentRequestMap<String, ElectrumBalance>,
     list_unspent_concurrent_map: ConcurrentRequestMap<String, Vec<ElectrumUnspent>>,
+    /// Script hashes this client has asked its servers to watch (R38.6.5).
+    ///
+    /// Held so every subscription can be re-established on a newly connected
+    /// server: a subscription belongs to one TCP session, so a reconnect or a
+    /// server swap silently drops it. Nothing may assume a subscription
+    /// survived either event.
+    watched_script_hashes: AsyncMutex<HashSet<String>>,
 }
 
 async fn electrum_request_multi(
@@ -367,6 +378,55 @@ impl Deref for ElectrumClient {
 }
 
 const BLOCKCHAIN_HEADERS_SUB_ID: &str = "blockchain.headers.subscribe";
+const BLOCKCHAIN_SCRIPTHASH_SUB_ID: &str = "blockchain.scripthash.subscribe";
+
+// Script hash -> the party that asked for it to be watched.
+//
+// Keyed globally rather than per client because a script hash already
+// identifies exactly one address of one coin, and because the notification
+// arrives deep inside a connection read loop that holds no client handle.
+// Threading one through every connection would buy nothing the key does not
+// already give us.
+lazy_static! {
+    static ref SCRIPTHASH_WATCHERS: std::sync::Mutex<HashMap<String, futures_mpsc::UnboundedSender<String>>> =
+        std::sync::Mutex::new(HashMap::new());
+}
+
+/// Register `sender` to be woken whenever `script_hash` changes status.
+///
+/// The receiver is a wake signal, not a data feed: it carries the script hash
+/// only so the consumer knows which address to re-read. Balances are always
+/// re-read authoritatively, never inferred from the notification.
+pub fn watch_scripthash(script_hash: String, sender: futures_mpsc::UnboundedSender<String>) {
+    SCRIPTHASH_WATCHERS
+        .lock()
+        .expect("scripthash watcher registry poisoned")
+        .insert(script_hash, sender);
+}
+
+/// Stop watching `script_hash`. Safe to call for an unregistered hash.
+pub fn unwatch_scripthash(script_hash: &str) {
+    SCRIPTHASH_WATCHERS
+        .lock()
+        .expect("scripthash watcher registry poisoned")
+        .remove(script_hash);
+}
+
+/// Deliver a status change to whoever registered for it.
+///
+/// A closed receiver means the consumer went away, so the registration is
+/// dropped rather than retried.
+fn notify_scripthash_change(script_hash: &str) {
+    let mut watchers = match SCRIPTHASH_WATCHERS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(sender) = watchers.get(script_hash) {
+        if sender.unbounded_send(script_hash.to_owned()).is_err() {
+            watchers.remove(script_hash);
+        }
+    }
+}
 
 impl UtxoJsonRpcClientInfo for ElectrumClient {
     fn coin_name(&self) -> &str { self.coin_ticker.as_str() }
@@ -480,6 +540,39 @@ impl ElectrumClient {
             .into_iter()
             .map(|hash| rpc_req!(self, "blockchain.scripthash.get_balance", &hash));
         self.batch_rpc(requests)
+    }
+
+    /// Ask the servers to notify us when `script_hash` changes status.
+    ///
+    /// The hash is remembered so it can be re-subscribed on a newly connected
+    /// server (R38.6.5): a subscription lives with one session, so a reconnect
+    /// or a server swap drops it silently.
+    ///
+    /// A failure here is not fatal. The caller keeps its existing polling, so
+    /// the effect of a lost subscription is added latency rather than a stale
+    /// balance.
+    pub async fn subscribe_scripthash(&self, script_hash: String) -> Result<(), String> {
+        let res: Result<Json, _> = rpc_func!(self, BLOCKCHAIN_SCRIPTHASH_SUB_ID, &script_hash)
+            .compat()
+            .await;
+        res.map_err(|e| ERRL!("{}", e))?;
+        self.watched_script_hashes.lock().await.insert(script_hash);
+        Ok(())
+    }
+
+    /// Re-establish every remembered subscription, for use after a connection
+    /// is (re-)established. Failures are logged and skipped so one unusable
+    /// server cannot stall the rest.
+    pub async fn resubscribe_watched_scripthashes(&self) {
+        let hashes: Vec<String> = self.watched_script_hashes.lock().await.iter().cloned().collect();
+        for script_hash in hashes {
+            let res: Result<Json, _> = rpc_func!(self, BLOCKCHAIN_SCRIPTHASH_SUB_ID, &script_hash)
+                .compat()
+                .await;
+            if let Err(e) = res {
+                common::log::debug!("Could not re-subscribe script hash {}: {}", script_hash, e);
+            }
+        }
     }
 
     /// https://electrumx.readthedocs.io/en/latest/protocol-methods.html#blockchain-headers-subscribe
@@ -829,6 +922,7 @@ impl ElectrumClientImpl {
             protocol_version,
             get_balance_concurrent_map: ConcurrentRequestMap::new(),
             list_unspent_concurrent_map: ConcurrentRequestMap::new(),
+            watched_script_hashes: AsyncMutex::new(HashSet::new()),
         }
     }
 
@@ -875,10 +969,22 @@ async fn electrum_process_json(raw_json: Json, arc: &JsonRpcPendingRequestsShare
         ElectrumRpcResponseEnum::SingleResponse(single) => JsonRpcResponseEnum::Single(single),
         ElectrumRpcResponseEnum::BatchResponses(batch) => JsonRpcResponseEnum::Batch(batch),
         ElectrumRpcResponseEnum::SubscriptionNotification(req) => {
+            // A script-hash notification is an event, not the answer to a
+            // pending request, so it is dispatched here and never reaches the
+            // request-matching path below.
+            if req.method == BLOCKCHAIN_SCRIPTHASH_SUB_ID {
+                if let Some(script_hash) = req.params.first().and_then(|p| p.as_str()) {
+                    notify_scripthash_change(script_hash);
+                }
+                return;
+            }
             let id = match req.method.as_ref() {
                 BLOCKCHAIN_HEADERS_SUB_ID => BLOCKCHAIN_HEADERS_SUB_ID,
+                // Unknown subscription kinds are ignored rather than treated as
+                // errors: a server is free to send notifications we never asked
+                // for, and dropping them must not disturb the connection.
                 _ => {
-                    error!("Couldn't get id of request {:?}", req);
+                    common::log::debug!("Ignoring unrecognised subscription notification {:?}", req.method);
                     return;
                 },
             };
@@ -923,7 +1029,31 @@ fn increase_delay(delay: &AtomicU64) {
     }
 }
 
+fn replace_if_connection_error_changed(last_error: &mut Option<String>, current_error: &str) -> bool {
+    if last_error.as_deref() == Some(current_error) {
+        false
+    } else {
+        *last_error = Some(current_error.to_owned());
+        true
+    }
+}
+
 macro_rules! try_loop {
+    ($e:expr, $addr: ident, $delay: ident, $last_error: ident) => {
+        match $e {
+            Ok(res) => res,
+            Err(e) => {
+                let error_text = format!("{:?}", e);
+                if replace_if_connection_error_changed(&mut $last_error, &error_text) {
+                    error!("{:?} error {}", $addr, error_text);
+                } else {
+                    common::log::debug!("{:?} repeated connection error {}", $addr, error_text);
+                }
+                increase_delay(&$delay);
+                continue;
+            },
+        }
+    };
     ($e:expr, $addr: ident, $delay: ident) => {
         match $e {
             Ok(res) => res,
@@ -1043,6 +1173,7 @@ async fn connect_loop(
     event_handlers: Vec<RpcTransportEventHandlerShared>,
 ) -> Result<(), ()> {
     let delay = Arc::new(AtomicU64::new(0));
+    let mut last_connect_error = None;
 
     loop {
         let current_delay = delay.load(AtomicOrdering::Relaxed);
@@ -1050,7 +1181,7 @@ async fn connect_loop(
             Timer::sleep(current_delay as f64).await;
         };
 
-        let socket_addr = try_loop!(addr_to_socket_addr(&addr), addr, delay);
+        let socket_addr = try_loop!(addr_to_socket_addr(&addr), addr, delay, last_connect_error);
 
         let connect_f = match config.clone() {
             ElectrumConfig::TCP => Either::Left(TcpStream::connect(&socket_addr).map_ok(ElectrumStream::Tcp)),
@@ -1074,10 +1205,16 @@ async fn connect_loop(
             },
         };
 
-        let stream = try_loop!(connect_f.await, addr, delay);
-        try_loop!(stream.as_ref().set_nodelay(true), addr, delay);
+        let stream = try_loop!(connect_f.await, addr, delay, last_connect_error);
+        try_loop!(stream.as_ref().set_nodelay(true), addr, delay, last_connect_error);
         info!("Electrum client connected to {}", addr);
-        try_loop!(event_handlers.on_connected(addr.clone()), addr, delay);
+        try_loop!(
+            event_handlers.on_connected(addr.clone()),
+            addr,
+            delay,
+            last_connect_error
+        );
+        last_connect_error = None;
         let last_chunk = Arc::new(AtomicU64::new(now_ms()));
         let mut last_chunk_f = electrum_last_chunk_loop(last_chunk.clone()).boxed().fuse();
 
@@ -1293,13 +1430,15 @@ fn electrum_request(
     timeout: u64,
 ) -> Box<dyn Future<Item = JsonRpcResponseEnum, Error = String> + Send + 'static> {
     let send_fut = async move {
-        let mut json = try_s!(json::to_string(&request));
+        let json = try_s!(json::to_string(&request));
         #[cfg(not(target_arch = "wasm32"))]
-        {
+        let json = {
+            let mut json = json;
             // Electrum request and responses must end with \n
             // https://electrumx.readthedocs.io/en/latest/protocol-basics.html#message-stream
             json.push('\n');
-        }
+            json
+        };
 
         let (req_tx, resp_rx) = async_oneshot::channel();
         responses.lock().await.insert(request.rpc_id(), req_tx);
@@ -1333,4 +1472,92 @@ pub(crate) fn address_balance_from_unspent_map(
     unspents.iter().fold(BigDecimal::from(0), |sum, unspent| {
         sum + big_decimal_from_sat_unsigned(unspent.value, decimals)
     })
+}
+
+#[cfg(test)]
+mod connection_error_tests {
+    use super::replace_if_connection_error_changed;
+
+    #[test]
+    fn identical_connection_errors_are_reported_once_until_state_changes() {
+        let mut last_error = None;
+        assert!(replace_if_connection_error_changed(
+            &mut last_error,
+            "certificate error"
+        ));
+        assert!(!replace_if_connection_error_changed(
+            &mut last_error,
+            "certificate error"
+        ));
+        assert!(replace_if_connection_error_changed(
+            &mut last_error,
+            "connection refused"
+        ));
+
+        last_error = None;
+        assert!(replace_if_connection_error_changed(
+            &mut last_error,
+            "certificate error"
+        ));
+    }
+
+    use super::{futures_mpsc, notify_scripthash_change, unwatch_scripthash, watch_scripthash};
+
+    /// A registered watcher is woken with the hash that changed, so the
+    /// consumer knows which address to re-read.
+    #[test]
+    fn scripthash_notification_reaches_its_watcher() {
+        let (tx, mut rx) = futures_mpsc::unbounded();
+        watch_scripthash("aabb".to_owned(), tx);
+
+        notify_scripthash_change("aabb");
+
+        assert_eq!(rx.try_next().unwrap(), Some("aabb".to_owned()));
+        unwatch_scripthash("aabb");
+    }
+
+    /// A notification for a hash nobody registered must be a no-op rather than
+    /// an error: servers may push subscriptions we never asked for, and that
+    /// must not disturb the connection.
+    #[test]
+    fn unwatched_scripthash_notification_is_ignored() {
+        notify_scripthash_change("never-registered");
+
+        let (tx, mut rx) = futures_mpsc::unbounded();
+        watch_scripthash("ccdd".to_owned(), tx);
+        notify_scripthash_change("some-other-hash");
+        assert!(rx.try_next().is_err(), "an unrelated hash must not wake this watcher");
+        unwatch_scripthash("ccdd");
+    }
+
+    /// If the consumer is gone the registration is dropped, so a departed
+    /// streamer cannot leak an entry for the life of the process.
+    #[test]
+    fn dropped_receiver_deregisters_its_watch() {
+        let (tx, rx) = futures_mpsc::unbounded();
+        watch_scripthash("eeff".to_owned(), tx);
+        drop(rx);
+
+        notify_scripthash_change("eeff");
+
+        let (tx2, mut rx2) = futures_mpsc::unbounded();
+        watch_scripthash("eeff".to_owned(), tx2);
+        notify_scripthash_change("eeff");
+        assert_eq!(rx2.try_next().unwrap(), Some("eeff".to_owned()));
+        unwatch_scripthash("eeff");
+    }
+
+    /// Unwatching stops delivery; a later notification must not resurrect it.
+    #[test]
+    fn unwatch_stops_delivery() {
+        let (tx, mut rx) = futures_mpsc::unbounded();
+        watch_scripthash("1122".to_owned(), tx);
+        unwatch_scripthash("1122");
+
+        notify_scripthash_change("1122");
+
+        // Unwatching drops the registry's sender, which closes the channel, so
+        // the receiver reports end-of-stream rather than a delivered message.
+        assert_eq!(rx.try_next(), Ok(None), "an unwatched hash must not be delivered");
+    }
 }

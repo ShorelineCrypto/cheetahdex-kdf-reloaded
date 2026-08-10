@@ -17,10 +17,14 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
   ZCoin type, dual activation modes (Native / Light), multi-lightwalletd light
   mode, the `init_z_coin` task-RPC trio with its progress states, shielded HTLC
   swap operations, and the activation result shape.
-- **§39.6 (T-PORT, mixed):** three items remain absent (WASM support,
-  activation-time sync tuning / sync-from-date, and sourcing consensus
-  parameters/checkpoint/HD path from `protocol_data`); Sapling parameter
-  integrity verification is implemented in reloaded.
+- **§39.6 (T-PORT, implemented):** WASM support, activation-time sync tuning /
+  sync-from-date, Sapling parameter integrity verification, sourcing consensus
+  parameters / checkpoint / HD path from `protocol_data`, and HD-derived
+  shielded key-policy derivation are all implemented. One narrow platform gap
+  remains: WASM shielded-transaction *building* (blocked by the absent
+  `LocalTxProver` parameter files; §39.6.1). The transparent UTXO side of a
+  shielded coin is iguana-derived even under an HD wallet; only the shielded
+  Sapling key is HD-derived, per R39.6.4 §2.
 
 > **Binding scope (R36).** Requirements bind observable behaviour, the public
 > activation/task RPC surface and its JSON field names, and externally *dictated*
@@ -114,13 +118,18 @@ R39.2.1 Activation is a long-running task exposed as the public RPC trio
 
 R39.2.2 The activation request carries a `mode` object (a tagged union with tag
 field `rpc` and payload field `rpc_data`) selecting one of:
-- **Native** -- talks to a full Zcash-family node; no extra fields.
-- **Light** -- a light client carrying `electrum_servers` (the UTXO-side
-  transparent backend) and `light_wallet_d_servers` (a **list** of lightwalletd
-  gRPC endpoints) for the shielded side.
+- **Native** -- talks to a full Zcash-family node; no `rpc_data` payload.
+- **Light** -- a light client whose `rpc_data` object carries `electrum_servers`
+  (the UTXO-side transparent backend) and `light_wallet_d_servers` (a **list** of
+  lightwalletd gRPC endpoints) for the shielded side. The **same `rpc_data`
+  object** is also where the optional shielded **sync starting point**
+  `sync_params` (and its companion `skip_sync_params` boolean) live in the
+  dictated wire (R39.6.2) — **not** at the top level of the activation params.
 
 R39.2.3 The request also carries optional `required_confirmations` and
-`requires_notarization` fields.
+`requires_notarization` fields (top-level on the activation params). Sync-tuning
+fields that sit at the top level (`scan_blocks_per_iteration`, `scan_interval_ms`,
+`zcash_params_path`) are specified in R39.6.2.
 
 R39.2.4 The light mode shall accept **more than one** lightwalletd endpoint so a
 deployment can list several servers.
@@ -129,14 +138,36 @@ deployment can list several servers.
 
 R39.3.1 The activation task shall report progress through observable in-progress
 states covering at least: activating the coin, scanning the shielded chain,
-requesting the wallet balance, and finishing.
+requesting the wallet balance, and finishing. On the dictated public task-status
+wire these serialize (at minimum) as `ActivatingCoin`, the two scan phases
+`UpdatingBlocksCache` and `BuildingWalletDb` (each carrying `current_scanned_block`
+and `latest_block` unsigned counters), `RequestingWalletBalance`, and
+`Finishing`; the hardware-wallet states of R39.3.2
+(`WaitingForTrezorToConnect`, `WaitingForUserToConfirmPubkey`) appear on the same
+status wire. These variant names are part of the externally observable task-RPC
+surface. (Verified identical between the `v2.6.0-beta` reference and the
+current upstream `dev` head.)
+
+> **Status update (reloaded).** Implemented (convergence item #1). Activation
+> reports the two dictated scan phases with live progress: `UpdatingBlocksCache`
+> during the lightwalletd compact-block download and `BuildingWalletDb` during
+> the wallet-database scan, each carrying `current_scanned_block` and
+> `latest_block` unsigned counters. The wallet-DB scan runs in bounded batches
+> so `current_scanned_block` advances incrementally.
 
 R39.3.2 When the wallet is hardware-backed, the task shall additionally surface
 states asking the user to connect the device and to confirm the pubkey, and shall
 accept the confirmation via `init_z_coin_user_action`.
 
-R39.3.3 On success the task result shall report `current_block` and a
-`wallet_balance` carrying the shielded balance.
+R39.3.3 On success the task result shall report `ticker`, `current_block`, and a
+`wallet_balance` carrying the shielded balance. (`ticker` and `current_block`
+are verified present on the dictated result of both `v2.6.0-beta` and the
+current upstream `dev` head.)
+
+> **Status update (reloaded).** Implemented (convergence item #1). Reloaded's
+> activation result (`ZcoinActivationResult`) now serializes the dictated
+> top-level `ticker` alongside `current_block`, `wallet_balance`, and
+> `first_sync_block`.
 
 ## 39.4 Sapling parameters & scanning (R31 externally dictated)
 
@@ -165,13 +196,14 @@ the swap protocol.
 ## Part B -- Required ports (T-PORT)
 
 > **Status of Part B:** R39.6.1, R39.6.2, R39.6.3, and R39.6.4 are all
-> implemented. Note: R39.6.4 has `z_derivation_path` parsed and stored,
-> but HD-derived key policy support is deferred to a future enhancement.
+> implemented, including HD-derived shielded key-policy support (R39.6.4 §2).
+> The transparent (UTXO) side of a shielded coin remains iguana-derived; only
+> the shielded Sapling spending key is HD-derived, as R39.6.4 §2 requires.
 
 ## 39.6 Required shielded-coin ports
 
 ### 39.6.1 WASM support
-### 39.6.1 WASM support
+
 R39.6.1 The shielded coin shall be buildable and activatable on the WASM target,
 with its shielded note/witness storage backed by IndexedDB (mirroring the
 native storage contract). Acceptance: a light-mode shielded coin activates in a
@@ -183,23 +215,96 @@ WASM build and reports a shielded balance.
 > `SaplingStateCacheOps` trait; `ZCoinSqliteSaplingCache` serves native builds
 > and `ZCoinIdbSaplingCache` (mm2_db IndexedDB backend) serves WASM. The
 > `MmCoinEnum::ZCoin` variant and the `z_coin` module are available on all
-> targets. Transaction building (`gen_tx` / `send_outputs`) remains native-only
-> because `LocalTxProver` (sapling parameter files) is absent in WASM.
+> targets. Shielded transaction *building* remains native-only, because the
+> Sapling local prover (and the parameter files it needs) is unavailable in WASM.
 
 ### 39.6.2 Activation-time sync tuning / sync-from-date
-R39.6.2 The activation request shall optionally accept sync-control parameters --
-at minimum a **sync starting point** expressed either as a block height or as a
-calendar **date** (so a fresh wallet need not scan from Sapling activation), and
-scan-throughput tuning (blocks-per-iteration and/or inter-iteration interval).
-Acceptance: activating with a sync-from-date begins scanning at the block
-corresponding to that date, materially reducing initial scan time.
+R39.6.2 The activation request shall optionally accept sync-control parameters so
+a fresh wallet need not scan from Sapling activation. This surface is
+**externally dictated interop** (the public `task::enable_z_coin::init` /
+`init_z_coin` request schema, as also emitted by KDF-family wallets); the JSON
+field names, their nesting, and their value shapes below are fixed by that
+contract. (The whole surface described here was verified **identical** between
+the `v2.6.0-beta` reference and the current upstream `dev` head.)
 
-> **Status update (reloaded).** Implemented (commit 7976367e2). The activation
-> request now accepts `blocks_per_iteration` (u32, default 1) and
-> `inter_iteration_interval_ms` (u64, default 0) to control sync throughput and
-> pacing. A `SyncStartpoint` enum (`Height(u32)` | `Date(String)`) is accepted;
-> height-based start is wired through; date-to-height resolution is deferred
-> pending an RPC lookup API.
+**Sync starting point (`sync_params`) \u2014 nested, not top-level.** The sync start
+point is a field named `sync_params` carried **inside the Light-mode `rpc_data`
+object** (`activation_params.mode.rpc_data.sync_params`), alongside
+`electrum_servers` and `light_wallet_d_servers`. It is **not** a top-level field
+on `activation_params`. It is optional and, when present, is an **externally
+tagged** union (lowercase variant names) taking one of exactly three JSON forms:
+
+| Form | JSON shape | Meaning |
+|------|-----------|---------|
+| height | `{"height": <unsigned integer>}` | Start syncing from this block height. |
+| date | `{"date": <unsigned integer>}` | Start from the block matching this Unix timestamp (seconds). |
+| earliest | `"earliest"` (the bare JSON string) | Start from the coin's Sapling activation height. |
+
+An adjacently-tagged `{"type": "height"|"date", "data": ...}` shape and a
+top-level `sync_start` field are **both wrong** for this surface and shall not be
+treated as the dictated wire.
+
+A sibling optional boolean `skip_sync_params` (also inside the Light `rpc_data`)
+requests resuming from the last locally-synced block; `sync_params` is consulted
+only when no prior synced state exists.
+
+**Scan-throughput tuning \u2014 top-level.** Two optional throughput fields sit at the
+**top level** of `activation_params` (not inside `rpc_data`):
+
+- `scan_blocks_per_iteration` \u2014 unsigned **non-zero** integer, blocks scanned per
+  iteration (dictated default 1000);
+- `scan_interval_ms` \u2014 unsigned integer, milliseconds to pause between scan
+  iterations (dictated default 0 = no pause).
+
+**Sapling parameter path \u2014 top-level, optional.** `zcash_params_path` is an
+optional string on `activation_params` giving the filesystem directory of the
+Sapling proving/verifying parameter files. It is part of the dictated request
+schema (consumed on native targets; see §39.4 / R39.6.3).
+
+Acceptance: activating with a `sync_params` `{"date": T}` begins scanning at the
+block corresponding to `T`, materially reducing initial scan time; `"earliest"`
+scans from Sapling activation; `{"height": N}` scans from height `N` (resolution
+semantics in R39.8.0g).
+
+> **Client/doc discrepancy (informative).** The dictated daemon wire and the
+> public API reference name the pacing field `scan_interval_ms`. Some
+> desktop-wallet clients emit `scan_interval` instead. The upstream daemon
+> defines **no** alias for the shorter spelling, so against an upstream daemon a
+> `scan_interval` field is silently ignored and the default applies; emit
+> `scan_interval_ms` for the value to take effect. (Reloaded additionally accepts
+> `scan_interval` as an alias \u2014 see the status note.)
+
+> **Status update (reloaded).** Implemented, with documented divergences from the
+> dictated wire:
+>
+> - **Sync start point:** conformant. Reloaded accepts `sync_params` nested in
+>   the Light-mode `rpc_data` in all three dictated forms (`{"height": N}`,
+>   `{"date": T}`, `"earliest"`). Height and earliest starts are applied directly;
+>   a date start is resolved to the matching block height before the initial
+>   shielded scan (R39.8.0g).
+> - **Throughput field names:** reloaded's canonical field names are
+>   `blocks_per_iteration` and `inter_iteration_interval_ms`, but it accepts the
+>   dictated `scan_blocks_per_iteration` as an alias for the former and both
+>   `scan_interval_ms` (dictated) and `scan_interval` (desktop-wallet spelling) as
+>   aliases for the latter, so all dictated and client spellings deserialize.
+> - **Throughput default — implemented (convergence item #4).** Reloaded now
+>   defaults blocks-per-iteration to the dictated **1000** when neither the coin
+>   config nor the request supplies it.
+> - **Throughput behavior — implemented.** The effective blocks-per-iteration
+>   and interval values control both the legacy Native commitment-tree loop and
+>   the modern Light wallet-database scanner. The Light scanner processes at
+>   most the configured block count per wallet batch and applies the configured
+>   millisecond pause between non-final batches. It logs the effective policy at
+>   INFO and keeps per-network-batch, per-wallet-batch, timing, and frontier
+>   details at DEBUG/TRACE so normal INFO operation remains bounded.
+> - **`skip_sync_params` — implemented (convergence item #3).** Reloaded accepts
+>   the boolean in the Light `rpc_data`; when set and prior local sync state
+>   exists, activation resumes from that state and ignores `sync_params`. With
+>   no prior state, `sync_params` is still consulted.
+> - **`zcash_params_path` — implemented (convergence item #2).** Reloaded accepts
+>   the top-level request field and, on native targets, loads the Sapling
+>   proving/verifying parameters from that directory, falling back to the fixed
+>   platform default when absent.
 
 ### 39.6.3 Sapling-parameter integrity verification
 R39.6.3 Before use, the loaded Sapling spend/output parameters shall be verified
@@ -265,13 +370,21 @@ mainnet constants.
 > - **Sync checkpoint (R39.6.4 §3).** The builder seeds the wallet's
 >   commitment-tree cache at `check_point_block.height`, deserialized from the
 >   checkpoint's `sapling_tree`, falling back to `sapling_activation_height` when
->   absent (native mode). Light-mode checkpoint-to-height tree seeding is deferred
->   (CRD 39.8.0b).
-> - **HD derivation path (R39.6.4 §2).** The `z_derivation_path` field is parsed
->   from `protocol_data` and retained for use when the key
->   policy is HD-derived. The current implementation is limited to the single-key
->   policy, so `z_derivation_path` is not consulted; support for HD-derived key
->   policies is deferred to a future enhancement.
+>   absent (native mode). In light mode the wallet's initial commitment-tree
+>   state is instead seeded from the lightwalletd `GetTreeState` at the resolved
+>   sync start height (one below the first fetched compact block), which supports
+>   an arbitrary resolved start rather than only the config checkpoint height
+>   (see the R39.8.0h status note).
+> - **HD derivation path (R39.6.4 §2).** Implemented. The shielded spending key
+>   is selected by the active key policy before the builder runs: under the HD
+>   (BIP39) policy it is derived from the wallet's BIP39 seed along the coin's
+>   `z_derivation_path` (purpose' / coin_type', both hardened) with the
+>   activation `account` appended as a hardened child
+>   (`m/<z_derivation_path>/account'`); under the legacy Iguana policy it is the
+>   ZIP32 master of the iguana secret. `account` is an optional `init_z_coin`
+>   request field defaulting to `0`, ignored under the Iguana policy. Under the
+>   HD policy a missing `z_derivation_path` is a build error. The transparent
+>   UTXO side of the coin remains iguana-derived (out of R39.6.4 §2 scope).
 > - **ZOMBIE fixtures.** Test fixtures updated to carry full `protocol_data` with
 >   Zcash-mainnet parameters; bare `{"type":"ZHTLC"}` is now non-conformant per
 >   R39.1.2.
@@ -333,13 +446,23 @@ block and shielded note scanning. In Native mode, activation shall use the nativ
 Zcash-family backend as the compact-block source. Both modes shall feed the same
 shielded wallet database contract and the same `z_coin_tx_history` data path.
 
-R39.8.0g The sync start point is resolved before wallet scanning:
+> **Status update (reloaded).** The Light-mode path is implemented. Native mode
+> still updates the older commitment-tree state cache but does not yet convert
+> full-node blocks into the modern Reloaded compact-block cache. Unless that
+> cache already covers the requested range, Native activation therefore cannot
+> yet satisfy R39.8.0f/R39.8.0m--R39.8.0n and fails the complete-through-tip
+> wallet-scan gate. This gap predates the stable dependency selection; the
+> native compile and Windows release-build gates below are not a claim that a
+> live Native-mode shielded activation passed.
 
-- an explicit height starts from that height, floored at
+R39.8.0g The sync start point (supplied via `mode.rpc_data.sync_params`; R39.6.2)
+is resolved before wallet scanning:
+
+- an explicit `{"height": N}` starts from height `N`, floored at
   `sapling_activation_height`;
-- an explicit date starts from the backend block height resolved for that date,
-  floored at `sapling_activation_height`;
-- `earliest` starts from `sapling_activation_height`;
+- an explicit `{"date": T}` starts from the backend block height resolved for
+  the Unix timestamp `T`, floored at `sapling_activation_height`;
+- `"earliest"` starts from `sapling_activation_height`;
 - an omitted start point may continue from existing local wallet/cache state
   when that state exists; otherwise it shall use the implementation's default
   recent-start policy, floored at `sapling_activation_height`.
@@ -351,6 +474,45 @@ requests reuse of previous sync state and a valid previous state exists,
 activation may continue from that state. The activation result shall expose the
 requested start, whether the request was below Sapling activation, and the actual
 start height used.
+
+> **Status update (reloaded).** Implemented. "Existing local scan state" is
+> interpreted as the wallet's **sync anchor** — one block above the earliest
+> block stored in the shielded wallet database, i.e. the height the current scan
+> was actually started from. On activation with an explicit `sync_params`
+> (R39.6.2):
+>
+> - If the requested start **differs from the current anchor in either
+>   direction** (earlier to gain history, or later to narrow the window), the
+>   compact-block cache and wallet database are rewound/recreated, the initial
+>   commitment-tree state is re-seeded from the light backend at the resolved
+>   start, and the wallet is rescanned from there. This comparison is evaluated
+>   **before** the "already scanned through the tip" short-circuit, so a changed
+>   sync start/date is honored even when the wallet was previously fully scanned
+>   (rather than reusing the stale cache).
+> - If the requested start **equals the current anchor**, local state is reused
+>   and scanning resumes from the tip, so an unchanged re-activation (a client
+>   that re-sends the same start every launch) does not rescan history.
+> - A requested start **beyond the current tip** is clamped to the tip; if that
+>   still differs from the anchor it rebuilds and scans the (empty) tip window,
+>   matching "sync from a future point".
+>
+> Because the wallet is re-seeded at `requested_start - 1` on rebuild, the anchor
+> afterwards equals the requested start, so the next unchanged activation matches
+> and resumes. In light mode the re-seed uses the lightwalletd `GetTreeState` at
+> the resolved start height (see the R39.6.4 §3 status note). The activation
+> result exposes `first_sync_block` — an object `{ requested, is_pre_sapling,
+> actual }` — where `requested` is the resolved start (height, or the block
+> resolved from a requested date), `is_pre_sapling` is
+> `requested < sapling_activation_height`, and `actual` floors `requested` at
+> `sapling_activation_height`.
+>
+> **Status update (reloaded).** Implemented (convergence item #4). Reloaded now
+> emits `first_sync_block` **unconditionally** in the activation result. When no
+> `sync_params` start was supplied, `requested` falls back to the height the
+> shielded scan was actually anchored at (the wallet's seed checkpoint + 1), and
+> then to Sapling activation when the wallet has no stored blocks yet.
+
+
 
 ### 39.8.0.2 Storage and schema expectations
 
@@ -379,20 +541,70 @@ R39.8.0l The wallet database shall be initialized with the wallet's extended ful
 viewing key and the configured checkpoint block when available. The checkpoint's
 height, hash, timestamp, and Sapling tree seed the scanned-block state so the
 wallet can start from the resolved sync point instead of replaying from Sapling
-activation.
+activation. In Light mode, the block-ID string in the lightwalletd `TreeState`
+response is in RPC display order, while compact-block `hash` and `prev_hash`
+byte fields are canonical little-endian. The implementation shall validate the
+display value as exactly 32 bytes and reverse it once at that protocol boundary
+before using it as the compact-chain anchor.
 
 ### 39.8.0.3 Scanner behavior
 
 R39.8.0m The shielded scanner shall run during activation and continue after
-activation as the coin's background shielded sync loop. During activation it
-shall report observable progress for compact-block cache update and wallet-db
-building, and activation shall wait until the wallet database is scanned through
-the current activation tip before returning success.
+activation as the coin's background shielded sync loop (§39.8.0.5). During
+activation it shall report observable progress for compact-block cache update and
+wallet-db building, and activation shall wait until the wallet database is scanned
+through the current activation tip before returning success. Concurrent activation
+tasks for the same shielded ticker shall be serialized for the complete task,
+including database construction, download, scan, result calculation, and
+registration, so one task cannot rebuild or rename a database while another task
+is using it. Different tickers shall remain independent, and cancellation shall
+release the serialization guard.
+
+> **Status (reloaded, 2026-08-09).** Implemented for Light mode: activation with
+> complete-through-tip gating, two-phase progress, same-ticker serialization, and
+> the R39.6.2 pacing controls; plus the post-activation background shielded sync
+> task of §39.8.0.5. Native mode is still served only by the legacy
+> commitment-tree catch-up loop and does not yet maintain the modern wallet
+> database after activation.
 
 R39.8.0n The scanner shall fetch compact blocks from the configured shielded
 backend, cache them by height, validate that scanned heights are sequential and
 that block hashes link to the previous scanned block, and rewind/rescan on chain
-continuity failures instead of accepting inconsistent wallet history.
+continuity failures instead of accepting inconsistent wallet history. Each
+bounded network batch shall be checked for its exact sequential requested range
+and then persisted in one atomic SQLite transaction. A short, out-of-order,
+out-of-range, malformed, or interrupted batch shall not leave a partially
+persisted batch in the compact cache. When activation restarts after compact
+blocks were cached but before they were scanned into the wallet, the complete
+cached segment from the resolved chain-state anchor through the highest cached
+height at or below the current target shall be revalidated before reuse. A
+valid segment shall resume network fetching at the following height instead of
+downloading those blocks again. An invalid segment shall be preserved for
+diagnosis, replaced with a fresh compact cache, and refetched; its reported
+maximum height alone is never sufficient evidence for reuse.
+
+The dictated Pirate compact-block protobuf does not carry the modern optional
+`ChainMetadata` field. Before handing a bounded batch to a scanner that requires
+that field at its boundary, the implementation shall adapt the first block in
+memory by deriving its final Sapling tree size from the trusted preceding
+`ChainState` frontier size plus the number of explicit Sapling outputs in that
+block. Existing metadata, stored compact-block bytes, hashes, transactions, and
+outputs shall remain unchanged. The adapter shall reject numeric conversion or
+addition overflow and shall not weaken the height/hash-link validation above.
+Pirate has no Orchard compact actions in this dictated interface, so the
+synthetic Orchard tree size is zero.
+
+Across bounded wallet-scan batches, the implementation shall advance and retain
+the exact next `ChainState` directly from the already validated compact-block
+commitments. It shall not reconstruct the next batch's frontier from the
+prunable wallet commitment tree: a completed rightmost subtree may legitimately
+have been compressed and no longer expose the leaf-level nodes needed for exact
+frontier reconstruction. After a process restart with existing scanned blocks,
+the implementation shall reacquire `TreeState` at exactly the persisted scanned
+height before scanning more blocks. It shall accept that refreshed frontier only
+when the response height, canonical block hash, and Sapling tree size match the
+wallet's persisted block metadata; a mismatch shall fail without guessing or
+overwriting the wallet state.
 
 R39.8.0o The scanner shall trial-decrypt Sapling outputs with the wallet's
 incoming viewing capability, record notes belonging to tracked accounts, advance
@@ -412,7 +624,515 @@ R39.8.0q Unconfirmed shielded outputs are not spendable merely because the local
 process created or observed them. Spendable balance, transaction history, and
 post-swap Desktop display shall reflect confirmed wallet-db scan results, with
 the existing locked-note/change tracking used only to prevent unsafe local
-double-spends while waiting for confirmation.
+double-spends while waiting for confirmation. Reporting an unconfirmed receipt as
+a *pending* (non-spendable) amount is required separately by §39.8.0.6 and does
+not relax this requirement.
+
+> **Status update (reloaded, 2026-08-09).** Light mode satisfies the spendable
+> half of this requirement: its balance is read from the scanned wallet database,
+> which by construction contains only mined, scanned notes. It does not yet
+> satisfy §39.8.0.6, because it reports a zero pending amount unconditionally, so
+> an incoming shielded transaction stays invisible until its block is mined *and*
+> scanned rather than appearing as a pending amount first. Native mode already
+> distinguishes the two, counting zero-confirmation notes as the non-spendable
+> portion of the balance. Until §39.8.0.6 is implemented, the expected
+> user-visible latency for an incoming shielded payment in Light mode is one
+> block plus up to one background sync period (§39.8.0.5).
+
+### 39.8.0.4 Native persistence generations and rebuild boundary
+
+> **Dirty-side derivation record (sanitized).** This subsection was derived by
+> the KDF Spec Reader from exactly two KDF references after a targeted ref
+> refresh on 2026-08-04: `v2.6.0-beta` at
+> `475cdb49bc343a8fefdc2caaa1635d5ec426990b`, and the then-current `dev` head at
+> `e686ef3500585f01c9f0e89c8c01bc036c42253c`. Both references resolve their
+> Zcash dependency family to the public Komodo librustzcash tag `k-1.4.2`,
+> revision `4e030a0f44cc17f100bf5f019563be25c5b8755f`. The requirements below carry
+> only dependency identity, public API generation, observable open behaviour,
+> and dictated on-disk schema. They carry no private implementation expression.
+> A clean-side implementation shall not consume this subsection until the KDF
+> Dirty Gate has passed it.
+
+R39.8.0r The two reference commits shall be treated as distinct compatibility
+references but **not** as distinct native wallet-schema generations. Their
+resolved Zcash packages are identical:
+
+| Package | `v2.6.0-beta` | current `dev` | Source in both references |
+|---|---:|---:|---|
+| `zcash_client_backend` | `0.5.0` | `0.5.0` | Git tag `k-1.4.2`, locked revision `4e030a0f44cc17f100bf5f019563be25c5b8755f` |
+| `zcash_client_sqlite` | `0.3.0` | `0.3.0` | same Git tag and revision |
+| `zcash_primitives` | `0.5.0` | `0.5.0` | same Git tag and revision |
+| `zcash_proofs` | `0.5.0` | `0.5.0` | same Git tag and revision |
+| `zcash_note_encryption` | `0.0.0` | `0.0.0` | same Git tag and revision, transitively selected |
+| `zcash_extras` | `0.1.0` | `0.1.0` | same Git tag and revision |
+
+None of these Zcash packages is sourced from crates.io, a local path, or a
+vendored directory in either reference. The native SQLite binding is instead
+the crates.io `rusqlite` `0.28.0` package with bundled SQLite enabled. The two
+references therefore provide no evidence that either netid used a newer
+librustzcash generation.
+
+R39.8.0s A newly created native reference wallet database has exactly the six
+tables below. Column order is binding for schema recognition. `NN` means an
+explicit `NOT NULL` declaration; `PK` means `INTEGER PRIMARY KEY` (a rowid alias,
+with no `AUTOINCREMENT` and no separate explicit `NOT NULL` declaration); a
+column without either marker is nullable.
+
+| Table | Ordered columns | Uniqueness and foreign keys |
+|---|---|---|
+| `accounts` | `account INTEGER PK`; `extfvk TEXT NN`; `address TEXT NN` | no additional constraint |
+| `blocks` | `height INTEGER PK`; `hash BLOB NN`; `time INTEGER NN`; `sapling_tree BLOB NN` | no additional constraint |
+| `transactions` | `id_tx INTEGER PK`; `txid BLOB NN`; `created TEXT`; `block INTEGER`; `tx_index INTEGER`; `expiry_height INTEGER`; `raw BLOB` | `UNIQUE(txid)`; `block` references `blocks(height)` |
+| `received_notes` | `id_note INTEGER PK`; `tx INTEGER NN`; `output_index INTEGER NN`; `account INTEGER NN`; `diversifier BLOB NN`; `value INTEGER NN`; `rcm BLOB NN`; `nf BLOB NN`; `is_change INTEGER NN`; `memo BLOB`; `spent INTEGER` | `UNIQUE(nf)`; `UNIQUE(tx, output_index)`; `tx` and `spent` reference `transactions(id_tx)`; `account` references `accounts(account)` |
+| `sapling_witnesses` | `id_witness INTEGER PK`; `note INTEGER NN`; `block INTEGER NN`; `witness BLOB NN` | `UNIQUE(note, block)`; `note` references `received_notes(id_note)`; `block` references `blocks(height)` |
+| `sent_notes` | `id_note INTEGER PK`; `tx INTEGER NN`; `output_index INTEGER NN`; `from_account INTEGER NN`; `address TEXT NN`; `value INTEGER NN`; `memo BLOB` | `UNIQUE(tx, output_index)`; `tx` references `transactions(id_tx)`; `from_account` references `accounts(account)` |
+
+The foreign keys use SQLite's default non-cascading, non-deferrable action.
+There are no explicit named indexes, views, or triggers. SQLite supplies only
+the rowid primary-key access paths and automatic indexes required by the five
+single/composite `UNIQUE` constraints listed above. Automatic index names are
+SQLite implementation details and shall not be used as fingerprints; their
+ordered indexed columns shall be checked instead.
+
+R39.8.0t A newly created reference wallet database has
+`PRAGMA user_version = 0`. Neither reference reads, validates, increments, or
+overwrites that value, and neither creates a schema-version or migration table.
+An existing database with another `user_version` is therefore not rejected on
+that fact alone by the references, but it is not a positive reference-created
+fingerprint. Native file opens request WAL journal mode and set connection-local
+synchronous mode to `NORMAL`, temporary storage to memory, and foreign-key
+enforcement on. WAL sidecars and those connection settings are not schema
+generation markers.
+
+R39.8.0u The reference compact-block cache is a separate SQLite database with
+exactly one table:
+
+| Table | Ordered columns | Uniqueness and foreign keys |
+|---|---|---|
+| `compactblocks` | `height INTEGER PK`; `data BLOB NN` | no additional constraint |
+
+It has no explicit indexes, foreign keys, views, triggers, migration table, or
+version table, and a newly created cache has `PRAGMA user_version = 0`. A row's
+`height` is the key and `data` is the serialized public compact-block payload.
+The same two-column cache schema is also exposed by the stable and release-
+candidate public SQLite generations discussed in R39.8.0y; it is consequently
+a positive compact-cache fingerprint but **not** a wallet-generation
+fingerprint.
+
+R39.8.0v Reference wallet open is permissive rather than versioned. An absent or
+empty SQLite file acquires the six tables in R39.8.0s. Existing same-named
+tables are retained without a complete semantic schema check; missing tables
+are added, extra tables/columns and an arbitrary `user_version` are ignored,
+and failures may occur only when a later account, block, note, witness, or
+transaction operation reaches an incompatible column or constraint. Schema
+creation is not an atomic whole-schema migration, so a failed open can leave a
+partially initialized file. A compatible populated wallet is reused; a changed
+sync anchor can rewind its contents, but does not change or replace its schema.
+The compact cache follows the same create-if-absent/reuse-if-operable policy for
+`compactblocks`. An unreadable or malformed SQLite file causes activation or
+the first affected storage operation to fail; neither reference has a separate
+unknown-schema recovery policy.
+
+R39.8.0w A conservative pre-open classifier for the deliberate rebuild policy
+shall use semantic SQLite metadata, not textual comparison of stored DDL and
+not the permissive set of files that the old open path might happen to tolerate.
+It shall distinguish the following classes without mutating the database:
+
+| Class | Minimum positive fingerprint |
+|---|---|
+| absent/empty wallet | file absent, or valid SQLite with `user_version = 0` and no user-defined tables, indexes, views, or triggers |
+| reference legacy wallet | valid SQLite; `user_version = 0`; no migration/version table; exactly the six tables, ordered columns, declared types/nullability, primary keys, uniqueness constraints, foreign keys, and permitted SQLite automatic indexes of R39.8.0s |
+| selected current wallet generation | valid SQLite produced by stable `zcash_client_sqlite 0.21.1`; `user_version = 8`; `schemer_migrations` having the single ordered column `id BLOB PRIMARY KEY`; exactly 48 ordered migration IDs whose canonical digest is `7b506df8a2b119fb143664a1c0b5eddfa7de5fe8458f07829818c59e5b39ddbb`; and exactly 467 canonical semantic records whose version-prefixed digest is `dfba9135b6d5ae446e88d83d162e9458730b5b098051d8565fdd91fe6be5bea8` |
+| recognized compact cache | valid SQLite; `user_version = 0`; exactly the `compactblocks` table of R39.8.0u and no other user-defined schema objects |
+| unknown wallet/cache | a readable SQLite schema that does not match one of the positive fingerprints above, including an exact legacy-looking schema with a nonzero `user_version`, extra user objects, altered constraints, or only a partial table set |
+| corrupt/unreadable | SQLite open, integrity validation, or schema introspection fails |
+
+`v2.6.0-beta` and the examined `dev` head deliberately map to the same
+`reference legacy wallet` class; no native database fingerprint can distinguish
+which of those two binaries created it. The modern stable and RC families both
+use `user_version = 8` plus `schemer_migrations`, so those two facts alone do not
+distinguish their final schemas; the selected release's applied migration-ID set
+and schema contract must do so.
+
+The non-mutation requirement also applies when SQLite left a rollback/WAL
+sidecar after interruption. Because SQLite cannot recover a hot rollback journal
+through a read-only connection, a failed direct read-only fingerprint with a
+present sidecar shall be retried only against a private temporary copy of the
+database and all present sidecars. SQLite may recover that copy before semantic
+fingerprinting. The source database and source sidecars shall remain byte-
+preserved during classification. If copy recovery or fingerprinting fails, the
+source remains `corrupt/unreadable`; a recoverable copy may classify only into
+one of the exact positive fingerprints above.
+
+For the selected-current row, the migration digest is SHA-256 over each
+uppercase `hex(id)` selected in bytewise `id` order, followed by `\n`. The
+semantic digest is SHA-256 over `user_version:8\n`, followed by the
+lexicographically sorted canonical records and `\n` after every record. Records
+cover every non-`sqlite_%` table/view/index/trigger identity, `table_xinfo`,
+`foreign_key_list`, and semantic `index_list`/`index_xinfo` result, plus the
+ordered migration IDs. SQLite values are type-tagged and text/blob bytes are hex
+encoded, so DDL whitespace, automatic-index names, locale, and display quoting
+cannot change the result. A deterministic regression pins this identity; a
+dependency change that alters it requires an explicit new schema decision.
+
+R39.8.0x Classification shall happen before a modern wallet initializer is
+allowed to modify the file. The observable policy is:
+
+- current Reloaded native storage uses `<TICKER>_RELOADED_WALLET.db` and
+  `<TICKER>_RELOADED_COMPACT_BLOCKS.db`;
+- the legacy/GLEEC names `<TICKER>_WALLET.db` and
+  `<TICKER>_COMPACT_BLOCKS.db` are a separate compatibility namespace and are
+  not opened, renamed, migrated, truncated, or deleted by Reloaded;
+- `<TICKER>_CACHE.db` remains the shared, backward-compatible native Sapling
+  commitment-tree cache. It is not a modern wallet or compact-block database;
+  Light mode may initialize its empty legacy schema when absent but does not
+  use it as the source of modern shielded balance, history, or scan state;
+
+- an absent/empty wallet is initialized in the selected current generation and
+  scanned from the resolved start of R39.8.0g--R39.8.0h;
+- a positively recognized reference legacy wallet is preserved recoverably,
+  replaced with a new current-generation wallet, and fully rescanned; it is
+  never migrated in place, and no legacy note, nullifier, witness, commitment-
+  tree, transaction-row identifier, or scan-tip state is reused;
+- a positively recognized current wallet opens normally under the selected
+  coherent release line;
+- an unknown or corrupt file is preserved and produces a typed activation
+  failure; it is not deleted, overwritten, or silently treated as empty.
+
+A recognized compact cache may supply serialized compact blocks to the rescan
+only after the existing height, payload-decode, sequential-height, and hash-link
+checks of R39.8.0n succeed. Its presence never changes the requirement to build
+all current wallet state anew, and it never constitutes evidence that the
+wallet database is current. The rebuild shall report the existing
+`UpdatingBlocksCache` and `BuildingWalletDb` phases according to the work
+actually performed.
+
+R39.8.0y The public modern candidates form two coherent, non-interchangeable
+dependency generations as of the reference date:
+
+| Candidate line | Backend | SQLite | Primitives | Proofs | Note encryption | Distribution |
+|---|---:|---:|---:|---:|---:|---|
+| stable | `0.23.0` | `0.21.1` | `0.28.0` | `0.28.0` | compatible `0.4.1` requirement (resolving to `0.4.2` in a fresh lock) | published crates.io releases |
+| newer release candidate | `0.24.0-rc.7` | `0.22.0-rc.7` | `0.30.0` | `0.30.0` | compatible `0.4.1` requirement | published RCs / matching upstream release tag |
+
+The stable client pair requires its coherent `0.28` primitives/proofs types;
+substituting the separately newer `0.30` primitives/proofs line would create a
+mixed public-type generation. Both modern SQLite candidates use the migration
+table described in R39.8.0w and set `user_version` to the fixed value `8`; the
+value is not advanced per migration. Their initial migration recognizes the
+six-table schema of R39.8.0s as its historical starting shape, so invoking the
+modern initializer directly on a reference database can initiate in-place
+migration. R39.8.0x therefore requires the KDF classifier to intercept that
+database first. Nothing in either authorized KDF reference requires an RC-only
+wallet, pool, or transaction-generation feature.
+
+> **Selection record (2026-08-04).** The operator selected the stable line:
+> `zcash_client_backend 0.23.0`, `zcash_client_sqlite 0.21.1`, and
+> `zcash_primitives`/`zcash_proofs 0.28.0`. KDF consumes exact crates.io
+> versions and retains only narrow, documented patches: removal of backend
+> 0.23.0's obsolete exact `time-core 0.1.2` resolver pin, plus the minimum
+> transparent/builder hooks required to preserve KDF P2SH input and raw-output
+> transaction bytes. The old broad `librustzcash-patched/` dependency is not
+> part of the selected graph.
+
+R39.8.0z The reference scan/store generation and both modern candidates differ
+at their public behavioral boundary. The reference generation resumes scanning
+implicitly from the greatest stored block (or Sapling activation for a new
+wallet), tracks Sapling extended full viewing keys and per-height incremental
+witness state, accepts an optional block-count bound, and stores each scanned
+batch through the legacy wallet-write contract. The modern stable generation
+requires an explicit starting height and preceding `ChainState`, a mutable
+`WalletWrite` store with unified full viewing keys and shard-tree commitment
+state, an explicit bounded count, and returns a `ScanSummary`; its normal sync
+orchestration also exposes prioritized scan ranges. The RC generation retains
+that basic scan contract but adds observable database/API obligations for newer
+shielded-pool migration, note locking, anchor retention, Ironwood/V6-era state,
+and additional transaction classification. These are generation changes, not
+evidence that the KDF reference contract changed: both authorized references
+remain on the same legacy Sapling generation of R39.8.0r.
+
+#### Tests
+
+T39.8.0a A deterministic SQLite fixture for each authorized reference shall
+prove the exact R39.8.0s and R39.8.0u `table_info`, `index_list`/indexed-column,
+and `foreign_key_list` results, `user_version = 0`, and the absence of any
+migration/version table. The two fixtures shall classify identically.
+
+T39.8.0b Detector tests shall cover absent, empty, exact reference legacy,
+selected current, extra-object, missing/altered-column, altered-constraint,
+nonzero-version legacy-looking, partial, and corrupt files. Classification shall
+be read-only, and unknown/corrupt fixtures shall remain byte-preserved.
+
+T39.8.0c Opening a recognized reference legacy fixture under the upgraded KDF
+shall prove recoverable preservation, creation of a new current store, a rescan
+from the resolved start, accurate cache/wallet progress phases, and reconstructed
+balance/history. It shall also prove that the modern dependency's in-place
+migration path was not invoked on the legacy file and that no old witness or
+commitment-tree state was reused.
+
+T39.8.0d A dependency-resolution check shall reject mixed Zcash public-type
+generations and shall record whether the selected build resolves the stable or
+RC matrix of R39.8.0y. Scan tests shall exercise explicit chain-state/start-
+height agreement, bounded progress, sequential/hash-link rejection, and durable
+wallet results after reopen.
+
+T39.8.0e A non-palindromic checkpoint hash test shall prove the single
+display-order-to-little-endian conversion before first-block link validation. A
+locked/hot-journal fixture shall prove recovery-based classification through a
+temporary copy while the source database and sidecar stay byte-identical. A
+forced mid-batch SQLite failure shall prove atomic compact-cache persistence,
+and same-/different-ticker lock tests shall prove the activation serialization
+scope of R39.8.0m. A reopen fixture shall prove that a complete validated cache
+resumes from its highest reusable height, clamps reuse to the current target,
+and rejects a discontinuous cached segment. A compact-block fixture with the
+dictated Pirate wire shape and no `ChainMetadata` shall prove that the adapter
+of R39.8.0n reconstructs the first-block Sapling tree size and that a received
+note is scanned into the expected balance. A deterministic metadata-free
+fixture shall cross a bounded-scan boundary at which the wallet tree prunes a
+completed rightmost subtree and prove that the compact-source frontier continues
+the next batch. The same fixture shall reopen the wallet, reject refreshed
+`TreeState` with a mismatched hash or tree size, accept the matching state, and
+continue scanning. A pacing fixture shall configure a one-block wallet scan
+batch and a nonzero inter-batch interval, prove incremental progress at every
+batch boundary, and prove the scanned height remains durable after reopen.
+
+#### Deferred Work
+
+D39.8.0a *(Resolved 2026-08-04.)* The operator selected the stable line and the
+selected-current row of R39.8.0w now binds its exact migration and semantic
+schema identities. The implementation still must not classify a database as
+current from `user_version = 8` or the migration-table name alone.
+
+D39.8.0b *(Specified 2026-08-09; see §39.8.0.5.)* The modern Light compact-block
+and wallet scanner shall be moved into a coin-lifetime background task after
+activation without weakening the existing activation-through-tip gate. The task
+needs an explicit poll policy, reorg and endpoint-failover handling, cancellation
+on coin disable/context shutdown, and serialization with re-activation or
+database rebuild.
+
+This item is now superseded by normative requirements rather than by a note:
+R39.8.0aa (coin-lifetime task, resume-from-local-state, no re-anchoring),
+R39.8.0ab (bounded poll policy and its latency budget — the period itself is the
+implementation's choice, not a dictated value), R39.8.0ac (termination on coin
+disable/shutdown in bounded time), R39.8.0ad (wallet-database-scoped
+serialization against activation rebuild/rename), and R39.8.0ae (endpoint
+failover; reorg recovery inherited from R39.8.0n). Tests are T39.8.0f.
+
+Residual: unconfirmed shielded receipts are still not represented in the balance,
+because the background pass consumes only mined compact blocks. That gap is now
+specified by §39.8.0.6 and tracked as D39.8.0c.
+
+#### Baseline Verifications
+
+V39.8.0a The reference commits and the locked dependency revision in
+R39.8.0r shall be re-resolved before implementation begins. The native wallet-
+open, compact-cache, and scan/store artifacts and the root Zcash dependency
+declarations used for this derivation were byte-identical between the two
+examined commits; the relevant lockfile entries also resolve the same package
+versions and Git revision. A changed `dev` head requires a fresh Spec Reader
+comparison rather than silently moving this bound reference.
+
+V39.8.0b The public package manifests for the selected modern line shall be
+checked together, including the backend/SQLite/primitives/proofs/note-encryption
+versions, before the current-generation fingerprint of D39.8.0a is closed.
+
+#### External references for this subsection
+
+- KomodoPlatform `librustzcash`, public tag `k-1.4.2`, revision
+  `4e030a0f44cc17f100bf5f019563be25c5b8755f` (MIT OR Apache-2.0 package
+  licensing): <https://github.com/KomodoPlatform/librustzcash/tree/4e030a0f44cc17f100bf5f019563be25c5b8755f>.
+- Published stable package manifests for `zcash_client_backend` `0.23.0` and
+  `zcash_client_sqlite` `0.21.1`: <https://crates.io/crates/zcash_client_backend/0.23.0>
+  and <https://crates.io/crates/zcash_client_sqlite/0.21.1>.
+- Published release-candidate package manifests for `zcash_client_backend`
+  `0.24.0-rc.7` and `zcash_client_sqlite` `0.22.0-rc.7`:
+  <https://crates.io/crates/zcash_client_backend/0.24.0-rc.7> and
+  <https://crates.io/crates/zcash_client_sqlite/0.22.0-rc.7>.
+- SQLite schema-table and application-version interfaces:
+  <https://www.sqlite.org/schematab.html> and
+  <https://www.sqlite.org/pragma.html#pragma_user_version>.
+
+### 39.8.0.5 Post-activation background shielded sync (Light mode)
+
+R39.8.0aa A Light-mode shielded coin shall keep its shielded wallet database
+current for the whole time the coin is active, not only up to the tip observed
+during activation. On successful completion of a Light activation the
+implementation shall start exactly one coin-lifetime background sync task per
+activated shielded coin, whose only job is to advance the compact-block cache and
+then the shielded wallet database toward the current backend tip. The task shall
+resume from the wallet's own local sync state and shall never re-anchor,
+rewind-by-policy, or otherwise change the sync start point established by
+R39.8.0g--R39.8.0h; changing the sync anchor remains an activation-only
+operation. The task shall not weaken the activation-through-tip gate of R39.8.0m:
+activation still returns only after its own scan is complete, and the background
+task exists to cover chain growth afterwards. A pass that finds the backend tip
+at or below the wallet's already-scanned height shall do no work.
+
+R39.8.0ab The background task shall have an explicit, bounded poll policy. **No
+poll period is dictated by any external contract**; the exact value is the
+implementation's choice, constrained as follows:
+
+- the period shall be strictly positive and finite — neither a busy loop nor an
+  unbounded wait — and it shall be a named, documented constant or configuration
+  value rather than an incidental literal;
+- passes shall not overlap: a new pass shall begin only after the previous pass
+  has finished or failed, so a slow catch-up cannot fan out concurrent scans of
+  the same wallet database;
+- the period shall be short enough that it is not the dominant term in
+  incoming-payment visibility latency. The steady-state latency budget for a
+  mined shielded receipt is *one block interval plus at most one poll period*, so
+  the poll period shall not exceed the coin's nominal block interval;
+- a failed pass (backend unreachable, fetch error, scan error) shall be treated
+  as transient: it shall not terminate the task, shall not tighten the poll
+  cadence into a hot retry, and shall be retried on a subsequent scheduled pass;
+- a failed scan shall leave the wallet conservatively marked as not
+  scan-complete, so spending and shielded-transaction construction stay blocked
+  until a later pass succeeds (consistent with R39.8.0q).
+
+> **Rationale (informative).** The GPLv2 baseline's Native shielded catch-up loop
+> already establishes the same shape — a periodic catch-up pass followed by a
+> fixed sleep, terminating when the coin is dropped — and its period is an order
+> of ten seconds. Any period from a few seconds up to the coin's block interval
+> satisfies R39.8.0ab; picking one exact number is an implementation decision and
+> is deliberately not specified here.
+
+R39.8.0ac The background task shall terminate when the coin is disabled or the
+application context shuts down. It shall not keep the coin alive: holding only a
+non-owning reference to the coin and returning when that reference can no longer
+be upgraded is a sufficient termination condition, and an explicit cancellation
+handle is equally acceptable. Termination shall be observable in bounded time —
+at most one poll period plus the duration of an in-flight pass — and shall
+release every resource the task holds, including the serialization guard of
+R39.8.0ad. A pass still running at the moment of disable shall not be able to
+corrupt or resurrect state for a coin that has been disabled.
+
+R39.8.0ad Background scanning and activation-time database construction shall be
+mutually exclusive per shielded wallet database. The implementation shall
+serialize on the identity of the wallet database itself (its on-disk location,
+not merely the ticker), and both the background scan entry point and the
+activation rebuild/replace/rename entry points shall take that guard. The
+guarantee is that no activation may create, rebuild, replace, rename, or remove a
+wallet database file while a scan of that same database is in flight, and no scan
+may run against a database whose files a concurrent activation is in the middle
+of replacing. Distinct wallet databases — including different tickers, and the
+legacy versus current namespaces of R39.8.0x — shall remain independent, and the
+guard shall be released on completion, failure, and cancellation alike. This
+guard is additional to, not a substitute for, the per-ticker activation
+serialization of R39.8.0m: it also covers the window in which a background pass
+started before coin disable is still running while a re-activation begins.
+
+R39.8.0ae A pass shall tolerate an individual unavailable shielded backend. When
+several `light_wallet_d_servers` are configured (R39.2.4), the implementation
+shall attempt the configured endpoints in turn and shall declare the pass failed
+only after every configured endpoint has failed. Chain-continuity recovery is not
+restated here: a background pass uses the same fetch/validate/scan path as
+activation and therefore inherits the sequential-height and hash-link validation
+and the rewind/refetch-on-discontinuity behaviour of R39.8.0n, including the
+handling of a reorg that invalidates already-cached blocks.
+
+### 39.8.0.6 Pending (unconfirmed) shielded receipts
+
+R39.8.0af A **pending shielded receipt** is a wallet-owned Sapling output that
+the wallet has observed in a transaction the backend reports as present in the
+mempool, and that is not yet present in the shielded wallet database as a scanned
+received note. Its amount is the note value recovered by trial-decrypting that
+output with the wallet's incoming viewing capability; an output that does not
+trial-decrypt to a tracked account is not a receipt and shall be ignored.
+
+R39.8.0ag A pending shielded receipt shall be reported to the caller **only** as
+part of the non-spendable portion of the coin balance (the `unspendable` field of
+the balance object), aligning Light mode with the Native-mode behaviour of
+counting zero-confirmation notes as non-spendable. It shall never contribute to:
+
+- the spendable balance;
+- any tradable/available-volume figure, order maximum, or swap-funding decision;
+- note selection or input selection for building any shielded transaction,
+  including swap payments, fee/burn outputs, and change.
+
+Pending receipts shall likewise not appear in `z_coin_tx_history`, which remains
+derived from wallet-database scan state (R39.8.9). R39.8.0q continues to govern:
+observing a receipt never makes it spendable; only a wallet-database scan does.
+
+R39.8.0ah A pending shielded receipt shall be invalidated — removed from the
+pending set and no longer added to the non-spendable balance — as soon as any of
+the following holds:
+
+- its transaction has been scanned into the shielded wallet database (the same
+  value then appears through normal scanned-note accounting);
+- its transaction is no longer reported by the backend as being in the mempool
+  and has not been mined (dropped or replaced);
+- its transaction's expiry height has been passed by the wallet's scanned tip.
+
+**Double-counting constraint.** The same value shall never be counted twice. An
+amount shall not appear simultaneously in the spendable balance (from the wallet
+database) and in the pending non-spendable amount, and the transition between the
+two shall be atomic from the caller's point of view: a balance query shall never
+observe a state in which a receipt has been counted from both sources, nor a
+state in which a receipt that is still in flight has been dropped from the
+pending set before the scan that supersedes it is durable. Repeated observation
+of the same mempool transaction across successive polls shall contribute its
+value at most once, keyed by transaction identifier and output index.
+
+R39.8.0ai The pending-receipt source is the lightwalletd streaming mempool
+method, which is dictated interop:
+
+| Element | Contract |
+|---|---|
+| method | `GetMempoolTx` |
+| request | `Exclude`, carrying a repeated `txid` byte field holding identifiers (optionally shortened to a prefix) the client already holds |
+| response | a **stream** of `CompactTx`, each carrying the transaction `index`, `hash`, optional `fee`, its `CompactSpend` nullifiers, and its `CompactOutput` entries |
+| recovery | a `CompactOutput` carries the note commitment, ephemeral key, and the truncated note ciphertext, which is sufficient for trial decryption of the note value by the wallet's incoming viewing capability; the memo is not recoverable from a compact output |
+
+The implementation shall treat the mempool view as advisory and possibly stale by
+seconds, shall pass already-known transaction identifiers in `Exclude` so a poll
+does not re-stream what it already holds, and shall degrade gracefully: an
+endpoint that errors on, or does not support, this method shall cause the pending
+amount to be reported as zero rather than failing the balance query or the
+background sync pass of §39.8.0.5.
+
+R39.8.0aj The pending-receipt view shall be refreshed on the same coin-lifetime
+schedule as the background sync of R39.8.0ab, or on balance query, or both; the
+choice is the implementation's, subject to the constraint that the reported
+pending amount shall not be older than one poll period and shall not be computed
+from a mempool snapshot taken before the wallet-database height it is combined
+with.
+
+#### Tests
+
+T39.8.0f Background-sync tests shall prove that, after a Light activation
+completes, a block mined afterwards becomes visible in balance and
+`z_coin_tx_history` without re-activation and within the stated latency budget of
+R39.8.0ab; that the background task does not change the wallet's sync anchor
+across passes; that a pass failure is transient and a later pass recovers; that a
+failed scan leaves the coin blocked from spending until a pass succeeds; that
+disabling the coin terminates the task within one poll period plus one in-flight
+pass; and that a re-activation which rebuilds the wallet database cannot proceed
+while a background pass is scanning that same database, nor a pass begin against
+a database mid-rebuild (R39.8.0ad). A multi-endpoint fixture shall prove that a
+pass survives the failure of any proper subset of the configured endpoints and
+fails only when all of them fail.
+
+T39.8.0g Pending-receipt tests shall use a mempool fixture to prove that a
+wallet-owned unconfirmed shielded output is reported in the non-spendable balance
+and never in the spendable balance or any tradable volume; that it is not offered
+for note selection; that it does not appear in `z_coin_tx_history`; that once the
+transaction is mined and scanned the total balance is unchanged across the
+transition (no double count, no gap) and the value has moved to spendable; that a
+dropped or expired mempool transaction removes the pending amount; that the same
+transaction observed on repeated polls contributes once; and that an endpoint
+which does not serve `GetMempoolTx` yields a zero pending amount rather than a
+balance error.
+
+#### Deferred Work
+
+D39.8.0c *(Resolved 2026-08-09.)* Pending shielded receipts (§39.8.0.6) are
+implemented. The background sync task polls the dictated `GetMempoolTx` stream
+after each wallet scan, trial-decrypts every compact output with the wallet's
+incoming viewing key, excludes any transaction the wallet database has already
+scanned, and rebuilds the pending set wholesale so a mined, dropped or expired
+transaction disappears without bespoke invalidation. The total surfaces only in
+the non-spendable balance field. Backend failure degrades the pending view to
+zero rather than failing the balance.
 
 ### 39.8.1 Envelope, method string & platform gate
 
@@ -607,12 +1327,13 @@ storage error that reflects the store failure.
   config with a well-formed `consensus_params` (plus optional `check_point_block`
   and `z_derivation_path`) deserializes successfully; a bare
   `{"type":"ZHTLC"}` (no `protocol_data`) is rejected at coin-config parse time.
-- Parameter sourcing (R39.6.4, pending port): a ZHTLC coin whose `protocol_data`
+- Parameter sourcing (R39.6.4, implemented): a ZHTLC coin whose `protocol_data`
   declares non-mainnet HRP/b58 prefixes, `coin_type`, or activation heights
   produces addresses/keys under those declared values and begins its shielded
   sync from the declared `check_point_block` (or `sapling_activation_height`
   when absent), not from hardcoded mainnet constants.
-- R39.6.4 remains pending completion (HD-derived key policy support deferred).
+- R39.6.4 is implemented, including HD-derived shielded key-policy support
+  (the transparent UTXO side remains iguana-derived, which is outside R39.6.4 §2).
 - Shielded history activation: a Light-mode ARRR activation initializes both the
   compact-block cache and shielded wallet database, reports compact-block and
   wallet-db scan progress, and reaches terminal activation only after wallet-db
@@ -623,6 +1344,18 @@ storage error that reflects the store failure.
   `received_by_me` and `my_balance_change`, includes the wallet shielded address
   in `to`, reports `sync_status: Finished`, and does not return
   `StorageIsNotInitialized` (§39.8.0d, §39.8.9).
+- Post-activation shielded sync (§39.8.0.5): after a Light-mode activation
+  completes, a subsequently mined shielded receipt becomes visible in balance and
+  `z_coin_tx_history` without re-activation, within one block interval plus at
+  most one poll period; the background task keeps the wallet's sync anchor
+  unchanged, survives a single-endpoint failure, stops when the coin is disabled,
+  and cannot run concurrently with an activation that rebuilds or renames the
+  same wallet database.
+- Pending shielded receipts (§39.8.0.6, not yet implemented — D39.8.0c): an
+  unconfirmed wallet-owned shielded receipt observed through `GetMempoolTx`
+  appears only in the non-spendable balance, never in spendable or tradable
+  amounts, is not double-counted when the transaction is mined and scanned, and
+  disappears if the transaction is dropped or expires.
 - Generic history separation: for an activated ZCoin, generic `my_tx_history`
   v2 rejects the coin as unsupported for that method; Desktop uses
   `z_coin_tx_history` for shielded history (§39.8.0c).

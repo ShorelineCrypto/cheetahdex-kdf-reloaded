@@ -6,16 +6,107 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Incoming ARRR/ZHTLC payments are now visible before they are mined — CRD ch.39 §39.8.0.6, R39.8.0af–aj.** Light mode reported a zero non-spendable balance unconditionally, so a shielded payment sent to the wallet did not exist as far as the UI was concerned until its block was mined *and* locally scanned. The background sync task now polls lightwalletd's `GetMempoolTx` stream after each wallet scan, trial-decrypts every compact output with the wallet's incoming viewing key, and reports the recovered value as pending. Ordering is deliberate: polling the mempool after the scan means a transaction mined between the two reads is already excluded, so the same value can never be counted from both the wallet database and the pending set. The set is rebuilt wholesale each poll, so mined, dropped, replaced, and expired transactions all fall out without bespoke invalidation, and repeated observation contributes a value at most once (keyed by transaction id and output index). Pending amounts appear **only** in the `unspendable` balance field — every swap path reads spendable balance, so an unmined note can never size a trade, fund a swap, or be selected as a transaction input. A backend that is unreachable or returns an unusable response degrades the pending view to zero rather than failing the balance query. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
+- **NFT activation now speaks the deployed indexer's wire contract — CRD ch.19 §19.5.1, R6a/R9a.** The subsystem previously used a REST shape of its own devising (`{base}/<chain>/<owner>/transfers?from_block=<n>`) against the base URL SDK/GUI callers supply. That URL addresses a deployed EVM NFT indexer, which serves a different contract, so every crawl request resolved to a path the service does not route and returned `404` — surfaced to the user as `CrawlFailed` and an activation failure. The bundled provider now speaks the dictated contract: `{base}/api/v2/<owner>/nft` and `.../nft/transfers` with `chain` and `format=decimal` query parameters, cursor pagination followed to completion, a `result`/`cursor` envelope, and `from_block` floored at `1` because the API treats `0` as absent. Block heights, timestamps and token ids are accepted as the decimal **strings** the contract sends (JSON numbers still decode, so persisted payloads and GUI clients are unaffected), and `confirmations` — which the contract does not carry — now defaults instead of failing the page. The contract has no latest-block operation, so a chain yielding no transfers leaves its scan bookmark unadvanced rather than moving it to a provider-reported head, which could otherwise skip transfers permanently. Code: `mm2src/coins/nft/providers/crawler.rs`, `mm2src/coins/nft/model/`, `mm2src/coins/nft/serde_helpers.rs`.
+- **NFT activation no longer crawls transfer history — CRD ch.19 R9a.** Activation ran a full transfer-history crawl, which multiplied provider requests by history size and made any single one of them activation-fatal, while contributing nothing the `nfts` response needs. It now performs exactly one operation — the owned-inventory fetch, paged to completion — and persists that snapshot before returning. The transfer walk, per-token detail lookups, metadata back-fill, and bookmark advance all remain behind `update_nft`. Code: `mm2src/coins/nft/activation.rs`.
+
+- **Light-mode shielded (ARRR/ZHTLC) balances now update while the wallet runs — CRD ch.39 §39.8.0.5.** The modern compact-block downloader and wallet scanner previously ran *only* during activation, so a Light-mode wallet's shielded balance stayed frozen at the activation height for the rest of the session: an incoming ARRR payment became visible only after activating the coin again (in practice, restarting the wallet). A coin-lifetime background task is now spawned at the end of a Light-mode activation and tops the wallet database up on a bounded poll period (R39.8.0ab), resuming from local sync state (`requested_start_height: None` + `skip_sync_params: true`) so it never re-anchors the wallet (R39.8.0aa). It holds weak references only, so it stops when the coin is disabled (R39.8.0ac). Native mode was unaffected. Expected latency for an incoming shielded payment is now one block plus one poll period. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins_activation/src/z_coin_activation.rs`.
+- **Shielded wallet-database rebuilds no longer race an in-flight scan — CRD ch.39 R39.8.0ad.** Disabling a shielded coin removes it from the registry, but a background sync pass already running holds its own reference and continues to the end of that pass; a re-activation started in that window could rename the wallet and compact-block databases out from under the running scan. SQLite's locking prevents corruption between concurrent statements but not against a rename, so the scan and rebuild entry points now take a shared lock scoped to the wallet database's on-disk identity rather than the ticker. Only synchronous sections are guarded, so it is never held across an await. Code: `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
+- **A coin with no usable Electrum server now says so immediately.** When every configured Electrum server was unusable — none configured at all, or all of them dropped because a native build cannot use `ws`/`wss` servers — activation spent five seconds attempting connections and then reported failing to connect to an empty candidate list, which gave no hint that the list was empty or why. That case is now detected before any connection attempt and reported as `NoUsableElectrumServers`, naming the ticker and both possible causes. Behaviour is unchanged whenever at least one usable server exists. Code: `mm2src/coins/utxo/utxo_builder/utxo_coin_builder.rs`.
+- **The `ws`/`wss` Electrum rejection message no longer implies missing work.** Native builds cannot use `ws`/`wss` servers, and WASM builds cannot use `TCP`/`SSL` ones — a deliberate platform split, not a pending feature. The native-side message said the protocols were "not supported yet", which read as a TODO and prompted repeated investigation; it now states the platform boundary directly. Message wording only, no behaviour change. Code: `mm2src/coins/utxo/rpc_clients/electrum_rpc_client.rs`.
+
+- **EVM swaps now explain a missing gas balance instead of leaking the provider error.** Attempting to trade an ERC-20/BEP-20/PLG-20 token with no platform coin (BNB/ETH/MATIC/…) to pay gas made `estimate_gas` revert, and the raw node error surfaced verbatim — e.g. BSC's `error code -32000: gas required exceeds allowance (0)` — with no indication that the actual problem was an empty gas balance. `get_fee_to_send_taker_fee` now checks the platform-coin balance when gas estimation fails and reports the shortfall against the *platform* ticker, which existing callers map onto `NotSufficientBaseCoinBalance` ("Not enough base coin BNB balance for swap: available …, required at least …"). Because that variant is classified as an insufficient-balance condition, `max_taker_vol` also degrades to a tradable volume of `0` instead of failing the whole RPC. The existing sent-coin check runs first and is unchanged, and a failure to read the platform balance never masks the original error. Code: `mm2src/coins/eth/eth_mm_coin.rs`, `mm2src/coins/eth/eth_types.rs`.
+
 ### Added
 
+- **Electrum-backed balances now update on notification instead of waiting for the next poll — CRD ch.38 R38.6.5.** The requirement — emit balance-change events with watched addresses registered at enable time and re-registered as needed — was only half met: events were emitted, but purely from a 30 s timer, and nothing was ever registered with a server. The client already received server-initiated notifications yet recognised exactly one method and discarded the rest as errors. It now routes `blockchain.scripthash.subscribe` notifications to a registry keyed by script hash, and the balance streamer subscribes its coin's address on start, races the notification against the poll deadline, and re-reads the balance as soon as a server reports a change. A deposit or incoming swap payment therefore appears in about the time the server takes to notice it, rather than up to a full poll interval later. Watched hashes are re-armed on every newly connected server, because a subscription belongs to one session and a reconnect or server swap drops it silently. **Polling is retained as the correctness floor**: a coin whose subscription fails, is unavailable, or dies silently keeps its existing timer, so the worst case is the latency we had before, never a stale balance. Applies to Electrum-backed UTXO, QTUM and BCH coins; native-RPC and non-UTXO families are unchanged. Unrecognised notification methods are now ignored rather than logged as errors, since a server may push subscriptions we never requested. Code: `mm2src/coins/utxo/rpc_clients/electrum_rpc_client.rs`, `mm2src/coins/utxo/utxo_builder/utxo_coin_builder.rs`, `mm2src/mm2_main/src/rpc/streaming_activations/balance.rs`.
+
+- **Known beta limitation: shielded Zcash/ARRR is not supported in the web-wallet WASM bundle yet.** The WASM CI safety net now uses a direct `cargo check --target wasm32-unknown-unknown -p mm2_main` check because the packaging step hit a duplicate `secp256k1-sys` link collision from the Zcash/ARRR stack. Native and desktop builds remain the supported targets for shielded Zcoin activation and sync until the web bundle is normalized.
+
 - **Z-coin (ARRR/ZHTLC) WASM support — R39.6.1.** The shielded coin module is now available on the `wasm32-unknown-unknown` target. `zcash_primitives` and `zcash_client_backend` are added as WASM dependencies. The sapling state cache is abstracted behind a `SaplingStateCacheOps` trait with a SQLite backend for native and an IndexedDB backend (mm2_db) for WASM. `MmCoinEnum::ZCoin` and the `z_coin` module are now gated for all targets. Transaction building (`gen_tx`/`send_outputs`) remains native-only pending WASM delivery of the sapling parameter files. Code: `mm2src/coins/z_coin/`, `mm2src/coins/Cargo.toml`, `mm2src/coins/lp_coins.rs`, `mm2src/coins/lp_coins_context.rs`.
-- **Z-coin sync-parameter control — R39.6.2.** The `task::enable_z_coin::init` activation request accepts two optional throughput-tuning fields: `blocks_per_iteration` (u32, default 1) and `inter_iteration_interval_ms` (u64, default 0). A `sync_start` field accepting `{"type":"Height","data":<u32>}` or `{"type":"Date","data":"<YYYY-MM-DD>"}` is also accepted; height-based start is wired through the sync loop; date-to-height resolution is deferred. Code: `mm2src/coins_activation/src/z_coin_activation.rs`, `mm2src/coins/z_coin.rs`.
+- **Z-coin sync-parameter control — R39.6.2.** The `task::enable_z_coin::init` activation request now honours the externally-dictated sync controls (confirmed against the public komodoplatform API reference and KDF-family wallets): a `sync_params` field **inside the Light-mode `rpc_data`** (`activation_params.mode.rpc_data.sync_params`), shaped as the externally-tagged union `{"height": <uint>}` / `{"date": <unix-seconds>}` / `"earliest"`; plus top-level `scan_blocks_per_iteration` (u32) and `scan_interval_ms` (u64, `scan_interval` accepted as an alias). Height starts pass through, date starts resolve to a block height via a binary search over backend block timestamps, and `earliest` maps to Sapling activation. (Supersedes the earlier, incorrect top-level `sync_start` / `{"type","data"}` shape.) Code: `mm2src/coins_activation/src/z_coin_activation.rs`, `mm2src/coins/z_coin.rs`.
+- **Z-coin HD-derived shielded key policy — R39.6.4 §2.** Under an HD (BIP39) wallet, the shielded Sapling spending key is now derived from the wallet seed along the coin's `z_derivation_path` with the activation `account` appended as a hardened child (`m/<z_derivation_path>/account'`); the legacy Iguana policy keeps deriving the ZIP32 master from the iguana secret. A new optional `account` field (u32, default 0) on `task::enable_z_coin::init` selects the account (ignored under the Iguana policy). Only the shielded key is HD-derived; the transparent UTXO side remains iguana-derived. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins_activation/src/z_coin_activation.rs`.
+- **Z-coin activation reports the resolved shielded sync start — R39.8.0h.** When a `sync_params` is supplied, the activation result now includes a `first_sync_block` object `{ requested, is_pre_sapling, actual }`, where `requested` is the resolved start height (from a height or a date), `is_pre_sapling` flags a request below Sapling activation, and `actual` floors the start at Sapling activation. Code: `mm2src/coins_activation/src/z_coin_activation.rs`.
+- **Z-coin (ARRR/ZHTLC) activation-wire conformance — R39.3 / R39.6.2 / R39.8.0h.**
+  `task::enable_z_coin` now matches the dictated public activation wire on the
+  remaining points: the status task reports the two dictated scan phases with
+  live progress (`UpdatingBlocksCache` during the compact-block download and
+  `BuildingWalletDb` during the wallet-DB scan, each with `current_scanned_block`
+  / `latest_block`); the activation result includes the top-level `ticker` and
+  emits `first_sync_block` unconditionally; the request honours
+  `zcash_params_path` (native Sapling parameter directory) and `skip_sync_params`
+  (resume from local state, consulting `sync_params` only when no prior state
+  exists); and blocks-per-iteration now defaults to the dictated `1000`. The
+  modern Light wallet-DB scanner now applies the effective
+  `scan_blocks_per_iteration` and `scan_interval_ms` values instead of using a
+  fixed 1,000-block batch with no pause. Activation logs the effective policy at
+  INFO; network and wallet batch timing/frontier details are bounded DEBUG/TRACE
+  diagnostics, while the normal Light-mode bypass of the legacy native cache is
+  no longer reported as a warning. Code:
+  `mm2src/coins_activation/src/z_coin_activation.rs`, `mm2src/coins/z_coin.rs`,
+  `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
 - **Tendermint `denom` / `decimals` / `ibc_channels` in `CoinProtocol`.** `CoinProtocol::TENDERMINT` now carries optional `denom`, `decimals`, and `ibc_channels` fields (R36.3.3), aligned with the komodo-coins config schema for ATOM-family coins. Code: `mm2src/coins/tendermint/`.
 - **V1 swap and taker order-status SSE.** The SSE streaming infrastructure now emits live maker/taker swap and order-status events under the existing `stream::*` namespace. Code: `mm2src/mm2_main/`.
 - **SSE streamer parity endpoints.** The CRD and implementation now cover `stream::disable`, `stream::fee_estimator::enable`, `stream::tx_history::enable`, and native non-Windows `stream::shutdown_signal::enable`, completing the currently bound `stream::*` parity surface. Code: `docs/reloaded-rewrite/10-sse-streaming.md`, `mm2src/mm2_main/`.
 - **RPC-dump development build workflow.** A manual `dev-build-rpc.yml` workflow builds with the RPC dump feature set, and the cross-platform build workflows pass feature flags consistently on Linux, macOS, Windows, iOS, and Android. Code: `.github/workflows/`.
 
 ### Fixed
+
+- **ARRR Light activation checkpoint, recovery, and concurrency.** Lightwalletd
+  `TreeState` display-order block IDs are now converted to the canonical
+  little-endian compact-block representation before first-block continuity
+  validation, fixing valid scans that failed immediately with a hash
+  discontinuity and consequently reported a zero balance. A recoverable hot
+  SQLite journal is classified through a temporary recovery copy without
+  mutating the source, rather than being mislabeled as schema corruption after
+  logout or interruption. Same-ticker ZCoin activation tasks are serialized
+  across the full activation lifecycle to prevent concurrent rebuild/rename
+  races on Windows. Compact-block network batches are validated and committed
+  atomically in one SQLite transaction, reducing long historical-sync write
+  overhead and preventing partial batches. After a restart, a complete cached
+  segment is chain-validated and resumed at its next height, avoiding another
+  download of already persisted history; a discontinuous segment is preserved
+  and rebuilt instead of being trusted by its maximum height. Code:
+  `mm2src/coins/z_coin/`, `mm2src/coins_activation/`.
+
+- **ARRR Light scans with Pirate compact-block metadata.** Pirate's dictated
+  compact-block protobuf predates the modern optional `ChainMetadata` field.
+  Reloaded now supplies the missing first-block Sapling tree size in memory
+  from the trusted checkpoint frontier and the block's explicit outputs, so
+  the stable `zcash_client_backend` scanner no longer aborts with an unknown
+  tree-size error. Reloaded also carries the exact compact-source frontier
+  between bounded wallet-scan batches instead of reconstructing it from the
+  prunable wallet tree, fixing later failures near completion with `Unable to
+  compute root; missing values for nodes`. After a restart it refreshes the
+  frontier at the persisted scan height and validates its block hash and tree
+  size before continuing. Scan failures are also logged explicitly instead of
+  appearing only in the activation task response. Code:
+  `mm2src/coins/z_coin/`.
+
+- **Z-coin (ARRR/ZHTLC) shielded sync honours the requested sync start.**
+  The activation request's shielded sync point (`mode.rpc_data.sync_params`)
+  was being dropped on the wire — the daemon expected a top-level `sync_start`
+  with a different shape, so the parameter deserialized to nothing and the
+  fetch plan always saw `requested_start_height=None`. On top of that, once a
+  shielded wallet had scanned to the chain tip, activation short-circuited on
+  the already-scanned state and reused the stale local cache, so the wallet
+  displayed a balance almost instantly regardless of the requested start. The
+  request now parses the dictated wire (`sync_params` as
+  `{"height"|"date":N}`/`"earliest"` inside the Light `rpc_data`), and
+  activation compares the requested start against the wallet's sync anchor and,
+  when they differ (earlier or later), rewinds/recreates the compact-block
+  cache and wallet database and rescans from the requested start, re-seeding
+  the commitment tree from the light backend — matching upstream behaviour. An
+  unchanged start still resumes from the tip without a rescan, and a start
+  beyond the tip is clamped. Fixes #2. The remaining ZHTLC activation-wire
+  divergences (two-phase scan progress, result `ticker`, `zcash_params_path`,
+  `skip_sync_params`, unconditional `first_sync_block`, and the `1000`
+  blocks-per-iteration default) are addressed by the activation-wire conformance
+  entry above. Code:
+  `mm2src/coins_activation/src/z_coin_activation.rs`,
+  `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
 
 - **Small KMD direct-burn DEX fees retain the legacy wire shape.** Netid 8762
   KMD taker-fee construction now permits the positive 75% fee-collection
@@ -47,20 +138,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **UTXO dynamic-fee trade preimage is consistent** for `UpperBound` vs `Exact` fee policies. Code: `mm2src/coins/utxo/`.
 - **ETH `estimate_gas` insufficient-balance revert mapped to `NotSufficientBalance`** instead of a generic transport error. Code: `mm2src/coins/eth/`.
 - **getrandom 0.3 `wasm_js` backend enabled on wasm32** so entropy sources compile correctly on the WASM target. Code: `Cargo.toml`.
-- **sia-rust bumped to `0e65d62`** (null `V2StorageProof.proof` fix).
+- **sia-rust bumped to `e1c0725`** (nom 7.1.3 and WASM bindgen refresh).
 - **ARRR/ZCoin activation and light-mode scanning.** ZHTLC activation no longer panics through the task manager when a failing Electrum candidate is encountered; activation fails over across available Electrum servers. Light-mode activation creates the required Sapling cache, bounds shielded-history scanning, handles stale checkpoints, uses the Pirate-compatible lightwalletd gRPC package, supports TLS lightwalletd endpoints, and reports shielded wallet DB balances for ARRR instead of returning zero. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
 - **ARRR/ZCoin and direct-withdraw coin previews through `task::withdraw`.** ZCoin/ARRR shielded withdraws, plus BCH, QRC20, SLP, Solana/SPL, Sia, and Tendermint native/token withdraws, are routed through the task-withdraw API instead of failing preview/status with `CoinDoesntSupportInitWithdraw` when clients use the task path. Lightning remains intentionally unsupported by withdraw because invoices are the payment entrypoint. Code: `mm2src/coins/rpc_command/init_withdraw.rs`, `mm2src/coins/z_coin.rs`.
-- **ARRR/ZCoin light-mode shielded withdrawal construction.** Shielded ARRR withdraw previews in light mode now build spends from the scanned `ARRR_WALLET.db` note/witness data instead of entering the native zcashd `ZRpcOps` path, preventing preview-time KDF crashes on Electrum-backed activations. Code: `mm2src/coins/z_coin/`.
+- **ARRR/ZCoin light-mode shielded withdrawal construction.** Shielded ARRR withdraw previews in light mode now build spends from the scanned `<TICKER>_RELOADED_WALLET.db` note/witness data instead of entering the native zcashd `ZRpcOps` path, preventing preview-time KDF crashes on Electrum-backed activations. Code: `mm2src/coins/z_coin/`.
 - **Orderbook address handling for Tendermint/Sia/Solana-family configs.** Orderbook and best-orders rendering no longer panic when a P2P order references non-UTXO protocol configs encountered by multi-coin wallet sessions. Tendermint addresses are derived from the order pubkey where possible; unsupported address families now return structured per-order errors and are skipped instead of crashing KDF. Code: `mm2src/mm2_main/src/lp_ordermatch/`.
-- **Legacy maker-swap refund event compatibility.** Saved swap files using the historical `MakerPaymentRefundStarted` event name now deserialize as `MakerPaymentWaitRefundStarted`, so old refund-path swaps no longer disappear from swap history/status with an unknown-variant error. Code: `mm2src/mm2_main/src/lp_swap/`.
+- **Legacy maker-swap refund event compatibility.** Data-less historical
+  `MakerPaymentRefundStarted` and `MakerPaymentRefundFinished` milestones now
+  deserialize as their distinct unit events, so old refund-path swaps no longer
+  disappear from swap history/status with `missing field data`. The known
+  payload-bearing refund-start form remains accepted and preserves its
+  `wait_until` deadline as a wait-refund milestone. Code:
+  `mm2src/mm2_main/src/lp_swap/`.
 - **Legacy swap instruction-event compatibility.** Saved maker/taker swap files whose `MakerPaymentInstructionsReceived` or `TakerPaymentInstructionsReceived` event omitted the optional `data` field now deserialize as `None`, preventing repeated `missing field data` errors in swap history/status polling. Code: `mm2src/mm2_main/src/lp_swap/`.
 - **Legacy swap-history resilience.** `my_recent_swaps` now logs and omits missing or corrupt saved-swap rows instead of returning `null` entries or failing typed recent-swap consumers, preventing wallet swap pages and order processing from being destabilized by incompatible historical swap files. Code: `mm2src/mm2_main/src/lp_swap/`.
 - **Ordermatch trie-delta removal test made deterministic.** The orderbook sync test no longer depends on nondeterministic ordering when asserting a delta after removed orders. Code: `mm2src/mm2_main/src/ordermatch_tests.rs`.
 - **Coin activation/runtime hardening for multi-asset wallets.** ERC20/BEP20 tokens with missing or zero config decimals now fall back to on-chain `decimals()`, NFT activation lazily opens the native async SQLite store instead of failing with `async_sqlite_connection is not initialized`, and Tendermint RPC node selection falls back from `/health` to `abci_info` before declaring all nodes unavailable. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
 - **Runtime stubs converted to explicit no-op/errors where safe.** Unsupported TRON V1 swap paths now return structured errors, L2 SQL transaction-history queries return an unsupported-history error instead of panicking, wasm crash-report initialization is an intentional no-op, and public-key trait methods for enabled coin families no longer panic when called by production paths. Code: `mm2src/coins/`, `mm2src/common/`.
+- **Background retry and diagnostic noise hardening.** Persistent QRC20 history
+  failures now back off from 10 seconds to a bounded five-minute retry interval
+  and reset after recovery. Native Electrum reconnect loops retain the first or
+  changed endpoint error at `ERROR` while identical retries move to `DEBUG`;
+  redundant rustls handshake/alert internals are omitted from the application
+  log while the endpoint-specific KDF error remains. Optional
+  `eth_feeHistory`, late request-response completions, routine peer exchange,
+  and duplicate peer-exchange dial diagnostics no longer appear as operator
+  errors. Code: `mm2src/coins/`, `mm2src/common/`, `mm2src/mm2_p2p/`.
 
 ### Changed / dependencies
 
+- **Security and yanked dependency refresh.** Transitive `ruint` is upgraded
+  from 1.18.0 to the security-fixed 1.20.0 for RUSTSEC-2026-0220. Compatible
+  patch updates also replace the yanked `ahash 0.7.6`,
+  `crossbeam-channel 0.5.1`, and `rmp-serde 0.14.3` releases; MessagePack stays
+  on the wire-compatible 0.14 line. Obsolete `libsqlite3-sys` and `rand`
+  advisory exceptions are removed from the audit policy.
+- **Stable modern `librustzcash` stack with schema-safe shielded rescan.**
+  Z-coin now uses the coherent stable crates.io line
+  (`zcash_client_backend 0.23.0`, `zcash_client_sqlite 0.21.1`, and
+  `zcash_primitives`/`zcash_proofs 0.28.0`) instead of the legacy vendored 0.5
+  API. Reloaded stores the modern wallet and compact cache as
+  `<TICKER>_RELOADED_WALLET.db` and
+  `<TICKER>_RELOADED_COMPACT_BLOCKS.db`, leaving GLEEC/pre-upgrade files
+  untouched. Exact legacy schemas are preserved and rebuilt/rescanned rather
+  than migrated in place; unknown or corrupt schemas fail without mutation.
+  The selected-current migration/schema fingerprint is pinned, cached-chain
+  continuity is validated before scanning, and KDF P2SH transaction bytes are
+  protected by full serialization regressions. The broad old Zcash workspace
+  dependency is replaced by exact registry versions plus three narrow,
+  documented crate patches for the obsolete `time-core` pin and required KDF
+  transaction-builder compatibility. See CRD chapter 39 and
+  [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md). This port completes the
+  Light-mode modern store/scan path; the pre-existing Native full-node adapter
+  does not yet populate that modern compact cache and remains an explicit CRD
+  chapter-39 gap.
+- **Shared SQLite binding upgraded from `rusqlite 0.24.2` to `0.37.0`.** All
+  native SQLite consumers now share the version required by the stable Zcash
+  wallet store. Legacy `NO_PARAMS`/named-query APIs and dynamic parameter calls
+  were ported without changing their SQL contracts. The upgrade also exposed
+  and removed one deprecated Solana keypair accessor in tests; the independent
+  `nom 6.1.2` future-incompatibility remains owned by the pinned `sia-rust`
+  dependency rather than Zcash.
 - **`rand` 0.7 → 0.8** across all direct reloaded usages (RUSTSEC-2026-0097; upstream-blocked advisory). Code: multiple crates.
 - **`mm2_metrics` rewritten** with a hand-rolled Prometheus registry; drops the dead `metrics-runtime 0.13` / `metrics-util` stack, clearing RUSTSEC-2021-0113. Code: `mm2src/mm2_metrics/`.
 - **`anyhow` bumped to 1.0.103, `crossbeam-epoch` to 0.9.20** (advisory clears). Code: `Cargo.toml`.

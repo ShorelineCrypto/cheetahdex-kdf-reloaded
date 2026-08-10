@@ -7,16 +7,48 @@ use async_trait::async_trait;
 use coins::utxo::utxo_common::{address_balance as utxo_address_balance, address_from_str_unchecked};
 use common::executor::Timer;
 use common::log;
+use futures::channel::mpsc as futures_mpsc;
 use futures::compat::Future01CompatExt;
 use futures::future::{select, Either};
+use futures::StreamExt;
 use mm2_event_stream::{mpsc, oneshot, Broadcaster, Event, EventStreamer, StreamerId};
 use serde::Deserialize;
 use serde_json::json;
 
 use super::{EnableStreamingRequest, EnableStreamingResponse, StreamingError};
+use coins::utxo::rpc_clients::{electrum_script_hash, ElectrumClient, UtxoRpcClientEnum};
+use coins::utxo::{output_script, ScriptType, UtxoCoinFields};
 use coins::{lp_coinfind, MarketCoinOps, MmCoinEnum};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+
+/// The Electrum client and P2PKH script hash for an Electrum-backed UTXO coin.
+///
+/// `None` for native-RPC coins and every non-UTXO family: only Electrum offers
+/// script-hash subscriptions, so there is nothing to register elsewhere.
+///
+/// The script hash is derived exactly as the balance path derives it
+/// (`output_script(.., P2PKH)` then `electrum_script_hash`), because a hash that
+/// does not match the one the balance read uses would subscribe successfully and
+/// then never fire — a silent failure indistinguishable from an idle address.
+fn electrum_subscription_target(coin: &MmCoinEnum) -> Option<(ElectrumClient, String)> {
+    fn resolve(fields: &UtxoCoinFields, address_str: &str) -> Option<(ElectrumClient, String)> {
+        let electrum = match &fields.rpc_client {
+            UtxoRpcClientEnum::Electrum(client) => client.clone(),
+            UtxoRpcClientEnum::Native(_) => return None,
+        };
+        let address = address_from_str_unchecked(fields, address_str).ok()?;
+        let script = output_script(&address, ScriptType::P2PKH);
+        Some((electrum, hex::encode(electrum_script_hash(&script))))
+    }
+
+    match coin {
+        MmCoinEnum::UtxoCoin(c) => resolve(c.as_ref(), &c.my_address().ok()?),
+        MmCoinEnum::QtumCoin(c) => resolve(c.as_ref(), &c.my_address().ok()?),
+        MmCoinEnum::Bch(c) => resolve(c.as_ref(), &c.my_address().ok()?),
+        _ => None,
+    }
+}
 
 fn electrum_utxo_watch_address(coin: &MmCoinEnum) -> Option<String> {
     match coin {
@@ -143,6 +175,30 @@ impl EventStreamer for BalanceEventStreamer {
         let mut watched_address: Option<String> = electrum_utxo_watch_address(&coin);
         let mut prev_watched_address: Option<String> = None;
 
+        // Ask the servers to tell us when this address changes, so a deposit or
+        // an incoming swap payment does not wait out the poll interval
+        // (R38.6.5). The receiver is only a wake signal: the balance below is
+        // always re-read authoritatively, never inferred from a notification.
+        //
+        // Every failure path here degrades to plain polling rather than
+        // aborting: a coin with no subscription is exactly as correct as it was
+        // before, only slower to notice.
+        let (wake_tx, mut wake_rx) = futures_mpsc::unbounded::<String>();
+        let mut subscribed_script_hash: Option<String> = None;
+        if let Some((electrum, script_hash)) = electrum_subscription_target(&coin) {
+            match electrum.subscribe_scripthash(script_hash.clone()).await {
+                Ok(()) => {
+                    coins::utxo::rpc_clients::watch_scripthash(script_hash.clone(), wake_tx);
+                    subscribed_script_hash = Some(script_hash);
+                },
+                Err(e) => log::debug!(
+                    "Balance streamer for {}: script-hash subscription unavailable ({}); polling only",
+                    self.ticker,
+                    e
+                ),
+            }
+        }
+
         // Emit an initial snapshot right away so clients don't wait for the first interval tick.
         match watched_balance(&coin, &watched_address).await {
             Ok(balance) => {
@@ -187,9 +243,23 @@ impl EventStreamer for BalanceEventStreamer {
                 watched_address = current_watch_address;
             }
 
-            let sleep = Timer::sleep(interval_secs);
-            let sleep = core::pin::pin!(sleep);
-            match select(sleep, &mut shutdown).await {
+            // Whichever comes first: the poll deadline, or a server telling us
+            // the address changed. The timer is retained as the correctness
+            // floor, so a subscription that silently dies costs latency only.
+            let tick = async {
+                let sleep = Timer::sleep(interval_secs);
+                futures::pin_mut!(sleep);
+                let woken = wake_rx.next();
+                futures::pin_mut!(woken);
+                match select(sleep, woken).await {
+                    Either::Left(_) => {},
+                    // Drain anything that arrived while we were busy so a burst
+                    // of notifications collapses into a single refresh.
+                    Either::Right(_) => while wake_rx.try_next().is_ok() {},
+                }
+            };
+            let tick = core::pin::pin!(tick);
+            match select(tick, &mut shutdown).await {
                 Either::Left(_) => {
                     match watched_balance(&coin, &watched_address).await {
                         Ok(balance) => {
@@ -239,6 +309,9 @@ impl EventStreamer for BalanceEventStreamer {
                     }
                 },
                 Either::Right(_) => {
+                    if let Some(script_hash) = subscribed_script_hash.take() {
+                        coins::utxo::rpc_clients::unwatch_scripthash(&script_hash);
+                    }
                     break;
                 },
             }
@@ -305,5 +378,70 @@ mod tests {
             &unspendable,
             watched_address.as_ref(),
         ));
+    }
+
+    /// The wake path must actually shorten the wait, not merely compile.
+    ///
+    /// This mirrors the streamer's tick: race the poll deadline against the
+    /// notification channel. With a deliberately long deadline, a delivered
+    /// notification must return promptly — if the receiver were awaited
+    /// incorrectly the race would simply fall through to the timer, which looks
+    /// identical to "no notification arrived" and would leave push silently
+    /// doing nothing.
+    #[test]
+    fn notification_wakes_the_tick_before_the_poll_deadline() {
+        use common::executor::Timer;
+        use futures::channel::mpsc as futures_mpsc;
+        use futures::future::{select, Either};
+        use futures::StreamExt;
+        use std::time::Instant;
+
+        let (tx, mut rx) = futures_mpsc::unbounded::<String>();
+
+        common::block_on(async move {
+            tx.unbounded_send("deadbeef".to_owned()).expect("receiver is alive");
+
+            let started = Instant::now();
+            // 30 s is the production default; a correct implementation must not
+            // wait for it when a notification is already pending.
+            let sleep = Timer::sleep(30.);
+            futures::pin_mut!(sleep);
+            let woken = rx.next();
+            futures::pin_mut!(woken);
+
+            let via_notification = matches!(select(sleep, woken).await, Either::Right(_));
+
+            assert!(via_notification, "the notification must win the race, not the timer");
+            assert!(
+                started.elapsed().as_secs() < 5,
+                "waking took {:?}; the notification did not short-circuit the poll deadline",
+                started.elapsed()
+            );
+        });
+    }
+
+    /// A burst of notifications must collapse into one refresh rather than
+    /// queueing a refresh per notification.
+    #[test]
+    fn burst_of_notifications_drains_to_a_single_wake() {
+        use futures::channel::mpsc as futures_mpsc;
+        use futures::StreamExt;
+
+        let (tx, mut rx) = futures_mpsc::unbounded::<String>();
+        for _ in 0..5 {
+            tx.unbounded_send("deadbeef".to_owned()).expect("receiver is alive");
+        }
+
+        common::block_on(async move {
+            rx.next().await.expect("first notification");
+            let mut drained = 0;
+            while rx.try_next().is_ok() {
+                drained += 1;
+            }
+            assert_eq!(
+                drained, 4,
+                "the remaining notifications must be drained, not left queued"
+            );
+        });
     }
 }
