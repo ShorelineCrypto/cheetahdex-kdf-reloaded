@@ -330,7 +330,7 @@ mod docker_tests {
             let mut slp_outputs = vec![];
 
             for _ in 0..18 {
-                let priv_key = SecretKey::new(&mut rand6::thread_rng());
+                let priv_key = SecretKey::new(&mut rand::thread_rng());
                 let key_pair = key_pair_from_secret(priv_key.as_ref()).unwrap();
                 let address_hash = key_pair.public().address_hash();
                 let address = Address {
@@ -396,7 +396,7 @@ mod docker_tests {
         ticker: &str,
         balance: BigDecimal,
     ) -> (MmArc, UtxoStandardCoin, [u8; 32]) {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
         let (ctx, coin) = utxo_coin_from_privkey(ticker, priv_key.as_ref());
         let timeout = 30; // timeout if test takes more than 30 seconds to run
         let my_address = coin.my_address().expect("!my_address");
@@ -1611,7 +1611,7 @@ mod docker_tests {
 
     #[test]
     fn test_maker_trade_preimage() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
 
         let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", &priv_key[..]);
         let my_address = mycoin.my_address().expect("!my_address");
@@ -1751,7 +1751,7 @@ mod docker_tests {
 
     #[test]
     fn test_taker_trade_preimage() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
 
         let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", priv_key.as_ref());
         let my_address = mycoin.my_address().expect("!my_address");
@@ -1898,7 +1898,7 @@ mod docker_tests {
             assert_eq!(actual.error_data, Some(expected));
         }
 
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
         let fill_balance_functor = |amount: BigDecimal| {
             let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", priv_key.as_ref());
             let my_address = mycoin.my_address().expect("!my_address");
@@ -2016,7 +2016,7 @@ mod docker_tests {
     /// https://github.com/KomodoPlatform/atomicDEX-API/issues/902
     #[test]
     fn test_trade_preimage_additional_validation() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
 
         let (_ctx, mycoin1) = utxo_coin_from_privkey("MYCOIN1", priv_key.as_ref());
         let my_address = mycoin1.my_address().expect("!my_address");
@@ -2161,7 +2161,7 @@ mod docker_tests {
 
     #[test]
     fn test_trade_preimage_legacy() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
         let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", priv_key.as_ref());
         let my_address = mycoin.my_address().expect("!my_address");
         fill_address(&mycoin, &my_address, 10.into(), 30);
@@ -3297,7 +3297,7 @@ mod docker_tests {
 
     #[test]
     fn test_withdraw_not_sufficient_balance() {
-        let privkey = SecretKey::new(&mut rand6::thread_rng());
+        let privkey = SecretKey::new(&mut rand::thread_rng());
         let coins = json! ([
             {"coin":"MYCOIN","asset":"MYCOIN","txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
             {"coin":"MYCOIN1","asset":"MYCOIN1","txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},

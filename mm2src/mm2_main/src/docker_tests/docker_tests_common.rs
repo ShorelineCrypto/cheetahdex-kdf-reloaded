@@ -343,7 +343,7 @@ pub fn generate_qrc20_coin_with_random_privkey(
     qtum_balance: BigDecimal,
     qrc20_balance: BigDecimal,
 ) -> (MmArc, Qrc20Coin, [u8; 32]) {
-    let priv_key = SecretKey::new(&mut rand6::thread_rng());
+    let priv_key = SecretKey::new(&mut rand::thread_rng());
     let (ctx, coin) = qrc20_coin_from_privkey(ticker, priv_key.as_ref());
 
     let timeout = 30; // timeout if test takes more than 30 seconds to run
@@ -376,7 +376,7 @@ pub fn generate_qtum_coin_with_random_privkey(
         "dust": 72800,
     });
     let req = json!({"method": "enable"});
-    let priv_key = SecretKey::new(&mut rand6::thread_rng());
+    let priv_key = SecretKey::new(&mut rand::thread_rng());
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
     let coin = block_on(qtum_coin_with_priv_key(&ctx, "QTUM", &conf, &params, priv_key.as_ref())).unwrap();
@@ -414,7 +414,7 @@ pub fn generate_segwit_qtum_coin_with_random_privkey(
         },
     });
     let req = json!({"method": "enable"});
-    let priv_key = SecretKey::new(&mut rand6::thread_rng());
+    let priv_key = SecretKey::new(&mut rand::thread_rng());
     let ctx = MmCtxBuilder::new().into_mm_arc();
     let params = UtxoActivationParams::from_legacy_req(&req).unwrap();
     let coin = block_on(qtum_coin_with_priv_key(&ctx, "QTUM", &conf, &params, priv_key.as_ref())).unwrap();
@@ -479,7 +479,7 @@ pub fn wait_for_estimate_smart_fee(timeout: u64) -> Result<(), String> {
         EstimateSmartFeeState::Idle => log!("Start wait_for_estimate_smart_fee"),
     }
 
-    let priv_key = SecretKey::new(&mut rand6::thread_rng());
+    let priv_key = SecretKey::new(&mut rand::thread_rng());
     let (_ctx, coin) = qrc20_coin_from_privkey("QICK", priv_key.as_ref());
     let timeout = now_ms() / 1000 + timeout;
     let client = match coin.as_ref().rpc_client {
@@ -531,7 +531,7 @@ pub fn trade_base_rel((base, rel): (&str, &str)) {
                 priv_key
             },
             "QICK" | "QORTY" => {
-                let priv_key = SecretKey::new(&mut rand6::thread_rng());
+                let priv_key = SecretKey::new(&mut rand::thread_rng());
                 let (_ctx, coin) = qrc20_coin_from_privkey(ticker, priv_key.as_ref());
                 let my_address = coin.my_address().expect("!my_address");
                 fill_address(&coin, &my_address, 10.into(), timeout);
@@ -540,7 +540,7 @@ pub fn trade_base_rel((base, rel): (&str, &str)) {
                 *priv_key.as_ref()
             },
             "MYCOIN" | "MYCOIN1" => {
-                let priv_key = SecretKey::new(&mut rand6::thread_rng());
+                let priv_key = SecretKey::new(&mut rand::thread_rng());
                 let (_ctx, coin) = utxo_coin_from_privkey(ticker, priv_key.as_ref());
                 let my_address = coin.my_address().expect("!my_address");
                 fill_address(&coin, &my_address, 10.into(), timeout);

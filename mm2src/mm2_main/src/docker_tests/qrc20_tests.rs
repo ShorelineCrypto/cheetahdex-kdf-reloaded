@@ -16,7 +16,7 @@ use http::StatusCode;
 use kdf_crypto::dhash160;
 use mm2_core::mm_ctx::{MmArc, MmCtxBuilder};
 use mm2_net_config::net_config_or_panic;
-use rand6::Rng;
+use rand::Rng;
 use serde_json::{self as json, Value as Json};
 use std::convert::TryFrom;
 use std::process::Command;
@@ -793,8 +793,8 @@ fn test_wait_for_tx_spend() {
 
 #[test]
 fn test_check_balance_on_order_post_base_coin_locked() {
-    let bob_priv_key = SecretKey::new(&mut rand6::thread_rng());
-    let alice_priv_key = SecretKey::new(&mut rand6::thread_rng());
+    let bob_priv_key = SecretKey::new(&mut rand::thread_rng());
+    let alice_priv_key = SecretKey::new(&mut rand::thread_rng());
     let timeout = 30; // timeout if test takes more than 80 seconds to run
 
     // fill the Bob address by 0.05 Qtum
@@ -1068,11 +1068,11 @@ fn test_max_taker_vol_dynamic_trade_fee() {
     // generate QTUM coin with the dynamic fee and fill the wallet by 2 Qtums
     let (_ctx, coin, priv_key) = generate_qtum_coin_with_random_privkey("QTUM", 2.into(), Some(0));
     let my_address = coin.my_address().expect("!my_address");
-    let mut rng = rand6::thread_rng();
+    let mut rng = rand::thread_rng();
     let mut qtum_balance = BigDecimal::from(2);
     let mut qtum_balance_steps = "2".to_owned();
     for _ in 0..4 {
-        let amount = rng.gen_range(100000, 10000000);
+        let amount = rng.gen_range(100000..10000000);
         let amount = big_decimal_from_sat(amount, 8);
         qtum_balance_steps = format!("{} + {}", qtum_balance_steps, amount);
         qtum_balance = &qtum_balance + &amount;

@@ -258,12 +258,53 @@ Add `--all-features` only when it is relevant and supported by that package.
 Use a separate dependency-wide lint only when the task changes dependencies or
 patched vendor code; do not turn unrelated warnings in vendored trees into
 opportunistic edits.
-For WASM-only work, also check `--target wasm32-unknown-unknown`. Full
-integration suites may require Docker, chain parameters, live endpoints, or
+Full integration suites may require Docker, chain parameters, live endpoints, or
 test passphrases; consult `docs/DEV_ENVIRONMENT.md`,
 `docs/TEST_ENV_VARS.md`, and `docs/DISABLED_TESTS.md` before running them.
 Never turn a required regression test into an ignored or network-dependent
 test when a deterministic unit test can cover it.
+
+### Targets a plain `cargo check` does not cover
+
+The default host build compiles neither the WASM targets nor the
+feature-gated test binaries, so a change can pass every local check and still
+break CI. Two distinct failures have reached `dev` this way: a borrow the host
+accepts but `wasm32-unknown-unknown` rejects, and a dependency-version mismatch
+that only surfaced when the `docker_tests` binary was built.
+
+**Check the target when your change could plausibly affect it — not only when
+the work is "about" that target.** The wasm break came from ordinary streaming
+code; the rand break came from a `secp256k1` upgrade. Neither author was
+working on wasm or on Docker.
+
+| Trigger | Also run |
+|---|---|
+| Anything in `coins`, `mm2_db`, or `mm2_main` | `cargo check --target wasm32-unknown-unknown -p <coins\|mm2_db\|mm2_main>` |
+| Dependency, version, or feature changes | the wasm checks above **and** `cargo test --no-run --bin docker_tests --features regtest-netid` |
+| Anything touching swap, key, or RNG code | as above, plus the focused CI jobs listed below |
+
+`--no-run` is enough to catch build breakage in the Docker binary without a
+running Docker daemon; the suite itself still needs the environment described
+in `docs/DEV_ENVIRONMENT.md`.
+
+The cheap focused jobs CI runs, worth mirroring before pushing a broad change:
+
+```sh
+cargo test -p coins_activation --lib
+cargo test -p mm2_main --lib ordermatch_tests
+cargo test -p coins --lib rpc_response_tests
+cargo test -p kdf_spv_validation
+```
+
+`.github/workflows/` is the authority on what CI builds. Read it rather than
+relying on this list when a change is wide or touches the build itself; other
+gated targets exist (for example `trezor-emulator-tests`) and the set moves.
+
+Where a test suite has known-failing cases in your environment — several
+require network access — establish the baseline before judging your own change:
+run the suite on an unmodified checkout, then compare failing test *names*, not
+counts. A differing name that passes in isolation is environment flakiness; a
+new name that fails in isolation is a regression.
 
 For compatibility-sensitive swap changes, verify all affected crates and run
 the focused fee/transaction/state-machine tests for both production netids.
@@ -300,7 +341,10 @@ A change is complete only when:
 - implementation and governing CRD agree;
 - focused regression tests cover the failure and both sides of relevant
   compatibility branches;
-- formatting and applicable checks pass;
+- formatting and applicable checks pass, **including the targets a host
+  `cargo check` does not build** — see §6 "Targets a plain `cargo check` does
+  not cover". Claiming a change is verified on the strength of the host build
+  alone is how the two known CI breakages reached `dev`;
 - public/operator documentation is consistent;
 - provenance and license requirements are preserved;
 - the final diff contains no unrelated changes, secrets, generated junk, or

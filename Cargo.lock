@@ -5746,7 +5746,6 @@ dependencies = [
  "parking_lot 0.12.5",
  "prost 0.12.6",
  "prost-build 0.12.6",
- "rand 0.6.5",
  "rand 0.8.6",
  "regex",
  "rmp-serde",
