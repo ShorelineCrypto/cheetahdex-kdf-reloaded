@@ -361,7 +361,7 @@ impl EventStreamer for BalanceEventStreamer {
             // Drain anything that arrived while we were busy so a burst of
             // notifications collapses into a single refresh.
             if notified == Some(true) {
-                while wake_rx.try_next().is_ok() {}
+                while wake_rx.try_recv().is_ok() {}
             }
 
             match notified {
@@ -547,7 +547,7 @@ mod tests {
         common::block_on(async move {
             rx.next().await.expect("first notification");
             let mut drained = 0;
-            while rx.try_next().is_ok() {
+            while rx.try_recv().is_ok() {
                 drained += 1;
             }
             assert_eq!(

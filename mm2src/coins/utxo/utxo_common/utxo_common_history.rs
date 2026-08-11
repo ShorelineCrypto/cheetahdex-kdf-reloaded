@@ -108,7 +108,7 @@ where
                 futures::pin_mut!(woken);
                 if let futures::future::Either::Right(_) = futures::future::select(idle, woken).await {
                     // Collapse a burst into one pass.
-                    while wake_rx.try_next().is_ok() {}
+                    while wake_rx.try_recv().is_ok() {}
                 }
                 continue;
             },

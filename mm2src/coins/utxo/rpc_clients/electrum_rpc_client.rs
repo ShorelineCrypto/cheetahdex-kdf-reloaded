@@ -1560,7 +1560,7 @@ mod connection_error_tests {
 
         notify_scripthash_change("aabb");
 
-        assert_eq!(rx.try_next().unwrap(), Some("aabb".to_owned()));
+        assert_eq!(rx.try_recv().unwrap(), "aabb".to_owned());
         unwatch_scripthash("aabb");
     }
 
@@ -1579,8 +1579,8 @@ mod connection_error_tests {
 
         notify_scripthash_change("shared");
 
-        assert_eq!(rx_a.try_next().unwrap(), Some("shared".to_owned()), "first watcher");
-        assert_eq!(rx_b.try_next().unwrap(), Some("shared".to_owned()), "second watcher");
+        assert_eq!(rx_a.try_recv().unwrap(), "shared".to_owned(), "first watcher");
+        assert_eq!(rx_b.try_recv().unwrap(), "shared".to_owned(), "second watcher");
         unwatch_scripthash("shared");
     }
 
@@ -1597,8 +1597,8 @@ mod connection_error_tests {
         notify_scripthash_change("peer");
 
         assert_eq!(
-            rx_live.try_next().unwrap(),
-            Some("peer".to_owned()),
+            rx_live.try_recv().unwrap(),
+            "peer".to_owned(),
             "the surviving watcher must still be notified"
         );
         unwatch_scripthash("peer");
@@ -1614,7 +1614,7 @@ mod connection_error_tests {
         let (tx, mut rx) = futures_mpsc::unbounded();
         watch_scripthash("ccdd".to_owned(), tx);
         notify_scripthash_change("some-other-hash");
-        assert!(rx.try_next().is_err(), "an unrelated hash must not wake this watcher");
+        assert!(rx.try_recv().is_err(), "an unrelated hash must not wake this watcher");
         unwatch_scripthash("ccdd");
     }
 
@@ -1631,7 +1631,7 @@ mod connection_error_tests {
         let (tx2, mut rx2) = futures_mpsc::unbounded();
         watch_scripthash("eeff".to_owned(), tx2);
         notify_scripthash_change("eeff");
-        assert_eq!(rx2.try_next().unwrap(), Some("eeff".to_owned()));
+        assert_eq!(rx2.try_recv().unwrap(), "eeff".to_owned());
         unwatch_scripthash("eeff");
     }
 
@@ -1652,8 +1652,8 @@ mod connection_error_tests {
         let (tx2, mut rx2) = futures_mpsc::unbounded();
         watch_scripthash("1122".to_owned(), tx2);
         notify_scripthash_change("1122");
-        assert_eq!(rx2.try_next().unwrap(), Some("1122".to_owned()));
-        assert!(rx2.try_next().is_err(), "exactly one delivery, not a duplicate");
+        assert_eq!(rx2.try_recv().unwrap(), "1122".to_owned());
+        assert!(rx2.try_recv().is_err(), "exactly one delivery, not a duplicate");
         unwatch_scripthash("1122");
     }
 
@@ -1679,13 +1679,9 @@ mod connection_error_tests {
 
         notify_scripthash_change(&event_key);
 
-        assert_eq!(
-            rx_event.try_next().unwrap(),
-            Some(event_key.clone()),
-            "token watcher woken"
-        );
+        assert_eq!(rx_event.try_recv().unwrap(), event_key.clone(), "token watcher woken");
         assert!(
-            rx_addr.try_next().is_err(),
+            rx_addr.try_recv().is_err(),
             "the platform coin's watcher must not be woken"
         );
 
@@ -1737,7 +1733,7 @@ mod connection_error_tests {
         // collapsed or cross-wired entries under load would be worse than one
         // that simply refused the work.
         for (rx, hash) in receivers.iter_mut().zip(hashes.iter()) {
-            assert_eq!(rx.try_next().unwrap(), Some(hash.clone()));
+            assert_eq!(rx.try_recv().unwrap(), hash.clone());
         }
 
         for hash in &hashes {
