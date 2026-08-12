@@ -510,7 +510,7 @@ fn get_locked_amount_by_other_swaps(ctx: &MmArc, except_uuid: &Uuid, coin: &str)
     let swap_ctx = SwapsContext::from_ctx(ctx).unwrap();
     let swap_lock = swap_ctx.running_swaps.lock().unwrap();
 
-    swap_lock
+    let v1_total = swap_lock
         .iter()
         .filter_map(|swap| swap.upgrade())
         .filter(|swap| swap.uuid() != except_uuid)
@@ -525,7 +525,35 @@ fn get_locked_amount_by_other_swaps(ctx: &MmArc, except_uuid: &Uuid, coin: &str)
                 }
             }
             total_amount
+        });
+    drop(swap_lock);
+
+    // V2 swaps reserve through their own ledger rather than the running-swap
+    // registry above, so reading only the registry would report a node with
+    // live V2 swaps as having balance it has already committed — admitting a
+    // new swap against it (CRD ch.52 R61). The aggregate `get_locked_amount`
+    // already sums both; this self-excluding variant is what every swap-start
+    // balance check calls, so it must agree.
+    let locked_v2 = swap_ctx.locked_amounts_v2.lock().unwrap();
+    let v2_total = locked_v2
+        .get(coin)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|info| &info.swap_uuid != except_uuid)
+                .fold(MmNumber::from(0), |mut total, info| {
+                    total += info.locked_amount.amount.clone();
+                    if let Some(ref fee) = info.locked_amount.trade_fee {
+                        if fee.coin == coin && !fee.paid_from_trading_vol {
+                            total += fee.amount.clone();
+                        }
+                    }
+                    total
+                })
         })
+        .unwrap_or_else(|| MmNumber::from(0));
+
+    v1_total + v2_total
 }
 
 pub fn active_swaps_using_coin(ctx: &MmArc, coin: &str) -> Result<Vec<Uuid>, String> {
