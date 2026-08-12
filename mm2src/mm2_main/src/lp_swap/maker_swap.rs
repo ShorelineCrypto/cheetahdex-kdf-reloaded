@@ -1278,6 +1278,14 @@ impl MakerSwap {
 
 impl AtomicSwap for MakerSwap {
     fn locked_amount(&self) -> Vec<LockedAmount> {
+        // A finished swap reserves nothing; see the taker-side counterpart. The
+        // checks below only ask whether a transaction was sent, so a swap that
+        // ended before sending one would otherwise reserve its volume for the
+        // rest of the process's life.
+        if self.finished_at.load(Ordering::Relaxed) > 0 {
+            return Vec::new();
+        }
+
         let mut result = Vec::new();
 
         // if maker payment is not sent yet it must be virtually locked

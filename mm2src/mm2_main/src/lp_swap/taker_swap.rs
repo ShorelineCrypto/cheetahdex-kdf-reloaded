@@ -2028,6 +2028,18 @@ impl TakerSwap {
 
 impl AtomicSwap for TakerSwap {
     fn locked_amount(&self) -> Vec<LockedAmount> {
+        // A finished swap reserves nothing, whatever it did or did not send.
+        //
+        // The checks below ask only whether a transaction was sent, so a swap
+        // that ended without sending one — a failed negotiation, for instance —
+        // answers "not sent yet" forever and keeps reserving its full volume.
+        // That reservation is subtracted from `max_taker_vol`, so every such
+        // swap permanently shrank the tradable balance until restart, the
+        // registry of running swaps being in-memory only.
+        if self.finished_at.load(Ordering::Relaxed) > 0 {
+            return Vec::new();
+        }
+
         let mut result = Vec::new();
 
         // if taker fee is not sent yet it must be virtually locked
@@ -3024,5 +3036,127 @@ mod taker_swap_tests {
 
         let actual = get_locked_amount_by_other_swaps(&ctx, &new_uuid(), "RICK");
         assert_eq!(actual, MmNumber::from(0));
+    }
+
+    /// A swap that ends without sending anything must stop reserving its volume.
+    ///
+    /// The reservation is derived from "no transaction sent yet", which stays
+    /// true forever for a swap that failed during negotiation. Because the
+    /// running-swap registry is in-memory, such a swap used to shrink
+    /// `max_taker_vol` by its full amount until the process restarted, so two
+    /// failed attempts cost the user twice over.
+    #[test]
+    fn finished_swap_releases_its_reservation() {
+        use crate::mm2::lp_swap::get_locked_amount;
+
+        // Same swap, twice: once left mid-flight, once negotiated-failed and
+        // finished. Only the finished one must release.
+        fn locked_for(events_tail: &str) -> MmNumber {
+            let taker_saved_json = format!(
+                r#"{{
+                "type": "Taker",
+                "uuid": "af5e0383-97f6-4408-8c03-a8eb8d17e46d",
+                "my_order_uuid": "af5e0383-97f6-4408-8c03-a8eb8d17e46d",
+                "events": [
+                    {{
+                        "timestamp": 1617096259172,
+                        "event": {{
+                            "type": "Started",
+                            "data": {{
+                                "taker_coin": "MORTY",
+                                "maker_coin": "RICK",
+                                "maker": "15d9c51c657ab1be4ae9d3ab6e76a619d3bccfe830d5363fa168424c0d044732",
+                                "my_persistent_pub": "03ad6f89abc2e5beaa8a3ac28e22170659b3209fe2ddf439681b4b8f31508c36fa",
+                                "lock_duration": 7800,
+                                "maker_amount": "0.1",
+                                "taker_amount": "0.11",
+                                "maker_payment_confirmations": 1,
+                                "maker_payment_requires_nota": false,
+                                "taker_payment_confirmations": 1,
+                                "taker_payment_requires_nota": false,
+                                "taker_payment_lock": 1617104058,
+                                "uuid": "af5e0383-97f6-4408-8c03-a8eb8d17e46d",
+                                "started_at": 1617096258,
+                                "maker_payment_wait": 1617099378,
+                                "maker_coin_start_block": 865240,
+                                "taker_coin_start_block": 869167,
+                                "fee_to_send_taker_fee": {{
+                                    "coin": "MORTY",
+                                    "amount": "0.00001",
+                                    "paid_from_trading_vol": false
+                                }},
+                                "taker_payment_trade_fee": {{
+                                    "coin": "MORTY",
+                                    "amount": "0.00001",
+                                    "paid_from_trading_vol": false
+                                }},
+                                "maker_payment_spend_trade_fee": {{
+                                    "coin": "RICK",
+                                    "amount": "0.00001",
+                                    "paid_from_trading_vol": true
+                                }}
+                            }}
+                        }}
+                    }}{events_tail}
+                ],
+                "maker_amount": "0.1",
+                "maker_coin": "RICK",
+                "taker_amount": "0.11",
+                "taker_coin": "MORTY",
+                "gui": null,
+                "mm_version": "21867da64",
+                "success_events": [],
+                "error_events": []
+            }}"#
+            );
+            let taker_saved_swap: TakerSavedSwap = json::from_str(&taker_saved_json).unwrap();
+            let key_pair =
+                key_pair_from_seed("spice describe gravity federal blast come thank unfair canal monkey style afraid")
+                    .unwrap();
+            let ctx = test_ctx_with_netid(key_pair);
+
+            let maker_coin = MmCoinEnum::Test(TestCoin::new("RICK"));
+            let taker_coin = MmCoinEnum::Test(TestCoin::new("MORTY"));
+
+            TestCoin::swap_contract_address.mock_safe(|_| MockResult::Return(None));
+            TestCoin::min_tx_amount.mock_safe(|_| MockResult::Return(BigDecimal::from(0)));
+
+            let (swap, _) = TakerSwap::load_from_saved(ctx.clone(), maker_coin, taker_coin, taker_saved_swap).unwrap();
+            let swaps_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+            let arc = Arc::new(swap);
+            let weak_ref = Arc::downgrade(&arc);
+            swaps_ctx.running_swaps.lock().unwrap().push(weak_ref);
+
+            get_locked_amount(&ctx, "MORTY")
+        }
+
+        // Still running: the volume it has not yet paid is genuinely reserved.
+        let in_flight = locked_for("");
+        assert!(
+            in_flight > MmNumber::from(0),
+            "a swap still in flight must reserve its taker volume, got {in_flight:?}"
+        );
+
+        // Negotiation failed and the swap finished: nothing was ever sent, and
+        // nothing may stay reserved.
+        let finished = locked_for(
+            r#",
+                    {
+                        "timestamp": 1617096259180,
+                        "event": {
+                            "type": "NegotiateFailed",
+                            "data": { "error": "maker refused" }
+                        }
+                    },
+                    {
+                        "timestamp": 1617096259190,
+                        "event": { "type": "Finished" }
+                    }"#,
+        );
+        assert_eq!(
+            finished,
+            MmNumber::from(0),
+            "a finished swap must release its reservation, got {finished:?}"
+        );
     }
 }
