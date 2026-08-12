@@ -8,7 +8,8 @@ use super::{broadcast_my_swap_status, broadcast_swap_message_every, check_other_
             get_locked_amount, recv_swap_msg, swap_topic, AbortOnDropHandle, AtomicSwap, LockedAmount, MySwapInfo,
             NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction, SavedSwap,
             SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext,
-            TransactionIdentifier, WAIT_CONFIRM_INTERVAL};
+            TransactionIdentifier, SWAP_WIRE_SECRET_HASH_MIN_LEN, WAIT_CONFIRM_INTERVAL};
+use super::{validate_wire_field_len, validate_wire_pubkey};
 use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MatchBy, OrderConfirmationsSettings, TakerAction, TakerOrderBuilder};
 use crate::mm2::lp_swap::{broadcast_p2p_tx_msg, tx_helper_topic};
@@ -1195,6 +1196,27 @@ impl TakerSwap {
         if !negotiated {
             return Ok((Some(TakerSwapCommand::Finish), vec![TakerSwapEvent::NegotiateFailed(
                 ERRL!("Maker sent negotiated = false").into(),
+            )]));
+        }
+
+        // Counterparty-supplied fields are narrowed to fixed-width types below,
+        // and that conversion indexes the slice unchecked. Refuse a wrong width
+        // here (ch.51 R62) so a short field cannot panic this task and a long
+        // one cannot be silently truncated.
+        for (field, what) in [
+            (maker_data.maker_coin_htlc_pub(), "maker_coin_htlc_pub"),
+            (maker_data.taker_coin_htlc_pub(), "taker_coin_htlc_pub"),
+        ] {
+            if let Err(e) = validate_wire_pubkey(field, what) {
+                return Ok((Some(TakerSwapCommand::Finish), vec![TakerSwapEvent::NegotiateFailed(
+                    ERRL!("{}", e).into(),
+                )]));
+            }
+        }
+        if let Err(e) = validate_wire_field_len(maker_data.secret_hash(), SWAP_WIRE_SECRET_HASH_MIN_LEN, "secret_hash")
+        {
+            return Ok((Some(TakerSwapCommand::Finish), vec![TakerSwapEvent::NegotiateFailed(
+                ERRL!("{}", e).into(),
             )]));
         }
 

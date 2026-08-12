@@ -3,6 +3,7 @@ use super::check_balance::{check_base_coin_balance_for_swap, check_my_coin_balan
 use super::pubkey_banning::ban_pubkey_on_failed_swap;
 use super::swap_lock::{SwapLock, SwapLockOps};
 use super::trade_preimage::{TradePreimageRequest, TradePreimageRpcError, TradePreimageRpcResult};
+use super::validate_wire_pubkey;
 use super::{broadcast_my_swap_status, broadcast_swap_message_every, check_other_coin_balance_for_swap,
             compute_dex_fee_with_taker_pubkey, get_locked_amount, recv_swap_msg, swap_topic, AtomicSwap, LockedAmount,
             MySwapInfo, NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction,
@@ -558,6 +559,19 @@ impl MakerSwap {
                 )]))
             },
         };
+
+        // See the taker-side counterpart: refuse a wrong-width key field
+        // (ch.51 R62) before it is narrowed by an unchecked conversion.
+        for (field, what) in [
+            (taker_data.maker_coin_htlc_pub(), "maker_coin_htlc_pub"),
+            (taker_data.taker_coin_htlc_pub(), "taker_coin_htlc_pub"),
+        ] {
+            if let Err(e) = validate_wire_pubkey(field, what) {
+                return Ok((Some(MakerSwapCommand::Finish), vec![MakerSwapEvent::NegotiateFailed(
+                    ERRL!("{}", e).into(),
+                )]));
+            }
+        }
 
         Ok((Some(MakerSwapCommand::WaitForTakerFee), vec![
             MakerSwapEvent::Negotiated(TakerNegotiationData {

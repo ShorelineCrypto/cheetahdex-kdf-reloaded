@@ -724,6 +724,45 @@ impl NegotiationDataMsg {
     }
 }
 
+/// Width of a public-key field on the legacy swap wire (CRD ch.51 R62).
+pub const SWAP_WIRE_PUBKEY_LEN: usize = 33;
+
+/// Width of the secret hash carried by the shape-1 negotiation payload
+/// (CRD ch.51 R65). Shapes 2 and 3 carry a variable-length hash, so this is a
+/// lower bound on what the fixed-width field can be narrowed to, not an
+/// equality.
+pub const SWAP_WIRE_SECRET_HASH_MIN_LEN: usize = 20;
+
+/// Reject a counterparty-supplied field that cannot fill its fixed-width slot.
+///
+/// These fields arrive as variable-length byte sequences and are narrowed to
+/// fixed-width types whose conversion indexes the slice without checking it. A
+/// field shorter than the target therefore panics the swap task, and a longer
+/// one is silently truncated — both reachable from a peer-supplied negotiation
+/// message, so neither may be left to the conversion.
+///
+/// A chain whose native key is not a 33-byte secp256k1 point reaches the short
+/// case honestly rather than maliciously; ch.51 R64 binds how such a key
+/// occupies the field, and until a coin produces that form its negotiation must
+/// fail as a length error (R62) rather than take the process down.
+pub fn validate_wire_field_len(field: &[u8], expected: usize, what: &str) -> Result<(), String> {
+    if field.len() < expected {
+        return Err(format!("{what} is {} bytes, expected at least {expected}", field.len()));
+    }
+    Ok(())
+}
+
+/// Exact-width check for the public-key fields bound by ch.51 R62.
+pub fn validate_wire_pubkey(field: &[u8], what: &str) -> Result<(), String> {
+    if field.len() != SWAP_WIRE_PUBKEY_LEN {
+        return Err(format!(
+            "{what} must be exactly {SWAP_WIRE_PUBKEY_LEN} bytes, got {}",
+            field.len()
+        ));
+    }
+    Ok(())
+}
+
 /// Data to be exchanged and validated on swap start, the replacement of LP_pubkeys_data, LP_choosei_data, etc.
 #[derive(Debug, Default, Deserializable, Eq, PartialEq, Serializable)]
 struct SwapNegotiationData {
@@ -739,4 +778,45 @@ pub struct TransactionIdentifier {
     tx_hex: BytesJson,
     /// Transaction hash in hexadecimal format
     tx_hash: BytesJson,
+}
+
+#[cfg(test)]
+mod wire_field_tests {
+    use super::*;
+
+    /// ch.51 R62: a key field is exactly 33 bytes, and any other width is a
+    /// length error rather than something the narrowing conversion has to cope
+    /// with. The conversion indexes the slice unchecked, so a short field would
+    /// otherwise panic the swap task on a peer-supplied message.
+    #[test]
+    fn wire_pubkey_accepts_only_the_bound_width() {
+        assert!(validate_wire_pubkey(&[0u8; SWAP_WIRE_PUBKEY_LEN], "k").is_ok());
+
+        // A 32-byte ed25519 key is the honest short case: until it is padded to
+        // the bound width (R64) it must be refused, not truncated or panicked on.
+        assert!(validate_wire_pubkey(&[0u8; 32], "k").is_err());
+
+        assert!(validate_wire_pubkey(&[], "k").is_err());
+        assert!(validate_wire_pubkey(&[0u8; 34], "k").is_err());
+    }
+
+    /// R64's padding convention makes an ed25519 key acceptable: native bytes
+    /// first, trailing zero. Guards the width, not the curve.
+    #[test]
+    fn ed25519_key_padded_to_the_bound_width_is_accepted() {
+        let mut padded = [7u8; SWAP_WIRE_PUBKEY_LEN];
+        padded[SWAP_WIRE_PUBKEY_LEN - 1] = 0;
+        assert!(validate_wire_pubkey(&padded, "k").is_ok());
+        assert_eq!(&padded[..32], &[7u8; 32], "native key occupies the leading bytes");
+    }
+
+    /// R65: the secret hash is fixed-width in shape 1 but variable in shapes 2
+    /// and 3, so the guard is a lower bound — enough to keep the narrowing
+    /// conversion in range without rejecting a legitimately wider hash.
+    #[test]
+    fn secret_hash_guard_is_a_lower_bound() {
+        assert!(validate_wire_field_len(&[0u8; 20], SWAP_WIRE_SECRET_HASH_MIN_LEN, "h").is_ok());
+        assert!(validate_wire_field_len(&[0u8; 32], SWAP_WIRE_SECRET_HASH_MIN_LEN, "h").is_ok());
+        assert!(validate_wire_field_len(&[0u8; 19], SWAP_WIRE_SECRET_HASH_MIN_LEN, "h").is_err());
+    }
 }
