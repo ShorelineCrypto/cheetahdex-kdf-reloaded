@@ -105,6 +105,7 @@ and a one-sentence capsule of what the chapter documents.
 | 49 | [Withdrawal task path](49-withdrawal-task-path.md) | direct `withdraw` method, `task::withdraw::*` family | The withdrawal JSON-RPC surface: the direct method and the long-running task family beside it. |
 | 50 | [EVM Trezor / hardware-wallet transaction signing](50-evm-trezor-signing.md) | device-held EVM account keys, activation-time address and public-key learning | EVM transaction signing under a hardware-wallet policy, where the account key never leaves the device. |
 | 51 | [Legacy (V1) Atomic-Swap State Machine](51-legacy-v1-swap-state-machine.md) | legacy maker and taker stage graphs, negotiation refusal contract, per-stage reserved-funds semantics | The legacy V1 maker and taker state machines: stages, events, resume mapping, the refusal contract, message budgets, and reserved-funds rules. |
+| 52 | [Version-Two Atomic-Swap State Machine](52-swap-v2-state-machine.md) | V2 maker and taker state graphs, bidirectional refusal contract, reserved-amount ledger semantics | The V2 maker and taker state machines: states, events, resume mapping, the refusal and abort contract, message budgets, and reserved-funds rules. |
 
 ## 30.4 Aggregated Input Register
 
