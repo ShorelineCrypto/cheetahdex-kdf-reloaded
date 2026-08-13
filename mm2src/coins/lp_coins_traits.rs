@@ -1,4 +1,5 @@
 use super::*;
+use keys::Public;
 
 /// Swap operations (mostly based on the Hash/Time locked transactions implemented by coin wallets).
 #[async_trait]
@@ -122,6 +123,53 @@ pub trait SwapOps {
     ) -> Result<Option<BytesJson>, MmError<NegotiateSwapContractAddrErr>>;
 
     fn get_htlc_key_pair(&self) -> Option<KeyPair>;
+
+    /// This node's hash-time-locked-contract public key for this coin, in the
+    /// form the legacy negotiation carries (CRD ch.51 R63).
+    ///
+    /// The result is exactly [`SWAP_HTLC_PUBKEY_LEN`] bytes on every chain, so
+    /// a swap machine never has to know which curve a coin signs with.
+    /// `node_secp_pubkey` is the secp256k1 key the swap machine resolved for
+    /// this coin — this coin's [`SwapOps::get_htlc_key_pair`] public key when
+    /// it has one, otherwise the node's persistent public key.
+    ///
+    /// The default is the secp256k1 case of R64: the field carries that key
+    /// unchanged. A chain whose native key is not a 33-byte secp256k1 point
+    /// overrides this and fills the field by the convention R64 dictates for
+    /// its key type; it ignores `node_secp_pubkey`, which is not a key it can
+    /// sign with.
+    ///
+    /// # Errors
+    ///
+    /// Fails when this coin has no key of the bound width to offer.
+    fn derive_htlc_pubkey(&self, node_secp_pubkey: &Public) -> MmResult<[u8; SWAP_HTLC_PUBKEY_LEN], HtlcPubkeyError> {
+        let bytes: &[u8] = node_secp_pubkey;
+        bytes
+            .try_into()
+            .map_to_mm(|_| HtlcPubkeyError::UnexpectedLength(bytes.len()))
+    }
+
+    /// Validate the counterparty's hash-time-locked-contract public key for
+    /// this coin (CRD ch.51 R63).
+    ///
+    /// Accepts exactly [`SWAP_HTLC_PUBKEY_LEN`] bytes and nothing else. The
+    /// default also enforces the rest of R64's secp256k1 case: a chain whose
+    /// native key is a 33-byte secp256k1 point rejects anything that is not a
+    /// well-formed point. A chain with another key type overrides this and
+    /// checks the key its own convention puts in the field.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the field is not exactly the bound width, or holds something
+    /// this chain cannot use as a counterparty key.
+    fn validate_other_pubkey(&self, raw_pubkey: &[u8]) -> MmResult<(), HtlcPubkeyError> {
+        if raw_pubkey.len() != SWAP_HTLC_PUBKEY_LEN {
+            return MmError::err(HtlcPubkeyError::UnexpectedLength(raw_pubkey.len()));
+        }
+        secp256k1::PublicKey::from_slice(raw_pubkey)
+            .map(|_| ())
+            .map_to_mm(|e| HtlcPubkeyError::NotOnCurve("secp256k1", e.to_string()))
+    }
 }
 /// Operations required for watcher node functionality.
 ///

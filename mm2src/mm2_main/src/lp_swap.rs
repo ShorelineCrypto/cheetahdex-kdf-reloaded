@@ -57,7 +57,8 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, TradeFee, TransactionEnum};
+use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, MmCoinEnum, TradeFee, TransactionEnum,
+            SWAP_HTLC_PUBKEY_LEN};
 use common::log::{debug, warn};
 use common::{bits256, calc_total_pages,
              executor::{spawn, Timer},
@@ -753,7 +754,10 @@ impl NegotiationDataMsg {
 }
 
 /// Width of a public-key field on the legacy swap wire (CRD ch.51 R62).
-pub const SWAP_WIRE_PUBKEY_LEN: usize = 33;
+///
+/// The same width the coin layer is held to by R63, seen from the message
+/// layer, so the two are one constant rather than two that could drift.
+pub const SWAP_WIRE_PUBKEY_LEN: usize = SWAP_HTLC_PUBKEY_LEN;
 
 /// Width of the secret hash carried by the shape-1 negotiation payload
 /// (CRD ch.51 R65). Shapes 2 and 3 carry a variable-length hash, so this is a
@@ -789,6 +793,42 @@ pub fn validate_wire_pubkey(field: &[u8], what: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Resolve the two per-coin public keys this node negotiates a legacy swap
+/// with, by asking each coin (ch.51 R63).
+///
+/// A secp256k1 chain answers with the key it is handed — its own HTLC keypair
+/// when [`SwapOps::get_htlc_key_pair`] gives one, otherwise this node's
+/// persistent key — so nothing changes for it. A chain that signs with another
+/// curve answers with its own key, in the 33-byte form R64 dictates. Neither
+/// the negotiation message nor the swap machines become key-length-polymorphic
+/// in the process: the result is exactly `SWAP_WIRE_PUBKEY_LEN` bytes either
+/// way.
+///
+/// # Errors
+///
+/// Fails when either coin cannot produce a key of the bound width; the swap
+/// then fails to start rather than negotiating a key it cannot sign with.
+pub fn derive_htlc_pubkeys(
+    ctx: &MmArc,
+    maker_coin: &MmCoinEnum,
+    maker_coin_htlc_key_pair: &Option<KeyPair>,
+    taker_coin: &MmCoinEnum,
+    taker_coin_htlc_key_pair: &Option<KeyPair>,
+) -> Result<(H264, H264), String> {
+    let node_pubkey = *ctx.secp256k1_key_pair().public();
+    let maker_coin_htlc_pubkey = maker_coin
+        .derive_htlc_pubkey(maker_coin_htlc_key_pair.as_ref().map_or(&node_pubkey, |k| k.public()))
+        .map_err(|e| format!("!{}.derive_htlc_pubkey {}", maker_coin.ticker(), e))?;
+    let taker_coin_htlc_pubkey = taker_coin
+        .derive_htlc_pubkey(taker_coin_htlc_key_pair.as_ref().map_or(&node_pubkey, |k| k.public()))
+        .map_err(|e| format!("!{}.derive_htlc_pubkey {}", taker_coin.ticker(), e))?;
+
+    Ok((
+        H264::from(&maker_coin_htlc_pubkey[..]),
+        H264::from(&taker_coin_htlc_pubkey[..]),
+    ))
 }
 
 /// Data to be exchanged and validated on swap start, the replacement of LP_pubkeys_data, LP_choosei_data, etc.

@@ -329,6 +329,20 @@ operations MAY return "not found" pending the deferred event-walk
 implementation (§20.10 D3); this is a documented gap, not a
 correctness claim.
 
+**R-S9 (negotiated HTLC key).** The module MUST answer the two
+coin-layer key operations the legacy negotiation depends on --
+key derivation and counterparty-key validation, bound by
+[Chapter 51](51-legacy-v1-swap-state-machine.md) R63 -- with its
+own ed25519 key rather than with the node's secp256k1 key, which
+Sia cannot sign with. Both sides use the fixed 33-byte field
+width of chapter 51 R62, filled by the ed25519 convention that
+chapter's R64 dictates: on send, the 32 native key bytes in the
+leading positions with the final byte zero; on validate, exactly
+33 bytes whose leading 32 bytes are a well-formed curve point; on
+use, the leading 32 bytes. This is what makes the keys the two
+peers negotiate agree with the keys the spend policies of §20.6
+are built from.
+
 > **Binding scope (R36).** This section binds swap *behaviour*
 > and references the public trait surface only. No per-method
 > table keyed to private helpers, no method bodies, and no
@@ -447,13 +461,13 @@ V3. The unit ratio, ed25519 scheme, address encoding, walletd
   public SLIP-44 registry (Sia coin type `1991`) and SLIP-10
   ed25519 derivation; the public Sia Rust library API the module
   binds (the key/address/transaction/spend-policy and API-client
-  types); and cross-chapter contracts (Chapters 06, 08, 13).
+  types); and cross-chapter contracts (Chapters 06, 08, 13, 51).
 - *Permitted-input classes used:* baseline source (epoch
   classification and absence verification only); external public
   specifications (the Sia protocol and consensus/transaction
   formats, the walletd HTTP API, SLIP-44/SLIP-10, the public Sia
   Rust library API); cross-chapter contracts (Chapters 06, 08,
-  13); Interop / wire-and-API-bound reuse (R29/R31/R33) for the
+  13, 51); Interop / wire-and-API-bound reuse (R29/R31/R33) for the
   dictated fragments embedded in §20.4 (the `enable_sia` /
   `task::enable_sia::*` public method strings), §20.4.1 (the
   SLIP-44 coin type and SLIP-10 scheme), §20.5 (the ed25519
@@ -468,7 +482,10 @@ V3. The unit ratio, ed25519 scheme, address encoding, walletd
   configuration the fee-address resolution reads); Chapter 08
   (the fee-routing engine that owns the per-network DEX-fee
   public keys); Chapter 13 (the swap version-negotiation path and
-  the V1/V2 trait boundary the Sia swap-ops sit on).
+  the V1/V2 trait boundary the Sia swap-ops sit on); Chapter 51
+  (the legacy negotiation's fixed-width key field, the two
+  coin-layer key operations, and the ed25519 padding convention
+  that R-S9 applies).
 - *Forbidden corpus:* consulted **only** to recover the
   externally-dictated public method strings of §20.4, the
   dictated derivation/coin-type and protocol/units facts of

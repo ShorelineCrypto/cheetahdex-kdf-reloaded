@@ -1,6 +1,8 @@
 // siacoin_swap_ops — SwapOps trait implementation and internal swap helper methods.
 
 use super::*;
+use crate::{HtlcPubkeyError, SWAP_HTLC_PUBKEY_LEN};
+use keys::Public;
 
 // ── Properly-typed swap methods (called by trait impls) ──────────────
 
@@ -456,6 +458,35 @@ impl SiaCoin {
     }
 }
 
+// ── Ed25519 keys in the fixed-width swap field (CRD ch.51 R64) ───────
+
+/// Width of the native ed25519 public key Sia signs with.
+const ED25519_PUBKEY_LEN: usize = 32;
+
+/// Place an ed25519 public key in the fixed-width swap field.
+///
+/// R64 dictates both halves of the convention: the 32 native bytes take the
+/// field's *leading* positions and the final byte is zero. A leading pad or a
+/// non-zero pad is not interoperable, so neither may be varied.
+fn ed25519_pubkey_to_swap_field(pubkey: &PublicKey) -> [u8; SWAP_HTLC_PUBKEY_LEN] {
+    let mut field = [0u8; SWAP_HTLC_PUBKEY_LEN];
+    field[..ED25519_PUBKEY_LEN].copy_from_slice(&pubkey.to_bytes());
+    field
+}
+
+/// Read an ed25519 public key back out of the fixed-width swap field.
+///
+/// R64's receive half: require exactly the bound width, then take the *leading*
+/// 32 bytes as the native key. The final byte is ignored rather than checked —
+/// the rule constrains what this node sends, not what it will accept.
+fn ed25519_pubkey_from_swap_field(field: &[u8]) -> MmResult<PublicKey, HtlcPubkeyError> {
+    if field.len() != SWAP_HTLC_PUBKEY_LEN {
+        return MmError::err(HtlcPubkeyError::UnexpectedLength(field.len()));
+    }
+    PublicKey::from_bytes(&field[..ED25519_PUBKEY_LEN])
+        .map_to_mm(|e| HtlcPubkeyError::NotOnCurve("ed25519", e.to_string()))
+}
+
 // ── SwapOps trait impl ───────────────────────────────────────────────
 
 #[async_trait]
@@ -724,5 +755,86 @@ impl SwapOps for SiaCoin {
     fn get_htlc_key_pair(&self) -> Option<KeyPair> {
         // Sia uses ed25519 keys, not secp256k1 KeyPair. Return None.
         None
+    }
+
+    /// Sia signs with ed25519, so the key it puts on the negotiation wire is
+    /// its own 32-byte key padded into the 33-byte field by the convention of
+    /// ch.51 R64 — never the node's secp256k1 key, which Sia cannot sign with,
+    /// and which is why `node_secp_pubkey` is ignored here.
+    fn derive_htlc_pubkey(&self, _node_secp_pubkey: &Public) -> MmResult<[u8; SWAP_HTLC_PUBKEY_LEN], HtlcPubkeyError> {
+        let keypair = self
+            .my_keypair()
+            .map_to_mm(|e| HtlcPubkeyError::NotAvailable(e.to_string()))?;
+        Ok(ed25519_pubkey_to_swap_field(&keypair.public()))
+    }
+
+    /// The counterparty's key for a Sia HTLC is an ed25519 key in the same
+    /// 33-byte field (R63, R64): exactly the bound width, with the leading 32
+    /// bytes a well-formed curve point. This is the check the Sia swap
+    /// transactions would otherwise fail much later, mid-swap.
+    fn validate_other_pubkey(&self, raw_pubkey: &[u8]) -> MmResult<(), HtlcPubkeyError> {
+        ed25519_pubkey_from_swap_field(raw_pubkey).map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod swap_field_tests {
+    use super::*;
+
+    fn test_pubkey() -> PublicKey {
+        SiaKeypair::from_private_bytes(&[1u8; 32])
+            .expect("32 bytes is a valid ed25519 secret key")
+            .public()
+    }
+
+    /// ch.51 R64 send half: native bytes in the leading positions, final byte
+    /// zero. Both are dictated by the deployed format, so both are asserted.
+    #[test]
+    fn ed25519_key_occupies_the_field_by_a_trailing_zero_pad() {
+        let pubkey = test_pubkey();
+        let field = ed25519_pubkey_to_swap_field(&pubkey);
+
+        assert_eq!(field.len(), SWAP_HTLC_PUBKEY_LEN);
+        assert_eq!(&field[..ED25519_PUBKEY_LEN], pubkey.as_bytes());
+        assert_eq!(field[SWAP_HTLC_PUBKEY_LEN - 1], 0);
+    }
+
+    /// R64 receive half: the same field validates, and the key recovered from
+    /// it is the one that was sent.
+    #[test]
+    fn ed25519_swap_field_round_trips() {
+        let pubkey = test_pubkey();
+        let field = ed25519_pubkey_to_swap_field(&pubkey);
+
+        assert_eq!(ed25519_pubkey_from_swap_field(&field).unwrap(), pubkey);
+    }
+
+    /// R63: exactly 33 bytes. A bare 32-byte ed25519 key is the honest short
+    /// case and is still refused — the field width does not follow the curve.
+    #[test]
+    fn only_the_bound_width_is_accepted() {
+        let pubkey = test_pubkey();
+
+        for field in [pubkey.as_bytes(), &[0u8; SWAP_HTLC_PUBKEY_LEN + 1][..], &[][..]] {
+            assert_eq!(
+                ed25519_pubkey_from_swap_field(field).unwrap_err().into_inner(),
+                HtlcPubkeyError::UnexpectedLength(field.len())
+            );
+        }
+    }
+
+    /// A field of the right width whose leading bytes are not a curve point is
+    /// rejected, rather than carried into a swap transaction that cannot be
+    /// satisfied.
+    #[test]
+    fn a_bound_width_field_that_is_not_a_curve_point_is_rejected() {
+        // y = 2 has no matching x on the Edwards curve, so this encodes no point.
+        let mut field = [0u8; SWAP_HTLC_PUBKEY_LEN];
+        field[0] = 2;
+
+        assert!(matches!(
+            ed25519_pubkey_from_swap_field(&field).unwrap_err().into_inner(),
+            HtlcPubkeyError::NotOnCurve("ed25519", _)
+        ));
     }
 }

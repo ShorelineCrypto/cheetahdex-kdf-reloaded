@@ -178,6 +178,26 @@ pub enum NegotiateSwapContractAddrErr {
     UnexpectedOtherAddr(BytesJson),
     NoOtherAddrAndNoFallback,
 }
+/// Width of a per-coin hash-time-locked-contract public key, at the coin layer
+/// and on the legacy swap wire alike (CRD ch.51 R62, R63).
+///
+/// The width belongs to the deployed wire format, not to secp256k1. A chain
+/// whose native key is narrower occupies the field by the padding convention of
+/// R64 instead of shortening it, so neither the swap machines nor the
+/// negotiation message ever become key-length-polymorphic.
+pub const SWAP_HTLC_PUBKEY_LEN: usize = 33;
+/// Failure of one of the two coin-layer key operations bound by CRD ch.51 R63,
+/// [`SwapOps::derive_htlc_pubkey`](crate::SwapOps::derive_htlc_pubkey) and
+/// [`SwapOps::validate_other_pubkey`](crate::SwapOps::validate_other_pubkey).
+#[derive(Debug, Display, Eq, PartialEq)]
+pub enum HtlcPubkeyError {
+    #[display(fmt = "HTLC public key must be exactly {} bytes, got {}", SWAP_HTLC_PUBKEY_LEN, _0)]
+    UnexpectedLength(usize),
+    #[display(fmt = "HTLC public key is not a valid {} point: {}", _0, _1)]
+    NotOnCurve(&'static str, String),
+    #[display(fmt = "Coin cannot derive an HTLC public key: {}", _0)]
+    NotAvailable(String),
+}
 /// Where the burn portion of a DEX fee is sent.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DexFeeBurnDestination {
