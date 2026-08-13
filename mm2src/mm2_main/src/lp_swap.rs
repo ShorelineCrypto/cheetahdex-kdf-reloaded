@@ -848,3 +848,107 @@ mod wire_field_tests {
         assert!(validate_wire_field_len(&[0u8; 19], SWAP_WIRE_SECRET_HASH_MIN_LEN, "h").is_err());
     }
 }
+
+#[cfg(test)]
+mod persisted_event_vocabulary_tests {
+    use super::maker_swap::{MAKER_ERROR_EVENTS, MAKER_SUCCESS_EVENTS};
+    use super::taker_swap::{TAKER_ERROR_EVENTS, TAKER_SUCCESS_EVENTS};
+
+    /// Pin the legacy persisted event vocabularies.
+    ///
+    /// The saved-swap JSON is a public compatibility surface: deployed peers
+    /// and GUIs read these lists, and CRD ch.44 R44.8A.3/.4 binds the names
+    /// each side's parser accepts. Nothing else in this tree checks them
+    /// against a fixed expectation — the recreate-swap fixtures derive them
+    /// from these same constants, so they agree by construction, and the
+    /// integration tests that use them need a live network.
+    ///
+    /// So this test exists to make a change deliberate rather than silent:
+    /// adding, removing, renaming or reordering an event must be accompanied
+    /// by updating this list and the chapter that binds it.
+    #[test]
+    fn legacy_event_vocabulary_is_pinned() {
+        assert_eq!(
+            TAKER_SUCCESS_EVENTS.as_slice(),
+            [
+            "Started",
+            "Negotiated",
+            "TakerFeeSent",
+            "TakerPaymentInstructionsReceived",
+            "MakerPaymentReceived",
+            "MakerPaymentWaitConfirmStarted",
+            "MakerPaymentValidatedAndConfirmed",
+            "TakerPaymentSent",
+            "WatcherMessageSent",
+            "TakerPaymentSpent",
+            "MakerPaymentSpent",
+            "MakerPaymentSpendConfirmed",
+            "MakerPaymentSpentByWatcher",
+            "TakerPaymentRefundStarted",
+            "TakerPaymentRefundFinished",
+            "TakerPaymentRefundedByWatcher",
+            "Finished",
+            ],
+            "TAKER_SUCCESS_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+        assert_eq!(
+            TAKER_ERROR_EVENTS.as_slice(),
+            [
+            "StartFailed",
+            "NegotiateFailed",
+            "TakerFeeSendFailed",
+            "MakerPaymentValidateFailed",
+            "MakerPaymentWaitConfirmFailed",
+            "TakerPaymentTransactionFailed",
+            "TakerPaymentWaitConfirmFailed",
+            "TakerPaymentDataSendFailed",
+            "TakerPaymentWaitForSpendFailed",
+            "MakerPaymentSpendFailed",
+            "MakerPaymentSpendConfirmFailed",
+            "TakerPaymentWaitRefundStarted",
+            "TakerPaymentRefunded",
+            "TakerPaymentRefundFailed",
+            ],
+            "TAKER_ERROR_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+        assert_eq!(
+            MAKER_SUCCESS_EVENTS.as_slice(),
+            [
+            "Started",
+            "Negotiated",
+            "MakerPaymentInstructionsReceived",
+            "TakerFeeValidated",
+            "MakerPaymentSent",
+            "TakerPaymentReceived",
+            "TakerPaymentWaitConfirmStarted",
+            "TakerPaymentValidatedAndConfirmed",
+            "TakerPaymentSpent",
+            "TakerPaymentSpendConfirmStarted",
+            "TakerPaymentSpendConfirmed",
+            "MakerPaymentRefundStarted",
+            "MakerPaymentRefundFinished",
+            "Finished",
+            ],
+            "MAKER_SUCCESS_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+        assert_eq!(
+            MAKER_ERROR_EVENTS.as_slice(),
+            [
+            "StartFailed",
+            "NegotiateFailed",
+            "TakerFeeValidateFailed",
+            "MakerPaymentTransactionFailed",
+            "MakerPaymentDataSendFailed",
+            "MakerPaymentWaitConfirmFailed",
+            "TakerPaymentValidateFailed",
+            "TakerPaymentWaitConfirmFailed",
+            "TakerPaymentSpendFailed",
+            "TakerPaymentSpendConfirmFailed",
+            "MakerPaymentWaitRefundStarted",
+            "MakerPaymentRefunded",
+            "MakerPaymentRefundFailed",
+            ],
+            "MAKER_ERROR_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+    }
+}
