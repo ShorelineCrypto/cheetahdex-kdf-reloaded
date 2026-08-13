@@ -2907,8 +2907,14 @@ mod taker_swap_tests {
     #[test]
     fn test_max_taker_vol_from_available() {
         let net_cfg = mm2_net_config::net_config_or_panic(8762);
-        let dex_fee_threshold = MmNumber::from("0.0001");
-        let min_tx_amount = MmNumber::from("0.00001");
+        // `max_taker_vol_from_available` derives its own threshold from the net
+        // config and `min_tx_amount`, so deriving it the same way here is what
+        // keeps the two in step. Hard-coding it is what broke this test: the
+        // 8762 config leaves the configured minimum at zero, so the effective
+        // threshold follows `min_tx_amount`, and the constant no longer matched
+        // it. The case values below are chosen against this threshold.
+        let min_tx_amount = MmNumber::from("0.0001");
+        let dex_fee_threshold = super::dex_fee_threshold(net_cfg, min_tx_amount.clone());
 
         // For these `availables` the dex_fee must be greater than threshold
         let source = vec![
@@ -2943,7 +2949,10 @@ mod taker_swap_tests {
             ("0.0863333333333333333333333333333333333333333333333331", true),
             ("0.0777999999999999999999999999999999999999999999999999", false),
             ("0.0777", false),
-            ("0.0002", false),
+            // Must clear threshold + dust strictly: at exactly twice the
+            // threshold the remaining volume equals `min_tx_amount` and the
+            // call is expected to fail as dust instead.
+            ("0.00021", false),
         ];
         for (available, is_kmd) in source {
             let available = MmNumber::from(available);
