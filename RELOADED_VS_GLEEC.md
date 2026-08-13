@@ -55,6 +55,17 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
   sharing either file between the two implementations would permit an older
   binary to open a schema it does not understand and could compromise shielded
   wallet state.
+- **Siacoin transaction history on the mmrpc-2.0 `my_tx_history`.** GLEEC KDF
+  serves SC history through the legacy tier-1 `my_tx_history` only, and rejects
+  an SC request on the mmrpc-2.0 method with the not-supported error. Reloaded
+  accepts SC on both tiers, serving the mmrpc-2.0 request from the same
+  coin-generic runtime history store the tier-1 method reads (CRD ch.53
+  R53.2.7). No compat switch is provided because the change is strictly
+  additive: it accepts a request GLEEC KDF refuses and alters no response GLEEC
+  KDF produces, so no existing integration observes a behaviour change. SC is
+  still deliberately *not* routed through the SQL-indexed history storage
+  (R53.3.1, ch.53 D53.1). Code: `coins/my_tx_history_v2.rs`,
+  `coins/siacoin/siacoin_history.rs`.
 
 ### Removed / disabled in KDF Reloaded
 

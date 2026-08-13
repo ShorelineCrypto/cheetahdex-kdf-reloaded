@@ -619,6 +619,13 @@ pub enum TransactionType {
     ClaimDelegationRewards,
     StandardTransfer,
     TokenTransfer(BytesJson),
+    /// A Siacoin v1 transaction event (CRD ch.53 R53.5.10).
+    SiaV1Transaction,
+    /// A Siacoin v2 transaction event (CRD ch.53 R53.5.10).
+    SiaV2Transaction,
+    /// A Siacoin miner *or* foundation payout event (CRD ch.53 R53.5.10);
+    /// both consensus payout kinds share this wire value.
+    SiaMinerPayout,
 }
 impl Default for TransactionType {
     fn default() -> Self { TransactionType::StandardTransfer }

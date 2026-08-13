@@ -102,7 +102,9 @@ R46.1.4 The activation flow shall: reject activation of an already-active coin
 coin configuration; construct the walletd HTTP client from `client_conf`; build
 the Sia coin via the existing Sia coin builder under the resolved signing policy;
 resolve and cache the per-network DEX-fee address (ch. 20 §20.4.2); register the
-activated coin; and, when `tx_history` is set, start history tracking.
+activated coin; and, when `tx_history` is set, start history tracking (the
+observable meaning of that step is bound by
+[Chapter 53](53-sia-transaction-history.md) §53.6).
 
 R46.1.5 The success `result` of `init` shall carry a single `task_id`
 (the long-running-task identifier) used by `status`, `user_action`, and `cancel`.

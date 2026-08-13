@@ -383,9 +383,14 @@ rather than defects. None is a correctness claim.
   is wired (§20.4.1). Full multi-account HD support (gap-limit
   honouring, address discovery, multiple receive addresses) is
   deferred; the HD-wallet implementation surface is a stub.
-- **D2 -- History persistence.** Sia chain state lives in
-  walletd; the module keeps no SQLite/IndexedDB history store and
-  the history-sync loop is inert (in-memory status only).
+- **D2 -- History persistence.** *Closed by*
+  [Chapter 53](53-sia-transaction-history.md), which binds Sia
+  transaction history as a projection of walletd's per-address
+  event log into the coin-generic runtime history store and gives
+  the history-sync loop its contract. Sia still creates no
+  per-coin SQL history tables and is still not classified through
+  the shared history-coin-type contract; that residue is chapter
+  53's D53.1.
 - **D3 -- Swap-spend search.** The event-walk that locates the
   spend of an HTLC output by id is not yet wired; the
   corresponding swap operations report "not found" (R-S8).

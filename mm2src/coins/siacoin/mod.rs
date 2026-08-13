@@ -86,10 +86,13 @@ pub(crate) use sia_withdraw::SiaWithdrawBuilder;
 // ─── Split sub-modules ─────────────────────────────────────────────────────
 
 mod siacoin_helpers;
+mod siacoin_history;
 mod siacoin_market_ops;
 mod siacoin_mm_coin;
 mod siacoin_swap_ops;
 mod siacoin_types;
+
+pub use siacoin_history::process_history_loop;
 
 // Re-export split module contents for backward-compatible access paths
 pub use siacoin_types::*;

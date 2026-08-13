@@ -420,3 +420,26 @@ pub enum SiaCoinMyKeypairError {
     #[error("[my_keypair] PrivKeyPolicy unsupported (Iguana seed required)")]
     PrivKeyPolicy,
 }
+
+// =====================================================================
+// 4. Transaction-history errors (CRD ch.53)
+// =====================================================================
+
+/// Failure projecting a walletd event onto a transaction-history record
+/// (CRD ch.53 §53.5).
+///
+/// Mapping is otherwise total: every represented event kind yields a record,
+/// and the three unrepresented kinds are skipped without error (R53.5.1).
+#[derive(Debug, Error)]
+pub enum SiaHistoryMapError {
+    #[error("[sia-history] event {event_id}: summing {field} values overflowed u128")]
+    AmountOverflow { event_id: String, field: &'static str },
+}
+
+/// Failure retrieving the wallet address's event set from walletd
+/// (CRD ch.53 §53.4).
+#[derive(Debug, Error)]
+pub enum SiaHistoryFetchError {
+    #[error("[sia-history] walletd address-events request failed: {0}")]
+    Transport(String),
+}

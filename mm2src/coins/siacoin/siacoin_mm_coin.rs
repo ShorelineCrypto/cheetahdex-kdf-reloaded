@@ -44,9 +44,18 @@ impl MmCoin for SiaCoin {
         }
     }
 
-    fn process_history_loop(&self, _ctx: MmArc) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-        // tx history loop not yet implemented for Sia in this fork
-        Box::new(futures01::future::ok(()))
+    fn process_history_loop(&self, ctx: MmArc) -> Box<dyn Future<Item = (), Error = ()> + Send> {
+        // The tracking pass of CRD ch.53 §53.6: populates the coin-generic
+        // runtime history store from the wallet address's walletd event log.
+        let coin = self.clone();
+        Box::new(
+            async move {
+                super::process_history_loop(coin, ctx).await;
+                Ok(())
+            }
+            .boxed()
+            .compat(),
+        )
     }
 
     fn history_sync_status(&self) -> HistorySyncState { self.history_sync_state.lock().unwrap().clone() }
