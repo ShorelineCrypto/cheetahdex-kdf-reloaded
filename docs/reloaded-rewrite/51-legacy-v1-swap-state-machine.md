@@ -763,7 +763,13 @@ never blocks itself.
 The zero-volume-with-fee entry is not redundant: it reserves the taker
 coin fee headroom needed to claim the incoming payment, which would
 otherwise be spendable by another trade and leave the swap unable to
-collect.
+collect. What it is worth is decided by R53 and can be nothing: a coin
+that pays its spend fee out of the payment being claimed marks the fee
+accordingly and contributes zero, while a coin that pays it from the
+account balance contributes the fee in whichever coin the descriptor
+names. Chapter 52 R64 binds the same reservation for the version-two
+protocol and MUST arrive at the same amount; a node runs both and
+computes one maximum-tradable-volume answer over the union.
 
 **R55.** *Taker per-stage reservations.* The taker MUST declare:
 

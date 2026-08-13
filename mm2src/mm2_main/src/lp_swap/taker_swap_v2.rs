@@ -59,6 +59,15 @@ pub enum TakerSwapEvent {
         taker_coin_start_block: u64,
         taker_payment_fee: MmNumber,
         maker_payment_spend_fee: MmNumber,
+        /// The part of `maker_payment_spend_fee` that must stay free in our own
+        /// balance — zero when the maker coin takes the fee out of the payment we
+        /// are claiming (CRD ch.52 R64). The coin that pays it is not persisted:
+        /// it is that coin's platform ticker, which does not vary.
+        ///
+        /// Additive and defaulted: a log written before this field existed
+        /// resumes with no headroom rather than failing to parse.
+        #[serde(default)]
+        maker_payment_spend_headroom: MmNumber,
     },
     Negotiated {
         maker_coin_start_block: u64,
@@ -190,6 +199,11 @@ pub struct TakerSwapStateMachine<MakerCoin: MmCoin + MakerCoinSwapOpsV2, TakerCo
     pub require_maker_payment_confirm: bool,
     pub require_maker_payment_spend_confirm: bool,
     pub swap_version: u8,
+    /// Maker-coin balance to keep free for spending the maker payment (ch.52
+    /// R64). Learned from the `Initialized` event — on a live run when it is
+    /// applied, on a resume by reading it back out of the persisted log — so
+    /// that a swap resumed past initialisation still holds its headroom.
+    pub maker_payment_spend_headroom: MmNumber,
 }
 
 impl<MakerCoin, TakerCoin> TakerSwapStateMachine<MakerCoin, TakerCoin>
@@ -202,6 +216,24 @@ where
     pub fn taker_payment_locktime(&self) -> u64 { self.started_at + self.lock_duration }
     pub fn unique_data(&self) -> Vec<u8> { self.uuid.as_bytes().to_vec() }
     pub fn taker_secret_hash(&self) -> Vec<u8> { self.secret_hash_algo.hash_secret(self.taker_secret.as_slice()) }
+
+    /// The coin whose balance pays for spending the maker payment. For an ERC20
+    /// maker coin that is the platform coin, not the token — the same choice the
+    /// coin makes when it reports the fee.
+    fn maker_payment_spend_fee_coin(&self) -> &str { self.maker_coin.platform_ticker() }
+
+    fn reserve_maker_payment_spend_headroom(&self) {
+        super::reserve_v2_spend_headroom(
+            &self.ctx,
+            self.uuid,
+            self.maker_payment_spend_fee_coin(),
+            self.maker_payment_spend_headroom.clone(),
+        );
+    }
+
+    fn release_maker_payment_spend_headroom(&self) {
+        super::release_v2_spend_headroom(&self.ctx, &self.uuid, self.maker_payment_spend_fee_coin());
+    }
 }
 
 // States (PhantomData-bound to the generic state machine) --------------------
@@ -219,15 +251,17 @@ pub struct Initialized<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwap
     pub taker_coin_start_block: u64,
     pub taker_payment_fee: MmNumber,
     pub maker_payment_spend_fee: MmNumber,
+    pub maker_payment_spend_headroom: MmNumber,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Initialized<M, T> {
-    pub fn new(mb: u64, tb: u64, tf: MmNumber, mf: MmNumber) -> Self {
+    pub fn new(mb: u64, tb: u64, tf: MmNumber, mf: MmNumber, mh: MmNumber) -> Self {
         Initialized {
             maker_coin_start_block: mb,
             taker_coin_start_block: tb,
             taker_payment_fee: tf,
             maker_payment_spend_fee: mf,
+            maker_payment_spend_headroom: mh,
             _p: PhantomData,
         }
     }
@@ -701,17 +735,35 @@ where
         }
         let last_event = repr.events.remove(repr.events.len() - 1);
 
+        // Only `Initialized` records the headroom, but the swap owes it for as
+        // long as the maker payment is unspent, so recover it from the log
+        // rather than from whichever event we happen to be resuming at.
+        let maker_payment_spend_headroom = repr
+            .events
+            .iter()
+            .chain(std::iter::once(&last_event))
+            .find_map(|event| match event {
+                TakerSwapEvent::Initialized {
+                    maker_payment_spend_headroom,
+                    ..
+                } => Some(maker_payment_spend_headroom.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+
         let current_state: Box<dyn RestoredState<StateMachine = Self>> = match last_event {
             TakerSwapEvent::Initialized {
                 maker_coin_start_block,
                 taker_coin_start_block,
                 taker_payment_fee,
                 maker_payment_spend_fee,
+                maker_payment_spend_headroom,
             } => Box::new(Initialized::new(
                 maker_coin_start_block,
                 taker_coin_start_block,
                 taker_payment_fee,
                 maker_payment_spend_fee,
+                maker_payment_spend_headroom,
             )),
             TakerSwapEvent::Negotiated {
                 maker_coin_start_block,
@@ -885,6 +937,7 @@ where
             require_maker_payment_confirm: true,
             require_maker_payment_spend_confirm: true,
             swap_version: repr.swap_version,
+            maker_payment_spend_headroom,
         };
 
         Ok((RestoredMachine::new(machine), current_state))
@@ -917,26 +970,24 @@ where
         swap_ctx.remove_active_swap_v2(&self.uuid);
         swap_ctx.remove_v2_msg_store(&self.uuid);
 
-        // Clean up V2 locked amounts for both coins.
-        let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
-        let maker_ticker = self.maker_coin.ticker();
-        if let Some(entries) = locked.get_mut(maker_ticker) {
-            entries.retain(|info| info.swap_uuid != self.uuid);
-        }
-        let taker_ticker = self.taker_coin.ticker();
-        if let Some(entries) = locked.get_mut(taker_ticker) {
-            entries.retain(|info| info.swap_uuid != self.uuid);
-        }
+        // Every entry, not just the two the swap trades in: an ERC20 leg files
+        // its spend headroom under the platform coin (ch.52 R59).
+        super::release_all_v2_locked_amounts(&self.ctx, &self.uuid);
     }
 
     fn on_event(&mut self, event: &TakerSwapEvent) {
         match event {
-            TakerSwapEvent::Initialized { taker_payment_fee, .. } => {
+            TakerSwapEvent::Initialized {
+                taker_payment_fee,
+                maker_payment_spend_headroom,
+                ..
+            } => {
                 let swaps_ctx =
                     super::SwapsContext::from_ctx(&self.ctx).expect("from_ctx should not fail at this point");
                 let taker_coin_ticker: String = self.taker_coin.ticker().into();
                 let new_locked = super::LockedAmountV2Info {
                     swap_uuid: self.uuid,
+                    kind: super::LockedAmountV2Kind::Volume,
                     locked_amount: super::LockedAmount {
                         coin: taker_coin_ticker.clone(),
                         amount: &self.taker_volume + &self.taker_premium,
@@ -954,15 +1005,26 @@ where
                     .entry(taker_coin_ticker)
                     .or_default()
                     .push(new_locked);
+
+                self.maker_payment_spend_headroom = maker_payment_spend_headroom.clone();
+                self.reserve_maker_payment_spend_headroom();
             },
             TakerSwapEvent::TakerFundingSent { .. } => {
                 let swaps_ctx =
                     super::SwapsContext::from_ctx(&self.ctx).expect("from_ctx should not fail at this point");
                 let ticker = self.taker_coin.ticker();
                 if let Some(taker_coin_locked) = swaps_ctx.locked_amounts_v2.lock().unwrap().get_mut(ticker) {
-                    taker_coin_locked.retain(|locked| locked.swap_uuid != self.uuid);
+                    // Only the volume entry: an ERC20 trade against its own
+                    // platform coin keeps the spend headroom in this same bucket,
+                    // and that is still owed until the maker payment is spent.
+                    taker_coin_locked.retain(|locked| {
+                        locked.swap_uuid != self.uuid || locked.kind != super::LockedAmountV2Kind::Volume
+                    });
                 };
             },
+            // The maker payment is ours now, so the fee to claim it is no longer
+            // owed and its headroom is released (ch.52 R64).
+            TakerSwapEvent::MakerPaymentSpent { .. } => self.release_maker_payment_spend_headroom(),
             TakerSwapEvent::Negotiated { .. }
             | TakerSwapEvent::TakerFundingRefundRequired { .. }
             | TakerSwapEvent::MakerPaymentAndFundingSpendPreimgReceived { .. }
@@ -971,7 +1033,6 @@ where
             | TakerSwapEvent::TakerPaymentRefundRequired { .. }
             | TakerSwapEvent::MakerPaymentConfirmed { .. }
             | TakerSwapEvent::TakerPaymentSpent { .. }
-            | TakerSwapEvent::MakerPaymentSpent { .. }
             | TakerSwapEvent::TakerFundingRefunded { .. }
             | TakerSwapEvent::TakerPaymentRefunded { .. }
             | TakerSwapEvent::Aborted { .. }
@@ -990,6 +1051,15 @@ where
     }
 
     fn on_kickstart_event(&mut self, event: TakerSwapEvent) {
+        // The volume entry comes back only where the funding is still unsent, but
+        // the headroom is owed for as long as the maker payment is unspent —
+        // which is every resumable event but the spend itself. This is what the
+        // legacy protocol reserves at the same points (ch.51 R55), and the two
+        // answers have to agree.
+        if !matches!(event, TakerSwapEvent::MakerPaymentSpent { .. }) {
+            self.reserve_maker_payment_spend_headroom();
+        }
+
         match event {
             TakerSwapEvent::Initialized { taker_payment_fee, .. }
             | TakerSwapEvent::Negotiated { taker_payment_fee, .. } => {
@@ -998,6 +1068,7 @@ where
                 let taker_coin_ticker: String = self.taker_coin.ticker().into();
                 let new_locked = super::LockedAmountV2Info {
                     swap_uuid: self.uuid,
+                    kind: super::LockedAmountV2Kind::Volume,
                     locked_amount: super::LockedAmount {
                         coin: taker_coin_ticker.clone(),
                         amount: &self.taker_volume + &self.taker_premium,
@@ -1047,6 +1118,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableSta
             taker_coin_start_block: self.taker_coin_start_block,
             taker_payment_fee: self.taker_payment_fee.clone(),
             maker_payment_spend_fee: self.maker_payment_spend_fee.clone(),
+            maker_payment_spend_headroom: self.maker_payment_spend_headroom.clone(),
         }
     }
 }
@@ -1288,6 +1360,11 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
             return Self::change_state(Aborted::new(reason), sm).await;
         }
 
+        // Resolved here, where the coin's own descriptor is still available: the
+        // persisted event carries a bare number, which cannot say whether the
+        // fee comes out of the payment being claimed or out of our balance.
+        let maker_payment_spend_headroom = super::spend_fee_headroom(&maker_payment_spend_trade_fee);
+
         info!("Taker swap {} has successfully started", sm.uuid);
         Self::change_state(
             Initialized::new(
@@ -1295,6 +1372,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for I
                 taker_coin_start_block,
                 taker_payment_trade_fee.amount,
                 maker_payment_spend_trade_fee.amount,
+                maker_payment_spend_headroom,
             ),
             sm,
         )

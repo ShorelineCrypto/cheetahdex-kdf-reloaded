@@ -281,10 +281,23 @@ impl From<TakerSwapEvent> for SwapEvent {
     fn from(taker_event: TakerSwapEvent) -> Self { SwapEvent::Taker(taker_event) }
 }
 
+/// What a V2 ledger entry reserves. One swap can hold two entries for the same
+/// coin — an ERC20 trade against its own platform coin puts the volume entry and
+/// the spend headroom in the same bucket — so removal has to name the kind as
+/// well as the swap.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LockedAmountV2Kind {
+    /// The role's own outgoing volume and the fee to send it (CRD ch.52 R58).
+    Volume,
+    /// Balance kept free to pay for spending the incoming payment (ch.52 R64).
+    SpendHeadroom,
+}
+
 /// V2 swap locked amount information, keyed by coin ticker in SwapsContext.
 #[derive(Debug)]
 struct LockedAmountV2Info {
     swap_uuid: Uuid,
+    kind: LockedAmountV2Kind,
     locked_amount: LockedAmount,
 }
 
@@ -400,6 +413,97 @@ impl SwapsContext {
 
     #[cfg(target_arch = "wasm32")]
     pub async fn swap_db(&self) -> InitDbResult<SwapDbLocked<'_>> { Ok(self.swap_db.get_or_initialize().await?) }
+}
+
+/// How much of a counterparty-payment spend fee the spender must keep free in
+/// its own balance.
+///
+/// Both protocols owe the same answer here (CRD ch.51 R54/R55, ch.52 R64), and
+/// it is not simply the fee amount. A coin that reports `paid_from_trading_vol`
+/// takes the fee out of the payment being claimed — a UTXO spend pays the miner
+/// from the HTLC output itself — so nothing has to stay free for it. A coin that
+/// does not report it burns the fee from the account balance, and that balance
+/// is the one named by `TradeFee::coin`, which for an ERC20 payment is the
+/// platform coin rather than the token.
+///
+/// Returns the reservable amount; the caller files it under `fee.coin`.
+fn spend_fee_headroom(fee: &TradeFee) -> MmNumber {
+    if fee.paid_from_trading_vol {
+        MmNumber::from(0)
+    } else {
+        fee.amount.clone()
+    }
+}
+
+/// Record the headroom a running V2 swap needs to spend the payment it is owed
+/// (ch.52 R64). Idempotent: re-applying the same event does not double-reserve.
+///
+/// `fee_coin` is the coin that actually pays the fee — `platform_ticker()` of the
+/// counterparty coin — which is also the ledger bucket the balance checks read.
+fn reserve_v2_spend_headroom(ctx: &MmArc, uuid: Uuid, fee_coin: &str, headroom: MmNumber) {
+    let swap_ctx = match SwapsContext::from_ctx(ctx) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to reserve spend headroom for swap {}: {}", uuid, e);
+            return;
+        },
+    };
+    let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+    let entries = locked.entry(fee_coin.to_owned()).or_default();
+    if entries
+        .iter()
+        .any(|info| info.swap_uuid == uuid && info.kind == LockedAmountV2Kind::SpendHeadroom)
+    {
+        return;
+    }
+    entries.push(LockedAmountV2Info {
+        swap_uuid: uuid,
+        kind: LockedAmountV2Kind::SpendHeadroom,
+        // The whole reservation is the headroom itself, so it goes in the amount
+        // rather than in a synthesised trade-fee descriptor: `spend_fee_headroom`
+        // has already applied the paid-from-trading-volume rule that the totals
+        // would otherwise apply to such a descriptor.
+        locked_amount: LockedAmount {
+            coin: fee_coin.to_owned(),
+            amount: headroom,
+            trade_fee: None,
+        },
+    });
+}
+
+/// Release the headroom entry of `uuid` once the incoming payment has been spent
+/// and the fee is no longer owed (ch.52 R64).
+fn release_v2_spend_headroom(ctx: &MmArc, uuid: &Uuid, fee_coin: &str) {
+    let swap_ctx = match SwapsContext::from_ctx(ctx) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to release spend headroom for swap {}: {}", uuid, e);
+            return;
+        },
+    };
+    let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+    if let Some(entries) = locked.get_mut(fee_coin) {
+        entries.retain(|info| !(info.swap_uuid == *uuid && info.kind == LockedAmountV2Kind::SpendHeadroom));
+    }
+}
+
+/// Remove every ledger entry belonging to `uuid`, whatever coin it was filed
+/// under (ch.52 R59).
+///
+/// The two coins of the swap are not enough to find them all: an ERC20 leg files
+/// its spend headroom under the platform coin, which need be neither of them.
+fn release_all_v2_locked_amounts(ctx: &MmArc, uuid: &Uuid) {
+    let swap_ctx = match SwapsContext::from_ctx(ctx) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to release locked amounts for swap {}: {}", uuid, e);
+            return;
+        },
+    };
+    let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+    for entries in locked.values_mut() {
+        entries.retain(|info| info.swap_uuid != *uuid);
+    }
 }
 
 /// Get total amount of selected coin locked by all currently ongoing swaps
@@ -989,6 +1093,207 @@ mod persisted_event_vocabulary_tests {
             "MakerPaymentRefundFailed",
             ],
             "MAKER_ERROR_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+    }
+}
+
+#[cfg(test)]
+mod v2_spend_headroom_tests {
+    use super::*;
+    use common::new_uuid;
+    use mm2_core::mm_ctx::MmCtxBuilder;
+
+    fn test_ctx() -> MmArc {
+        MmCtxBuilder::default()
+            .with_conf(json::json!({"netid": 8762}))
+            .into_mm_arc()
+    }
+
+    /// The shape V1 files its counterparty-spend reservation in: zero volume,
+    /// carrying the coin's own fee descriptor (ch.51 R54/R55, and see
+    /// `TakerSwap::locked_amount`). Placed in the V2 ledger so that both shapes
+    /// are scored by the same predicate — which ch.52 R62 requires the two totals
+    /// to share anyway.
+    fn v1_shaped_headroom_total(fee: &TradeFee) -> MmNumber {
+        let ctx = test_ctx();
+        let swap_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+        swap_ctx
+            .locked_amounts_v2
+            .lock()
+            .unwrap()
+            .entry(fee.coin.clone())
+            .or_default()
+            .push(LockedAmountV2Info {
+                swap_uuid: new_uuid(),
+                kind: LockedAmountV2Kind::Volume,
+                locked_amount: LockedAmount {
+                    coin: fee.coin.clone(),
+                    amount: MmNumber::from(0),
+                    trade_fee: Some(fee.clone()),
+                },
+            });
+        get_locked_amount(&ctx, &fee.coin)
+    }
+
+    fn v2_headroom_total(fee: &TradeFee) -> MmNumber {
+        let ctx = test_ctx();
+        reserve_v2_spend_headroom(&ctx, new_uuid(), &fee.coin, spend_fee_headroom(fee));
+        get_locked_amount(&ctx, &fee.coin)
+    }
+
+    /// A UTXO spend pays the miner out of the HTLC output it is claiming, so no
+    /// balance has to stay free for it. An EVM spend burns gas from the account,
+    /// so it does. These are the two coin families on the V2 surface, and they are
+    /// the reason the answer cannot be "reserve the fee" or "reserve nothing".
+    fn utxo_style_fee() -> TradeFee {
+        TradeFee {
+            coin: "MORTY".into(),
+            amount: MmNumber::from("0.00001"),
+            paid_from_trading_vol: true,
+        }
+    }
+
+    fn evm_style_fee() -> TradeFee {
+        TradeFee {
+            coin: "ETH".into(),
+            amount: MmNumber::from("0.0021"),
+            paid_from_trading_vol: false,
+        }
+    }
+
+    /// ch.52 R64 with ch.51 R54/R55: closing the V2 gap only helps if the two
+    /// protocols then answer the same question the same way, since one node runs
+    /// both and `max_taker_vol` sums them.
+    #[test]
+    fn v2_spend_headroom_agrees_with_the_v1_reservation() {
+        for (label, fee) in [
+            ("a fee paid out of the payment being claimed", utxo_style_fee()),
+            ("a fee burned from our own balance", evm_style_fee()),
+        ] {
+            assert_eq!(
+                v1_shaped_headroom_total(&fee),
+                v2_headroom_total(&fee),
+                "V1 and V2 must reserve the same amount for {label}"
+            );
+        }
+
+        // And the answers are actually different from each other, so the
+        // agreement above is not two zeroes agreeing by accident.
+        assert_eq!(v2_headroom_total(&utxo_style_fee()), MmNumber::from(0));
+        assert_eq!(v2_headroom_total(&evm_style_fee()), MmNumber::from("0.0021"));
+    }
+
+    /// Both directions, as `finished_swap_releases_its_reservation` does for the
+    /// legacy registry: reserving must be visible, and releasing must undo it.
+    /// A headroom that were never released would shrink `max_taker_vol` for the
+    /// life of the process, the ledger being in-memory only (ch.52 R65).
+    #[test]
+    fn v2_spend_headroom_is_held_until_the_incoming_payment_is_spent() {
+        let ctx = test_ctx();
+        let uuid = new_uuid();
+        let fee = evm_style_fee();
+
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from(0),
+            "nothing is reserved before the swap initialises"
+        );
+
+        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, spend_fee_headroom(&fee));
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from("0.0021"),
+            "a live swap must hold the fee it needs to claim what it is owed"
+        );
+
+        // Re-applying the same event must not double-reserve; a resume can apply
+        // it a second time (ch.52 R63).
+        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, spend_fee_headroom(&fee));
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from("0.0021"),
+            "reserving twice for one swap must not reserve twice"
+        );
+
+        release_v2_spend_headroom(&ctx, &uuid, &fee.coin);
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from(0),
+            "once the payment is spent the fee is no longer owed"
+        );
+    }
+
+    /// ch.52 R61: the self-excluding total is what every swap-start balance check
+    /// reads, so a headroom invisible to it would admit a second swap against the
+    /// balance the first needs to collect — the failure R61 was written for,
+    /// reached by a different route.
+    #[test]
+    fn v2_spend_headroom_is_visible_to_the_self_excluding_total() {
+        let ctx = test_ctx();
+        let holder = new_uuid();
+        let other = new_uuid();
+        let fee = evm_style_fee();
+
+        reserve_v2_spend_headroom(&ctx, holder, &fee.coin, spend_fee_headroom(&fee));
+
+        assert_eq!(
+            get_locked_amount_by_other_swaps(&ctx, &other, &fee.coin),
+            MmNumber::from("0.0021"),
+            "another swap's balance check must see the headroom"
+        );
+        assert_eq!(
+            get_locked_amount_by_other_swaps(&ctx, &holder, &fee.coin),
+            MmNumber::from(0),
+            "a swap must not block itself"
+        );
+    }
+
+    /// An ERC20 leg files its headroom under the platform coin, which need be
+    /// neither of the swap's two coins — and which may equally well be one of
+    /// them, when the other leg is that same platform coin. Both cases have to
+    /// work: the volume entry must not carry the headroom away with it, and
+    /// termination must still find the headroom to release (ch.52 R59).
+    #[test]
+    fn erc20_headroom_shares_a_bucket_with_the_volume_entry_without_colliding() {
+        let ctx = test_ctx();
+        let swap_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+        let uuid = new_uuid();
+
+        // Volume reserved in ETH, headroom for spending an ERC20 payment also
+        // billed to ETH: one bucket, two entries, one swap.
+        swap_ctx
+            .locked_amounts_v2
+            .lock()
+            .unwrap()
+            .entry("ETH".to_owned())
+            .or_default()
+            .push(LockedAmountV2Info {
+                swap_uuid: uuid,
+                kind: LockedAmountV2Kind::Volume,
+                locked_amount: LockedAmount {
+                    coin: "ETH".into(),
+                    amount: MmNumber::from("1"),
+                    trade_fee: None,
+                },
+            });
+        reserve_v2_spend_headroom(&ctx, uuid, "ETH", MmNumber::from("0.0021"));
+        assert_eq!(get_locked_amount(&ctx, "ETH"), MmNumber::from("1.0021"));
+
+        // The payment goes out: the volume is committed, the headroom is not.
+        if let Some(entries) = swap_ctx.locked_amounts_v2.lock().unwrap().get_mut("ETH") {
+            entries.retain(|info| info.swap_uuid != uuid || info.kind != LockedAmountV2Kind::Volume);
+        }
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from("0.0021"),
+            "committing the volume must leave the headroom standing"
+        );
+
+        release_all_v2_locked_amounts(&ctx, &uuid);
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from(0),
+            "termination must clear every bucket the swap wrote to"
         );
     }
 }

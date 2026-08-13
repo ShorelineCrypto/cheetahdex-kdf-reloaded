@@ -1464,6 +1464,7 @@ mod tests {
                 taker_coin_start_block: 200,
                 maker_payment_trade_fee: MmNumber::from("0.001"),
                 taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                taker_payment_spend_headroom: MmNumber::from("0.002"),
             },
             MakerSwapEvent::WaitingForTakerFunding {
                 maker_coin_start_block: 100,
@@ -1559,6 +1560,7 @@ mod tests {
                 taker_coin_start_block: 200,
                 taker_payment_fee: MmNumber::from("0.001"),
                 maker_payment_spend_fee: MmNumber::from("0.002"),
+                maker_payment_spend_headroom: MmNumber::from("0.002"),
             },
             TakerSwapEvent::Negotiated {
                 maker_coin_start_block: 100,
@@ -1694,6 +1696,7 @@ mod tests {
                     taker_coin_start_block: 200,
                     maker_payment_trade_fee: MmNumber::from("0.001"),
                     taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                    taker_payment_spend_headroom: MmNumber::from("0.002"),
                 },
                 MakerSwapEvent::Completed,
             ],
@@ -1747,6 +1750,7 @@ mod tests {
                     taker_coin_start_block: 200,
                     taker_payment_fee: MmNumber::from("0.001"),
                     maker_payment_spend_fee: MmNumber::from("0.002"),
+                    maker_payment_spend_headroom: MmNumber::from("0.002"),
                 },
                 TakerSwapEvent::Completed,
             ],
@@ -1826,6 +1830,7 @@ mod tests {
             taker_coin_start_block: 2,
             maker_payment_trade_fee: MmNumber::from("0.001"),
             taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+            taker_payment_spend_headroom: MmNumber::from("0.002"),
         });
         assert_eq!(repr.events.len(), 1);
 
@@ -1948,6 +1953,7 @@ mod tests {
                 taker_coin_start_block: 200,
                 maker_payment_trade_fee: MmNumber::from("0.001"),
                 taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                taker_payment_spend_headroom: MmNumber::from("0.002"),
             };
             block_on(storage.store_event(uuid, event1)).unwrap();
 
@@ -2014,6 +2020,7 @@ mod tests {
                 taker_coin_start_block: 200,
                 taker_payment_fee: MmNumber::from("0.001"),
                 maker_payment_spend_fee: MmNumber::from("0.002"),
+                maker_payment_spend_headroom: MmNumber::from("0.002"),
             };
             block_on(storage.store_event(uuid, event1)).unwrap();
 
@@ -2114,6 +2121,7 @@ mod tests {
                     taker_coin_start_block: 200,
                     maker_payment_trade_fee: MmNumber::from("0.001"),
                     taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                    taker_payment_spend_headroom: MmNumber::from("0.002"),
                 },
                 MakerSwapEvent::WaitingForTakerFunding {
                     maker_coin_start_block: 100,
@@ -2162,6 +2170,7 @@ mod tests {
                 taker_coin_start_block: 84,
                 maker_payment_trade_fee: MmNumber::from("0.001"),
                 taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+                taker_payment_spend_headroom: MmNumber::from("0.002"),
             }))
             .unwrap();
 
@@ -2196,6 +2205,7 @@ mod tests {
                 taker_coin_start_block: 84,
                 taker_payment_fee: MmNumber::from("0.001"),
                 maker_payment_spend_fee: MmNumber::from("0.002"),
+                maker_payment_spend_headroom: MmNumber::from("0.002"),
             }))
             .unwrap();
 

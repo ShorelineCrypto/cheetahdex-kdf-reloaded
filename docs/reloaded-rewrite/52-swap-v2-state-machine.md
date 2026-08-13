@@ -195,8 +195,8 @@ activity; subscribe to the swap topic; create the per-swap message inbox
 pinned to the counterparty's peer-to-peer public key; and register the
 swap in the active-swap index. On termination it MUST mark the swap
 finished in storage and then perform the exact inverse: unsubscribe,
-destroy the inbox, deregister from the active-swap index, and remove the
-swap's reserved-amount entries for both coins (R59).
+destroy the inbox, deregister from the active-swap index, and remove
+every reserved-amount entry the swap holds (R59).
 
 **R6.** *Single runner per swap.* Before any state runs, the runner MUST
 acquire a per-swap-identifier exclusion lock with a forty-second
@@ -944,11 +944,19 @@ the swap's own start balance check has already passed, unlike the legacy
 contract where the registry entry precedes the first stage
 (chapter 51 R51).
 
+This is not the role's only entry: R64 binds a second one, on the coin
+that pays for spending the incoming payment, with a longer window. The
+removal above MUST remove only the volume entry, because the two can
+share a ledger bucket.
+
 **R59.** *Unconditional release on every exit path.* When the run
 terminates for any reason — completion, abort, either refund terminal,
-or a failure inside the runtime — the runner MUST remove the swap's
-entries for **both** coins from the ledger, unconditionally and without
-consulting how the swap ended. This MUST happen in the same process,
+or a failure inside the runtime — the runner MUST remove **every** entry
+the swap holds, in whatever coin it was filed under, unconditionally and
+without consulting how the swap ended. The swap's own two coins are not
+a sufficient search: the fee-headroom entry of R64 is filed in the coin
+that pays the fee, which for a token leg is that token's platform coin
+and need be neither of them. This MUST happen in the same process,
 immediately, as part of the termination sequence of R5, and MUST NOT be
 deferred to a restart, a garbage-collection pass, or the dropping of any
 object. A swap that terminated during `STATE-INITIALIZE` never created
@@ -982,25 +990,71 @@ This MUST be the same predicate the legacy total applies
 (chapter 51 R53), so that a mixed node cannot compute two different
 answers for one coin.
 
-**R63.** *Reconstruction on resume.* When a swap is resumed, the entry
-MUST be re-created if and only if the resumed entry event is one at
-which the role's funds had not yet been committed: for the maker,
+**R63.** *Reconstruction on resume.* When a swap is resumed, the volume
+entry MUST be re-created if and only if the resumed entry event is one
+at which the role's funds had not yet been committed: for the maker,
 `Initialized`, `WaitingForTakerFunding` or `TakerFundingReceived`; for
 the taker, `Initialized` or `Negotiated`. For every other resumed event
-no entry MUST be created. Re-creation on resume MUST NOT go through the
-live-transition notification path, consistent with chapter 14 R29's
-requirement that resume entry be distinguishable from first-time entry.
+no volume entry MUST be created.
 
-**R64.** *No fee-headroom reservation.* Unlike the legacy contract
-(chapter 51 R54, R55), the version-two reservation does **not** include
-a zero-volume entry reserving the headroom needed to spend the incoming
-payment on the counterparty's coin. The maker reserves nothing on the
-taker coin and the taker reserves nothing on the maker coin. This is a
-known gap: a concurrent trade can consume the fee headroom a live
-version-two swap needs to claim what it is owed. It is recorded as
-deferred work (D2) rather than silently corrected, because closing it
-changes the maximum-tradable-volume answer and must be done deliberately
-on both protocols at once.
+The fee-headroom entry of R64 has a longer window and therefore a
+different rule: it MUST be re-created at every resumed event except the
+one at which the incoming payment was spent — `TakerPaymentSpent` for
+the maker, `MakerPaymentSpent` for the taker — which is exactly the span
+over which the legacy protocol reserves it. Re-creation MUST be
+idempotent, so that applying the initialisation event on a resume does
+not reserve a second time.
+
+Re-creation on resume MUST NOT go through the live-transition
+notification path, consistent with chapter 14 R29's requirement that
+resume entry be distinguishable from first-time entry.
+
+**R64.** *Fee-headroom reservation.* Each role MUST additionally reserve
+the balance it will need to pay for spending the payment it is owed, so
+that a concurrent trade cannot consume it and leave the swap unable to
+collect. This is the version-two statement of what chapter 51 R54 and
+R55 bind for the legacy protocol, and the two MUST produce the same
+number, because one node runs both and a single maximum-tradable-volume
+answer is computed over the union.
+
+The amount is **not** simply the counterparty coin's spend fee. A coin
+that reports its spend fee as payable out of the trading volume takes
+that fee from the payment being claimed — a UTXO spend pays the miner
+out of the hash-time-locked output itself — and therefore needs no
+balance kept free at all. A coin that does not takes it from the account
+balance. The reserved amount is therefore the fee amount when the fee is
+not payable out of the trading volume and zero when it is; the coin it
+is reserved *in* is the coin the fee descriptor names, which for a token
+payment is the token's platform coin rather than the token. This is the
+same predicate R62 and chapter 51 R53 apply to every other reserved
+amount, applied here at the point the descriptor is still available.
+
+| Role  | Entry created when applying | Reserved                                                        | Entry removed when applying |
+|-------|-----------------------------|-----------------------------------------------------------------|-----------------------------|
+| Maker | `Initialized`               | the reservable part of the taker-payment-spend fee, in the coin that pays it | `TakerPaymentSpent`        |
+| Taker | `Initialized`               | the reservable part of the maker-payment-spend fee, in the coin that pays it | `MakerPaymentSpent`        |
+
+Two consequences follow from the coin that pays it being neither role's
+trading coin in general. First, the entry may share a ledger bucket with
+that role's own volume entry — a token traded against its own platform
+coin puts both there — so removing the volume entry at the point R58
+binds MUST NOT remove the headroom entry with it. Second, the entry may
+sit in a bucket that is neither of the swap's two coins, which is why
+R59's release is stated over every bucket rather than over two.
+
+Only the initialisation event records the amount, but it is owed for as
+long as the incoming payment is unspent; a resumed swap MUST therefore
+recover it from the persisted log rather than from the event it happens
+to be resuming at (R63).
+
+This rule is a deliberate KDF Reloaded divergence: the upstream
+version-two implementation this chapter is contrasted against reserves
+nothing here, which is why the requirement was first recorded as the gap
+D2 rather than as a rule. It is stated as a requirement rather than
+offered as an option because the alternative behaviour is a node that
+can be left unable to collect a payment it has already been sent, and
+because a node running both protocols must not answer the same balance
+question two different ways depending on which protocol asked.
 
 **R65.** *Reservation is process-local.* The ledger is in-memory only
 and is cleared on restart; reservations are reconstructed by resuming
@@ -1173,6 +1227,7 @@ plus optional reason that chapter 33 binds.
 | Chain-observed stages repeat their broadcast until the state exits, not until a reply | R52     |
 | Reservation lives in the version-two ledger, released unconditionally on every exit | R57–R60   |
 | The self-excluding reservation total reads both the legacy registry and the version-two ledger | R61 |
+| Both roles reserve the fee headroom to claim the incoming payment, in the same amount the legacy protocol does | R64, chapter 51 R54, R55 |
 | Public-key width is coin-family-determined, never protocol-fixed               | R66, R67      |
 | Counterparty key bytes are length-checked and can never abort the process      | R68           |
 | Chapter 51's ed25519 padding convention has no version-two counterpart         | R69           |
@@ -1257,6 +1312,17 @@ contributes exactly the amounts of R58 between its initialisation event
 and its payment event and zero afterwards; the taker likewise between
 its initialisation event and its funding event.
 
+**T13a.** *Fee headroom, both families and both protocols.* For a spend
+fee reported as payable out of the trading volume the reserved headroom
+is zero, and for one that is not it is the whole fee amount — and for
+each of the two, the version-two reservation and the legacy reservation
+of chapter 51 R54 / R55 contribute the identical amount to the total.
+The headroom is visible to the self-excluding total of R61 for another
+swap's identifier and invisible for its own; reserving twice for one
+swap reserves once; committing the volume entry from a shared bucket
+leaves the headroom standing; and termination clears the bucket even
+when it is neither of the swap's coins.
+
 **T14.** *The self-excluding total sees version-two reservations.* With
 one live version-two swap holding a reservation, the self-excluding
 total computed for a *different* swap identifier includes that
@@ -1265,9 +1331,12 @@ balance is rejected. The same test computed for the holding swap's own
 identifier excludes it, so a swap never blocks itself.
 
 **T15.** *Reconstruction on resume.* Resuming at each of the events
-listed in R63 re-creates the reservation exactly once; resuming at any
+listed in R63 re-creates the volume entry exactly once; resuming at any
 other event creates none; and resuming twice does not duplicate an
-entry.
+entry. The fee-headroom entry is re-created at every resumed event but
+the incoming-payment spend, including events whose own payload does not
+carry the amount, which the resume path recovers from the persisted
+initialisation event.
 
 **T16.** *Key-width acceptance and rejection.* A UTXO-side field of 33
 bytes and an EVM-side field of 64 bytes are both accepted in the same
@@ -1325,11 +1394,13 @@ malformed-key refusal (not retryable). A machine-readable reason code
 would need a new field on an existing message and is deferred; the
 free-text reason MUST NOT be parsed as if it were one.
 
-**D2.** *Fee-headroom reservation.* R64 records that neither role
-reserves the counterparty-coin headroom it needs to claim the incoming
-payment, unlike the legacy contract. Closing the gap changes the
-maximum-tradable-volume answer and should be done for both protocols
-together.
+**D2.** *(Resolved by §52.8, R64.)* *Fee-headroom reservation.* R64 now
+binds the reservation on both roles, deriving the amount so that it
+equals what chapter 51 R54 / R55 already reserve for the legacy
+protocol; the legacy side needed no change. The maximum-tradable-volume
+answer shrinks by the incoming-payment spend fee while a version-two
+swap is live against a coin that pays that fee from the account balance,
+and is unchanged for coins that pay it out of the payment being claimed.
 
 **D3.** *Per-swap key isolation for the taker's spend path.* The
 maker's spend of the taker payment on the preimage-skipping branch
@@ -1407,6 +1478,17 @@ descriptors carrying the fee's coin and its
 payable-out-of-trading-volume marker. R58 and R62 require the
 descriptor, because the inclusion predicate of R62 cannot be evaluated
 without it; this is a persisted-payload change to two events.
+
+For the *spend* fee the requirement is now met a different way: R64
+evaluates the predicate where the descriptor is still in hand, at
+initialisation, and each initialisation event carries the resolved
+reservable amount alongside the estimate as an additional defaulted
+field. The paying coin is recovered from the live coin rather than
+persisted, since it is that coin's platform ticker and does not vary
+over a swap. The *payment* fee half of this verification is unaddressed:
+the volume entry of R58 still synthesises a descriptor naming the
+trading coin, which is wrong for a token whose fee is billed to its
+platform coin.
 
 **V6.** The present tree's maker machine reaches its terminal abort
 state from the refund state on a failed refund, and its taker machine
