@@ -1151,6 +1151,87 @@ mod tests {
         assert!(format!("{}", reason).contains("insufficient funds"));
     }
 
+    /// ch.52 R58/R64: both fields are additive, so a log written before either
+    /// existed — the JSON below has neither — must still deserialize, defaulting
+    /// the headroom to zero (its pre-existing, always-correct-for-a-gap value)
+    /// and the reservable-fee marker to absent (recovered from the raw fee
+    /// amount by the caller, not by serde; see `recreate_machine`).
+    #[test]
+    fn old_persisted_initialized_event_without_the_new_fields_still_deserializes() {
+        use common::mm_number::MmNumber;
+
+        // Round-trip through JSON rather than a hand-written literal, so this
+        // test does not depend on guessing the enum's wire tagging shape — only
+        // on the two new fields genuinely being optional. Serialise a fully
+        // populated event, delete the two fields a pre-fix log would never have
+        // written, and confirm it still parses.
+        let maker_event = MakerSwapEvent::Initialized {
+            maker_coin_start_block: 100,
+            taker_coin_start_block: 200,
+            maker_payment_trade_fee: MmNumber::from("0.001"),
+            taker_payment_spend_trade_fee: MmNumber::from("0.002"),
+            taker_payment_spend_headroom: MmNumber::from("0.002"),
+            maker_payment_trade_fee_reservable: Some(MmNumber::from("0.001")),
+        };
+        let mut maker_value = serde_json::to_value(&maker_event).unwrap();
+        let maker_fields = maker_value
+            .get_mut("Initialized")
+            .expect("externally-tagged Initialized");
+        maker_fields
+            .as_object_mut()
+            .unwrap()
+            .remove("taker_payment_spend_headroom");
+        maker_fields
+            .as_object_mut()
+            .unwrap()
+            .remove("maker_payment_trade_fee_reservable");
+        let event: MakerSwapEvent = serde_json::from_value(maker_value).unwrap();
+        match event {
+            MakerSwapEvent::Initialized {
+                taker_payment_spend_headroom,
+                maker_payment_trade_fee_reservable,
+                ..
+            } => {
+                assert_eq!(taker_payment_spend_headroom, MmNumber::from(0));
+                assert_eq!(maker_payment_trade_fee_reservable, None);
+            },
+            other => panic!("expected Initialized, got {other:?}"),
+        }
+
+        let taker_event = TakerSwapEvent::Initialized {
+            maker_coin_start_block: 100,
+            taker_coin_start_block: 200,
+            taker_payment_fee: MmNumber::from("0.001"),
+            maker_payment_spend_fee: MmNumber::from("0.002"),
+            maker_payment_spend_headroom: MmNumber::from("0.002"),
+            taker_payment_fee_reservable: Some(MmNumber::from("0.001")),
+        };
+        let mut taker_value = serde_json::to_value(&taker_event).unwrap();
+        let taker_fields = taker_value
+            .get_mut("Initialized")
+            .expect("externally-tagged Initialized");
+        taker_fields
+            .as_object_mut()
+            .unwrap()
+            .remove("maker_payment_spend_headroom");
+        taker_fields
+            .as_object_mut()
+            .unwrap()
+            .remove("taker_payment_fee_reservable");
+        let event: TakerSwapEvent = serde_json::from_value(taker_value).unwrap();
+        match event {
+            TakerSwapEvent::Initialized {
+                maker_payment_spend_headroom,
+                taker_payment_fee_reservable,
+                ..
+            } => {
+                assert_eq!(maker_payment_spend_headroom, MmNumber::from(0));
+                assert_eq!(taker_payment_fee_reservable, None);
+            },
+            other => panic!("expected Initialized, got {other:?}"),
+        }
+    }
+
     #[test]
     fn t17_9_10_maker_kickstart_guard_extracts_latest_maker_payment() {
         let old_payment = BytesJson::from(vec![0x01]);
@@ -1465,6 +1546,7 @@ mod tests {
                 maker_payment_trade_fee: MmNumber::from("0.001"),
                 taker_payment_spend_trade_fee: MmNumber::from("0.002"),
                 taker_payment_spend_headroom: MmNumber::from("0.002"),
+                maker_payment_trade_fee_reservable: Some(MmNumber::from("0.001")),
             },
             MakerSwapEvent::WaitingForTakerFunding {
                 maker_coin_start_block: 100,
@@ -1561,6 +1643,7 @@ mod tests {
                 taker_payment_fee: MmNumber::from("0.001"),
                 maker_payment_spend_fee: MmNumber::from("0.002"),
                 maker_payment_spend_headroom: MmNumber::from("0.002"),
+                taker_payment_fee_reservable: Some(MmNumber::from("0.001")),
             },
             TakerSwapEvent::Negotiated {
                 maker_coin_start_block: 100,
@@ -1697,6 +1780,7 @@ mod tests {
                     maker_payment_trade_fee: MmNumber::from("0.001"),
                     taker_payment_spend_trade_fee: MmNumber::from("0.002"),
                     taker_payment_spend_headroom: MmNumber::from("0.002"),
+                    maker_payment_trade_fee_reservable: Some(MmNumber::from("0.001")),
                 },
                 MakerSwapEvent::Completed,
             ],
@@ -1751,6 +1835,7 @@ mod tests {
                     taker_payment_fee: MmNumber::from("0.001"),
                     maker_payment_spend_fee: MmNumber::from("0.002"),
                     maker_payment_spend_headroom: MmNumber::from("0.002"),
+                    taker_payment_fee_reservable: Some(MmNumber::from("0.001")),
                 },
                 TakerSwapEvent::Completed,
             ],
@@ -1831,6 +1916,7 @@ mod tests {
             maker_payment_trade_fee: MmNumber::from("0.001"),
             taker_payment_spend_trade_fee: MmNumber::from("0.002"),
             taker_payment_spend_headroom: MmNumber::from("0.002"),
+            maker_payment_trade_fee_reservable: Some(MmNumber::from("0.001")),
         });
         assert_eq!(repr.events.len(), 1);
 
@@ -1954,6 +2040,7 @@ mod tests {
                 maker_payment_trade_fee: MmNumber::from("0.001"),
                 taker_payment_spend_trade_fee: MmNumber::from("0.002"),
                 taker_payment_spend_headroom: MmNumber::from("0.002"),
+                maker_payment_trade_fee_reservable: Some(MmNumber::from("0.001")),
             };
             block_on(storage.store_event(uuid, event1)).unwrap();
 
@@ -2021,6 +2108,7 @@ mod tests {
                 taker_payment_fee: MmNumber::from("0.001"),
                 maker_payment_spend_fee: MmNumber::from("0.002"),
                 maker_payment_spend_headroom: MmNumber::from("0.002"),
+                taker_payment_fee_reservable: Some(MmNumber::from("0.001")),
             };
             block_on(storage.store_event(uuid, event1)).unwrap();
 
@@ -2122,6 +2210,7 @@ mod tests {
                     maker_payment_trade_fee: MmNumber::from("0.001"),
                     taker_payment_spend_trade_fee: MmNumber::from("0.002"),
                     taker_payment_spend_headroom: MmNumber::from("0.002"),
+                    maker_payment_trade_fee_reservable: Some(MmNumber::from("0.001")),
                 },
                 MakerSwapEvent::WaitingForTakerFunding {
                     maker_coin_start_block: 100,
@@ -2171,6 +2260,7 @@ mod tests {
                 maker_payment_trade_fee: MmNumber::from("0.001"),
                 taker_payment_spend_trade_fee: MmNumber::from("0.002"),
                 taker_payment_spend_headroom: MmNumber::from("0.002"),
+                maker_payment_trade_fee_reservable: Some(MmNumber::from("0.001")),
             }))
             .unwrap();
 
@@ -2206,6 +2296,7 @@ mod tests {
                 taker_payment_fee: MmNumber::from("0.001"),
                 maker_payment_spend_fee: MmNumber::from("0.002"),
                 maker_payment_spend_headroom: MmNumber::from("0.002"),
+                taker_payment_fee_reservable: Some(MmNumber::from("0.001")),
             }))
             .unwrap();
 

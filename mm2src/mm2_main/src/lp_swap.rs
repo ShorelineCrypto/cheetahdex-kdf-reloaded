@@ -415,19 +415,22 @@ impl SwapsContext {
     pub async fn swap_db(&self) -> InitDbResult<SwapDbLocked<'_>> { Ok(self.swap_db.get_or_initialize().await?) }
 }
 
-/// How much of a counterparty-payment spend fee the spender must keep free in
-/// its own balance.
+/// How much of a trade fee that is not itself skimmed from a payment the payer
+/// must keep free in its own balance.
 ///
-/// Both protocols owe the same answer here (CRD ch.51 R54/R55, ch.52 R64), and
-/// it is not simply the fee amount. A coin that reports `paid_from_trading_vol`
-/// takes the fee out of the payment being claimed — a UTXO spend pays the miner
-/// from the HTLC output itself — so nothing has to stay free for it. A coin that
-/// does not report it burns the fee from the account balance, and that balance
-/// is the one named by `TradeFee::coin`, which for an ERC20 payment is the
-/// platform coin rather than the token.
+/// Both protocols owe the same answer here (CRD ch.51 R53/R54/R55, ch.52
+/// R58/R62/R64), and it is not simply the fee amount. A coin that reports
+/// `paid_from_trading_vol` takes the fee out of the payment it concerns — a
+/// UTXO spend pays the miner from the HTLC output itself — so nothing has to
+/// stay free for it. A coin that does not report it burns the fee from the
+/// account balance, and that balance is the one named by `TradeFee::coin`,
+/// which for an ERC20 payment is the platform coin rather than the token.
+/// This is the same predicate V1's `get_locked_amount` applies to a
+/// registry entry's nested `trade_fee` (chapter 51 R53); here it is applied
+/// once, at estimation time, rather than re-evaluated on every query.
 ///
 /// Returns the reservable amount; the caller files it under `fee.coin`.
-fn spend_fee_headroom(fee: &TradeFee) -> MmNumber {
+fn fee_reservable_amount(fee: &TradeFee) -> MmNumber {
     if fee.paid_from_trading_vol {
         MmNumber::from(0)
     } else {
@@ -435,56 +438,75 @@ fn spend_fee_headroom(fee: &TradeFee) -> MmNumber {
     }
 }
 
-/// Record the headroom a running V2 swap needs to spend the payment it is owed
-/// (ch.52 R64). Idempotent: re-applying the same event does not double-reserve.
+/// Record one component of a running V2 swap's ledger entry — a headroom
+/// reservation (ch.52 R64) or a volume/send-fee reservation (R58) — under the
+/// named coin's bucket. Idempotent per (swap, kind, coin): re-applying the same
+/// event does not double-reserve, which matters because a resumed process
+/// re-derives its reservations by reading its own persisted log back (R63).
 ///
-/// `fee_coin` is the coin that actually pays the fee — `platform_ticker()` of the
-/// counterparty coin — which is also the ledger bucket the balance checks read.
-fn reserve_v2_spend_headroom(ctx: &MmArc, uuid: Uuid, fee_coin: &str, headroom: MmNumber) {
+/// The whole reservation goes in `LockedAmount::amount` rather than in a
+/// synthesised nested `trade_fee`: the caller has already applied
+/// `fee_reservable_amount`'s paid-from-trading-volume rule, so nesting it
+/// would apply that rule a second time and, worse, only when the bucket
+/// happens to equal the descriptor's own coin — which is exactly the
+/// coin-conflation bug this per-kind, per-coin bucketing avoids.
+fn reserve_v2_amount(ctx: &MmArc, uuid: Uuid, kind: LockedAmountV2Kind, coin: &str, amount: MmNumber) {
     let swap_ctx = match SwapsContext::from_ctx(ctx) {
         Ok(c) => c,
         Err(e) => {
-            error!("Failed to reserve spend headroom for swap {}: {}", uuid, e);
+            error!("Failed to reserve amount for swap {}: {}", uuid, e);
             return;
         },
     };
     let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
-    let entries = locked.entry(fee_coin.to_owned()).or_default();
-    if entries
-        .iter()
-        .any(|info| info.swap_uuid == uuid && info.kind == LockedAmountV2Kind::SpendHeadroom)
-    {
+    let entries = locked.entry(coin.to_owned()).or_default();
+    if entries.iter().any(|info| info.swap_uuid == uuid && info.kind == kind) {
         return;
     }
     entries.push(LockedAmountV2Info {
         swap_uuid: uuid,
-        kind: LockedAmountV2Kind::SpendHeadroom,
-        // The whole reservation is the headroom itself, so it goes in the amount
-        // rather than in a synthesised trade-fee descriptor: `spend_fee_headroom`
-        // has already applied the paid-from-trading-volume rule that the totals
-        // would otherwise apply to such a descriptor.
+        kind,
         locked_amount: LockedAmount {
-            coin: fee_coin.to_owned(),
-            amount: headroom,
+            coin: coin.to_owned(),
+            amount,
             trade_fee: None,
         },
     });
 }
 
-/// Release the headroom entry of `uuid` once the incoming payment has been spent
-/// and the fee is no longer owed (ch.52 R64).
-fn release_v2_spend_headroom(ctx: &MmArc, uuid: &Uuid, fee_coin: &str) {
+/// Release every entry of `kind` that `uuid` holds in `coin`'s bucket. A no-op
+/// if none exist, so callers may name a bucket unconditionally — including one
+/// a swap never actually reserved in, such as a trading coin whose platform
+/// ticker is itself, where the volume and send-fee entries share a bucket and
+/// a caller releasing both by coin need not know they coincided.
+fn release_v2_amount(ctx: &MmArc, uuid: &Uuid, kind: LockedAmountV2Kind, coin: &str) {
     let swap_ctx = match SwapsContext::from_ctx(ctx) {
         Ok(c) => c,
         Err(e) => {
-            error!("Failed to release spend headroom for swap {}: {}", uuid, e);
+            error!("Failed to release amount for swap {}: {}", uuid, e);
             return;
         },
     };
     let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
-    if let Some(entries) = locked.get_mut(fee_coin) {
-        entries.retain(|info| !(info.swap_uuid == *uuid && info.kind == LockedAmountV2Kind::SpendHeadroom));
+    if let Some(entries) = locked.get_mut(coin) {
+        entries.retain(|info| !(info.swap_uuid == *uuid && info.kind == kind));
     }
+}
+
+/// Record the headroom a running V2 swap needs to spend the payment it is owed
+/// (ch.52 R64).
+///
+/// `fee_coin` is the coin that actually pays the fee — `platform_ticker()` of
+/// the counterparty coin — which is also the ledger bucket the balance checks
+/// read.
+fn reserve_v2_spend_headroom(ctx: &MmArc, uuid: Uuid, fee_coin: &str, headroom: MmNumber) {
+    reserve_v2_amount(ctx, uuid, LockedAmountV2Kind::SpendHeadroom, fee_coin, headroom);
+}
+
+/// Release the headroom entry of `uuid` once the incoming payment has been spent
+/// and the fee is no longer owed (ch.52 R64).
+fn release_v2_spend_headroom(ctx: &MmArc, uuid: &Uuid, fee_coin: &str) {
+    release_v2_amount(ctx, uuid, LockedAmountV2Kind::SpendHeadroom, fee_coin);
 }
 
 /// Remove every ledger entry belonging to `uuid`, whatever coin it was filed
@@ -1137,7 +1159,7 @@ mod v2_spend_headroom_tests {
 
     fn v2_headroom_total(fee: &TradeFee) -> MmNumber {
         let ctx = test_ctx();
-        reserve_v2_spend_headroom(&ctx, new_uuid(), &fee.coin, spend_fee_headroom(fee));
+        reserve_v2_spend_headroom(&ctx, new_uuid(), &fee.coin, fee_reservable_amount(fee));
         get_locked_amount(&ctx, &fee.coin)
     }
 
@@ -1199,7 +1221,7 @@ mod v2_spend_headroom_tests {
             "nothing is reserved before the swap initialises"
         );
 
-        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, spend_fee_headroom(&fee));
+        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, fee_reservable_amount(&fee));
         assert_eq!(
             get_locked_amount(&ctx, &fee.coin),
             MmNumber::from("0.0021"),
@@ -1208,7 +1230,7 @@ mod v2_spend_headroom_tests {
 
         // Re-applying the same event must not double-reserve; a resume can apply
         // it a second time (ch.52 R63).
-        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, spend_fee_headroom(&fee));
+        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, fee_reservable_amount(&fee));
         assert_eq!(
             get_locked_amount(&ctx, &fee.coin),
             MmNumber::from("0.0021"),
@@ -1234,7 +1256,7 @@ mod v2_spend_headroom_tests {
         let other = new_uuid();
         let fee = evm_style_fee();
 
-        reserve_v2_spend_headroom(&ctx, holder, &fee.coin, spend_fee_headroom(&fee));
+        reserve_v2_spend_headroom(&ctx, holder, &fee.coin, fee_reservable_amount(&fee));
 
         assert_eq!(
             get_locked_amount_by_other_swaps(&ctx, &other, &fee.coin),
@@ -1295,5 +1317,87 @@ mod v2_spend_headroom_tests {
             MmNumber::from(0),
             "termination must clear every bucket the swap wrote to"
         );
+    }
+
+    /// ch.52 R58/V5: this is the shape the volume entry used before this fix —
+    /// one `LockedAmountV2Info`, filed under the trading coin's bucket, with the
+    /// send fee nested inside as a `TradeFee` naming whatever coin the fee is
+    /// actually billed to. `get_locked_amount` only ever checks a nested
+    /// `trade_fee` against the bucket it is iterating, never against the fee's
+    /// own coin — so a fee that disagrees with its bucket, which is exactly what
+    /// an ERC20 leg's platform-coin gas fee does, was silently uncounted
+    /// everywhere: not in the trading coin's total, and not in the fee's own
+    /// coin's total either. Confirms the defect this fix closes actually existed
+    /// in the shape the old code produced, independent of any code this commit
+    /// changed.
+    #[test]
+    fn nested_trade_fee_naming_a_different_coin_than_its_bucket_was_invisible() {
+        let ctx = test_ctx();
+        let swap_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+        swap_ctx
+            .locked_amounts_v2
+            .lock()
+            .unwrap()
+            .entry("MYTOKEN".to_owned())
+            .or_default()
+            .push(LockedAmountV2Info {
+                swap_uuid: new_uuid(),
+                kind: LockedAmountV2Kind::Volume,
+                locked_amount: LockedAmount {
+                    coin: "MYTOKEN".into(),
+                    amount: MmNumber::from("1"),
+                    trade_fee: Some(TradeFee {
+                        coin: "ETH".into(),
+                        amount: MmNumber::from("0.01"),
+                        paid_from_trading_vol: false,
+                    }),
+                },
+            });
+
+        assert_eq!(
+            get_locked_amount(&ctx, "MYTOKEN"),
+            MmNumber::from("1"),
+            "the volume amount is still counted in its own bucket"
+        );
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from(0),
+            "but the nested fee, naming a coin other than the bucket it was filed under, was invisible everywhere — the real gas fee this represents was never reserved"
+        );
+    }
+
+    /// The fix for the test above: the send fee is its own ledger entry, in its
+    /// own coin's bucket, rather than nested inside the volume entry (ch.52 R58,
+    /// closing V5). Mirrors `finished_swap_releases_its_reservation` and
+    /// `erc20_headroom_shares_a_bucket_with_the_volume_entry_without_colliding`:
+    /// both directions, plus idempotency and a shared-bucket case.
+    #[test]
+    fn send_fee_in_a_different_coin_than_the_trading_coin_is_reserved_and_released_in_its_own_bucket() {
+        let ctx = test_ctx();
+        let uuid = new_uuid();
+
+        // A token traded against its own platform coin's gas: the volume lives
+        // under the token, the send fee under the platform coin.
+        reserve_v2_amount(&ctx, uuid, LockedAmountV2Kind::Volume, "MYTOKEN", MmNumber::from("1"));
+        reserve_v2_amount(&ctx, uuid, LockedAmountV2Kind::Volume, "ETH", MmNumber::from("0.01"));
+
+        assert_eq!(get_locked_amount(&ctx, "MYTOKEN"), MmNumber::from("1"));
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from("0.01"),
+            "the send fee must be visible in its own coin's bucket, unlike the nested shape above"
+        );
+
+        // A resume re-derives its reservations by reading the persisted log
+        // back (R63); re-applying the same event must not double-reserve.
+        reserve_v2_amount(&ctx, uuid, LockedAmountV2Kind::Volume, "ETH", MmNumber::from("0.01"));
+        assert_eq!(get_locked_amount(&ctx, "ETH"), MmNumber::from("0.01"));
+
+        // The payment is broadcast: both halves were committed together and
+        // release together, whether or not they shared a bucket.
+        release_v2_amount(&ctx, &uuid, LockedAmountV2Kind::Volume, "MYTOKEN");
+        release_v2_amount(&ctx, &uuid, LockedAmountV2Kind::Volume, "ETH");
+        assert_eq!(get_locked_amount(&ctx, "MYTOKEN"), MmNumber::from(0));
+        assert_eq!(get_locked_amount(&ctx, "ETH"), MmNumber::from(0));
     }
 }

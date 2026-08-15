@@ -928,14 +928,38 @@ carry the coin ticker, the reserved amount, and the associated trade fee
 descriptor. Keying by swap identifier is what makes removal exact and
 unconditional.
 
-**R58.** *Entry creation and removal are driven by events.* The entry
+**R58.** *Entry creation and removal are driven by events.* Two entries
 MUST be created when the role's initialisation event is applied, and
-removed when the role's own funds leave the wallet:
+both removed together when the role's own funds leave the wallet:
 
 | Role  | Entry created when applying | Reserved                                                                                  | Entry removed when applying                     |
 |-------|-----------------------------|-------------------------------------------------------------------------------------------|-------------------------------------------------|
-| Maker | `Initialized`               | the maker volume in the maker coin, plus the maker-payment trade fee                       | `MakerPaymentSentFundingSpendGenerated`         |
-| Taker | `Initialized`               | the taker volume plus the total dex-fee spend plus the premium, in the taker coin, plus the taker-payment trade fee | `TakerFundingSent`      |
+| Maker | `Initialized`               | (1) the maker volume, in the maker coin; (2) the maker-payment trade fee, in whichever coin the maker coin's sender-fee descriptor names | `MakerPaymentSentFundingSpendGenerated` |
+| Taker | `Initialized`               | (1) the taker volume plus the total dex-fee spend plus the premium, in the taker coin; (2) the taker-payment trade fee, in whichever coin the taker coin's sender-fee descriptor names | `TakerFundingSent` |
+
+The fee entry's coin MUST NOT be assumed to be the trading coin. It is
+the fee descriptor's own coin, which chapter 08's `get_sender_trade_fee`
+contract makes the trading coin's platform ticker — the same coin for
+every coin family whose native asset pays its own fees, and the
+platform coin rather than the token for a coin family whose asset does
+not (an ERC20 token, for example, where the fee is gas billed to the
+platform coin). The reserved amount is only the fee's reservable part
+per R62 — zero if the fee's descriptor marks it payable out of the
+trading volume, the full amount otherwise — evaluated once, when the
+descriptor is still in hand at initialisation (R64 states the identical
+evaluation for the receiving-side fee, and both are resolved at the same
+point for the same reason).
+
+The two entries MAY land in the same ledger bucket, when the fee's coin
+happens to equal the trading coin, or in two different buckets, when it
+does not; either way both share the same creation and removal points and
+MUST be removed together. Filing the fee as a second same-coin-bucketed
+entry rather than nesting it inside the volume entry is a requirement,
+not an implementation choice: a per-coin-ticker ledger can only apply a
+nested fee's coin-and-marker predicate against the bucket already being
+queried, so a nested fee naming a *different* coin than the bucket it
+was filed under is invisible to every bucket's total — the token-fee
+failure mode V5 records.
 
 The removal points are correct: at each of them the reserved funds have
 just been committed to an on-chain output and are no longer spendable
@@ -944,10 +968,10 @@ the swap's own start balance check has already passed, unlike the legacy
 contract where the registry entry precedes the first stage
 (chapter 51 R51).
 
-This is not the role's only entry: R64 binds a second one, on the coin
-that pays for spending the incoming payment, with a longer window. The
-removal above MUST remove only the volume entry, because the two can
-share a ledger bucket.
+This is not the role's only reservation: R64 binds a further one, on the
+coin that pays for spending the *incoming* payment, with a longer
+window. The removal above MUST remove only the two entries of this rule,
+because all three can share a ledger bucket.
 
 **R59.** *Unconditional release on every exit path.* When the run
 terminates for any reason — completion, abort, either refund terminal,
@@ -990,12 +1014,17 @@ This MUST be the same predicate the legacy total applies
 (chapter 51 R53), so that a mixed node cannot compute two different
 answers for one coin.
 
-**R63.** *Reconstruction on resume.* When a swap is resumed, the volume
-entry MUST be re-created if and only if the resumed entry event is one
-at which the role's funds had not yet been committed: for the maker,
+**R63.** *Reconstruction on resume.* When a swap is resumed, both R58
+entries — the volume entry and its accompanying send-fee entry — MUST be
+re-created together if and only if the resumed entry event is one at
+which the role's funds had not yet been committed: for the maker,
 `Initialized`, `WaitingForTakerFunding` or `TakerFundingReceived`; for
 the taker, `Initialized` or `Negotiated`. For every other resumed event
-no volume entry MUST be created.
+neither MUST be created. Only the `Initialized` event carries the
+send-fee entry's reservable amount (R58); recovering it for a resume at
+a later event in the window means reading it back out of the
+`Initialized` event earlier in the same persisted log, not out of the
+event actually being resumed at.
 
 The fee-headroom entry of R64 has a longer window and therefore a
 different rule: it MUST be re-created at every resumed event except the
@@ -1228,6 +1257,7 @@ plus optional reason that chapter 33 binds.
 | Reservation lives in the version-two ledger, released unconditionally on every exit | R57–R60   |
 | The self-excluding reservation total reads both the legacy registry and the version-two ledger | R61 |
 | Both roles reserve the fee headroom to claim the incoming payment, in the same amount the legacy protocol does | R64, chapter 51 R54, R55 |
+| A role's send-fee reservation is filed by the fee's own coin, never assumed to be the trading coin | R58, R62 |
 | Public-key width is coin-family-determined, never protocol-fixed               | R66, R67      |
 | Counterparty key bytes are length-checked and can never abort the process      | R68           |
 | Chapter 51's ed25519 padding convention has no version-two counterpart         | R69           |
@@ -1322,6 +1352,17 @@ swap's identifier and invisible for its own; reserving twice for one
 swap reserves once; committing the volume entry from a shared bucket
 leaves the headroom standing; and termination clears the bucket even
 when it is neither of the swap's coins.
+
+**T13b.** *Send-fee entry is filed by its own coin, not the trading
+coin.* For each role, a sender-fee descriptor whose coin differs from
+the trading coin — the platform-ticker case a token trading coin
+produces — contributes its reservable amount to the fee's own coin's
+total and not to the trading coin's total beyond the volume itself; the
+two entries release together at the same event; re-applying the
+initialisation event does not double-reserve either; and a descriptor
+whose coin equals the trading coin, nested in the same bucket as the
+volume entry under the shape R58 forbids, is shown to be invisible to
+every total.
 
 **T14.** *The self-excluding total sees version-two reservations.* With
 one live version-two swap holding a reservation, the self-excluding
@@ -1472,23 +1513,36 @@ conjunction the deployed vocabulary uses. R22, R36 and R78 are therefore
 tightening rules relative to the present tree, and correcting them
 changes only the persisted encoding, not the state graph.
 
-**V5.** The present tree stores the two trade-fee estimates in the
-initialisation events as bare numbers rather than as full fee
-descriptors carrying the fee's coin and its
+**V5.** *(Resolved by §52.8, R58.)* The present tree stored the two
+trade-fee estimates in the initialisation events as bare numbers rather
+than as full fee descriptors carrying the fee's coin and its
 payable-out-of-trading-volume marker. R58 and R62 require the
 descriptor, because the inclusion predicate of R62 cannot be evaluated
-without it; this is a persisted-payload change to two events.
+without it, and the ledger's per-coin-ticker bucketing made the gap
+concrete rather than cosmetic: a volume entry that nested the send fee
+as a `TradeFee` naming a coin other than the bucket it was filed under
+was invisible to `get_locked_amount` in *every* bucket, because the
+fold logic checks a nested fee's coin only against the bucket it is
+already iterating, never against the bucket the fee's own coin would
+name. This was live for a token trading coin, whose sender-side fee is
+billed to its platform coin (R58's second table row) rather than to the
+token; a token maker or taker reserved nothing for its own payment's
+gas.
 
-For the *spend* fee the requirement is now met a different way: R64
-evaluates the predicate where the descriptor is still in hand, at
-initialisation, and each initialisation event carries the resolved
-reservable amount alongside the estimate as an additional defaulted
-field. The paying coin is recovered from the live coin rather than
-persisted, since it is that coin's platform ticker and does not vary
-over a swap. The *payment* fee half of this verification is unaddressed:
-the volume entry of R58 still synthesises a descriptor naming the
-trading coin, which is wrong for a token whose fee is billed to its
-platform coin.
+Both estimates are now resolved into full descriptors where they are
+computed, at initialisation, rather than persisted as bare numbers: each
+initialisation event carries the send fee's reservable amount as an
+additional defaulted field, alongside the existing estimate. The paying
+coin is recovered from the live coin rather than persisted, since it is
+that coin's platform ticker and does not vary over a swap. The ledger
+entry for the two is likewise no longer one entry with a nested fee, but
+two entries under `Volume` sharing the coin's own bucket when the fee's
+coin agrees with the trading coin and separate buckets when it does not
+— eliminating the nested-fee-versus-bucket mismatch rather than working
+around it. A log written before this field existed falls back to
+reserving the full persisted estimate, in the newly correct bucket,
+which changes only which bucket a token's send-fee reservation lands in
+on resume, never how much is reserved.
 
 **V6.** The present tree's maker machine reaches its terminal abort
 state from the refund state on a failed refund, and its taker machine
