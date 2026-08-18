@@ -89,6 +89,38 @@ address advances the address index under that same purpose; a UTXO coin
 configured with an `m/44'` `derivation_path` continues to activate and derive.
 Each derived address's reported `derivation_path` carries the configured purpose.
 
+R38.3.4 **Withdraw-request derivation-path purpose generality (fifth
+consumer).** The withdraw RPC's own `from` selector, when supplied as an
+explicit derivation-path string (as opposed to being omitted, or supplied as
+the structured account/chain/address-index selector), is a fifth UTXO HD
+consumer of the purpose-generic parse rule R38.3.3 binds — not an exception to
+it. The withdraw sender-resolution path shall deserialize that string with the
+same generic purpose-level standard HD path of Chapter 5 R18, exactly as the
+four consumers R38.3.3 names, and shall NOT use the strict BIP-44 alias of
+Chapter 5 R19. Only the coin-type component of the parsed path is validated
+against the activated coin's own configured SLIP-44 coin type; the account,
+chain, and address-index components select which already-derived HD address
+the withdrawal is sent from, and the resolved address itself is always the one
+the coin's own configured account extended public key derives at that
+account/chain/index — the purpose digit the caller supplies is not itself
+trusted as a derivation input, only checked for being one of the recognised
+BIP-43 purposes (32, 44, 49, 84) so a malformed or nonsensical path is still
+rejected. Consequently a UTXO coin configured with a non-44 purpose (BIP-84
+native segwit or BIP-49 nested segwit, per R38.3.3) shall accept a withdraw
+`from.derivation_path` written at that same purpose, instead of being refused
+with a purpose-mismatch error merely because the purpose is not 44. Acceptance
+(two-direction): a UTXO segwit coin activated with an `m/84'` `derivation_path`
+(R38.3.3) accepts a withdraw request whose `from.derivation_path` is a full
+`purpose'/coin_type'/account'/chain/address_index` string at purpose `84'`
+naming an already-derived address, and resolves it to the same sender address
+the my-address / new-address consumers report for that path (two-direction
+with R38.3.3's own acceptance); the same coin's withdraw continues to be
+refused when the path's coin-type component does not match the activated
+coin, independent of the path's purpose. This rule binds the same coin family
+this chapter otherwise covers (UTXO); the identically-shaped question for
+non-UTXO coin families that also accept an explicit withdraw derivation path
+is outside this chapter's scope.
+
 ## 38.4 KMD interest / rewards & dust policy
 
 R38.4.1 KMD active-user-reward (interest) calculation shall follow the KMD
