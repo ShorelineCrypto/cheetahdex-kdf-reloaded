@@ -2135,9 +2135,21 @@ pub(crate) fn orderbook_address(
         CoinProtocol::SOLANA | CoinProtocol::SPLTOKEN { .. } => {
             MmError::err(OrderbookAddrErr::CoinIsNotSupported(coin.to_owned()))
         },
-        CoinProtocol::SIA => MmError::err(OrderbookAddrErr::CoinIsNotSupported(coin.to_owned())),
+        // Sia's receiving address is derived from a per-coin ed25519 key, not
+        // from the order's secp256k1 P2P identity pubkey this function is
+        // given -- no derivation from that pubkey can ever produce it, the
+        // same reason a shielded coin has no transparent address to show
+        // (CRD ch.32 R-F6b). Returning the unsupported-coin error here (as
+        // opposed to the shielded success below) fed the caller's
+        // drop-this-order-on-any-error path and silently removed every live
+        // Sia order from both `orderbook` and `best_orders`, in either query
+        // direction.
+        CoinProtocol::SIA => Ok(OrderbookAddress::Shielded),
+        // Lightning deliberately keeps its payment-receiving identity
+        // private; showing one here would leak exactly what the protocol
+        // withholds (CRD ch.32 R-F6b). Same fix, same reasoning as Sia above.
         #[cfg(not(target_arch = "wasm32"))]
-        CoinProtocol::LIGHTNING { .. } => MmError::err(OrderbookAddrErr::CoinIsNotSupported(coin.to_owned())),
+        CoinProtocol::LIGHTNING { .. } => Ok(OrderbookAddress::Shielded),
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC(_) => Ok(OrderbookAddress::Shielded),
         CoinProtocol::TENDERMINT { account_prefix, .. } => {
@@ -2164,5 +2176,51 @@ pub(crate) fn orderbook_address(
             .map(OrderbookAddress::Transparent)
             .map_to_mm(OrderbookAddrErr::AddrFromPubkeyError),
         CoinProtocol::NFT { .. } => MmError::err(OrderbookAddrErr::CoinIsNotSupported(coin.to_owned())),
+    }
+}
+
+#[cfg(test)]
+mod orderbook_address_tests {
+    use super::*;
+    use mm2_test_helpers::for_tests::mm_ctx_with_custom_db;
+
+    // Regression for a live Sia order silently disappearing from `orderbook`
+    // and `best_orders`: address resolution used to return the
+    // unsupported-coin error for Sia (and Lightning), which the caller in
+    // orderbook_rpc.rs treats as fatal for that one order and drops it
+    // entirely (CRD ch.32 R-F6c). It must instead succeed with the shielded
+    // marker, the same outcome ZHTLC and privacy-shielded coins already get
+    // (R-F6b), so the order stays in the response.
+    #[test]
+    fn sia_address_resolution_succeeds_shielded_instead_of_dropping_the_order() {
+        let ctx = mm_ctx_with_custom_db();
+        let conf = json!({"protocol": {"type": "SIA"}});
+        let result = orderbook_address(&ctx, "SC", &conf, "irrelevant-for-sia", UtxoAddressFormat::Standard);
+        assert!(
+            matches!(result, Ok(OrderbookAddress::Shielded)),
+            "expected Ok(Shielded), got {result:?}"
+        );
+    }
+
+    #[test]
+    fn lightning_address_resolution_succeeds_shielded_instead_of_dropping_the_order() {
+        let ctx = mm_ctx_with_custom_db();
+        let fee_and_confs = json!({"default_fee_per_kb": 1000, "n_blocks": 1});
+        let conf = json!({"protocol": {"type": "LIGHTNING", "protocol_data": {
+            "platform": "BTC",
+            "network": "mainnet",
+            "confirmations": {"background": fee_and_confs, "normal": fee_and_confs, "high_priority": fee_and_confs},
+        }}});
+        let result = orderbook_address(
+            &ctx,
+            "tBTC-lightning",
+            &conf,
+            "irrelevant-for-lightning",
+            UtxoAddressFormat::Standard,
+        );
+        assert!(
+            matches!(result, Ok(OrderbookAddress::Shielded)),
+            "expected Ok(Shielded), got {result:?}"
+        );
     }
 }
