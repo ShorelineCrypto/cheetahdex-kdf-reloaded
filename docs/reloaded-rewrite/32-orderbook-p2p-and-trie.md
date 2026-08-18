@@ -638,6 +638,72 @@ an in-memory order into the RPC orderbook entry for both the ask
 side (price as-is) and the bid side (price inverted and
 confirmation settings reversed).
 
+**R-F6b (shielded outcome is a success, not a failure).** For a
+coin family whose display address cannot, or by design should
+not, be shown as a transparent string derived from the order's
+P2P identity pubkey, address derivation MUST succeed with the
+shielded marker of R-F6 rather than fail with the unsupported-coin
+error. This applies for two distinct reasons, both currently
+recognised:
+
+- the coin's real receiving address is cryptographically
+  unrelated to the order's P2P identity pubkey, so no derivation
+  from that pubkey can ever produce it -- this is Siacoin's case:
+  its address is derived from a per-coin ed25519 key ([Chapter
+  20](20-siacoin-integration.md) R-T3, R-S9), which is not, and is
+  not derived from, the secp256k1 key the order's P2P identity
+  uses; or
+- the coin's protocol deliberately keeps the payment-receiving
+  identity private and showing it would leak information the
+  protocol is designed to withhold -- this is Bitcoin Lightning's
+  case ([Chapter 41](41-lightning-network.md)).
+
+A privacy-shielded coin whose protocol itself defines a shielded
+address class (for example a Zcash-Sapling-shielded coin) reaches
+the same shielded outcome for the more direct reason that it has
+no transparent address to show at all. In every one of these
+cases the order MUST still appear in the orderbook / best-orders
+response, carrying the shielded marker in place of an address
+string; treating any of these coin families as an unsupported-coin
+address-derivation failure is a conformance defect, because it
+feeds R-F6c's drop path and removes the order from the response
+entirely rather than displaying it without an address.
+
+> **Code-quality finding (informative).** This repository's own
+> peer-address-derivation function currently answers the
+> unsupported-coin failure, not the shielded success, for both the
+> Siacoin and the Lightning coin families -- the two cases R-F6b
+> binds to the shielded outcome. Combined with R-F6c's drop-on-
+> failure behaviour, this means every live Siacoin or Lightning
+> order is presently absent from both the `orderbook` and the
+> `best_orders` responses, in either query direction, rather than
+> being shown with a shielded marker. This is the same defect
+> shape a live Siacoin maker order was observed to exhibit. Making
+> both arms return the shielded success value, matching the
+> treatment already given to the privacy-shielded coin family
+> R-F6b also names, is a direct, narrowly scoped fix; it changes
+> only these two arms' outcome and does not touch R-F6c's general
+> drop behaviour, which correctly remains for a coin family that
+> has no address-resolution path defined at all.
+
+**R-F6c (address-resolution failure drops only that order).**
+When address derivation for a specific order's coin genuinely
+fails -- because no derivation path is defined for that coin
+family at all, as opposed to the shielded case of R-F6b -- the
+response-assembly behaviour for both the `orderbook` and the
+`best_orders` RPC surfaces MUST omit only that one order from the
+response and continue assembling the rest; it MUST NOT abort the
+whole response. This is the accepted, currently-shipped behaviour
+for a coin family that has no address-derivation path implemented
+at all (observed for Solana/SPL-token orders); it is not a design
+goal to eliminate generally, and it is not the correct handling
+for the R-F6b cases, which must not reach this failure path in the
+first place. A future coin family that gains a real
+address-derivation path moves from this rule to the transparent
+case of R-F6; a future coin family recognised as address-
+undisplayable-by-design moves to R-F6b's shielded case instead of
+sitting on this rule.
+
 **R-F6a (subscription tracking).** The per-topic subscription
 state MUST distinguish "already requested" from "subscribed but
 not yet requested, since timestamp T". It is owned by the
@@ -750,27 +816,41 @@ V4. **Wire/in-memory split is lossless.** Round-trip an order
   specification, the MessagePack serialisation format, and the
   libp2p gossip/signed-envelope model — the external public
   specifications the wire and hashing contracts derive from;
-  cross-chapter contracts (Chapters 11, 13, 16, 28).
+  cross-chapter contracts (Chapters 11, 13, 16, 28); and, added
+  in this revision, prompted by a reproduced order-visibility
+  failure — the peer-address-derivation outcome mapping and the
+  per-order response-assembly drop behaviour bound by R-F6b/R-F6c.
 - *Permitted-input classes used:* baseline source (epoch
   classification only); external public specifications (`sp_trie`
   trie layout, BLAKE2b, MessagePack, libp2p gossipsub);
-  cross-chapter contracts (Chapters 11, 13, 16, 28); Interop /
-  wire-and-algorithm-bound reuse (R29/R31) for the dictated
-  fragments embedded in §32.5.1, §32.6.1, and §32.7.1 — namely
-  the eight-field wire order record and its MessagePack
+  cross-chapter contracts (Chapters 11, 13, 16, 20, 28, 41);
+  Interop / wire-and-algorithm-bound reuse (R29/R31) for the
+  dictated fragments embedded in §32.5.1, §32.6.1, and §32.7.1 —
+  namely the eight-field wire order record and its MessagePack
   encoding, the proof-carrying wire item and side-channel record
   shapes, the inbound request variant set and the sync-response
   shape, and the BLAKE2b-64 / `sp_trie` version-0 trie hash
   parameters and empty-trie root — whose authoritative source is
   the bytes any conforming peer must exchange for cross-peer
   interoperability and trie-root convergence, not the historical
-  lineage's discretionary expression.
+  lineage's discretionary expression; and, for R-F6b/R-F6c, the
+  public RPC response-shape fact that a shielded outcome is a
+  success case that keeps the order in the response, and that a
+  drop-only-that-order (not abort-the-response) behaviour is the
+  existing contract for a coin family with no address-derivation
+  path at all — both are RPC response-shape facts within the
+  compatibility surface, not internal expression.
 - *Sibling-allowlist consultations:* Chapter 28 (the libp2p
   ingestion and signed-envelope decoder feeding the gossip entry
   point); Chapter 13 (the swap version-negotiation path
   consuming the confirmation-settings reconciliation and the
   side-channel maps); Chapters 11 and 16 (the cancellation-TTL
-  binding and the per-order ephemeral-pubkey mechanism).
+  binding and the per-order ephemeral-pubkey mechanism); and,
+  added in this revision, Chapter 20 (Siacoin's ed25519 address
+  key being cryptographically unrelated to the order's P2P
+  identity pubkey, which R-F6b relies on) and Chapter 41
+  (Lightning's deliberate non-disclosure of its payment identity,
+  which R-F6b also relies on).
 - *Forbidden corpus:* consulted **only** to recover the
   externally-dictated wire-and-algorithm fragments of §32.5.1,
   §32.6.1, and §32.7.1, embedded as Interop reuse under R29/R31
@@ -779,7 +859,15 @@ V4. **Wire/in-memory split is lossless.** Round-trip an order
   no upstream function bodies, private identifiers, helper
   decomposition, control-flow transcription, per-method tables
   keyed to internal names, or diagnostic / panic / log string
-  literals accompany them). All other content is clean-room
+  literals accompany them); and, in this revision, to recover
+  which coin families the shielded-success outcome of R-F6b
+  currently covers and to confirm the drop-only-that-order
+  behaviour of R-F6c against both the `v2.6.0-beta` and current
+  v3-lineage references, which agree. Only the outcome mapping
+  (which coin protocol family reaches which of the three
+  documented outcomes, and why) crosses into this chapter; no
+  function name, argument list, match-arm structure, or comment
+  text was reproduced. All other content is clean-room
   driving-spec stated by behaviour and public/dictated interface.
   Any residual similarity of a conformant realisation to the
   historical lineage — of either epoch — is governed by the R35

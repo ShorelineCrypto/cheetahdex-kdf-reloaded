@@ -70,7 +70,8 @@ Bound rules R1–R7 cover the run loop and lifecycle; R8–R19 the maker
 stage graph; R20–R32 the taker stage graph; R33–R40 the refusal and
 abort contract; R41–R50 the message contract and timeout budget;
 R51–R58 the reserved-funds semantics; R59–R66 the wire field and type
-expectations; R67–R70 the reference-version split.
+expectations; R71–R73 the secret-hash algorithm selection; R67–R70 the
+reference-version split.
 
 ## 51.2 Subsystem Shape
 
@@ -885,6 +886,76 @@ length constraint, and an empty sequence MUST be the encoding of
 check 4 and R24 is the coin layer's, not the message layer's; the
 message layer MUST NOT validate these fields.
 
+### 51.9.1 Secret-Hash Algorithm Selection (dictated interop)
+
+**R71.** *The secret-hash algorithm is coin-pair-selected, not
+universal.* The `secret_hash` value carried by R59 MUST be produced by
+a hash algorithm chosen once per swap from the negotiated maker/taker
+coin pair, not by applying one hash algorithm unconditionally to every
+swap. Exactly two algorithms are in scope: a 20-byte default (the
+`RIPEMD160(SHA-256(secret))` composition already assumed by R65's
+shape-1 width) and a 32-byte alternate (`SHA-256(secret)`). The
+selection MUST be a pure function of the two coins' identities, MUST
+be evaluated independently and identically by both counterparties (it
+is not itself carried on the wire — only its 20- or 32-byte result
+is), and MUST agree with the algorithm every other conforming peer
+implementation selects for the same coin pair; disagreement is a
+protocol-level incompatibility, not a display concern.
+
+**R72.** *A native-32-byte-hash-lock coin on either side forces the
+32-byte algorithm.* A coin family whose own atomic-swap payment
+construction commits to a native 32-byte hash value — at minimum, the
+Cosmos/Tendermint IBC-HTLC family ([Chapter 18](18-tendermint-ibc-htlc.md)),
+Bitcoin Lightning ([Chapter 41](41-lightning-network.md)), and Siacoin's
+native spend-policy HTLC ([Chapter 20](20-siacoin-integration.md) R-H1,
+R-H2) — MUST cause the 32-byte alternate of R71 to be selected whenever
+that coin family appears on **either** the maker or the taker side of
+the pair, regardless of what the other side would otherwise select.
+Every coin pairing not covered by this rule MUST select the 20-byte
+default. This "widest-commitment wins" selection is dictated (R29/R33):
+it is the only way a swap paired against one of these coin families can
+produce a `secret_hash` value the native hash-lock on that side is
+actually capable of verifying — the native construction has no
+provision for accepting or being satisfied by a differently-sized
+external value, and this chapter's own wire contract (R65) already
+anticipates a 32-byte secret hash existing on shapes 2 and 3.
+
+**R73.** *Algorithm selection is orthogonal to shape selection.* The
+negotiation-shape choice of R60 (shape 2 vs. shape 3) turns solely on
+per-coin HTLC-public-key equality; it MUST NOT be influenced by, and
+MUST NOT influence, which secret-hash algorithm R71/R72 selects. A
+32-byte `secret_hash` therefore always lands inside the
+already-variable-length field that shape 2 or shape 3 carries (R65); no
+additional shape and no widening of shape 1 is needed, or permitted, to
+carry it.
+
+> **Code-quality finding (informative).** This repository's own legacy
+> maker- and taker-swap state machines compute `secret_hash` with the
+> 20-byte default algorithm unconditionally, for every coin pair, with
+> no coin-pair-based selection step anywhere in that computation. A
+> coin-pair hash-algorithm-selection primitive matching R71/R72 already
+> exists elsewhere in this repository's cryptography surface, but the
+> legacy swap state machines never call it. The practical consequence is
+> that a swap pairing any coin governed by R72 (Sia, Lightning, or a
+> Tendermint-family coin) still receives the 20-byte value, which that
+> coin's own native hash-lock construction cannot consume — for Sia
+> concretely, this is the field-width mismatch a live swap in this
+> defect area was observed to fail on. Wiring the selection into both
+> state machines' secret-hash computation is a genuine correctness gap
+> to close, not a discretionary style choice.
+>
+> A second, compounding gap sits downstream of the first: this
+> repository's own taker-side negotiation-result storage and its
+> maker-negotiation-data carrier both type `secret_hash` as a
+> fixed-20-byte value rather than the variable-length byte sequence R65
+> already requires for shapes 2 and 3. Even after the selection gap
+> above is closed, a received 32-byte `secret_hash` would still fail or
+> be truncated when the taker stores the negotiated value, because the
+> carrying type cannot hold more than 20 bytes. Both gaps must be closed
+> together for a swap against an R72 coin to complete; closing only the
+> selection gap would move the failure from "wrong hash sent" to "wrong
+> hash received," not remove it.
+
 ## 51.10 Bound Reference-Version Split
 
 **R67.** *The legacy state machine is identical across both reference
@@ -947,6 +1018,8 @@ and the 33-byte key width of R62 MUST NOT be relaxed, on either netid.
 | Public-key fields are exactly 33 bytes on every chain                  | R62, R63      |
 | Ed25519 keys occupy the field by trailing zero pad, read from the front | R64          |
 | Secret-hash width is 20 bytes in shape 1, variable in shapes 2 and 3   | R65           |
+| Secret-hash algorithm is coin-pair-selected; a native-32-byte-hash-lock coin on either side forces the 32-byte algorithm | R71, R72 |
+| Algorithm selection never changes which negotiation shape is emitted   | R73           |
 | The legacy machine is identical across reference lineages and netids   | R67, R69      |
 
 ## 51.12 Tests
@@ -1028,6 +1101,13 @@ persistent key when given shape 1 or 2.
 **T16.** *Secret-hash width.* A shape-1 payload with a 32-byte secret
 hash is rejected; a shape-2 or shape-3 payload with a 32-byte secret
 hash is accepted.
+
+**T16a.** *Secret-hash algorithm selection.* For a coin pair where
+neither side is governed by R72, the emitted `secret_hash` is the
+20-byte default algorithm's output on the swap secret. For a coin pair
+where an R72-governed coin is the maker, the taker, or both, the
+emitted `secret_hash` is the 32-byte algorithm's output, and this holds
+independently of which negotiation shape (R60) the same swap emits.
 
 **T17.** *Sender pinning.* A correctly signed message from a key other
 than the pinned counterparty key leaves every inbox slot unchanged.
@@ -1184,7 +1264,16 @@ does not bind its payload shape.
   machine only — specifically the refusal-transmission conditions of
   R34, the reservation-release mechanism of R51, the fixed-width
   key-field contract of R62 through R64, the refund-chain stage split of
-  R18 and R31, and the reference-lineage equivalence of R67. No source
-  text, private helper structure, internal decomposition, log or error
-  string, or per-method internal table was copied; every rule above is
-  stated as an externally observable behavioural or wire requirement.
+  R18 and R31, the reference-lineage equivalence of R67, and — added in
+  this revision, prompted by a reproduced Siacoin V1-swap failure — the
+  coin-pair secret-hash-algorithm-selection contract of R71 through R73.
+  For R71–R73, both the `v2.6.0-beta` legacy reference and the current
+  v3-lineage reference were consulted and agree: the selection is
+  dictated interop (R29/R33), reproduced here only as the two-algorithm
+  choice, the widest-commitment-wins selection rule, and the coin
+  families it currently covers — not as any internal function name,
+  argument list, helper decomposition, or per-branch internal
+  structure. No source text, private helper structure, internal
+  decomposition, log or error string, or per-method internal table was
+  copied; every rule above is stated as an externally observable
+  behavioural or wire requirement.

@@ -343,6 +343,25 @@ use, the leading 32 bytes. This is what makes the keys the two
 peers negotiate agree with the keys the spend policies of §20.6
 are built from.
 
+**R-S10 (negotiated secret hash MUST be the 32-byte algorithm).**
+The `secret_hash` a Sia-involved legacy swap negotiates and that
+this module's payment-argument parsing consumes (R-S1 through
+R-S5) MUST be the 32-byte `SHA-256(secret)` value, never the
+20-byte default -- [Chapter 51](51-legacy-v1-swap-state-machine.md)
+R72 makes this selection mandatory, on either the maker or the
+taker side, precisely because §20.6's native spend-policy hash
+lock (R-H1, R-H2) has no provision for being satisfied by, or
+constructed from, any other width. This module's own argument
+parsing is not the place that width is enforced or relaxed: it is
+entitled to assume chapter 51's negotiation layer already
+delivered a 32-byte value, and MUST continue to reject a
+`secret_hash` of any other length as a parse failure rather than
+attempt to pad or reinterpret it. Chapter 51 §51.9.1 records, as a
+code-quality finding, that this repository's negotiation layer
+does not yet perform the R72 selection for Sia; until it does,
+this module's own correct 32-byte-only parsing cannot by itself
+make a Sia-involved legacy swap complete.
+
 > **Binding scope (R36).** This section binds swap *behaviour*
 > and references the public trait surface only. No per-method
 > table keyed to private helpers, no method bodies, and no
@@ -485,13 +504,18 @@ V3. The unit ratio, ed25519 scheme, address encoding, walletd
   the V1/V2 trait boundary the Sia swap-ops sit on); Chapter 51
   (the legacy negotiation's fixed-width key field, the two
   coin-layer key operations, and the ed25519 padding convention
-  that R-S9 applies).
+  that R-S9 applies, and -- added in this revision -- the
+  coin-pair secret-hash-algorithm-selection contract of R71
+  through R73 that R-S10 applies).
 - *Forbidden corpus:* consulted **only** to recover the
   externally-dictated public method strings of §20.4, the
   dictated derivation/coin-type and protocol/units facts of
   §20.4.1 and §20.5, the dictated spend-policy HTLC contract of
   §20.6, and the dictated walletd endpoint paths of §20.8 --
-  embedded as Interop reuse under R29/R31/R33. No discretionary
+  embedded as Interop reuse under R29/R31/R33. R-S10 embeds no
+  further corpus fact beyond what chapter 51 already records; it
+  is a cross-reference stating this module's obligation given
+  chapter 51's R72. No discretionary
   expression from the post-2022 module -- no struct field lists,
   internal type or enum definitions, private method names or
   bodies, transaction-builder/satisfier call chains, local
