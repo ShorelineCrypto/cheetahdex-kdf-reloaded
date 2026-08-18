@@ -101,6 +101,37 @@ Do not combine the dirty and clean roles in one context. A dirty-side agent
 must not implement code, and an agent that has seen forbidden implementation
 expression must not become the clean-side implementer.
 
+### Requesting code-quality analysis from KDF Spec Reader
+
+KDF Spec Reader's job is distilling behavior into CRD chapters, not auditing
+code for correctness — do not turn every dispatch into a code review. By
+default it only surfaces a finding that falls out of its normal reading with
+little extra effort, or one a code comment states outright (see its own
+"Incidental code-quality findings" section for the exact triggers).
+
+When dispatching it, decide deliberately whether this run also needs an
+explicit request to look harder, based on what kind of task it is:
+
+- Routine chapter authoring or a scoped rewrite: leave the default alone: do
+  not ask for extra scrutiny.
+- Chasing a bug where the relevant chapter already exists, already passed the
+  Dirty Gate, and accurately describes what the code does — and the bug
+  persists anyway: this shape means the chapter is faithfully documenting
+  code that was already wrong at the source, not that the chapter or the
+  implementation drifted from it. Always explicitly ask Spec Reader to
+  analyze the original (corpus) code for correctness in this specific area,
+  not merely to re-confirm the chapter still matches it — this is the one
+  case where a deeper look is mandatory, not optional.
+- A user-reported bug in an area with no chapter yet, or one being rewritten
+  from scratch: reasonable to ask for it too, since the authoring pass is
+  already reading the relevant code closely and a second pass would be pure
+  overhead.
+
+Either way, a finding is informative, not a mandate — decide what to do with
+it the same way you would any other CRD content: verify it against this
+repository's actual code before acting, and gate any chapter change it
+produced through KDF Dirty Gate before treating it as final.
+
 ## 3. Upstream-version and network compatibility policy
 
 Compatibility research must use an explicit reference version; never treat an
