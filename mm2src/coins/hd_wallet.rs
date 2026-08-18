@@ -6,7 +6,7 @@ use crate::{lp_coinfind_or_err, BalanceError, CoinFindError, CoinWithDerivationM
 use async_trait::async_trait;
 use common::HttpStatusCode;
 use crypto::{Bip32DerPathError, Bip32Error, Bip44Chain, Bip44DerPathError, Bip44DerivationPath, ChildNumber,
-             DerivationPath, HwError};
+             DerivationPath, HwError, StandardHDPath};
 use derive_more::Display;
 use http::StatusCode;
 use mm2_core::mm_ctx::MmArc;
@@ -341,6 +341,20 @@ pub struct HDAddressId {
 
 impl From<Bip44DerivationPath> for HDAddressId {
     fn from(der_path: Bip44DerivationPath) -> Self {
+        HDAddressId {
+            account_id: der_path.account_id(),
+            chain: der_path.chain(),
+            address_id: der_path.address_id(),
+        }
+    }
+}
+
+// ETH's own withdraw `from` parsing (eth_impl.rs, eth_trezor_withdraw.rs) keeps
+// using `Bip44DerivationPath` above deliberately: Ethereum has no segwit-style
+// purpose variant, so hardcoding purpose 44' there is correct, not the bug this
+// impl exists to fix for UTXO segwit coins (`utxo_common_hd.rs`).
+impl From<StandardHDPath> for HDAddressId {
+    fn from(der_path: StandardHDPath) -> Self {
         HDAddressId {
             account_id: der_path.account_id(),
             chain: der_path.chain(),

@@ -67,7 +67,7 @@ pub(crate) use common::log::{debug, error, info, warn};
 pub(crate) use common::mm_number::MmNumber;
 pub(crate) use common::{now_ms, one_hundred, ten_f64};
 pub(crate) use crypto::privkey::key_pair_from_secret;
-pub(crate) use crypto::{Bip32DerPathOps, Bip44Chain, Bip44DerPathError, Bip44DerivationPath, RpcDerivationPath};
+pub(crate) use crypto::{Bip32DerPathOps, Bip44Chain, RpcDerivationPath, StandardHDPath, StandardHDPathError};
 pub(crate) use futures::compat::Future01CompatExt;
 pub(crate) use futures::future::{FutureExt, TryFutureExt};
 pub(crate) use futures01::future::Either;
