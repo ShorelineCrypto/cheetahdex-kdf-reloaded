@@ -65,6 +65,7 @@ use common::{bits256, calc_total_pages,
              log::{error, info},
              mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
              now_ms, HttpStatusCode, PagingOptions};
+use crypto::secret_hash_algo::SecretHashAlgo;
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
 use http::{Response, StatusCode};
@@ -921,6 +922,36 @@ pub fn validate_wire_pubkey(field: &[u8], what: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Select the secret-hash algorithm for a legacy swap's `(maker_coin,
+/// taker_coin)` pair (CRD ch.51 R71/R72).
+///
+/// The 20-byte `RIPEMD160(SHA-256(_))` default is correct for the ordinary
+/// case, but a coin family whose own atomic-swap payment construction
+/// commits to a native 32-byte hash -- Siacoin's spend-policy HTLC, Bitcoin
+/// Lightning, or a Tendermint-family coin's IBC-HTLC -- has no way to accept
+/// or be satisfied by a shorter external value. Whenever one of those
+/// families sits on either side of the pair, both peers must independently
+/// select the 32-byte `SHA-256(_)` alternate instead; the algorithm itself is
+/// never carried on the wire, only its result, so this selection has to be a
+/// pure function of the two coins' identities that every conforming peer
+/// evaluates identically (R71).
+pub fn select_secret_hash_algo(maker_coin: &MmCoinEnum, taker_coin: &MmCoinEnum) -> SecretHashAlgo {
+    fn commits_to_a_native_32_byte_hash(coin: &MmCoinEnum) -> bool {
+        match coin {
+            MmCoinEnum::SiaCoin(_) | MmCoinEnum::TendermintCoin(_) | MmCoinEnum::TendermintToken(_) => true,
+            #[cfg(not(target_arch = "wasm32"))]
+            MmCoinEnum::LightningCoin(_) => true,
+            _ => false,
+        }
+    }
+
+    if commits_to_a_native_32_byte_hash(maker_coin) || commits_to_a_native_32_byte_hash(taker_coin) {
+        SecretHashAlgo::SHA256
+    } else {
+        SecretHashAlgo::DHASH160
+    }
+}
+
 /// Resolve the two per-coin public keys this node negotiates a legacy swap
 /// with, by asking each coin (ch.51 R63).
 ///
@@ -1400,4 +1431,34 @@ mod v2_spend_headroom_tests {
         assert_eq!(get_locked_amount(&ctx, "MYTOKEN"), MmNumber::from(0));
         assert_eq!(get_locked_amount(&ctx, "ETH"), MmNumber::from(0));
     }
+}
+
+#[cfg(test)]
+mod secret_hash_algo_selection_tests {
+    use super::*;
+    use coins::TestCoin;
+
+    // The overwhelmingly common case, and the one this repository's swap
+    // test suite already builds coin pairs for throughout
+    // (`MmCoinEnum::Test`) -- confirms the default stays the 20-byte
+    // algorithm when neither side is one of the R72-named families.
+    #[test]
+    fn an_ordinary_pair_selects_the_20_byte_default() {
+        let a = MmCoinEnum::Test(TestCoin::default());
+        let b = MmCoinEnum::Test(TestCoin::default());
+        assert!(matches!(select_secret_hash_algo(&a, &b), SecretHashAlgo::DHASH160));
+    }
+
+    // NOT independently tested here: that Sia, Tendermint, TendermintToken,
+    // and (off-wasm32) Lightning select the 32-byte alternate. This
+    // repository's test infrastructure has no lightweight way to construct a
+    // functional SiaCoin/TendermintCoin/LightningCoin (each wraps a real API
+    // client, unlike the MmCoinEnum::Test double used above), and a test that
+    // merely re-typed the same family list a second time to compare against
+    // itself would pass regardless of whether `select_secret_hash_algo`'s
+    // match arms were ever kept in sync with it — worse than no test, since
+    // it would look like coverage. That branch is verified by CRD ch.51 R72
+    // cross-reference and code review instead (see the doc comment on
+    // `select_secret_hash_algo` above); a real regression test needs test
+    // doubles for these coin families that do not exist yet.
 }

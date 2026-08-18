@@ -8,7 +8,7 @@ use super::{broadcast_my_swap_status, broadcast_swap_message_every, check_other_
             MySwapInfo, NegotiationDataMsg, NegotiationDataV2, NegotiationDataV3, RecoveredSwap, RecoveredSwapAction,
             SavedSwap, SavedSwapIo, SavedTradeFee, SwapConfirmationsSettings, SwapError, SwapMsg, SwapsContext,
             TransactionIdentifier, WAIT_CONFIRM_INTERVAL};
-use super::{derive_htlc_pubkeys, validate_wire_pubkey};
+use super::{derive_htlc_pubkeys, select_secret_hash_algo, validate_wire_pubkey};
 use crate::mm2::lp_dispatcher::{DispatcherContext, LpEvents};
 use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MakerOrderBuilder, OrderConfirmationsSettings};
@@ -29,7 +29,7 @@ use mm2_net_config::{net_config_or_panic, NetConfig};
 use parking_lot::Mutex as PaMutex;
 use primitives::hash::H264;
 use rand::Rng;
-use rpc::v1::types::{Bytes as BytesJson, H160 as H160Json, H256 as H256Json, H264 as H264Json};
+use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json, H264 as H264Json};
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer};
 use serde_json::{self as json, Value as Json};
@@ -129,7 +129,12 @@ pub struct MakerSwapData {
     pub maker_coin: String,
     pub taker: H256Json,
     pub secret: H256Json,
-    pub secret_hash: Option<H160Json>,
+    // Variable-length, not H160Json: CRD ch.51 R71/R72 selects a 32-byte
+    // secret_hash algorithm whenever the maker or taker coin's own payment
+    // construction commits to a native 32-byte hash (Sia, Lightning, a
+    // Tendermint-family coin) -- a fixed-20-byte field here would silently
+    // truncate that value, corrupting the swap.
+    pub secret_hash: Option<BytesJson>,
     pub my_persistent_pub: H264Json,
     pub lock_duration: u64,
     pub maker_amount: BigDecimal,
@@ -369,7 +374,19 @@ impl MakerSwap {
 
     fn get_my_negotiation_data(&self) -> NegotiationDataMsg {
         let r = self.r();
-        let secret_hash = dhash160(&r.data.secret.0).take().to_vec();
+        // Read the algorithm ch.51 R71/R72 already selected for this swap
+        // (persisted in `Started`), rather than recomputing with the
+        // 20-byte default -- this is what actually goes on the wire, so
+        // getting it wrong here defeats the selection entirely. The
+        // dhash160 fallback is for a swap resumed from before this field
+        // existed, which negotiated with the 20-byte default unconditionally
+        // and must keep doing so on resume.
+        let secret_hash = r
+            .data
+            .secret_hash
+            .clone()
+            .map(|h| h.0)
+            .unwrap_or_else(|| dhash160(&r.data.secret.0).take().to_vec());
         let maker_coin_swap_contract = self
             .maker_coin
             .swap_contract_address()
@@ -489,11 +506,19 @@ impl MakerSwap {
             },
         };
 
+        // ch.51 R71/R72: 32-byte SHA-256 instead of the 20-byte default
+        // whenever either coin's own payment construction commits to a
+        // native 32-byte hash (Sia, Lightning, a Tendermint-family coin) --
+        // computed once here and persisted in `secret_hash` below, rather
+        // than re-derived from `secret` at each later use, so every
+        // reference to this swap's secret hash agrees for its whole life.
+        let secret_hash_algo = select_secret_hash_algo(&self.maker_coin, &self.taker_coin);
+
         let data = MakerSwapData {
             taker_coin: self.taker_coin.ticker().to_owned(),
             maker_coin: self.maker_coin.ticker().to_owned(),
             taker: self.taker.bytes.into(),
-            secret_hash: Some(dhash160(&secret).into()),
+            secret_hash: Some(secret_hash_algo.hash_secret(&secret).into()),
             secret: secret.into(),
             started_at,
             lock_duration: self.payment_locktime,
@@ -740,13 +765,24 @@ impl MakerSwap {
             ]));
         }
 
+        // ch.51 R71/R72: read the algorithm already selected for this swap
+        // rather than recomputing with the 20-byte default -- this is the
+        // hash the maker's own on-chain payment must actually commit to.
+        let secret_hash = self
+            .r()
+            .data
+            .secret_hash
+            .clone()
+            .map(|h| h.0)
+            .unwrap_or_else(|| dhash160(&self.r().data.secret.0).take().to_vec());
+
         let transaction_f = self
             .maker_coin
             .check_if_my_payment_sent(
                 self.r().data.maker_payment_lock as u32,
                 &*self.r().my_maker_coin_htlc_pub,
                 &*self.r().other_maker_coin_htlc_pub,
-                &*dhash160(&self.r().data.secret.0),
+                &secret_hash,
                 self.r().data.maker_coin_start_block,
                 &self.r().data.maker_coin_swap_contract_address,
             )
@@ -760,7 +796,7 @@ impl MakerSwap {
                         self.r().data.maker_payment_lock as u32,
                         &*self.r().my_maker_coin_htlc_pub,
                         &*self.r().other_maker_coin_htlc_pub,
-                        &*dhash160(&self.r().data.secret.0),
+                        &secret_hash,
                         self.maker_amount.clone(),
                         &self.r().data.maker_coin_swap_contract_address,
                     );
@@ -899,7 +935,15 @@ impl MakerSwap {
             time_lock: self.taker_payment_lock.load(Ordering::Relaxed) as u32,
             taker_pub: self.r().other_taker_coin_htlc_pub.to_vec(),
             maker_pub: self.r().my_taker_coin_htlc_pub.to_vec(),
-            secret_hash: dhash160(&self.r().data.secret.0).to_vec(),
+            // ch.51 R71/R72: read the algorithm already selected for this
+            // swap; see the comment in maker_payment() above.
+            secret_hash: self
+                .r()
+                .data
+                .secret_hash
+                .clone()
+                .map(|h| h.0)
+                .unwrap_or_else(|| dhash160(&self.r().data.secret.0).take().to_vec()),
             amount: self.taker_amount.clone(),
             swap_contract_address: self.r().data.taker_coin_swap_contract_address.clone(),
             try_spv_proof_until: wait_taker_payment,
@@ -1031,11 +1075,21 @@ impl MakerSwap {
             }
         }
 
+        // ch.51 R71/R72: must match whatever algorithm was actually used to
+        // build the maker payment being refunded here; see the comment in
+        // maker_payment() above.
+        let secret_hash = self
+            .r()
+            .data
+            .secret_hash
+            .clone()
+            .map(|h| h.0)
+            .unwrap_or_else(|| dhash160(&self.r().data.secret.0).take().to_vec());
         let spend_fut = self.maker_coin.send_maker_refunds_payment(
             &self.r().maker_payment.clone().unwrap().tx_hex,
             self.r().data.maker_payment_lock as u32,
             &*self.r().other_maker_coin_htlc_pub,
-            &*dhash160(&self.r().data.secret.0),
+            &secret_hash,
             self.r().my_maker_coin_htlc_keypair.private().secret.as_slice(),
             &self.r().data.maker_coin_swap_contract_address,
         );
@@ -1240,7 +1294,8 @@ impl MakerSwap {
             .r()
             .data
             .secret_hash
-            .unwrap_or_else(|| dhash160(&self.r().data.secret.0).into());
+            .clone()
+            .unwrap_or_else(|| dhash160(&self.r().data.secret.0).take().to_vec().into());
 
         // have to do this because std::sync::RwLockReadGuard returned by r() is not Send,
         // so it can't be used across await

@@ -30,7 +30,7 @@ use mm2_err_handle::prelude::*;
 use mm2_net_config::{net_config_or_panic, NetConfig};
 use parking_lot::Mutex as PaMutex;
 use primitives::hash::H264;
-use rpc::v1::types::{Bytes as BytesJson, H160 as H160Json, H256 as H256Json, H264 as H264Json};
+use rpc::v1::types::{Bytes as BytesJson, H256 as H256Json, H264 as H264Json};
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer};
 use serde_json::{self as json, Value as Json};
@@ -491,7 +491,12 @@ pub struct TakerSwapMut {
     maker_payment_spend: Option<TransactionIdentifier>,
     taker_payment_spend: Option<TransactionIdentifier>,
     taker_payment_refund: Option<TransactionIdentifier>,
-    secret_hash: H160Json,
+    // Variable-length, not H160Json: CRD ch.51 R71/R72 selects a 32-byte
+    // secret_hash algorithm whenever the maker or taker coin's own payment
+    // construction commits to a native 32-byte hash (Sia, Lightning, a
+    // Tendermint-family coin) -- a fixed-20-byte field here would silently
+    // truncate that value, corrupting the swap.
+    secret_hash: BytesJson,
     secret: H256Json,
     my_maker_coin_htlc_keypair: KeyPair,
     my_taker_coin_htlc_keypair: KeyPair,
@@ -534,7 +539,10 @@ pub struct TakerPaymentSpentData {
 pub struct MakerNegotiationData {
     pub maker_payment_locktime: u64,
     pub maker_pubkey: H264Json,
-    pub secret_hash: H160Json,
+    // Variable-length: see the comment on TakerSwapMut::secret_hash. The
+    // maker may have negotiated the 32-byte algorithm (CRD ch.51 R71/R72);
+    // this is the field that receives whatever width the maker actually sent.
+    pub secret_hash: BytesJson,
     pub maker_coin_swap_contract_addr: Option<BytesJson>,
     pub taker_coin_swap_contract_addr: Option<BytesJson>,
     pub maker_coin_htlc_pubkey: Option<H264Json>,
@@ -944,7 +952,7 @@ impl TakerSwap {
                 taker_payment_spend: None,
                 maker_payment_spend: None,
                 taker_payment_refund: None,
-                secret_hash: H160Json::default(),
+                secret_hash: BytesJson::default(),
                 secret: H256Json::default(),
                 my_maker_coin_htlc_keypair: *ctx.secp256k1_key_pair(),
                 my_taker_coin_htlc_keypair: *ctx.secp256k1_key_pair(),
@@ -1897,7 +1905,7 @@ impl TakerSwap {
         // so it can't be used across await
         let other_maker_coin_htlc_pub = self.r().other_maker_coin_htlc_pub;
         let other_taker_coin_htlc_pub = self.r().other_taker_coin_htlc_pub;
-        let secret_hash = self.r().secret_hash.0;
+        let secret_hash = self.r().secret_hash.0.clone();
         let maker_coin_start_block = self.r().data.maker_coin_start_block;
         let maker_coin_swap_contract_address = self.r().data.maker_coin_swap_contract_address.clone();
 
