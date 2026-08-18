@@ -994,14 +994,14 @@ fn open_log_file() -> Option<std::fs::File> {
 
     // For security reasons we want the log path to always end with ".log".
     if !mm_log.ends_with(".log") {
-        println!("open_log_file] MM_LOG doesn't end with '.log'");
+        let _ = witeln!(std::io::stdout(), "open_log_file] MM_LOG doesn't end with '.log'");
         return None;
     }
 
     match std::fs::OpenOptions::new().append(true).create(true).open(&mm_log) {
         Ok(f) => Some(f),
         Err(err) => {
-            println!("open_log_file] Can't open {}: {}", mm_log, err);
+            let _ = witeln!(std::io::stdout(), "open_log_file] Can't open " (mm_log) ": " (err));
             None
         },
     }
@@ -1020,6 +1020,20 @@ pub fn writeln(line: &str) {
     //     thread 'CORE' panicked at 'cannot access stdout during shutdown'
     //
     // (which might be related to https://github.com/rust-lang/rust/issues/29488).
+    //
+    // It does NOT protect against a broken stdout pipe. `println!` panics on a
+    // write failure, and when this function is reached from the panic hook
+    // (`set_panic_hook` below, logging the very panic that got us here), that
+    // second panic occurs while the first is still unwinding — Rust treats a
+    // panic during unwind as unconditionally fatal and aborts the process
+    // right through this `catch_unwind`, no matter what it wraps. This is
+    // exactly what happens when KDF runs as a child process with a piped
+    // stdout (both wallet apps run it this way) and the reading end closes or
+    // stalls: an ordinary log line, or the panic hook's own report of an
+    // unrelated panic, kills the whole trading engine over a transient,
+    // purely cosmetic I/O condition. `witeln!` returns a `Result` instead of
+    // panicking, so a broken pipe here now drops the line instead of the
+    // process.
     let _ = catch_unwind(|| {
         if let Ok(mut log_file) = LOG_FILE.lock() {
             if let Some(ref mut log_file) = *log_file {
@@ -1027,7 +1041,7 @@ pub fn writeln(line: &str) {
                 return;
             }
         }
-        println!("{}", line);
+        let _ = witeln!(std::io::stdout(), (line));
     });
 }
 
