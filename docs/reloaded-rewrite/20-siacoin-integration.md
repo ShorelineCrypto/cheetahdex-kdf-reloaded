@@ -405,7 +405,29 @@ fee estimation is **not** performed at the time of writing
 
 **R-W4.** Sign the transaction with the active keypair and return
 the serialised transaction together with fee/amount details
-denominated in SC (converted from hastings per R-U1).
+denominated in SC (converted from hastings per R-U1). The
+withdraw (and tx-history) response's `fee_details` object MUST
+carry the fee amount under the field name `total_amount`, not
+`amount`. This is a bound wire-shape fact, not a discretionary
+Rust field-naming choice: every other coin family's single-value
+fee-details shape in this workspace's withdraw/tx-history response
+contract names its comparable field `amount` (the convention this
+project's own 2019-baseline UTXO fee-details shape established,
+and that every later single-value fee-details shape except Sia's
+has followed), but Sia's fee-details shape has been checked
+against the reference corpus at both the stable-legacy and current
+v3 reference points (AGENTS.md §3) and is confirmed, consistently
+at both points, to name this field `total_amount`. Preserving that
+name is required by this project's RPC-response wire-compatibility
+policy; it is not an accidental repo-internal naming inconsistency
+to be corrected by renaming to `amount`.
+
+> **Binding scope (R36).** The `fee_details.total_amount` field
+> name bound above is dictated wire-shape (a public JSON-RPC
+> response contract field), sourced as Interop/wire-compatibility
+> reuse, not private expression. The Rust struct name that carries
+> it, its derive list, and its module location remain discretionary
+> (§20.0, §20.3).
 
 ## 20.10 Deferred Work
 
@@ -492,8 +514,10 @@ V3. The unit ratio, ed25519 scheme, address encoding, walletd
   SLIP-44 coin type and SLIP-10 scheme), §20.5 (the ed25519
   scheme, SHA-256 secret hash, address/units encodings, and V2
   transaction wire form), §20.6 (the spend-policy HTLC shape and
-  its success/refund satisfaction forms), and §20.8 (the walletd
-  endpoint paths) -- whose authoritative source is the bytes and
+  its success/refund satisfaction forms), §20.8 (the walletd
+  endpoint paths), and -- added in this revision -- §20.9 (the
+  `fee_details.total_amount` withdraw/tx-history response field
+  name) -- whose authoritative source is the bytes and
   calls any conforming Sia node, walletd instance, or library
   consumer must exchange for interoperability, not the historical
   lineage's discretionary expression.
@@ -511,8 +535,20 @@ V3. The unit ratio, ed25519 scheme, address encoding, walletd
   externally-dictated public method strings of §20.4, the
   dictated derivation/coin-type and protocol/units facts of
   §20.4.1 and §20.5, the dictated spend-policy HTLC contract of
-  §20.6, and the dictated walletd endpoint paths of §20.8 --
-  embedded as Interop reuse under R29/R31/R33. R-S10 embeds no
+  §20.6, the dictated walletd endpoint paths of §20.8, and --
+  added in this revision -- the `fee_details.total_amount` wire
+  field name of §20.9 R-W4, checked at both the `v2.6.0-beta`
+  stable-legacy reference and the current `dev`/v3 reference per
+  AGENTS.md §3, with no disagreement between the two -- embedded
+  as Interop/wire-compatibility reuse. While checking §20.9's
+  withdraw-response construction for the same category of
+  unvalidated wire-shape choice, the module's DEX-fee-address
+  resolution (activation-time lookup keyed by network id, already
+  bound at §20.4.2) was also compared against the corpus and found
+  to carry no additional wire-visible field or response-shape fact
+  beyond what §20.4.2 already binds; it is an internal computation,
+  not a JSON-RPC-visible contract, so no further R-W-series or
+  R-A-series rule was added for it. R-S10 embeds no
   further corpus fact beyond what chapter 51 already records; it
   is a cross-reference stating this module's obligation given
   chapter 51's R72. No discretionary
