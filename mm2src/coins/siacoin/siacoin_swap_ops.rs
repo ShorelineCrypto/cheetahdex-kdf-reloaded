@@ -415,8 +415,12 @@ impl SiaCoin {
         Ok(CanRefundHtlc::HaveToWait(locktime - median_timestamp))
     }
 
-    async fn validate_htlc_payment(&self, input: ValidatePaymentInput) -> Result<(), SiaValidateHtlcPaymentError> {
-        let sia_args = SiaValidatePaymentInputArgs::try_from(input)?;
+    async fn validate_htlc_payment(
+        &self,
+        input: ValidatePaymentInput,
+        payment_owner: ValidatingPaymentOwner,
+    ) -> Result<(), SiaValidateHtlcPaymentError> {
+        let sia_args = SiaValidatePaymentInputArgs::try_from_validate_payment_input(input, payment_owner)?;
 
         let my_keypair = self.my_keypair()?;
         let success_public_key = my_keypair.public();
@@ -677,13 +681,25 @@ impl SwapOps for SiaCoin {
 
     fn validate_maker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
         let coin = self.clone();
-        let fut = async move { coin.validate_htlc_payment(input).await.map_err(|e| e.to_string()) };
+        // We are the taker here (validating the payment the maker sent us),
+        // so the counterparty is the maker.
+        let fut = async move {
+            coin.validate_htlc_payment(input, ValidatingPaymentOwner::Maker)
+                .await
+                .map_err(|e| e.to_string())
+        };
         Box::new(fut.boxed().compat())
     }
 
     fn validate_taker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
         let coin = self.clone();
-        let fut = async move { coin.validate_htlc_payment(input).await.map_err(|e| e.to_string()) };
+        // We are the maker here (validating the payment the taker sent us),
+        // so the counterparty is the taker.
+        let fut = async move {
+            coin.validate_htlc_payment(input, ValidatingPaymentOwner::Taker)
+                .await
+                .map_err(|e| e.to_string())
+        };
         Box::new(fut.boxed().compat())
     }
 
