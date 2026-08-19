@@ -1722,11 +1722,15 @@ fn test_orderbook_address_handles_non_utxo_protocols_without_panic() {
         OrderbookAddress::Shielded => panic!("Tendermint orderbook address must be transparent"),
     }
 
+    // Sia's display address can't be derived from the order's P2P
+    // secp256k1 identity (it signs with ed25519), so -- like ZHTLC -- it
+    // takes the shielded outcome rather than being dropped from the
+    // orderbook as unsupported (CRD ch.32 R-F6b; see also the
+    // orderbook_address_tests module in ordermatch_orderbook.rs).
     let sia_conf = json::json!({ "protocol": { "type": "SIA" } });
-    let err = orderbook_address(&ctx, "SC", &sia_conf, &pubkey, UtxoAddressFormat::Standard)
-        .expect_err("Sia orderbook address must be unsupported without panicking")
-        .into_inner();
-    assert!(matches!(err, OrderbookAddrErr::CoinIsNotSupported(coin) if coin == "SC"));
+    let address = orderbook_address(&ctx, "SC", &sia_conf, &pubkey, UtxoAddressFormat::Standard)
+        .expect("Sia orderbook address must resolve to the shielded outcome, not an error");
+    assert!(matches!(address, OrderbookAddress::Shielded));
 }
 
 pub(super) fn make_random_orders(
