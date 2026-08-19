@@ -1128,12 +1128,29 @@ where
     Ok(lock_time.max(htlc_locktime))
 }
 
+/// Returns `Some(keypair)` when this coin's negotiated V1 HTLC key must be
+/// something other than the node's persistent secp256k1 identity key, `None`
+/// when the persistent key is itself the address that will sign (ch.51 R63).
+///
+/// `PrivKeyPolicy::KeyPair` (Iguana/legacy single-address activation) derives
+/// its one and only address straight from the node's persistent key, so
+/// `None` (fall back to it) is correct. `PrivKeyPolicy::HDWallet` is not: its
+/// `activated_key` is a distinct, path-derived key that both the wallet's
+/// address display and its normal UTXO-selection/signing path already use
+/// for this coin -- returning `None` here used to negotiate the *node's* key
+/// while `send_taker_fee`/`send_maker_payment` went on signing with
+/// `activated_key`, so the counterparty's `check_all_inputs_signed_by_pub`
+/// validation (comparing against the negotiated key) failed every time an
+/// HD-activated coin was used, with "The dex fee was sent from wrong
+/// address" surfacing on the maker side. Mirrors `get_htlc_pubkey_v2` below,
+/// which already reads the enabled HD address for the V2 path.
 pub fn get_htlc_key_pair<T>(coin: &T) -> Option<KeyPair>
 where
     T: AsRef<UtxoCoinFields>,
 {
     match &coin.as_ref().priv_key_policy {
-        PrivKeyPolicy::KeyPair(_) | PrivKeyPolicy::HDWallet { .. } => None,
+        PrivKeyPolicy::KeyPair(_) => None,
+        PrivKeyPolicy::HDWallet { activated_key, .. } => Some(*activated_key),
         PrivKeyPolicy::Trezor => Some(KeyPair::random_compressed()),
     }
 }
