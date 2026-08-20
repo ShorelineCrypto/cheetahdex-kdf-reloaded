@@ -576,23 +576,57 @@ impl<'de> Deserialize<'de> for TxFeeDetails {
     where
         D: Deserializer<'de>,
     {
+        // `#[serde(untagged)]` ignores the `type` tag `TxFeeDetails`'s own
+        // `Serialize` derive writes and picks the first variant whose *shape*
+        // the data happens to fit, so every arm of `TxFeeDetails` needs an
+        // arm here too -- `Sia` and `Tendermint` never got one when they were
+        // added to `TxFeeDetails`. A variant missing from this list isn't
+        // merely mis-tagged on read: since one history file holds every tx as
+        // one JSON array, a single unrepresentable entry fails deserializing
+        // the *whole* file, which `load_history_from_file_impl` treats as
+        // corruption and wipes on every single read, including the read
+        // `my_tx_history_v2_rpc` does directly against the file on every RPC
+        // call (see lp_coins_ops.rs / my_tx_history_v2.rs) -- so a coin with
+        // any fee-details shape missing here can never show history at all,
+        // not even transiently. Confirmed live: SC's cache reset with a
+        // "TxFeeDetailsUnTagged" deserialization error on every KDF start and
+        // every history RPC call, immediately discarding whatever the
+        // background history loop had just fetched and saved.
+        //
+        // `Tendermint` is listed before `Utxo` deliberately: its shape
+        // (`coin`, `amount`, `gas_limit`) is a strict superset of Utxo's
+        // (`coin: Option<..>`, `amount`), so trying Utxo first would silently
+        // swallow every Tendermint entry as a (wrongly re-tagged) Utxo one
+        // instead of failing -- same bug, quieter symptom, not the one that
+        // was reported but the same oversight. Genuine Utxo entries have no
+        // `gas_limit` field, so this reordering can't misclassify them.
+        //
+        // `Slp { amount, coin: String }` is deliberately NOT added: its shape
+        // is *identical* to Utxo's whenever `coin` is present, so no
+        // placement in this list can distinguish the two structurally --
+        // fixing that needs the tag to actually be read, not guessed, and is
+        // a separate, untested change left alone here.
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum TxFeeDetailsUnTagged {
+            Tendermint(tendermint::TendermintFeeDetails),
             Utxo(UtxoFeeDetails),
             Eth(EthTxFeeDetails),
             Qrc20(Qrc20FeeDetails),
             #[cfg(not(target_arch = "wasm32"))]
             Solana(SolanaFeeDetails),
+            Sia(siacoin::SiaFeeDetails),
             Tron(crate::eth::tron::fee::TronTxFeeDetails),
         }
 
         match Deserialize::deserialize(deserializer)? {
+            TxFeeDetailsUnTagged::Tendermint(f) => Ok(TxFeeDetails::Tendermint(f)),
             TxFeeDetailsUnTagged::Utxo(f) => Ok(TxFeeDetails::Utxo(f)),
             TxFeeDetailsUnTagged::Eth(f) => Ok(TxFeeDetails::Eth(f)),
             TxFeeDetailsUnTagged::Qrc20(f) => Ok(TxFeeDetails::Qrc20(f)),
             #[cfg(not(target_arch = "wasm32"))]
             TxFeeDetailsUnTagged::Solana(f) => Ok(TxFeeDetails::Solana(f)),
+            TxFeeDetailsUnTagged::Sia(f) => Ok(TxFeeDetails::Sia(f)),
             TxFeeDetailsUnTagged::Tron(f) => Ok(TxFeeDetails::Tron(f)),
         }
     }
@@ -975,4 +1009,52 @@ pub enum HistorySyncState {
     InProgress(Json),
     Error(Json),
     Finished,
+}
+
+#[cfg(test)]
+mod tx_fee_details_tests {
+    //! Regression coverage for `TxFeeDetails`'s hand-rolled untagged
+    //! `Deserialize`: every `TxFeeDetails` arm must round-trip through it, or
+    //! a single such entry in a saved history file makes the whole file
+    //! (a JSON array shared by every tx of that coin) fail to load -- which
+    //! `load_history_from_file_impl` then treats as corruption and silently
+    //! wipes, on every read, forever (this is exactly what happened to SC).
+    use super::*;
+
+    fn roundtrip(details: TxFeeDetails) {
+        let serialized = json::to_string(&details).expect("TxFeeDetails always serializes");
+        let deserialized: TxFeeDetails =
+            json::from_str(&serialized).unwrap_or_else(|e| panic!("{} failed to deserialize back: {}", serialized, e));
+        assert_eq!(details, deserialized, "serialized as: {}", serialized);
+    }
+
+    #[test]
+    fn test_sia_fee_details_roundtrip() {
+        roundtrip(TxFeeDetails::Sia(siacoin::SiaFeeDetails {
+            coin: "SC".to_owned(),
+            policy: siacoin::SiaFeePolicy::Unknown,
+            total_amount: "0.001".parse().unwrap(),
+        }));
+    }
+
+    #[test]
+    fn test_tendermint_fee_details_roundtrip() {
+        roundtrip(TxFeeDetails::Tendermint(tendermint::TendermintFeeDetails {
+            coin: "ATOM".to_owned(),
+            amount: "0.002".parse().unwrap(),
+            uamount: 0,
+            gas_limit: 100000,
+        }));
+    }
+
+    /// A real Utxo entry (no `gas_limit`) must keep deserializing as `Utxo`
+    /// now that `Tendermint` -- whose shape is a strict superset of Utxo's --
+    /// is tried first.
+    #[test]
+    fn test_utxo_fee_details_roundtrip_unaffected_by_tendermint_reordering() {
+        roundtrip(TxFeeDetails::Utxo(UtxoFeeDetails {
+            coin: Some("RIN".to_owned()),
+            amount: "0.0001".parse().unwrap(),
+        }));
+    }
 }
