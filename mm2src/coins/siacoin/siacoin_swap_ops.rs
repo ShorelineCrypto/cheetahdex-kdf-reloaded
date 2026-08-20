@@ -765,8 +765,26 @@ impl SwapOps for SiaCoin {
         _search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        // Not yet implemented for Sia
-        Ok(None)
+        // Every non-test caller of this trait method is `TakerSwap`/`MakerSwap`
+        // `recover_funds`, and only there (grep confirms it -- neither is
+        // reached from the normal swap FSM's own spend-detection/wait loop,
+        // which uses `wait_for_confirmations`/`tx_details_from_event`
+        // instead). `Ok(None)` here used to mean "not yet implemented" while
+        // *claiming* "confirmed not spent" -- indistinguishable, from the
+        // caller's side, from a real, checked answer. `recover_funds` treats
+        // `Ok(None)` as license to fall through to a refund attempt (see
+        // taker_swap.rs/maker_swap.rs), so a Sia swap whose payment actually
+        // *was* already spent by the counterparty would silently attempt a
+        // doomed refund instead of failing with a message that says why.
+        // An explicit error routes through `try_s!` at the call site and
+        // surfaces as a clean RPC error instead -- "fails gracefully" is the
+        // honest behavior until this is genuinely implemented (needs a
+        // live Sia swap to verify a real spend-vs-refund witness
+        // disambiguation against, which this environment has no way to do).
+        Err("search_for_swap_tx_spend_my is not yet implemented for Sia; \
+             cannot determine whether this payment has already been spent, \
+             so it is not safe to recover automatically"
+            .to_owned())
     }
 
     async fn search_for_swap_tx_spend_other(
@@ -778,8 +796,12 @@ impl SwapOps for SiaCoin {
         _search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        // Not yet implemented for Sia
-        Ok(None)
+        // See `search_for_swap_tx_spend_my` above -- same reasoning, same
+        // fix, mirrored for the counterparty-payment side of `recover_funds`.
+        Err("search_for_swap_tx_spend_other is not yet implemented for Sia; \
+             cannot determine whether this payment has already been spent, \
+             so it is not safe to recover automatically"
+            .to_owned())
     }
 
     fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
