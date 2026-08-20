@@ -234,6 +234,12 @@ impl SiaCoin {
 /// error to a caller: failures surface through the sync status (R53.6.3).
 pub async fn process_history_loop(coin: SiaCoin, ctx: MmArc) {
     let ticker = coin.ticker().to_owned();
+    // Cheap, permanent confirmation that this task actually got scheduled
+    // and its first HTTP call has an execution context to run in --
+    // sync_status alone can't distinguish "loop never started" from "loop
+    // started and is legitimately waiting" (see lp_spawn_tx_history's own
+    // comment for why the former was possible here until now).
+    info!("Sia history loop starting for {}", ticker);
 
     // Defensive: tracking is only spawned when `tx_history` is set, but a coin
     // built without it must never touch the store (R53.6.1).
