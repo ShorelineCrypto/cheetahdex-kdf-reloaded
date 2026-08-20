@@ -918,7 +918,72 @@ produce a `secret_hash` value the native hash-lock on that side is
 actually capable of verifying — the native construction has no
 provision for accepting or being satisfied by a differently-sized
 external value, and this chapter's own wire contract (R65) already
-anticipates a 32-byte secret hash existing on shapes 2 and 3.
+anticipates a 32-byte secret hash existing on shapes 2 and 3. No coin
+pairing in scope of this rule is refused at negotiation time, or
+restricted to a different swap-protocol version, merely because it
+requires the 32-byte alternate: the legacy V1 path selects the wider
+algorithm per R71/R72 and proceeds like any other pairing, including
+pairings where the *other* side is a coin family that has no native
+32-byte hash-lock of its own.
+
+**R72A.** *Every leg consumes the one shared value; each coin family's
+own construction decides how.* R71's `secret_hash` is computed once per
+swap and used identically by both legs (R71); it is never renegotiated,
+recomputed, or replaced per leg. What differs per leg is entirely
+downstream of that shared value, inside each coin family's own
+payment-construction, payment-validation, and secret-extraction
+operations (the external coin-layer dependency named in §51.2). Every
+such operation MUST treat the shared `secret_hash` as its sole source of
+truth for the hash commitment and MUST derive whatever value it embeds,
+compares, or reconstructs from it in a manner appropriate to what that
+coin family's own native hash-lock construction is actually capable of
+verifying, rather than assuming the shared value's raw bytes are always
+the value to use:
+
+- A coin family whose native construction accepts the hash commitment as
+  an opaque value of whatever width R71/R72 produced — verifying a
+  revealed secret against it by the coin's own logic rather than by a
+  fixed-width on-chain primitive applied to the secret — MUST use
+  `secret_hash` unchanged, at whichever width R71/R72 selected.
+- A coin family whose native construction instead verifies a revealed
+  secret by applying its own fixed-width, non-configurable hash
+  primitive to the secret at spend time — for example, a hash-time-lock
+  construction whose satisfaction opcode has no form capable of
+  consuming a hash wider than that primitive's output — MUST derive the
+  value it embeds and compares as follows: when `secret_hash` already
+  carries that native output width, use it unchanged; when
+  `secret_hash` carries the 32-byte alternate of R72, derive the
+  embedded/compared value by applying that same fixed-width primitive
+  once, directly to the 32-byte `secret_hash` value itself, with no
+  further hashing of the secret. For every coin family in scope of R72
+  today, the 32-byte alternate is defined as the wide half of that
+  coin's narrower composite primitive's own construction (R71), so this
+  single-application derivation is mathematically guaranteed to equal
+  what the coin's on-chain primitive independently computes from the
+  real secret at spend time.
+
+A coin-layer implementation that instead uses the shared `secret_hash`'s
+raw bytes unconditionally in a fixed-width embed/compare, or that
+rejects a `secret_hash` wider than its own native output instead of
+deriving from it per the second case above, cannot construct, validate,
+or spend a payment for any pairing where R72 selects the wide algorithm
+on that coin's side — even though negotiation (R71/R72) and any
+validation step that only reconstructs and structurally compares the
+construction (rather than executing it) both complete without error,
+because neither observes the mismatch that only on-chain execution of
+the native primitive against the real secret would reveal.
+
+**R72B.** *The derivation of R72A is a coin-layer duty, not a
+swap-machine duty.* The maker and taker stage graphs of §51.4 and §51.5
+MUST pass R71's single `secret_hash` value to the external coin-layer
+operations of §51.2 unchanged, at every stage that constructs,
+validates, spends, refunds, or extracts a secret from a payment (R17,
+R28–R31 and their maker-side counterparts). Neither stage graph may
+itself branch on `secret_hash`'s width, substitute a derived value
+before calling into the coin layer, or assume that the value one
+coin-layer operation is given is the literal byte value another chain's
+construction exposes on-chain. Any derivation R72A requires MUST happen
+entirely inside the coin-layer operation for that specific coin family.
 
 **R73.** *Algorithm selection is orthogonal to shape selection.* The
 negotiation-shape choice of R60 (shape 2 vs. shape 3) turns solely on
@@ -955,6 +1020,42 @@ carry it.
 > together for a swap against an R72 coin to complete; closing only the
 > selection gap would move the failure from "wrong hash sent" to "wrong
 > hash received," not remove it.
+>
+> A third gap, independent of the first two and confirmed against a
+> reproduced live-network failure, sits inside this repository's own
+> UTXO-family coin-layer payment construction, payment-validation
+> reconstruction, and spend-secret-extraction functions: none of them
+> perform the width-dependent derivation R72A now requires. Each of them
+> instead uses the shared `secret_hash` value's raw bytes unconditionally
+> — embedding it directly into the fixed-width hash-comparison slot of
+> the constructed payment, reconstructing the identical fixed-width
+> comparison on the validating side, and comparing an observed spend's
+> revealed secret's fixed-width digest directly against `secret_hash`'s
+> raw bytes rather than against a derived comparator. UTXO's native
+> hash-lock satisfaction opcode is fixed-width and non-configurable and
+> is exactly the second case R72A describes, so once the first two gaps
+> are closed and a UTXO-paired swap actually receives and stores the
+> 32-byte alternate, this third gap makes the constructed payment one the
+> native opcode can never be satisfied against — for anyone, including
+> the legitimate secret holder — because a fixed-width on-chain primitive
+> applied to the real secret can never equal a differently-sized embedded
+> value. This is invisible at both construction and validation time
+> because validation only reconstructs and structurally compares the
+> same (uniformly wrong) expected construction that construction itself
+> produced; nothing on either side executes the on-chain primitive until
+> an actual spend is attempted, which is the point at which a live swap
+> in this defect area was observed to fail, after which the payment
+> remains spendable only via the refund timelock. All three gaps — the
+> selection gap, the storage-width gap, and this construction/validation/
+> extraction-derivation gap — must be closed together for a legacy V1
+> swap pairing an R72-governed coin against a UTXO-family coin to
+> complete on the honest-spend path; closing any subset moves the failure
+> to a different one of the three without removing it. The same class of
+> gap is plausible in this repository's other coin families whose native
+> hash-lock construction is likewise built on a fixed-width,
+> non-configurable primitive rather than an opaque-width comparison, but
+> confirming that is outside what this chapter's UTXO-focused reading
+> covers.
 
 ## 51.10 Bound Reference-Version Split
 
@@ -1019,6 +1120,7 @@ and the 33-byte key width of R62 MUST NOT be relaxed, on either netid.
 | Ed25519 keys occupy the field by trailing zero pad, read from the front | R64          |
 | Secret-hash width is 20 bytes in shape 1, variable in shapes 2 and 3   | R65           |
 | Secret-hash algorithm is coin-pair-selected; a native-32-byte-hash-lock coin on either side forces the 32-byte algorithm | R71, R72 |
+| The shared secret_hash is never refused, renegotiated, or replaced per leg; each coin family's own construction derives what it needs from it | R72A, R72B |
 | Algorithm selection never changes which negotiation shape is emitted   | R73           |
 | The legacy machine is identical across reference lineages and netids   | R67, R69      |
 
@@ -1108,6 +1210,18 @@ neither side is governed by R72, the emitted `secret_hash` is the
 where an R72-governed coin is the maker, the taker, or both, the
 emitted `secret_hash` is the 32-byte algorithm's output, and this holds
 independently of which negotiation shape (R60) the same swap emits.
+
+**T16b.** *Per-coin-family construction derivation (R72A).* For a coin
+family whose native hash-lock construction verifies via a fixed-width
+primitive applied to the raw secret, driving a swap through the 32-byte
+branch of T16a produces, on that coin's leg: a constructed payment whose
+on-chain construction the real secret actually satisfies; a
+validation-by-reconstruction step on the counterparty's side that
+accepts the identical construction; and, from an observed honest spend
+of it, correct secret extraction. The same three checks pass for the
+20-byte branch of T16a on a coin family that requires the opaque-width
+form. Both a fixed-width-primitive coin family and an opaque-width coin
+family are covered.
 
 **T17.** *Sender pinning.* A correctly signed message from a key other
 than the pinned counterparty key leaves every inbox slot unchanged.
@@ -1264,16 +1378,29 @@ does not bind its payload shape.
   machine only — specifically the refusal-transmission conditions of
   R34, the reservation-release mechanism of R51, the fixed-width
   key-field contract of R62 through R64, the refund-chain stage split of
-  R18 and R31, the reference-lineage equivalence of R67, and — added in
-  this revision, prompted by a reproduced Siacoin V1-swap failure — the
-  coin-pair secret-hash-algorithm-selection contract of R71 through R73.
-  For R71–R73, both the `v2.6.0-beta` legacy reference and the current
-  v3-lineage reference were consulted and agree: the selection is
-  dictated interop (R29/R33), reproduced here only as the two-algorithm
-  choice, the widest-commitment-wins selection rule, and the coin
-  families it currently covers — not as any internal function name,
-  argument list, helper decomposition, or per-branch internal
-  structure. No source text, private helper structure, internal
-  decomposition, log or error string, or per-method internal table was
-  copied; every rule above is stated as an externally observable
-  behavioural or wire requirement.
+  R18 and R31, the reference-lineage equivalence of R67, the coin-pair
+  secret-hash-algorithm-selection contract of R71 through R73 (added
+  prompted by a reproduced Siacoin V1-swap failure), and — added in this
+  revision, prompted by a reproduced UTXO-family V1-swap spend failure —
+  the per-coin-family construction/validation/extraction derivation
+  contract of R72A and R72B and the no-refusal clarification appended to
+  R72. For R71–R73 and for R72A/R72B alike, both the `v2.6.0-beta`
+  legacy reference and the current v3-lineage reference were consulted
+  and agree, byte-for-byte identical at the two consulted call sites:
+  the selection and per-family derivation are dictated interop
+  (R29/R33), reproduced here only as the two-algorithm choice, the
+  widest-commitment-wins selection rule, the coin families it currently
+  covers, the opaque-width-vs-fixed-width-primitive distinction between
+  coin families, and the single-application derivation's cryptographic
+  identity with the coin's own on-chain primitive — not as any internal
+  function name, argument list, helper decomposition, or per-branch
+  internal structure. The same fixed-width-primitive derivation pattern
+  was also observed, at both reference points, in this workspace's
+  EVM-legacy and QRC20-family coin-layer swap code, confirming R72A's
+  two-case shape is the general one and not UTXO-specific; those other
+  families' own chapters are not amended here and this observation is
+  not a claim about this repository's EVM or QRC20 code, which this
+  reading did not inspect. No source text, private helper structure,
+  internal decomposition, log or error string, or per-method internal
+  table was copied; every rule above is stated as an externally
+  observable behavioural or cryptographic requirement.

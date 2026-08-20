@@ -1,6 +1,8 @@
 // utxo_common_swap — HTLC/swap operations, payment scripts, validation
 
 use super::*;
+use kdf_crypto::ripemd160;
+use primitives::hash::H160;
 
 pub const DEFAULT_SWAP_TX_SPEND_SIZE: u64 = 305;
 
@@ -828,9 +830,22 @@ pub fn extract_secret(secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, St
             },
         };
 
-        let actual_secret_hash = &*dhash160(&secret);
-        if actual_secret_hash != secret_hash {
-            log!("Warning: invalid 'dhash160(secret)' "[actual_secret_hash]", expected "[secret_hash]);
+        // ch.51 R72A: `secret_hash` may be R71's 20-byte default or R72's
+        // 32-byte alternate; either way, the revealed value on-chain is
+        // always checked against `OP_HASH160(secret)`, so that's what this
+        // extraction must reproduce and compare against too -- see
+        // htlc_hash160_comparator's doc comment for why that isn't simply
+        // `dhash160(secret_hash)` in the 32-byte case.
+        let expected_secret_hash = match htlc_hash160_comparator(secret_hash) {
+            Ok(h) => h,
+            Err(e) => {
+                error!("extract_secret: {}", e);
+                continue;
+            },
+        };
+        let actual_secret_hash = dhash160(&secret);
+        if actual_secret_hash != expected_secret_hash {
+            log!("Warning: invalid 'dhash160(secret)' "[actual_secret_hash]", expected "[expected_secret_hash]);
             continue;
         }
         return Ok(secret);
@@ -1055,7 +1070,55 @@ where
     Ok(result)
 }
 
+/// Derives the 20-byte value UTXO's `OP_HASH160`-based HTLC satisfaction
+/// opcode must be compared against, from the swap's single shared
+/// `secret_hash` (ch.51 R72A): UTXO's native hash-lock can only ever verify
+/// a fixed-width `RIPEMD160(SHA-256(secret))` digest -- that is what
+/// `OP_HASH160 <secret>` computes on-chain when the real secret is pushed,
+/// unconditionally, regardless of which algorithm ch.51 R71/R72 selected at
+/// the swap level.
+///
+/// - 20 bytes (R71's default): already that exact digest -- used unchanged.
+/// - 32 bytes (R72's alternate, forced whenever a native-32-byte-hash-lock
+///   coin -- Sia, Tendermint/IBC-HTLC, Lightning -- is on either side): this
+///   value *is* `SHA-256(secret)`, the inner half of the same
+///   `RIPEMD160(SHA-256(secret))` composite (R72A), so applying `RIPEMD160`
+///   alone -- the remaining, outer half -- reproduces exactly what
+///   `OP_HASH160(secret)` computes on-chain. Applying the *whole* `dhash160`
+///   composite here instead (i.e. re-hashing with SHA-256 first) would
+///   derive `RIPEMD160(SHA-256(SHA-256(secret)))`, which nothing on-chain
+///   ever produces -- a payment built or checked against a wrong-by-that-
+///   difference constant is unspendable by anyone, including the legitimate
+///   secret holder, invisible until an actual spend is attempted (this is
+///   the third gap ch.51 §51.9.1's Code-quality finding describes, and what
+///   a live testnet swap pairing SC against a UTXO coin was observed to
+///   fail on).
+///
+/// Errors on any other width: R65's wire contract admits only these two.
+fn htlc_hash160_comparator(secret_hash: &[u8]) -> Result<H160, String> {
+    match secret_hash.len() {
+        20 => Ok(H160::from(secret_hash)),
+        32 => Ok(ripemd160(secret_hash)),
+        other => ERR!("secret_hash must be 20 or 32 bytes (ch.51 R65/R71/R72), got {}", other),
+    }
+}
+
 pub fn payment_script(time_lock: u32, secret_hash: &[u8], pub_0: &Public, pub_1: &Public) -> Script {
+    // A malformed width here would otherwise silently build a script nobody
+    // can ever satisfy (see htlc_hash160_comparator's doc comment) -- fail
+    // loudly and immediately instead. Every caller already validates
+    // secret_hash's width against R65 before reaching this point in the
+    // ordinary case, so this is a last-resort guard, not the primary check.
+    let secret_hash_hash160 = match htlc_hash160_comparator(secret_hash) {
+        Ok(h) => h,
+        Err(e) => {
+            error!(
+                "payment_script: {} -- building an unsatisfiable placeholder script rather than panicking",
+                e
+            );
+            H160::default()
+        },
+    };
     let builder = Builder::default();
     builder
         .push_opcode(Opcode::OP_IF)
@@ -1069,7 +1132,7 @@ pub fn payment_script(time_lock: u32, secret_hash: &[u8], pub_0: &Public, pub_1:
         .push_bytes(&[32])
         .push_opcode(Opcode::OP_EQUALVERIFY)
         .push_opcode(Opcode::OP_HASH160)
-        .push_bytes(secret_hash)
+        .push_bytes(&*secret_hash_hash160)
         .push_opcode(Opcode::OP_EQUALVERIFY)
         .push_bytes(pub_1)
         .push_opcode(Opcode::OP_CHECKSIG)
@@ -2620,4 +2683,66 @@ fn test_pubkey_from_script_sig() {
 
     let script_sig_err = Script::from("493044022071edae37cf518e98db3f7637b9073a7a980b957b0c7b871415dbb4898ec3ebdc022031b402a6b98e64ffdf752266449ca979a9f70144dba77ed7a6a25bfab11648f6012103ad6f89abc2e5beaa8a3ac28e22170659b3209fe2ddf439681b4b8f31508c36fa");
     pubkey_from_script_sig(&script_sig_err).unwrap_err();
+}
+
+// ch.51 R72A: htlc_hash160_comparator's whole job is to reproduce, from the
+// swap's shared secret_hash alone, exactly what OP_HASH160(secret) computes
+// on-chain when the real secret is later pushed. The tests below aren't
+// exercisable through an integration test in this environment (every
+// existing send/spend/extract test needs a live electrum connection), so
+// they check the derivation directly -- most importantly, that it agrees
+// with dhash160(secret) for a real secret, which is the property the whole
+// fix depends on.
+#[test]
+fn test_htlc_hash160_comparator_20_byte_input_is_unchanged() {
+    // dhash160 of the real secret used by test_extract_secret_finds_the_secret_against_a_32_byte_secret_hash below.
+    let narrow = H160::from("2fb610d856c19fd57f2d0cffe8dff689074b3d8a");
+    assert_eq!(htlc_hash160_comparator(&*narrow).unwrap(), narrow);
+}
+
+#[test]
+fn test_htlc_hash160_comparator_32_byte_input_is_ripemd160_of_it() {
+    let wide = sha256(&[7u8; 32]);
+    let expected = ripemd160(wide.as_slice());
+    assert_eq!(htlc_hash160_comparator(wide.as_slice()).unwrap(), expected);
+}
+
+#[test]
+fn test_htlc_hash160_comparator_rejects_other_widths() {
+    assert!(htlc_hash160_comparator(&[0u8; 19]).is_err());
+    assert!(htlc_hash160_comparator(&[0u8; 21]).is_err());
+    assert!(htlc_hash160_comparator(&[0u8; 33]).is_err());
+    assert!(htlc_hash160_comparator(&[]).is_err());
+}
+
+/// The property the whole fix depends on: for a real secret, deriving the
+/// comparator from R72's 32-byte alternate (`SHA-256(secret)`) must equal
+/// `dhash160(secret)` -- exactly what `OP_HASH160(secret)` computes
+/// on-chain when the real secret is pushed at spend time, regardless of
+/// which algorithm ch.51 R71/R72 selected. If this property doesn't hold,
+/// nothing built or checked with the 32-byte alternate is spendable by
+/// anyone, which is the bug this fix closes.
+#[test]
+fn test_htlc_hash160_comparator_agrees_with_dhash160_of_the_real_secret() {
+    let secret = [7u8; 32];
+    let secret_hash_32 = sha256(&secret); // R72's alternate: SHA-256(secret)
+    let derived = htlc_hash160_comparator(secret_hash_32.as_slice()).unwrap();
+    assert_eq!(derived, dhash160(&secret));
+}
+
+#[test]
+fn test_extract_secret_finds_the_secret_against_a_32_byte_secret_hash() {
+    // Same real spend tx and secret as utxo_tests::test_extract_secret,
+    // which confirms this raw tx's script_sig pushes this exact secret at
+    // instruction index 1 and that dhash160(secret) is the 20-byte hash
+    // embedded at that spend's origin (R71's default). This test checks the
+    // other half of the same property (R72's 32-byte alternate): the same
+    // observed spend must also extract successfully when the swap had
+    // instead negotiated secret_hash = SHA-256(secret).
+    let tx_hex = hex::decode("0100000001de7aa8d29524906b2b54ee2e0281f3607f75662cbc9080df81d1047b78e21dbc00000000d7473044022079b6c50820040b1fbbe9251ced32ab334d33830f6f8d0bf0a40c7f1336b67d5b0220142ccf723ddabb34e542ed65c395abc1fbf5b6c3e730396f15d25c49b668a1a401209da937e5609680cb30bff4a7661364ca1d1851c2506fa80c443f00a3d3bf7365004c6b6304f62b0e5cb175210270e75970bb20029b3879ec76c4acd320a8d0589e003636264d01a7d566504bfbac6782012088a9142fb610d856c19fd57f2d0cffe8dff689074b3d8a882103f368228456c940ac113e53dad5c104cf209f2f102a409207269383b6ab9b03deac68ffffffff01d0dc9800000000001976a9146d9d2b554d768232320587df75c4338ecc8bf37d88ac40280e5c").unwrap();
+    let expected_secret = hex::decode("9da937e5609680cb30bff4a7661364ca1d1851c2506fa80c443f00a3d3bf7365").unwrap();
+    let secret_hash_32 = sha256(&expected_secret);
+
+    let extracted = extract_secret(secret_hash_32.as_slice(), &tx_hex).unwrap();
+    assert_eq!(extracted, expected_secret);
 }
