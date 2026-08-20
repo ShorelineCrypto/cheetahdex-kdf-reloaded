@@ -2,11 +2,54 @@
 
 use super::*;
 use crate::{HtlcPubkeyError, SWAP_HTLC_PUBKEY_LEN};
+use common::log::warn;
 use keys::Public;
 
 // ── Properly-typed swap methods (called by trait impls) ──────────────
 
 impl SiaCoin {
+    /// `utxo_from_txid` looks the payment's own event up by txid and then
+    /// its address's unspent outputs (`ApiClientHelpers::utxo_from_txid`,
+    /// sia-rust). A single unretried lookup here turned a very short
+    /// walletd indexing lag into a hard swap failure: both
+    /// `send_maker_spends_taker_payment` and `send_taker_spends_maker_payment`
+    /// call this immediately after `wait_for_confirmations` has *just*
+    /// polled the same event as sufficiently confirmed through the same
+    /// endpoint (`GetEventRequest`) -- but `wait_for_confirmations` itself
+    /// retries on any error, so a walletd blip there is invisible, while
+    /// this spend-side lookup had no such tolerance and failed the whole
+    /// swap outright (observed on a real testnet swap: a 404 "event not
+    /// found" roughly 200ms after the wait step's last successful poll of
+    /// the same txid). Retrying here brings this lookup's resilience in
+    /// line with the wait step's.
+    async fn utxo_from_txid_with_retry(
+        &self,
+        txid: &TransactionId,
+        vout_index: u32,
+    ) -> Result<sia_rust::types::UtxoWithBasis, Box<client_error::UtxoFromTxidError>> {
+        const ATTEMPTS: u8 = 5;
+        const RETRY_DELAY_SECONDS: f64 = 3.;
+        let mut last_err = None;
+        for attempt in 1..=ATTEMPTS {
+            match self.client.utxo_from_txid(txid, vout_index).await {
+                Ok(utxo) => return Ok(utxo),
+                Err(e) => {
+                    warn!(
+                        "utxo_from_txid({}, {}) attempt {}/{} failed, retrying: {}",
+                        txid, vout_index, attempt, ATTEMPTS, e
+                    );
+                    last_err = Some(e);
+                    if attempt < ATTEMPTS {
+                        Timer::sleep(RETRY_DELAY_SECONDS).await;
+                    }
+                },
+            }
+        }
+        Err(Box::new(
+            last_err.expect("loop runs at least once, so this is always Some"),
+        ))
+    }
+
     async fn new_send_taker_fee(
         &self,
         dex_fee: &DexFee,
@@ -143,11 +186,7 @@ impl SiaCoin {
         let input_spend_policy =
             SpendPolicy::atomic_swap_success(&maker_public_key, &taker_public_key, time_lock as u64, &secret_hash);
 
-        let htlc_utxo = self
-            .client
-            .utxo_from_txid(&taker_payment_txid, 0)
-            .await
-            .map_err(Box::new)?;
+        let htlc_utxo = self.utxo_from_txid_with_retry(&taker_payment_txid, 0).await?;
 
         let miner_fee = Currency::DEFAULT_FEE;
         let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
@@ -191,11 +230,7 @@ impl SiaCoin {
         let input_spend_policy =
             SpendPolicy::atomic_swap_success(&taker_public_key, &maker_public_key, time_lock as u64, &secret_hash);
 
-        let htlc_utxo = self
-            .client
-            .utxo_from_txid(&maker_payment_txid, 0)
-            .await
-            .map_err(Box::new)?;
+        let htlc_utxo = self.utxo_from_txid_with_retry(&maker_payment_txid, 0).await?;
 
         let miner_fee = Currency::DEFAULT_FEE;
         let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
@@ -321,11 +356,7 @@ impl SiaCoin {
             &sia_args.secret_hash,
         );
 
-        let htlc_utxo = self
-            .client
-            .utxo_from_txid(&sia_args.payment_tx.txid(), 0)
-            .await
-            .map_err(Box::new)?;
+        let htlc_utxo = self.utxo_from_txid_with_retry(&sia_args.payment_tx.txid(), 0).await?;
 
         let miner_fee = Currency::DEFAULT_FEE;
         let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
