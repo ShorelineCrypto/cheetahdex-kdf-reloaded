@@ -406,7 +406,30 @@ pub async fn tx_details_by_hash<T: UtxoCommonOps>(
     let verbose_tx = try_s!(coin.as_ref().rpc_client.get_verbose_transaction(&hash).compat().await);
     let mut tx: UtxoTx = try_s!(deserialize(verbose_tx.hex.as_slice()).map_err(|e| ERRL!("{:?}", e)));
     tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
-    let my_address = try_s!(coin.as_ref().derivation_method.iguana_or_err());
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it errors outright for an
+    // HD-wallet-activated one, which made every transaction in an
+    // HD-wallet coin's history fail to detail (even though
+    // request_tx_history, above, already correctly finds their txids for
+    // HD wallets too). Mirror request_tx_history's own resolution instead
+    // (root/primary HD address; see its comment for the single-address
+    // HD scope note).
+    let coin_fields = coin.as_ref();
+    let my_address_obj: Address = match &coin_fields.derivation_method {
+        DerivationMethod::Iguana(addr) => addr.clone(),
+        DerivationMethod::HDWallet(hd_wallet) => {
+            let pk = try_s!(my_public_key(coin_fields));
+            address_from_pubkey(
+                pk,
+                coin_fields.conf.pub_addr_prefix,
+                coin_fields.conf.pub_t_addr_prefix,
+                coin_fields.conf.checksum_type,
+                coin_fields.conf.bech32_hrp.clone(),
+                hd_wallet.address_format.clone(),
+            )
+        },
+    };
+    let my_address = &my_address_obj;
 
     input_transactions.insert(hash, HistoryUtxoTx {
         tx: tx.clone(),

@@ -218,7 +218,27 @@ pub fn send_maker_spends_taker_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx = try_tx_fus!(deserialize(taker_payment_tx).map_err(|e| ERRL!("{:?}", e)));
     prev_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
@@ -270,7 +290,27 @@ pub fn send_taker_spends_maker_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx = try_tx_fus!(deserialize(maker_payment_tx).map_err(|e| ERRL!("{:?}", e)));
     prev_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
@@ -322,7 +362,27 @@ pub fn send_taker_refunds_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx =
         try_tx_fus!(deserialize(taker_payment_tx).map_err(|e| TransactionErr::Plain(format!("{:?}", e))));
@@ -372,7 +432,27 @@ pub fn send_maker_refunds_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx = try_tx_fus!(deserialize(maker_payment_tx).map_err(|e| ERRL!("{:?}", e)));
     prev_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
