@@ -67,4 +67,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: kdf-x86_64-pc-windows-msvc
-          path: target/x86_64-pc-windows-msvc/${{ inputs.profile }}/kdf.exe
+          # kdf.pdb only exists for a profile that generates one (e.g.
+          # `release-dbg`, see Cargo.toml); upload-artifact doesn't fail the
+          # build when a pattern matches nothing, it just skips it, so this
+          # is safe for the default `release` profile too.
+          path: |
+            target/x86_64-pc-windows-msvc/${{ inputs.profile }}/kdf.exe
+            target/x86_64-pc-windows-msvc/${{ inputs.profile }}/kdf.pdb

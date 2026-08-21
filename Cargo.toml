@@ -161,6 +161,22 @@ codegen-units = 128
 # Turns debugging symbols off for the out-of-workspace dependencies.
 debug = false
 
+[profile.release-dbg]
+# Same codegen as `release` (opt-level 3, codegen-units 1, panic=unwind) so a
+# crash reproduces the same way it does in a shipped build, but keeps full
+# debug info and does not strip it -- on windows-msvc this makes rustc/link.exe
+# emit a real, complete .pdb (covering dependencies too, since this profile
+# deliberately has no `[profile.release-dbg.package."*"]` override to turn
+# that back off) instead of the minimal/absent one `release`'s `debug = 0`
+# produces. Not for shipping (much bigger PDB, longer link time) -- for
+# symbolicating a crash dump post-mortem, or attaching a debugger/Application
+# Verifier live. Build with `cargo build --profile release-dbg`; `build-windows.yml`
+# accepts `profile: release-dbg` as a workflow_dispatch input and uploads the
+# matching .pdb alongside the .exe.
+inherits = "release"
+debug = true
+strip = false
+
 # bitcoin 0.27 / bitcoin_hashes 0.10 both declare an optional `core2 = "^0.3"`
 # dep used only under `no-std`. Every 0.3.x release is yanked upstream, which
 # blocks fresh resolution against vendored lightning/zcash crates. The shim at
