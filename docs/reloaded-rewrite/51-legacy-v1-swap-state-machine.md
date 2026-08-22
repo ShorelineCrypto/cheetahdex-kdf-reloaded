@@ -1056,6 +1056,32 @@ carry it.
 > non-configurable primitive rather than an opaque-width comparison, but
 > confirming that is outside what this chapter's UTXO-focused reading
 > covers.
+>
+> **Resolved.** All three stacked gaps this finding described are closed.
+> The selection gap: the maker machine now calls `select_secret_hash_algo`
+> once per swap and persists its result as `secret_hash`
+> (`maker_swap.rs`, commit `bfa0e41b3`); the taker machine never computed
+> its own value in the first place (it adopts whatever the maker sent in
+> the `Negotiated` message, R59), so closing the maker side closes both
+> roles. The storage-width gap: both `MakerSwapData::secret_hash` and
+> `TakerSwapData::secret_hash` are `BytesJson` (variable-length), not a
+> fixed-20-byte type, so a 32-byte value round-trips through persistence
+> and the negotiation wire intact. The UTXO construction/validation/
+> extraction-derivation gap: `htlc_hash160_comparator` now performs the
+> exact R72A derivation -- a 20-byte `secret_hash` is used unchanged, a
+> 32-byte one has `RIPEMD160` applied to it once -- and every UTXO
+> payment-construction, payment-validation-reconstruction, and
+> spend-secret-extraction call site routes through it instead of
+> embedding `secret_hash`'s raw bytes (`utxo_common_swap.rs`, commit
+> `8ae48f460`). A Sia-paired (or Lightning- or Tendermint-family-paired)
+> legacy swap negotiated by this repository today gets the 32-byte
+> algorithm and a UTXO counterparty that can actually spend against it.
+> This does **not** retroactively fix a swap already persisted with the
+> pre-fix 20-byte value -- recovering that swap's payment still fails
+> exactly as this finding described, now surfaced as a named error
+> instead of a raw parse failure (`SiaCheckIfMyPaymentSentArgsError::
+> WrongSecretHashLength`, `SiaValidatePaymentInputError::
+> WrongSecretHashLength`) rather than something recovery can act on.
 
 ## 51.10 Bound Reference-Version Split
 

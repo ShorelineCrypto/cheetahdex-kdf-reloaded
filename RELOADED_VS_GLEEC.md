@@ -90,7 +90,15 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
 ### Work in progress
 
 - Hardware wallet — Ledger transport (scaffolding only; crate not built into any artifact).
-- Siacoin atomic-swap operations (HD-wallet stubs only; not wired to any default activation flow).
+- Siacoin V1 atomic-swap operations. No longer a stub: SC now negotiates its
+  own ed25519 HTLC key (ch.51 R-S9), gets the CRD-dictated 32-byte secret
+  hash whenever it is on either side of the pair (ch.51 R71/R72), and has
+  completed real send/spend/refund swaps against UTXO counterparties
+  (confirmed live, both directions). Still open: the swap-spend search
+  event-walk remains unimplemented (ch.20 D3/R-S8 — the affected RPC now
+  fails cleanly instead of silently guessing "not spent", but does not yet
+  actually search), and the V2 swap protocol is not implemented for SC
+  (ch.20 D5, V1 only).
 - HD wallet dispatch in swap/ordermatch paths (legacy iguana-key fallback retained for parity with upstream and GLEEC; documented in code).
 - *(further entries to be enumerated.)*
 

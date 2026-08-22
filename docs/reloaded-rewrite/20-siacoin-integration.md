@@ -325,9 +325,12 @@ against the expected secret hash.
 querying walletd for the relevant address event(s).
 
 **R-S8 (deferred swap-spend search).** The swap-spend search
-operations MAY return "not found" pending the deferred event-walk
-implementation (§20.10 D3); this is a documented gap, not a
-correctness claim.
+operations MUST report failure rather than "not found" pending the
+deferred event-walk implementation (§20.10 D3); "not found" is not
+a safe default because `recover_funds` (chapter 51 R33) treats it as
+a confirmed negative and acts on it (§20.10 D3 records the live
+failure this caused). This is a documented gap, not a correctness
+claim.
 
 **R-S9 (negotiated HTLC key).** The module MUST answer the two
 coin-layer key operations the legacy negotiation depends on --
@@ -447,8 +450,23 @@ rather than defects. None is a correctness claim.
   the shared history-coin-type contract; that residue is chapter
   53's D53.1.
 - **D3 -- Swap-spend search.** The event-walk that locates the
-  spend of an HTLC output by id is not yet wired; the
-  corresponding swap operations report "not found" (R-S8).
+  spend of an HTLC output by id is not yet wired. R-S8 originally
+  permitted the operations to report "not found" pending that
+  implementation, on the assumption that "not found" is a safe
+  default; it is not, for the one caller that actually reaches
+  this path. `recover_funds` (chapter 51 R33's swap-recovery RPC)
+  treats "not found" as "confirmed not spent" and falls through to
+  attempting a refund of a payment it never actually checked --
+  observed live: a `recover_funds_of_swap` call for an SC-paired
+  swap that reached this exact branch. `search_for_swap_tx_spend_my`
+  and `search_for_swap_tx_spend_other` now return an explicit error
+  instead ("not yet implemented for Sia; cannot determine whether
+  this payment has already been spent, so it is not safe to recover
+  automatically"), which `recover_funds` surfaces as a clean RPC
+  failure rather than silently taking the wrong branch. The
+  event-walk itself remains unimplemented; this closes the unsafe
+  default, not the deferred work. Code:
+  `mm2src/coins/siacoin/siacoin_swap_ops.rs`.
 - **D4 -- Message signing.** Generic message sign/verify report
   "unsupported"; the ed25519 primitives exist but the
   coin-level wiring is absent.
