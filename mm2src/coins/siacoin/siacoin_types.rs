@@ -264,6 +264,11 @@ impl SiaCheckIfMyPaymentSentArgs {
             ));
         }
         let success_public_key = PublicKey::from_bytes(&other_pub[..32])?;
+        if secret_hash.len() != 32 {
+            return Err(SiaCheckIfMyPaymentSentArgsError::WrongSecretHashLength {
+                actual: secret_hash.len(),
+            });
+        }
         let secret_hash = Hash256::try_from(secret_hash)?;
         let amount = siacoin_to_hastings(amount)?;
 
@@ -325,6 +330,11 @@ impl SiaValidatePaymentInputArgs {
         }
         let other_pub = PublicKey::from_bytes(&other_pub_bytes[..32])?;
 
+        if args.secret_hash.len() != 32 {
+            return Err(SiaValidatePaymentInputError::WrongSecretHashLength {
+                actual: args.secret_hash.len(),
+            });
+        }
         let secret_hash = Hash256::try_from(args.secret_hash.as_slice())?;
         let amount = siacoin_to_hastings(args.amount)?;
 

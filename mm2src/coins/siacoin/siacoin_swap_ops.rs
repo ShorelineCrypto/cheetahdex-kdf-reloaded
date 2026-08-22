@@ -906,4 +906,30 @@ mod swap_field_tests {
             HtlcPubkeyError::NotOnCurve("ed25519", _)
         ));
     }
+
+    /// A swap negotiated before Sia pairs required the 32-byte SHA256 secret
+    /// hash (select_secret_hash_algo, ch.51 R71/R72) has the legacy 20-byte
+    /// RIPEMD160(SHA256(_)) one instead. That must be reported as the
+    /// structural fact it is -- "this swap can't be checked against Sia" --
+    /// not `Hash256Error`'s generic "invalid slice length", which said
+    /// nothing about *why* a 20-byte hash showed up (observed verbatim in a
+    /// real recover_funds_of_swap failure).
+    #[test]
+    fn check_if_my_payment_sent_args_reports_a_legacy_20_byte_secret_hash_by_name() {
+        let other_pub = ed25519_pubkey_to_swap_field(&test_pubkey());
+        let legacy_secret_hash = [0u8; 20];
+
+        let err = SiaCheckIfMyPaymentSentArgs::try_from_positional(
+            1787000000,
+            &other_pub,
+            &legacy_secret_hash,
+            BigDecimal::from(1),
+        )
+        .err()
+        .unwrap();
+
+        assert!(matches!(err, SiaCheckIfMyPaymentSentArgsError::WrongSecretHashLength {
+            actual: 20
+        }));
+    }
 }

@@ -95,6 +95,23 @@ pub enum SiaCheckIfMyPaymentSentArgsError {
     InvalidOtherPublicKeyLength(Vec<u8>),
     #[error("[chk-payment-args] other_pub parse failed: {0}")]
     ParseOtherPublicKey(#[from] PublicKeyError),
+    // Checked explicitly ahead of `Hash256::try_from` (see try_from_positional)
+    // rather than left to fall through to `ParseSecretHash` below, because the
+    // 20-byte case isn't malformed input -- it's the legacy RIPEMD160(SHA256(_))
+    // secret hash width every non-Sia-paired swap still negotiates
+    // (select_secret_hash_algo, ch.51 R71/R72). A swap negotiated before that
+    // 32-byte requirement existed for a Sia-paired swap carries a 20-byte hash
+    // that can never satisfy it; that's a structural fact about the swap, not
+    // a bug to retry past, so it gets a message that says so instead of
+    // `Hash256Error`'s generic "invalid slice length" (observed verbatim in a
+    // real recover_funds_of_swap failure with no indication of why 20 bytes
+    // showed up at all).
+    #[error(
+        "[chk-payment-args] secret_hash is {actual} bytes, Siacoin HTLCs require exactly 32 -- \
+         this swap most likely negotiated the legacy 20-byte secret hash used for non-Sia pairs, \
+         so its Sia-side payment cannot be checked or recovered automatically"
+    )]
+    WrongSecretHashLength { actual: usize },
     #[error("[chk-payment-args] secret_hash parse failed: {0}")]
     ParseSecretHash(#[from] Hash256Error),
     #[error("[chk-payment-args] amount conversion failed: {0}")]
@@ -119,6 +136,15 @@ pub enum SiaValidatePaymentInputError {
     InvalidOtherPublicKeyLength(Vec<u8>),
     #[error("[validate-payment-in] other_pub parse failed: {0}")]
     ParseOtherPublicKey(#[from] PublicKeyError),
+    // See SiaCheckIfMyPaymentSentArgsError::WrongSecretHashLength -- same
+    // reasoning, same fix, for the live validate_maker_payment/
+    // validate_taker_payment path rather than recover_funds's.
+    #[error(
+        "[validate-payment-in] secret_hash is {actual} bytes, Siacoin HTLCs require exactly 32 -- \
+         this swap most likely negotiated the legacy 20-byte secret hash used for non-Sia pairs, \
+         so its Sia-side payment cannot be validated"
+    )]
+    WrongSecretHashLength { actual: usize },
     #[error("[validate-payment-in] secret_hash parse failed: {0}")]
     ParseSecretHash(#[from] Hash256Error),
     #[error("[validate-payment-in] amount conversion failed: {0}")]

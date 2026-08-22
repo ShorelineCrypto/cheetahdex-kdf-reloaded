@@ -1044,9 +1044,24 @@ async fn search_for_swap_output_spend(
     let script = payment_script(time_lock, secret_hash, first_pub, second_pub);
     let expected_script_pubkey = Builder::build_p2sh(&dhash160(&script).into()).to_bytes();
     if tx.outputs[0].script_pubkey != expected_script_pubkey {
+        // Reached from `recover_funds`: the pubkeys/secret_hash/locktime this
+        // recovery attempt reconstructed from the swap's own saved record
+        // don't reproduce the HTLC script that's actually on chain in this
+        // payment, so it's not safe to search for or act on its spend --
+        // could mean the on-chain tx isn't really this swap's payment, or
+        // the saved record's negotiated data is itself inconsistent with it
+        // (seen in practice on swaps predating later fixes to how that data
+        // gets derived/persisted). Either way this is a hard stop, not
+        // something to retry -- report the two script hashes and this
+        // transaction's own hash rather than a full Debug-formatted dump of
+        // the deserialized transaction, which said nothing a caller could
+        // act on.
         return ERR!(
-            "Transaction {:?} output 0 script_pubkey doesn't match expected {:?}",
-            tx,
+            "Payment tx {:?} output 0 does not pay the HTLC script this swap negotiated \
+             (found script_pubkey {:?}, expected {:?} from the swap's saved pubkeys/secret_hash/locktime) \
+             -- this payment cannot be recovered automatically",
+            tx.hash(),
+            tx.outputs[0].script_pubkey,
             expected_script_pubkey
         );
     }
