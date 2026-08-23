@@ -65,8 +65,8 @@ pub use sia_rust;
 pub use sia_rust::transport::client::{error as client_error, ApiClient as SiaApiClient, ApiClientHelpers,
                                       Client as SiaClient};
 pub use sia_rust::transport::endpoints::{AddressesEventsRequest, ConsensusTipRequest, GetAddressUtxosRequest,
-                                         GetEventRequest, TxpoolBroadcastRequest, TxpoolTransactionsRequest,
-                                         TxpoolTransactionsResponse};
+                                         GetEventRequest, TxpoolBroadcastRequest, TxpoolFeeRequest,
+                                         TxpoolTransactionsRequest, TxpoolTransactionsResponse};
 pub use sia_rust::types::{Address, Currency, Event, EventDataWrapper, EventPayout, EventType, Hash256, Hash256Error,
                           Keypair as SiaKeypair, KeypairError, Preimage, PreimageError, PublicKey, PublicKeyError,
                           SiacoinElement, SiacoinOutput, SiacoinOutputId, SpendPolicy, TransactionId, V1Transaction,
