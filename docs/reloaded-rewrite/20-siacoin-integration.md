@@ -518,39 +518,14 @@ rather than defects. None is a correctness claim.
   broadcast, which it does not do for any coin today (a pre-existing,
   coin-agnostic gap, not Sia-specific). Commit `73ef8b608`.
 
-- **D8 -- Raw-transaction fetch.** A unified historical
-  raw-transaction fetch is not implemented; walletd's mempool
-  lookup is the only available path in the bound client version.
-
-<<<IMPL
-This pass implements D8 only. Do not touch swap-spend search, message
-signing, HD wallet, fee estimation, or watcher eligibility -- other
-passes may be running concurrently elsewhere in this module.
-
-`get_raw_transaction` in `siacoin_mm_coin.rs` currently returns
-`RawTransactionError::NotImplemented` unconditionally. Wire it to
-fetch a transaction by id/hash. The module already has a mempool-only
-lookup pattern to mirror (search `siacoin_market_ops.rs` for the
-existing mempool fetch used by fee/payment validation, around its
-`found_in_mempool` usage) -- extend coverage to a confirmed,
-already-mined transaction too, using whatever confirmed-tx-by-id
-endpoint the bound Sia client library (sia_rust) exposes for that. If
-no such endpoint exists in the bound library version, do not invent
-one -- report exactly what's missing and leave the existing
-mempool-only behavior as the fallback, documented as such rather than
-silently unchanged.
-
-D7's `watcher_validate_taker_fee` (this same file, already landed) is a
-close precedent worth checking first: it fetches a *confirmed* tx by id
-via `self.client.get_event(&txid)` (matching `Ok(event)` against
-`EventDataWrapper::V2Transaction(tx)` in its payload), falling back to
-`self.client.get_unconfirmed_transaction(&txid)` for the mempool case.
-Verify this is in fact the right confirmed-tx-by-id lookup for a raw-tx
-fetch (as opposed to an address/wallet-scoped event query that happens
-to work for that method's narrower need) before relying on it -- don't
-assume the precedent transfers without checking its actual
-preconditions against `get_raw_transaction`'s.
-IMPL>>>
+- **D8 -- Raw-transaction fetch.** *Closed.* `get_raw_transaction` now
+  parses the requested txid and tries a confirmed lookup via
+  `sia_rust`'s `ApiClientHelpers::get_transaction` (verified, not
+  assumed, against the bound library's own source: it is exactly
+  `get_event(txid)` filtered to `EventDataWrapper::V2Transaction`, the
+  same txid-scoped lookup D7's `watcher_validate_taker_fee` already
+  uses), falling back to `get_unconfirmed_transaction` for a
+  mempool-only transaction. Commit `02341d5d4`.
 
 
 ## 20.11 Baseline Verifications
