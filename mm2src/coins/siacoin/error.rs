@@ -487,3 +487,15 @@ pub enum SiaHistoryFetchError {
     #[error("[sia-history] walletd address-events request failed: {0}")]
     Transport(String),
 }
+
+// =====================================================================
+// 5. Multi-account HD wallet errors (CRD ch.20 D1)
+// =====================================================================
+
+/// Failure deriving a [`crate::siacoin::sia_hd_wallet::SiaHDWallet`]'s SLIP-10
+/// ed25519 root key (`m/44'/1991'`, the node every HD account is derived from).
+#[derive(Debug, Error)]
+pub enum SiaHDWalletCreationError {
+    #[error("[hd-wallet] failed to derive the Sia ed25519 HD root key: {0}")]
+    DeriveRoot(String),
+}

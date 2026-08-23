@@ -23,10 +23,15 @@ pub type HDAccountsMutex<HDAccount> = AsyncMutex<HDAccountsMap<HDAccount>>;
 pub type HDAccountsMut<'a, HDAccount> = AsyncMutexGuard<'a, HDAccountsMap<HDAccount>>;
 pub type HDAccountMut<'a, HDAccount> = AsyncMappedMutexGuard<'a, HDAccountsMap<HDAccount>, HDAccount>;
 
-#[derive(Display)]
+#[derive(Debug, Display)]
 pub enum AddressDerivingError {
     #[display(fmt = "BIP32 address deriving error: {}", _0)]
     Bip32Error(Bip32Error),
+    /// SLIP-10 ed25519 derivation error (e.g. Siacoin's `m/44'/1991'/...'` HD path,
+    /// CRD ch.20 D1). ed25519 SLIP-10 has no analog of `Bip32Error` shared with the
+    /// secp256k1 coins above, so the source error is carried as its display string.
+    #[display(fmt = "ed25519 BIP32 address deriving error: {}", _0)]
+    Ed25519Bip32Error(String),
 }
 
 impl From<Bip32Error> for AddressDerivingError {
@@ -37,6 +42,7 @@ impl From<AddressDerivingError> for BalanceError {
     fn from(e: AddressDerivingError) -> Self {
         match e {
             AddressDerivingError::Bip32Error(bip32) => BalanceError::Internal(bip32.to_string()),
+            AddressDerivingError::Ed25519Bip32Error(e) => BalanceError::Internal(e),
         }
     }
 }
@@ -49,6 +55,7 @@ pub enum NewAddressDerivingError {
     AddressLimitReached { max_addresses_number: u32 },
     InvalidBip44Chain { chain: Bip44Chain },
     Bip32Error(Bip32Error),
+    Ed25519Bip32Error(String),
     WalletStorageError(HDWalletStorageError),
 }
 
@@ -60,6 +67,7 @@ impl From<AddressDerivingError> for NewAddressDerivingError {
     fn from(e: AddressDerivingError) -> Self {
         match e {
             AddressDerivingError::Bip32Error(bip32) => NewAddressDerivingError::Bip32Error(bip32),
+            AddressDerivingError::Ed25519Bip32Error(e) => NewAddressDerivingError::Ed25519Bip32Error(e),
         }
     }
 }
@@ -80,7 +88,7 @@ impl From<AccountUpdatingError> for NewAddressDerivingError {
     }
 }
 
-#[derive(Display)]
+#[derive(Debug, Display)]
 pub enum NewAccountCreatingError {
     #[display(fmt = "Hardware Wallet context is not initialized")]
     HwContextNotInitialized,
@@ -140,13 +148,13 @@ impl From<NewAccountCreatingError> for HDWalletRpcError {
 }
 
 /// Currently, we suppose that ETH/ERC20/QRC20 don't have [`Bip44Chain::Internal`] addresses.
-#[derive(Display)]
+#[derive(Debug, Display)]
 #[display(fmt = "Coin doesn't support the given BIP44 chain: {:?}", chain)]
 pub struct InvalidBip44ChainError {
     pub chain: Bip44Chain,
 }
 
-#[derive(Display)]
+#[derive(Debug, Display)]
 pub enum AccountUpdatingError {
     AddressLimitReached { max_addresses_number: u32 },
     InvalidBip44Chain(InvalidBip44ChainError),
@@ -257,6 +265,7 @@ impl From<AddressDerivingError> for HDWalletRpcError {
     fn from(e: AddressDerivingError) -> Self {
         match e {
             AddressDerivingError::Bip32Error(bip32) => HDWalletRpcError::ErrorDerivingAddress(bip32.to_string()),
+            AddressDerivingError::Ed25519Bip32Error(e) => HDWalletRpcError::ErrorDerivingAddress(e),
         }
     }
 }
@@ -269,6 +278,7 @@ impl From<NewAddressDerivingError> for HDWalletRpcError {
             },
             NewAddressDerivingError::InvalidBip44Chain { chain } => HDWalletRpcError::InvalidBip44Chain { chain },
             NewAddressDerivingError::Bip32Error(bip32) => HDWalletRpcError::Internal(bip32.to_string()),
+            NewAddressDerivingError::Ed25519Bip32Error(e) => HDWalletRpcError::Internal(e),
             NewAddressDerivingError::WalletStorageError(storage) => {
                 HDWalletRpcError::WalletStorageError(storage.to_string())
             },
