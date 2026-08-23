@@ -7,6 +7,11 @@ lazy_static! {
         DalekDerivationPath::from_str("m/44'/1991'/0'/0'/0'").expect("Valid single address mode path");
 }
 
+/// Default HD gap limit for a `SiaHDWallet` built at activation (CRD ch.20 D1) when
+/// the activation request's `gap_limit` field is absent. Matches UTXO's own
+/// `DEFAULT_GAP_LIMIT` (`utxo.rs`) and `sia_hd_wallet.rs`'s own test fixtures.
+pub(crate) const DEFAULT_HD_GAP_LIMIT: u32 = 20;
+
 /// The index of the HTLC output in the transaction that locks the funds
 pub(crate) const HTLC_VOUT_INDEX: u32 = 0;
 

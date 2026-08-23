@@ -23,11 +23,11 @@ pub(crate) use super::{BalanceError, CoinBalance, CoinsContext, HistorySyncState
                        SignRawTransactionRequest, SignatureError, SwapOps, TradeFee, TransactionDetails,
                        TransactionEnum, TransactionErr, TransactionFut, TransactionType, UnexpectedDerivationMethod,
                        VerificationError};
-pub(crate) use crate::{BalanceFut, CanRefundHtlc, DexFee, FeeApproxStage, FoundSwapTxSpend,
-                       NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, PrivKeyPolicy, RawTransactionRes,
-                       SignatureResult, TradePreimageFut, TradePreimageResult, TradePreimageValue, Transaction,
-                       TxFeeDetails, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput, VerificationResult,
-                       WatcherOps, WithdrawFut, WithdrawRequest};
+pub(crate) use crate::{BalanceFut, CanRefundHtlc, CoinWithDerivationMethod, DerivationMethod, DexFee, FeeApproxStage,
+                       FoundSwapTxSpend, NegotiateSwapContractAddrErr, PrivKeyBuildPolicy, PrivKeyPolicy,
+                       RawTransactionRes, SignatureResult, TradePreimageFut, TradePreimageResult, TradePreimageValue,
+                       Transaction, TxFeeDetails, ValidateAddressResult, ValidateFeeArgs, ValidatePaymentInput,
+                       VerificationResult, WatcherOps, WithdrawFut, WithdrawRequest};
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use bigdecimal::BigDecimal;
@@ -80,6 +80,7 @@ pub use error::SiaCoinNewError;
 pub(crate) use error::*;
 
 pub mod sia_hd_wallet;
+pub(crate) use sia_hd_wallet::SiaHDWallet;
 mod sia_withdraw;
 pub(crate) use sia_withdraw::SiaWithdrawBuilder;
 
@@ -113,6 +114,11 @@ pub struct SiaCoinGeneric<T: SiaApiClient + ApiClientHelpers> {
     /// Keyed on the active netid, so trades on netid 6133 use 6133's fee address
     /// rather than the netid 8762 default.
     pub(crate) fee_address: Address,
+    /// Iguana (single-key) vs. HD-wallet address-derivation mode (CRD ch.20 D1).
+    /// Arc-wrapped like the coin's other shared state (`client`, `priv_key_policy`,
+    /// `history_sync_state`) so `SiaCoinGeneric` can stay cheaply `Clone`: `SiaHDWallet`
+    /// holds an internal `HDAccountsMutex` and is not itself `Clone`.
+    pub derivation_method: Arc<DerivationMethod<Address, SiaHDWallet>>,
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

@@ -3,11 +3,12 @@
 //! §20.4.1 dictates SLIP-10 ed25519 derivation under SLIP-44 coin type 1991 and,
 //! today, a single derived address per HD account (`SINGLE_ADDRESS_MODE_PATH` in
 //! `siacoin_types.rs`, still used unchanged by the existing single-address
-//! activation path in `siacoin_helpers.rs`). This module is the *additional*,
-//! not-yet-wired-into-activation, real multi-account implementation: an
-//! `HDWalletOps`/`HDAccountOps` pair for Sia (mirroring the trait-conformance
-//! shape of `utxo_common/utxo_common_hd.rs` and `eth/eth_hd_wallet.rs`), plus
-//! gap-limit address discovery via `HDWalletBalanceOps`.
+//! activation path in `siacoin_helpers.rs`). This module is the real
+//! multi-account implementation, now wired into activation and the HD RPC
+//! surface (see below): an `HDWalletOps`/`HDAccountOps` pair for Sia
+//! (mirroring the trait-conformance shape of `utxo_common/utxo_common_hd.rs`
+//! and `eth/eth_hd_wallet.rs`), plus gap-limit address discovery via
+//! `HDWalletBalanceOps`.
 //!
 //! ## Derivation model (why this differs in shape from UTXO/ETH)
 //!
@@ -33,25 +34,47 @@
 //! address convention (§20.4.1 fixes only the single-address-mode path, not a
 //! `Bip44Chain::Internal` role for Sia).
 //!
-//! ## Not yet wired into activation
+//! ## Wired into activation (CRD ch.20 D1 activation-wiring follow-up)
 //!
-//! This module is deliberately self-contained: `SiaCoinGeneric` gains no new
-//! field, `SiaCoinBuilder::build` is untouched, and `CoinWithDerivationMethod`/
-//! `EnableCoinBalanceOps`/the HD RPC surface (`HDWalletRpcOps`,
-//! `AccountBalanceRpcOps`, `InitCreateHDAccountRpcOps`) are not implemented.
-//! The existing single-address HD activation path (§20.4.1, `SiaCoin::new`)
-//! keeps working completely unchanged. See the coder pass report for why this
-//! boundary was drawn here.
+//! `SiaCoinGeneric` now carries a `derivation_method: Arc<DerivationMethod<Address,
+//! SiaHDWallet>>` field (`mod.rs`), and `SiaCoinBuilder`/`SiaCoin::new`
+//! (`siacoin_helpers.rs`) construct `DerivationMethod::HDWallet(wallet)` -- with
+//! account 0 *not* pre-created there; see `CoinWithDerivationMethod`/the HD RPC
+//! surface below -- whenever the priv-key policy is `GlobalHDAccount`, and
+//! `DerivationMethod::Iguana(address)` for the legacy single-key policy. This
+//! module now also implements `CoinWithDerivationMethod`, `HDWalletRpcOps`,
+//! `AccountBalanceRpcOps`, and `InitAccountBalanceRpcOps` for `SiaCoin` (pure
+//! delegation to the shared `common_impl` helpers, mirroring `eth_hd_wallet.rs`).
+//! `InitCreateHDAccountRpcOps` is implemented too, but *not* via the shared
+//! delegation pattern -- see its own doc comment for why.
+//!
+//! The existing single-address HD activation path (§20.4.1) is observably
+//! unaffected: `priv_key_policy` still resolves to the exact same
+//! `PrivKeyPolicy::KeyPair` built from `SINGLE_ADDRESS_MODE_PATH` as before (the
+//! same key `derive_address`'s account-0/External/address-0 output is proven,
+//! by this module's own test below, to equal), so every existing signing call
+//! site (`my_keypair()`, swap ops, withdraw) is untouched. What changed is that
+//! the coin *also* now reports `DerivationMethod::HDWallet` and can serve
+//! read-only multi-account/multi-address balance discovery and account creation
+//! through the RPC surface above -- spending remains scoped to the single
+//! activated key (ch.20 R-T3). See the coder pass report for the full
+//! reasoning and the scope this pass deliberately left open.
 
 use super::*;
 
 use crate::coin_balance::{self, coin_balance_map_for_ticker, AddressBalanceStatus, EnableCoinBalanceError,
-                          EnableCoinScanPolicy, HDAddressBalance, HDAddressBalanceScanner, HDWalletBalance,
-                          HDWalletBalanceOps};
+                          EnableCoinScanPolicy, HDAccountBalance, HDAddressBalance, HDAddressBalanceScanner,
+                          HDWalletBalance, HDWalletBalanceOps};
 use crate::hd_pubkey::HDXPubExtractor;
-use crate::hd_wallet::{AccountUpdatingError, AddressDerivingError, AsyncMutexGuard, HDAccountMut, HDAccountOps,
-                       HDAccountsMap, HDAccountsMutex, HDAddress, HDWalletCoinOps, HDWalletOps,
-                       InvalidBip44ChainError, NewAccountCreatingError};
+use crate::hd_wallet::{self, AccountUpdatingError, AddressDerivingError, AsyncMutexGuard, GetNewHDAddressParams,
+                       GetNewHDAddressResponse, HDAccountMut, HDAccountOps, HDAccountsMap, HDAccountsMutex, HDAddress,
+                       HDWalletCoinOps, HDWalletOps, HDWalletRpcError, HDWalletRpcOps, InvalidBip44ChainError,
+                       NewAccountCreatingError};
+use crate::rpc_command::account_balance::{self, AccountBalanceParams, AccountBalanceRpcOps, HDAccountBalanceResponse};
+use crate::rpc_command::hd_account_balance_rpc_error::HDAccountBalanceRpcError;
+use crate::rpc_command::init_account_balance::{self as init_account_balance_mod, InitAccountBalanceParams,
+                                               InitAccountBalanceRpcOps};
+use crate::rpc_command::init_create_account::{CreateNewAccountParams, InitCreateHDAccountRpcOps};
 use crate::BalanceResult;
 use crypto::{Bip44Chain, ChildNumber, DerivationPath as CryptoDerivationPath, GlobalHDAccountArc, RpcDerivationPath};
 use ed25519_dalek_bip32::{ChildIndex, ExtendedSigningKey};
@@ -335,6 +358,19 @@ impl HDWalletCoinOps for SiaCoin {
     }
 }
 
+// ─── CoinWithDerivationMethod ───────────────────────────────────────────
+
+/// CRD ch.20 D1: exposes the `Iguana`/`HDWallet` derivation mode `SiaCoinBuilder`
+/// now constructs (`siacoin_helpers.rs`) to the coin-generic HD balance/RPC surface
+/// (`EnableCoinBalanceOps`, `HDWalletRpcOps`, `AccountBalanceRpcOps`, ...), mirroring
+/// `eth_hd_wallet.rs`'s `impl CoinWithDerivationMethod for EthCoin`.
+impl CoinWithDerivationMethod for SiaCoin {
+    type Address = Address;
+    type HDWallet = SiaHDWallet;
+
+    fn derivation_method(&self) -> &DerivationMethod<Self::Address, Self::HDWallet> { &self.derivation_method }
+}
+
 // ─── Address discovery (HDWalletBalanceOps) ────────────────────────────
 
 /// Checks whether an address has ever been used by querying walletd's
@@ -438,6 +474,120 @@ impl HDWalletBalanceOps for SiaCoin {
         }
         Ok(result)
     }
+}
+
+// ─── HD RPC surface ─────────────────────────────────────────────────────
+//
+// CRD ch.20 D1's remaining "not yet wired" gap: `HDWalletRpcOps`,
+// `AccountBalanceRpcOps`, and `InitAccountBalanceRpcOps` are pure delegation to
+// the crate's shared `common_impl` helpers -- the same helpers `eth_hd_wallet.rs`
+// delegates to for `EthCoin` -- because those helpers are already generic over
+// any coin satisfying `HDWalletBalanceOps + CoinWithDerivationMethod + MarketCoinOps`,
+// which `SiaCoin` now does. `InitCreateHDAccountRpcOps` is the one exception; see
+// its own doc comment below.
+
+#[async_trait]
+impl HDWalletRpcOps for SiaCoin {
+    async fn get_new_address_rpc(
+        &self,
+        params: GetNewHDAddressParams,
+    ) -> MmResult<GetNewHDAddressResponse, HDWalletRpcError> {
+        hd_wallet::common_impl::get_new_address_rpc(self, params).await
+    }
+}
+
+#[async_trait]
+impl AccountBalanceRpcOps for SiaCoin {
+    async fn account_balance_rpc(
+        &self,
+        params: AccountBalanceParams,
+    ) -> MmResult<HDAccountBalanceResponse, HDAccountBalanceRpcError> {
+        account_balance::common_impl::account_balance_rpc(self, params).await
+    }
+}
+
+#[async_trait]
+impl InitAccountBalanceRpcOps for SiaCoin {
+    async fn init_account_balance_rpc(
+        &self,
+        params: InitAccountBalanceParams,
+    ) -> MmResult<HDAccountBalance, HDAccountBalanceRpcError> {
+        init_account_balance_mod::common_impl::init_account_balance_rpc(self, params).await
+    }
+}
+
+/// Unlike `HDWalletRpcOps`/`AccountBalanceRpcOps`/`InitAccountBalanceRpcOps` above,
+/// this does **not** delegate to `init_create_account::common_impl`. That shared
+/// helper is what `EthCoin`/`UtxoStandardCoin` use, but it always forwards
+/// `Some(xpub_extractor)` into `HDWalletCoinOps::create_new_account` (mirroring the
+/// hardware-wallet-capable account-creation flow those coins support). Sia's own
+/// `create_new_account` (above) rejects *any* `Some(_)` extractor outright --
+/// SLIP-10 ed25519 has no public-key-only child derivation, so there is no
+/// software-or-hardware "extract an xpub for a not-yet-existing account" operation
+/// to perform (module doc comment; the chapter's own D1 architectural-risk note).
+/// Delegating verbatim would therefore make `task::create_new_account` permanently
+/// fail for every Sia HD wallet with `CoinDoesntSupportTrezor`, not merely for a
+/// hardware-backed one.
+///
+/// This impl instead calls the crate's `create_new_account` free function
+/// directly (this module, above) -- always the software path, which is the only
+/// path a `SiaCoin` can ever reach (R-T3, ch.46 R46.1.3: a Trezor priv-key policy
+/// is rejected long before an `HDWallet`-mode `SiaCoin` exists), so `xpub_extractor`
+/// is intentionally unused rather than threaded through as `Some(_)`.
+///
+/// Separately, and not fixed here: `task::create_new_account`'s *dispatcher*
+/// (`coins_activation`/`coins::rpc_command::init_create_account`) unconditionally
+/// constructs its extractor via `RpcTaskXPubExtractor::new` (not `new_unchecked`),
+/// which itself fails immediately with `HwContextNotInitialized` whenever no
+/// hardware wallet is connected -- for *every* coin wired to it today, Sia
+/// included once wired. That is a pre-existing, coin-agnostic gap in the shared
+/// RPC-task plumbing, not something this pass introduces or can fix from within
+/// `coins::siacoin`; see the coder pass report.
+#[async_trait]
+impl InitCreateHDAccountRpcOps for SiaCoin {
+    async fn init_create_account_rpc<XPubExtractor>(
+        &self,
+        params: CreateNewAccountParams,
+        _xpub_extractor: &XPubExtractor,
+    ) -> MmResult<HDAccountBalance, HDWalletRpcError>
+    where
+        XPubExtractor: HDXPubExtractor + Sync,
+    {
+        init_create_new_account_software(self, params).await
+    }
+}
+
+/// Mirrors `mm2src/coins/rpc_command/init_create_account.rs`'s own
+/// `common_impl::init_create_new_account_rpc`, minus the xpub-extractor plumbing --
+/// see `InitCreateHDAccountRpcOps for SiaCoin`'s doc comment for why.
+async fn init_create_new_account_software(
+    coin: &SiaCoin,
+    params: CreateNewAccountParams,
+) -> MmResult<HDAccountBalance, HDWalletRpcError> {
+    let hd_wallet = coin.derivation_method().hd_wallet_or_err().mm_err(Into::into)?;
+
+    let mut new_account = create_new_account(hd_wallet).await.mm_err(Into::into)?;
+    let address_scanner = coin.produce_hd_address_scanner().await.mm_err(Into::into)?;
+    let account_index = new_account.account_id();
+    let account_derivation_path = new_account.account_derivation_path();
+
+    let addresses = if params.scan {
+        let gap_limit = params.gap_limit.unwrap_or_else(|| hd_wallet.gap_limit());
+        coin.scan_for_new_addresses(hd_wallet, &mut new_account, &address_scanner, gap_limit)
+            .await
+            .mm_err(Into::into)?
+    } else {
+        Vec::new()
+    };
+
+    let total_balance = crate::coin_balance::sum_hd_address_balances(coin.ticker(), &addresses);
+
+    Ok(HDAccountBalance {
+        account_index,
+        derivation_path: RpcDerivationPath(account_derivation_path),
+        total_balance,
+        addresses,
+    })
 }
 
 /// Mirrors `utxo_common_hd::scan_for_new_addresses_impl` /

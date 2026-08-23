@@ -521,6 +521,7 @@ pub async fn get_new_address(
         MmCoinEnum::UtxoCoin(utxo) => utxo.get_new_address_rpc(req.params).await,
         MmCoinEnum::QtumCoin(qtum) => qtum.get_new_address_rpc(req.params).await,
         MmCoinEnum::EthCoin(eth) => eth.get_new_address_rpc(req.params).await,
+        MmCoinEnum::SiaCoin(sia) => sia.get_new_address_rpc(req.params).await,
         _ => MmError::err(HDWalletRpcError::CoinIsActivatedNotWithHDWallet),
     }
 }

@@ -455,6 +455,8 @@ pub enum SiaCoinNewError {
     Builder(#[from] SiaCoinBuilderError),
     #[error("[new] address derivation from master xkey failed: {0}")]
     DeriveExtendedKey(#[from] PrivKeyError),
+    #[error("[new] HD wallet root derivation failed: {0}")]
+    HDWalletCreation(#[from] SiaHDWalletCreationError),
 }
 
 /// Errors raised by the `my_keypair` accessor when the wallet is not
