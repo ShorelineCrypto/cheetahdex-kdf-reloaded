@@ -539,6 +539,17 @@ no such endpoint exists in the bound library version, do not invent
 one -- report exactly what's missing and leave the existing
 mempool-only behavior as the fallback, documented as such rather than
 silently unchanged.
+
+D7's `watcher_validate_taker_fee` (this same file, already landed) is a
+close precedent worth checking first: it fetches a *confirmed* tx by id
+via `self.client.get_event(&txid)` (matching `Ok(event)` against
+`EventDataWrapper::V2Transaction(tx)` in its payload), falling back to
+`self.client.get_unconfirmed_transaction(&txid)` for the mempool case.
+Verify this is in fact the right confirmed-tx-by-id lookup for a raw-tx
+fetch (as opposed to an address/wallet-scoped event query that happens
+to work for that method's narrower need) before relying on it -- don't
+assume the precedent transfers without checking its actual
+preconditions against `get_raw_transaction`'s.
 IMPL>>>
 
 
