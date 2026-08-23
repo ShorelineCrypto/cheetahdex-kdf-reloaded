@@ -377,6 +377,24 @@ pub enum SiaCheckIfMyPaymentSentError {
     EventVariant(EventDataWrapper),
 }
 
+/// Errors raised while searching for the spend of an HTLC payment (CRD
+/// ch.20 §20.10 D3).
+#[derive(Debug, Error)]
+pub enum SiaCoinSearchSwapTxSpendError {
+    #[error("[search-swap-spend] keypair fetch failed: {0}")]
+    MyKeypair(#[from] SiaCoinMyKeypairError),
+    #[error("[search-swap-spend] other_pub wrong length, expected 33 bytes, got: {0:?}")]
+    InvalidOtherPublicKeyLength(Vec<u8>),
+    #[error("[search-swap-spend] other_pub parse failed: {0}")]
+    ParseOtherPublicKey(#[from] PublicKeyError),
+    #[error("[search-swap-spend] payment tx parse failed: {0}")]
+    ParseTx(#[from] SiaTransactionError),
+    #[error("[search-swap-spend] secret_hash parse failed: {0}")]
+    ParseSecretHash(#[from] Hash256Error),
+    #[error("[search-swap-spend] walletd event fetch failed: {0}")]
+    FetchEvents(#[from] SiaHistoryFetchError),
+}
+
 /// Errors raised while extracting the HTLC preimage from a spend tx.
 #[derive(Debug, Error)]
 #[allow(clippy::large_enum_variant)]

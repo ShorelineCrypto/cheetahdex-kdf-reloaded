@@ -22,18 +22,41 @@ impl MarketCoinOps for SiaCoin {
         Ok(public_key.to_string())
     }
 
+    /// Sia's ed25519 signing (`sia_rust::types::Keypair::sign`) signs the raw message
+    /// bytes directly and has no pre-hash step (unlike ECDSA's fixed-width digest
+    /// requirement), so there is no 32-byte hash to expose here. Every other
+    /// ed25519-keyed coin in this crate (e.g. Solana) answers the same way.
     fn sign_message_hash(&self, _message: &str) -> Option<[u8; 32]> { None }
 
-    fn sign_message(&self, _message: &str) -> SignatureResult<String> {
-        MmError::err(SignatureError::InternalError(
-            "SiaCoin::sign_message: Unsupported".to_string(),
-        ))
+    /// Signs `message`'s raw UTF-8 bytes with the coin's ed25519 keypair, matching
+    /// `sia_rust::types::Keypair::sign`'s only signing primitive — it has no message
+    /// prefix/hash convention of its own, so the raw bytes are signed as-is. The
+    /// hex-encoded signature is `Signature`'s own `Display` format.
+    fn sign_message(&self, message: &str) -> SignatureResult<String> {
+        let key_pair = self
+            .my_keypair()
+            .map_err(|e| SignatureError::InternalError(e.to_string()))?;
+        let signature = key_pair.sign(message.as_bytes());
+        Ok(signature.to_string())
     }
 
-    fn verify_message(&self, _signature: &str, _message: &str, _address: &str) -> VerificationResult<bool> {
-        MmError::err(VerificationError::InternalError(
-            "SiaCoin::verify_message: Unsupported".to_string(),
-        ))
+    /// Verifies `signature` over `message`'s raw UTF-8 bytes against `pubkey`.
+    ///
+    /// Unlike this crate's ECDSA-recoverable coins, a plain ed25519 signature does
+    /// not let the public key be recovered from `(message, signature)` alone, and a
+    /// Sia wallet address (`Address`, see `siacoin_types.rs`) is a one-way blake2b
+    /// hash of a spend policy, not an invertible encoding of the public key — so an
+    /// address alone cannot serve as ed25519 verification key material. `pubkey` is
+    /// therefore the sender's Sia public key (`sia_rust::types::PublicKey`'s own
+    /// `ed25519:<hex>` string form), not a Sia wallet address; this mirrors how this
+    /// crate's other ed25519-keyed coin (Solana) already resolves the identical
+    /// constraint by taking a public key rather than an address in this parameter.
+    fn verify_message(&self, signature: &str, message: &str, pubkey: &str) -> VerificationResult<bool> {
+        let public_key =
+            PublicKey::from_str(pubkey).map_err(|e| VerificationError::AddressDecodingError(e.to_string()))?;
+        let signature = sia_rust::types::Signature::from_str(signature)
+            .map_err(|e| VerificationError::SignatureDecodingError(e.to_string()))?;
+        Ok(public_key.verify(message.as_bytes(), &signature).is_ok())
     }
 
     fn my_balance(&self) -> BalanceFut<CoinBalance> {
@@ -262,5 +285,72 @@ mod send_raw_tx_tests {
             err.contains("trailing characters at line 1 column 2"),
             "expected the old bug's exact failure mode, got: {err}"
         );
+    }
+}
+
+/// `sign_message`/`verify_message` exercise `SiaKeypair::sign` and `PublicKey::verify`
+/// exactly as written above; no mock `SiaApiClient` fixture exists yet in this crate to
+/// build a full `SiaCoin` (see `mod.rs`'s generic-over-backend `SiaCoinGeneric`), so
+/// these tests exercise those same sia-rust primitives and the string encode/decode
+/// steps directly, matching this file's existing pure-logic test style.
+#[cfg(test)]
+mod sign_verify_message_tests {
+    use super::*;
+
+    fn keypair(seed: u8) -> SiaKeypair {
+        SiaKeypair::from_private_bytes(&[seed; 32]).expect("32 bytes is a valid ed25519 secret key")
+    }
+
+    #[test]
+    fn signed_message_verifies_against_the_signer_pubkey() {
+        let key_pair = keypair(1);
+        let pubkey_str = key_pair.public().to_string();
+
+        let signature = key_pair.sign(b"hello sia").to_string();
+
+        let public_key = PublicKey::from_str(&pubkey_str).unwrap();
+        let parsed_sig = sia_rust::types::Signature::from_str(&signature).unwrap();
+        assert!(public_key.verify(b"hello sia", &parsed_sig).is_ok());
+    }
+
+    #[test]
+    fn verification_fails_for_a_tampered_message() {
+        let key_pair = keypair(1);
+        let signature = key_pair.sign(b"hello sia").to_string();
+
+        let public_key = key_pair.public();
+        let parsed_sig = sia_rust::types::Signature::from_str(&signature).unwrap();
+        assert!(public_key.verify(b"hello SIA", &parsed_sig).is_err());
+    }
+
+    #[test]
+    fn verification_fails_against_a_different_signers_pubkey() {
+        let signer = keypair(1);
+        let other = keypair(2);
+        let signature = signer.sign(b"hello sia").to_string();
+
+        let parsed_sig = sia_rust::types::Signature::from_str(&signature).unwrap();
+        assert!(other.public().verify(b"hello sia", &parsed_sig).is_err());
+    }
+
+    /// `verify_message`'s `pubkey` argument is a Sia public key
+    /// (`ed25519:<64-hex-chars>`), not a Sia wallet address — an address is a
+    /// one-way blake2b hash of a spend policy and cannot serve as ed25519
+    /// verification key material. A genuine Sia address must therefore fail to
+    /// parse as a `PublicKey`, the same decode step `verify_message` performs.
+    #[test]
+    fn a_sia_wallet_address_does_not_parse_as_a_pubkey() {
+        let address = keypair(1).public().address().to_string();
+        assert!(PublicKey::from_str(&address).is_err());
+    }
+
+    #[test]
+    fn malformed_pubkey_string_is_rejected() {
+        assert!(PublicKey::from_str("not-a-pubkey").is_err());
+    }
+
+    #[test]
+    fn malformed_signature_string_is_rejected() {
+        assert!(sia_rust::types::Signature::from_str("not-a-signature").is_err());
     }
 }

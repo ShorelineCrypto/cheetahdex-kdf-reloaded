@@ -191,9 +191,12 @@ pub(crate) fn tx_details_from_event(
 }
 
 impl SiaCoin {
-    /// Retrieve the wallet address's **complete** event set from walletd
-    /// (R53.4.3), paging until a short page arrives.
-    async fn fetch_all_events(&self, address: &Address) -> Result<Vec<Event>, SiaHistoryFetchError> {
+    /// Retrieve an address's **complete** event set from walletd (R53.4.3),
+    /// paging until a short page arrives.
+    ///
+    /// `pub(super)`: the swap-spend event-walk (D3, `siacoin_swap_ops.rs`)
+    /// reuses this same paging rather than adding a second implementation.
+    pub(super) async fn fetch_all_events(&self, address: &Address) -> Result<Vec<Event>, SiaHistoryFetchError> {
         let mut all = Vec::new();
         let mut offset = 0i64;
         loop {
