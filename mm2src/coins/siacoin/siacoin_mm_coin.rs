@@ -349,12 +349,40 @@ impl MmCoin for SiaCoin {
         Box::new(fut.boxed().compat())
     }
 
-    fn get_raw_transaction(&self, _req: RawTransactionRequest) -> RawTransactionFut {
-        Box::new(futures01::future::err(MmError::new(
-            RawTransactionError::NotImplemented {
-                coin: self.ticker().to_string(),
-            },
-        )))
+    /// Real (CRD ch.20 §20.10 D8): fetches a transaction by txid, confirmed
+    /// or in the mempool. `sia_rust`'s `ApiClientHelpers::get_transaction`
+    /// is the confirmed-tx-by-id lookup -- verified against D7's
+    /// `watcher_validate_taker_fee` precedent (this same file) rather than
+    /// assumed: `get_transaction` is itself defined (sia-rust
+    /// `transport/client/helpers.rs`) as a plain `get_event(txid)` filtered
+    /// to the `EventDataWrapper::V2Transaction` variant, i.e. exactly the
+    /// txid-scoped lookup D7 inlines, not an address/wallet-scoped query
+    /// that happens to work for D7's narrower need -- so it transfers
+    /// cleanly to this general raw-tx fetch. Falls back to
+    /// `get_unconfirmed_transaction` (same mempool-only lookup this coin
+    /// already uses, e.g. `wait_for_tx_spend`'s `found_in_mempool`/D7's own
+    /// fallback) for a transaction that exists only in the mempool.
+    fn get_raw_transaction(&self, req: RawTransactionRequest) -> RawTransactionFut {
+        let coin = self.clone();
+        let fut = async move {
+            let txid =
+                Hash256::from_str(&req.tx_hash).map_to_mm(|e| RawTransactionError::InvalidHashError(e.to_string()))?;
+
+            let tx = match coin.client.get_transaction(&txid).await {
+                Ok(tx) => tx,
+                Err(_) => coin
+                    .client
+                    .get_unconfirmed_transaction(&txid)
+                    .await
+                    .map_to_mm(|e| RawTransactionError::Transport(e.to_string()))?
+                    .or_mm_err(|| RawTransactionError::HashNotExist(req.tx_hash.clone()))?,
+            };
+
+            Ok(RawTransactionRes {
+                tx_hex: BytesJson(SiaTransaction(tx).tx_hex()),
+            })
+        };
+        Box::new(fut.boxed().compat())
     }
 
     fn decimals(&self) -> u8 { 24 }
