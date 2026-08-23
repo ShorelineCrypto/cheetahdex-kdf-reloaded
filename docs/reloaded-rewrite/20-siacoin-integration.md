@@ -490,72 +490,33 @@ rather than defects. None is a correctness claim.
 - **D5 -- V2 swap protocol.** Neither V2 swap-operations trait is
   implemented for Sia; swaps involving Sia run only over the V1
   protocol ([Chapter 13](13-swap-version-negotiation.md)).
-- **D6 -- Size-aware fee estimation.** The withdraw path takes
-  the fee from the request rather than estimating from
-  transaction size.
+- **D6 -- Size-aware fee estimation.** *Closed.* The withdraw path
+  now estimates the fee from a probe transaction's real serialized
+  size (`V2TransactionBuilder::weight()`) times the live
+  `GET /api/txpool/fee` rate, recomputed as each candidate input is
+  added, rather than a flat constant. Sia's V2 wire encoding writes
+  every `Currency` as a fixed-width `u128`, so weight depends only on
+  input/output counts, never amounts -- a zero-valued placeholder
+  transaction is exact, not approximate. Commit `836a6278c`.
 
-<<<IMPL
-This pass implements D6 only. Do not touch swap-spend search, message
-signing, HD wallet, watcher eligibility, or raw-tx fetch -- other
-passes may be running concurrently elsewhere in this module.
-
-`mm2src/coins/siacoin/sia_withdraw.rs` currently applies a hard-coded
-flat fee, `TX_FEE_HASTINGS` (10 SC), to every withdraw transaction
-regardless of size. Its own doc comment already names the blocker:
-"switch to size-aware fee estimation once the v2 builder exposes a
-serialized-size helper."
-
-First, check whether that helper now exists: does `V2TransactionBuilder`
-(already imported in this file) or another public type in the bound
-Sia client library (sia_rust) expose a way to get a built/serialized
-transaction's byte size, or a fee-per-byte constant/endpoint from
-walletd, that this pass can use to replace the flat constant with a
-real estimate? If yes, wire it in, replacing `TX_FEE_HASTINGS`'s use
-in `plan_inputs`/`build` with a size-based calculation. If the needed
-capability genuinely does not exist in the bound library version, do
-not force it or invent a byte-size calculation independently (that
-would silently diverge from whatever the library's own serialization
-actually produces) -- leave the flat fee as-is, update this doc
-comment to state precisely what's missing instead of removing it, and
-report exactly what you checked and what's absent.
-
-`sia_withdraw.rs`'s own top-of-file invariant note says "Only
-`PrivKeyPolicy::KeyPair` (Iguana) is supported... HD-wallet support is
-gated on upstream sia-rust work." This is unrelated to D6 and out of
-this pass's scope -- do not attempt to lift that restriction here, it
-belongs to D1's HD-wallet work if it turns out to be relevant there at
-all (D1 covers address derivation/discovery, not necessarily withdraw).
-IMPL>>>
-
-- **D7 -- Watcher eligibility.** The watcher-operations surface
-  is empty; Sia HTLCs are not watcher-eligible.
-
-<<<IMPL
-This pass implements D7 only. Do not touch swap-spend search, message
-signing, HD wallet, fee estimation, or raw-tx fetch -- other passes
-may be running concurrently elsewhere in this module.
-
-`impl WatcherOps for SiaCoin {}` in `siacoin_mm_coin.rs` currently uses
-every default the `WatcherOps` trait (`mm2src/coins/lp_coins_traits.rs`)
-provides -- an empty impl block. Read that trait's full method set and
-default bodies, and this crate's `WatcherOps` implementation for at
-least one other coin family that actually implements it for real, for
-the shape of a genuine implementation.
-
-Sia's HTLC is a native spend policy (§20.6), not a UTXO/EVM-style
-script/contract -- before implementing each method, consider whether a
-third party (the watcher) can actually construct and broadcast a valid
-spend/refund transaction against it using only what a watcher is given
-(the payment tx, the secret once revealed, public keys) and Sia's
-public V2-transaction/spend-policy primitives, the same way it can for
-the coin families that already implement this trait for real. If a
-specific method's precondition genuinely cannot be met for Sia's HTLC
-model, do not force an implementation that can't actually work --
-implement what IS genuinely watcher-eligible, leave the rest as an
-`unimplemented!` stub per the stub policy, and report precisely which
-methods you judged infeasible and why, so this can be reviewed rather
-than silently accepted.
-IMPL>>>
+- **D7 -- Watcher eligibility.** *Closed, partial by design.* Four of
+  the five non-trivial `WatcherOps` methods are implemented for real:
+  `watcher_validate_taker_fee` (partial -- `WatcherValidateTakerFeeInput`
+  carries neither a swap uuid nor an amount, so it can only check the
+  fee tx exists and pays the right address, not that it belongs to
+  *this* swap or is the right amount), `watcher_validate_taker_payment`,
+  `create_taker_payment_refund_preimage` (sound because Sia's V2
+  signature hash provably excludes each input's `satisfied_policy`
+  bytes, so a refund can be signed ahead of time using only this
+  node's key), and `watcher_search_for_swap_tx_spend`.
+  `create_maker_payment_spend_preimage` is judged infeasible and
+  deliberately left on the trait's own graceful default rather than
+  `unimplemented!()`: the trait supplies only `secret_hash`, never the
+  secret, and this method is called before the secret exists to the
+  caller; completing it needs `swap_watcher.rs`'s `SpendMakerPayment`
+  state to splice a revealed secret into a pre-built transaction before
+  broadcast, which it does not do for any coin today (a pre-existing,
+  coin-agnostic gap, not Sia-specific). Commit `73ef8b608`.
 
 - **D8 -- Raw-transaction fetch.** A unified historical
   raw-transaction fetch is not implemented; walletd's mempool
