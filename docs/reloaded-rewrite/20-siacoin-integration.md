@@ -457,6 +457,69 @@ rather than defects. None is a correctness claim.
   single-address HD activation path is unaffected either way. Code:
   `mm2src/coins/siacoin/sia_hd_wallet.rs`.
 
+<<<IMPL
+This pass closes D1's remaining activation-wiring gap only. Do not
+touch D3/D4/D6/D7/D8 (already closed, committed) or D5/Phase B (out of
+scope, gated behind its own chapter).
+
+Goal: make the already-landed `SiaHDWallet`/`SiaHDAccount`
+(`sia_hd_wallet.rs`) actually reachable through activation and the HD
+RPC surface, the way `EthCoin`/`UtxoStandardCoin` already are for their
+own coins. Concretely, still open per this chapter's own D1 entry:
+`SiaCoinBuilder`/activation, `CoinWithDerivationMethod`, and the HD RPC
+surface (`HDWalletRpcOps`/`AccountBalanceRpcOps`/
+`InitCreateHDAccountRpcOps`, all in `mm2src/coins/hd_wallet.rs` or
+`mm2src/coins/rpc_command/`) do not yet consume `sia_hd_wallet.rs`.
+
+Mirror `mm2src/coins/eth/eth_hd_wallet.rs` (~600 lines, the most
+complete example in this crate: `CoinWithDerivationMethod`,
+`HDWalletCoinOps`, `HDWalletRpcOps`, `HDWalletBalanceOps`,
+`AccountBalanceRpcOps`, `InitAccountBalanceRpcOps`,
+`InitCreateHDAccountRpcOps` all impl'd for `EthCoin` there) for the
+*shape* of each trait impl, and `SiaCoin`'s existing
+`priv_key_policy: Arc<PrivKeyPolicy<SiaKeypair>>` field/`SiaCoinBuilder`
+(`mm2src/coins/siacoin/mod.rs`) plus `sia_activation.rs`
+(`mm2src/coins_activation/src/sia_activation.rs`) for what Sia's
+activation path currently does (Iguana/single-address only, via the
+`InitStandaloneCoinActivationOps` task framework -- note this is a
+different activation-request framework than ETH's; check how UTXO
+coins that use the *same* `InitStandaloneCoinActivationOps` framework
+(e.g. `qtum.rs`/`utxo_standard.rs` -- also check their own
+`*_activation.rs` in `coins_activation/`) wire HD activation through
+it, since that may be the closer precedent than ETH's for the
+activation-request/RPC-task side specifically, even though ETH's
+`eth_hd_wallet.rs` is still the best precedent for the trait-impl
+shapes themselves).
+
+One architectural wrinkle to check before assuming ETH's shape
+transfers cleanly: ETH/UTXO's HD flows support hardware-wallet /
+public-key-only account extraction (`ExtractExtendedPubkey`, BIP32
+xpub-based) because secp256k1 allows non-hardened child-*public*-key
+derivation without the parent private key. SLIP-10 ed25519 has no such
+capability (already established by this chapter's D1 entry above --
+`SiaHDAccount` carries a private signing key, not an xpub, for exactly
+this reason). If `ExtractExtendedPubkey`-shaped hardware-wallet support
+turns out to be structurally required by the traits you're
+implementing and cannot work for Sia's ed25519 scheme, do not force a
+fake implementation -- implement the passphrase/seed-based path for
+real (this is the actually-reachable case for Sia today), stub the
+hardware-wallet-specific piece per the stub policy with a clear
+`unimplemented!("ch20 D1 activation: ...")` and reason, and report this
+precisely rather than silently omitting it.
+
+This is a large, multi-file wiring task. If partway through it becomes
+clear the full RPC surface can't be finished cleanly in one pass,
+prioritize landing a smaller *correct*, compiling slice over a larger
+broken one -- e.g. `CoinWithDerivationMethod` + `SiaCoinBuilder`
+constructing `DerivationMethod::HDWallet(SiaHDWallet)` when an HD
+activation is requested (with the existing single-address/Iguana path
+completely unaffected) is a coherent, independently valuable stopping
+point even if the RPC surface (`HDWalletRpcOps` etc.) needs a follow-up
+pass -- report exactly what you landed vs. deferred and why, per the
+stub policy, rather than pushing through a risky change to force
+full completion.
+IMPL>>>
+
 - **D2 -- History persistence.** *Closed by*
   [Chapter 53](53-sia-transaction-history.md), which binds Sia
   transaction history as a projection of walletd's per-address
