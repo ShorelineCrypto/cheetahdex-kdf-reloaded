@@ -552,7 +552,9 @@ IMPL>>>
 
 - **D5 -- V2 swap protocol.** Neither V2 swap-operations trait is
   implemented for Sia; swaps involving Sia run only over the V1
-  protocol ([Chapter 13](13-swap-version-negotiation.md)).
+  protocol ([Chapter 13](13-swap-version-negotiation.md)). Binding
+  design drafted in [Chapter 54](54-sia-swap-v2-path.md) (status:
+  DRAFT, not yet approved for implementation).
 - **D6 -- Size-aware fee estimation.** *Closed.* The withdraw path
   now estimates the fee from a probe transaction's real serialized
   size (`V2TransactionBuilder::weight()`) times the live
