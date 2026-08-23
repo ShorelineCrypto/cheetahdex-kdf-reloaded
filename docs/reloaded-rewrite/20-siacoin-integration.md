@@ -441,6 +441,41 @@ rather than defects. None is a correctness claim.
   is wired (§20.4.1). Full multi-account HD support (gap-limit
   honouring, address discovery, multiple receive addresses) is
   deferred; the HD-wallet implementation surface is a stub.
+
+<<<IMPL
+This pass implements D1 only. Do not touch swap-spend search, message
+signing, watcher eligibility, fee estimation, or raw-tx fetch -- other
+passes may be running concurrently in siacoin_swap_ops.rs and
+siacoin_market_ops.rs; do not edit either file.
+
+Sia currently derives exactly one address per HD account (§20.4.1,
+R-A1 step 2), using SLIP-10 ed25519 under SLIP-44 coin type 1991 --
+both already dictated, do not change them. This pass extends that to
+real multi-account HD: `HDWalletOps`/`HDAccountOps`
+(`mm2src/coins/hd_wallet.rs`) implemented for Sia, with gap-limit
+honouring and address discovery, mirroring how an existing
+implementation (e.g. UTXO's, in `mm2src/coins/utxo/utxo_common/
+utxo_common_hd.rs` or wherever `impl HDWalletOps for` UTXO's coin type
+lives) structures it -- for the trait-conformance shape, not
+UTXO-specific derivation logic (UTXO's own coin type / script family
+does not apply here).
+
+Before implementing multi-address balance/history aggregation, verify
+against the bound Sia client library's (sia_rust) public API whether
+querying balance/events across several addresses is actually
+supported the way this needs (e.g. can it be done per-address and
+summed, or does it need something the library doesn't expose). If the
+walletd/sia-rust surface makes a specific piece of this infeasible as
+specified, do not force it or invent a client API that doesn't exist
+-- implement everything that IS feasible, leave the infeasible piece
+as an `unimplemented!` stub per the stub policy, and report exactly
+what's blocked and why in your final report so this can be re-scoped.
+
+Existing single-address-mode activation (§20.4.1) must keep working
+unchanged for a coin that doesn't request multi-account HD -- this is
+additive, not a replacement of the current path.
+IMPL>>>
+
 - **D2 -- History persistence.** *Closed by*
   [Chapter 53](53-sia-transaction-history.md), which binds Sia
   transaction history as a projection of walletd's per-address
@@ -467,9 +502,92 @@ rather than defects. None is a correctness claim.
   event-walk itself remains unimplemented; this closes the unsafe
   default, not the deferred work. Code:
   `mm2src/coins/siacoin/siacoin_swap_ops.rs`.
+
+<<<IMPL
+This pass implements D3 only. Do not touch any other module of this
+chapter (history, activation, HD, watcher, message signing, V2) --
+those are separate passes.
+
+Replace the two `Err("... not yet implemented for Sia ...")` stub
+bodies of `search_for_swap_tx_spend_my`/`search_for_swap_tx_spend_other`
+in `mm2src/coins/siacoin/siacoin_swap_ops.rs` with a real event-walk:
+
+1. Fetch the address's event set the same way
+   `siacoin_history.rs`'s `fetch_all_events` already does (page the
+   walletd address-events endpoint to completion; do not add a second,
+   divergent paging implementation -- reuse or directly mirror that
+   one).
+2. Find the event whose consumed inputs include the HTLC payment
+   transaction's output id (the `tx`/`output_index` this function
+   already receives).
+3. If no such event exists, return `Ok(None)` -- the payment is
+   genuinely unspent, this is the one case "not found" was always
+   correct for.
+4. If found, classify it: spent-via-secret (the success path) vs.
+   refunded-via-timelock (the refund path), by inspecting the
+   satisfied spend policy the consuming event/transaction carries --
+   the two cases share the same public/private-key policy leaves
+   `SpendPolicy::atomic_swap`/`atomic_swap_success` builds (§20.6);
+   distinguish by which leaf the revealed signature set actually
+   satisfies. Reuse the secret-extraction logic already bound by R-S6
+   (do not re-derive secret-hash comparison logic independently).
+5. Return `FoundSwapTxSpend::Spent(tx)` or `FoundSwapTxSpend::Refunded(tx)`
+   accordingly, matching the `FoundSwapTxSpend` enum every other coin
+   family's `search_for_swap_tx_spend_*` already returns (see the UTXO
+   implementation in `utxo_common_swap.rs` for the shape, not the
+   logic -- UTXO's script-based classification does not apply to
+   Sia's spend-policy model).
+
+If classifying spent-vs-refunded turns out to need a walletd/sia-rust
+API this pass cannot find a public accessor for, stop and report
+exactly what's missing rather than guessing at the data shape.
+
+Add unit tests for the classification logic (spent, refunded, not
+found) using constructed events, following the existing test style in
+`siacoin_history.rs`'s `tests` module (pure mapping tests against
+constructed `Event` values, no live walletd needed).
+IMPL>>>
+
 - **D4 -- Message signing.** Generic message sign/verify report
   "unsupported"; the ed25519 primitives exist but the
   coin-level wiring is absent.
+
+<<<IMPL
+This pass implements D4 only. Do not touch swap-spend search, history,
+activation, HD, watcher, or V2 swap protocol -- those are separate
+passes (one may be running concurrently in another file; do not edit
+`siacoin_swap_ops.rs`).
+
+`MarketCoinOps::sign_message_hash`/`sign_message`/`verify_message`
+(`mm2src/coins/lp_coins_traits.rs`) are currently unconditional
+"unsupported" stubs in `mm2src/coins/siacoin/siacoin_market_ops.rs`
+(search that file for `fn sign_message`). Wire them to Sia's own
+ed25519 keypair (the same key `my_keypair()`/`SiaCoin` already uses
+for swap HTLCs).
+
+Before choosing a message-to-signature byte encoding, check whether
+the bound Sia client library (sia-rust) exposes a documented
+message-signing convention of its own (a signing/verification helper,
+or a stated wire format for signed messages) -- if Sia's own public
+API dictates the format, use exactly that, it is not this pass's
+choice to make. If no such convention exists anywhere in the bound
+library's public surface, this is genuinely undictated: stop and
+report that explicitly (with what you found and did not find) rather
+than inventing a signing format silently, since an invented format
+that later needs to change is a wire break for anyone who signed a
+message under it. Do not port another coin family's message-prefix
+convention (e.g. a Bitcoin-style "signmessage" prefix) onto Sia's
+ed25519 keys on your own authority -- that convention is specific to
+secp256k1-recoverable signatures, not a general pattern.
+
+For the response/error shape only (not the signing algorithm), match
+the existing style used by another `MarketCoinOps` implementation in
+this crate that already returns real (non-"unsupported") results, e.g.
+`mm2src/coins/tendermint/tendermint_market_ops.rs` or
+`mm2src/coins/eth/eth_market_ops.rs` -- for how `SignatureResult`/
+`VerificationResult` errors are constructed, not for their signing math.
+IMPL>>>
+
 - **D5 -- V2 swap protocol.** Neither V2 swap-operations trait is
   implemented for Sia; swaps involving Sia run only over the V1
   protocol ([Chapter 13](13-swap-version-negotiation.md)).
