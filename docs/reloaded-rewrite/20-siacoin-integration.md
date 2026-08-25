@@ -402,9 +402,11 @@ address.
 assemble a V2 transaction with one output of the requested amount
 and a change output back to the source address.
 
-**R-W3.** Set the miner fee from the request value. Size-aware
-fee estimation is **not** performed at the time of writing
-(§20.10 D6).
+**R-W3.** Set the miner fee from a size-aware estimate: a probe
+transaction's real serialized weight times walletd's current
+hastings-per-byte rate, recomputed as each candidate input is
+added (§20.10 D6, closed). The request does not carry a
+fee-override value for this path.
 
 **R-W4.** Sign the transaction with the active keypair and return
 the serialised transaction together with fee/amount details
@@ -431,6 +433,17 @@ to be corrected by renaming to `amount`.
 > reuse, not private expression. The Rust struct name that carries
 > it, its derive list, and its module location remain discretionary
 > (§20.0, §20.3).
+
+**R-W5.** This withdraw path is the coin-generic `WithdrawOps`
+implementation the framework's shared withdraw RPC surface drives.
+It is therefore reachable both through the direct `withdraw` method
+and through the generic `task::withdraw::{init,status,user_action,
+cancel}` family, on the same terms as every other coin family that
+does not define coin-specific task-withdraw behaviour of its own;
+the request/response wire contract for both paths is bound by
+[Chapter 49](49-withdrawal-task-path.md), not by this chapter. This
+chapter binds only the Sia-specific fee/signing behaviour of
+R-W1--R-W4.
 
 ## 20.10 Deferred Work
 

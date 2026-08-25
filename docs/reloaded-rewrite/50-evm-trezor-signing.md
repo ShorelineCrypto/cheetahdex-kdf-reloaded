@@ -415,6 +415,19 @@ a placement/seam note; the internal decomposition is not bound.
 > requires. If the published API later defines a hardware-wallet swap flow, the
 > docs govern and this note shall be revisited.
 
+> **Cross-reference (not a contradiction).** UTXO coins *do* support
+> Trezor-backed version-two swap signing
+> ([Chapter 15](15-swap-v2-utxo-path.md) §15.13, R45-R48), which can read as
+> tension with the EVM verdict above. It is not: the UTXO version-two state
+> machine signs each HTLC transaction interactively, one step at a time, as the
+> swap reaches that step (R47 of ch. 15), so the device is prompted live at the
+> moment a signature is needed. The EVM/MetaMask swap path this chapter's
+> verdict mirrors instead needs signatures the framework can schedule and hold
+> for later, non-interactive use (detached refund pre-signing, §47.5) -- a shape
+> no interactive hardware-signing model, UTXO's included, can satisfy. The two
+> chapters describe the same class of device (Trezor) under two different
+> swap-signing shapes, not a disagreement about what Trezor can do.
+
 ---
 
 ## 50.8 Acceptance tests

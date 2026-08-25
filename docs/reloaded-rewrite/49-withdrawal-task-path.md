@@ -1,5 +1,7 @@
 # 49. Withdrawal task path
 
+**Status:** driving-spec.
+
 ## 49.1 Scope
 
 This chapter covers the withdrawal JSON-RPC surface for the direct `withdraw`

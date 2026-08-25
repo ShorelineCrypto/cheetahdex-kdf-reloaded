@@ -3,8 +3,10 @@
 **Status:** driving-spec (required port). This chapter specifies a **shared
 task-activation substrate** for platform-coin-with-tokens activation. It does not
 introduce a new coin, a new wire contract, or a new activation result shape; it
-provides the long-running task machinery that the EVM (ch. 35 §35.3) and
-Tendermint (ch. 36 §36.6) task-activation families were recorded as blocked on.
+provides the long-running task machinery that the EVM
+([Chapter 35](35-evm-v2-activation-rpcs.md) §35.3) and
+Tendermint ([Chapter 36](36-tendermint-v2-activation-rpcs.md) §36.6)
+task-activation families were recorded as blocked on.
 
 > **One-sentence claim:** the project shall provide a generic
 > platform-coin task-activation framework -- the `init`/`status`/`user_action`/
@@ -71,6 +73,19 @@ task so that progress can be polled and the run can be cancelled. The `init`
 parameters and the final success result are **identical** to the one-shot call's
 (R48.2); no task-only request field is added, preserving 100% compatibility with
 the published one-shot activation schema.
+
+> **Implementation status (informative).** The substrate specified in this
+> chapter (§§48.1--48.7) is implemented: a generic
+> `init`/`status`/`user_action`/`cancel` task wrapper drives the existing
+> one-shot platform-coin-with-tokens activation routine as its unit of work, and
+> both required registrations of R48.4.1 are wired -- `task::enable_eth::*` over
+> the EVM platform coin and `task::enable_tendermint::*` over the Tendermint
+> platform coin -- each routed on native and WASM targets alike, satisfying
+> R48.4.2's same-target-coverage requirement. This closes the dependency both
+> [Chapter 35](35-evm-v2-activation-rpcs.md) §35.3 and
+> [Chapter 36](36-tendermint-v2-activation-rpcs.md) §36.6 record on this
+> substrate (§48.9); those two chapters' task-family sections are current, not
+> merely unblocked in principle.
 
 ---
 
@@ -289,11 +304,13 @@ not additional contract beyond §§48.1--48.7.
 
 ## 48.9 Relationship to other chapters
 
-- Ch. 35 §35.3 (`task::enable_eth`) and ch. 36 §36.6
+- [Chapter 35](35-evm-v2-activation-rpcs.md) §35.3 (`task::enable_eth`) and
+  [Chapter 36](36-tendermint-v2-activation-rpcs.md) §36.6
   (`task::enable_tendermint`) define the **per-coin** wire contract (params,
   result, error discriminants) and record the dependency on this substrate. This
   chapter supplies the substrate; with it in place, those sections are
-  **unblocked** and their task families are delivered.
+  **unblocked** and their task families are delivered (see the implementation
+  status note in §48.0).
 - Ch. 38 (UTXO coin maintenance) and the standalone-coin task family describe the
   **sibling** substrate and the hardware task plumbing that R48.3.2 reuses.
 - Ch. 47 (MetaMask) defines the WASM MetaMask signing policy under which EVM

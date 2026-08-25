@@ -44,8 +44,14 @@ does not introduce a new coin (the Sia coin itself is bound by ch. 20).
 Sia is a **standalone coin** (it is not a platform-with-tokens coin and has no
 child tokens). It therefore activates through the project's shared
 **standalone-coin task-activation** mechanism -- the same long-running task
-family used by UTXO, Qtum, and Z-coin -- rather than the platform-coin activator
-used by EVM (ch. 35) and Tendermint (ch. 36). The surface specified here is:
+family used by UTXO, Qtum, and Z-coin -- rather than the **platform-coin
+task-activation framework** of [Chapter 48](48-platform-coin-task-activation.md)
+that EVM ([Chapter 35](35-evm-v2-activation-rpcs.md)) and Tendermint
+([Chapter 36](36-tendermint-v2-activation-rpcs.md)) use for their
+platform-with-tokens activation. Sia is a standalone-coin consumer of the
+**sibling** substrate ch. 48 §48.9 itself names, not a ch. 48 consumer: it has no
+platform/token split for ch. 48's framework to wrap. The surface specified here
+is:
 
 | Method string | Tier | Purpose |
 | --- | --- | --- |
