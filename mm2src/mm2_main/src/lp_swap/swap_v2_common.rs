@@ -1712,12 +1712,14 @@ mod tests {
                 taker_payment_spend: BytesJson::from(vec![0x11]),
                 maker_payment: BytesJson::from(vec![0xBB]),
                 negotiation_data: negotiation_data.clone(),
+                taker_payment: BytesJson::from(vec![0xEE]),
             },
             TakerSwapEvent::MakerPaymentSpent {
                 maker_coin_start_block: 100,
                 taker_coin_start_block: 200,
                 maker_payment_spend: BytesJson::from(vec![0x22]),
                 negotiation_data: negotiation_data.clone(),
+                taker_payment: BytesJson::from(vec![0xEE]),
             },
             TakerSwapEvent::TakerFundingRefunded {
                 funding_tx: BytesJson::from(vec![0xAA]),

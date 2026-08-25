@@ -140,12 +140,28 @@ pub enum TakerSwapEvent {
         taker_payment_spend: BytesJson,
         maker_payment: BytesJson,
         negotiation_data: StoredTakerNegotiationData,
+        /// The taker's own payment transaction (CRD ch.52 D8). Additive and defaulted:
+        /// a log written before this field existed resumes with empty bytes here rather
+        /// than failing to parse -- which is correct for such a log, since no swap logged
+        /// before this field existed can still be waiting at `MakerPaymentSpent` today (V2
+        /// swaps don't live that long), not a signal that empty bytes are fine going
+        /// forward.
+        #[serde(default)]
+        taker_payment: BytesJson,
     },
     MakerPaymentSpent {
         maker_coin_start_block: u64,
         taker_coin_start_block: u64,
         maker_payment_spend: BytesJson,
         negotiation_data: StoredTakerNegotiationData,
+        /// The taker's own payment transaction (CRD ch.52 D8). Additive and defaulted:
+        /// a log written before this field existed resumes with empty bytes here rather
+        /// than failing to parse -- which is correct for such a log, since no swap logged
+        /// before this field existed can still be waiting at `MakerPaymentSpent` today (V2
+        /// swaps don't live that long), not a signal that empty bytes are fine going
+        /// forward.
+        #[serde(default)]
+        taker_payment: BytesJson,
     },
     TakerFundingRefunded {
         funding_tx: BytesJson,
@@ -477,16 +493,22 @@ pub struct TakerPaymentSpent<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCo
     pub taker_payment_spend: BytesJson,
     pub maker_payment: BytesJson,
     pub negotiation_data: StoredTakerNegotiationData,
+    /// The taker's own payment transaction, carried forward from `TakerPaymentSent`/
+    /// `TakerPaymentSentPreimageSendingSkipped` (CRD ch.52 D8) so a later
+    /// confirmation-timeout abort at `MakerPaymentSpent` still has real bytes to refund,
+    /// instead of the state field scope dropping them two hops too early.
+    pub taker_payment: BytesJson,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymentSpent<M, T> {
-    pub fn new(mb: u64, tb: u64, tps: BytesJson, mp: BytesJson, nd: StoredTakerNegotiationData) -> Self {
+    pub fn new(mb: u64, tb: u64, tps: BytesJson, mp: BytesJson, nd: StoredTakerNegotiationData, tp: BytesJson) -> Self {
         TakerPaymentSpent {
             maker_coin_start_block: mb,
             taker_coin_start_block: tb,
             taker_payment_spend: tps,
             maker_payment: mp,
             negotiation_data: nd,
+            taker_payment: tp,
             _p: PhantomData,
         }
     }
@@ -497,15 +519,21 @@ pub struct MakerPaymentSpent<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCo
     pub taker_coin_start_block: u64,
     pub maker_payment_spend: BytesJson,
     pub negotiation_data: StoredTakerNegotiationData,
+    /// The taker's own payment transaction, carried forward from `TakerPaymentSpent`
+    /// (CRD ch.52 D8) so `on_changed`'s confirmation-timeout abort path can build a
+    /// working `TakerPaymentRefundRequired` instead of falling back to empty bytes that
+    /// `refund_combined_taker_payment` cannot use.
+    pub taker_payment: BytesJson,
     _p: PhantomData<(M, T)>,
 }
 impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> MakerPaymentSpent<M, T> {
-    pub fn new(mb: u64, tb: u64, mps: BytesJson, nd: StoredTakerNegotiationData) -> Self {
+    pub fn new(mb: u64, tb: u64, mps: BytesJson, nd: StoredTakerNegotiationData, tp: BytesJson) -> Self {
         MakerPaymentSpent {
             maker_coin_start_block: mb,
             taker_coin_start_block: tb,
             maker_payment_spend: mps,
             negotiation_data: nd,
+            taker_payment: tp,
             _p: PhantomData,
         }
     }
@@ -946,23 +974,27 @@ where
                 taker_payment_spend,
                 maker_payment,
                 negotiation_data,
+                taker_payment,
             } => Box::new(TakerPaymentSpent::new(
                 maker_coin_start_block,
                 taker_coin_start_block,
                 taker_payment_spend,
                 maker_payment,
                 negotiation_data,
+                taker_payment,
             )),
             TakerSwapEvent::MakerPaymentSpent {
                 maker_coin_start_block,
                 taker_coin_start_block,
                 maker_payment_spend,
                 negotiation_data,
+                taker_payment,
             } => Box::new(MakerPaymentSpent::new(
                 maker_coin_start_block,
                 taker_coin_start_block,
                 maker_payment_spend,
                 negotiation_data,
+                taker_payment,
             )),
             TakerSwapEvent::TakerFundingRefunded { .. } => {
                 return MmError::err(SwapRecreateError::Internal(
@@ -1249,6 +1281,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableSta
             taker_payment_spend: self.taker_payment_spend.clone(),
             maker_payment: self.maker_payment.clone(),
             negotiation_data: self.negotiation_data.clone(),
+            taker_payment: self.taker_payment.clone(),
         }
     }
 }
@@ -1261,6 +1294,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> StorableSta
             taker_coin_start_block: self.taker_coin_start_block,
             maker_payment_spend: self.maker_payment_spend.clone(),
             negotiation_data: self.negotiation_data.clone(),
+            taker_payment: self.taker_payment.clone(),
         }
     }
 }
@@ -2388,6 +2422,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                         spend_tx_bytes,
                         self.maker_payment.clone(),
                         self.negotiation_data.clone(),
+                        self.taker_payment.clone(),
                     ),
                     sm,
                 )
@@ -2453,6 +2488,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
                         spend_tx_bytes,
                         self.maker_payment.clone(),
                         self.negotiation_data.clone(),
+                        self.taker_payment.clone(),
                     ),
                     sm,
                 )
@@ -2550,6 +2586,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 self.taker_coin_start_block,
                 maker_payment_spend_bytes,
                 self.negotiation_data.clone(),
+                self.taker_payment.clone(),
             ),
             sm,
         )
@@ -2581,12 +2618,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
                 warn!("Swap {}: maker payment spend not confirmed in time: {}", sm.uuid, e);
                 let reason = AbortReason::MakerPaymentSpendNotConfirmedInTime(e.to_string());
                 return Self::change_state(
-                    TakerPaymentRefundRequired::new(
-                        // We don't have taker_payment bytes here; use empty as fallback
-                        BytesJson::default(),
-                        self.negotiation_data.clone(),
-                        reason,
-                    ),
+                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
                     sm,
                 )
                 .await;
@@ -2785,5 +2817,106 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> LastState f
     type StateMachine = TakerSwapStateMachine<M, T>;
     async fn on_changed(self: Box<Self>, sm: &mut Self::StateMachine) -> () {
         error!("Taker swap {} aborted: {}", sm.uuid, self.reason);
+    }
+}
+
+// Regression tests for CRD ch.52 D8 ------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // `EthCoin` is used only as a compile-time type parameter (the states carry no
+    // coin-typed field, only `PhantomData<(M, T)>`): it is real production code that
+    // implements `MmCoin + MakerCoinSwapOpsV2 + TakerCoinSwapOpsV2`, but no coin
+    // instance, network access, or mocking is needed to exercise `new`/`get_event`.
+    use coins::eth::EthCoin;
+
+    fn negotiation_data_for_test() -> StoredTakerNegotiationData {
+        StoredTakerNegotiationData {
+            maker_secret_hash: BytesJson::from(vec![1, 2]),
+            maker_coin_htlc_pub: BytesJson::from(vec![3, 4]),
+            taker_coin_htlc_pub: BytesJson::from(vec![5, 6]),
+            maker_coin_swap_contract: None,
+            taker_coin_swap_contract: None,
+            maker_payment_locktime: 3000,
+            taker_coin_address: "Raddress".into(),
+        }
+    }
+
+    /// CRD ch.52 D8, state-field-scope half: `TakerPaymentSpent` and `MakerPaymentSpent`
+    /// must carry the real `taker_payment` bytes forward, not drop them. Before the fix,
+    /// neither state (nor `TakerSwapEvent::TakerPaymentSpent`/`::MakerPaymentSpent`) had a
+    /// `taker_payment` field at all, so this test would not have compiled against the
+    /// pre-fix code -- the strongest possible "fails before, passes after".
+    #[test]
+    fn taker_payment_survives_taker_payment_spent_and_maker_payment_spent_events() {
+        let negotiation_data = negotiation_data_for_test();
+        let real_taker_payment = BytesJson::from(vec![0xEE, 0xAD, 0xBE, 0xEF]);
+
+        let taker_payment_spent = TakerPaymentSpent::<EthCoin, EthCoin>::new(
+            100,
+            200,
+            BytesJson::from(vec![0x11]), // taker_payment_spend
+            BytesJson::from(vec![0xBB]), // maker_payment
+            negotiation_data.clone(),
+            real_taker_payment.clone(),
+        );
+        match taker_payment_spent.get_event() {
+            TakerSwapEvent::TakerPaymentSpent { taker_payment, .. } => {
+                assert_eq!(taker_payment, real_taker_payment);
+            },
+            other => panic!("unexpected event: {:?}", other),
+        }
+
+        let maker_payment_spent = MakerPaymentSpent::<EthCoin, EthCoin>::new(
+            100,
+            200,
+            BytesJson::from(vec![0x22]), // maker_payment_spend
+            negotiation_data,
+            real_taker_payment.clone(),
+        );
+        match maker_payment_spent.get_event() {
+            TakerSwapEvent::MakerPaymentSpent { taker_payment, .. } => {
+                assert_eq!(
+                    taker_payment, real_taker_payment,
+                    "MakerPaymentSpent must retain the real taker_payment bytes (CRD ch.52 D8)"
+                );
+            },
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    /// CRD ch.52 D8, call-site half: `MakerPaymentSpent::on_changed`'s confirmation-timeout
+    /// abort path must forward the real `self.taker_payment` to `TakerPaymentRefundRequired`,
+    /// not the removed `BytesJson::default()` fallback. `on_changed` itself needs a live,
+    /// confirmation-failing coin to actually reach that branch, which this codebase has no
+    /// mocking infrastructure for on the V2 swap-ops traits (`MakerCoinSwapOpsV2` /
+    /// `TakerCoinSwapOpsV2` have no test double anywhere in the tree); this checks the fixed
+    /// call site directly instead, the same way `dex_fee.rs`'s `t16_4a`/`t16_4b` verify other
+    /// call-site shapes via `include_str!`. Before the fix, `BytesJson::default()` appeared
+    /// in this file exactly once, at this call site, so the first assertion alone would have
+    /// failed against the pre-fix code.
+    #[test]
+    fn maker_payment_spent_confirmation_timeout_no_longer_falls_back_to_empty_bytes() {
+        let whole_file = include_str!("taker_swap_v2.rs");
+        // Only inspect the production code above this very test module -- otherwise this
+        // assertion (and its own doc comment, which names the removed fallback call) would
+        // trivially fail against itself once inlined by `include_str!`.
+        let mod_tests_pos = whole_file.find("mod tests {").expect("this test module should exist");
+        let source = &whole_file[..mod_tests_pos];
+        assert!(
+            !source.contains("BytesJson::default()"),
+            "MakerPaymentSpent::on_changed's confirmation-timeout abort must not fall back \
+             to empty taker_payment bytes (CRD ch.52 D8)"
+        );
+
+        let marker = "MakerPaymentSpendNotConfirmedInTime";
+        let marker_pos = source.find(marker).expect("reason variant should still be used here");
+        let window = &source[marker_pos..(marker_pos + 300).min(source.len())];
+        assert!(
+            window.contains("self.taker_payment"),
+            "TakerPaymentRefundRequired::new(...) after a maker-payment-spend confirmation \
+             timeout must be constructed from self.taker_payment"
+        );
     }
 }
