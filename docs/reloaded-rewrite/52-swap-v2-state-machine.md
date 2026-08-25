@@ -1534,6 +1534,68 @@ there when needed; or (b) make this specific refund path
 locate-by-search instead of reconstruct-from-bytes, mirroring how
 [Chapter 20](20-siacoin-integration.md) D3's swap-spend event-walk
 lets `recover_funds` find a payment's disposition without the caller
+
+<<<IMPL
+This pass closes D8 only. Do not touch D7 (WASM storage, its own
+project) or anything outside `taker_swap_v2.rs`/`dex_fee.rs` unless a
+real inconsistency forces it -- say so and stop rather than silently
+expanding scope.
+
+Take direction (a): thread `taker_payment: BytesJson` through
+`TakerPaymentSpent` and `MakerPaymentSpent` as an additive,
+`#[serde(default)]` field, following the exact precedent already in
+this file for `maker_payment_spend_headroom`
+(`TakerSwapEvent::Initialized`, ~line 67): same doc-comment shape
+explaining it's additive/defaulted so a log written before this field
+existed still resumes (falling back to `BytesJson::default()` is
+*correct* for an old log, since no swap logged before this field
+existed can still be waiting at `MakerPaymentSpent` today -- V2 swaps
+don't live that long -- but say so explicitly in the new field's doc
+comment so a future reader doesn't mistake the serde default for "this
+is fine to still be empty going forward").
+
+Concretely, thread the field through:
+- `TakerPaymentSpent` state struct (fields around line 474) and its
+  `new()` constructor -- add `taker_payment: BytesJson`, populated from
+  wherever `TakerPaymentSpent` is actually constructed (find every
+  `TakerPaymentSpent::new(...)` call site; the value is already in
+  scope at each one, since it comes from the state one hop earlier,
+  `TakerPaymentSent`/`TakerPaymentSentPreimageSendingSkipped`, which
+  already carry it).
+- `MakerPaymentSpent` state struct (fields around line 495) and its
+  `new()` constructor -- same field, threaded from `TakerPaymentSpent`.
+- `TakerSwapEvent::TakerPaymentSpent` and `::MakerPaymentSpent` enum
+  variants (used for persistence) -- add the same field, `#[serde(default)]`.
+- Every place that constructs or matches these two event variants (the
+  `get_event`/event-application round-trip code the compiler will point
+  you at once the enum variant grows a field -- let the compiler drive
+  this, don't hunt manually).
+- `MakerPaymentSpent::on_changed`'s `TakerPaymentRefundRequired::new(...)`
+  call (currently passing `BytesJson::default()` with the "use empty as
+  fallback" comment): pass `self.taker_payment` instead, and delete the
+  stale comment along with the fallback.
+
+Verify: after this change, `cargo check -p mm2_main --lib` must stay
+clean, and every existing `taker_swap_v2`/`swap_v2` test must still
+pass unmodified (this is a field addition to persisted state, not a
+behavior change to any currently-tested path). Add one new test proving
+`MakerPaymentSpent::on_changed`'s timeout-abort path now produces a
+`TakerPaymentRefundRequired` carrying the real taker-payment bytes, not
+empty ones -- this is the regression test for the bug itself, so it
+must actually fail against the old code and pass against the fix
+(check this manually if you can't literally run it against pre-fix
+code: reason through why the assertion would have failed before).
+
+If direction (a) turns out to be genuinely awkward once you're in the
+code (e.g. `TakerPaymentSpent` is constructed from a context that
+doesn't actually have `taker_payment` in scope, contradicting what this
+IMPL block assumes), stop and report exactly what you found rather than
+forcing it or silently switching to direction (b) -- that's a real
+surprise worth flagging to the dispatcher, not a judgment call to make
+silently.
+IMPL>>>
+
+
 supplying its transaction bytes up front. Until closed, this specific
 abort path should be assumed non-functional for automatic recovery;
 manual intervention is required if it is ever hit.
