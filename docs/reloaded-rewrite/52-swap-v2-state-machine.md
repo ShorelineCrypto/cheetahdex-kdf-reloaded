@@ -129,7 +129,14 @@ chapter-14 storable runtime; the version-two coin-trait surface bound by
 chapters 15 and 17; the dex-fee descriptor and its arithmetic bound by
 [chapter 08](08-fee-routing-engine.md) and
 [chapter 16](16-swap-v2-pre-burn-output.md); the wire schema bound by
-chapter 33; and the persistence layer bound by chapter 44.
+chapter 33; and the persistence layer bound by chapter 44. For a UTXO
+coin with SPV configured, the chapter-15 payment-validation methods
+this substrate calls (chapter 15 R12) additionally perform the
+proof-of-inclusion check bound by
+[chapter 37](37-utxo-spv-and-block-header-validation.md) §37.6; this is
+a property of what that coin-trait method can conclude, not of this
+chapter's own receive budgets or state transitions, which are the same
+whether or not SPV is configured for either coin.
 
 **Chapter-bound identifiers.** Every state name used in this chapter
 except one is *also* the discriminant of the event that state emits on

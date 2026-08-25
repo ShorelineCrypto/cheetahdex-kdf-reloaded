@@ -20,7 +20,8 @@ Reloaded ships some of it and lacks the rest, so the chapter is split:
 - **§38.1--§38.5 (T-DOC, as-built):** capabilities verified present in reloaded
   -- Qtum split & staking-param naming, config-driven maturity, baseline address
   types (P2PKH / P2SH / segwit v0), KMD rewards/dust policy, `sign_raw_transaction`,
-  `consolidate_utxos`, and the chain-variant model (shared with §37).
+  `consolidate_utxos`, and the chain-variant model (shared with
+  [chapter 37](37-utxo-spv-and-block-header-validation.md) §37.5).
 - **§38.6 (T-PORT, required, NOT yet in reloaded):** capabilities verified
   **absent** in reloaded that must be ported -- PoSV support, Taproot output
   parsing & withdraw guard, P2PK show/spend, Electrum connection prioritisation
@@ -143,7 +144,11 @@ optional broadcast flag; when broadcast is not requested it returns the
 constructed transaction without sending it.
 
 R38.5.3 The coin's header/byte handling shall use the configuration-selected
-chain-variant model defined in §37.5 (shared contract).
+chain-variant model defined in
+[chapter 37](37-utxo-spv-and-block-header-validation.md) §37.5 (shared
+contract). Chapter 37 additionally binds the SPV activation configuration,
+header-store, and confirmation-proof behaviour a UTXO coin may separately
+opt into; this chapter does not restate it.
 
 ---
 

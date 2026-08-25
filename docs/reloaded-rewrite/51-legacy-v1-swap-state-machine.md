@@ -97,6 +97,13 @@ coin-layer swap operations (payment construction, validation, spend,
 refund, confirmation waiting), the fee descriptor and its arithmetic
 bound by [chapter 08](08-fee-routing-engine.md), and the persistence
 layer bound by [chapter 44](44-database-persistence-and-migrations.md).
+For a UTXO coin with SPV configured, the coin-layer payment-validation
+step this substrate calls (R17, R28) additionally performs the
+proof-of-inclusion check bound by
+[chapter 37](37-utxo-spv-and-block-header-validation.md) §37.6; this is
+a property of what that opaque validation step can conclude, not of
+this chapter's own timeout budgets or stage transitions, which are the
+same whether or not SPV is configured for either coin.
 
 **Chapter-bound identifiers.** The stage names used throughout this
 chapter (`STAGE-START`, `STAGE-NEGOTIATE`, and the rest) are bound by
