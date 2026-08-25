@@ -77,12 +77,24 @@ to have a real IndexedDB backend, not a stub. Now recorded as ch.52 D7 and
 cross-referenced at ch.26 D6, since it's simultaneously "this subsystem has
 a gap" and "this binding rule has a known violation."
 
-### CONFIRMED: F9 — vendored `lightning` breaks `cargo clippy --workspace`
+### CONFIRMED (severity revised): F9 — vendored `lightning` breaks bare
+`cargo clippy --workspace`, but not per-package clippy
 
 Re-run directly: `cargo clippy -p lightning --no-deps` exits with 13
-deny-level errors. First-party clippy coverage silently stops at the
-`lightning` dependency boundary for any bare `--workspace` invocation.
-Highest-leverage, lowest-risk fix in this whole plan (Phase 0).
+deny-level errors, confirming the crash is real. But re-checked further
+(2026-08-26) before writing the fix: `cargo clippy -p coins --no-deps --
+-D warnings` exits 0 and reports only `coins`' own diagnostics — `lightning`
+being in the dependency graph does not suppress or block first-party
+linting for a package that merely *depends* on it. The original framing
+("first-party clippy coverage silently stops at the dependency boundary")
+overstated the impact: `AGENTS.md`'s already-documented per-package clippy
+pattern was never affected by this. What actually breaks is a literal
+`--workspace` sweep, or invoking clippy with `-p lightning`/
+`-p lightning-invoice` directly — real, and worth documenting so nobody hits
+it running an ad hoc audit (exactly how the external review found it), but
+not the "silent workspace-wide blind spot" it first looked like. Documented
+in `AGENTS.md` §6 rather than as a CI fix, since no CI job runs `cargo
+clippy --workspace` today — there was nothing in CI to actually fix.
 
 ### CONFIRMED: F1 — 47 copy-paste refund-transition blocks
 
@@ -146,15 +158,21 @@ be treated as merely deferred-and-fine; see "Recommend prioritizing" above.
 ## Phased plan (adapted from the original review; sequencing unchanged,
 annotated where this repository's own verification changed the picture)
 
-### Phase 0 — Guardrails (½ day, no behavior change)
+### Phase 0 — Guardrails (½ day, no behavior change) — DONE, see T2 below
 
-- P0.1 Document that bare `cargo clippy --workspace` fails on vendored
-  `lightning` (confirmed); note the `SDKROOT` local-build requirement.
-- P0.2 Adopt `RUSTFLAGS="--cap-lints=warn" cargo clippy --workspace
-  --all-targets` for CI/dev so first-party code actually gets linted despite
-  the vendored failure.
-- P0.3 Capture the current first-party warning baseline so regressions are
-  visible.
+- P0.1/P0.2 **Done** (`AGENTS.md` §6, 2026-08-26): documented that a bare
+  `cargo clippy --workspace` (or `-p lightning`/`-p lightning-invoice`
+  directly) fails on the vendored crate's own deny-level lints, confirmed
+  this does *not* affect the already-documented per-package clippy pattern
+  (re-verified directly, see the revised F9 note above), and gave the
+  `RUSTFLAGS="--cap-lints=warn"` escape hatch for the rare case a genuine
+  workspace-wide sweep is wanted. No CI change was needed — no CI job runs
+  `cargo clippy --workspace` today.
+- P0.3 Not done as a standalone step: a clean, uncached first-party warning
+  count needs a full rebuild to be trustworthy (an incrementally-cached run
+  under-reports), which wasn't worth the wall-clock cost on its own: the
+  external review's own reported figure (~180) is the working baseline
+  until a future full-clean sweep re-derives it.
 
 ### Phase 1 — Mechanical dedup, no behavior change
 

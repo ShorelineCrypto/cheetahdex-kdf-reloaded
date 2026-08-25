@@ -309,6 +309,22 @@ Add `--all-features` only when it is relevant and supported by that package.
 Use a separate dependency-wide lint only when the task changes dependencies or
 patched vendor code; do not turn unrelated warnings in vendored trees into
 opportunistic edits.
+
+**Do not run bare `cargo clippy --workspace`.** It fails outright — the
+vendored, patched `rust-lightning-patched/lightning` crate trips 13
+deny-level clippy lints against its own source (confirmed 2026-08-26:
+`cargo clippy -p lightning --no-deps` exits nonzero, "could not compile
+`lightning` (lib) due to 13 previous errors"). This does **not** affect the
+per-package pattern above — `cargo clippy -p <package> --all-targets
+--no-deps -- -D warnings` never clippy-invokes `lightning` as its own primary
+target, so it lints your package's first-party code correctly regardless
+(confirmed the same day: `cargo clippy -p coins --no-deps -- -D warnings`
+exits 0 and reports only `coins`' own diagnostics). The only thing that
+breaks is a literal `--workspace` sweep, or a manual `-p lightning`/
+`-p lightning-invoice` invocation. If a task genuinely needs a
+workspace-wide sweep (a periodic audit, not routine per-crate work), use
+`RUSTFLAGS="--cap-lints=warn" cargo clippy --workspace --all-targets`
+instead of the bare form.
 Full integration suites may require Docker, chain parameters, live endpoints, or
 test passphrases; consult `docs/DEV_ENVIRONMENT.md`,
 `docs/TEST_ENV_VARS.md`, and `docs/DISABLED_TESTS.md` before running them.
