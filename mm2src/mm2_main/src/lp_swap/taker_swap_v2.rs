@@ -2338,18 +2338,6 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 .await;
             },
         };
-        let taker_taker_coin_pub_bytes = match sm.taker_coin.try_derive_htlc_pubkey_v2_bytes(&unique_data) {
-            Ok(pubkey) => pubkey,
-            Err(e) => {
-                let reason =
-                    AbortReason::InternalError(format!("Failed to derive own taker-coin V2 HTLC pubkey: {}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
-            },
-        };
         let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
             mm2_net_config::net_config_or_panic(sm.ctx.netid()),
             &sm.taker_coin,
@@ -2674,7 +2662,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             funding_time_lock: sm.taker_funding_locktime(),
             payment_time_lock: sm.taker_payment_locktime(),
             maker_pubkey: &maker_taker_coin_pub,
-            taker_secret: sm.taker_secret.as_slice().try_into().unwrap_or(&[0u8; 32]),
+            taker_secret: &sm.taker_secret,
             taker_secret_hash: &taker_secret_hash,
             maker_secret_hash: &self.negotiation_data.maker_secret_hash,
             dex_fee: &dex_fee,

@@ -369,23 +369,40 @@ cfg_native! {
 
     // SQL helper functions --------------------------------------------------
 
+    /// Fields extracted from either a maker or taker V2 swap DB repr, already
+    /// resolved to the plain values the shared `my_swaps` INSERT statement
+    /// binds. `insert_swap_v2_maker`/`insert_swap_v2_taker` each populate one
+    /// of these from their own repr type and hand it to [`insert_swap_v2`].
+    struct SwapV2InsertFields {
+        my_coin: String,
+        other_coin: String,
+        started_at: u64,
+        swap_type: u8,
+        maker_volume: String,
+        taker_volume: String,
+        premium: String,
+        dex_fee: String,
+        dex_fee_burn: String,
+        secret: Vec<u8>,
+        secret_hash: Vec<u8>,
+        secret_hash_algo: i64,
+        p2p_privkey: Vec<u8>,
+        lock_duration: u64,
+        maker_coin_confs: u64,
+        maker_coin_nota: bool,
+        taker_coin_confs: u64,
+        taker_coin_nota: bool,
+        other_p2p_pub: Vec<u8>,
+        swap_version: u8,
+    }
+
     /// Insert a new V2 swap record into the my_swaps table.
     /// For maker swaps: my_coin = maker_coin, other_coin = taker_coin.
     /// For taker swaps: my_coin = taker_coin, other_coin = maker_coin.
-    fn insert_swap_v2_maker(ctx: &MmArc, uuid: &Uuid, repr: &MakerSwapDbRepr) -> Result<(), String> {
+    fn insert_swap_v2(ctx: &MmArc, uuid: &Uuid, fields: SwapV2InsertFields, role: &str) -> Result<(), String> {
         let conn = ctx.sqlite_connection();
         let uuid_str = uuid.to_string();
         let events_json = serde_json::to_string(&serde_json::json!([])).unwrap();
-        let maker_vol_str = repr.maker_volume.to_decimal().to_string();
-        let taker_vol_str = repr.taker_volume.to_decimal().to_string();
-        let premium_str = repr.taker_premium.to_decimal().to_string();
-        let dex_fee_str = repr.dex_fee_amount.to_decimal().to_string();
-        let dex_fee_burn_str = repr.dex_fee_burn.to_decimal().to_string();
-        let secret: Vec<u8> = repr.maker_secret.0.to_vec();
-        let secret_hash: Vec<u8> = repr.maker_secret_hash.to_vec();
-        let secret_hash_algo: i64 = secret_hash_algo_to_i64(repr.secret_hash_algo);
-        let p2p_privkey: Vec<u8> = repr.p2p_keypair.as_ref().map(|k| k.0.clone()).unwrap_or_default();
-        let other_p2p_pub: Vec<u8> = repr.taker_p2p_pub.to_vec();
 
         conn.execute(
             "INSERT INTO my_swaps (
@@ -396,56 +413,70 @@ cfg_native! {
                 other_p2p_pub, swap_version
             ) VALUES (?1,?2,?3,?4,?5,0,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
             params![
-                repr.maker_coin, repr.taker_coin, uuid_str, repr.started_at as i64,
-                MAKER_SWAP_V2_TYPE as i64, events_json,
-                maker_vol_str, taker_vol_str, premium_str, dex_fee_str, dex_fee_burn_str,
-                secret, secret_hash, secret_hash_algo, p2p_privkey,
-                repr.lock_duration as i64,
-                repr.conf_settings.maker_coin_confs as i64, repr.conf_settings.maker_coin_nota as i64,
-                repr.conf_settings.taker_coin_confs as i64, repr.conf_settings.taker_coin_nota as i64,
-                other_p2p_pub, repr.swap_version as i64,
+                fields.my_coin, fields.other_coin, uuid_str, fields.started_at as i64,
+                fields.swap_type as i64, events_json,
+                fields.maker_volume, fields.taker_volume, fields.premium, fields.dex_fee, fields.dex_fee_burn,
+                fields.secret, fields.secret_hash, fields.secret_hash_algo, fields.p2p_privkey,
+                fields.lock_duration as i64,
+                fields.maker_coin_confs as i64, fields.maker_coin_nota as i64,
+                fields.taker_coin_confs as i64, fields.taker_coin_nota as i64,
+                fields.other_p2p_pub, fields.swap_version as i64,
             ],
         )
         .map(|_| ())
-        .map_err(|e| format!("Failed to insert V2 maker swap {}: {}", uuid, e))
+        .map_err(|e| format!("Failed to insert V2 {} swap {}: {}", role, uuid, e))
+    }
+
+    fn insert_swap_v2_maker(ctx: &MmArc, uuid: &Uuid, repr: &MakerSwapDbRepr) -> Result<(), String> {
+        let fields = SwapV2InsertFields {
+            my_coin: repr.maker_coin.clone(),
+            other_coin: repr.taker_coin.clone(),
+            started_at: repr.started_at,
+            swap_type: MAKER_SWAP_V2_TYPE,
+            maker_volume: repr.maker_volume.to_decimal().to_string(),
+            taker_volume: repr.taker_volume.to_decimal().to_string(),
+            premium: repr.taker_premium.to_decimal().to_string(),
+            dex_fee: repr.dex_fee_amount.to_decimal().to_string(),
+            dex_fee_burn: repr.dex_fee_burn.to_decimal().to_string(),
+            secret: repr.maker_secret.0.to_vec(),
+            secret_hash: repr.maker_secret_hash.to_vec(),
+            secret_hash_algo: secret_hash_algo_to_i64(repr.secret_hash_algo),
+            p2p_privkey: repr.p2p_keypair.as_ref().map(|k| k.0.clone()).unwrap_or_default(),
+            lock_duration: repr.lock_duration,
+            maker_coin_confs: repr.conf_settings.maker_coin_confs,
+            maker_coin_nota: repr.conf_settings.maker_coin_nota,
+            taker_coin_confs: repr.conf_settings.taker_coin_confs,
+            taker_coin_nota: repr.conf_settings.taker_coin_nota,
+            other_p2p_pub: repr.taker_p2p_pub.to_vec(),
+            swap_version: repr.swap_version,
+        };
+        insert_swap_v2(ctx, uuid, fields, "maker")
     }
 
     fn insert_swap_v2_taker(ctx: &MmArc, uuid: &Uuid, repr: &TakerSwapDbRepr) -> Result<(), String> {
-        let conn = ctx.sqlite_connection();
-        let uuid_str = uuid.to_string();
-        let events_json = serde_json::to_string(&serde_json::json!([])).unwrap();
-        let maker_vol_str = repr.maker_volume.to_decimal().to_string();
-        let taker_vol_str = repr.taker_volume.to_decimal().to_string();
-        let premium_str = repr.taker_premium.to_decimal().to_string();
-        let dex_fee_str = repr.dex_fee_amount.to_decimal().to_string();
-        let dex_fee_burn_str = repr.dex_fee_burn.to_decimal().to_string();
-        let secret: Vec<u8> = repr.taker_secret.0.to_vec();
-        let secret_hash: Vec<u8> = repr.taker_secret_hash.to_vec();
-        let secret_hash_algo: i64 = secret_hash_algo_to_i64(repr.secret_hash_algo);
-        let p2p_privkey: Vec<u8> = repr.p2p_keypair.as_ref().map(|k| k.0.clone()).unwrap_or_default();
-        let other_p2p_pub: Vec<u8> = repr.maker_p2p_pub.to_vec();
-
-        conn.execute(
-            "INSERT INTO my_swaps (
-                my_coin, other_coin, uuid, started_at, swap_type, is_finished, events_json,
-                maker_volume, taker_volume, premium, dex_fee, dex_fee_burn,
-                secret, secret_hash, secret_hash_algo, p2p_privkey, lock_duration,
-                maker_coin_confs, maker_coin_nota, taker_coin_confs, taker_coin_nota,
-                other_p2p_pub, swap_version
-            ) VALUES (?1,?2,?3,?4,?5,0,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
-            params![
-                repr.taker_coin, repr.maker_coin, uuid_str, repr.started_at as i64,
-                TAKER_SWAP_V2_TYPE as i64, events_json,
-                maker_vol_str, taker_vol_str, premium_str, dex_fee_str, dex_fee_burn_str,
-                secret, secret_hash, secret_hash_algo, p2p_privkey,
-                repr.lock_duration as i64,
-                repr.conf_settings.maker_coin_confs as i64, repr.conf_settings.maker_coin_nota as i64,
-                repr.conf_settings.taker_coin_confs as i64, repr.conf_settings.taker_coin_nota as i64,
-                other_p2p_pub, repr.swap_version as i64,
-            ],
-        )
-        .map(|_| ())
-        .map_err(|e| format!("Failed to insert V2 taker swap {}: {}", uuid, e))
+        let fields = SwapV2InsertFields {
+            my_coin: repr.taker_coin.clone(),
+            other_coin: repr.maker_coin.clone(),
+            started_at: repr.started_at,
+            swap_type: TAKER_SWAP_V2_TYPE,
+            maker_volume: repr.maker_volume.to_decimal().to_string(),
+            taker_volume: repr.taker_volume.to_decimal().to_string(),
+            premium: repr.taker_premium.to_decimal().to_string(),
+            dex_fee: repr.dex_fee_amount.to_decimal().to_string(),
+            dex_fee_burn: repr.dex_fee_burn.to_decimal().to_string(),
+            secret: repr.taker_secret.0.to_vec(),
+            secret_hash: repr.taker_secret_hash.to_vec(),
+            secret_hash_algo: secret_hash_algo_to_i64(repr.secret_hash_algo),
+            p2p_privkey: repr.p2p_keypair.as_ref().map(|k| k.0.clone()).unwrap_or_default(),
+            lock_duration: repr.lock_duration,
+            maker_coin_confs: repr.conf_settings.maker_coin_confs,
+            maker_coin_nota: repr.conf_settings.maker_coin_nota,
+            taker_coin_confs: repr.conf_settings.taker_coin_confs,
+            taker_coin_nota: repr.conf_settings.taker_coin_nota,
+            other_p2p_pub: repr.maker_p2p_pub.to_vec(),
+            swap_version: repr.swap_version,
+        };
+        insert_swap_v2(ctx, uuid, fields, "taker")
     }
 
     /// Check if a V2 swap record exists for the given UUID.
@@ -464,11 +495,15 @@ cfg_native! {
 
     /// Append an event to the events_json array of a V2 swap.
     fn append_swap_v2_event<E: Serialize>(ctx: &MmArc, uuid: &Uuid, event: &E) -> Result<(), String> {
-        let conn = ctx.sqlite_connection();
+        let mut conn = ctx.sqlite_connection();
         let uuid_str = uuid.to_string();
 
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Failed to start transaction for {}: {}", uuid, e))?;
+
         // Read existing events
-        let events_str: String = conn
+        let events_str: String = tx
             .query_row(
                 "SELECT events_json FROM my_swaps WHERE uuid = ?1",
                 params![uuid_str],
@@ -486,12 +521,14 @@ cfg_native! {
         let updated = serde_json::to_string(&events)
             .map_err(|e| format!("Failed to serialize updated events for {}: {}", uuid, e))?;
 
-        conn.execute(
+        tx.execute(
             "UPDATE my_swaps SET events_json = ?1 WHERE uuid = ?2",
             params![updated, uuid_str],
         )
-        .map(|_| ())
-        .map_err(|e| format!("Failed to update events for swap {}: {}", uuid, e))
+        .map_err(|e| format!("Failed to update events for swap {}: {}", uuid, e))?;
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit transaction for {}: {}", uuid, e))
     }
 
     /// Get the full swap DB repr for a V2 swap.
