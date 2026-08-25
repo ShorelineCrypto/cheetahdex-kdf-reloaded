@@ -1470,6 +1470,67 @@ A swap whose coin the user never re-enables therefore never resumes and
 never times out. Surfacing such swaps to the operator, rather than
 bounding the wait, is the likely resolution and is deferred.
 
+**D7.** *WebAssembly persistence is a no-op.* `swap_v2_common.rs`'s
+`wasm` module implements `StateMachineStorage` for both
+`MakerSwapStorage` and `TakerSwapStorage` entirely as stubs:
+`store_repr`/`store_event`/`mark_finished` return `Ok(())` without
+writing anything, `has_record_for` always returns `false`, and
+`get_unfinished` always returns an empty list (`get_repr` is the one
+honest member, returning an explicit "not yet implemented" error). A
+version-two swap run from a WebAssembly build therefore persists
+nothing: a page reload or tab close during a live swap is
+indistinguishable, on resume, from a swap that never started — no
+event log to replay, no record for kickstart to find. This is a gap
+against [Chapter 26](26-cross-platform-and-wasm.md) R8, which binds
+every persistence consumer in the workspace — the version-two swap
+state stores named explicitly among R8's chapter-bound consumers — to
+a real native-SQLite-plus-WebAssembly-IndexedDB pair, not one working
+implementation and one silent stub. Native (non-WASM) resume/kickstart
+is unaffected; this is WebAssembly-only. Closing it means a real
+IndexedDB-backed implementation following R9's substrate, which is its
+own project (data shape, migration from nothing since no prior WASM
+V2 swap was ever actually recorded, and coordination with R8's other
+consumers' established shape) — deferred rather than attempted inline.
+Until closed, a WebAssembly-based GUI or SDK integration that offers
+version-two swaps should treat an in-progress swap as unsafe to leave
+unattended (no crash/reload recovery exists), and this limitation
+should be stated to users, not left implicit.
+
+**D8.** *`MakerPaymentSpent`'s confirmation-timeout abort persists an
+unusable, empty payment record.* On the taker side, if the maker's
+spend of the taker's own successful claim on the maker's payment
+(`MakerPaymentSpent` state) fails to confirm within its wait window,
+the code transitions to `TakerPaymentRefundRequired` carrying
+`BytesJson::default()` (empty bytes) in place of the taker's own
+payment transaction — the comment at the call site
+(`taker_swap_v2.rs`, `MakerPaymentSpent::on_changed`) reads "We don't
+have taker_payment bytes here; use empty as fallback." That refund
+transition's own state handler then hands those empty bytes to
+`refund_combined_taker_payment` as `RefundTakerPaymentArgs::payment_tx`
+— which cannot construct a valid refund from zero bytes. The root
+cause is state-field scope, not a missing lookup: `TakerPaymentSent`
+carries `taker_payment: BytesJson`, but the very next state,
+`TakerPaymentSpent`, already drops it (keeping only
+`taker_payment_spend`, the transaction that *consumed* it, and
+`maker_payment`) — so by `MakerPaymentSpent`, two transitions later,
+the bytes are gone from every reachable field, including
+`StoredTakerNegotiationData`, which was never scoped to carry them
+either. This is a real, reachable gap on native builds too (any
+delayed/dropped/reorganized confirmation of the maker's spend
+triggers it), not a WebAssembly-specific concern like D7. Two
+directions to close it, neither attempted here: (a) thread
+`taker_payment: BytesJson` through `TakerPaymentSpent` and
+`MakerPaymentSpent` as an additive, `#[serde(default)]` field (keeping
+the persisted event schema's established backward-compatible-add
+convention, e.g. R64's headroom field), so the bytes are simply still
+there when needed; or (b) make this specific refund path
+locate-by-search instead of reconstruct-from-bytes, mirroring how
+[Chapter 20](20-siacoin-integration.md) D3's swap-spend event-walk
+lets `recover_funds` find a payment's disposition without the caller
+supplying its transaction bytes up front. Until closed, this specific
+abort path should be assumed non-functional for automatic recovery;
+manual intervention is required if it is ever hit.
+
 ## 52.14 Baseline and Repository Verifications
 
 The version-two substrate does not exist in the baseline state defined

@@ -629,6 +629,19 @@ consumer wanting multi-page state
 sharing must implement it in the JavaScript
 hosting layer.
 
+**D6.** *A known R8 non-conformance.* R8 binds every persistence
+consumer, the version-two swap state stores among them by name, to a
+real native-SQLite-plus-WebAssembly-IndexedDB pair. The version-two
+swap state stores do not meet this today: their WebAssembly
+`StateMachineStorage` implementation is an unconditional no-op (empty
+write, `false`/empty read), not a working IndexedDB backend. Full
+detail, and the two directions considered for closing it, are recorded
+against the owning chapter rather than duplicated here: [Chapter
+52](52-swap-v2-state-machine.md) D7. Recorded here too because this is
+the chapter that states the general rule this specific consumer
+breaks — a reader auditing R8 conformance chapter-by-chapter should
+find this gap from either direction.
+
 ## 26.15 Baseline Verifications
 
 **V1.** The chapter-02-anchored baseline tree MUST be confirmed

@@ -27,6 +27,13 @@ Goal: stabilise APIs and on-disk formats; broaden platform coverage.
 - Bump the vendored `librustzcash` (anchor-era 2022) to a modern release with
   batched note decryption and `shardtree` witnesses, to speed up shielded
   (ARRR/ZHTLC) sync. Workload analysis: `docs/plans/librustzcash-upgrade.md`.
+- V2 swap engine: fix a confirmed live gap where a specific taker-side
+  timeout-abort path (`MakerPaymentSpent` → refund) cannot construct a
+  valid refund (CRD ch.52 D8), dedup ~700-900 lines of copy-paste across
+  `lp_swap/`, and implement real WebAssembly persistence for V2 swaps
+  (currently a silent no-op, CRD ch.52 D7 / ch.26 D6 — a V2 swap in a
+  browser build does not survive a reload). Workload analysis:
+  `docs/plans/v2-swap-engine-hardening.md`.
 
 ## Stable (v1.0.0)
 
