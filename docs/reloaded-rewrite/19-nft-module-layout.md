@@ -660,8 +660,8 @@ The flow is:
 1. Resolve the EVM platform coin handle for the requested
    chain's ticker. Anything that is not a plain EVM platform
    coin is rejected; the codebase does not implement EVM-style
-   NFT withdrawal for TRON-family chains and returns an
-   explicit error to that effect.
+   NFT withdrawal for TRON-family chains ([Chapter 21](21-tron-integration.md)
+   D5) and returns an explicit error to that effect.
 2. Encode the calldata using a generic Ethereum ABI encoder
    over the embedded fragment for the selected method.
 3. For the ERC-1155 variant, if the max-balance drain flag is

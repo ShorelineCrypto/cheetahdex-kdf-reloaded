@@ -13,8 +13,9 @@
 > already-specified, coin-generic V2 trait surface
 > (`mm2src/coins/lp_coins_traits.rs`) to Siacoin's already-bound V1
 > primitives ([Chapter 20](20-siacoin-integration.md) §20.4–§20.8) and to
-> the already-shipped V2 substrate ([Chapter 14](14-swap-v2-state-machine-substrate.md)
-> if present, else the state-machine module directly). Every requirement
+> the already-shipped V2 substrate ([Chapter 14](14-state-machine-runtime.md)
+> and its V2-swap specialization, [Chapter 52](52-swap-v2-state-machine.md)).
+> Every requirement
 > below is traceable to one of: (a) an already-bound Sia V1 fact this
 > project already implements and has tested, (b) the coin-generic V2
 > trait/type definitions as they exist in this repository today, or (c) a

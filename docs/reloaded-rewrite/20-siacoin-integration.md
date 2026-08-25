@@ -500,8 +500,9 @@ rather than defects. None is a correctness claim.
   convention exists to follow). `verify_message`'s third parameter is
   a Sia public key, not a wallet address -- a plain ed25519 signature
   cannot be verified against an address (a one-way hash, not
-  invertible to a pubkey); this crate's other ed25519 coin (Solana)
-  resolves the identical constraint the same way. Code:
+  invertible to a pubkey); this crate's other ed25519 coin
+  ([Chapter 40](40-solana-coin.md)) resolves the identical constraint
+  the same way. Code:
   `mm2src/coins/siacoin/siacoin_market_ops.rs`.
 
 - **D5 -- V2 swap protocol.** Neither V2 swap-operations trait is
