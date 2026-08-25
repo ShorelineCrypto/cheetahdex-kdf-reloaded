@@ -1503,102 +1503,30 @@ version-two swaps should treat an in-progress swap as unsafe to leave
 unattended (no crash/reload recovery exists), and this limitation
 should be stated to users, not left implicit.
 
-**D8.** *`MakerPaymentSpent`'s confirmation-timeout abort persists an
-unusable, empty payment record.* On the taker side, if the maker's
-spend of the taker's own successful claim on the maker's payment
-(`MakerPaymentSpent` state) fails to confirm within its wait window,
-the code transitions to `TakerPaymentRefundRequired` carrying
-`BytesJson::default()` (empty bytes) in place of the taker's own
-payment transaction — the comment at the call site
-(`taker_swap_v2.rs`, `MakerPaymentSpent::on_changed`) reads "We don't
-have taker_payment bytes here; use empty as fallback." That refund
-transition's own state handler then hands those empty bytes to
-`refund_combined_taker_payment` as `RefundTakerPaymentArgs::payment_tx`
-— which cannot construct a valid refund from zero bytes. The root
-cause is state-field scope, not a missing lookup: `TakerPaymentSent`
-carries `taker_payment: BytesJson`, but the very next state,
-`TakerPaymentSpent`, already drops it (keeping only
-`taker_payment_spend`, the transaction that *consumed* it, and
-`maker_payment`) — so by `MakerPaymentSpent`, two transitions later,
-the bytes are gone from every reachable field, including
-`StoredTakerNegotiationData`, which was never scoped to carry them
-either. This is a real, reachable gap on native builds too (any
-delayed/dropped/reorganized confirmation of the maker's spend
-triggers it), not a WebAssembly-specific concern like D7. Two
-directions to close it, neither attempted here: (a) thread
-`taker_payment: BytesJson` through `TakerPaymentSpent` and
-`MakerPaymentSpent` as an additive, `#[serde(default)]` field (keeping
-the persisted event schema's established backward-compatible-add
-convention, e.g. R64's headroom field), so the bytes are simply still
-there when needed; or (b) make this specific refund path
-locate-by-search instead of reconstruct-from-bytes, mirroring how
-[Chapter 20](20-siacoin-integration.md) D3's swap-spend event-walk
-lets `recover_funds` find a payment's disposition without the caller
-
-<<<IMPL
-This pass closes D8 only. Do not touch D7 (WASM storage, its own
-project) or anything outside `taker_swap_v2.rs`/`dex_fee.rs` unless a
-real inconsistency forces it -- say so and stop rather than silently
-expanding scope.
-
-Take direction (a): thread `taker_payment: BytesJson` through
-`TakerPaymentSpent` and `MakerPaymentSpent` as an additive,
-`#[serde(default)]` field, following the exact precedent already in
-this file for `maker_payment_spend_headroom`
-(`TakerSwapEvent::Initialized`, ~line 67): same doc-comment shape
-explaining it's additive/defaulted so a log written before this field
-existed still resumes (falling back to `BytesJson::default()` is
-*correct* for an old log, since no swap logged before this field
-existed can still be waiting at `MakerPaymentSpent` today -- V2 swaps
-don't live that long -- but say so explicitly in the new field's doc
-comment so a future reader doesn't mistake the serde default for "this
-is fine to still be empty going forward").
-
-Concretely, thread the field through:
-- `TakerPaymentSpent` state struct (fields around line 474) and its
-  `new()` constructor -- add `taker_payment: BytesJson`, populated from
-  wherever `TakerPaymentSpent` is actually constructed (find every
-  `TakerPaymentSpent::new(...)` call site; the value is already in
-  scope at each one, since it comes from the state one hop earlier,
-  `TakerPaymentSent`/`TakerPaymentSentPreimageSendingSkipped`, which
-  already carry it).
-- `MakerPaymentSpent` state struct (fields around line 495) and its
-  `new()` constructor -- same field, threaded from `TakerPaymentSpent`.
-- `TakerSwapEvent::TakerPaymentSpent` and `::MakerPaymentSpent` enum
-  variants (used for persistence) -- add the same field, `#[serde(default)]`.
-- Every place that constructs or matches these two event variants (the
-  `get_event`/event-application round-trip code the compiler will point
-  you at once the enum variant grows a field -- let the compiler drive
-  this, don't hunt manually).
-- `MakerPaymentSpent::on_changed`'s `TakerPaymentRefundRequired::new(...)`
-  call (currently passing `BytesJson::default()` with the "use empty as
-  fallback" comment): pass `self.taker_payment` instead, and delete the
-  stale comment along with the fallback.
-
-Verify: after this change, `cargo check -p mm2_main --lib` must stay
-clean, and every existing `taker_swap_v2`/`swap_v2` test must still
-pass unmodified (this is a field addition to persisted state, not a
-behavior change to any currently-tested path). Add one new test proving
-`MakerPaymentSpent::on_changed`'s timeout-abort path now produces a
-`TakerPaymentRefundRequired` carrying the real taker-payment bytes, not
-empty ones -- this is the regression test for the bug itself, so it
-must actually fail against the old code and pass against the fix
-(check this manually if you can't literally run it against pre-fix
-code: reason through why the assertion would have failed before).
-
-If direction (a) turns out to be genuinely awkward once you're in the
-code (e.g. `TakerPaymentSpent` is constructed from a context that
-doesn't actually have `taker_payment` in scope, contradicting what this
-IMPL block assumes), stop and report exactly what you found rather than
-forcing it or silently switching to direction (b) -- that's a real
-surprise worth flagging to the dispatcher, not a judgment call to make
-silently.
-IMPL>>>
-
-
-supplying its transaction bytes up front. Until closed, this specific
-abort path should be assumed non-functional for automatic recovery;
-manual intervention is required if it is ever hit.
+**D8.** *Closed.* `MakerPaymentSpent`'s confirmation-timeout abort no
+longer persists an unusable, empty payment record. `taker_payment:
+BytesJson` is now threaded through `TakerPaymentSpent` and
+`MakerPaymentSpent` (both the state structs and the persisted
+`TakerSwapEvent::TakerPaymentSpent`/`::MakerPaymentSpent` variants) as
+an additive, `#[serde(default)]` field, following the same
+backward-compatible-add convention already established for R64's
+headroom field — a log written before this field existed resumes with
+empty bytes, which is safe only because no V2 swap logged that far
+back can still be waiting at `MakerPaymentSpent` today, not because
+empty bytes are fine going forward. `MakerPaymentSpent::on_changed`'s
+confirmation-timeout branch now passes the real, carried-forward
+`self.taker_payment` to `TakerPaymentRefundRequired` instead of
+`BytesJson::default()`. Two regression tests cover it: one proves
+`taker_payment` round-trips through `get_event()` (would not have
+compiled against the pre-fix code, the strongest available form of
+"fails before, passes after"); one is a source-text meta-test, mirroring
+the existing `dex_fee.rs` `include_str!` idiom, proving the fixed call
+site no longer contains the empty-bytes fallback. Full
+`on_changed()`-level end-to-end coverage was not attempted: this
+codebase has no mock/test-double infrastructure for
+`MakerCoinSwapOpsV2`/`TakerCoinSwapOpsV2` anywhere, and building one is
+its own scoped effort, not part of this fix. Code:
+`mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs`.
 
 ## 52.14 Baseline and Repository Verifications
 

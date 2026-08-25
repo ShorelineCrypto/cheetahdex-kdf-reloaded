@@ -1,6 +1,10 @@
 # Plan: V2 swap engine dedup, error-path hardening, and V1 driver consolidation
 
-> **Status:** analysis and implementation plan only; not started.
+> **Status:** in progress. T1 (the D8 correctness fix, commit `220f8cafc`)
+> and T2 (the clippy guardrail, commit `ba0b0a739`) are done. Remaining
+> items are tracked with the same T-numbering used in chat with the user
+> (not otherwise written down); see the numbered findings/phases below for
+> the underlying P-numbering this plan originally shipped with.
 >
 > This plan is adapted from an external code review of `lp_swap/` (2026-08-25),
 > supplemented with independent verification against this repository. Findings
@@ -38,9 +42,9 @@ landing, only on the review discipline this project already applies (see
 
 ## Findings, most-to-least confirmed-severe
 
-### CONFIRMED — D8-class: `MakerPaymentSpent`'s timeout-abort persists an
-unusable, empty payment record (new; not in the original review's own
-framing, found while verifying it)
+### FIXED (T1, commit `220f8cafc`) — D8-class: `MakerPaymentSpent`'s
+timeout-abort persisted an unusable, empty payment record (new; not in the
+original review's own framing, found while verifying it)
 
 `taker_swap_v2.rs`'s `MakerPaymentSpent::on_changed`, on the maker-payment-
 spend-confirmation-timeout path, transitions to `TakerPaymentRefundRequired`
@@ -56,13 +60,11 @@ is dropped two transitions earlier than where it's needed —
 never scoped to carry it either. **This is a live, reachable bug on native
 builds**, not a style nit — any delayed, dropped, or reorganized
 confirmation of the maker's own payment spend triggers it. Now recorded as
-[Chapter 52](../reloaded-rewrite/52-swap-v2-state-machine.md) D8, with the
-two candidate fixes (thread the field through as an additive
-`#[serde(default)]` field vs. make this one refund path locate-by-search
-the way [Chapter 20](../reloaded-rewrite/20-siacoin-integration.md) D3
-already does for Sia) recorded there. **Recommend prioritizing an actual
-fix over the rest of this plan** — everything else here is maintainability;
-this is correctness.
+[Chapter 52](../reloaded-rewrite/52-swap-v2-state-machine.md) D8 (now
+**Closed**). Took direction (a), the additive `#[serde(default)]` field —
+verified in the fix that it was not awkward anywhere, `taker_payment` was
+in scope at every call site as expected, so direction (b) was never
+needed.
 
 ### CONFIRMED — F8: WASM V2 swap storage is a total no-op
 
@@ -190,12 +192,9 @@ annotated where this repository's own verification changed the picture)
 
 ### Phase 2 — Error-path hardening (small, deliberate behavior changes)
 
-- **P2.0 (new, higher priority than the rest of this phase): fix the
-  `MakerPaymentSpent` empty-bytes bug (ch.52 D8) for real** — thread
-  `taker_payment` through the two intervening states, or switch this one
-  refund path to locate-by-search. Needs its own scoped Coder pass and CRD
-  sign-off on which of the two directions to take, same process as every
-  other deferred-work item this project closes.
+- ~~P2.0~~ **Done as T1, commit `220f8cafc`.** `taker_payment` threaded
+  through `TakerPaymentSpent`/`MakerPaymentSpent` as an additive field; two
+  new regression tests; ch.52 D8 marked Closed.
 - P2.1 Replace the `net_config_or_panic` V2 sites with propagated
   `AbortReason::InternalError` — verify per-site reachability first (see
   "severity revised" note above) rather than assuming all seven are
@@ -235,16 +234,15 @@ annotated where this repository's own verification changed the picture)
 
 | Step | Items | Risk | Est. |
 |---|---|---|---|
-| 1 | P0.1–P0.3 | none | ½ d |
-| 2 | **P2.0 (moved up)** | correctness fix, needs design decision | 1–2 d |
-| 3 | P1.2, P1.3 | trivial | ½ d |
-| 4 | P1.1 + dex_fee meta-test update | low | 1–2 d |
-| 5 | P1.4 | low | ½–1 d |
-| 6 | P2.1–P2.4 (minus P2.0, done above) | medium (behavioral) | 1 d |
-| 7 | P3.1–P3.2 | medium | 2–3 d |
-| 8 | P3.3 | optional | 1 d+ |
+| 1 | P0.1–P0.3 | none | done (commit `ba0b0a739`) |
+| 2 | P2.0 | correctness fix | done (commit `220f8cafc`) |
+| 3 | P1.2, P1.3 | trivial | pending |
+| 4 | P1.1 + dex_fee meta-test update | low | pending |
+| 5 | P1.4 | low | pending |
+| 6 | P2.1–P2.4 (minus P2.0, done above) | medium (behavioral) | pending |
+| 7 | P3.1–P3.2 | medium | pending, queued for a later round |
+| 8 | P3.3 | optional | pending, queued for a later round |
 
 Total mechanical-dedup yield unchanged from the original estimate: roughly
-−700…−900 lines in `lp_swap/` with net-zero behavior change from Phase 1,
-plus one real correctness fix (P2.0) promoted ahead of the pure hardening
-items.
+−700…−900 lines in `lp_swap/` with net-zero behavior change from Phase 1.
+The one real correctness fix (P2.0) is done.
