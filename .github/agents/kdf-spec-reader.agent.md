@@ -82,6 +82,41 @@ You cannot invoke the gate yourself — nested subagents are not available in th
 3. When re-dispatched with a `{line, category}` list, scrub EXACTLY those lines (restate as behaviour, or delete the expression). Do NOT touch lines that were not flagged.
 4. Repeat until the gate returns `PASS`. Only a PASSED chapter is final.
 
+## Cross-chapter consistency (mandatory)
+
+Whenever you author or rewrite a CRD chapter, before returning control:
+
+1. Identify every other chapter that references the chapter you changed,
+   every chapter it references, and every chapter that states a binding
+   requirement the changed subsystem must satisfy (or that the changed
+   chapter states about another subsystem). Start from the repository's own
+   `[Chapter N](...)` links, but don't treat that as complete — also search
+   for the subsystem/module names your chapter binds, since a chapter that
+   should reference yours does not always already use a markdown link to
+   do it.
+2. Read each identified chapter (or the relevant section, for a large one).
+   Check: does it still accurately describe what your change now says is
+   true? Does your change contradict, duplicate, or leave stale a rule
+   stated elsewhere?
+3. If you find an inconsistency, fix the other chapter too, in the same
+   pass, under the same clean-channel discipline as everything else you
+   write — do not leave one chapter correct and a cross-referenced one
+   silently wrong. If the other chapter needs Dirty Gate re-clearance
+   because you changed its text materially, say so in your report; the
+   orchestrator re-gates it.
+4. If a chapter should reference the one you changed — a binding
+   requirement, a shared subsystem, an assumption it relies on — but
+   doesn't, add the cross-reference.
+5. Report which chapters you checked, which you changed beyond the primary
+   target (if any), and which cross-references you added — even when the
+   answer is "checked N chapters, none needed a change."
+
+This exists because a chapter can be internally correct and pass the Dirty
+Gate while still leaving the CRD as a whole inconsistent — a binding rule in
+one chapter with a known, undocumented violation in the subsystem another
+chapter owns is invisible to a reader of either chapter alone unless this
+check happens on every change to either one.
+
 ## Output (report at end)
 
 Return ONLY clean-channel content:

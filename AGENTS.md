@@ -236,6 +236,19 @@ While editing:
 - Use typed errors and explicit propagation. Do not introduce `unwrap()`,
   `expect()`, or `panic!()` in production code except unavoidable constant
   initialization already justified by project convention.
+- Never substitute a placeholder value — an empty/default/zero stand-in, or a
+  fallback branch on a conversion that looks fallible but your data's actual
+  type makes infallible — for data you do not have at a call site, in a
+  funds-moving or state-machine transition path. Propagate a typed error or
+  abort instead. If the real fix needs a design decision you cannot make in
+  this change, stop and follow the stub policy (`unimplemented!()` + a
+  recorded reason) rather than shipping a value that lets the code compile
+  but cannot do its job.
+- For a new or touched state-machine transition, check every state that can
+  actually reach it and confirm each one's field set carries what the
+  transition needs — do not infer completeness from the code compiling and
+  the happy-path test passing. A compiler and a happy-path test cannot see
+  that a downstream abort path needs data an upstream state already dropped.
 - Do not log passphrases, private keys, mnemonics, session secrets, raw
   authorization headers, or unredacted RPC payloads.
 - Keep public APIs documented, including `# Errors` and `# Panics` where
@@ -260,6 +273,13 @@ For CRD edits:
 - Do not write `Forbidden corpus: not consulted` unless that statement is true
   for the authoring context or the chapter has completed the documented
   Spec Reader and Dirty Gate workflow.
+- Before finishing any edit to a CRD chapter — whether authored via `KDF
+  Spec Reader` or edited directly in a session — identify every other
+  chapter that references it, is referenced by it, or states a binding
+  requirement the changed subsystem must satisfy. Check each for continued
+  accuracy; fix or cross-reference as needed in the same pass. See
+  `kdf-spec-reader.agent.md`'s "Cross-chapter consistency" section for the
+  full procedure when the Spec Reader role is doing the authoring.
 
 ## 6. Formatting, tests, and verification
 
@@ -379,4 +399,12 @@ A change is complete only when:
 - public/operator documentation is consistent;
 - provenance and license requirements are preserved;
 - the final diff contains no unrelated changes, secrets, generated junk, or
-  forbidden-corpus expression.
+  forbidden-corpus expression;
+- passing `cargo check`/`test`/`clippy` is a floor, not evidence of
+  completeness — it was true of both real gaps a 2026-08-25 external review
+  found in `lp_swap/` (CRD ch.52 D7, D8). Before calling a change verified,
+  grep your own diff for placeholder/fallback patterns (`unwrap_or(`,
+  `::default()` used as a stand-in, empty-value substitutions, `TODO`) in
+  funds-moving or state-machine code; any hit ships either fixed, or as an
+  explicit stub paired with a same-commit CRD Deferred Work entry — never as
+  a silent comment only.
