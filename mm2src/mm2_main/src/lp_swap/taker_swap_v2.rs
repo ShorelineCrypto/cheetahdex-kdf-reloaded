@@ -383,6 +383,26 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerFundin
             _p: PhantomData,
         }
     }
+
+    /// Shared body for this state's `on_changed` abort paths: they all carry the same
+    /// fields forward into `TakerFundingRefundRequired` and differ only in `reason`.
+    async fn abort_to_funding_refund_required(
+        &self,
+        reason: AbortReason,
+        sm: &mut TakerSwapStateMachine<M, T>,
+    ) -> StateResult<TakerSwapStateMachine<M, T>> {
+        Self::change_state(
+            TakerFundingRefundRequired::new(
+                self.maker_coin_start_block,
+                self.taker_coin_start_block,
+                self.negotiation_data.clone(),
+                self.taker_funding.clone(),
+                reason,
+            ),
+            sm,
+        )
+        .await
+    }
 }
 
 pub struct MakerPaymentAndFundingSpendPreimgReceived<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
@@ -412,6 +432,26 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> MakerPaymen
             maker_payment: mp,
             _p: PhantomData,
         }
+    }
+
+    /// Shared body for this state's `on_changed` abort paths: they all carry the same
+    /// fields forward into `TakerFundingRefundRequired` and differ only in `reason`.
+    async fn abort_to_funding_refund_required(
+        &self,
+        reason: AbortReason,
+        sm: &mut TakerSwapStateMachine<M, T>,
+    ) -> StateResult<TakerSwapStateMachine<M, T>> {
+        Self::change_state(
+            TakerFundingRefundRequired::new(
+                self.maker_coin_start_block,
+                self.taker_coin_start_block,
+                self.negotiation_data.clone(),
+                self.taker_funding.clone(),
+                reason,
+            ),
+            sm,
+        )
+        .await
     }
 }
 
@@ -443,6 +483,26 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> MakerPaymen
             _p: PhantomData,
         }
     }
+
+    /// Shared body for this state's `on_changed` abort paths: they all carry the same
+    /// fields forward into `TakerFundingRefundRequired` and differ only in `reason`.
+    async fn abort_to_funding_refund_required(
+        &self,
+        reason: AbortReason,
+        sm: &mut TakerSwapStateMachine<M, T>,
+    ) -> StateResult<TakerSwapStateMachine<M, T>> {
+        Self::change_state(
+            TakerFundingRefundRequired::new(
+                self.maker_coin_start_block,
+                self.taker_coin_start_block,
+                self.negotiation_data.clone(),
+                self.taker_funding.clone(),
+                reason,
+            ),
+            sm,
+        )
+        .await
+    }
 }
 
 pub struct TakerPaymentSent<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
@@ -464,6 +524,20 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymen
             _p: PhantomData,
         }
     }
+
+    /// Shared body for this state's `on_changed` abort paths: they all carry the same
+    /// fields forward into `TakerPaymentRefundRequired` and differ only in `reason`.
+    async fn abort_to_payment_refund_required(
+        &self,
+        reason: AbortReason,
+        sm: &mut TakerSwapStateMachine<M, T>,
+    ) -> StateResult<TakerSwapStateMachine<M, T>> {
+        Self::change_state(
+            TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
+            sm,
+        )
+        .await
+    }
 }
 
 pub struct TakerPaymentSentPreimageSendingSkipped<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
@@ -484,6 +558,20 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> TakerPaymen
             maker_payment: mp,
             _p: PhantomData,
         }
+    }
+
+    /// Shared body for this state's `on_changed` abort paths: they all carry the same
+    /// fields forward into `TakerPaymentRefundRequired` and differ only in `reason`.
+    async fn abort_to_payment_refund_required(
+        &self,
+        reason: AbortReason,
+        sm: &mut TakerSwapStateMachine<M, T>,
+    ) -> StateResult<TakerSwapStateMachine<M, T>> {
+        Self::change_state(
+            TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
+            sm,
+        )
+        .await
     }
 }
 
@@ -1707,64 +1795,24 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             Err(e) => {
                 warn!("Swap {}: did not receive maker payment info: {}", sm.uuid, e);
                 let reason = AbortReason::DidNotReceiveMakerPayment(e);
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
 
         // Parse the maker payment tx.
         if let Err(e) = sm.maker_coin.parse_tx(&maker_payment_info.tx_bytes) {
             let reason = AbortReason::FailedToParseMakerPayment(format!("{:?}", e));
-            return Self::change_state(
-                TakerFundingRefundRequired::new(
-                    self.maker_coin_start_block,
-                    self.taker_coin_start_block,
-                    self.negotiation_data.clone(),
-                    self.taker_funding.clone(),
-                    reason,
-                ),
-                sm,
-            )
-            .await;
+            return self.abort_to_funding_refund_required(reason, sm).await;
         }
 
         // Parse the funding spend preimage and signature.
         if let Err(e) = sm.taker_coin.parse_preimage(&maker_payment_info.funding_preimage_tx) {
             let reason = AbortReason::FailedToParseFundingSpendPreimg(format!("{:?}", e));
-            return Self::change_state(
-                TakerFundingRefundRequired::new(
-                    self.maker_coin_start_block,
-                    self.taker_coin_start_block,
-                    self.negotiation_data.clone(),
-                    self.taker_funding.clone(),
-                    reason,
-                ),
-                sm,
-            )
-            .await;
+            return self.abort_to_funding_refund_required(reason, sm).await;
         }
         if let Err(e) = sm.taker_coin.parse_signature(&maker_payment_info.funding_preimage_sig) {
             let reason = AbortReason::FailedToParseFundingSpendSig(format!("{:?}", e));
-            return Self::change_state(
-                TakerFundingRefundRequired::new(
-                    self.maker_coin_start_block,
-                    self.taker_coin_start_block,
-                    self.negotiation_data.clone(),
-                    self.taker_funding.clone(),
-                    reason,
-                ),
-                sm,
-            )
-            .await;
+            return self.abort_to_funding_refund_required(reason, sm).await;
         }
 
         let stored_preimage = StoredTxPreimage {
@@ -1805,34 +1853,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::FailedToParseMakerPayment(format!("{:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let taker_funding_tx = match sm.taker_coin.parse_tx(&self.taker_funding) {
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own funding tx: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
 
@@ -1841,34 +1869,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse maker's maker-coin pubkey: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let maker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&self.negotiation_data.taker_coin_htlc_pub) {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse maker's taker-coin pubkey: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
 
@@ -1884,17 +1892,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
         };
         if let Err(e) = sm.maker_coin.validate_maker_payment_v2(validate_args).await {
             let reason = AbortReason::MakerPaymentValidationFailed(format!("{:?}", e));
-            return Self::change_state(
-                TakerFundingRefundRequired::new(
-                    self.maker_coin_start_block,
-                    self.taker_coin_start_block,
-                    self.negotiation_data.clone(),
-                    self.taker_funding.clone(),
-                    reason,
-                ),
-                sm,
-            )
-            .await;
+            return self.abort_to_funding_refund_required(reason, sm).await;
         }
 
         // Derive taker's own taker-coin pubkey.
@@ -1903,34 +1901,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             Err(e) => {
                 let reason =
                     AbortReason::InternalError(format!("Failed to derive own taker-coin V2 HTLC pubkey: {}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let taker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&taker_taker_coin_pub_bytes) {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own taker-coin pubkey: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
 
@@ -1949,34 +1927,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::FailedToParseFundingSpendPreimg(format!("{:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let signature = match sm.taker_coin.parse_signature(&self.funding_spend_preimage.signature) {
             Ok(s) => s,
             Err(e) => {
                 let reason = AbortReason::FailedToParseFundingSpendSig(format!("{:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let preimage_with_sig = TxPreimageWithSig { preimage, signature };
@@ -1987,17 +1945,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             .await
         {
             let reason = AbortReason::FundingSpendPreimageValidationFailed(format!("{:?}", e));
-            return Self::change_state(
-                TakerFundingRefundRequired::new(
-                    self.maker_coin_start_block,
-                    self.taker_coin_start_block,
-                    self.negotiation_data.clone(),
-                    self.taker_funding.clone(),
-                    reason,
-                ),
-                sm,
-            )
-            .await;
+            return self.abort_to_funding_refund_required(reason, sm).await;
         }
 
         // Step 3: Optional confirmation gate for maker payment.
@@ -2016,17 +1964,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             if let Err(e) = confirm_result {
                 warn!("Swap {}: maker payment not confirmed in time: {}", sm.uuid, e);
                 let reason = AbortReason::MakerPaymentNotConfirmedInTime(e.to_string());
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             }
             info!("Swap {}: maker payment confirmed, proceeding to spend funding", sm.uuid);
         }
@@ -2040,17 +1978,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::FailedToSendPayment(format!("Failed to send taker payment: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let taker_payment_bytes: BytesJson = taker_payment_tx.tx_hex().into();
@@ -2103,34 +2031,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own funding tx: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let maker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&self.negotiation_data.taker_coin_htlc_pub) {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse maker's taker-coin pubkey: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let taker_taker_coin_pub_bytes = match sm.taker_coin.try_derive_htlc_pubkey_v2_bytes(&unique_data) {
@@ -2138,34 +2046,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
             Err(e) => {
                 let reason =
                     AbortReason::InternalError(format!("Failed to derive own taker-coin V2 HTLC pubkey: {}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let taker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&taker_taker_coin_pub_bytes) {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own taker-coin pubkey: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
 
@@ -2183,34 +2071,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse preimage: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let signature = match sm.taker_coin.parse_signature(&self.funding_spend_preimage.signature) {
             Ok(s) => s,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse signature: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let preimage_with_sig = TxPreimageWithSig { preimage, signature };
@@ -2223,17 +2091,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for M
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::FailedToSendPayment(format!("Failed to send taker payment: {:?}", e));
-                return Self::change_state(
-                    TakerFundingRefundRequired::new(
-                        self.maker_coin_start_block,
-                        self.taker_coin_start_block,
-                        self.negotiation_data.clone(),
-                        self.taker_funding.clone(),
-                        reason,
-                    ),
-                    sm,
-                )
-                .await;
+                return self.abort_to_funding_refund_required(reason, sm).await;
             },
         };
         let taker_payment_bytes: BytesJson = taker_payment_tx.tx_hex().into();
@@ -2286,22 +2144,14 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own payment tx: {:?}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
+                return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
         let maker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&self.negotiation_data.taker_coin_htlc_pub) {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse maker's taker-coin pubkey: {:?}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
+                return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
         let taker_taker_coin_pub_bytes = match sm.taker_coin.try_derive_htlc_pubkey_v2_bytes(&unique_data) {
@@ -2309,33 +2159,21 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             Err(e) => {
                 let reason =
                     AbortReason::InternalError(format!("Failed to derive own taker-coin V2 HTLC pubkey: {}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
+                return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
         let taker_taker_coin_pub = match sm.taker_coin.parse_pubkey(&taker_taker_coin_pub_bytes) {
             Ok(p) => p,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own taker-coin pubkey: {:?}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
+                return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
         let maker_address = match sm.taker_coin.try_my_addr().await {
             Ok(address) => address,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to select taker-coin V2 address: {}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
+                return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
         let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
@@ -2367,11 +2205,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             Ok(r) => r,
             Err(e) => {
                 let reason = AbortReason::FailedToGenerateSpendPreimage(format!("{:?}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
+                return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
 
@@ -2419,11 +2253,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             Err(e) => {
                 warn!("Swap {}: maker did not spend taker payment in time: {:?}", sm.uuid, e);
                 let reason = AbortReason::MakerDidNotSpendInTime(format!("{:?}", e));
-                Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await
+                self.abort_to_payment_refund_required(reason, sm).await
             },
         }
     }
@@ -2448,11 +2278,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             Ok(tx) => tx,
             Err(e) => {
                 let reason = AbortReason::InternalError(format!("Failed to parse own payment tx: {:?}", e));
-                return Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await;
+                return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
 
@@ -2485,11 +2311,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State
             Err(e) => {
                 warn!("Swap {}: maker did not spend taker payment in time: {:?}", sm.uuid, e);
                 let reason = AbortReason::MakerDidNotSpendInTime(format!("{:?}", e));
-                Self::change_state(
-                    TakerPaymentRefundRequired::new(self.taker_payment.clone(), self.negotiation_data.clone(), reason),
-                    sm,
-                )
-                .await
+                self.abort_to_payment_refund_required(reason, sm).await
             },
         }
     }
