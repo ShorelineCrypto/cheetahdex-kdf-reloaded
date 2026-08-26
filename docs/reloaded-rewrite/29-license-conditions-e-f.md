@@ -295,8 +295,14 @@ chapter discusses is:
   fee-emission path) are preserved byte-identically where they are
   values, and independently re-expressed where they are logic;
 - the toxicity check found and removed one stray comment that
-  attributed behaviour to a post-baseline upstream party
-  (commit `760099074`, replaced with a factual design-intent note).
+  attributed behaviour to a post-baseline upstream party, replacing
+  it with a factual design-intent note. The specific commit is
+  tracked in that internal audit's own record, not reproduced here as
+  a hash: this document's project history was checked directly (full
+  and unreachable-object log search) and does not contain a commit
+  matching the hash this chapter previously cited, so citing it here
+  would assert a false sense of independent verifiability this
+  document cannot back up.
 
 The audit conclusions, the package-by-package classifications, and
 the standing methodology are recorded in that internal engineering
