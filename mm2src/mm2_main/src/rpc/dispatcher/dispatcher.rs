@@ -161,14 +161,22 @@ async fn auth(request: &MmRpcRequest, ctx: &MmArc, client: &SocketAddr) -> Dispa
         return Ok(());
     }
 
-    let rpc_password = ctx.conf["rpc_password"].as_str().unwrap_or_else(|| {
+    // `rpc_password` absent from config must never be treated as an empty-string
+    // password to match against: defaulting it to "" let a caller who explicitly
+    // supplied an empty (present, non-null) `userpass` authenticate for every
+    // protected method on a node that never had a password configured at all.
+    // No comparison is attempted in that case — every request is rejected the
+    // same way a wrong password is, through the same rate-limited path, so an
+    // unconfigured node gives an attacker no signal distinguishing "no password
+    // set" from "wrong password" (CRD ch.43 §43.3 code-quality finding).
+    let rpc_password = ctx.conf["rpc_password"].as_str();
+    if rpc_password.is_none() {
         warn!("'rpc_password' is not set in the config");
-        ""
-    });
-    match request.userpass {
-        Some(ref userpass) if userpass == rpc_password => Ok(()),
-        Some(_) => Err(process_rate_limit(ctx, client).await),
-        None => MmError::err(DispatcherError::UserpassIsNotSet),
+    }
+    match (request.userpass.as_deref(), rpc_password) {
+        (Some(userpass), Some(rpc_password)) if userpass == rpc_password => Ok(()),
+        (Some(_), _) => Err(process_rate_limit(ctx, client).await),
+        (None, _) => MmError::err(DispatcherError::UserpassIsNotSet),
     }
 }
 
@@ -583,6 +591,91 @@ mod tests {
 
         let err = block_on(dispatcher_v2(request, ctx)).unwrap_err();
         assert!(matches!(err.into_inner(), DispatcherError::NoSuchMethod));
+    }
+
+    /// Any address works: `auth` only reads `client` to key its rate-limit
+    /// registry on the failure paths these tests exercise.
+    fn test_client_addr() -> SocketAddr { "127.0.0.1:0".parse().unwrap() }
+
+    fn protected_request(userpass: Option<&str>) -> MmRpcRequest {
+        MmRpcRequest {
+            mmrpc: MmRpcVersion::V2,
+            userpass: userpass.map(str::to_owned),
+            // Any method absent from `PUBLIC_METHODS` exercises the real auth
+            // check; `my_balance` is not public.
+            method: "my_balance".to_owned(),
+            params: json!({}),
+            id: Some(1),
+        }
+    }
+
+    /// CRD ch.43 §43.3: a node with no `rpc_password` configured must reject
+    /// every protected-method request, not authenticate a caller who supplies
+    /// an explicit empty-string `userpass`. Before the fix this passed
+    /// (`"" == ""`), granting unauthenticated access to every protected
+    /// method on any node that never had a password configured.
+    #[test]
+    fn auth_rejects_empty_userpass_when_rpc_password_is_unconfigured() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        assert!(
+            ctx.conf["rpc_password"].is_null(),
+            "test assumes no rpc_password in config"
+        );
+
+        let request = protected_request(Some(""));
+        let result = block_on(auth(&request, &ctx, &test_client_addr()));
+        assert!(
+            result.is_err(),
+            "an empty userpass must not authenticate against an unconfigured rpc_password"
+        );
+    }
+
+    /// Same gap, non-empty caller-supplied value: still must not authenticate
+    /// against an unconfigured password.
+    #[test]
+    fn auth_rejects_any_userpass_when_rpc_password_is_unconfigured() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        assert!(
+            ctx.conf["rpc_password"].is_null(),
+            "test assumes no rpc_password in config"
+        );
+
+        let request = protected_request(Some("whatever-a-caller-happens-to-send"));
+        let result = block_on(auth(&request, &ctx, &test_client_addr()));
+        assert!(
+            result.is_err(),
+            "no userpass value should authenticate against an unconfigured rpc_password"
+        );
+    }
+
+    /// Sanity: a configured password still authenticates a matching caller.
+    #[test]
+    fn auth_accepts_correct_userpass_when_rpc_password_is_configured() {
+        let ctx = MmCtxBuilder::default()
+            .with_conf(json!({ "rpc_password": "correct horse battery staple" }))
+            .into_mm_arc();
+
+        let request = protected_request(Some("correct horse battery staple"));
+        let result = block_on(auth(&request, &ctx, &test_client_addr()));
+        assert!(
+            result.is_ok(),
+            "the configured password must still authenticate its own caller"
+        );
+    }
+
+    /// Sanity: a configured password still rejects a wrong caller.
+    #[test]
+    fn auth_rejects_wrong_userpass_when_rpc_password_is_configured() {
+        let ctx = MmCtxBuilder::default()
+            .with_conf(json!({ "rpc_password": "correct horse battery staple" }))
+            .into_mm_arc();
+
+        let request = protected_request(Some("wrong password"));
+        let result = block_on(auth(&request, &ctx, &test_client_addr()));
+        assert!(
+            result.is_err(),
+            "a configured password must still reject a caller who gets it wrong"
+        );
     }
 
     #[cfg(all(unix, not(target_arch = "wasm32")))]

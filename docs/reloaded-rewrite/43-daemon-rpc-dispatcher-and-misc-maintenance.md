@@ -93,25 +93,29 @@ config) if it fails. The policy shall require **all** of:
 > dropping a character-class requirement, or removing the repeated-character cap)
 > is a regression. Verified: the shipped policy enforces all of the above.
 
-> **Code-quality finding (informative).** The strength-policy validation of
-> R43.3.2 is only exercised when `rpc_password` is present in the runtime
-> configuration; a genuinely absent `rpc_password` skips the strength check
-> entirely (a diagnostic is logged, but startup proceeds). Separately, the
-> request-time authentication comparison of R43.3.1 substitutes an empty
-> string for the configured password whenever `rpc_password` is absent,
-> rather than refusing every comparison outright. The combined effect is that
-> a caller who explicitly supplies an empty (present, non-null) credential
-> satisfies that comparison whenever `rpc_password` is unconfigured, gaining
-> access to every protected method without ever having been given a password
-> -- which does not honour R43.3.1's "a missing or wrong password shall be
-> rejected" floor, nor Chapter 45 R45.5.2's requirement that an absent
-> `rpc_password` "shall not silently grant unauthenticated access." The
-> sibling case -- `rpc_password` explicitly configured as an empty string --
-> is already refused at startup, so this gap is specific to the *absent*
-> case. Closing it requires either extending the startup refusal of R43.3.2
-> to a genuinely absent `rpc_password`, or making the authentication
-> comparison itself reject every caller credential, including an explicitly
-> empty one, whenever no `rpc_password` is configured.
+> **Code-quality finding (informative, resolved 2026-08-27).** The
+> request-time authentication comparison of R43.3.1 used to substitute an
+> empty string for the configured password whenever `rpc_password` was
+> absent, rather than refusing every comparison outright: a caller who
+> explicitly supplied an empty (present, non-null) credential satisfied that
+> comparison whenever `rpc_password` was unconfigured, gaining access to
+> every protected method without ever having been given a password -- which
+> did not honour R43.3.1's "a missing or wrong password shall be rejected"
+> floor, nor Chapter 45 R45.5.2's requirement that an absent `rpc_password`
+> "shall not silently grant unauthenticated access." The sibling case --
+> `rpc_password` explicitly configured as an empty string -- was already
+> refused at startup, so the gap was specific to the *absent* case. Closed
+> by making the authentication comparison itself reject every caller
+> credential, including an explicitly empty one, whenever no `rpc_password`
+> is configured -- routed through the same rate-limited invalid-password
+> path a wrong password already takes, so an unconfigured node gives a
+> caller no signal distinguishing "no password set" from "wrong password."
+> The startup strength-policy validation of R43.3.2 still only runs when
+> `rpc_password` is present (a genuinely absent `rpc_password` still only
+> logs a diagnostic at startup and does not refuse to start) -- this is now
+> a pure availability/UX question, not a security gap, since no request can
+> authenticate against an unconfigured password regardless. Code:
+> `mm2src/mm2_main/src/rpc/dispatcher/dispatcher.rs` (`auth`).
 
 R43.3.3 The RPC password and passphrase shall never be logged or echoed in
 responses or errors.
