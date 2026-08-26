@@ -1351,11 +1351,12 @@ storage error that reflects the store failure.
   unchanged, survives a single-endpoint failure, stops when the coin is disabled,
   and cannot run concurrently with an activation that rebuilds or renames the
   same wallet database.
-- Pending shielded receipts (§39.8.0.6, not yet implemented — D39.8.0c): an
-  unconfirmed wallet-owned shielded receipt observed through `GetMempoolTx`
-  appears only in the non-spendable balance, never in spendable or tradable
-  amounts, is not double-counted when the transaction is mined and scanned, and
-  disappears if the transaction is dropped or expires.
+- Pending shielded receipts (§39.8.0.6, implemented -- D39.8.0c resolved
+  2026-08-09): an unconfirmed wallet-owned shielded receipt observed through
+  `GetMempoolTx` appears only in the non-spendable balance, never in
+  spendable or tradable amounts, is not double-counted when the transaction
+  is mined and scanned, and disappears if the transaction is dropped or
+  expires.
 - Generic history separation: for an activated ZCoin, generic `my_tx_history`
   v2 rejects the coin as unsupported for that method; Desktop uses
   `z_coin_tx_history` for shielded history (§39.8.0c).

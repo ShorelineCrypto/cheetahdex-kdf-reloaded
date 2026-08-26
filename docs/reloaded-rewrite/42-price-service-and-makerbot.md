@@ -122,6 +122,14 @@ history may read the same values by swap `uuid`.
 > snapshots are fetched, stored in the GLEEC-compatible aggregate stats columns,
 > and exposed through per-wallet swap-history RPCs by `uuid`.
 
+> **Cross-reference.** [Chapter 44](44-database-persistence-and-migrations.md)
+> §44.6 and R44.8.6 own the binding on-disk schema this requirement writes
+> through: the state `7 -> 8` `stats_swaps` migration adds the
+> `maker_coin_usd_price` / `taker_coin_usd_price` columns this snapshot
+> populates, and R44.8.6 binds that RELOADED does not add a parallel
+> completion-fiat column set to `my_swaps` -- per-wallet history reads the
+> `stats_swaps` price columns by `uuid` instead.
+
 ## 42.7 Acceptance criteria (chapter)
 
 - `start_simple_market_maker_bot` starts the loop with a pair registry; the loop

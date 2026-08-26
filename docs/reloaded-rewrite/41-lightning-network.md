@@ -39,7 +39,13 @@ only. It shall be absent from the WASM build.
 
 R41.2.1 Lightning node activation shall be a long-running task exposed as the
 public RPC quartet `init_lightning` / `init_lightning_status` /
-`init_lightning_user_action` / `cancel_init_lightning`.
+`init_lightning_user_action` / `cancel_init_lightning`. The same task, and the
+same activation routine, shall also be reachable through the namespaced
+`task::enable_lightning::{init,status,user_action,cancel}` method quartet; both
+forms drive the identical activation task and are interchangeable, native-only
+aliases of each other (see [Chapter 48](48-platform-coin-task-activation.md),
+which cites the Lightning task family as prior art for the shared task-lifecycle
+substrate).
 
 R41.2.2 A simplified single-call enable path shall also be exposed as the public
 RPC `enable_lightning`.
@@ -91,14 +97,16 @@ chapter bind the project's public behaviour and the BOLT-level wire contract, no
 the engine's internal API. The implementation shall track a maintained engine
 version.
 
-> **Upstream divergence (informative).** Reloaded exposes the channel/payment
-> operations under **flat** method strings (e.g. `open_channel`,
-> `send_payment`). Upstream later regrouped several of these under a
-> `lightning::` RPC namespace (e.g. `lightning::channels::open_channel`). This is
-> a public-interface naming difference, not a behavioural one. **Recommended (if
-> aligning to upstream):** introduce the namespaced aliases while keeping the
-> flat names for backward compatibility, or document the flat names as the
-> reloaded contract. No behavioural change is required.
+> **Upstream divergence (informative).** Upstream regrouped the channel/payment
+> operations under a `lightning::` RPC namespace (e.g.
+> `lightning::channels::open_channel`). Reloaded exposes **both** forms: the
+> original **flat** method strings (e.g. `open_channel`, `send_payment`) remain
+> routed for backward compatibility, and the namespaced `lightning::channels::*`
+> / `lightning::nodes::*` / `lightning::payments::*` aliases (including
+> `lightning::channels::update_channel` and the §41.7 `lightning::nodes::*`
+> trusted-node RPCs) are routed alongside them to the same handlers. This is a
+> public-interface naming difference, not a behavioural one; no request differs
+> in outcome by which form of the method string it uses.
 
 ## 41.7 Trusted-node management RPCs
 
@@ -108,9 +116,9 @@ version.
 > chapter and the public API docs disagree on a field name, the public API docs
 > govern the wire contract.
 
-> **Status:** these three RPCs are **not yet present** in reloaded-public and are
-> specified here as a forward requirement (see the implementation-substrate note
-> at the end of this section).
+> **Status:** these three RPCs are **implemented and routed** in reloaded-public
+> (see the implementation-substrate note at the end of this section for the
+> persistence substrate that backs them).
 
 R41.7.1 The project shall expose three native-only mmrpc-2.0 RPCs for managing the
 set of *trusted nodes* of an activated Lightning coin:
@@ -186,10 +194,10 @@ R41.7.8 **Error conditions (public `error_type` + HTTP status).**
 > string below are the **public** Komodo DeFi Framework Lightning RPC contract;
 > the published API docs govern on any discrepancy.
 
-> **Status:** this RPC is **not yet routed** in reloaded-public. It is
-> **deliverable** against the vendored Lightning substrate via a bounded patch
-> (see the feasibility verdict at the end of this section); the contract below is
-> the finished target.
+> **Status:** this RPC is **implemented and routed** in reloaded-public, delivered
+> against the vendored Lightning substrate via the bounded patch described in the
+> feasibility verdict at the end of this section; the contract below is the
+> shipped behaviour.
 
 R41.8.1 The project shall expose a native-only mmrpc-2.0 RPC
 `lightning::channels::update_channel` that mutates the configurable parameters of
@@ -322,13 +330,13 @@ R41.8.6 **Error conditions (public `error_type` discriminant + HTTP status).**
 >   uplift remains a larger, separate effort tracked elsewhere and is out of scope
 >   here.
 >
-> **Fallback (clean published failure, only if the user elects to route §41.8
-> before the bounded patch lands):** the method may be routed to a documented
-> failure rather than left unrouted -- it shall return a single documented
-> `error_type` of a not-available class with HTTP **501 Not Implemented**, never a
-> panic, never a partial/silent mutation. This fallback is a divergence from the
-> public contract (which performs the update) and must itself be documented as
-> such; it is *not* the preferred finish, which is verdict **A** above.
+> **Historical fallback (superseded).** Before the bounded patch above landed,
+> this chapter allowed routing `update_channel` to a documented not-available
+> failure (HTTP 501) rather than leaving it unrouted, as an interim divergence
+> from the public contract. That fallback no longer applies: verdict **A** has
+> shipped and `update_channel` performs the update as specified in R41.8.3-
+> R41.8.5. Recorded here only so a reader of prior chapter history understands
+> why an interim 501 path may have existed.
 
 ## 41.9 Acceptance criteria
 

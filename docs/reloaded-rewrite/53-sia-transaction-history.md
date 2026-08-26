@@ -1,6 +1,6 @@
 # Chapter 53 -- Siacoin Transaction History
 
-**Status:** driving-spec (required port). This chapter closes
+**Status:** driving-spec (required port, implemented). This chapter closes
 [Chapter 20](20-siacoin-integration.md) §20.10 **D2 -- History persistence**
 and gives the `tx_history` activation flag bound by
 [Chapter 46](46-sia-v2-activation-rpcs.md) §46.1.2 an observable meaning.
@@ -14,14 +14,15 @@ and gives the `tx_history` activation flag bound by
 > the shared paging, confirmation-count, and sync-status semantics every
 > other coin already uses.
 
-> **Treatment:** **T-PORT.** The Sia coin type, its walletd client, its
-> `tx_history` activation flag, its history-sync-state cell, the
+> **Treatment:** **T-PORT, implemented.** The Sia coin type, its walletd
+> client, its `tx_history` activation flag, its history-sync-state cell, the
 > coin-generic runtime history store, the coin-generic history RPC handler,
-> and the Sia fee-details record are all already present in reloaded (see
-> §53.7). What is required is the **history integration**: the event-to-record
-> mapping, the background tracking task that populates the store, the three
-> Sia transaction-type wire values, and the history-RPC acceptance of the Sia
-> coin. The contract distilled here is the source of truth for that port.
+> and the Sia fee-details record were already present in reloaded before this
+> port (see §53.7). The **history integration** this chapter specified --
+> the event-to-record mapping, the background tracking task that populates
+> the store, the three Sia transaction-type wire values, and the
+> history-RPC acceptance of the Sia coin -- has been implemented against the
+> contract distilled here.
 
 > **Binding scope (R37).** Requirements bind observable behaviour, the public
 > RPC method strings and their request/response JSON field names, the wire
@@ -461,12 +462,12 @@ This note orients the implementer; it is not normative.
   union, and the hastings/SC conversion helpers;
 - the Sia HTTP client's address-events call.
 
-**What must be added (scope of this chapter's port):**
+**Added by this chapter's port (implemented):**
 
 - the three transaction-type wire values of R53.5.10;
 - the event-to-record mapping of §53.5;
-- the tracking pass and its lifecycle of §53.6, replacing the currently inert
-  history loop that ch. 20 §20.10 D2 records;
+- the tracking pass and its lifecycle of §53.6, replacing the previously
+  inert history loop that ch. 20 §20.10 D2 recorded (now closed);
 - acceptance of the Sia coin on the mmrpc-2.0 runtime-history branch
   (R53.2.7).
 
@@ -500,8 +501,11 @@ D2; the residue is narrower.
   raw-transaction field is empty for Sia (R53.5.11); exposing the event's
   typed payload to callers is deferred.
 - **D53.5 -- Multi-address history.** Only the activated single address is
-  queried (R53.4.2), consistent with ch. 20 §20.10 D1. Aggregating history
-  across a discovered HD address set is deferred.
+  queried (R53.4.2), matching Sia activation's account-0-only scope
+  (ch. 20 §20.4.1; ch. 46 R46.1.3). Ch. 20 §20.10 D1 (multi-account HD) is
+  now closed, so a wallet may hold additional discovered HD addresses beyond
+  the activated one; aggregating history across that discovered address set
+  remains deferred here.
 - **D53.6 -- History streaming.** Sia history records are not published to
   the event-streaming surface; a caller polls (§53.6.8).
 - **D53.7 -- Fee-policy attribution.** The reported fee policy is the
