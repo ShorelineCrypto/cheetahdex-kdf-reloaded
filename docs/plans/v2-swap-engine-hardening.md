@@ -1,10 +1,12 @@
 # Plan: V2 swap engine dedup, error-path hardening, and V1 driver consolidation
 
-> **Status:** in progress. T1 (the D8 correctness fix, commit `220f8cafc`)
-> and T2 (the clippy guardrail, commit `ba0b0a739`) are done. Remaining
-> items are tracked with the same T-numbering used in chat with the user
-> (not otherwise written down); see the numbered findings/phases below for
-> the underlying P-numbering this plan originally shipped with.
+> **Status:** T1-T7 and T9-T10 are done (commits `220f8cafc`, `ba0b0a739`,
+> `9f79af496`, `5923c4558`, `7c021ea47`). T8 was reassessed as riskier than
+> categorized and deferred, not attempted (see its own entry below). T11-T13
+> (V1 consolidation) remain queued for a future round, per the plan's own
+> original phasing. T-numbering is used in chat with the user (not
+> otherwise written down); see the numbered findings/phases below for the
+> underlying P-numbering this plan originally shipped with.
 >
 > This plan is adapted from an external code review of `lp_swap/` (2026-08-25),
 > supplemented with independent verification against this repository. Findings
@@ -231,15 +233,25 @@ annotated where this repository's own verification changed the picture)
 - ~~P2.0~~ **Done as T1, commit `220f8cafc`.** `taker_payment` threaded
   through `TakerPaymentSpent`/`MakerPaymentSpent` as an additive field; two
   new regression tests; ch.52 D8 marked Closed.
-- P2.1 Replace the `net_config_or_panic` V2 sites with propagated
-  `AbortReason::InternalError` — verify per-site reachability first (see
-  "severity revised" note above) rather than assuming all seven are
-  equally live.
+- ~~P2.1~~ **Done as T9, commit `7c021ea47`.** All 7 sites replaced with
+  the existing fallible `net_config_for`, mirroring each site's own
+  established sibling abort pattern. New `dex_fee.rs` source-text
+  meta-test (`t18_...`).
 - ~~P2.2~~ **Done as T5, commit `9f79af496`.** Replaced with `&sm.taker_secret`
   — `H256: Deref<Target = [u8; 32]>` (verified directly in
   `kdf_primitives`' `define_hash!` macro), so this is a plain infallible
   deref, not a fallback of any kind.
-- P2.3 Recovery-path `.expect()`s → logged abort with reason.
+- ~~P2.3~~ **Investigated as T10, commit `7c021ea47`. Documentation, not
+  a behavior change.** All 3 `.expect()` messages traced to their root
+  cause rather than reflexively converted. `SwapsContext::from_ctx`'s
+  `.expect()` left as-is (structurally infallible in practice, matches
+  this codebase's own pervasive convention). The two P2P-pubkey
+  `.expect()`s left as panics, deliberately not converted to a "logged
+  graceful degrade" — that would silently break the swap's P2P routing,
+  judged worse than a loud panic. Investigation surfaced a real,
+  previously-undocumented gap: CRD ch.52 R9's "fifth case" (malformed
+  persisted bytes must fail recreation with a distinct error) isn't
+  implemented for the P2P identity pubkey specifically — now ch.52 D9.
 - ~~P2.4~~ **Done as T4, commit `9f79af496`.** `append_swap_v2_event`'s
   SELECT/UPDATE now run inside one `conn.transaction()`, matching the
   pattern already used elsewhere in this codebase.
@@ -276,7 +288,7 @@ annotated where this repository's own verification changed the picture)
 | 3 | P1.2, P1.3 (SQL only), P2.2, P2.4 | trivial | done (commit `9f79af496`) |
 | 4 | P1.1 (dex_fee meta-tests needed no update) | low | done (commit `5923c4558`) |
 | 5 | P1.4 | **reassessed as medium-risk, V1 compat territory** | deferred, not attempted |
-| 6 | P2.1, P2.3 | medium (behavioral) | pending |
+| 6 | P2.1, P2.3 | medium (behavioral) | done (commit `7c021ea47`) |
 | 7 | P3.1–P3.2 | medium | pending, queued for a later round |
 | 8 | P3.3 | optional | pending, queued for a later round |
 
