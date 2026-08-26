@@ -1156,14 +1156,40 @@ where
             taker_coin: self.taker_coin.ticker().into(),
             swap_type: SwapV2Type::TakerV2,
         };
+        // Safe: `from_ctx` (mm2_core::mm_ctx::from_ctx) memoizes a per-process
+        // singleton keyed on `ctx.swaps_ctx`. Every other call site in this
+        // codebase (dozens, across lp_swap.rs, swap_v2_rpcs.rs, swap_msg.rs, ...)
+        // already treats it as infallible via `.unwrap()`, and the constructor
+        // closure has no fallible/panicking step of its own — failure here would
+        // require a poisoned `ctx.swaps_ctx` mutex, i.e. an earlier panic while
+        // holding that exact lock, which nothing in `from_ctx`'s own closure does.
+        // See docs/plans/v2-swap-engine-hardening.md (T10/P2.3) for the full
+        // reachability analysis.
         let swap_ctx = super::SwapsContext::from_ctx(&self.ctx).expect("SwapsContext should exist");
         swap_ctx.add_active_swap_v2(swap_info);
+        // KNOWN GAP (T10/P2.3, docs/plans/v2-swap-engine-hardening.md): unlike
+        // the `SwapsContext` lookup above, this parse is NOT provably
+        // unreachable. This codebase has no fresh-swap-initiation path yet —
+        // `TakerSwapStateMachine` is only ever built by `recreate_machine` — and
+        // `recreate_machine` does not itself validate `maker_p2p_pub` before
+        // accepting a stored record, even though CRD ch.52 R9's "fifth case"
+        // requires stored pubkey bytes that no longer parse to fail recreation
+        // with a distinct, typed error rather than reach here. A malformed
+        // persisted pubkey does reach this `.expect()`. Left as a panic rather
+        // than a logged skip-and-continue of `init_v2_msg_store`: skipping it
+        // would silently break this swap's entire P2P message routing, while the
+        // reentrancy-lock-renewal task (already spawned in `on_start`, on the
+        // shared executor, independent of this hook) keeps holding the swap's
+        // lock forever in this process either way — so a graceful degrade here
+        // does not clearly dominate a loud panic. The real fix belongs in
+        // `recreate_machine` per R9, not this infallible hook.
         let accept_from = secp256k1::PublicKey::from_slice(&self.maker_p2p_pubkey)
             .expect("maker_p2p_pubkey must be a valid 33-byte compressed pubkey");
         swap_ctx.init_v2_msg_store(self.uuid, accept_from);
     }
 
     fn clean_up_context(&mut self) {
+        // See the `init_additional_context` comment above — same guarantee applies.
         let swap_ctx = super::SwapsContext::from_ctx(&self.ctx).expect("SwapsContext should exist");
         swap_ctx.remove_active_swap_v2(&self.uuid);
         swap_ctx.remove_v2_msg_store(&self.uuid);
@@ -1716,8 +1742,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for N
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
+        let net_config = match mm2_net_config::net_config_for(sm.ctx.netid()) {
+            Some(cfg) => cfg,
+            None => {
+                let reason = AbortReason::InternalError(format!("No net config for netid {}", sm.ctx.netid()));
+                return Self::change_state(Aborted::new(reason), sm).await;
+            },
+        };
         let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
-            mm2_net_config::net_config_or_panic(sm.ctx.netid()),
+            net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),
             &sm.taker_volume,
@@ -2176,8 +2209,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
+        let net_config = match mm2_net_config::net_config_for(sm.ctx.netid()) {
+            Some(cfg) => cfg,
+            None => {
+                let reason = AbortReason::InternalError(format!("No net config for netid {}", sm.ctx.netid()));
+                return self.abort_to_payment_refund_required(reason, sm).await;
+            },
+        };
         let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
-            mm2_net_config::net_config_or_panic(sm.ctx.netid()),
+            net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),
             &sm.taker_volume,
@@ -2471,8 +2511,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
+        let net_config = match mm2_net_config::net_config_for(sm.ctx.netid()) {
+            Some(cfg) => cfg,
+            None => {
+                let reason = AbortReason::InternalError(format!("No net config for netid {}", sm.ctx.netid()));
+                return Self::change_state(Aborted::new(reason), sm).await;
+            },
+        };
         let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
-            mm2_net_config::net_config_or_panic(sm.ctx.netid()),
+            net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),
             &sm.taker_volume,
@@ -2554,8 +2601,15 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
+        let net_config = match mm2_net_config::net_config_for(sm.ctx.netid()) {
+            Some(cfg) => cfg,
+            None => {
+                let reason = AbortReason::InternalError(format!("No net config for netid {}", sm.ctx.netid()));
+                return Self::change_state(Aborted::new(reason), sm).await;
+            },
+        };
         let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
-            mm2_net_config::net_config_or_panic(sm.ctx.netid()),
+            net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),
             &sm.taker_volume,
