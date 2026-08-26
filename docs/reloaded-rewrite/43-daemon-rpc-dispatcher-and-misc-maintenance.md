@@ -47,8 +47,12 @@ R43.1.2 The endpoint shall accept a **versioned** request shape carrying:
 - `userpass` -- the RPC password (see §43.3);
 - `id` (optional) -- echoed back in the response.
 
-R43.1.3 An unrecognised `mmrpc` version shall not be fatal: the dispatcher shall
-fall back to the latest known version rather than rejecting the request outright.
+R43.1.3 An unrecognised `mmrpc` version shall not be fatal: the endpoint shall
+answer with a structured, well-formed version-mismatch error response rather
+than failing to produce a valid response at all. The error response's own
+version tag defaults to the latest known version so the envelope stays
+well-formed; the triggering request is refused (as a version-mismatch error),
+not processed under the fallback version.
 
 R43.1.4 A response shall carry the matching version and `id`, and either a result
 or a structured error object.
@@ -89,6 +93,26 @@ config) if it fails. The policy shall require **all** of:
 > dropping a character-class requirement, or removing the repeated-character cap)
 > is a regression. Verified: the shipped policy enforces all of the above.
 
+> **Code-quality finding (informative).** The strength-policy validation of
+> R43.3.2 is only exercised when `rpc_password` is present in the runtime
+> configuration; a genuinely absent `rpc_password` skips the strength check
+> entirely (a diagnostic is logged, but startup proceeds). Separately, the
+> request-time authentication comparison of R43.3.1 substitutes an empty
+> string for the configured password whenever `rpc_password` is absent,
+> rather than refusing every comparison outright. The combined effect is that
+> a caller who explicitly supplies an empty (present, non-null) credential
+> satisfies that comparison whenever `rpc_password` is unconfigured, gaining
+> access to every protected method without ever having been given a password
+> -- which does not honour R43.3.1's "a missing or wrong password shall be
+> rejected" floor, nor Chapter 45 R45.5.2's requirement that an absent
+> `rpc_password` "shall not silently grant unauthenticated access." The
+> sibling case -- `rpc_password` explicitly configured as an empty string --
+> is already refused at startup, so this gap is specific to the *absent*
+> case. Closing it requires either extending the startup refusal of R43.3.2
+> to a genuinely absent `rpc_password`, or making the authentication
+> comparison itself reject every caller credential, including an explicitly
+> empty one, whenever no `rpc_password` is configured.
+
 R43.3.3 The RPC password and passphrase shall never be logged or echoed in
 responses or errors.
 
@@ -113,7 +137,9 @@ shall be wound down as part of shutdown rather than abandoned.
 ## 43.6 Acceptance criteria
 
 - A legacy request and a versioned (`mmrpc`) request both route correctly; an
-  unknown `mmrpc` version falls back to the latest rather than erroring (§43.1).
+  unknown `mmrpc` version yields a structured version-mismatch error response
+  (its own envelope defaulting to the latest known version) rather than a
+  raw or invalid response (§43.1).
 - A public method succeeds without a password; a protected method fails without
   the correct password and, in local-only mode, fails from a non-loopback client
   (§43.2).
