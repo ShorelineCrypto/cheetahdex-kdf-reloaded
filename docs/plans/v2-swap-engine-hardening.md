@@ -181,9 +181,18 @@ annotated where this repository's own verification changed the picture)
 - P1.1 Extract a shared refund-transition helper replacing the 47 (really:
   59, once `TakerPaymentRefundRequired` is included — recount before
   scoping) copy-paste blocks (F1). Est. −450…−550 lines.
-- P1.2 Delete the duplicate `taker_taker_coin_pub_bytes` derivation (F2).
-- P1.3 Merge `insert_swap_v2_{maker,taker}` and the two kickstart handlers
-  (F5).
+- ~~P1.2~~ **Done as T3, commit `9f79af496`.** Deleted the redundant second
+  `taker_taker_coin_pub_bytes` derivation; the two other occurrences of the
+  same shape were confirmed to be distinct, single derivations and left
+  alone.
+- ~~P1.3~~ **Done as T6, commit `9f79af496` — SQL functions only.**
+  `insert_swap_v2_{maker,taker}` merged into a shared private
+  `insert_swap_v2` plus a `SwapV2InsertFields` struct; public signatures
+  unchanged; SQL/parameter shape verified byte-identical to both
+  originals. The two kickstart handlers were deliberately **not**
+  merged — they differ by type (`DbRepr`/`Storage`/`StateMachine`
+  triads), not just value, so a real merge needs a generic trait
+  abstraction, its own separate design decision. Still open if wanted.
 - P1.4 Collapse `*SwapEventDeser` mirrors onto the hand-written
   `Deserialize` hooks (F7), preserving legacy-compat branches byte-for-byte.
 - Update `dex_fee.rs`'s `include_str!` source-text meta-tests alongside
@@ -199,13 +208,14 @@ annotated where this repository's own verification changed the picture)
   `AbortReason::InternalError` — verify per-site reachability first (see
   "severity revised" note above) rather than assuming all seven are
   equally live.
-- P2.2 Remove the (confirmed-dead) zero-secret `unwrap_or(&[0u8; 32])` for
-  clarity/future-proofing — cosmetic, not safety-critical, given it's
-  unreachable today.
+- ~~P2.2~~ **Done as T5, commit `9f79af496`.** Replaced with `&sm.taker_secret`
+  — `H256: Deref<Target = [u8; 32]>` (verified directly in
+  `kdf_primitives`' `define_hash!` macro), so this is a plain infallible
+  deref, not a fallback of any kind.
 - P2.3 Recovery-path `.expect()`s → logged abort with reason.
-- P2.4 Wrap `append_swap_v2_event`'s read-modify-write in a transaction
-  (F4) — correct-by-construction even though the reentrancy lock already
-  makes it safe in practice today.
+- ~~P2.4~~ **Done as T4, commit `9f79af496`.** `append_swap_v2_event`'s
+  SELECT/UPDATE now run inside one `conn.transaction()`, matching the
+  pattern already used elsewhere in this codebase.
 
 ### Phase 3 — V1 consolidation (medium risk; do after Phase 1 experience)
 
@@ -236,10 +246,10 @@ annotated where this repository's own verification changed the picture)
 |---|---|---|---|
 | 1 | P0.1–P0.3 | none | done (commit `ba0b0a739`) |
 | 2 | P2.0 | correctness fix | done (commit `220f8cafc`) |
-| 3 | P1.2, P1.3 | trivial | pending |
+| 3 | P1.2, P1.3 (SQL only), P2.2, P2.4 | trivial | done (commit `9f79af496`) |
 | 4 | P1.1 + dex_fee meta-test update | low | pending |
 | 5 | P1.4 | low | pending |
-| 6 | P2.1–P2.4 (minus P2.0, done above) | medium (behavioral) | pending |
+| 6 | P2.1, P2.3 | medium (behavioral) | pending |
 | 7 | P3.1–P3.2 | medium | pending, queued for a later round |
 | 8 | P3.3 | optional | pending, queued for a later round |
 
