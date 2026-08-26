@@ -1528,6 +1528,36 @@ codebase has no mock/test-double infrastructure for
 its own scoped effort, not part of this fix. Code:
 `mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs`.
 
+**D9.** *R9's "fifth case" is not implemented for persisted P2P pubkey
+bytes, and only incidentally covered for some other byte types.*
+`recreate_machine` (both maker and taker) does not itself validate any
+stored transaction, preimage, signature, public-key, or address bytes
+before accepting a persisted record and constructing the state
+machine — it checks only event-list emptiness and terminal-event
+exclusion (R9's first four cases). For transaction and HTLC-pubkey
+bytes this gap is largely masked in practice: the states that actually
+consume them re-parse independently in their own `on_changed`, so a
+malformed value still produces a clean abort, just later and via a
+different code path than R9 describes. It is not masked for the
+per-swap P2P identity pubkey (`maker_p2p_pubkey`/`taker_p2p_pubkey`):
+this value is consumed exactly once, inside
+`StorableStateMachine::init_additional_context` — a hook that is
+infallible by trait signature (returns `()`, not a `Result`) — via
+`secp256k1::PublicKey::from_slice(...).expect(...)`. A malformed
+persisted value here reaches that `.expect()` and panics, which R9
+explicitly says should not happen: recreation should fail up front,
+distinctly, not panic deep inside a later, unrelated-looking hook.
+Found while investigating whether that `.expect()` could safely become
+a logged degrade instead of a panic (it was judged it should not,
+absent this fix — skipping `init_v2_msg_store` would silently break
+the swap's P2P routing instead of failing loudly); the real fix
+belongs in `recreate_machine` validating the fifth case up front, as
+R9 already requires, not in patching the symptom at the consuming
+hook. Deferred rather than fixed inline, since it touches both roles'
+recreation paths and deserves its own scoped pass. Code:
+`mm2src/mm2_main/src/lp_swap/{taker_swap_v2,maker_swap_v2}.rs`
+(`recreate_machine`, `init_additional_context`).
+
 ## 52.14 Baseline and Repository Verifications
 
 The version-two substrate does not exist in the baseline state defined
