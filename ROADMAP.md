@@ -27,13 +27,21 @@ Goal: stabilise APIs and on-disk formats; broaden platform coverage.
 - Bump the vendored `librustzcash` (anchor-era 2022) to a modern release with
   batched note decryption and `shardtree` witnesses, to speed up shielded
   (ARRR/ZHTLC) sync. Workload analysis: `docs/plans/librustzcash-upgrade.md`.
-- V2 swap engine: fix a confirmed live gap where a specific taker-side
-  timeout-abort path (`MakerPaymentSpent` → refund) cannot construct a
-  valid refund (CRD ch.52 D8), dedup ~700-900 lines of copy-paste across
-  `lp_swap/`, and implement real WebAssembly persistence for V2 swaps
+- V2 swap engine: the `MakerPaymentSpent` timeout-abort refund gap (CRD
+  ch.52 D8) is fixed and most of the copy-paste dedup across `lp_swap/`
+  is done; still open — the V1 legacy event-deserializer mirrors (needs
+  its own careful, wire-compat-focused pass, not mechanical dedup), V1
+  driver consolidation, and real WebAssembly persistence for V2 swaps
   (currently a silent no-op, CRD ch.52 D7 / ch.26 D6 — a V2 swap in a
   browser build does not survive a reload). Workload analysis:
   `docs/plans/v2-swap-engine-hardening.md`.
+- **Siacoin V2 swap protocol (CRD ch.54): drafted, awaiting review, not
+  implemented.** ch.54 is an original-design chapter (no corpus
+  precedent exists for Sia's V2 path) binding the coin-generic V2 swap
+  traits to Sia's native spend-policy primitives. Per the plan that
+  produced it, no implementation pass may start until it's been read
+  and signed off. Until then, Sia swaps run V1 only — unaffected either
+  way.
 
 ## Stable (v1.0.0)
 

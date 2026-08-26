@@ -74,6 +74,11 @@ role:
   `/home/tomas_admin`.
 - If forbidden content appears accidentally, stop reading it, do not use it,
   and report the contamination risk.
+- A suspected or confirmed clean-room wall breach halts all `git commit` and
+  `git push` activity in this repository immediately — every in-flight
+  change, not only the one that triggered it — until the situation is
+  investigated and cured. Report it to the maintainer privately and
+  promptly; do not commit or push while remediation is pending.
 
 Do not claim that every existing file is a clean-room rewrite. The repository
 has a documented hybrid provenance: baseline-derived GPLv2 code,
