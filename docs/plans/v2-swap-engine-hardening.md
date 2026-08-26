@@ -178,9 +178,15 @@ annotated where this repository's own verification changed the picture)
 
 ### Phase 1 — Mechanical dedup, no behavior change
 
-- P1.1 Extract a shared refund-transition helper replacing the 47 (really:
-  59, once `TakerPaymentRefundRequired` is included — recount before
-  scoping) copy-paste blocks (F1). Est. −450…−550 lines.
+- ~~P1.1~~ **Done as T7, commit `5923c4558`.** One private helper method per
+  originating state type (not a single universal generic function — lower
+  risk, and each `Self::change_state` call site was already statically
+  typed to one concrete state, so no generic `TransitionFrom` bound
+  engineering was needed). 53 call sites replaced across both files; two
+  single-occurrence sites deliberately left inline. Net −328 lines
+  (estimate was −450…−550; the difference is the per-type helper bodies
+  themselves, which a single universal function wouldn't have needed —
+  a real cost of choosing the lower-risk approach, not a shortfall).
 - ~~P1.2~~ **Done as T3, commit `9f79af496`.** Deleted the redundant second
   `taker_taker_coin_pub_bytes` derivation; the two other occurrences of the
   same shape were confirmed to be distinct, single derivations and left
@@ -247,7 +253,7 @@ annotated where this repository's own verification changed the picture)
 | 1 | P0.1–P0.3 | none | done (commit `ba0b0a739`) |
 | 2 | P2.0 | correctness fix | done (commit `220f8cafc`) |
 | 3 | P1.2, P1.3 (SQL only), P2.2, P2.4 | trivial | done (commit `9f79af496`) |
-| 4 | P1.1 + dex_fee meta-test update | low | pending |
+| 4 | P1.1 (dex_fee meta-tests needed no update) | low | done (commit `5923c4558`) |
 | 5 | P1.4 | low | pending |
 | 6 | P2.1, P2.3 | medium (behavioral) | pending |
 | 7 | P3.1–P3.2 | medium | pending, queued for a later round |
