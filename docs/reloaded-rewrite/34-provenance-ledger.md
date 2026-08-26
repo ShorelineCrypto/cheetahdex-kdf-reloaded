@@ -54,8 +54,10 @@ after-the-fact narrowing.
     independent authors converge on the same shape (CRD §1.11 R32).
   - `third-party-api-bound` — shape dictated by an external crate, ABI,
     or protocol spec the file directly binds to (CRD §1.11 R33).
-  - `baseline-carryforward` — predates the 2022 baseline anchor; governed
-    by CRD §1.3 R3, not by the §1.11 categorisation.
+  - `baseline-carryforward` — predates the 2022 baseline anchor, or is a
+    mechanical relocation of anchor content; governed by CRD §1.3 R1 (the
+    baseline itself) and R2 (material that predates the baseline), not by
+    the §1.11 categorisation.
   - `vendored-subtree` — a whole upstream project imported as a subtree
     under its own license.
   - `adapted-source` — code adapted or ported from a public,
@@ -236,6 +238,24 @@ Two provenance statements were tightened after an external audit:
   shipped code's residual expressive similarity remains deferred to the R35
   gate (ch30 D1) per the locked review order.
 
+### 2026-08-27 — ethabi-vendored row removed (superseded by an alloy migration)
+
+- The `mm2src/ethabi-vendored/` row is removed from the *Vendored subtrees*
+  table: the directory no longer exists in the working tree. The project
+  first migrated off the vendored copy onto the plain published `ethabi 17`
+  crate, then replaced `ethabi` entirely with the `alloy-dyn-abi` /
+  `alloy-json-abi` ABI codec; no `ethabi` dependency of any form remains.
+  Neither successor is vendored — both are ordinary permissively-licensed
+  Cargo dependencies, which per the dependency-pointer reasoning already
+  recorded elsewhere in this ledger (§34.2, the `rust-web3` and WalletConnect
+  SDK entries) do not themselves require a ledger row.
+- This was a stale entry, not a live inconsistency at the time it was
+  written: the row was accurate when authored, and the ledger's own
+  Operating rule 2 (§34.4) already covers the removal case ("If a ledger
+  entry is replaced by an independent reimplementation, remove its row").
+  Row removed here per that rule; no code change accompanies this
+  correction.
+
 ### 2026-08-04 — stable Zcash crates and narrow compatibility patches
 
 - The obsolete `librustzcash-patched/` 0.5-era workspace dependency was
@@ -266,7 +286,7 @@ Two provenance statements were tightened after an external audit:
 | `mm2src/coins/z_coin/service.proto` | interop-reuse | `PirateNetwork/lightwalletd` upstream `walletrpc/service.proto`. | MIT (Zcash developers; Pirate Chain developers). | Third-party MIT-licensed protocol spec. The `pirate.wallet.sdk.rpc` package is required for ARRR lightwalletd wire compatibility. |
 | `mm2src/coins/z_coin/compact_formats.proto` | interop-reuse | `PirateNetwork/lightwalletd` upstream `walletrpc/compact_formats.proto`. | MIT (Zcash developers; Pirate Chain developers). | Same as above; compact block messages must share the same `pirate.wallet.sdk.rpc` package as the service. |
 | `mm2src/coins/utxo/bchrpc.proto` | interop-reuse | `gcash/bchd` upstream `bchrpc/pb/bchrpc.proto` (Bitcoin Cash node RPC). | ISC (gcash/bchd project license). | Drives `mm2src/coins/utxo/pb.rs` generation. Upstream file does not carry a per-file copyright header; project license applies. |
-| `mm2src/coins/eth/maker_swap_v2_abi.json` | interop-reuse | ABI of the deployed `EtomicSwapMakerV2` Solidity contract. | Derived from the deployed bytecode; ABI is a public derivation. | Bytes must match the deployed contract or `ethabi` calls fail at runtime. |
+| `mm2src/coins/eth/maker_swap_v2_abi.json` | interop-reuse | ABI of the deployed `EtomicSwapMakerV2` Solidity contract. | Derived from the deployed bytecode; ABI is a public derivation. | Bytes must match the deployed contract or the in-tree alloy-backed ABI facade's calls fail at runtime. |
 | `mm2src/coins/eth/taker_swap_v2_abi.json` | interop-reuse | ABI of the deployed `EtomicSwapTakerV2` Solidity contract. | Same as above. | Same as above. |
 
 ### Interop reuse — wire-format-only source
@@ -436,7 +456,6 @@ Distinct from the in-tree fragment scheme.
 
 | Destination | Classification | Source reference | License basis | Notes |
 |---|---|---|---|---|
-| `mm2src/ethabi-vendored/` | vendored-subtree | Upstream `rust-ethereum/ethabi` lineage (see in-tree crate metadata). | MIT/Apache-2 style upstream licensing. | Vendored for dependency control and compatibility. |
 | `mm2src/testcontainers-vendored/` | vendored-subtree | Upstream `testcontainers-rs` lineage (see in-tree crate metadata). | Upstream permissive licensing per crate metadata. | Vendored for deterministic CI behaviour. |
 | `vendor-patches/zcash_client_backend-0.23.0/` | vendored-subtree | Published crates.io `zcash_client_backend 0.23.0`. | MIT OR Apache-2.0; both license texts retained in-tree. | Manifest-only removal of the obsolete exact `time-core 0.1.2` dependency; see `KDF-PATCH.md`. |
 | `vendor-patches/zcash_primitives-0.28.0/` | vendored-subtree | Published crates.io `zcash_primitives 0.28.0`. | MIT OR Apache-2.0; both license texts retained in-tree. | Narrow transaction-builder compatibility extension; see `KDF-PATCH.md`. |
@@ -544,3 +563,96 @@ derivatives):
 Both pre-exist in upstream KDF and remain disclosed open items in §34.2 and
 in `LEGAL/LICENSING-POLICY.md`; their resolution is a maintainer/counsel
 licensing-policy decision, not a provenance question.
+
+## 34.6 Tests
+
+This is a meta-chapter (companion ledger); it has no executable test
+invariants of its own. The audit discipline that keeps it accurate is:
+
+- *Row-existence audit.* Every `Destination` path listed in §34.3 MUST
+  exist in the working tree. A row whose destination no longer exists —
+  the file was removed, renamed, or the dependency it recorded was
+  replaced — is stale and MUST be corrected or removed in the same pass
+  that discovers it (Operating rule 2, §34.4).
+- *Unlisted-file audit.* Per Operating rule 4 (§34.4), introducing a file
+  into any category other than the clean-room default (generated-artifact,
+  interop-reuse, convergent-idiomatic, third-party-api-bound,
+  baseline-carryforward, vendored-subtree, adapted-source, lineage-derived)
+  MUST add a ledger row in the same commit.
+- *Commit-citation audit.* Every introducing, superseding, or maintenance-
+  note commit hash cited in §34.2–§34.3 MUST resolve in the working
+  repository's history and MUST carry the cited date.
+
+## 34.7 Deferred Work
+
+**D1.** The two open license-compatibility items recorded in the
+2026-06-13 maintenance note (§34.2) — the Apache-2.0 WalletConnect SDK
+crates and the GPL-3.0-derived `mm2src/coins/eth/legacy_tx.rs`, both in
+tension with the GPL-2.0-only `LEGAL/LICENSE` notice — remain open.
+Resolution (moving to GPL-3.0 or GPL-2.0-or-later, or invoking the
+exceptions mechanism `LEGAL/LICENSE` itself names) is a maintainer/counsel
+licensing-policy decision, not a ledger-classification change; §34.2 and
+`LEGAL/LICENSING-POLICY.md` track the item.
+
+**D2.** Automated enforcement of the three §34.6 audits against the
+working tree on each pre-commit boundary is deferred to chapter 30 D1, the
+shared audit-tooling-gap hand-off point every chapter's own tooling
+deferral resolves to (see chapter 30 §30.8). The audits are currently
+performed manually at ledger-edit time.
+
+## 34.8 Baseline Verifications
+
+**V1.** Each `baseline-carryforward` entry in §34.3 MUST be confirmed
+against the chapter-02-bound anchor commit
+`c1d46c0c1592faa0860f704008b2b2381bc3840f` (3 June 2022): a plain
+baseline-carryforward row's recorded `First-introduced` date MUST match
+the introducing commit for that path in the working tree's history and
+MUST predate the anchor date; a *Refactor-relocated baseline content* row
+MUST be confirmed to be a mechanical relocation of content present at the
+anchor, with any post-anchor addition inside it (for example, logic
+entered after the anchor date) called out under the copyleft-inheritance
+basis of §34.5(b) rather than folded into the baseline-carryforward
+classification.
+
+## 34.9 External References
+
+This chapter's authoritative external citations are carried per row in
+the `Source reference` and `License basis` columns of §34.3; this section
+groups them by category for lookup and does not restate the per-row
+detail:
+
+- `programatik29/tokio-rusqlite` (MIT) — the adapted-source basis for the
+  `db_common` async SQLite connection wrapper.
+- `PirateNetwork/lightwalletd`'s `walletrpc/service.proto` and
+  `compact_formats.proto` (MIT) — the ARRR lightwalletd wire format.
+- `gcash/bchd`'s `bchrpc/pb/bchrpc.proto` (ISC) — the Bitcoin Cash node
+  RPC wire format.
+- The 1inch Swap API v6.0 and Portfolio API public specifications.
+- The WalletConnect v2 specification and the `relay_rpc` crate surface.
+- ISO 7816-4 APDU framing.
+- Cosmos SDK / Ethermint ABCI query paths and `BaseAccount` proto shape.
+- SQLite `CREATE` / `UPDATE` / `DELETE` / `WHERE` / table-constraint
+  grammar and the `sql_builder` crate API.
+- The published `zcash_client_backend`, `zcash_primitives`, and
+  `zcash_transparent` crates (MIT OR Apache-2.0).
+- `testcontainers-rs` (vendored subtree, permissive licensing per crate
+  metadata).
+
+## 34.10 Provenance Footer
+
+- *Inputs:* the working tree, checked path-by-path against every row in
+  §34.3 and every commit hash cited in §34.2 (per the audits of §34.6);
+  `LEGAL/THIRDPARTY-LICENSES` and `LEGAL/LICENSE`; chapter 01 (the R27
+  provenance-ledger-recording rule and the R28–R36 component-provenance
+  categories this ledger operationalises, per the corrected citation in
+  §34.1); chapter 02 (the anchor commit and date the baseline-carryforward
+  classification of §34.3 and the V1 verification of §34.8 are computed
+  against); chapter 30 (the audit-tooling-gap hand-off point of D2 in
+  §34.7).
+- *Permitted-input classes used:* the baseline itself (chapter 01 R1, for
+  baseline-carryforward rows); material that predates the baseline
+  (chapter 01 R2); external, public specifications (chapter 01 R3); wire
+  formats and external interfaces the project must inter-operate with
+  (chapter 01 R4).
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* not consulted.

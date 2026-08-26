@@ -107,6 +107,7 @@ and a one-sentence capsule of what the chapter documents.
 | 51 | [Legacy (V1) Atomic-Swap State Machine](51-legacy-v1-swap-state-machine.md) | legacy maker and taker stage graphs, negotiation refusal contract, per-stage reserved-funds semantics | The legacy V1 maker and taker state machines: stages, events, resume mapping, the refusal contract, message budgets, and reserved-funds rules. |
 | 52 | [Version-Two Atomic-Swap State Machine](52-swap-v2-state-machine.md) | V2 maker and taker state graphs, bidirectional refusal contract, reserved-amount ledger semantics | The V2 maker and taker state machines: states, events, resume mapping, the refusal and abort contract, message budgets, and reserved-funds rules. |
 | 53 | [Siacoin Transaction History](53-sia-transaction-history.md) | walletd address-event projection, coin-generic runtime history store, Sia transaction-type wire values | Sia transaction history as a projection of walletd's per-address event log into the shared transaction-details record, served through the framework's history RPC surface. |
+| 54 | [Siacoin Atomic-Swap Version-Two Path](54-sia-swap-v2-path.md) | Sia V2 swap path over the coin-generic V2 trait surface | DRAFT, not yet approved for implementation: binds the coin-generic V2 trait surface to Siacoin's V1 primitives and the shared V2 state-machine substrate; closes chapter 20 §20.10 D5. |
 
 ## 30.4 Aggregated Input Register
 
@@ -286,7 +287,7 @@ preserved-for-history substrate retained for git-archaeology continuity
 ## 30.6 Document-Set Composition (binding rules)
 
 **R1.** *Per-chapter self-containment.* Each substantive chapter (03
-through 28, and 31 through 33) MUST
+through 28, 31 through 33, and 35 through 54) MUST
 satisfy the project's chapter-shape rules (Chapter 01 §6): executive
 summary, subsystem shape, the binding-rule sections appropriate to the
 chapter's substrate, tests / deferred work / external references /
@@ -294,7 +295,11 @@ baseline verifications, and a provenance footer. The four-section
 post-substantive tail (tests, deferred, external refs, baseline
 verifications) MUST appear on every driving-spec chapter. A reader who
 picks up a single chapter alone MUST be able to verify that chapter's
-attribution without reading the rest of the document set.
+attribution without reading the rest of the document set. Chapter 54
+is DRAFT and not yet approved for implementation (see its own status
+line); it is listed in §30.3 for V2's completeness check but its
+content is not yet a binding driving specification until its status
+changes.
 
 **R2.** *Whole-delta coverage.* The substantive chapters as a set MUST
 describe the entire substrate delta from the baseline tree. Behaviours
@@ -339,6 +344,23 @@ discipline that protects it is:
 listed in §30.7 against the working tree on each pre-commit boundary is
 deferred. The audits are currently performed manually at chapter-edit
 time.
+
+This single deferred item is also the consolidated hand-off point every
+other chapter's own automated-tooling gap resolves to when it names
+"chapter 30 D1" or "chapter 30's audit-tooling-gap binding" rather than
+tracking a separate open item of its own: chapter 00's D1 (automated lint
+enforcement of its R5/R6 per-chapter-shape rules), chapter 01's D1
+(automated linting of R11 identifier hygiene, R13–R15 citation discipline,
+R16/R19/R20 per-chapter shape, and the R35 residual-similarity gate),
+chapter 02's D1 (a mechanical verification harness re-deriving the R4
+workspace-member registry, the R5 patched-dependency registry, and the
+§2.8 module layout from the anchor commit), and chapter 34's D2 (automated
+enforcement of its own three §34.6 ledger audits) are folded into this
+same deferred tooling effort rather than tracked as five separate open
+items. None of the five constituent automated checks exist yet; all are
+performed manually at the relevant chapter's or the ledger's edit time in
+the interim, and a future implementation of this item MUST cover all five
+before being considered complete.
 
 **D2.** A glossary chapter consolidating substrate names introduced
 across the document set is deferred. The per-substrate reverse map in
