@@ -164,7 +164,7 @@ only the order's UUID (or price+UUID sort key).
 a TTL-bounded record of recently-cancelled order UUIDs, consulted
 on insert so that a `Cancel` message that races ahead of its
 matching `Create` cannot resurrect an order. The guard's TTL is
-bound by [§11.5](11-order-match-cancellation.md) and §32.9; this
+bound by [§11.2](11-order-match-cancellation.md) and §32.9; this
 chapter binds only the guard's presence and the obligation to
 consult it on insert. *(Post-2022 component per §32.1.)*
 
@@ -669,22 +669,22 @@ address-derivation failure is a conformance defect, because it
 feeds R-F6c's drop path and removes the order from the response
 entirely rather than displaying it without an address.
 
-> **Code-quality finding (informative).** This repository's own
-> peer-address-derivation function currently answers the
-> unsupported-coin failure, not the shielded success, for both the
-> Siacoin and the Lightning coin families -- the two cases R-F6b
-> binds to the shielded outcome. Combined with R-F6c's drop-on-
-> failure behaviour, this means every live Siacoin or Lightning
-> order is presently absent from both the `orderbook` and the
+> **Code-quality finding (informative, resolved).** This
+> repository's peer-address-derivation function previously
+> answered the unsupported-coin failure, not the shielded success,
+> for both the Siacoin and the Lightning coin families -- the two
+> cases R-F6b binds to the shielded outcome. Combined with R-F6c's
+> drop-on-failure behaviour, this meant every live Siacoin or
+> Lightning order was absent from both the `orderbook` and the
 > `best_orders` responses, in either query direction, rather than
-> being shown with a shielded marker. This is the same defect
-> shape a live Siacoin maker order was observed to exhibit. Making
-> both arms return the shielded success value, matching the
-> treatment already given to the privacy-shielded coin family
-> R-F6b also names, is a direct, narrowly scoped fix; it changes
-> only these two arms' outcome and does not touch R-F6c's general
-> drop behaviour, which correctly remains for a coin family that
-> has no address-resolution path defined at all.
+> being shown with a shielded marker; this is the defect shape a
+> live Siacoin maker order was observed to exhibit. This
+> repository's code has since been corrected so that both arms
+> return the shielded success value, matching the treatment already
+> given to the privacy-shielded coin family R-F6b also names; the
+> fix changed only these two arms' outcome and left R-F6c's general
+> drop behaviour untouched, which correctly remains for a coin
+> family that has no address-resolution path defined at all.
 
 **R-F6c (address-resolution failure drops only that order).**
 When address derivation for a specific order's coin genuinely

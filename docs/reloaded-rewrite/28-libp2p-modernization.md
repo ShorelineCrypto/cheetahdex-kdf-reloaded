@@ -176,6 +176,23 @@ exactly the following named surface:
 
 Every other symbol in the substrate MUST be private to the crate.
 
+> **Code-quality finding (informative).** The current implementation does
+> not meet R1/R2/R5 as stated. `mm2_p2p` declares `atomicdex_behaviour`,
+> `network_streamer`, `peers_exchange`, `relay_address`, and
+> `request_response` as public submodules rather than keeping every
+> non-re-exported symbol private, and several downstream call sites import
+> directly from those submodule paths instead of the crate-root re-export
+> surface — for example the connection command/event/channel types the
+> application networking layer consumes, the gossipsub/peer-connectivity
+> accessor functions backing the Chapter 10 §10.16 `NETWORK` streamer's
+> snapshot fields (R30), and the `NetworkStreamer` type that streamer
+> activates. None of these are on the R5 re-export list. Closing the gap
+> means either widening R5's re-export list to cover the symbols downstream
+> code actually needs, or moving those call sites onto crate-root
+> re-exports and making the submodules private; either is a
+> substrate-boundary change, not a change to any bound behaviour elsewhere
+> in this chapter or in Chapter 10.
+
 ## 28.5 Bound Composed Behaviour
 
 **R6.** The composed network behaviour MUST be a `NetworkBehaviour`
