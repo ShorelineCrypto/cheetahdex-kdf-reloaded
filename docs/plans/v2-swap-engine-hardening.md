@@ -199,8 +199,29 @@ annotated where this repository's own verification changed the picture)
   merged — they differ by type (`DbRepr`/`Storage`/`StateMachine`
   triads), not just value, so a real merge needs a generic trait
   abstraction, its own separate design decision. Still open if wanted.
-- P1.4 Collapse `*SwapEventDeser` mirrors onto the hand-written
-  `Deserialize` hooks (F7), preserving legacy-compat branches byte-for-byte.
+- P1.4 (T8) **Reassessed and deferred, not attempted — riskier than its
+  original categorization.** F7's `*SwapEventDeser` mirrors turn out to
+  live in `taker_swap.rs`/`maker_swap.rs` — the **V1** legacy swap files,
+  not V2 — meaning this is compat-sensitive persisted-event-log
+  deserialization territory (`AGENTS.md` §1's persistent-data
+  compatibility rule applies directly), not a same-crate V2 refactor like
+  T7. Looked closer before dispatching anything: `TakerSwapEvent`'s custom
+  `Deserialize` impl pre-checks three variants before falling through to
+  the full `TakerSwapEventDeser` mirror + its 47-line `From` impl. Two of
+  the three existing regression tests
+  (`test_legacy_taker_watcher_message_sent_event_is_accepted`,
+  `test_legacy_taker_maker_payment_spend_confirmed_event_is_accepted`)
+  prove the pre-check tolerates an *unexpected, ignored* `data` payload on
+  what's otherwise a unit variant — the **opposite** direction of
+  tolerance from what the in-code comment ("observed with and without
+  payloads") suggests at a glance, and not something a naive
+  directly-derived `Deserialize` would reproduce automatically (serde's
+  default adjacently-tagged unit-variant handling typically errors on an
+  unexpected payload, it doesn't silently ignore one). A real fix here
+  needs to reproduce that exact tolerance deliberately, verified against
+  real historical JSON shapes, not just "existing tests still pass" —
+  genuine design work, not mechanical dedup. Queued for a dedicated future
+  pass rather than rushed in this round.
 - Update `dex_fee.rs`'s `include_str!` source-text meta-tests alongside
   P1.1/P1.2 — they assert on `taker_swap_v2.rs`/`maker_swap_v2.rs`'s literal
   source text and will need updating for any refactor touching those files.
@@ -254,7 +275,7 @@ annotated where this repository's own verification changed the picture)
 | 2 | P2.0 | correctness fix | done (commit `220f8cafc`) |
 | 3 | P1.2, P1.3 (SQL only), P2.2, P2.4 | trivial | done (commit `9f79af496`) |
 | 4 | P1.1 (dex_fee meta-tests needed no update) | low | done (commit `5923c4558`) |
-| 5 | P1.4 | low | pending |
+| 5 | P1.4 | **reassessed as medium-risk, V1 compat territory** | deferred, not attempted |
 | 6 | P2.1, P2.3 | medium (behavioral) | pending |
 | 7 | P3.1–P3.2 | medium | pending, queued for a later round |
 | 8 | P3.3 | optional | pending, queued for a later round |
