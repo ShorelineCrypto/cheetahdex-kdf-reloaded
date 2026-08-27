@@ -294,3 +294,33 @@ implementer's choice.
   `task_id` (§46.6).
 - The activation reuses the existing Sia coin builder and the shared
   standalone-coin task framework; no coin construction is reinvented (§46.7).
+
+## 46.9 Provenance Footer
+
+- *Inputs:* the published Komodo DeFi Framework API documentation (the
+  `task::enable_sia` method family, its request/response JSON field names,
+  and its error discriminants -- the source of truth this chapter distills
+  per its own "Source of truth" note); reloaded's existing standalone-coin
+  task-activation framework (the generic `init_standalone_coin` entry
+  points and `InitStandaloneCoinActivationOps` trait already driving UTXO
+  and [Chapter 39](39-zcash---z_coin-shielded-coin.md)'s `task::enable_z_coin`
+  family, the precedent this chapter's own executive summary names);
+  [Chapter 20](20-siacoin-integration.md) (the Sia coin type, builder,
+  activation config/protocol types, and walletd backend this chapter
+  activates); [Chapter 48](48-platform-coin-task-activation.md) §48.9 (named
+  only as the contrasting sibling substrate for platform-coin activation,
+  which Sia -- a standalone coin -- does not use); [Chapter 53](53-sia-transaction-history.md)
+  §53.6 (the `tx_history` activation parameter this chapter's §46.1.2/§46.1.4
+  give meaning to downstream).
+- *Permitted-input classes used:* external public specification (the
+  published KDF API documentation); baseline/sibling source (the existing
+  standalone-coin task framework and its UTXO/Z-coin precedent); cross-chapter
+  contracts (Chapters 20, 48, 53); Interop / wire-and-API-bound reuse (R29/R31)
+  for the dictated method strings, JSON field names, and error discriminants
+  this chapter distills -- whose authoritative source is the published API
+  contract any conforming KDF-family client must exchange, not discretionary
+  expression.
+- *Sibling-allowlist consultations:* [Chapter 20](20-siacoin-integration.md),
+  [Chapter 48](48-platform-coin-task-activation.md) §48.9,
+  [Chapter 53](53-sia-transaction-history.md) §53.6.
+- *Forbidden corpus:* not consulted.
