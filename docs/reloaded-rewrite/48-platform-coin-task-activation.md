@@ -316,3 +316,33 @@ not additional contract beyond §§48.1--48.7.
 - Ch. 47 (MetaMask) defines the WASM MetaMask signing policy under which EVM
   platform activation (one-shot and task) completes without `user_action`
   (R48.6.1).
+
+## 48.10 Provenance Footer
+
+- *Inputs:* reloaded's already-shipped one-shot platform-coin-with-tokens
+  activation routine that EVM and Tendermint activation delegate to, and its
+  two existing sibling task-activation substrates -- the standalone-coin
+  family (`task::enable_utxo`, `task::enable_qtum`, the Z-coin task trio)
+  and the l2 family (`task::enable_lightning`,
+  [Chapter 41](41-lightning-network.md)) -- the precedent this chapter's own
+  "Treatment" note names as the shape the third, platform-with-tokens
+  substrate follows; the public mmrpc-2.0 task-status envelope shape shared
+  by every `task::` family; [Chapter 35](35-evm-v2-activation-rpcs.md) §35.3
+  and [Chapter 36](36-tendermint-v2-activation-rpcs.md) §36.6 (the per-coin
+  wire contracts this substrate was recorded as blocking, per those
+  chapters' own dependency notes); [Chapter 38](38-utxo-coin-maintenance-and-features.md)
+  (the sibling standalone-coin substrate and hardware task plumbing R48.3.2
+  reuses); [Chapter 47](47-metamask-integration.md) (the WASM MetaMask
+  signing policy under which EVM platform activation completes without
+  `user_action`, R48.6.1).
+- *Permitted-input classes used:* baseline/sibling source (the existing
+  one-shot activation routine and the standalone-coin/l2 task-substrate
+  precedent); cross-chapter contracts (Chapters 35, 36, 38, 47); Interop /
+  wire-and-API-bound reuse (R29/R31) for the dictated task-status envelope
+  shape shared by every `task::` family.
+- *Sibling-allowlist consultations:* [Chapter 35](35-evm-v2-activation-rpcs.md)
+  §35.3, [Chapter 36](36-tendermint-v2-activation-rpcs.md) §36.6,
+  [Chapter 38](38-utxo-coin-maintenance-and-features.md),
+  [Chapter 41](41-lightning-network.md),
+  [Chapter 47](47-metamask-integration.md).
+- *Forbidden corpus:* not consulted.
