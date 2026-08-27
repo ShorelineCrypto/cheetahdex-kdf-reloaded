@@ -352,3 +352,23 @@ T49.25. For the same supported coin family and signing policy where both direct
 `withdraw` and task withdrawal are supported, compare a successful direct
 `withdraw` result with the `details` payload of a successful task withdrawal.
 Both shall expose the same transaction-details field contract.
+
+## 49.7 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree (the
+  already-shipped direct `withdraw` method and `task::withdraw::*` family
+  this chapter documents as-built -- by public wire contract only, no code
+  transcribed); the shared mmrpc-2.0 task pattern (`init`/`status`/
+  `user_action`/`cancel`, the standard task-status envelope) already
+  established by sibling `task::` families; [Chapter 35](35-evm-v2-activation-rpcs.md)
+  R35.1.4/R35.3.2 (the Trezor hardware policy this chapter's sender
+  selection and `user_action` surface accommodate); [Chapter 50](50-evm-trezor-signing.md)
+  R50.1-R50.4 (the EVM Trezor withdrawal path built directly on this
+  chapter's wire).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  withdraw wire and shared task-status envelope pattern); cross-chapter
+  contracts (Chapters 35, 50); Interop / wire-and-API-bound reuse (R29/R31)
+  for the dictated request/response field names and task-status vocabulary.
+- *Sibling-allowlist consultations:* [Chapter 35](35-evm-v2-activation-rpcs.md),
+  [Chapter 50](50-evm-trezor-signing.md).
+- *Forbidden corpus:* not consulted.
