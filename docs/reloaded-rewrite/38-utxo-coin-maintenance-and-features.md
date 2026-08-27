@@ -343,3 +343,40 @@ R38.8.6 **Tests (two-direction, observable).**
   returns ticker-keyed balances even for empty accounts, and `get_new_address`
   returns successive external addresses matching a reference wallet;
   Iguana-mode HD requests stay refused.
+
+## 38.9 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree, for the
+  T-DOC baseline of §38.1-§38.5 (Qtum split/staking-param naming,
+  config-driven maturity, baseline address types, KMD rewards/dust
+  policy, `sign_raw_transaction`, `consolidate_utxos`, the chain-variant
+  model shared with [Chapter 37](37-utxo-spv-and-block-header-validation.md)
+  §37.5 -- by public behaviour and config-key shape only, no code
+  transcribed); published BIP-341/342 (Taproot), BIP-44/BIP-84 (HD
+  derivation), and Electrum protocol documentation (public specifications
+  for the §38.6/§38.8 port targets); [Chapter 5](05-hd-wallet-and-key-derivation.md)
+  §5.9A (the software-HD crypto substrate §38.8 consumes); [Chapter 7](07-mnemonic-and-passphrase-management.md)
+  (a cross-referenced sibling chapter); [Chapter 45](45-startup-configuration-and-environment-tolerance.md)
+  (a cross-referenced sibling chapter).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  UTXO maintenance surface, for the T-DOC majority); external public
+  specification (BIP-341/342, BIP-44/BIP-84, the Electrum protocol);
+  cross-chapter contracts (Chapters 5, 7, 37, 45). For the §38.6/§38.8
+  scope determination itself -- identifying which post-2022 UTXO
+  features (PoSV, Taproot, P2PK, connection prioritisation, balance
+  streaming, fixed-fee policy, FIRO Spark) exist upstream and are
+  genuinely absent from reloaded's baseline -- Forbidden corpus, under
+  the chapter-01 two-team clean-room workflow; see below.
+- *Sibling-allowlist consultations:* [Chapter 5](05-hd-wallet-and-key-derivation.md)
+  §5.9A, [Chapter 37](37-utxo-spv-and-block-header-validation.md) §37.5.
+- *Forbidden corpus:* consulted, under the chapter-01 two-team clean-room
+  workflow, for the absence-verification and feature-scope determination
+  of §38.6/§38.8 only -- identifying that PoSV support, Taproot output
+  handling, P2PK balance/spend, Electrum connection prioritisation, UTXO
+  balance event streaming, fixed-fee/min-volume policy, and FIRO Spark
+  verbose-tx support exist upstream and are absent from reloaded's
+  baseline. The behavioural contracts themselves (R38.6.x, R38.8.x) are
+  independently authored specification bound to public protocol
+  documentation (BIPs, Electrum protocol) and this project's own
+  software-HD substrate, not corpus expression. No other section of this
+  chapter draws on the forbidden corpus.
