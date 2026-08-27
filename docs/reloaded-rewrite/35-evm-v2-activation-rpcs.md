@@ -430,3 +430,33 @@ internal decomposition is the implementer's choice.
   (R35.6).
 - The entire surface builds and is routed on native **and** WASM targets, with
   the external-signer activation policy available only on WASM (R35.1.4, R35.7).
+
+## 35.9 Provenance Footer
+
+- *Inputs:* the published Komodo DeFi Framework API documentation (the
+  `enable_eth_with_tokens`/token/task-activation method family, its
+  request/response JSON field names, and its error discriminants -- the
+  source of truth this chapter distills per its own "Source of truth"
+  note); the EVM JSON-RPC, EIP-1559 fee semantics, ERC-20 contract ABI, and
+  CAIP-style chain identification (public dictated-interop specifications
+  cited throughout §35.1-§35.6); reloaded's existing EVM coin type and its
+  legacy `enable` path (§35.7, already present in the workspace);
+  [Chapter 17](17-swap-v2-evm-path.md) (the swap-v2 EVM chapter this
+  chapter's activation surface feeds when V2 swaps are used);
+  [Chapter 19](19-nft-integration.md) (the NFT-provider activation block
+  and error contract this chapter's §35.4 and R35.4 build on);
+  [Chapter 39](39-zcash---z_coin-shielded-coin.md) (a cross-referenced
+  sibling activation chapter); [Chapter 47](47-metamask-integration.md) and
+  [Chapter 48](48-platform-coin-task-activation.md) (the MetaMask signing
+  policy and platform-coin task-activation substrate this chapter's
+  activation surface is built on and unblocks, respectively).
+- *Permitted-input classes used:* external public specification (the
+  published KDF API documentation; EVM JSON-RPC/EIP-1559/ERC-20/CAIP
+  specifications); baseline source (the existing EVM coin type and legacy
+  `enable` path); cross-chapter contracts (Chapters 17, 19, 39, 47, 48);
+  Interop / wire-and-API-bound reuse (R29/R31) for the dictated method
+  strings, JSON field names, and error discriminants this chapter distills.
+- *Sibling-allowlist consultations:* [Chapter 17](17-swap-v2-evm-path.md),
+  [Chapter 19](19-nft-integration.md), [Chapter 39](39-zcash---z_coin-shielded-coin.md),
+  [Chapter 47](47-metamask-integration.md), [Chapter 48](48-platform-coin-task-activation.md).
+- *Forbidden corpus:* not consulted.
