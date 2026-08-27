@@ -817,7 +817,7 @@ fn test_check_balance_on_order_post_base_coin_locked() {
     fill_address(&coin, &my_address, 10.into(), timeout);
 
     let confpath = get_qtum_conf_path();
-    let qick_contract_address = format!("{:#02x}", get_qrc20_contract_address("QICK"));
+    let qick_contract_address = format!("{:#x}", get_qrc20_contract_address("QICK"));
     let coins = json!([
         {"coin":"MYCOIN","asset":"MYCOIN","required_confirmations":0,"txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
         {"coin":"QICK","required_confirmations":1,"pubtype": 120,"p2shtype": 50,"wiftype": 128,"segwit": true,"mm2": 1,"mature_confirmations": 500,"confpath": confpath,"network":"regtest",
@@ -1394,7 +1394,7 @@ fn test_search_for_segwit_swap_tx_spend_native_was_refunded_maker() {
 
     let found = block_on(coin.search_for_swap_tx_spend_my(
         time_lock,
-        &*coin.my_public_key().unwrap(),
+        coin.my_public_key().unwrap(),
         &[0; 20],
         &tx.tx_hex(),
         0,
@@ -1433,7 +1433,7 @@ fn test_search_for_segwit_swap_tx_spend_native_was_refunded_taker() {
 
     let found = block_on(coin.search_for_swap_tx_spend_my(
         time_lock,
-        &*coin.my_public_key().unwrap(),
+        coin.my_public_key().unwrap(),
         &[0; 20],
         &tx.tx_hex(),
         0,

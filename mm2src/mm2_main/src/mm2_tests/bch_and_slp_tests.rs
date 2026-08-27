@@ -10,7 +10,7 @@ const T_BCH_ELECTRUMS: &[&str] = &[
     "testnet.imaginary.cash:50001",
 ];
 
-fn t_bch_electrums_legacy_json() -> Vec<Json> { T_BCH_ELECTRUMS.into_iter().map(|url| json!({ "url": url })).collect() }
+fn t_bch_electrums_legacy_json() -> Vec<Json> { T_BCH_ELECTRUMS.iter().map(|url| json!({ "url": url })).collect() }
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]

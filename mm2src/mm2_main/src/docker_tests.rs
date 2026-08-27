@@ -2,6 +2,17 @@
 #![feature(test)]
 #![test_runner(docker_tests_runner)]
 #![recursion_limit = "512"]
+// This is a separate crate root from `mm2_lib.rs`/`mm2_bin.rs` (its own [[bin]]
+// target), so it does not inherit their crate-level lint policy even though it
+// pulls in the same first-party modules. Mirroring their allows here (KDF-009)
+// keeps that policy consistent instead of letting already-accepted lints
+// resurface just because this crate root happened to omit the same headers.
+#![allow(uncommon_codepoints)]
+#![allow(dead_code)]
+#![allow(mismatched_lifetime_syntaxes)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::diverging_sub_expression)]
+#![allow(clippy::explicit_auto_deref)]
 
 #[cfg(test)] use docker_tests::docker_tests_runner;
 
@@ -78,7 +89,7 @@ mod docker_tests {
             })
             .collect();
         let args: Vec<String> = std::env::args().collect();
-        let _exit_code = test_main(&args, owned_tests, None);
+        test_main(&args, owned_tests, None);
     }
 }
 
@@ -192,7 +203,7 @@ mod docker_tests {
             })
             .collect();
         let args: Vec<String> = std::env::args().collect();
-        let _exit_code = test_main(&args, owned_tests, None);
+        test_main(&args, owned_tests, None);
     }
 
     fn pull_docker_image(name: &str) {
@@ -431,7 +442,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &[0; 20],
             &tx.tx_hex(),
             0,
@@ -469,7 +480,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &[0; 20],
             &tx.tx_hex(),
             0,
@@ -508,7 +519,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &*dhash160(&secret),
             &tx.tx_hex(),
             0,
@@ -547,7 +558,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &*dhash160(&secret),
             &tx.tx_hex(),
             0,
@@ -3232,7 +3243,7 @@ mod docker_tests {
 
         thread::sleep(Duration::from_secs(2));
         let (unspents, _) =
-            block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
+            block_on(coin.get_unspent_ordered_list(coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
         assert_eq!(unspents.len(), 1);
     }
 
@@ -3290,7 +3301,7 @@ mod docker_tests {
 
         thread::sleep(Duration::from_secs(2));
         let (unspents, _) =
-            block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
+            block_on(coin.get_unspent_ordered_list(coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
         // 4 utxos are merged of 5 so the resulting unspents len must be 2
         assert_eq!(unspents.len(), 2);
     }
@@ -4072,7 +4083,7 @@ mod docker_tests {
         }
 
         let (unspents, _) =
-            block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
+            block_on(coin.get_unspent_ordered_list(coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
         assert_eq!(unspents.len(), 5, "Expected 5 unspent outputs, got: {}", unspents.len());
 
         // Verify total value: 100 + 4*10 = 140

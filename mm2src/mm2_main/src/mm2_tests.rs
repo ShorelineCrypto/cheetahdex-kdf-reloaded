@@ -6315,7 +6315,7 @@ fn test_orderbook_is_mine_orders() {
     let asks = bob_orderbook["asks"].as_array().unwrap();
     assert_eq!(asks.len(), 1, "Bob RICK/MORTY orderbook must have exactly 1 ask");
     let is_mine = asks[0]["is_mine"].as_bool().unwrap();
-    assert_eq!(is_mine, true);
+    assert!(is_mine);
 
     // Alice orderbook must show 1 not-mine order
     log!("Get RICK/MORTY orderbook on Alice side");
@@ -6333,7 +6333,7 @@ fn test_orderbook_is_mine_orders() {
     let asks = alice_orderbook["asks"].as_array().unwrap();
     assert_eq!(asks.len(), 1, "Alice RICK/MORTY orderbook must have exactly 1 ask");
     let is_mine = asks[0]["is_mine"].as_bool().unwrap();
-    assert_eq!(is_mine, false);
+    assert!(!is_mine);
 
     // make another order by Alice
     let rc = block_on(mm_alice.rpc(&json! ({
@@ -7049,9 +7049,9 @@ fn test_conf_settings_in_orderbook() {
         "Alice RICK/MORTY orderbook must have exactly 1 ask"
     );
     assert_eq!(alice_orderbook.asks[0].base_confs, 10);
-    assert_eq!(alice_orderbook.asks[0].base_nota, true);
+    assert!(alice_orderbook.asks[0].base_nota);
     assert_eq!(alice_orderbook.asks[0].rel_confs, 5);
-    assert_eq!(alice_orderbook.asks[0].rel_nota, false);
+    assert!(!alice_orderbook.asks[0].rel_nota);
 
     assert_eq!(
         alice_orderbook.bids.len(),
@@ -7059,9 +7059,9 @@ fn test_conf_settings_in_orderbook() {
         "Alice RICK/MORTY orderbook must have exactly 1 bid"
     );
     assert_eq!(alice_orderbook.bids[0].base_confs, 10);
-    assert_eq!(alice_orderbook.bids[0].base_nota, true);
+    assert!(alice_orderbook.bids[0].base_nota);
     assert_eq!(alice_orderbook.bids[0].rel_confs, 5);
-    assert_eq!(alice_orderbook.bids[0].rel_nota, false);
+    assert!(!alice_orderbook.bids[0].rel_nota);
 
     block_on(mm_bob.stop()).unwrap();
     block_on(mm_alice.stop()).unwrap();
@@ -7184,9 +7184,9 @@ fn alice_can_see_confs_in_orderbook_after_sync() {
         .find(|entry| entry.pubkey == bob_pubkey)
         .unwrap();
     assert_eq!(bob_order_in_orderbook.base_confs, 10);
-    assert_eq!(bob_order_in_orderbook.base_nota, true);
+    assert!(bob_order_in_orderbook.base_nota);
     assert_eq!(bob_order_in_orderbook.rel_confs, 5);
-    assert_eq!(bob_order_in_orderbook.rel_nota, false);
+    assert!(!bob_order_in_orderbook.rel_nota);
 
     block_on(mm_bob.stop()).unwrap();
     block_on(mm_alice.stop()).unwrap();

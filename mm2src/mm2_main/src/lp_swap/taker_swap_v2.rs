@@ -704,6 +704,10 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Completed<M
     pub fn new() -> Self { Completed(PhantomData) }
 }
 
+impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> Default for Completed<M, T> {
+    fn default() -> Self { Self::new() }
+}
+
 pub struct Aborted<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> {
     pub reason: AbortReason,
     _p: PhantomData<(M, T)>,

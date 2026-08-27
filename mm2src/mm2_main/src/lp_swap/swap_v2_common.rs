@@ -1834,7 +1834,7 @@ mod tests {
         assert_eq!(back.uuid, repr.uuid);
         assert_eq!(back.events.len(), 2);
         assert_eq!(back.swap_version, 2);
-        assert_eq!(back.conf_settings.taker_coin_nota, true);
+        assert!(back.conf_settings.taker_coin_nota);
     }
 
     #[test]
@@ -1889,7 +1889,7 @@ mod tests {
         assert_eq!(back.uuid, repr.uuid);
         assert_eq!(back.events.len(), 2);
         assert_eq!(back.swap_version, 2);
-        assert_eq!(back.conf_settings.maker_coin_nota, true);
+        assert!(back.conf_settings.maker_coin_nota);
     }
 
     #[test]
@@ -2368,9 +2368,9 @@ mod tests {
             block_on(storage.store_repr(uuid, repr)).unwrap();
             let loaded: MakerSwapDbRepr = block_on(storage.get_repr(uuid)).unwrap();
             assert_eq!(loaded.conf_settings.maker_coin_confs, 5);
-            assert_eq!(loaded.conf_settings.maker_coin_nota, true);
+            assert!(loaded.conf_settings.maker_coin_nota);
             assert_eq!(loaded.conf_settings.taker_coin_confs, 3);
-            assert_eq!(loaded.conf_settings.taker_coin_nota, false);
+            assert!(!loaded.conf_settings.taker_coin_nota);
         }
 
         #[test]

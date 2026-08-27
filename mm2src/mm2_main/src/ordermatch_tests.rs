@@ -1287,13 +1287,12 @@ fn lp_connect_start_bob_should_not_be_invoked_if_order_match_already_connected()
 
     static mut CONNECT_START_CALLED: bool = false;
     lp_connect_start_bob.mock_safe(|_, _, _| {
-        MockResult::Return(unsafe {
-            CONNECT_START_CALLED = true;
-        })
+        let _: () = unsafe { CONNECT_START_CALLED = true };
+        MockResult::Return(())
     });
 
     let connect: TakerConnect = json::from_str(r#"{"taker_order_uuid":"2f9afe84-7a89-4194-8947-45fba563118f","maker_order_uuid":"5f6516ea-ccaa-453a-9e37-e1c2c0d527e3","method":"connect","sender_pubkey":"031d4256c4bc9f99ac88bf3dba21773132281f65f9bf23a59928bce08961e2f3","dest_pub_key":"c6a78589e18b482aea046975e6d0acbdea7bf7dbf04d9d5bd67fda917815e3ed"}"#).unwrap();
-    block_on(process_taker_connect(ctx, connect.sender_pubkey.clone(), connect));
+    block_on(process_taker_connect(ctx, connect.sender_pubkey, connect));
     assert!(unsafe { !CONNECT_START_CALLED });
 }
 
@@ -1696,7 +1695,7 @@ fn make_ctx_for_tests() -> (MmArc, String, [u8; 32]) {
     ctx.secp256k1_key_pair
         .pin(key_pair_from_seed("passphrase").unwrap())
         .unwrap();
-    let secret = *(&*ctx.secp256k1_key_pair().private().secret);
+    let secret = *ctx.secp256k1_key_pair().private().secret;
     let pubkey = hex::encode(&**ctx.secp256k1_key_pair().public());
     (ctx, pubkey, secret)
 }
@@ -1768,7 +1767,7 @@ pub(super) fn make_random_orders(
 fn pubkey_and_secret_for_test(passphrase: &str) -> (String, [u8; 32]) {
     let key_pair = key_pair_from_seed(passphrase).unwrap();
     let pubkey = hex::encode(&**key_pair.public());
-    let secret = *(&*key_pair.private().secret);
+    let secret = *key_pair.private().secret;
     (pubkey, secret)
 }
 
@@ -1802,9 +1801,9 @@ fn test_process_get_orderbook_request() {
         ORDERS_NUMBER,
     ));
 
-    pubkey1_orders.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
-    pubkey2_orders.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
-    pubkey3_orders.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
+    pubkey1_orders.sort_unstable_by_key(|x| x.uuid);
+    pubkey2_orders.sort_unstable_by_key(|x| x.uuid);
+    pubkey3_orders.sort_unstable_by_key(|x| x.uuid);
 
     let mut orders_by_pubkeys = HashMap::new();
     orders_by_pubkeys.insert(pubkey1, pubkey1_orders);
@@ -1817,7 +1816,7 @@ fn test_process_get_orderbook_request() {
 
     {
         let mut orderbook = ordermatch_ctx.orderbook.lock();
-        for order in orders_by_pubkeys.iter().map(|(_pubkey, orders)| orders).flatten() {
+        for order in orders_by_pubkeys.values().flatten() {
             let ops = orderbook.index_insert_or_update(order.clone());
             if !ops.is_empty() {
                 let _ = ordermatch_ctx.trie_ops_tx.unbounded_send(ops);
@@ -1835,7 +1834,7 @@ fn test_process_get_orderbook_request() {
     for (pubkey, item) in orderbook.pubkey_orders {
         let expected = orders_by_pubkeys
             .get(&pubkey)
-            .expect(&format!("!best_orders_by_pubkeys is expected to contain {:?}", pubkey));
+            .unwrap_or_else(|| panic!("!best_orders_by_pubkeys is expected to contain {:?}", pubkey));
 
         let mut actual: Vec<OrderbookItem> = item
             .orders
@@ -1848,7 +1847,7 @@ fn test_process_get_orderbook_request() {
                 )
             })
             .collect();
-        actual.sort_unstable_by(|x, y| x.uuid.cmp(&y.uuid));
+        actual.sort_unstable_by_key(|x| x.uuid);
         log!([pubkey]"-"[actual.len()]);
         assert_eq!(actual, *expected);
     }
@@ -1881,9 +1880,7 @@ fn test_process_get_orderbook_request_limit() {
     }
     ordermatch_ctx.wait_trie_ops_flushed();
 
-    let err = process_get_orderbook_request(ctx.clone(), "RICK".into(), "MORTY".into())
-        .err()
-        .expect("Expected an error");
+    let err = process_get_orderbook_request(ctx.clone(), "RICK".into(), "MORTY".into()).expect_err("Expected an error");
 
     log!("error: "(err));
     assert!(err.contains("Orderbook too large"));
@@ -1981,19 +1978,10 @@ fn test_request_and_fill_orderbook() {
     let orderbook = ordermatch_ctx.orderbook.lock();
     let trie_store = ordermatch_ctx.trie_store.lock();
 
-    let expected = expected_orders
-        .iter()
-        .map(|(_pubkey, orders)| orders.clone())
-        .flatten()
-        .collect();
+    let expected = expected_orders.values().flat_map(|orders| orders.clone()).collect();
     assert_eq!(orderbook.order_set, expected);
 
-    let expected = expected_orders
-        .iter()
-        .map(|(_pubkey, orders)| orders)
-        .flatten()
-        .map(|(uuid, _order)| *uuid)
-        .collect();
+    let expected = expected_orders.values().flatten().map(|(uuid, _order)| *uuid).collect();
     let unordered = orderbook
         .unordered
         .get(&("RICK".to_owned(), "MORTY".to_owned()))
@@ -2001,8 +1989,7 @@ fn test_request_and_fill_orderbook() {
     assert_eq!(*unordered, expected);
 
     let expected = expected_orders
-        .iter()
-        .map(|(_pubkey, orders)| orders)
+        .values()
         .flatten()
         .map(|(uuid, order)| OrderedByPriceOrder {
             uuid: *uuid,
@@ -2046,9 +2033,9 @@ fn test_request_and_fill_orderbook() {
             })
             .collect();
 
-        in_trie.sort_by(|x, y| x.0.cmp(&y.0));
+        in_trie.sort_by_key(|x| x.0);
         let mut expected = orders;
-        expected.sort_by(|x, y| x.0.cmp(&y.0));
+        expected.sort_by_key(|x| x.0);
         assert_eq!(in_trie, expected);
     }
 }
@@ -2321,7 +2308,7 @@ fn test_taker_request_can_match_with_maker_pubkey() {
     assert!(order.request.can_match_with_maker_pubkey(&maker_pubkey));
 
     let mut set = HashSet::new();
-    set.insert(maker_pubkey.clone());
+    set.insert(maker_pubkey);
     order.request.match_by = MatchBy::Pubkeys(set);
     assert!(order.request.can_match_with_maker_pubkey(&maker_pubkey));
 
@@ -2373,7 +2360,7 @@ fn test_recently_cancelled_blocks_insert() {
     // Now try to insert — should be silently dropped
     orderbook.index_insert_or_update(order);
     assert!(
-        orderbook.order_set.get(&uuid).is_none(),
+        !orderbook.order_set.contains_key(&uuid),
         "order should NOT have been inserted after recent cancellation"
     );
 }
@@ -2394,7 +2381,7 @@ fn test_recently_cancelled_allows_different_pubkey() {
     // Insert from pubkey_b should succeed
     orderbook.index_insert_or_update(order);
     assert!(
-        orderbook.order_set.get(&uuid).is_some(),
+        orderbook.order_set.contains_key(&uuid),
         "order from a different pubkey should be inserted"
     );
 }
@@ -2781,12 +2768,12 @@ fn test_process_sync_pubkey_orderbook_state_points_to_not_uptodate_trie_root() {
     let mut expected: Vec<(Uuid, OrderbookP2PItem)> =
         orders.into_iter().map(|order| (order.uuid, order.into())).collect();
     expected.push((new_order.uuid, new_order.into()));
-    full_trie.sort_by(|x, y| x.0.cmp(&y.0));
-    expected.sort_by(|x, y| x.0.cmp(&y.0));
+    full_trie.sort_by_key(|x| x.0);
+    expected.sort_by_key(|x| x.0);
     assert_eq!(full_trie, expected);
 }
 
-fn check_if_orderbook_contains_only(ctx: &MmArc, pubkey: &str, orders: &Vec<OrderbookItem>) {
+fn check_if_orderbook_contains_only(ctx: &MmArc, pubkey: &str, orders: &[OrderbookItem]) {
     let ordermatch_ctx = OrdermatchContext::from_ctx(ctx).unwrap();
     let orderbook = ordermatch_ctx.orderbook.lock();
     let trie_store = ordermatch_ctx.trie_store.lock();
@@ -2851,7 +2838,7 @@ fn check_if_orderbook_contains_only(ctx: &MmArc, pubkey: &str, orders: &Vec<Orde
                     (key, value)
                 })
                 .collect();
-            trie.sort_by(|(uuid_x, _), (uuid_y, _)| uuid_x.cmp(uuid_y));
+            trie.sort_by_key(|(uuid_x, _)| *uuid_x);
             (alb_pair.clone(), trie)
         })
         .collect();
@@ -2862,8 +2849,8 @@ fn check_if_orderbook_contains_only(ctx: &MmArc, pubkey: &str, orders: &Vec<Orde
             .or_insert_with(Vec::default);
         trie.push((order.uuid, order.clone()));
     }
-    for (_alb_pair, trie) in expected_trie_orders.iter_mut() {
-        trie.sort_by(|(uuid_x, _), (uuid_y, _)| uuid_x.cmp(uuid_y));
+    for trie in expected_trie_orders.values_mut() {
+        trie.sort_by_key(|(uuid_x, _)| *uuid_x);
     }
     assert_eq!(actual_trie_orders, expected_trie_orders);
 }
@@ -2939,7 +2926,7 @@ fn test_orderbook_sync_trie_diff_time_cache() {
     let bob_history_on_sync = {
         let orderbook_bob = ordermatch_ctx_bob.orderbook.lock();
         DeltaOrFullTrie::from_history(
-            &rick_morty_history_bob,
+            rick_morty_history_bob,
             *alice_root,
             *bob_root,
             &trie_store_bob.memory_db,
@@ -3009,7 +2996,7 @@ fn test_orderbook_sync_trie_diff_time_cache() {
     let bob_history_on_sync = {
         let orderbook_bob = ordermatch_ctx_bob.orderbook.lock();
         DeltaOrFullTrie::from_history(
-            &rick_morty_history_bob,
+            rick_morty_history_bob,
             *alice_root,
             *bob_root,
             &trie_store_bob.memory_db,
@@ -3498,9 +3485,9 @@ fn test_order_conf_settings_reversed() {
     };
     let r = s.reversed();
     assert_eq!(r.base_confs, 1);
-    assert_eq!(r.base_nota, false);
+    assert!(!r.base_nota);
     assert_eq!(r.rel_confs, 3);
-    assert_eq!(r.rel_nota, true);
+    assert!(r.rel_nota);
 }
 
 #[test]

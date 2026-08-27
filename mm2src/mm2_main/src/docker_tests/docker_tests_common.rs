@@ -63,26 +63,20 @@ pub fn set_qtum_conf_path(conf_path: PathBuf) { *QTUM_CONF_PATH.lock().unwrap() 
 
 pub fn get_qrc20_contract_address(ticker: &str) -> H160Eth {
     match ticker {
-        "QICK" => QICK_TOKEN_ADDRESS
+        "QICK" => (*QICK_TOKEN_ADDRESS
             .lock()
-            .unwrap()
-            .clone()
-            .expect("QICK_TOKEN_ADDRESS must be set already"),
-        "QORTY" => QORTY_TOKEN_ADDRESS
+            .unwrap())
+        .expect("QICK_TOKEN_ADDRESS must be set already"),
+        "QORTY" => (*QORTY_TOKEN_ADDRESS
             .lock()
-            .unwrap()
-            .clone()
-            .expect("QORTY_TOKEN_ADDRESS must be set already"),
+            .unwrap())
+        .expect("QORTY_TOKEN_ADDRESS must be set already"),
         _ => panic!("Expected QICK or QORTY ticker"),
     }
 }
 
 pub fn get_qrc20_swap_contract_address() -> H160Eth {
-    QRC20_SWAP_CONTRACT_ADDRESS
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("QRC20_SWAP_CONTRACT_ADDRESS must be set already")
+    (*QRC20_SWAP_CONTRACT_ADDRESS.lock().unwrap()).expect("QRC20_SWAP_CONTRACT_ADDRESS must be set already")
 }
 
 pub fn set_qrc20_contract_addresses(qick: H160Eth, qorty: H160Eth, swap: H160Eth) {
@@ -144,7 +138,7 @@ pub fn utxo_asset_docker_node<'a>(docker: &'a Cli, ticker: &'static str, port: u
         "-v".into(),
         format!("{}:/root/.zcash-params", zcash_params_path().display()),
         "-p".into(),
-        format!("{}:{}", port, port).into(),
+        format!("{}:{}", port, port),
     ];
     let image = GenericImage::new(UTXO_ASSET_DOCKER_IMAGE)
         .with_args(args)
@@ -240,7 +234,7 @@ pub fn qrc20_coin_from_privkey(ticker: &str, priv_key: &[u8]) -> (MmArc, Qrc20Co
         platform,
         &conf,
         &params,
-        &priv_key,
+        priv_key,
         contract_address,
     ))
     .unwrap();
@@ -251,7 +245,7 @@ pub fn qrc20_coin_from_privkey(ticker: &str, priv_key: &[u8]) -> (MmArc, Qrc20Co
 
 fn qrc20_coin_conf_item(ticker: &str) -> Json {
     let contract_address = get_qrc20_contract_address(ticker);
-    let contract_address = format!("{:#02x}", contract_address);
+    let contract_address = format!("{:#x}", contract_address);
 
     let confpath = get_qtum_conf_path();
     json!({
@@ -449,7 +443,7 @@ where
         log!({ "{:02x}", tx_bytes });
         loop {
             let unspents = client
-                .list_unspent_impl(0, std::i32::MAX, vec![address.to_string()])
+                .list_unspent_impl(0, i32::MAX, vec![address.to_string()])
                 .wait()
                 .unwrap();
             if !unspents.is_empty() {
@@ -741,7 +735,7 @@ pub fn solana_supplied_node() -> MarketMakerIt {
         {"coin":"ADEX-SOL-DEVNET","protocol":{"type":"SPLTOKEN","protocol_data":{"decimals":9,"token_contract_address":"5tSm6PqMosy1rz1AqV3kD28yYT5XqZW3QYmZommuFiPJ","platform":"SOL-DEVNET"}},"mm2": 1},
     ]);
 
-    let mm = MarketMakerIt::start(
+    MarketMakerIt::start(
         json! ({
             "gui": "nogui",
             "netid": 9000,
@@ -754,9 +748,7 @@ pub fn solana_supplied_node() -> MarketMakerIt {
         "pass".to_string(),
         None,
     )
-    .unwrap();
-
-    mm
+    .unwrap()
 }
 
 pub fn get_balance(mm: &MarketMakerIt, coin: &str) -> MyBalanceResponse {

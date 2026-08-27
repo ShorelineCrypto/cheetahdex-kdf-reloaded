@@ -282,6 +282,9 @@ impl MakerOrdersContext {
     /// Number of active orders.
     pub fn len(&self) -> usize { self.orders.len() }
 
+    /// Whether there are no active orders.
+    pub fn is_empty(&self) -> bool { self.orders.is_empty() }
+
     /// Iterate over all (uuid, order_arc) pairs.
     pub fn iter(&self) -> impl Iterator<Item = (&Uuid, &Arc<AsyncMutex<MakerOrder>>)> { self.orders.iter() }
 }
