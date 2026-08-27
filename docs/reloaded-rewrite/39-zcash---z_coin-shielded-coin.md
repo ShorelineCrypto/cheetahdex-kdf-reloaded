@@ -1367,3 +1367,29 @@ storage error that reflects the store failure.
   `PageNumber`/`FromId` paging modes, echoes paging metadata, reports
   `sync_status: Finished`, and rejects non-shielded coins (`NotSupportedFor`)
   and inactive coins (`CoinIsNotActive`) (§39.8).
+
+## 39.9 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree, for the
+  T-DOC parts of this chapter (§39.1-§39.5's as-built native ZCoin type,
+  dual activation modes, `init_z_coin` task-RPC trio, shielded HTLC swap
+  operations, and §39.8's `z_coin_tx_history` method -- by public
+  behaviour and wire-contract shape only, no code transcribed); the
+  published Komodo DeFi Framework API documentation (the source of truth
+  for §39.6's WASM/sync-tuning/parameter-integrity ports and §39.8's
+  `z_coin_tx_history` wire contract, per this chapter's own "Source of
+  truth"/"Source-of-truth note" callouts); the published Zcash Sapling
+  protocol (shielded note/commitment-tree semantics, spend/output proving
+  system) and the published lightwalletd gRPC service contract (both
+  explicitly named as this chapter's binding-scope source of truth); the
+  present reloaded workspace's own shared transaction-history HTTP
+  status/error-discriminant mapping that §39.8's `z_coin_tx_history`
+  reuses from the generic `my_tx_history` (v2) method.
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  ZCoin type, activation flow, and history method, for the T-DOC parts);
+  external public specification (the published KDF API documentation, the
+  Zcash Sapling protocol, the lightwalletd gRPC contract); Interop /
+  wire-and-API-bound reuse (R29/R31) for the dictated method strings, JSON
+  field names, and error discriminants this chapter distills.
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* not consulted.
