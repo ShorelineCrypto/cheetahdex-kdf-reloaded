@@ -141,3 +141,21 @@ history may read the same values by swap `uuid`.
   unknown future provider values.
 - Price fetch supports endpoint fallback via comma-separated `price_url`.
 - A completed swap records its moment-of-completion fiat price (R42.6.1).
+
+## 42.7 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree (the
+  shipped makerbot RPC pair, per-pair configuration registry, price-fetch
+  loop, and price-provider set -- by public behaviour and config-key
+  shape only, no code transcribed); the externally dictated
+  price-aggregator JSON response shape and the current set of upstream
+  price providers (CoinGecko, CoinMarketCap, etc.) and their public APIs
+  (this chapter's own binding-scope source of truth); [Chapter 44](44-database-persistence-and-migrations.md)
+  (the persistence contract §42.6's fiat-price-at-completion snapshot is
+  built on).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  makerbot and price-fetch loop); external public specification (the
+  price-aggregator response shape and upstream provider APIs);
+  cross-chapter contracts (Chapter 44).
+- *Sibling-allowlist consultations:* [Chapter 44](44-database-persistence-and-migrations.md).
+- *Forbidden corpus:* not consulted.
