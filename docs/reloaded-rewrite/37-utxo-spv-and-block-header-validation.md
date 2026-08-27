@@ -344,3 +344,40 @@ reported rather than an unbounded walk-back.
   validation whenever `spv_conf` is also configured for that coin (R37.6.1,
   R37.6.1a). A coin's confirmation-wait deadlines and swap-stage transitions
   are unchanged by whether SPV is configured (R37.6.1b).
+
+## 37.9 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree, for the
+  T-DOC majority of this chapter (§37.0-§37.6: the already-shipped
+  `kdf_spv_validation` crate, per-coin block-header storage backends,
+  configuration-selected chain-variant reader, and proof-of-work/retarget
+  validation -- by public behaviour and storage-contract shape only, no
+  code transcribed); published Bitcoin consensus documentation (proof-of-work
+  and difficulty-retarget rules, R31 externally dictated, §37.4); published
+  Merkle-proof / SPV construction documentation (§37.6); the present reloaded
+  workspace's own SQLite/IndexedDB storage contracts (§37.3). For the single
+  **target** requirement (R37.7.2, the active chain-reorganization detector):
+  a forensic comparison of reloaded's shipped behaviour against
+  upstream/corpus, conducted under the chapter-01 two-team clean-room
+  workflow -- the source of the "Upstream divergence" finding that
+  reloaded historically shipped only the passive per-height overwrite of
+  R37.7.1.
+- *Permitted-input classes used:* baseline/as-built source (the shipped SPV
+  subsystem, for the T-DOC majority); external public specification (Bitcoin
+  consensus proof-of-work/retarget rules, Merkle-proof construction); R6
+  (behavioural observation, for the storage/validation contract as currently
+  implemented). For R37.7.2 specifically: Forbidden corpus, under the
+  chapter-01 two-team clean-room workflow -- see below.
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* consulted, under the chapter-01 two-team clean-room
+  workflow, for upstream parity of the chain-reorganization detector only
+  -- specifically the behavioural gap identified in R37.7.2's "Upstream
+  divergence" note (that reloaded's shipped passive per-height overwrite
+  omits the active detect-and-resolve routine upstream/corpus has). The
+  active detector's own contract (trigger condition, resolve procedure,
+  walk-back bound, convergence argument, and the acceptance test) is
+  independently authored behavioural specification, not corpus expression:
+  it binds observable outcomes and explicitly directs that "the
+  implementation shall be expressed independently; this section binds the
+  contract, not any particular branch structure." No other section of this
+  chapter draws on the forbidden corpus.
