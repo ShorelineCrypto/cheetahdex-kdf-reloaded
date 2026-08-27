@@ -457,3 +457,34 @@ task variant share a single activation path.
 - The task-based `task::enable_tendermint::*` family is delivered via the shared
   platform-coin task-activation framework of ch. 48, wrapping the one-shot
   activation of §36.1 as its unit of work (R36.6).
+
+## 36.7 Provenance Footer
+
+- *Inputs:* the published Komodo DeFi Framework API documentation (the
+  Tendermint/token activation method family, its request/response JSON
+  field names, and its error discriminants -- the source of truth this
+  chapter distills per its own "Source of truth" note); the Cosmos/
+  Tendermint RPC endpoint contract, IBC denom and channel identification,
+  the Cosmos secp256k1 public-key/account-id model, and CAIP-style chain
+  identification (public dictated-interop specifications cited throughout
+  §36.1-§36.6); reloaded's existing Tendermint coin/token types and
+  activation-parameter scaffolding (§36.5, already present in the
+  workspace); [Chapter 18](18-swap-v2-tendermint-path.md) (the IBC/HTLC
+  layer and channel routing this chapter's activation establishes coins
+  for); [Chapter 22](22-walletconnect-v2.md) (the WalletConnect activation
+  binding this chapter's activation-parameter scaffolding accommodates);
+  [Chapter 35](35-evm-v2-activation-rpcs.md) (the sibling EVM
+  platform-coin-with-tokens activation chapter this chapter mirrors in
+  shape); [Chapter 48](48-platform-coin-task-activation.md) (the shared
+  platform-coin task-activation framework the `task::enable_tendermint::*`
+  family is delivered through).
+- *Permitted-input classes used:* external public specification (the
+  published KDF API documentation; the Cosmos/Tendermint RPC/IBC/secp256k1/
+  CAIP specifications); baseline source (the existing Tendermint coin/token
+  types); cross-chapter contracts (Chapters 18, 22, 35, 48); Interop /
+  wire-and-API-bound reuse (R29/R31) for the dictated method strings, JSON
+  field names, and error discriminants this chapter distills.
+- *Sibling-allowlist consultations:* [Chapter 18](18-swap-v2-tendermint-path.md),
+  [Chapter 22](22-walletconnect-v2.md), [Chapter 35](35-evm-v2-activation-rpcs.md),
+  [Chapter 48](48-platform-coin-task-activation.md).
+- *Forbidden corpus:* not consulted.
