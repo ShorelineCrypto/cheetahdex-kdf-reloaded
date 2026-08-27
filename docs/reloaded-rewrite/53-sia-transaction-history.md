@@ -586,7 +586,7 @@ V4. The walletd address-events endpoint, the event object's identifier /
 
 ---
 
-## 53.11 Provenance footer
+## 53.11 Provenance Footer
 
 - *Inputs:* the project's own revision history and current tree (for the
   epoch classification of §53.1, the baseline verifications of §53.9, and
