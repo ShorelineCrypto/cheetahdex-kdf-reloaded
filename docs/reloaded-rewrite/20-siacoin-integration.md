@@ -324,13 +324,18 @@ against the expected secret hash.
 **R-S7 (payment lookup).** Answer "has my payment been sent" by
 querying walletd for the relevant address event(s).
 
-**R-S8 (deferred swap-spend search).** The swap-spend search
-operations MUST report failure rather than "not found" pending the
-deferred event-walk implementation (§20.10 D3); "not found" is not
-a safe default because `recover_funds` (chapter 51 R33) treats it as
-a confirmed negative and acts on it (§20.10 D3 records the live
-failure this caused). This is a documented gap, not a correctness
-claim.
+**R-S8 (swap-spend search).** The swap-spend search operations MUST
+distinguish three outcomes, not two: a payment spent via the revealed
+secret, a payment refunded via the timelock, and a payment that is
+genuinely still unspent -- by walking the HTLC address's walletd
+event log for the event that consumes the payment's HTLC output and
+classifying it against the expected secret hash, as §20.10 D3
+describes. Only a genuinely unspent payment MAY report "not found";
+a query failure (the walletd lookup itself erroring) MUST NOT be
+folded into "not found", because `recover_funds` (chapter 51 R33)
+treats "not found" as a confirmed negative and acts on it -- collapsing
+a real error into that outcome was the deferred-implementation-era gap
+§20.10 D3 records, now closed.
 
 **R-S9 (negotiated HTLC key).** The module MUST answer the two
 coin-layer key operations the legacy negotiation depends on --
