@@ -712,19 +712,27 @@ pub fn update_coins_config(mut config: Json) -> Result<Json, String> {
                     .as_str()
                     .ok_or(ERRL!("Expected etomic as string, found {:?}", etomic))?;
                 if etomic == "0x0000000000000000000000000000000000000000" {
-                    CoinProtocol::ETH { chain_id: None }
+                    // This legacy-upgrade path never knows a chain_id, so build the
+                    // wire shape directly instead of round-tripping
+                    // `CoinProtocol::ETH { chain_id: None }` through serde: the
+                    // adjacently-tagged derive emits `"protocol_data": {"chain_id":
+                    // null}` for that value (chain_id's `#[serde(default)]` only
+                    // affects deserialization, not serialization), which is a
+                    // config-shape regression a pre-chain_id `coins` file never
+                    // had and callers do not expect from this upgrade step.
+                    json!({ "type": "ETH" })
                 } else {
                     let contract_address = etomic.to_owned();
-                    CoinProtocol::ERC20 {
+                    json::to_value(CoinProtocol::ERC20 {
                         platform: "ETH".into(),
                         contract_address,
-                    }
+                    })
+                    .map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?
                 }
             },
-            _ => CoinProtocol::UTXO,
+            _ => json::to_value(CoinProtocol::UTXO).map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?,
         };
 
-        let protocol = json::to_value(protocol).map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?;
         coin.insert("protocol".into(), protocol);
     }
 
