@@ -469,7 +469,7 @@ mod wire_dump_tests {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub extern "C" fn spawn_rpc(ctx_h: u32) {
+pub fn spawn_rpc(ctx_h: u32) -> Result<(), String> {
     use common::wio::CORE;
     use hyper::server::conn::AddrStream;
     use hyper::service::{make_service_fn, service_fn};
@@ -481,13 +481,23 @@ pub extern "C" fn spawn_rpc(ctx_h: u32) {
     // then we might want to refactor into starting it ideomatically in order to benefit from a more graceful shutdown,
     // cf. https://github.com/hyperium/hyper/pull/1640.
 
-    let ctx = MmArc::from_ffi_handle(ctx_h).expect("No context");
+    let ctx = MmArc::from_ffi_handle(ctx_h)?;
 
-    let rpc_ip_port = ctx.rpc_ip_port().unwrap();
+    let rpc_ip_port = ctx.rpc_ip_port()?;
     // By entering the context, we tie `tokio::spawn` to this executor.
     let _runtime_guard = CORE.0.enter();
 
-    let server = Server::try_bind(&rpc_ip_port).unwrap_or_else(|_| panic!("Can't bind on {}", rpc_ip_port));
+    // A bind failure (port already in use, permission denied, ...) is a launch-time
+    // configuration error, not a process invariant violation: CRD ch.45 R45.7.1
+    // requires a clean, structured error and an orderly non-zero exit here, never a
+    // panic. This function previously panicked on this path, which aborts rather
+    // than unwinds now that the function is a plain Rust fn (its former `extern "C"`
+    // qualifier made a panic here undefined behaviour / an abrupt SIGABRT, since it
+    // has always had exactly one caller in this crate, not a real FFI boundary).
+    let server = Server::try_bind(&rpc_ip_port).map_err(|e| format!("Can't bind on {rpc_ip_port}: {e}"))?;
+    // The actual bound address: identical to `rpc_ip_port` unless port 0 was
+    // requested (R45.5.1: "bind any free port"), in which case the OS chose one.
+    let bound_addr = server.local_addr();
     let make_svc = make_service_fn(move |socket: &AddrStream| {
         let remote_addr = socket.remote_addr();
         async move {
@@ -524,19 +534,19 @@ pub extern "C" fn spawn_rpc(ctx_h: u32) {
         futures::future::ready(())
     });
 
-    let rpc_ip_port = ctx.rpc_ip_port().unwrap();
     CORE.0.spawn({
         log_tag!(
             ctx,
             "😉";
             fmt = ">>>>>>>>>> DEX stats {}:{} DEX stats API enabled at unixtime.{}  <<<<<<<<<",
-            rpc_ip_port.ip(),
-            rpc_ip_port.port(),
+            bound_addr.ip(),
+            bound_addr.port(),
             gstuff::now_ms() / 1000
         );
         let _ = ctx.rpc_started.pin(true);
         server
     });
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
