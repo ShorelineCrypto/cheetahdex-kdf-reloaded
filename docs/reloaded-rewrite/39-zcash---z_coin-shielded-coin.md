@@ -41,8 +41,10 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
 ## 39.1 Coin type & platform
 
 R39.1.1 The shielded coin (`ZCoin`) is a UTXO-derived coin type that adds a
-Sapling shielded layer. In reloaded it is built on the **native** target only;
-the WASM build excludes it (see §39.6.1 for the required port).
+Sapling shielded layer. This was originally built on the **native** target
+only; §39.6.1's required port has since made it buildable and activatable on
+the WASM target as well, with one narrow gap (shielded transaction *building*
+stays native-only -- see §39.6.1 for the exact boundary and status).
 
 R39.1.2 A shielded coin's `coins`-config `protocol` field is a tagged object
 with `type` = `"ZHTLC"` **and a required `protocol_data` object**. The
