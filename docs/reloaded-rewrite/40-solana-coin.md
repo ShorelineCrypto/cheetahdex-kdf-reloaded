@@ -82,3 +82,18 @@ project's common transaction-details shape.
   JSON-RPC (R40.2).
 - A SOL transfer and an SPL transfer can be built, signed, broadcast, and their
   details decoded (R40.3).
+
+## 40.4 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree (the
+  shipped Solana coin module and SPL-token activation wiring this
+  chapter documents as-built -- by public behaviour and wire-contract
+  shape only, no code transcribed); the published Solana JSON-RPC method
+  set, the SPL Token program account/instruction model, ed25519 keypairs,
+  base58 address encoding, and lamport units (all explicitly named as
+  this chapter's binding-scope source of truth).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  Solana/SPL coin module); external public specification (Solana
+  JSON-RPC, the SPL Token program, ed25519/base58/lamport conventions).
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* not consulted.
