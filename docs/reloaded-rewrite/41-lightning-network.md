@@ -355,3 +355,22 @@ R41.8.6 **Error conditions (public `error_type` discriminant + HTTP status).**
   force-close fee ceiling) can be updated by `rpc_channel_id` and the effective
   configuration is echoed back and persisted (R41.8), delivered by the bounded
   vendored-LDK runtime-config-mutation patch described in §41.8.
+
+## 41.10 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree (the
+  shipped `LightningCoin` node/channel/payment RPC surface this chapter
+  documents as-built -- by public behaviour and wire-contract shape
+  only, no code transcribed); the published BOLT specifications
+  (BOLT-11 invoices, channel and HTLC semantics) and the vendored
+  LDK-style Lightning library's public network behaviour (both
+  explicitly named as this chapter's binding-scope source of truth);
+  [Chapter 48](48-platform-coin-task-activation.md) (the l2
+  task-activation family `task::enable_lightning` is delivered through,
+  and its flat-alias relationship this chapter's §41.2 cross-references).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  Lightning coin and its vendored LDK dependency); external public
+  specification (the BOLT specifications); cross-chapter contracts
+  (Chapter 48).
+- *Sibling-allowlist consultations:* [Chapter 48](48-platform-coin-task-activation.md).
+- *Forbidden corpus:* not consulted.
