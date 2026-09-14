@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
-use zcash_client_backend::data_api::{chain::{error::Error as ChainScanError, scan_cached_blocks, BlockSource,
-                                             ChainState},
+use zcash_client_backend::data_api::{chain::{error::Error as ChainScanError,
+                                             scan_cached_blocks_with_zip212_enforcement, BlockSource, ChainState},
                                      wallet::ConfirmationsPolicy,
                                      AccountBirthday, AccountPurpose, WalletCommitmentTrees, WalletRead, WalletWrite};
 use zcash_client_backend::proto::compact_formats as zcash_compact;
@@ -34,6 +34,11 @@ const LIGHTWALLETD_BLOCK_BATCH_SIZE: u64 = 500;
 const LIGHTWALLETD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const LIGHTWALLETD_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const LIGHTWALLETD_GRPC_SERVICE: &str = "pirate.wallet.sdk.rpc.CompactTxStreamer";
+
+// SQLite header marker for a completed Pirate v1/v2 receive-policy scan.
+// ASCII "ARR2"; zero means not yet recovered. This adds no schema object and
+// leaves zcash_client_sqlite's user_version and migration fingerprint intact.
+const PIRATE_RECEIVE_POLICY_ID: i32 = 0x4152_5232;
 
 type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
 type ReloadedWalletDb = WalletDb<Connection, ZcoinConsensusParams, SystemClock, OsRng>;
@@ -147,6 +152,15 @@ impl ZCoinShieldedHistory {
             },
         }
 
+        if consensus_params.is_pirate() && paths.wallet_db_path.exists() {
+            read_receive_policy_id(&paths.wallet_db_path).map_err(|reason| {
+                MmError::new(ZCoinBuildError::ShieldedDbSchema {
+                    path: paths.wallet_db_path.display().to_string(),
+                    reason,
+                })
+            })?;
+        }
+
         match classify_wallet_db(&paths.wallet_db_path, consensus_params.clone()) {
             WalletDbGeneration::AbsentOrEmpty | WalletDbGeneration::SelectedCurrent => {},
             WalletDbGeneration::ReferenceLegacy => {
@@ -247,6 +261,17 @@ impl ZCoinShieldedHistory {
     pub(crate) fn wallet_db_path(&self) -> &Path { &self.wallet_db_path }
 
     pub(crate) fn compact_blocks_path(&self) -> &Path { &self.compact_blocks_path }
+
+    fn receive_policy_recovery_start(&self) -> Result<Option<u64>, String> {
+        if self.consensus_params.is_pirate()
+            && read_receive_policy_id(&self.wallet_db_path)? == 0
+            && self.scanned_block_height()?.is_some()
+        {
+            self.wallet_anchor_height()
+        } else {
+            Ok(None)
+        }
+    }
 
     pub(crate) async fn fetch_compact_blocks_from_lightwalletd(
         &self,
@@ -358,6 +383,13 @@ impl ZCoinShieldedHistory {
                 }
                 // Requested start matches the current anchor: reuse local state and
                 // continue from the tip (no rescan on unchanged re-activations).
+                if let Some(anchor) = self.receive_policy_recovery_start()? {
+                    return Ok(Some(LightwalletdFetchPlan {
+                        start_height: anchor + 1,
+                        reset_stale_empty_checkpoint: false,
+                        reset_scan_state: false,
+                    }));
+                }
                 if scanned_height >= target_height {
                     return Ok(None);
                 }
@@ -369,6 +401,13 @@ impl ZCoinShieldedHistory {
             }
 
             // No explicit start requested: continue from existing local state.
+            if let Some(anchor) = self.receive_policy_recovery_start()? {
+                return Ok(Some(LightwalletdFetchPlan {
+                    start_height: anchor + 1,
+                    reset_stale_empty_checkpoint: false,
+                    reset_scan_state: false,
+                }));
+            }
             if scanned_height >= target_height {
                 return Ok(None);
             }
@@ -597,7 +636,10 @@ impl ZCoinShieldedHistory {
         }
 
         let scanned_height = self.scanned_block_height()?;
-        if scanned_height.is_some_and(|height| height != checkpoint_height) {
+        let recovery_anchor = self.receive_policy_recovery_start()?;
+        if scanned_height.is_some_and(|height| height != checkpoint_height)
+            && recovery_anchor != Some(checkpoint_height)
+        {
             return Err(format!(
                 "Shielded wallet is scanned through height {:?}, but compact fetching requires chain state at {}",
                 scanned_height, checkpoint_height
@@ -657,6 +699,11 @@ impl ZCoinShieldedHistory {
         if wallet_db.get_account_ids().map_err(|e| e.to_string())?.is_empty() {
             let ufvk = sapling_ufvk(&self.extfvk)?;
             import_wallet_account(&mut wallet_db, &ufvk, chain_state.clone())?;
+        } else if self.receive_policy_recovery_start()? == Some(u64::from(u32::from(checkpoint_height))) {
+            // Recovery starts at the original birthday. Its preceding block is
+            // not necessarily stored in the wallet. Before recording notes, the scan
+            // reconstructs the old tip and checks its hash, tree size, and root
+            // using the validated compact commitments.
         } else {
             let block_metadata = wallet_db
                 .block_metadata(checkpoint_height)
@@ -923,7 +970,12 @@ impl ZCoinShieldedHistory {
     {
         let scan_batch_size = usize::try_from(blocks_per_iteration.max(1))
             .map_err(|_| "Shielded wallet scan iteration size does not fit into usize".to_owned())?;
-        let initial_scanned_height = self.scanned_height()?.unwrap_or(0);
+        let recovery_start = self.receive_policy_recovery_start()?;
+        let previous_scanned_height = self.scanned_height()?.unwrap_or(0);
+        if recovery_start.is_some() && target_height < previous_scanned_height {
+            return Err("Pirate receive recovery target is below the previously scanned wallet tip".to_owned());
+        }
+        let initial_scanned_height = recovery_start.unwrap_or(previous_scanned_height);
         if initial_scanned_height >= target_height {
             log::info!(
                 "ZCoin shielded wallet DB scan skipped: scanned_height={}, target_height={}",
@@ -993,6 +1045,53 @@ impl ZCoinShieldedHistory {
             else {
                 break;
             };
+            if recovery_start == Some(scanned_height) && previous_scanned_height > scanned_height {
+                // Reconstruct the old tip from the fetched birthday frontier and
+                // cached commitments before recording recovered notes. The old
+                // birthday checkpoint may have been pruned, but the tip root is
+                // retained. Checking that root rejects a false initial frontier
+                // even when its leaf count and block hash are unchanged.
+                let count = usize::try_from(previous_scanned_height - scanned_height)
+                    .map_err(|_| "Recovery validation block count overflow".to_owned())?;
+                let recovered_tip = validated_cached_block_chain_state(&block_db, from_height, &from_state, count)?
+                    .ok_or_else(|| "Recovery compact cache does not cover the previous wallet tip".to_owned())?;
+                let old_tip = BlockHeight::from_u32(
+                    u32::try_from(previous_scanned_height).map_err(|_| "Recovery wallet tip overflow".to_owned())?,
+                );
+                let metadata = wallet_db
+                    .block_metadata(old_tip)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "Recovery wallet tip metadata is unavailable".to_owned())?;
+                let root = wallet_db
+                    .with_sapling_tree_mut(|tree| {
+                        if let Some(root) = tree.root_at_checkpoint_id(&old_tip)? {
+                            return Ok(Some(root));
+                        }
+                        // An output-free final block may have no checkpoint.
+                        // Only use the complete stored tree when its leaf count
+                        // proves that its root belongs to this persisted tip.
+                        let stored_size = tree
+                            .max_leaf_position(None)?
+                            .map_or(0, |position| u64::from(position) + 1);
+                        if metadata.sapling_tree_size().map(u64::from) == Some(stored_size) {
+                            tree.root_at_checkpoint_depth(None)
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                    .map_err(|e| e.to_string())?;
+                let tree_size = u32::try_from(recovered_tip.final_sapling_tree().tree_size())
+                    .map_err(|_| "Recovery Sapling tree size overflow".to_owned())?;
+                if recovered_tip.block_height() != old_tip
+                    || metadata.block_hash() != recovered_tip.block_hash()
+                    || metadata.sapling_tree_size() != Some(tree_size)
+                    || root != Some(recovered_tip.final_sapling_tree().root())
+                {
+                    return Err(
+                        "Recovery compact chain or Sapling root does not match the stored wallet tip".to_owned(),
+                    );
+                }
+            }
             let sapling_tree_size_before =
                 u32::try_from(from_state.final_sapling_tree().tree_size()).map_err(|_| {
                     format!(
@@ -1005,13 +1104,14 @@ impl ZCoinShieldedHistory {
                 first_height: from_height,
                 sapling_tree_size_before,
             };
-            let summary = match scan_cached_blocks(
+            let summary = match scan_cached_blocks_with_zip212_enforcement(
                 &consensus_params,
                 &block_source,
                 &mut wallet_db,
                 from_height,
                 &from_state,
                 scan_limit,
+                consensus_params.sapling_receive_override(),
             ) {
                 Ok(summary) => summary,
                 Err(ChainScanError::BlockSource(SqliteClientError::CacheMiss(_))) => break,
@@ -1057,12 +1157,15 @@ impl ZCoinShieldedHistory {
             }
         }
 
-        let scanned_height = wallet_db
-            .block_max_scanned()
-            .map_err(|e| e.to_string())?
-            .map(|block| u64::from(u32::from(block.block_height())))
-            .unwrap_or(scanned_height);
         if scanned_height >= target_height {
+            if self.consensus_params.is_pirate() {
+                // Commit only after this pass actually traversed its target;
+                // block_max_scanned can still describe the old restrictive scan.
+                let conn = Connection::open(&self.wallet_db_path).map_err(|e| e.to_string())?;
+                read_receive_policy_id(&self.wallet_db_path)?;
+                conn.pragma_update(None, "application_id", PIRATE_RECEIVE_POLICY_ID)
+                    .map_err(|e| e.to_string())?;
+            }
             log::info!(
                 "ZCoin shielded wallet DB scan finished through height {} in {:?}",
                 scanned_height,
@@ -1481,6 +1584,10 @@ fn read_only_schema_fingerprint_once(path: &Path) -> Result<SchemaFingerprint, S
 /// recover the copy before fingerprinting it; the source remains byte-for-byte
 /// unchanged until normal wallet opening performs the real recovery.
 fn schema_fingerprint_from_recovery_copy(path: &Path) -> Result<SchemaFingerprint, String> {
+    read_from_recovery_copy(path, schema_fingerprint)
+}
+
+fn read_from_recovery_copy<T>(path: &Path, read: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
     let file_name = path
         .file_name()
         .ok_or_else(|| format!("Invalid shielded database path {}", path.display()))?;
@@ -1508,7 +1615,7 @@ fn schema_fingerprint_from_recovery_copy(path: &Path) -> Result<SchemaFingerprin
     }
 
     let conn = Connection::open(&probe_path).map_err(|e| e.to_string())?;
-    schema_fingerprint(&conn)
+    read(&conn)
 }
 
 fn create_schema_probe_dir() -> Result<PathBuf, String> {
@@ -2008,6 +2115,34 @@ fn preserve_database_for_rebuild(path: &Path, reason: &str) -> Result<Option<Pat
 
 const DATABASE_SIDECAR_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
 
+fn read_receive_policy_id(path: &Path) -> Result<i32, String> {
+    fn read(conn: &Connection) -> Result<i32, String> {
+        conn.pragma_query_value(None, "application_id", |row| row.get(0))
+            .map_err(|e| e.to_string())
+    }
+    let direct = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| e.to_string())
+        .and_then(|conn| read(&conn));
+    let marker = match direct {
+        Ok(marker) => marker,
+        Err(_)
+            if DATABASE_SIDECAR_SUFFIXES
+                .iter()
+                .any(|suffix| path_with_suffix(path, suffix).exists()) =>
+        {
+            read_from_recovery_copy(path, read)?
+        },
+        Err(error) => return Err(error),
+    };
+    match marker {
+        0 | PIRATE_RECEIVE_POLICY_ID => Ok(marker),
+        _ => Err(format!(
+            "Unrecognized shielded wallet application_id {}; database was left unchanged",
+            marker
+        )),
+    }
+}
+
 fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut suffixed = path.as_os_str().to_os_string();
     suffixed.push(suffix);
@@ -2170,6 +2305,267 @@ mod tests {
         .unwrap()
     }
 
+    fn pirate_params() -> ZcoinConsensusParams {
+        let mut params = test_params();
+        params.overwinter_activation_height = 152_855;
+        params.sapling_activation_height = 152_855;
+        params
+    }
+
+    #[test]
+    fn pirate_zip212_receipt_without_canopy_survives_reopen() {
+        let db_dir = test_db_dir("pirate-zip212-receipt");
+        let params = pirate_params();
+        let extfvk = test_extfvk(21);
+        let checkpoint = CheckPointBlockInfo {
+            height: 152_854,
+            hash: rpc::v1::types::H256([9; 32]),
+            time: 10,
+            sapling_tree: empty_sapling_tree_bytes().into(),
+        };
+        let history =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), params.clone(), &extfvk, Some(&checkpoint))
+                .unwrap();
+        history
+            .insert_compact_block(compact_block_with_received_note(152_855, 11, 9, &extfvk, 125_000_000))
+            .unwrap();
+        history
+            .scan_cached_blocks_to_height(params.clone(), 152_855, 1_000, 0, |_, _| {})
+            .unwrap();
+        assert_eq!(history.balance(params.clone()).unwrap(), 125_000_000);
+        drop(history);
+        let reopened = ZCoinShieldedHistory::open_or_create("ARRR", db_dir, params.clone(), &extfvk, None).unwrap();
+        assert_eq!(reopened.balance(params.clone()).unwrap(), 125_000_000);
+        assert!(reopened
+            .lightwalletd_fetch_plan(&params, 152_855, None, true)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn pirate_zip212_historical_recovery_preserves_spends_ids_and_retries() {
+        use crate::z_coin::zip212_tests::note_for_version;
+        use zcash_client_backend::data_api::chain::scan_cached_blocks;
+
+        let db_dir = test_db_dir("pirate-zip212-recovery");
+        // A nonempty preceding frontier must be after Sapling activation.
+        let birthday = 153_855u32;
+        let target = u64::from(birthday + 3);
+        let params = pirate_params();
+        let extfvk = test_extfvk(22);
+        let mut seed_tree = sapling::CommitmentTree::empty();
+        seed_tree
+            .append(sapling::Node::from_cmu(&note_for_version(&test_extfvk(23), 1, 1).cmu()))
+            .unwrap();
+        let mut seed_bytes = Vec::new();
+        zcash_primitives::merkle_tree::write_commitment_tree(&seed_tree, &mut seed_bytes).unwrap();
+        let checkpoint = CheckPointBlockInfo {
+            height: birthday - 1,
+            hash: rpc::v1::types::H256([9; 32]),
+            time: 10,
+            sapling_tree: seed_bytes.clone().into(),
+        };
+        let history =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), params.clone(), &extfvk, Some(&checkpoint))
+                .unwrap();
+        let mut blocks = Vec::new();
+        for (offset, version, value) in [(0, 1, 10_000_000), (1, 2, 20_000_000), (2, 1, 30_000_000)] {
+            let mut block = compact_block_for_note(
+                u64::from(birthday) + offset,
+                10 + offset as u8,
+                9 + offset as u8,
+                &extfvk,
+                note_for_version(&extfvk, value, version),
+            );
+            block.vtx[0].txid = vec![10 + offset as u8; 32];
+            block.chain_metadata.as_mut().unwrap().sapling_commitment_tree_size = 2 + offset as u32;
+            blocks.push(block);
+        }
+        let mut spend = empty_compact_block(target, 13, 12);
+        spend.chain_metadata.as_mut().unwrap().sapling_commitment_tree_size = 4;
+        spend.vtx.push(zcash_compact::CompactTx {
+            index: 1,
+            txid: vec![13; 32],
+            spends: vec![zcash_compact::CompactSaplingSpend {
+                nf: note_for_version(&extfvk, 10_000_000, 1)
+                    .nf(&extfvk.fvk.vk.nk, 1)
+                    .0
+                    .to_vec(),
+            }],
+            ..Default::default()
+        });
+        blocks.push(spend);
+        history.insert_compact_blocks(&blocks).unwrap();
+        let cache_before = std::fs::read(history.compact_blocks_path()).unwrap();
+        let schema_before = read_only_schema_fingerprint(history.wallet_db_path()).unwrap();
+        {
+            // Reproduce a current-generation wallet populated by the old,
+            // restrictive API: v1 receives/spend known, v2 receive invisible.
+            let mut wallet = open_wallet_db(history.wallet_db_path(), params.clone()).unwrap();
+            wallet.update_chain_tip(BlockHeight::from_u32(birthday + 3)).unwrap();
+            scan_cached_blocks(
+                &params,
+                &BlockDb::for_path(history.compact_blocks_path()).unwrap(),
+                &mut wallet,
+                BlockHeight::from_u32(birthday),
+                &chain_state_from_checkpoint(&checkpoint).unwrap(),
+                4,
+            )
+            .unwrap();
+        }
+        assert_eq!(history.balance(params.clone()).unwrap(), 30_000_000);
+        let known_rows = history.load_rows().unwrap();
+        assert_eq!(known_rows.len(), 3);
+        let original_ids: HashMap<_, _> = known_rows
+            .iter()
+            .map(|row| (row.tx_hash.clone(), row.internal_id))
+            .collect();
+        assert_eq!(read_receive_policy_id(history.wallet_db_path()).unwrap(), 0);
+        let plan = history
+            .lightwalletd_fetch_plan(&params, target, None, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.start_height, u64::from(birthday));
+        assert!(!plan.reset_scan_state);
+
+        let tree_state = |tree: &[u8]| z_coin_grpc::TreeState {
+            network: "main".to_owned(),
+            height: u64::from(birthday - 1),
+            hash: hex::encode([9; 32]),
+            time: 10,
+            tree: hex::encode(tree),
+        };
+        let mut false_tree = sapling::CommitmentTree::empty();
+        false_tree
+            .append(sapling::Node::from_cmu(&note_for_version(&test_extfvk(24), 1, 1).cmu()))
+            .unwrap();
+        let mut false_bytes = Vec::new();
+        zcash_primitives::merkle_tree::write_commitment_tree(&false_tree, &mut false_bytes).unwrap();
+        history
+            .init_wallet_checkpoint_from_tree_state(params.clone(), tree_state(&false_bytes))
+            .unwrap();
+        assert!(history
+            .scan_cached_blocks_to_height(params.clone(), target, 1, 0, |_, _| {})
+            .unwrap_err()
+            .contains("Sapling root"));
+        assert_eq!(history.balance(params.clone()).unwrap(), 30_000_000);
+
+        history
+            .init_wallet_checkpoint_from_tree_state(params.clone(), tree_state(&seed_bytes))
+            .unwrap();
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            history.scan_cached_blocks_to_height_with_sleeper(
+                params.clone(),
+                target,
+                1,
+                1,
+                |_, _| {},
+                |_| panic!("simulated process interruption after a durable scan batch"),
+            )
+        }));
+        assert!(
+            interrupted.is_err(),
+            "recovery returned before the injected interruption: {interrupted:?}"
+        );
+        assert_eq!(read_receive_policy_id(history.wallet_db_path()).unwrap(), 0);
+        assert_eq!(history.scanned_height().unwrap(), Some(target));
+        drop(history);
+
+        let reopened =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), params.clone(), &extfvk, None).unwrap();
+        let plan = reopened
+            .lightwalletd_fetch_plan(&params, target, None, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.start_height, u64::from(birthday));
+        reopened
+            .init_wallet_checkpoint_from_tree_state(params.clone(), tree_state(&seed_bytes))
+            .unwrap();
+        let mut progress = Vec::new();
+        reopened
+            .scan_cached_blocks_to_height(params.clone(), target, 1, 0, |height, _| progress.push(height))
+            .unwrap();
+        assert_eq!(progress, (u64::from(birthday - 1)..=target).collect::<Vec<_>>());
+        assert_eq!(reopened.balance(params.clone()).unwrap(), 50_000_000);
+        assert_eq!(reopened.wallet_sync_start_height().unwrap(), Some(u64::from(birthday)));
+        assert_eq!(std::fs::read(reopened.compact_blocks_path()).unwrap(), cache_before);
+        assert_eq!(
+            read_only_schema_fingerprint(reopened.wallet_db_path()).unwrap(),
+            schema_before
+        );
+        let rows = reopened.load_rows().unwrap();
+        assert_eq!(rows.len(), 4);
+        for row in &rows {
+            if let Some(id) = original_ids.get(&row.tx_hash) {
+                assert_eq!(row.internal_id, *id);
+            }
+        }
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.tx_hash == hex::encode([13; 32]))
+                .unwrap()
+                .spent_by_me,
+            10_000_000
+        );
+        assert_eq!(
+            read_receive_policy_id(reopened.wallet_db_path()).unwrap(),
+            PIRATE_RECEIVE_POLICY_ID
+        );
+        drop(reopened);
+        let completed = ZCoinShieldedHistory::open_or_create("ARRR", db_dir, params.clone(), &extfvk, None).unwrap();
+        assert!(completed
+            .lightwalletd_fetch_plan(&params, target, None, true)
+            .unwrap()
+            .is_none());
+        assert_eq!(completed.balance(params).unwrap(), 50_000_000);
+    }
+
+    #[test]
+    fn pirate_zip212_unknown_receive_marker_is_rejected_without_mutation() {
+        let db_dir = test_db_dir("pirate-zip212-unknown-marker");
+        let params = pirate_params();
+        let extfvk = test_extfvk(25);
+        let history =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), params.clone(), &extfvk, None).unwrap();
+        let path = history.wallet_db_path().to_owned();
+        drop(history);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "application_id", 12345).unwrap();
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        }
+        let before = std::fs::read(&path).unwrap();
+        let error = ZCoinShieldedHistory::open_or_create("ARRR", db_dir, params, &extfvk, None).unwrap_err();
+        assert!(error.to_string().contains("application_id"));
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn pirate_zip212_fresh_wallet_keeps_recent_start_policy() {
+        let params = pirate_params();
+        let checkpoint = CheckPointBlockInfo {
+            height: 152_854,
+            hash: rpc::v1::types::H256([9; 32]),
+            time: 10,
+            sapling_tree: empty_sapling_tree_bytes().into(),
+        };
+        let history = ZCoinShieldedHistory::open_or_create(
+            "ARRR",
+            test_db_dir("pirate-zip212-fresh"),
+            params.clone(),
+            &test_extfvk(26),
+            Some(&checkpoint),
+        )
+        .unwrap();
+        assert_eq!(history.receive_policy_recovery_start().unwrap(), None);
+        let plan = history
+            .lightwalletd_fetch_plan(&params, 4_000_000, None, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.start_height, 4_000_000 - DEFAULT_LIGHT_WALLETD_RECENT_SCAN_BLOCKS);
+        assert!(plan.reset_stale_empty_checkpoint);
+    }
+
     fn open_test_history() -> ZCoinShieldedHistory {
         let db_dir = test_db_dir("wallet-history-test");
         let extfvk = test_extfvk(7);
@@ -2223,6 +2619,16 @@ mod tests {
             NoteValue::from_raw(value),
             Rseed::AfterZip212([42; 32]),
         );
+        compact_block_for_note(height, hash_byte, prev_hash_byte, extfvk, note)
+    }
+
+    fn compact_block_for_note(
+        height: u64,
+        hash_byte: u8,
+        prev_hash_byte: u8,
+        extfvk: &ExtendedFullViewingKey,
+        note: Note,
+    ) -> zcash_compact::CompactBlock {
         let mut rng = StdRng::from_seed([7; 32]);
         let encryptor = sapling_note_encryption(
             Some(extfvk.fvk.ovk),
@@ -3527,12 +3933,13 @@ impl ZCoinShieldedHistory {
         use sapling::note_encryption::{try_sapling_compact_note_decryption, CompactOutputDescription};
         use sapling::Note;
         use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
-        use zcash_primitives::transaction::components::sapling::zip212_enforcement;
 
         let ivk = PreparedIncomingViewingKey::new(&self.extfvk.fvk.vk.ivk());
         // Mempool transactions will be mined at the next height at the
         // earliest, so enforcement is evaluated against the tip.
-        let enforcement = zip212_enforcement(&self.consensus_params, BlockHeight::from_u32(tip as u32));
+        let enforcement = self
+            .consensus_params
+            .sapling_receive_enforcement(BlockHeight::from_u32(tip as u32));
 
         for server in servers {
             let mut client = match Self::connect_lightwalletd(server).await {

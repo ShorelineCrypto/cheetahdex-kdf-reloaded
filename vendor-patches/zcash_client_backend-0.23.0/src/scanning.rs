@@ -625,6 +625,7 @@ where
         nullifiers,
         prior_block_metadata,
         None,
+        None,
     )
 }
 

@@ -40,7 +40,7 @@ use mm2_err_handle::prelude::*;
 use primitives::bytes::Bytes;
 use rpc::v1::types::{Bytes as BytesJson, ToTxHash, Transaction as RpcTransaction, H256 as H256Json};
 use sapling::keys::{FullViewingKey, OutgoingViewingKey};
-use sapling::note_encryption::try_sapling_output_recovery;
+use sapling::note_encryption::{try_sapling_output_recovery, Zip212Enforcement};
 use sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey};
 use sapling::{CommitmentTree, IncrementalWitness, Node, Note, PaymentAddress};
 use script::{Builder as ScriptBuilder, Opcode, Script, TransactionInputSigner};
@@ -52,7 +52,7 @@ use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, InputSource, TargetValue, WalletCommitmentTrees,
                                      WalletRead};
-use zcash_client_backend::decrypt_transaction;
+use zcash_client_backend::decrypt_transaction_with_zip212_enforcement;
 use zcash_keys::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_keys::keys::UnifiedFullViewingKey;
@@ -127,6 +127,7 @@ macro_rules! try_ztx_s {
 
 mod z_coin_ops;
 #[cfg(not(target_arch = "wasm32"))] mod z_swap_ops;
+#[cfg(all(test, not(target_arch = "wasm32")))] mod zip212_tests;
 
 #[cfg(all(test, feature = "zhtlc-native-tests"))]
 mod z_coin_tests;
@@ -169,6 +170,29 @@ pub struct ZcoinConsensusParams {
 }
 
 impl ZcoinConsensusParams {
+    /// Recognizes the deployed Cheetah Pirate parameter tuple (CRD 39.9.1).
+    /// Later upgrade heights do not identify the coin and remain authoritative
+    /// for transaction construction. The separate ZIP32 path is unchanged.
+    fn is_pirate(&self) -> bool {
+        self.overwinter_activation_height == 152_855
+            && self.sapling_activation_height == 152_855
+            && self.coin_type == 133
+            && self.hrp_sapling_extended_spending_key == "secret-extended-key-main"
+            && self.hrp_sapling_extended_full_viewing_key == "zxviews"
+            && self.hrp_sapling_payment_address == "zs"
+            && self.b58_pubkey_address_prefix == [28, 184]
+            && self.b58_script_address_prefix == [28, 189]
+    }
+
+    fn sapling_receive_override(&self) -> Option<Zip212Enforcement> {
+        self.is_pirate().then_some(Zip212Enforcement::GracePeriod)
+    }
+
+    fn sapling_receive_enforcement(&self, height: BlockHeight) -> Zip212Enforcement {
+        self.sapling_receive_override()
+            .unwrap_or_else(|| zcash_primitives::transaction::components::sapling::zip212_enforcement(self, height))
+    }
+
     fn network_type_hint(&self) -> NetworkType {
         use zcash_protocol::constants::{regtest, testnet};
 

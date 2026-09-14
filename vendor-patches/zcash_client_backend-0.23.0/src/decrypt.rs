@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sapling::note_encryption::{PreparedIncomingViewingKey, SaplingDomain};
+use sapling::note_encryption::{PreparedIncomingViewingKey, SaplingDomain, Zip212Enforcement};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
 use zcash_primitives::{
@@ -121,19 +121,44 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     tx: &'a Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> DecryptedTransaction<'a, Transaction, AccountId> {
-    let zip212_enforcement = zip212_enforcement(
+    decrypt_transaction_with_zip212_enforcement(
         params,
-        // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
-        // for mempool transactions. We fall back to Sapling activation if we have no other
-        // information.
-        mined_height.unwrap_or_else(|| {
-            chain_tip_height
-                .map(|max_height| max_height + 1) // "mempool height"
-                .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
-                // Fall back to the genesis block in regtest mode.
-                .unwrap_or_else(|| BlockHeight::from(0))
-        }),
-    );
+        mined_height,
+        chain_tip_height,
+        tx,
+        ufvks,
+        None,
+    )
+}
+
+/// Decrypts a transaction with an optional Sapling receive-policy override.
+///
+/// `None` preserves [`decrypt_transaction`]'s height-based policy. The override
+/// only selects accepted Sapling plaintext versions, retaining recipient,
+/// commitment, and ephemeral-key verification; Orchard behavior is unchanged.
+pub fn decrypt_transaction_with_zip212_enforcement<'a, P: consensus::Parameters, AccountId: Copy>(
+    params: &P,
+    mined_height: Option<BlockHeight>,
+    chain_tip_height: Option<BlockHeight>,
+    tx: &'a Transaction,
+    ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
+    zip212_override: Option<Zip212Enforcement>,
+) -> DecryptedTransaction<'a, Transaction, AccountId> {
+    let zip212_enforcement = zip212_override.unwrap_or_else(|| {
+        zip212_enforcement(
+            params,
+            // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
+            // for mempool transactions. We fall back to Sapling activation if we have no other
+            // information.
+            mined_height.unwrap_or_else(|| {
+                chain_tip_height
+                    .map(|max_height| max_height + 1) // "mempool height"
+                    .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
+                    // Fall back to the genesis block in regtest mode.
+                    .unwrap_or_else(|| BlockHeight::from(0))
+            }),
+        )
+    });
     let sapling_bundle = tx.sapling_bundle();
     let sapling_outputs = sapling_bundle
         .iter()

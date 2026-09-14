@@ -234,12 +234,13 @@ impl ZCoin {
                 BranchId::for_height(&self.z_fields.consensus_params, mined_height),
             )
             .map_to_mm(|err| GenTxError::TxReadError { err, hex: prev_tx.hex })?;
-            let decrypted = decrypt_transaction(
+            let decrypted = decrypt_transaction_with_zip212_enforcement(
                 &self.z_fields.consensus_params,
                 Some(mined_height),
                 Some(BlockHeight::from_u32(current_block)),
                 &z_cash_tx,
                 &ext,
+                self.z_fields.consensus_params.sapling_receive_override(),
             );
 
             let decrypted_output = decrypted

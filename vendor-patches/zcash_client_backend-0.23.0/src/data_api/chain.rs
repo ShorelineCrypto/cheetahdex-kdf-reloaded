@@ -597,6 +597,44 @@ where
     DbT: WalletWrite,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
 {
+    scan_cached_blocks_with_zip212_enforcement(
+        params,
+        block_source,
+        data_db,
+        from_height,
+        from_state,
+        limit,
+        None,
+    )
+}
+
+/// Scans cached blocks with an optional Sapling receive-policy override.
+///
+/// `None` retains height-based Zcash enforcement. This hook only changes which
+/// Sapling plaintext versions may be decrypted; all cryptographic and chain
+/// checks are retained. It does not change transaction construction.
+///
+/// # Errors
+/// Returns the same storage, block-source, and scan errors as [`scan_cached_blocks`].
+///
+/// # Panics
+/// Panics if `from_height != from_state.block_height() + 1`.
+#[allow(clippy::type_complexity)]
+pub fn scan_cached_blocks_with_zip212_enforcement<ParamsT, DbT, BlockSourceT>(
+    params: &ParamsT,
+    block_source: &BlockSourceT,
+    data_db: &mut DbT,
+    from_height: BlockHeight,
+    from_state: &ChainState,
+    limit: usize,
+    zip212_override: Option<sapling::note_encryption::Zip212Enforcement>,
+) -> Result<ScanSummary, Error<DbT::Error, BlockSourceT::Error>>
+where
+    ParamsT: consensus::Parameters + Send + 'static,
+    BlockSourceT: BlockSource,
+    DbT: WalletWrite,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
+{
     assert_eq!(from_height, from_state.block_height + 1);
 
     // Fetch the UnifiedFullViewingKeys we are tracking
@@ -607,7 +645,9 @@ where
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
     block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
-        runners.add_block(params, block).map_err(|e| e.into())
+        runners
+            .add_block(params, block, zip212_override)
+            .map_err(|e| e.into())
     })?;
     runners.flush();
 
@@ -636,6 +676,7 @@ where
                 &nullifiers,
                 prior_block_metadata.as_ref(),
                 Some(&mut runners),
+                zip212_override,
             )
             .map_err(Error::Scan)?;
 
