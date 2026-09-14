@@ -246,10 +246,7 @@ impl SwapOps for ZCoin {
                 if let Some((note, address, memo)) = try_sapling_output_recovery(
                     &DEX_FEE_OVK,
                     shielded_out,
-                    zcash_primitives::transaction::components::sapling::zip212_enforcement(
-                        &coin.z_fields.consensus_params,
-                        block_height,
-                    ),
+                    coin.z_fields.consensus_params.sapling_receive_enforcement(block_height),
                 ) {
                     if address != coin.z_fields.dex_fee_addr {
                         let hrp = coin.z_fields.consensus_params.hrp_sapling_payment_address();

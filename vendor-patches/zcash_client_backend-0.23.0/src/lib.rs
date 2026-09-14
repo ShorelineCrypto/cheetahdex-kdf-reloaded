@@ -77,7 +77,9 @@ pub mod serialization;
 #[cfg(feature = "tor")]
 pub mod tor;
 
-pub use decrypt::{DecryptedOutput, TransferType, decrypt_transaction};
+pub use decrypt::{
+    DecryptedOutput, TransferType, decrypt_transaction, decrypt_transaction_with_zip212_enforcement,
+};
 
 #[deprecated(note = "This module is deprecated; use `::zcash_keys::address` instead.")]
 pub mod address {

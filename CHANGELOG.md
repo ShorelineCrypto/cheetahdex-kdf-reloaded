@@ -54,6 +54,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **ARRR ZIP-212 deposits and historical recovery.** Pirate version-2 Sapling
+  receipts are now recognized even with no Canopy activation configured, while
+  version-1 receipts remain supported. The policy applies consistently to
+  scanning, pending receipts, full decryption, and fee output recovery, without
+  changing transaction construction or other coins' enforcement. Existing ARRR
+  wallets recover previously missed receipts once from their original scan
+  start, preserving wallet records and validated cache data. See
+  [ARRR recovery guidance](docs/ARRR_ZIP212_RECOVERY.md).
+
 - **ARRR Light activation checkpoint, recovery, and concurrency.** Lightwalletd
   `TreeState` display-order block IDs are now converted to the canonical
   little-endian compact-block representation before first-block continuity

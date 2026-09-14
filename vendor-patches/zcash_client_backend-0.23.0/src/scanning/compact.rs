@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::hash::Hash;
 
 use incrementalmerkletree::Retention;
-use sapling::note_encryption::{CompactOutputDescription, SaplingDomain};
+use sapling::note_encryption::{CompactOutputDescription, SaplingDomain, Zip212Enforcement};
 use subtle::ConditionallySelectable;
 
 use tracing::{debug, trace};
@@ -116,14 +116,20 @@ where
     }
 
     #[tracing::instrument(skip_all, fields(height = block.height))]
-    pub(crate) fn add_block<P>(&mut self, params: &P, block: CompactBlock) -> Result<(), ScanError>
+    pub(crate) fn add_block<P>(
+        &mut self,
+        params: &P,
+        block: CompactBlock,
+        zip212_override: Option<Zip212Enforcement>,
+    ) -> Result<(), ScanError>
     where
         P: consensus::Parameters + Send + 'static,
         IvkTag: Copy + Send + 'static,
     {
         let block_hash = block.hash();
         let block_height = block.height();
-        let zip212_enforcement = zip212_enforcement(params, block_height);
+        let zip212_enforcement =
+            zip212_override.unwrap_or_else(|| zip212_enforcement(params, block_height));
 
         for tx in block.vtx.into_iter() {
             let txid = tx.txid();
@@ -173,6 +179,7 @@ where
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
     params: &P,
     block: CompactBlock,
@@ -180,6 +187,7 @@ pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
     nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO>>,
+    zip212_override: Option<Zip212Enforcement>,
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
@@ -224,7 +232,8 @@ where
 
     let cur_height = block.height();
     let cur_hash = block.hash();
-    let zip212_enforcement = zip212_enforcement(params, cur_height);
+    let zip212_enforcement =
+        zip212_override.unwrap_or_else(|| zip212_enforcement(params, cur_height));
 
     let mut pos_tracker = PositionTracker::for_compact_block(params, &block, prior_block_metadata)?;
 
@@ -621,7 +630,7 @@ mod tests {
             let mut batch_runners = if scan_multithreaded {
                 let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
                 runners
-                    .add_block(&Network::TestNetwork, cb.clone())
+                    .add_block(&Network::TestNetwork, cb.clone(), None)
                     .unwrap();
                 runners.flush();
 
@@ -643,6 +652,7 @@ mod tests {
                     Some(0),
                 )),
                 batch_runners.as_mut(),
+                None,
             )
             .unwrap();
             let txs = scanned_block.transactions();
@@ -707,7 +717,7 @@ mod tests {
             let mut batch_runners = if scan_multithreaded {
                 let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
                 runners
-                    .add_block(&Network::TestNetwork, cb.clone())
+                    .add_block(&Network::TestNetwork, cb.clone(), None)
                     .unwrap();
                 runners.flush();
 
@@ -723,6 +733,7 @@ mod tests {
                 &Nullifiers::empty(),
                 None,
                 batch_runners.as_mut(),
+                None,
             )
             .unwrap();
             let txs = scanned_block.transactions();

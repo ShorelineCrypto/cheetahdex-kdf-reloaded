@@ -1364,3 +1364,104 @@ storage error that reflects the store failure.
   `PageNumber`/`FromId` paging modes, echoes paging metadata, reports
   `sync_status: Finished`, and rejects non-shielded coins (`NotSupportedFor`)
   and inactive coins (`CoinIsNotActive`) (§39.8).
+
+## 39.9 Pirate ZIP-212 receive compatibility and historical recovery
+
+### 39.9.1 Scope and public protocol basis
+
+This addition describes receive compatibility with Pirate full-node release
+`v6.0.3-842c598`, independently of the Pirate hard-fork schedule. ZIP-212 changes
+the Sapling note plaintext and randomness derivation; recognizing a transaction
+container does not imply that its encrypted outputs are recognized as wallet
+receipts. Public Pirate behavior generates version-2 note plaintexts before
+Canopy and accepts both version-1 and version-2 plaintexts at all heights.
+
+Public references:
+
+- [ZIP-212](https://zips.z.cash/zip-0212), including lead-byte selection, randomness
+  derivation, commitment checks, and ephemeral-key checks.
+- [Pirate v6.0.3 dependency manifest](https://github.com/PirateNetwork/pirate/blob/842c598a8ea976d2f072d790258dcd531f8948a9/Cargo.toml).
+- [Pirate v6.0.3 Sapling output construction](https://github.com/PirateNetwork/pirate/blob/842c598a8ea976d2f072d790258dcd531f8948a9/src/rust/src/sapling_protocol/sapling_bundle.rs).
+- [Pinned Pirate Sapling receive policy](https://github.com/PirateNetwork/sapling-crypto/blob/62fcf59a4d933244ee6280182c6cd3e5290e8a90/src/note_encryption.rs).
+- [Pinned Cheetah coin registry](https://github.com/ShorelineCrypto/coins/blob/519e6a345c1e99542b705dd2489364ef3d4f767f/coins), ARRR entry.
+
+R39.9.1 The Pirate receive policy shall accept cryptographically valid Sapling
+note plaintext versions 1 and 2 at every supported scan height, including when
+`canopy_activation_height` is absent. It shall apply only to positively
+identified Pirate consensus parameters, not to every ZHTLC coin or to every
+coin lacking Canopy. The identification rule shall be documented and tested.
+
+The deployed Cheetah ARRR consensus identity is the conjunction of
+`overwinter_activation_height = sapling_activation_height = 152855`,
+`coin_type = 133`, Sapling spending-key/viewing-key/address HRPs
+`secret-extended-key-main` / `zxviews` / `zs`, and transparent public-key/script
+prefixes `[28, 184]` / `[28, 189]`. Recognizing this full tuple is sufficient for
+the compatibility policy. Optional later-upgrade heights are not identity
+fields. The separate deployed derivation path `m/32'/141'` does not authorize
+changing `coin_type` or any existing wallet key. Native full-node transparent
+prefixes differ; this change must not silently rewrite the deployed tuple.
+
+R39.9.2 This policy shall be consistent across compact-block trial decryption,
+batched scanning, full-transaction incoming-note decryption, pending incoming
+receipts, and outgoing-viewing-key output recovery used in shielded fee checks.
+Existing generic library entrypoints shall retain their default behavior.
+
+R39.9.3 Acceptance shall retain the note commitment, recipient-key, plaintext
+structure, and ZIP-212 ephemeral-key consistency checks. Unsupported plaintext
+versions, wrong wallet keys, invalid commitments, and inconsistent ephemeral
+keys shall not produce a receipt. This is not permission to bypass decryption
+or transaction validation failures.
+
+R39.9.4 Configured network-upgrade heights, transaction branch identifiers,
+transaction version selection, and sending policy shall remain unchanged.
+In particular, changing Canopy activation to obtain broader receive behavior
+is not an acceptable implementation. Non-Pirate networks retain their existing
+pre-activation, grace-period, and post-activation acceptance rules.
+
+### 39.9.2 Previously scanned wallets
+
+R39.9.5 A wallet previously scanned under the restrictive policy can contain
+confirmed but unrecognized deposits below its recorded tip. Updating only the
+next-block scanner is insufficient. On first use of the corrected Pirate
+receive policy, the wallet shall re-examine its previously covered scan range
+from its existing birthday/sync anchor through the requested tip. This shall
+not replace an older anchor with the default recent-history window.
+
+R39.9.6 Recovery shall preserve wallet identity, keys, known transaction records,
+known notes and spends, and validated compact-block data. Rescanning shall not
+double-count receipts, resurrect spent notes, or bypass block-chain continuity
+and witness checks. Existing synchronization exclusion and activation progress
+requirements apply to the recovery pass as well.
+
+R39.9.7 A durable receive-policy generation shall distinguish an unexamined
+wallet from one whose recovery completed successfully. Completion shall be
+recorded only after scanning succeeds through the requested tip. A failed or
+interrupted pass shall remain retryable; a later successful reopen shall not
+unnecessarily repeat a completed recovery. Known wallet data must remain
+recoverable after an interrupted pass.
+
+R39.9.8 This marker shall not alter the selected-generation schema fingerprint,
+the legacy database namespace, or RPC envelopes. A narrowly scoped use of the
+SQLite `application_id` metadata field is permitted if an unmarked database
+remains identifiable, the marker has a documented stable value, and unexpected
+nonzero values are preserved and rejected rather than overwritten. No new
+schema object or change to `user_version` is authorized by this addition.
+
+### 39.9.3 Acceptance and provenance
+
+R39.9.9 Deterministic, offline regression coverage shall include actual Pirate
+parameters without Canopy; valid version-1 and version-2 notes to the same
+wallet; wrong-key, commitment, and ephemeral-key rejection; unchanged
+non-Pirate activation-boundary behavior; compact and full decryption; balance,
+history, and reopen persistence; and recovery of a version-2 receipt missed
+by an earlier restrictive scan. Recovery coverage shall include an already
+known receipt/spend, interruption/retry, and no repeated recovery on a completed
+wallet. Live network transfers are supplementary, not a substitute for these
+regressions.
+
+This section is a sanitized behavioral specification derived from the public
+ZIP and pinned Pirate protocol sources above, plus the independently written
+Reloaded base. Its author acts on the corpus side because the surrounding
+investigation had previously consulted a different KDF implementation. No
+implementation code is supplied here. This section must pass the repository's
+corpus-side gate before transfer to a fresh clean implementation context.
