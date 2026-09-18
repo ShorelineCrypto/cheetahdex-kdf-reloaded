@@ -168,7 +168,7 @@ Our own code — key locations (paths relative to the repository root):
 | Local patches to the upstream builder (swap P2SH input, locktime, raw outputs; ~126 + ~154 lines); the P2SH signing arm takes its digest from the builder‑supplied `calculate_sighash`, so ZIP‑244 sighash for v6 comes for free once re‑vendored | `vendor-patches/zcash_primitives-0.28.0/KDF-PATCH.md`, `vendor-patches/zcash_transparent-0.8.0/{KDF-PATCH.md, src/builder.rs:776‑782}` |
 | Previous crate migration: policy, 7 acceptance gates, progress log — port landed 2026‑08‑05, stabilization ran to 08‑11; 3 of 4 runtime defects surfaced only in live Windows GUI wallets | `docs/plans/librustzcash-upgrade.md` (L38‑42, 44‑66, 620‑734) |
 | Governing specification chapter (updated in the same commit as behaviour) | `docs/reloaded-rewrite/39-zcash---z_coin-shielded-coin.md` |
-| Coin configuration consumed by wallets (`consensus_params`, server lists) | `komodo-coins-rin`: `coins` (ARRR at L904), `light_wallet_d/ARRR`, `electrums/ARRR` |
+| Coin configuration consumed by wallets (`consensus_params`, server lists) | **`GLEECBTC/coins`** (`master`, actively maintained): `coins`, `light_wallet_d/ARRR`, `light_wallet_d/ARRR_WSS`, `electrums/ARRR`. `komodo-coins-rin` is a stale 6‑month‑old fork — do not use it as a source of truth. |
 
 ---
 
@@ -221,14 +221,15 @@ stopped.*
    always `Finished` for a shielded coin, which the shipped code already contradicts; the
    chapter is corrected in the same commit.
 3. **Server hygiene.** Remove the five dead lightwalletd endpoints and the one dead Electrum
-   endpoint from `komodo-coins-rin` (`light_wallet_d/ARRR`, `electrums/ARRR`), order by
-   measured latency, and ask Pirate for the canonical list (§7 q6).
+   endpoint upstream in **`GLEECBTC/coins`** (`light_wallet_d/ARRR`, `electrums/ARRR`;
+   `ARRR_WSS` inherits the dead `electrum3`), order by measured latency, and ask Pirate for
+   the canonical list (§7 q6).
 4. **Ironwood guard and swap freeze** (maintainer decision: wall‑clock, with freeze). This
    is B's safety net but needs nothing from the crate bump, so it ships here:
    - add `ironwood_activation_time: Option<u32>` and `ironwood_activation_height: Option<u32>`
      to `ZcoinConsensusParams` (additive; `serde` has no `deny_unknown_fields` on this path,
      so old and new coin files stay mutually compatible) and publish
-     `ironwood_activation_time: 1791054000` in the ARRR coin entry now;
+     `ironwood_activation_time: 1791054000` in the ARRR coin entry of `GLEECBTC/coins`;
    - a build carries a capability flag for v6 (`false` until step 3);
    - **swap freeze:** on non‑capable builds, refuse to place or match ARRR orders and to
      start ARRR swaps from `T − max_htlc_locktime`, with the error
@@ -259,8 +260,10 @@ stopped.*
 From `mm2src/mm2_main/src/lp_swap.rs:209‑232` and `:734‑786`: `PAYMENT_LOCKTIME = 7 800 s`,
 the **maker** payment locks for `lock_duration * 2`, `lp_atomic_locktime_v1` multiplies by
 **10** when either side is BTC, and V1 is reachable whenever a legacy peer sends no
-`conf_settings` (`ordermatch_trading.rs:446‑456`, `:530‑540`). ARRR's own coin config also
-sets `requires_notarization: true`, which triggers the 4× multiplier on the modern path.
+`conf_settings` (`ordermatch_trading.rs:446‑456`, `:530‑540`). The 4× V2 path additionally
+triggers when either side requires notarization; ARRR upstream sets
+`requires_notarization: false`, so for ARRR that depends on the *counterparty* coin. Either
+way the BTC ×10 V1 branch dominates and sets the constant.
 
 | Pairing | maker HTLC lock | + refund grace (`+3700`) |
 |---|---|---|
@@ -631,3 +634,14 @@ Open items depending on Pirate's answers:
   `history_sync_status` has no `Error` arm at all, so a failed sync is currently
   indistinguishable from one still catching up. Implementation sequencing for Plan A is
   tracked in the session plan `arrr-ironwood-plan-a.md`.
+- **2026‑09‑18 (later):** corrected the coin-config source of truth. Earlier entries cited
+  `komodo-coins-rin`, a stale 6-month-old fork; the live upstream is **`GLEECBTC/coins`**
+  (`master`, last pushed 2026‑09‑17). Re-checked against it: the ARRR entry there sets
+  `requires_notarization: false` / `required_confirmations: 5`, not the `true`/`2` the fork
+  carries — Correction 1's supporting claim is amended above, though its 156 000 s conclusion
+  is unchanged because the BTC ×10 branch dominates regardless. The dead-endpoint finding is
+  **confirmed against upstream**: `light_wallet_d/ARRR` and `electrums/ARRR` there are
+  byte-identical to the fork, so the 5 dead lightwalletd and 1 dead Electrum entries are live
+  in the list GUIs actually consume. Also noted: **ZOMBIE is absent from upstream `coins`, and
+  ARRR is the only ZHTLC coin shipped** — the repo's `zhtlc-native-tests` build ZOMBIE from an
+  inline test conf, so they are unaffected, but there is no shipped test ZHTLC coin.
