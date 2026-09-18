@@ -153,3 +153,21 @@ shall be wound down as part of shutdown rather than abandoned.
   daemon running (§43.4).
 - A termination signal triggers a clean, bounded shutdown of the daemon and its
   subsystems (§43.5).
+
+## 43.7 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree (the
+  shipped dispatcher -- legacy and namespaced routing, public-method
+  classification, password authentication -- and the daemon lifecycle
+  this chapter documents as-built and binds the security obligations of,
+  by public behaviour and wire-envelope shape only, no code
+  transcribed); the 2026-08-26 external audit's KDF-001 finding (the
+  auth-bypass gap this chapter's §43.3 code-quality finding records and
+  the fix it now describes as resolved); [Chapter 45](45-startup-configuration-and-environment-tolerance.md)
+  (the startup-tolerance contract R45.5.2/R45.7.1 this chapter's R43.3.1/
+  R43.4.1 security obligations are bound alongside).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  dispatcher and daemon lifecycle); R7 (independent work, for the
+  security-fix description); cross-chapter contracts (Chapter 45).
+- *Sibling-allowlist consultations:* [Chapter 45](45-startup-configuration-and-environment-tolerance.md).
+- *Forbidden corpus:* not consulted.
