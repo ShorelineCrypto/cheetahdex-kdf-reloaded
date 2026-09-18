@@ -13,6 +13,11 @@ Goal: a publicly reviewable, buildable codebase exercising the same atomic-swap 
 - [x] Compatibility convention documented (developer rule + central admin chapter `docs/GLEEC_COMPATIBILITY.md`).
 - [ ] Public alpha tag with signed Linux binary.
 - [ ] Vulnerability disclosure mailbox and signing key fingerprints published.
+- [ ] **Pirate Chain (ARRR) "Ironwood" hard fork, 3 Oct 2026 19:00 UTC.** After
+  activation only version-6 transactions are standard, so every ARRR swap step breaks on
+  an un-upgraded build. A wall-clock guard and swap freeze ship ahead of the date so a
+  slip is safe rather than costly; receiving and balance display are unaffected. Plan,
+  live-network evidence and staging: `docs/plans/arrr-ironwood-compatibility.md`.
 
 ## Beta (v0.2.0-beta.x)
 
