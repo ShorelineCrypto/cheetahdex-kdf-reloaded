@@ -645,3 +645,31 @@ Open items depending on Pirate's answers:
   in the list GUIs actually consume. Also noted: **ZOMBIE is absent from upstream `coins`, and
   ARRR is the only ZHTLC coin shipped** — the repo's `zhtlc-native-tests` build ZOMBIE from an
   inline test conf, so they are unaffected, but there is no shipped test ZHTLC coin.
+- **2026‑09‑18 — Step 0 executed and passed.** Built `dev` at `d378b804e`
+  (release, 24m22s) and ran a full Light-mode round trip against mainnet.
+  **Problem A does not reproduce.** Activation via `lightd1.pirate.black` — the **new
+  lightwalletd v1.0.0.0** — succeeded in 47 s: `GetTreeState` at height 4135638 returned a
+  well-formed tree, 3 001 compact blocks fetched in 6.2 s, wallet scan in 0.7 s. A 0.1 ARRR
+  receive (mined 4138653) was detected one block later and reported by
+  `z_coin_tx_history` with `received_by_me: 0.1` and `sync_status: Finished`. The funds were
+  then swept back out: `task::withdraw::init` + `send_raw_transaction` produced a **v4
+  Sapling** transaction (header `04000080`, versionGroupId `0x892F2085`, 2 373 bytes) that
+  mined at 4138661 — the pre-activation baseline the Oct-3 guard will later block. Each of
+  the three reachable lightwalletd servers was then validated individually
+  (`lightd1.pirate.black` 47 s, `electrum1.cipig.net:9447` 23 s, `electrum2.cipig.net:9447`
+  23 s); every one rebuilt the wallet database from scratch and re-found the note, which
+  also evidences the rebuild-and-rescan recovery path that Step 2's wallet-DB policy relies
+  on. 17 scans, zero WARN or ERROR in the shielded path.
+- **2026‑09‑18 — defect found by Step 0: `z_coin_tx_history` reports txids in the wrong byte
+  order.** `z_coin_wallet_db.rs:1148` does `tx_hash: hex::encode(txid)` on the raw
+  `zcash_client_sqlite` `transactions.txid` column, which holds **internal little-endian**
+  bytes; every other KDF coin reverses to display order first
+  (`utxo_common_history.rs:551`, `tx.hash().reversed()`). Confirmed against mainnet on both
+  transactions, and the two RPCs **contradict each other**: `send_raw_transaction` returned
+  `23bb6cda…` (found on the explorer) while `z_coin_tx_history` reports the same transaction
+  as `0e377444…` (404 — it is the byte reversal). So an ARRR txid from history cannot be
+  looked up, and cannot be correlated with the id the send returned. CRD §39.8.3 `:1205`
+  says only "Transaction hash, hexadecimal" and does not pin the order, which is how this
+  passed review — the same display-vs-little-endian confusion the previous migration hit
+  with `TreeState` block IDs. Fix is one call site plus the CRD line; folded into round 1
+  because it lives in the same file as A1.
