@@ -34,20 +34,18 @@ The subsystem is divided cleanly between:
    they own. The trait is intentionally minimal and chain-family
    agnostic.
 
-**Port status.** The protocol and persistence layers are present
-in reloaded as a **library crate** and are functionally complete.
-The integration trait of §22.3 is **NOT yet present in reloaded**
-and MUST be created as part of the port. Three integration
-obligations remain: (a) the §22.3 integration trait must be added
-to the WalletConnect library crate, (b) at least one coin support
-module per chain family must implement that trait, and (c) the
-public RPC dispatcher does not yet register the WalletConnect
-methods. Per the project's PORT decision these are not optional
-"deferred" items — they are **binding driving-spec requirements**
-that an implementer MUST satisfy. The trait surface (§22.3), the
+**Port status.** *Implemented.* The protocol and persistence
+layers, the §22.3 integration trait (`WcCoinSigner`), the
+session-establishment handshake of §22.4.1 (propose-publish,
+session-key derivation, and settled-session construction/
+persistence), at least one coin support module per chain family
+(EVM, Cosmos, UTXO), and the five public RPC handlers of §22.9A.2
+are all present in reloaded. The trait surface (§22.3), the
 required coin-integration set, the public RPC surface, and the
-clean-channel wire payloads are specified normatively in §22.8.1
-and §22.9A; the persistence shape (§22.5) is already binding.
+clean-channel wire payloads specified normatively in §22.8.1 and
+§22.9A are the contract this port was implemented against; the
+persistence shape (§22.5) was already binding. See the §22.9A and
+§22.9 status notes for the per-item detail.
 
 ## 22.1 Subsystem Shape
 
@@ -955,18 +953,21 @@ R11. **Session `encoding_algo` selection.** The WalletConnect
     does not amend the WC2 Type 0 codec or the Cosmos field-level
     binary encoding rules.
 
-The following items are **required ports** (binding driving-spec,
+The following items were **required ports** (binding driving-spec,
 specified normatively in §22.9A) plus genuinely-optional
 follow-on work; the required-port items are flagged as such:
 
-D1. **[REQUIRED PORT — §22.9A.1]** At least one coin support
-    module per the EVM, Cosmos, and UTXO families shall implement
-    the integration trait. This is a binding requirement, not
-    optional.
+D1. **[REQUIRED PORT — §22.9A.1, implemented]** At least one coin
+    support module per the EVM, Cosmos, and UTXO families
+    implements the `WcCoinSigner` integration trait
+    (`mm2src/coins/eth/wc_integration.rs`,
+    `mm2src/coins/utxo/wc_integration.rs`,
+    `mm2src/coins/tendermint/wc_integration.rs`).
 
-D2. **[REQUIRED PORT — §22.9A.2]** The five public RPC handlers
-    of §22.9A.2 (see R6) shall be registered in the public
-    dispatcher. This is a binding requirement, not optional.
+D2. **[REQUIRED PORT — §22.9A.2, implemented]** The five public RPC
+    handlers of §22.9A.2 (see R6) are registered in the public
+    dispatcher (`wc_new_connection`, `wc_get_sessions`,
+    `wc_get_session`, `wc_delete_session`, `wc_ping_session`).
 
 D3. The session-key type shall acquire `Zeroize` /
     `ZeroizeOnDrop` (see R5).
@@ -1008,25 +1009,18 @@ D9. When the encrypted format of D8 ships and a stronger-security
 
 ## 22.9A Required Port — Coin Integration and Public RPC Surface (driving-spec)
 
-**STATUS.** The capabilities in this section are **required but
-NOT yet implemented in reloaded**. The WalletConnect library crate
-is present for the **transport cryptography, JSON-RPC payload
-types, and persistence** layers; however the **session-
-establishment handshake is only stubbed** — the inbound
-`wc_sessionPropose` response and `wc_sessionSettle` handlers log
-and acknowledge but do not derive the session key, build, or store
-a `Session`, and no `wc_sessionPropose` is published over the
-relay. Completing that handshake (propose-publish on the pairing
+**STATUS.** *Implemented.* The capabilities in this section were
+**required** at chapter authoring time and have since been
+ported. The WalletConnect library crate provides the transport
+cryptography, JSON-RPC payload types, and persistence layers; the
+session-establishment handshake — propose-publish on the pairing
 topic, deriving the session key from the responder public key per
-§22.6, and building/persisting the settled session) is part of
-this required port, since AC1 depends on it. The **§22.3
-integration trait is NOT present and MUST be created** as part of
-this port. Per the PORT decision these are binding requirements,
-not optional deferred work. An implementer MUST land the session-
-establishment handshake, the §22.3 integration trait, the
-per-family coin integration (§22.9A.1), and the public RPC
-dispatcher surface (§22.9A.2), all emitting the clean-channel wire
-payloads pinned in §22.8.1.
+§22.6, and building/persisting the settled session (AC1) — is
+implemented rather than stubbed; the §22.3 integration trait
+(`WcCoinSigner`) is present; the per-family coin integration
+(§22.9A.1) has at least one implementor per chain family; and the
+public RPC dispatcher surface (§22.9A.2) is registered — all
+emitting the clean-channel wire payloads pinned in §22.8.1.
 
 ### 22.9A.1 Coin-integration requirement
 

@@ -195,7 +195,10 @@ impl<'a, Addr: Clone + DisplayAddress + Eq + std::hash::Hash, Tx: Transaction> T
             TransactionType::StakingDelegation
             | TransactionType::RemoveDelegation
             | TransactionType::ClaimDelegationRewards
-            | TransactionType::StandardTransfer => tx_hash.clone(),
+            | TransactionType::StandardTransfer
+            | TransactionType::SiaV1Transaction
+            | TransactionType::SiaV2Transaction
+            | TransactionType::SiaMinerPayout => tx_hash.clone(),
         };
 
         TransactionDetails {
@@ -408,7 +411,14 @@ pub async fn my_tx_history_v2_rpc(
     request: MyTxHistoryRequestV2,
 ) -> Result<MyTxHistoryResponseV2, MmError<MyTxHistoryErrorV2>> {
     let coin = lp_coinfind_or_err(&ctx, &request.coin).await.mm_err(Into::into)?;
-    if matches!(coin, MmCoinEnum::UtxoCoin(_) | MmCoinEnum::QtumCoin(_)) {
+    // Sia is served from the coin-generic runtime history store, not the SQL-indexed
+    // path: it is deliberately not classified through `HistoryCoinType` (CRD ch.53
+    // R53.3.1). Accepting it here is the additive extension of R53.2.7, so
+    // `NotSupportedFor` is not observable for an activated Sia coin (R53.2.10).
+    if matches!(
+        coin,
+        MmCoinEnum::UtxoCoin(_) | MmCoinEnum::QtumCoin(_) | MmCoinEnum::SiaCoin(_)
+    ) {
         return build_response_from_runtime_history(ctx, request, coin).await;
     }
 

@@ -4,11 +4,12 @@ use crate::standalone_coin::{InitStandaloneCoinActivationOps, InitStandaloneCoin
                              InitStandaloneCoinInitialStatus, InitStandaloneCoinTaskHandle,
                              InitStandaloneCoinTaskManagerShared};
 use async_trait::async_trait;
-use coins::coin_balance::{EnableCoinBalance, IguanaWalletBalance};
+use coins::coin_balance::{EnableCoinBalance, EnableCoinBalanceOps, EnableCoinScanPolicy};
+use coins::hd_pubkey::RpcTaskXPubExtractor;
 use coins::siacoin::{SiaCoin, SiaCoinActivationRequest, SiaCoinNewError};
 use coins::{BalanceError, CoinProtocol, MarketCoinOps, PrivKeyBuildPolicy, RegisterCoinError};
-use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
-use crypto::CryptoCtxError;
+use crypto::hw_rpc_task::{HwConnectStatuses, HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
+use crypto::{CryptoCtx, CryptoCtxError};
 use derive_more::Display;
 use futures::compat::Future01CompatExt;
 use mm2_core::mm_ctx::MmArc;
@@ -191,7 +192,7 @@ impl InitStandaloneCoinActivationOps for SiaCoin {
 
     async fn get_activation_result(
         &self,
-        _ctx: MmArc,
+        ctx: MmArc,
         task_handle: &SiaRpcTaskHandle,
         _activation_request: &Self::ActivationRequest,
     ) -> MmResult<Self::ActivationResult, SiaInitError> {
@@ -204,8 +205,35 @@ impl InitStandaloneCoinActivationOps for SiaCoin {
             .await
             .map_to_mm(SiaInitError::CouldNotGetBlockCount)?;
 
-        let balance = self.my_balance().compat().await.mm_err(Into::into)?;
-        let address = self.my_address().map_to_mm(SiaInitError::Internal)?;
+        // `wallet_balance`'s shape is dictated by ch.46 R46.2.4: the single-address
+        // ("Iguana") `{address, balance}` report or, for an HD wallet, the generic
+        // per-account/per-address balance report -- the same `EnableCoinBalanceOps`
+        // blanket impl UTXO/ETH's own activation results use, which branches on
+        // `self.derivation_method()` (CRD ch.20 D1). `xpub_extractor` is
+        // constructed the same way UTXO/ETH's own `get_activation_result` construct
+        // theirs, but for Sia it is *always* `None` in practice: a Trezor priv-key
+        // policy is rejected long before this point (R-T3, ch.46 R46.1.3), so
+        // `crypto_ctx.hw_ctx()` can never be `Some` for an activated `SiaCoin`.
+        let xpub_extractor = RpcTaskXPubExtractor::new_unchecked(&ctx, task_handle, sia_xpub_extractor_rpc_statuses());
+        let crypto_ctx = CryptoCtx::from_ctx(&ctx).mm_err(|error| SiaInitError::Internal(error.to_string()))?;
+        let xpub_extractor = if crypto_ctx.hw_ctx().is_some() {
+            Some(&xpub_extractor)
+        } else {
+            None
+        };
+
+        // Activation itself never grows the HD wallet past account 0 (ch.46
+        // R46.1.3: only a single-address HD-account state reaches a successfully
+        // activated Sia coin) -- `EnableCoinScanPolicy::default()`
+        // (`ScanIfNewWallet`) only scans a *newly created* account's addresses up
+        // to its gap limit; it never creates a second account, and `SiaHDWallet`
+        // has no persistent account storage to have grown one from a prior run
+        // (`sia_hd_wallet.rs` module doc comment), so the "new wallet" branch is
+        // the only one ever taken here.
+        let wallet_balance = self
+            .enable_coin_balance(xpub_extractor, EnableCoinScanPolicy::default(), 0)
+            .await
+            .mm_err(|error| SiaInitError::CouldNotGetBalance(error.to_string()))?;
 
         task_handle
             .update_in_progress_status(SiaInProgressStatus::Finishing)
@@ -214,7 +242,25 @@ impl InitStandaloneCoinActivationOps for SiaCoin {
         Ok(SiaActivationResult {
             ticker: self.ticker().to_owned(),
             current_block,
-            wallet_balance: EnableCoinBalance::Iguana(IguanaWalletBalance { address, balance }),
+            wallet_balance,
         })
+    }
+}
+
+/// `HwConnectStatuses` mandates values even for the Trezor-connect states Sia can
+/// never reach in practice (see `get_activation_result`'s doc comment) --
+/// `SiaInProgressStatus` deliberately gains no new variants for them (unlike
+/// `UtxoStandardInProgressStatus`'s `WaitingForTrezorToConnect`/
+/// `WaitingForUserToConfirmPubkey`); the existing states are reused since these
+/// slots are structurally required but never actually surfaced for Sia.
+fn sia_xpub_extractor_rpc_statuses() -> HwConnectStatuses<SiaInProgressStatus, SiaAwaitingStatus> {
+    HwConnectStatuses {
+        on_connect: SiaInProgressStatus::ActivatingCoin,
+        on_connected: SiaInProgressStatus::ActivatingCoin,
+        on_connection_failed: SiaInProgressStatus::Finishing,
+        on_button_request: SiaInProgressStatus::ActivatingCoin,
+        on_pin_request: SiaAwaitingStatus::EnterTrezorPin,
+        on_passphrase_request: SiaAwaitingStatus::EnterTrezorPassphrase,
+        on_ready: SiaInProgressStatus::ActivatingCoin,
     }
 }

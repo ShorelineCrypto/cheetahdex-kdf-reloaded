@@ -16,8 +16,9 @@ use mm2_net_config::NetConfig;
 
 /// Returns the effective DEX-fee floor for a swap.
 ///
-/// Whichever is larger of the network's configured minimum DEX fee
-/// (`NetConfig::dex_fee_min_threshold`) and the taker coin's `min_tx_amount`.
+/// Whichever is larger of the optional network override and the taker coin's
+/// `min_tx_amount`. Both production reference networks leave the override at
+/// zero, making the coin minimum the effective floor.
 pub(crate) fn dex_fee_threshold(net_cfg: &dyn NetConfig, min_tx_amount: MmNumber) -> MmNumber {
     let min_fee: MmNumber = net_cfg.dex_fee_min_threshold().into();
     if min_fee < min_tx_amount {
@@ -99,11 +100,12 @@ pub(crate) fn dex_fee_amount_from_taker_coin_ref(
 /// from the network configuration.
 ///
 /// If `NetConfig::burn_enabled()` is false, returns `DexFee::Standard`.
-/// Otherwise, splits the total fee according to `NetConfig::dex_fee_share()`:
-///   - `fee_amount = total * share` (goes to DEX fee address)
-///   - `burn_amount = total - fee_amount` (goes to OP_RETURN / burn address)
+/// Otherwise, the coin policy selects a direct OP_RETURN burn, an account
+/// burn, or the standard single-output form.
 ///
-/// The burn destination is `KmdOpReturn` for KMD, `PreBurnAccount` for others.
+/// Active production policy burns only KMD on netid 8762, splitting 75% to the
+/// fee address and 25% to OP_RETURN. Netid 6133 and non-KMD netid-8762 takers
+/// use the standard form.
 pub fn compute_dex_fee(
     net_cfg: &dyn NetConfig,
     taker_coin: &MmCoinEnum,
@@ -160,7 +162,7 @@ mod tests {
     fn mock_min_tx_amount() { TestCoin::min_tx_amount.mock_safe(|_| MockResult::Return(BigDecimal::from(0))); }
 
     #[test]
-    fn known_taker_pubkey_fee_computation_returns_no_fee_for_burn_pubkey() {
+    fn burn_disabled_network_does_not_waive_fee_for_burn_pubkey() {
         mock_min_tx_amount();
 
         let net_cfg = net_config_or_panic(6133);
@@ -171,8 +173,8 @@ mod tests {
         let aware_fee = compute_dex_fee_with_taker_pubkey(net_cfg, &taker_coin, "RICK", &trade_amount, burn_pubkey);
         let blind_fee = compute_dex_fee(net_cfg, &taker_coin, "RICK", &trade_amount);
 
-        assert_eq!(aware_fee, DexFee::NoFee);
-        assert_ne!(blind_fee, DexFee::NoFee);
+        assert_eq!(aware_fee, DexFee::Standard(MmNumber::from((2, 100))));
+        assert_eq!(aware_fee, blind_fee);
     }
 
     #[test]
@@ -205,5 +207,45 @@ mod tests {
                 >= 4
         );
         assert!(!taker_swap_v2.contains("dex_fee: &DexFee::NoFee"));
+    }
+
+    /// T9/P2.1: the 7 `net_config_or_panic` call sites in the V2 swap `on_changed`
+    /// handlers (4 in `taker_swap_v2.rs`, 3 in `maker_swap_v2.rs`) must all have been
+    /// replaced with the fallible `net_config_for`, which each site matches on and
+    /// aborts the state machine cleanly (`AbortReason::InternalError`) rather than
+    /// panicking, on `None`. `on_changed` itself needs a live coin implementing
+    /// `MakerCoinSwapOpsV2`/`TakerCoinSwapOpsV2` to actually drive execution down to
+    /// this call, which this codebase has no mocking infrastructure for (same
+    /// limitation `taker_swap_v2.rs`'s own
+    /// `maker_payment_spent_confirmation_timeout_no_longer_falls_back_to_empty_bytes`
+    /// documents for T1/D8); this checks the fixed call sites' source shape directly
+    /// instead, the same way `t16_4a`/`t16_4b` above do.
+    #[test]
+    fn t18_net_config_for_replaces_net_config_or_panic_in_v2_swap_files() {
+        let maker_swap_v2 = include_str!("maker_swap_v2.rs");
+        let taker_swap_v2 = include_str!("taker_swap_v2.rs");
+
+        assert!(
+            !maker_swap_v2.contains("net_config_or_panic"),
+            "maker_swap_v2.rs must not call net_config_or_panic from a fallible on_changed context"
+        );
+        assert!(
+            !taker_swap_v2.contains("net_config_or_panic"),
+            "taker_swap_v2.rs must not call net_config_or_panic from a fallible on_changed context"
+        );
+        assert_eq!(
+            maker_swap_v2
+                .matches("mm2_net_config::net_config_for(sm.ctx.netid())")
+                .count(),
+            3,
+            "maker_swap_v2.rs should have exactly 3 net_config_for call sites (P2.1)"
+        );
+        assert_eq!(
+            taker_swap_v2
+                .matches("mm2_net_config::net_config_for(sm.ctx.netid())")
+                .count(),
+            4,
+            "taker_swap_v2.rs should have exactly 4 net_config_for call sites (P2.1)"
+        );
     }
 }

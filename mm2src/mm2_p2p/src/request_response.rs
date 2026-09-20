@@ -120,7 +120,7 @@ impl RequestResponseBehaviour {
                     error!("{:?}. Request {:?} is not processed", e, request_id);
                 }
             },
-            _ => error!("Received unknown request {:?}", request_id),
+            _ => debug!("Ignoring response for no-longer-pending request {:?}", request_id),
         }
     }
 
@@ -141,6 +141,15 @@ impl RequestResponseBehaviour {
                 request_id,
                 error,
             } => {
+                // The local timeout can expire before libp2p emits the terminal failure.
+                // The caller has already been notified by the dropped oneshot sender in that case.
+                if !self.pending_requests.contains_key(&request_id) {
+                    debug!(
+                        "Ignoring late outbound failure {:?} for no-longer-pending request {:?} to peer {:?}",
+                        error, request_id, peer
+                    );
+                    return;
+                }
                 match &error {
                     OutboundFailure::UnsupportedProtocols => debug!(
                         "Peer {:?} does not support request-response protocol for request {:?}",
@@ -322,16 +331,6 @@ impl AsRef<str> for Protocol {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Protocol;
-
-    #[test]
-    fn protocol_name_is_version2() {
-        assert_eq!(Protocol::Version2.as_ref(), "/request-response/2");
-    }
-}
-
 #[async_trait]
 impl<
         Proto: Clone + AsRef<str> + Send + Sync,
@@ -396,4 +395,14 @@ where
         ));
     }
     write_length_prefixed(io, data).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Protocol;
+
+    #[test]
+    fn protocol_name_is_version2() {
+        assert_eq!(Protocol::Version2.as_ref(), "/request-response/2");
+    }
 }

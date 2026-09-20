@@ -8,9 +8,9 @@ use async_trait::async_trait;
 use derive_more::Display;
 use keys::hash::H256;
 use mm2_err_handle::prelude::*;
+use sapling::CommitmentTree;
 use serialization::{serialize_list, Reader};
-use zcash_primitives::merkle_tree::CommitmentTree;
-use zcash_primitives::sapling::Node;
+use zcash_primitives::merkle_tree::{read_commitment_tree, write_commitment_tree};
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ use zcash_primitives::sapling::Node;
 /// commitments (cmus) for a single block height.
 pub(crate) struct SaplingBlockState {
     pub(crate) height: u32,
-    pub(crate) prev_tree_state: CommitmentTree<Node>,
+    pub(crate) prev_tree_state: CommitmentTree,
     pub(crate) cmus: Vec<H256>,
 }
 
@@ -57,17 +57,16 @@ pub(crate) trait SaplingStateCacheOps: Send + Sync {
 
 // ── Shared serialisation helpers ─────────────────────────────────────────────
 
-/// Serialise `CommitmentTree<Node>` to raw bytes for storage.
-pub(crate) fn tree_to_bytes(tree: &CommitmentTree<Node>) -> Result<Vec<u8>, ZCoinSaplingCacheError> {
+/// Serialise a Sapling `CommitmentTree` to raw bytes for storage.
+pub(crate) fn tree_to_bytes(tree: &CommitmentTree) -> Result<Vec<u8>, ZCoinSaplingCacheError> {
     let mut buf = Vec::new();
-    tree.write(&mut buf)
-        .map_err(|e| ZCoinSaplingCacheError::SerialisationError(e.to_string()))?;
+    write_commitment_tree(tree, &mut buf).map_err(|e| ZCoinSaplingCacheError::SerialisationError(e.to_string()))?;
     Ok(buf)
 }
 
-/// Deserialise `CommitmentTree<Node>` from raw bytes.
-pub(crate) fn bytes_to_tree(bytes: &[u8]) -> Result<CommitmentTree<Node>, ZCoinSaplingCacheError> {
-    CommitmentTree::read(bytes).map_err(|e| ZCoinSaplingCacheError::SerialisationError(e.to_string()))
+/// Deserialise a Sapling `CommitmentTree` from raw bytes.
+pub(crate) fn bytes_to_tree(bytes: &[u8]) -> Result<CommitmentTree, ZCoinSaplingCacheError> {
+    read_commitment_tree(bytes).map_err(|e| ZCoinSaplingCacheError::SerialisationError(e.to_string()))
 }
 
 /// Serialise a `Vec<H256>` (note commitments) to a compact byte vector using
@@ -89,7 +88,7 @@ pub(crate) fn bytes_to_cmus(bytes: &[u8]) -> Result<Vec<H256>, ZCoinSaplingCache
 mod native {
     use super::*;
     use db_common::sqlite::rusqlite::types::Type;
-    use db_common::sqlite::rusqlite::{Connection, Error as SqliteError, Row, ToSql, NO_PARAMS};
+    use db_common::sqlite::rusqlite::{params, Connection, Error as SqliteError, Row};
     use std::sync::{Arc, Mutex};
 
     impl From<SqliteError> for ZCoinSaplingCacheError {
@@ -102,7 +101,7 @@ mod native {
             prev_tree_state BLOB    NOT NULL,
             cmus            BLOB    NOT NULL
         );";
-        sql.execute(INIT_STMT, NO_PARAMS).map(|_| ())
+        sql.execute(INIT_STMT, []).map(|_| ())
     }
 
     fn row_to_state(row: &Row<'_>) -> Result<SaplingBlockState, SqliteError> {
@@ -110,7 +109,7 @@ mod native {
         let tree_bytes: Vec<u8> = row.get(1)?;
         let cmu_bytes: Vec<u8> = row.get(2)?;
 
-        let prev_tree_state = CommitmentTree::read(tree_bytes.as_slice())
+        let prev_tree_state = read_commitment_tree(tree_bytes.as_slice())
             .map_err(|e| SqliteError::FromSqlConversionFailure(1, Type::Blob, Box::new(e)))?;
         let mut reader = Reader::from_read(cmu_bytes.as_slice());
         let cmus = reader
@@ -147,7 +146,7 @@ mod native {
             let sqlite = self.sqlite.clone();
             tokio::task::block_in_place(move || {
                 let conn = sqlite.lock().unwrap();
-                match conn.query_row(STMT, NO_PARAMS, |r| row_to_state(r)) {
+                match conn.query_row(STMT, [], |r| row_to_state(r)) {
                     Ok(state) => Ok(Some(state)),
                     Err(SqliteError::QueryReturnedNoRows) => Ok(None),
                     Err(e) => MmError::err(ZCoinSaplingCacheError::from(e)),
@@ -167,9 +166,7 @@ mod native {
                 let mut stmt = conn.prepare(STMT).map_err(ZCoinSaplingCacheError::from)?;
                 #[allow(clippy::needless_question_mark)]
                 let rows: Result<Vec<_>, _> = stmt
-                    .query_map(&[height.to_sql().map_err(ZCoinSaplingCacheError::from)?], |r| {
-                        row_to_state(r)
-                    })
+                    .query_map(params![height], row_to_state)
                     .map_err(ZCoinSaplingCacheError::from)?
                     .collect();
                 rows.map_err(|e| MmError::new(ZCoinSaplingCacheError::from(e)))
@@ -184,13 +181,9 @@ mod native {
             let cmu_bytes = cmus_to_bytes(&state.cmus);
             tokio::task::block_in_place(move || {
                 let conn = sqlite.lock().unwrap();
-                conn.execute(STMT, &[
-                    state.height.to_sql().map_err(ZCoinSaplingCacheError::from)?,
-                    tree_bytes.to_sql().map_err(ZCoinSaplingCacheError::from)?,
-                    cmu_bytes.to_sql().map_err(ZCoinSaplingCacheError::from)?,
-                ])
-                .map(|_| ())
-                .map_err(|e| MmError::new(ZCoinSaplingCacheError::from(e)))
+                conn.execute(STMT, params![state.height, tree_bytes, cmu_bytes])
+                    .map(|_| ())
+                    .map_err(|e| MmError::new(ZCoinSaplingCacheError::from(e)))
             })
         }
     }
@@ -229,7 +222,7 @@ mod wasm {
         /// The coin ticker — scopes the table to a single Z-coin instance.
         ticker: String,
         height: u32,
-        /// Base64-encoded serialised `CommitmentTree<Node>`.
+        /// Base64-encoded serialised Sapling `CommitmentTree`.
         prev_tree_state_b64: String,
         /// Base64-encoded compact-serialised `Vec<H256>`.
         cmus_b64: String,

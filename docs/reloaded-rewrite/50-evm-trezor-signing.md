@@ -415,6 +415,19 @@ a placement/seam note; the internal decomposition is not bound.
 > requires. If the published API later defines a hardware-wallet swap flow, the
 > docs govern and this note shall be revisited.
 
+> **Cross-reference (not a contradiction).** UTXO coins *do* support
+> Trezor-backed version-two swap signing
+> ([Chapter 15](15-swap-v2-utxo-path.md) §15.13, R45-R48), which can read as
+> tension with the EVM verdict above. It is not: the UTXO version-two state
+> machine signs each HTLC transaction interactively, one step at a time, as the
+> swap reaches that step (R47 of ch. 15), so the device is prompted live at the
+> moment a signature is needed. The EVM/MetaMask swap path this chapter's
+> verdict mirrors instead needs signatures the framework can schedule and hold
+> for later, non-interactive use (detached refund pre-signing, §47.5) -- a shape
+> no interactive hardware-signing model, UTXO's included, can satisfy. The two
+> chapters describe the same class of device (Trezor) under two different
+> swap-signing shapes, not a disagreement about what Trezor can do.
+
 ---
 
 ## 50.8 Acceptance tests
@@ -514,3 +527,30 @@ display chain/token names) required for the reloaded target chains, or optional?
 They are an optional display aid in the public protocol; if a target chain
 requires one for the device to sign, that is a per-chain configuration concern
 outside the signing-behaviour contract bound here.
+
+## 50.10 Provenance Footer
+
+- *Inputs:* the published Trezor Ethereum message-signing protocol and the
+  published Komodo DeFi Framework API documentation (the source of truth
+  this chapter distills per its own "Source of truth" note);
+  [Chapter 35](35-evm-v2-activation-rpcs.md) R35.1.4/R35.3.2 (the
+  `priv_key_policy` Trezor hardware policy this chapter adds a signing
+  variant for); [Chapter 47](47-metamask-integration.md) §47.5 (the EVM
+  signing-policy seam already carrying `Local`/`Metamask` variants, which
+  this chapter adds `Trezor` to as a sibling); [Chapter 48](48-platform-coin-task-activation.md)
+  (the awaiting-user-action task machinery this chapter's `EnterTrezorPin`/
+  `EnterTrezorPassphrase` states realize, R48.6.2); [Chapter 49](49-withdrawal-task-path.md)
+  R49.6-R49.9/R49.17-R49.18/R49.22 (the withdraw task family and status
+  vocabulary this chapter's wire is already fixed by); [Chapter 15](15-swap-v2-utxo-path.md)
+  R47 (the live-swap step that structurally forces this chapter's
+  no-framework-scheduled-non-interactive-HTLC-signing conclusion, O-2).
+- *Permitted-input classes used:* external public specification (the
+  published Trezor Ethereum message-signing protocol and KDF API
+  documentation); cross-chapter contracts (Chapters 15, 35, 47, 48, 49);
+  Interop / wire-and-API-bound reuse (R29/R31) for the dictated task states
+  and error/discriminant mapping this chapter distills.
+- *Sibling-allowlist consultations:* [Chapter 15](15-swap-v2-utxo-path.md)
+  R47, [Chapter 35](35-evm-v2-activation-rpcs.md), [Chapter 47](47-metamask-integration.md)
+  §47.5, [Chapter 48](48-platform-coin-task-activation.md) R48.6.2,
+  [Chapter 49](49-withdrawal-task-path.md).
+- *Forbidden corpus:* not consulted.

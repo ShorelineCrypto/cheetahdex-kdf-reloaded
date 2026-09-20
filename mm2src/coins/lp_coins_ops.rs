@@ -187,9 +187,29 @@ pub async fn lp_register_coin(
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn lp_spawn_tx_history(ctx: MmArc, coin: MmCoinEnum) -> Result<(), String> {
-    try_s!(std::thread::Builder::new()
-        .name(format!("tx_history_{}", coin.ticker()))
-        .spawn(move || coin.process_history_loop(ctx).wait()));
+    // A plain std::thread + futures01 .wait() has no ambient Tokio runtime
+    // context. That was never a problem for the coins that have used this
+    // path so far (their history fetch doesn't need one), but a coin whose
+    // history loop makes async HTTP calls through a Tokio-based client
+    // (e.g. Sia's, built on reqwest) silently fails the moment it tries to
+    // do any I/O: reqwest/tokio's internals require a runtime handle a raw
+    // OS thread doesn't have. This surfaces as the loop never completing
+    // even its first pass -- sync_status stuck at its initial NotStarted
+    // value forever, with nothing to log, because the failure happens
+    // before the loop body ever runs far enough to call
+    // set_history_sync_state even once.
+    //
+    // ETH already hit this and worked around it by routing its own history
+    // loop through `spawn` (the shared Tokio runtime, CORE) instead of this
+    // function (see start_history_background_fetching in
+    // eth_with_tokens_activation.rs) -- do the same here, generically, so
+    // every coin gets a runtime-aware spawn rather than only the one coin
+    // that happened to need it worked around first. This mirrors the
+    // wasm32 branch below, which already spawns onto its own executor
+    // rather than a raw thread.
+    common::executor::spawn(async move {
+        let _res = coin.process_history_loop(ctx).compat().await;
+    });
     Ok(())
 }
 #[cfg(target_arch = "wasm32")]
@@ -692,19 +712,27 @@ pub fn update_coins_config(mut config: Json) -> Result<Json, String> {
                     .as_str()
                     .ok_or(ERRL!("Expected etomic as string, found {:?}", etomic))?;
                 if etomic == "0x0000000000000000000000000000000000000000" {
-                    CoinProtocol::ETH { chain_id: None }
+                    // This legacy-upgrade path never knows a chain_id, so build the
+                    // wire shape directly instead of round-tripping
+                    // `CoinProtocol::ETH { chain_id: None }` through serde: the
+                    // adjacently-tagged derive emits `"protocol_data": {"chain_id":
+                    // null}` for that value (chain_id's `#[serde(default)]` only
+                    // affects deserialization, not serialization), which is a
+                    // config-shape regression a pre-chain_id `coins` file never
+                    // had and callers do not expect from this upgrade step.
+                    json!({ "type": "ETH" })
                 } else {
                     let contract_address = etomic.to_owned();
-                    CoinProtocol::ERC20 {
+                    json::to_value(CoinProtocol::ERC20 {
                         platform: "ETH".into(),
                         contract_address,
-                    }
+                    })
+                    .map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?
                 }
             },
-            _ => CoinProtocol::UTXO,
+            _ => json::to_value(CoinProtocol::UTXO).map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?,
         };
 
-        let protocol = json::to_value(protocol).map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?;
         coin.insert("protocol".into(), protocol);
     }
 

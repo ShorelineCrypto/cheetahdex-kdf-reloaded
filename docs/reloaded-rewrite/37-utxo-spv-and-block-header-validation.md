@@ -197,6 +197,60 @@ without an unexpected-end-of-input failure.
 
 R37.6.1 The verified header chain shall back the SPV confirmation path used when
 deciding whether a swap-relevant transaction is sufficiently confirmed.
+Concretely: a UTXO coin's configuration carries an independent boolean flag,
+**`enable_spv_proof`**, under the coin's `conf` (dictated config-compat, like
+`spv_conf` of R37.1.2 but a separate switch -- a coin may set either without
+the other). When `enable_spv_proof` is true, the coin-layer payment-validation
+operation that [chapter 15](15-swap-v2-utxo-path.md) R12, and the legacy and
+version-two swap state machines
+([chapter 51](51-legacy-v1-swap-state-machine.md),
+[chapter 52](52-swap-v2-state-machine.md)) invoke as an external dependency to
+validate a maker or taker payment shall, in addition to the ordinary
+confirmation-count wait, fetch a Merkle inclusion proof for the swap-relevant
+transaction and validate that proof against the header of the block the
+transaction is included in, retrying until a deadline; a transaction whose
+proof does not validate shall not be accepted as a validated payment. This
+proof-of-inclusion check applies only when the coin is connected through the
+project's Electrum-family RPC backend; a coin connected through the chain's
+native-daemon RPC backend does not perform it. When the payment's own
+required-confirmations value is zero, the check is skipped along with the
+confirmation wait.
+
+R37.6.1a The block header the proof-of-inclusion check of R37.6.1 validates
+against shall be drawn from the persistent header store of §37.3 -- and
+therefore already carries the proof-of-work / difficulty-retarget validation
+of §37.4 -- whenever the coin's `spv_conf` (R37.1.2) is configured. When
+`spv_conf` is not configured for that coin, `enable_spv_proof` may still be
+set independently, and the check falls back to a header fetched directly from
+the RPC backend for that request, with no proof-of-work/difficulty validation
+applied to it and nothing about it persisted.
+
+> **Code-quality finding (informative).** The fallback of R37.6.1a is a real
+> reduction in what the proof-of-inclusion check proves, not merely a
+> documented option. When `enable_spv_proof` is set without a configured
+> `spv_conf`, the header the Merkle proof is checked against is trusted from
+> the same RPC backend the check exists to avoid fully trusting, with no
+> proof-of-work or difficulty validation and no persisted cross-request
+> record of it. A Merkle inclusion proof against an unauthenticated header
+> only shows that the transaction is included in *some* block the server
+> handed back for that height, not that the block belongs to the coin's
+> actual heaviest valid chain -- the exact property §37.0 states this
+> subsystem exists to avoid trusting a single remote server for. Requiring
+> `spv_conf` whenever `enable_spv_proof` is set (or deriving one flag's
+> effective value from the other's presence, rather than treating them as
+> fully independent switches) would close the gap. This chapter does not
+> resolve the choice; it is a config-validation decision belonging to the
+> owning coin-activation path.
+
+R37.6.1b The proof-of-inclusion check of R37.6.1 changes what a payment-
+validation call can conclude, not when it is called or how long it waits: the
+confirmation-wait deadlines, stage/state transitions, and event vocabularies
+bound by chapters 51 and 52 are identical whether or not SPV is configured for
+a coin, because both state machines treat payment validation as a single
+opaque external step regardless of its internal implementation (chapter 51
+§51.2, chapter 52 §52.2). SPV is therefore a trust-minimization layer nested
+inside an existing validation step, not a parallel or alternative
+confirmation mechanism with its own timing.
 
 R37.6.2 The public `get_current_mtp` RPC shall report a coin's current
 median-time-past, computed from the relevant recent headers.
@@ -284,3 +338,46 @@ reported rather than an unbounded walk-back.
   (R37.5.2).
 - `get_current_mtp` returns a plausible median-time-past for an SPV-enabled coin
   (R37.6.2).
+- A swap-relevant payment on an Electrum-connected coin with `enable_spv_proof`
+  set is validated only when its Merkle inclusion proof checks against the
+  applicable block header, and that header carries the §37.4 proof-of-work
+  validation whenever `spv_conf` is also configured for that coin (R37.6.1,
+  R37.6.1a). A coin's confirmation-wait deadlines and swap-stage transitions
+  are unchanged by whether SPV is configured (R37.6.1b).
+
+## 37.9 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree, for the
+  T-DOC majority of this chapter (§37.0-§37.6: the already-shipped
+  `kdf_spv_validation` crate, per-coin block-header storage backends,
+  configuration-selected chain-variant reader, and proof-of-work/retarget
+  validation -- by public behaviour and storage-contract shape only, no
+  code transcribed); published Bitcoin consensus documentation (proof-of-work
+  and difficulty-retarget rules, R31 externally dictated, §37.4); published
+  Merkle-proof / SPV construction documentation (§37.6); the present reloaded
+  workspace's own SQLite/IndexedDB storage contracts (§37.3). For the single
+  **target** requirement (R37.7.2, the active chain-reorganization detector):
+  a forensic comparison of reloaded's shipped behaviour against
+  upstream/corpus, conducted under the chapter-01 two-team clean-room
+  workflow -- the source of the "Upstream divergence" finding that
+  reloaded historically shipped only the passive per-height overwrite of
+  R37.7.1.
+- *Permitted-input classes used:* baseline/as-built source (the shipped SPV
+  subsystem, for the T-DOC majority); external public specification (Bitcoin
+  consensus proof-of-work/retarget rules, Merkle-proof construction); R6
+  (behavioural observation, for the storage/validation contract as currently
+  implemented). For R37.7.2 specifically: Forbidden corpus, under the
+  chapter-01 two-team clean-room workflow -- see below.
+- *Sibling-allowlist consultations:* none.
+- *Forbidden corpus:* consulted, under the chapter-01 two-team clean-room
+  workflow, for upstream parity of the chain-reorganization detector only
+  -- specifically the behavioural gap identified in R37.7.2's "Upstream
+  divergence" note (that reloaded's shipped passive per-height overwrite
+  omits the active detect-and-resolve routine upstream/corpus has). The
+  active detector's own contract (trigger condition, resolve procedure,
+  walk-back bound, convergence argument, and the acceptance test) is
+  independently authored behavioural specification, not corpus expression:
+  it binds observable outcomes and explicitly directs that "the
+  implementation shall be expressed independently; this section binds the
+  contract, not any particular branch structure." No other section of this
+  chapter draws on the forbidden corpus.

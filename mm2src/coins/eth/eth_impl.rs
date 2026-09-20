@@ -2903,7 +2903,10 @@ impl EthCoin {
                         .first()
                         .map(|val| increase_by_percent_one_gwei(*val, BASE_BLOCK_FEE_DIFF_PCT)),
                     Err(e) => {
-                        error!("Error {} on eth_feeHistory request", e);
+                        common::log::debug!(
+                            "Optional eth_feeHistory gas-price source is unavailable: {}; using remaining sources",
+                            e
+                        );
                         None
                     },
                 }

@@ -241,7 +241,12 @@ helper MUST reconstruct the expected redeem script from the
 secret-hash-typed enumeration accessor, compare the output's
 script-pubkey to its pay-to-script-hash form, verify the amount,
 poll for confirmations, and (under the chapter-bound electrum
-mode) verify the simplified-payment-verification proof.
+mode) verify the simplified-payment-verification proof. The
+simplified-payment-verification proof step, its `enable_spv_proof`
+config gate, and its relationship to the header store are bound by
+[chapter 37](37-utxo-spv-and-block-header-validation.md) §37.6; this
+chapter's confirmation-count wait and validation contract are
+unaffected by whether that proof step is configured.
 
 The secret-hash-typed enumeration's `redeem_script()` accessor
 MUST dispatch the three version-two variants

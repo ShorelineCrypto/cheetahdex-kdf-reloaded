@@ -319,12 +319,33 @@ path. Implementation:
   - `outputs[1] = { address: bech32(dhash160(burn_pubkey)), coins: burn_amount }`.
 - `WithBurn { burn_destination: KmdOpReturn }` → rejected
   (`KmdOpReturn` is a UTXO concept; Tendermint has no OP_RETURN).
-- `NoFee` and `Standard` → single `MsgSend`.
+- `Standard` → single `MsgSend`.
+- `NoFee` → rejected with an internal error; no transaction is
+  built or broadcast.
 
 Tendermint is treated as a V1-only counterparty by the V2
 state-machine driver. The V2 maker- and taker-side trait surfaces
 are not implemented for this chain family in this chapter's scope;
 treatment of a V2 path for Tendermint is out of scope here.
+
+> **Code-quality finding (informative).** Tendermint's fee-send
+> implementation rejects `DexFee::NoFee` with an error rather than
+> completing a fee-less send. The UTXO fee-send implementation
+> ([Chapter 16](16-swap-v2-pre-burn-output.md) family) treats
+> `NoFee` as a zero-output, gracefully-completed case instead of an
+> error. Under the per-coin burn-policy matrix bound by
+> [Chapter 16 §16.3](16-swap-v2-pre-burn-output.md#163-bound-per-coin-burn-policy-surface),
+> Tendermint's general burn-account predicate is `false` for every
+> currently configured network, so the factory of Chapter 16 §16.4
+> never constructs a `NoFee` value for a Tendermint taker today and
+> this branch is not reachable in current production configuration.
+> It would become reachable, and would then incorrectly fail a
+> taker's own trade instead of completing it fee-free, if Tendermint
+> were ever given a non-default general burn-account opt-in. Aligning
+> the Tendermint branch with the UTXO precedent (zero-output success
+> rather than a rejection) is a reasonable fix; not applied here
+> because it is untested production behavior change outside this
+> chapter's documentation-accuracy scope.
 
 ---
 
@@ -538,7 +559,11 @@ The chapter relies on one baseline-state claim:
   `c1d46c0c1592faa0860f704008b2b2381bc3840f`; chapter 31 (the
   central application-context substrate the Tendermint coins
   context is fetched through as a sub-context slot per chapter 31
-  R7); Cosmos SDK proto
+  R7); [Chapter 16](16-swap-v2-pre-burn-output.md) (the `DexFee`
+  descriptor and per-coin burn-policy substrate consumed by
+  §18.5.1); the present-day working tree, re-verified for this
+  revision against `mm2src/coins/tendermint/tendermint_swap_ops.rs`
+  for the `DexFee` match arms bound in §18.5.1; Cosmos SDK proto
   definitions for `Coin`, `MsgSend`, `MsgMultiSend`; ICS-20
   (`ibc.applications.transfer.v1.MsgTransfer`); the Iris-mod HTLC
   proto repository at `https://github.com/irismod/htlc`; BIP-173

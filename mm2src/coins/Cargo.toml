@@ -36,8 +36,7 @@ async-trait = "0.1.52"
 base64 = "0.10.0"
 base58 = "0.2.0"
 bigdecimal = { version = "0.3", features = ["serde"] }
-bip32 = { version = "0.2.2", default-features = false, features = ["alloc", "secp256k1-ffi"] }
-bitcoin = "0.27.1"
+bip32 = { version = "0.6.0-pre.1", default-features = false, features = ["alloc", "secp256k1-ffi"] }
 bitcoin_hashes = "0.10.0"
 blake2b_simd = "1"
 kdf_crypto = { path = "../kdf_crypto" }
@@ -88,22 +87,21 @@ kdf_walletconnect = { path = "../kdf_walletconnect" }
 keys = { package = "kdf_keys", path = "../kdf_keys" }
 lazy_static = "1.4"
 libc = "0.2"
-lightning = { path = "../../rust-lightning-patched/lightning" }
-lightning-background-processor = { path = "lightning_background_processor" }
-lightning-invoice = { path = "../../rust-lightning-patched/lightning-invoice" }
 mocktopus = "0.8.0"
 num-traits = "0.2"
 parking_lot = { version = "0.12.0" }
 primitives = { package = "kdf_primitives", path = "../kdf_primitives" }
 prost = { workspace = true }
+# `zcash_client_backend` 0.23 uses prost 0.14 for compact-block messages,
+# while KDF's existing gRPC surface remains on prost 0.12.
+prost_14 = { package = "prost", version = "=0.14.4" }
 prost-types = { workspace = true }
-protobuf = "2.20"
 rand = { version = "0.8", features = ["std", "small_rng"] }
 rmp-serde = "0.14.3"
 rpc = { package = "kdf_rpc_types", path = "../kdf_rpc_types" }
 rpc_task = { path = "../rpc_task" }
 script = { package = "kdf_script", path = "../kdf_script" }
-secp256k1 = { version = "0.20" }
+secp256k1 = { version = "0.29" }
 ser_error = { path = "../derives/ser_error" }
 ser_error_derive = { path = "../derives/ser_error_derive" }
 serde = "1.0"
@@ -128,6 +126,15 @@ alloy = { workspace = true }
 tower = { workspace = true }
 winapi = "0.3"
 zbase32 = "0.1.2"
+incrementalmerkletree = { version = "=0.8.2", features = ["legacy-api", "std"] }
+zcash_note_encryption = "=0.4.2"
+zcash_keys = { version = "=0.14.0", default-features = false, features = ["sapling", "std", "unstable"] }
+zcash_protocol = "=0.9.0"
+zcash_script = "=0.4.5"
+zcash_transparent = { version = "=0.8.0", features = ["transparent-inputs"] }
+zip32 = "=0.2.1"
+
+[dev-dependencies]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { version = "0.3.27" }
@@ -141,13 +148,35 @@ web-sys = { version = "0.3.55", features = ["console", "Headers", "Request", "Re
 # R39.6.1: zcash_primitives (shielded types) and zcash_client_backend (note
 # trial-decryption) are needed on WASM for sapling state sync and balance
 # reporting.  zcash_proofs (LocalTxProver) remains native-only.
-zcash_client_backend = { path = "../../librustzcash-patched/zcash_client_backend" }
-zcash_primitives = { features = ["transparent-inputs"], path = "../../librustzcash-patched/zcash_primitives" }
+zcash_client_backend = { version = "=0.23.0", default-features = false, features = ["transparent-inputs"] }
+sapling = { package = "sapling-crypto", version = "=0.7.0", default-features = false, features = ["std"] }
+zcash_primitives = { version = "=0.28.0", default-features = false, features = ["non-standard-fees", "std", "transparent-inputs"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dirs = { version = "1" }
 hyper = { version = "0.14", features = ["client", "http2", "http1"] }
 hyper-rustls = { version = "0.23", default-features = false, features = ["http1", "http2", "webpki-roots", "webpki-tokio"] }
+# The `lightning` module (mm2src/coins/lightning/) is itself
+# `#[cfg(not(target_arch = "wasm32"))]` (see lp_coins.rs), so its
+# dependencies belong here rather than in the unconditional block above —
+# keeping bitcoin 0.27.1 / secp256k1 0.20 out of the WASM dependency graph.
+# `lightning-invoice`'s one outside consumer (utxo.rs's
+# `lightning_invoice::Currency` re-export) is now also cfg-gated to match.
+# `bitcoin` itself moved here too: utxo.rs's only two direct `bitcoin::`
+# usages outside this module (`BitcoinNetwork`/`LightningCurrency` `From`
+# impls) were dead code with zero callers anywhere in the tree — gated them
+# to not(wasm32) rather than deleting, since they're plausibly a forgotten
+# wire-up rather than intentional dead code (see the GLEEC KDF
+# chain/ext-bitcoin feature-flag precedent below for why that's not a
+# theoretical concern). Lightning's own real bitcoin-crate usage — the
+# `kdf_tx_to_bitcoin` wire-byte round-trip in `lightning/ln_platform.rs`,
+# which needs no `kdf_chain`-level conversion trait at all — is unaffected.
+# See docs/plans/secp256k1-migration.md ("Scope reduction: decouple
+# Lightning first").
+bitcoin = "0.27.1"
+lightning = { path = "../../rust-lightning-patched/lightning" }
+lightning-background-processor = { path = "lightning_background_processor" }
+lightning-invoice = { path = "../../rust-lightning-patched/lightning-invoice" }
 lightning-persister = { path = "lightning_persister" }
 lightning-net-tokio = { path = "../../rust-lightning-patched/lightning-net-tokio" }
 rust-ini = { version = "0.13" }
@@ -156,10 +185,16 @@ tokio = { version = "1.7" }
 tokio-rustls = { version = "0.23" }
 tonic = { version = "0.11", features = ["tls", "tls-webpki-roots", "channel"] }
 webpki-roots = { version = "0.22" }
-zcash_client_backend = { path = "../../librustzcash-patched/zcash_client_backend" }
-zcash_client_sqlite = { path = "../../librustzcash-patched/zcash_client_sqlite" }
-zcash_primitives = { features = ["transparent-inputs"], path = "../../librustzcash-patched/zcash_primitives" }
-zcash_proofs = { path = "../../librustzcash-patched/zcash_proofs" }
+zcash_client_backend = { version = "=0.23.0", features = ["transparent-inputs", "zcash_proofs"] }
+zcash_client_sqlite = { version = "=0.21.1", features = ["transparent-inputs"] }
+sapling = { package = "sapling-crypto", version = "=0.7.0" }
+zcash_primitives = { version = "=0.28.0", features = ["non-standard-fees", "transparent-inputs"] }
+zcash_proofs = "=0.28.0"
+# secp256k1 0.20->0.29 migration unified this crate onto the same secp256k1
+# line the Zcash stack already used, so the `zcash_secp256k1` alias (used only
+# by z_htlc.rs, now imports plain `secp256k1` instead) is gone -- Cargo
+# rejects depending on the same resolved (name, version) twice under two
+# local names. See docs/plans/secp256k1-migration.md.
 
 # Solana stack — modular `solana-*` 2.x crates plus `spl-token` 8 and
 # the `spl-associated-token-account-client` helper. The legacy

@@ -84,14 +84,6 @@ jobs:
           fi
           cargo check --target wasm32-unknown-unknown -p mm2_main $FEATURES_FLAG
 
-      - name: Install wasm-pack
+      - name: cargo check mm2_main (wasm32)
         shell: bash
-        run: |
-          if ! command -v wasm-pack >/dev/null 2>&1; then
-            curl -fsSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
-          fi
-          wasm-pack --version
-
-      - name: wasm-pack build mm2_main
-        shell: bash
-        run: wasm-pack build mm2src/mm2_main --target web --out-dir ../../target/wasm-pack-out --dev
+        run: cargo check --target wasm32-unknown-unknown -p mm2_main

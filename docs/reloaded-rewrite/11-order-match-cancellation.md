@@ -207,7 +207,10 @@ D3. **Cross-instance attribution.** The guard distinguishes
   identifier collisions are negligible.
 - The orderbook substrate whose insert and cancellation
   paths the mitigation extends (referenced via
-  [Chapter 12](12-order-match-state-store.md)).
+  [Chapter 32](32-orderbook-p2p-and-trie.md)). Chapter
+  12 binds a distinct store -- the node's own live maker
+  orders -- and is not the orderbook substrate this
+  mitigation extends.
 
 ## 11.10 Baseline Verifications
 

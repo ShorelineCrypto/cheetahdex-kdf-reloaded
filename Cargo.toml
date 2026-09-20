@@ -50,6 +50,14 @@ members = [
     "mm2src/kdf_walletconnect",
     "mm2src/mm2_metamask",
 ]
+# Patched published crates remain ordinary path dependencies rather than
+# first-party workspace members. Excluding them also permits their own focused
+# upstream-style unit tests to be run via `--manifest-path`.
+exclude = [
+    "vendor-patches/zcash_client_backend-0.23.0",
+    "vendor-patches/zcash_primitives-0.28.0",
+    "vendor-patches/zcash_transparent-0.8.0",
+]
 
 # https://doc.rust-lang.org/beta/cargo/reference/features.html#feature-resolver-version-2
 resolver = "2"
@@ -125,7 +133,7 @@ mm2_metrics = { path = "mm2src/mm2_metrics" }
 mm2_number = { path = "mm2src/mm2_number" }
 prost = "0.12"
 prost-types = "0.12"
-sia-rust = { git = "https://github.com/kdf-reloaded/sia-rust", rev = "0e65d62b52bb99dd638bbb6763d475977db7433a" }
+sia-rust = { git = "https://github.com/kdf-reloaded/sia-rust", rev = "e1c07251afd8669df0b686edcfb1141eff0fcaff" }
 # using the same version as cosmrs
 tendermint-rpc = { version = "0.35", default-features = false }
 thiserror = "1"
@@ -153,6 +161,22 @@ codegen-units = 128
 # Turns debugging symbols off for the out-of-workspace dependencies.
 debug = false
 
+[profile.release-dbg]
+# Same codegen as `release` (opt-level 3, codegen-units 1, panic=unwind) so a
+# crash reproduces the same way it does in a shipped build, but keeps full
+# debug info and does not strip it -- on windows-msvc this makes rustc/link.exe
+# emit a real, complete .pdb (covering dependencies too, since this profile
+# deliberately has no `[profile.release-dbg.package."*"]` override to turn
+# that back off) instead of the minimal/absent one `release`'s `debug = 0`
+# produces. Not for shipping (much bigger PDB, longer link time) -- for
+# symbolicating a crash dump post-mortem, or attaching a debugger/Application
+# Verifier live. Build with `cargo build --profile release-dbg`; `build-windows.yml`
+# accepts `profile: release-dbg` as a workflow_dispatch input and uploads the
+# matching .pdb alongside the .exe.
+inherits = "release"
+debug = true
+strip = false
+
 # bitcoin 0.27 / bitcoin_hashes 0.10 both declare an optional `core2 = "^0.3"`
 # dep used only under `no-std`. Every 0.3.x release is yanked upstream, which
 # blocks fresh resolution against vendored lightning/zcash crates. The shim at
@@ -160,3 +184,6 @@ debug = false
 # resolves without affecting any std build (no-std is never enabled here).
 [patch.crates-io]
 core2 = { path = "core2-shim" }
+zcash_client_backend = { path = "vendor-patches/zcash_client_backend-0.23.0" }
+zcash_primitives = { path = "vendor-patches/zcash_primitives-0.28.0" }
+zcash_transparent = { path = "vendor-patches/zcash_transparent-0.8.0" }

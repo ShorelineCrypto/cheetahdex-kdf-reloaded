@@ -594,7 +594,7 @@ mod coin_protocol_tests {
         });
         match CoinProtocol::from_conf_json(arrr).unwrap() {
             CoinProtocol::ZHTLC(info) => {
-                use zcash_primitives::consensus::Parameters;
+                use zcash_protocol::consensus::NetworkConstants;
                 assert!(info.check_point_block.is_some());
                 assert!(info.z_derivation_path.is_some());
                 assert_eq!(info.consensus_params.hrp_sapling_payment_address(), "zs");

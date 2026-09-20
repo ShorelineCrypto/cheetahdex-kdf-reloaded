@@ -28,12 +28,11 @@ use crate::{coin_conf, lp_coinfind, CoinProtocol, MarketCoinOps};
 // ZHTLC shielded-key export (R-K4) relies on the native-only `z_coin` / librustzcash
 // stack, so these imports and the matching derivation path are gated off WASM.
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_client_backend::encoding::{encode_extended_full_viewing_key, encode_extended_spending_key,
-                                     encode_payment_address};
+use sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey};
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_primitives::constants::mainnet as z_mainnet_constants;
+use zcash_keys::encoding::{encode_extended_full_viewing_key, encode_extended_spending_key, encode_payment_address};
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_primitives::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey};
+use zcash_protocol::constants::mainnet as z_mainnet_constants;
 
 /// Maximum number of HD addresses derivable in a single `get_private_keys`
 /// call (R-K4). A request whose `[start_index, end_index]` range exceeds this
@@ -623,16 +622,11 @@ fn derive_zhtlc(ticker: &str, secret: &Secp256k1Secret) -> Result<DerivedKey, Mm
     let z_spending_key = ExtendedSpendingKey::master(secret.as_slice());
     let priv_key =
         encode_extended_spending_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_SPENDING_KEY, &z_spending_key);
-    let efvk = ExtendedFullViewingKey::from(&z_spending_key);
+    #[allow(deprecated)]
+    let efvk = z_spending_key.to_extended_full_viewing_key();
     let viewing_key =
         encode_extended_full_viewing_key(z_mainnet_constants::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &efvk);
-    let (_, payment_address) =
-        z_spending_key
-            .default_address()
-            .map_to_mm(|_| GetPrivateKeysError::KeyDerivationFailed {
-                ticker: ticker.to_owned(),
-                reason: "failed to derive default shielded payment address".to_owned(),
-            })?;
+    let (_, payment_address) = z_spending_key.default_address();
     let address = encode_payment_address(z_mainnet_constants::HRP_SAPLING_PAYMENT_ADDRESS, &payment_address);
 
     Ok(DerivedKey {

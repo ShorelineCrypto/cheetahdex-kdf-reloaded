@@ -1,10 +1,55 @@
 // siacoin_swap_ops — SwapOps trait implementation and internal swap helper methods.
 
 use super::*;
+use crate::{HtlcPubkeyError, SWAP_HTLC_PUBKEY_LEN};
+use common::log::warn;
+use keys::Public;
 
 // ── Properly-typed swap methods (called by trait impls) ──────────────
 
 impl SiaCoin {
+    /// `utxo_from_txid` looks the payment's own event up by txid and then
+    /// its address's unspent outputs (`ApiClientHelpers::utxo_from_txid`,
+    /// sia-rust). A single unretried lookup here turned a very short
+    /// walletd indexing lag into a hard swap failure: both
+    /// `send_maker_spends_taker_payment` and `send_taker_spends_maker_payment`
+    /// call this immediately after `wait_for_confirmations` has *just*
+    /// polled the same event as sufficiently confirmed through the same
+    /// endpoint (`GetEventRequest`) -- but `wait_for_confirmations` itself
+    /// retries on any error, so a walletd blip there is invisible, while
+    /// this spend-side lookup had no such tolerance and failed the whole
+    /// swap outright (observed on a real testnet swap: a 404 "event not
+    /// found" roughly 200ms after the wait step's last successful poll of
+    /// the same txid). Retrying here brings this lookup's resilience in
+    /// line with the wait step's.
+    async fn utxo_from_txid_with_retry(
+        &self,
+        txid: &TransactionId,
+        vout_index: u32,
+    ) -> Result<sia_rust::types::UtxoWithBasis, Box<client_error::UtxoFromTxidError>> {
+        const ATTEMPTS: u8 = 5;
+        const RETRY_DELAY_SECONDS: f64 = 3.;
+        let mut last_err = None;
+        for attempt in 1..=ATTEMPTS {
+            match self.client.utxo_from_txid(txid, vout_index).await {
+                Ok(utxo) => return Ok(utxo),
+                Err(e) => {
+                    warn!(
+                        "utxo_from_txid({}, {}) attempt {}/{} failed, retrying: {}",
+                        txid, vout_index, attempt, ATTEMPTS, e
+                    );
+                    last_err = Some(e);
+                    if attempt < ATTEMPTS {
+                        Timer::sleep(RETRY_DELAY_SECONDS).await;
+                    }
+                },
+            }
+        }
+        Err(Box::new(
+            last_err.expect("loop runs at least once, so this is always Some"),
+        ))
+    }
+
     async fn new_send_taker_fee(
         &self,
         dex_fee: &DexFee,
@@ -141,11 +186,7 @@ impl SiaCoin {
         let input_spend_policy =
             SpendPolicy::atomic_swap_success(&maker_public_key, &taker_public_key, time_lock as u64, &secret_hash);
 
-        let htlc_utxo = self
-            .client
-            .utxo_from_txid(&taker_payment_txid, 0)
-            .await
-            .map_err(Box::new)?;
+        let htlc_utxo = self.utxo_from_txid_with_retry(&taker_payment_txid, 0).await?;
 
         let miner_fee = Currency::DEFAULT_FEE;
         let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
@@ -189,11 +230,7 @@ impl SiaCoin {
         let input_spend_policy =
             SpendPolicy::atomic_swap_success(&taker_public_key, &maker_public_key, time_lock as u64, &secret_hash);
 
-        let htlc_utxo = self
-            .client
-            .utxo_from_txid(&maker_payment_txid, 0)
-            .await
-            .map_err(Box::new)?;
+        let htlc_utxo = self.utxo_from_txid_with_retry(&maker_payment_txid, 0).await?;
 
         let miner_fee = Currency::DEFAULT_FEE;
         let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
@@ -319,11 +356,7 @@ impl SiaCoin {
             &sia_args.secret_hash,
         );
 
-        let htlc_utxo = self
-            .client
-            .utxo_from_txid(&sia_args.payment_tx.txid(), 0)
-            .await
-            .map_err(Box::new)?;
+        let htlc_utxo = self.utxo_from_txid_with_retry(&sia_args.payment_tx.txid(), 0).await?;
 
         let miner_fee = Currency::DEFAULT_FEE;
         let htlc_utxo_amount = htlc_utxo.output.siacoin_output.value;
@@ -390,18 +423,81 @@ impl SiaCoin {
         let tx = SiaTransaction::try_from(spend_tx)?;
         let expected_hash = Hash256::try_from(expected_hash_slice)?;
 
-        let found_secret =
-            tx.0.siacoin_inputs
-                .iter()
-                .flat_map(|input| input.satisfied_policy.preimages.iter())
-                .find(|extracted_secret| {
-                    let check_secret_hash = Hash256(sha256(&extracted_secret.0).take());
-                    check_secret_hash == expected_hash
-                });
-
-        found_secret
-            .map(|secret| secret.0.to_vec())
+        extract_secret_from_tx(&tx.0, &expected_hash)
             .ok_or(SiaCoinSiaExtractSecretError::FailedToExtract { tx, expected_hash })
+    }
+
+    /// D3: locate the spend of `tx`'s HTLC output (fixed at `HTLC_VOUT_INDEX`,
+    /// R-H1) by walking the HTLC address's event history, and classify it as
+    /// spent-via-secret vs. refunded-via-timelock. `success_public_key`/
+    /// `refund_public_key` are the same `SpendPolicy::atomic_swap` roles §20.6
+    /// builds the HTLC from -- callers decide which side "my" key plays
+    /// before calling this (mirrors `search_for_swap_output_spend`'s shape in
+    /// the UTXO implementation).
+    async fn sia_search_for_swap_tx_spend(
+        &self,
+        time_lock: u32,
+        secret_hash: &[u8],
+        tx: &[u8],
+        success_public_key: PublicKey,
+        refund_public_key: PublicKey,
+    ) -> Result<Option<FoundSwapTxSpend>, SiaCoinSearchSwapTxSpendError> {
+        let payment_tx = SiaTransaction::try_from(tx)?;
+        let secret_hash = Hash256::try_from(secret_hash)?;
+
+        let htlc_address =
+            SpendPolicy::atomic_swap(&success_public_key, &refund_public_key, time_lock as u64, &secret_hash).address();
+        let htlc_output_id = SiacoinOutputId::new(payment_tx.txid(), HTLC_VOUT_INDEX);
+
+        let events = self.fetch_all_events(&htlc_address).await?;
+
+        Ok(classify_htlc_spend(&events, &htlc_output_id, &secret_hash))
+    }
+
+    /// `tx` is the payment *I* sent, so I hold the refund key and the
+    /// counterparty holds the success key (§20.6, mirrors
+    /// `send_maker_payment`/`send_taker_payment`'s role assignment).
+    async fn sia_search_for_swap_tx_spend_my(
+        &self,
+        time_lock: u32,
+        other_pub: &[u8],
+        secret_hash: &[u8],
+        tx: &[u8],
+    ) -> Result<Option<FoundSwapTxSpend>, SiaCoinSearchSwapTxSpendError> {
+        let my_keypair = self.my_keypair()?;
+
+        if other_pub.len() != 33 {
+            return Err(SiaCoinSearchSwapTxSpendError::InvalidOtherPublicKeyLength(
+                other_pub.to_vec(),
+            ));
+        }
+        let other_public_key = PublicKey::from_bytes(&other_pub[..32])?;
+
+        self.sia_search_for_swap_tx_spend(time_lock, secret_hash, tx, other_public_key, my_keypair.public())
+            .await
+    }
+
+    /// `tx` is the counterparty's payment, so they hold the refund key and I
+    /// hold the success key -- which is why "spent" here means *I* already
+    /// claimed it.
+    async fn sia_search_for_swap_tx_spend_other(
+        &self,
+        time_lock: u32,
+        other_pub: &[u8],
+        secret_hash: &[u8],
+        tx: &[u8],
+    ) -> Result<Option<FoundSwapTxSpend>, SiaCoinSearchSwapTxSpendError> {
+        let my_keypair = self.my_keypair()?;
+
+        if other_pub.len() != 33 {
+            return Err(SiaCoinSearchSwapTxSpendError::InvalidOtherPublicKeyLength(
+                other_pub.to_vec(),
+            ));
+        }
+        let other_public_key = PublicKey::from_bytes(&other_pub[..32])?;
+
+        self.sia_search_for_swap_tx_spend(time_lock, secret_hash, tx, my_keypair.public(), other_public_key)
+            .await
     }
 
     async fn sia_can_refund_htlc(&self, locktime: u64) -> Result<CanRefundHtlc, SiaCoinSiaCanRefundHtlcError> {
@@ -413,8 +509,12 @@ impl SiaCoin {
         Ok(CanRefundHtlc::HaveToWait(locktime - median_timestamp))
     }
 
-    async fn validate_htlc_payment(&self, input: ValidatePaymentInput) -> Result<(), SiaValidateHtlcPaymentError> {
-        let sia_args = SiaValidatePaymentInputArgs::try_from(input)?;
+    async fn validate_htlc_payment(
+        &self,
+        input: ValidatePaymentInput,
+        payment_owner: ValidatingPaymentOwner,
+    ) -> Result<(), SiaValidateHtlcPaymentError> {
+        let sia_args = SiaValidatePaymentInputArgs::try_from_validate_payment_input(input, payment_owner)?;
 
         let my_keypair = self.my_keypair()?;
         let success_public_key = my_keypair.public();
@@ -454,6 +554,88 @@ impl SiaCoin {
 
         Ok(())
     }
+}
+
+// ── Swap-spend event-walk classification (CRD ch.20 §20.10 D3) ───────
+
+/// Find the revealed secret preimage in a spend transaction's satisfied
+/// policies matching `expected_hash` (R-S6). Shared by `extract_secret` and
+/// the swap-spend classification below so the hash comparison lives in
+/// exactly one place.
+fn extract_secret_from_tx(tx: &V2Transaction, expected_hash: &Hash256) -> Option<Vec<u8>> {
+    tx.siacoin_inputs
+        .iter()
+        .flat_map(|input| input.satisfied_policy.preimages.iter())
+        .find(|extracted_secret| Hash256(sha256(&extracted_secret.0).take()) == *expected_hash)
+        .map(|secret| secret.0.to_vec())
+}
+
+/// Locate, within an already-fetched event set, the event whose consumed
+/// inputs spend `htlc_output_id`, and classify it as spent-via-secret
+/// (R-H2) vs. refunded-via-timelock (R-H3) by whether the spending
+/// transaction reveals the expected secret preimage -- the two paths share
+/// the same public/private-key policy leaves (§20.6), so the preimage is
+/// what actually distinguishes them, exactly as R-S6's secret extraction
+/// already relies on. `Ok(None)` means genuinely unspent (the event set
+/// carries no consumer of this output).
+///
+/// Pure: takes the event set as data, so it needs no walletd access and is
+/// directly unit-testable against constructed events.
+fn classify_htlc_spend(
+    events: &[Event],
+    htlc_output_id: &SiacoinOutputId,
+    secret_hash: &Hash256,
+) -> Option<FoundSwapTxSpend> {
+    for event in events {
+        let spend_tx = match &event.data {
+            EventDataWrapper::V2Transaction(tx) => tx,
+            _ => continue,
+        };
+
+        let spends_htlc_output = spend_tx
+            .siacoin_inputs
+            .iter()
+            .any(|input| &input.parent.id == htlc_output_id);
+        if !spends_htlc_output {
+            continue;
+        }
+
+        let found_tx: TransactionEnum = SiaTransaction(spend_tx.clone()).into();
+        return Some(match extract_secret_from_tx(spend_tx, secret_hash) {
+            Some(_) => FoundSwapTxSpend::Spent(found_tx),
+            None => FoundSwapTxSpend::Refunded(found_tx),
+        });
+    }
+    None
+}
+
+// ── Ed25519 keys in the fixed-width swap field (CRD ch.51 R64) ───────
+
+/// Width of the native ed25519 public key Sia signs with.
+const ED25519_PUBKEY_LEN: usize = 32;
+
+/// Place an ed25519 public key in the fixed-width swap field.
+///
+/// R64 dictates both halves of the convention: the 32 native bytes take the
+/// field's *leading* positions and the final byte is zero. A leading pad or a
+/// non-zero pad is not interoperable, so neither may be varied.
+fn ed25519_pubkey_to_swap_field(pubkey: &PublicKey) -> [u8; SWAP_HTLC_PUBKEY_LEN] {
+    let mut field = [0u8; SWAP_HTLC_PUBKEY_LEN];
+    field[..ED25519_PUBKEY_LEN].copy_from_slice(&pubkey.to_bytes());
+    field
+}
+
+/// Read an ed25519 public key back out of the fixed-width swap field.
+///
+/// R64's receive half: require exactly the bound width, then take the *leading*
+/// 32 bytes as the native key. The final byte is ignored rather than checked —
+/// the rule constrains what this node sends, not what it will accept.
+fn ed25519_pubkey_from_swap_field(field: &[u8]) -> MmResult<PublicKey, HtlcPubkeyError> {
+    if field.len() != SWAP_HTLC_PUBKEY_LEN {
+        return MmError::err(HtlcPubkeyError::UnexpectedLength(field.len()));
+    }
+    PublicKey::from_bytes(&field[..ED25519_PUBKEY_LEN])
+        .map_to_mm(|e| HtlcPubkeyError::NotOnCurve("ed25519", e.to_string()))
 }
 
 // ── SwapOps trait impl ───────────────────────────────────────────────
@@ -646,13 +828,25 @@ impl SwapOps for SiaCoin {
 
     fn validate_maker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
         let coin = self.clone();
-        let fut = async move { coin.validate_htlc_payment(input).await.map_err(|e| e.to_string()) };
+        // We are the taker here (validating the payment the maker sent us),
+        // so the counterparty is the maker.
+        let fut = async move {
+            coin.validate_htlc_payment(input, ValidatingPaymentOwner::Maker)
+                .await
+                .map_err(|e| e.to_string())
+        };
         Box::new(fut.boxed().compat())
     }
 
     fn validate_taker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
         let coin = self.clone();
-        let fut = async move { coin.validate_htlc_payment(input).await.map_err(|e| e.to_string()) };
+        // We are the maker here (validating the payment the taker sent us),
+        // so the counterparty is the taker.
+        let fut = async move {
+            coin.validate_htlc_payment(input, ValidatingPaymentOwner::Taker)
+                .await
+                .map_err(|e| e.to_string())
+        };
         Box::new(fut.boxed().compat())
     }
 
@@ -680,28 +874,37 @@ impl SwapOps for SiaCoin {
 
     async fn search_for_swap_tx_spend_my(
         &self,
-        _time_lock: u32,
-        _other_pub: &[u8],
-        _secret_hash: &[u8],
-        _tx: &[u8],
+        time_lock: u32,
+        other_pub: &[u8],
+        secret_hash: &[u8],
+        tx: &[u8],
         _search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        // Not yet implemented for Sia
-        Ok(None)
+        // Every non-test caller of this trait method is `TakerSwap`/`MakerSwap`
+        // `recover_funds` (grep confirms it -- neither is reached from the
+        // normal swap FSM's own spend-detection/wait loop, which uses
+        // `wait_for_confirmations`/`tx_details_from_event` instead). D3
+        // (CRD ch.20 §20.10) closes the walk this depends on.
+        self.sia_search_for_swap_tx_spend_my(time_lock, other_pub, secret_hash, tx)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn search_for_swap_tx_spend_other(
         &self,
-        _time_lock: u32,
-        _other_pub: &[u8],
-        _secret_hash: &[u8],
-        _tx: &[u8],
+        time_lock: u32,
+        other_pub: &[u8],
+        secret_hash: &[u8],
+        tx: &[u8],
         _search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        // Not yet implemented for Sia
-        Ok(None)
+        // See `search_for_swap_tx_spend_my` above -- same reasoning, mirrored
+        // for the counterparty-payment side of `recover_funds`.
+        self.sia_search_for_swap_tx_spend_other(time_lock, other_pub, secret_hash, tx)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
@@ -724,5 +927,219 @@ impl SwapOps for SiaCoin {
     fn get_htlc_key_pair(&self) -> Option<KeyPair> {
         // Sia uses ed25519 keys, not secp256k1 KeyPair. Return None.
         None
+    }
+
+    /// Sia signs with ed25519, so the key it puts on the negotiation wire is
+    /// its own 32-byte key padded into the 33-byte field by the convention of
+    /// ch.51 R64 — never the node's secp256k1 key, which Sia cannot sign with,
+    /// and which is why `node_secp_pubkey` is ignored here.
+    fn derive_htlc_pubkey(&self, _node_secp_pubkey: &Public) -> MmResult<[u8; SWAP_HTLC_PUBKEY_LEN], HtlcPubkeyError> {
+        let keypair = self
+            .my_keypair()
+            .map_to_mm(|e| HtlcPubkeyError::NotAvailable(e.to_string()))?;
+        Ok(ed25519_pubkey_to_swap_field(&keypair.public()))
+    }
+
+    /// The counterparty's key for a Sia HTLC is an ed25519 key in the same
+    /// 33-byte field (R63, R64): exactly the bound width, with the leading 32
+    /// bytes a well-formed curve point. This is the check the Sia swap
+    /// transactions would otherwise fail much later, mid-swap.
+    fn validate_other_pubkey(&self, raw_pubkey: &[u8]) -> MmResult<(), HtlcPubkeyError> {
+        ed25519_pubkey_from_swap_field(raw_pubkey).map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod swap_field_tests {
+    use super::*;
+
+    fn test_pubkey() -> PublicKey {
+        SiaKeypair::from_private_bytes(&[1u8; 32])
+            .expect("32 bytes is a valid ed25519 secret key")
+            .public()
+    }
+
+    /// ch.51 R64 send half: native bytes in the leading positions, final byte
+    /// zero. Both are dictated by the deployed format, so both are asserted.
+    #[test]
+    fn ed25519_key_occupies_the_field_by_a_trailing_zero_pad() {
+        let pubkey = test_pubkey();
+        let field = ed25519_pubkey_to_swap_field(&pubkey);
+
+        assert_eq!(field.len(), SWAP_HTLC_PUBKEY_LEN);
+        assert_eq!(&field[..ED25519_PUBKEY_LEN], pubkey.as_bytes());
+        assert_eq!(field[SWAP_HTLC_PUBKEY_LEN - 1], 0);
+    }
+
+    /// R64 receive half: the same field validates, and the key recovered from
+    /// it is the one that was sent.
+    #[test]
+    fn ed25519_swap_field_round_trips() {
+        let pubkey = test_pubkey();
+        let field = ed25519_pubkey_to_swap_field(&pubkey);
+
+        assert_eq!(ed25519_pubkey_from_swap_field(&field).unwrap(), pubkey);
+    }
+
+    /// R63: exactly 33 bytes. A bare 32-byte ed25519 key is the honest short
+    /// case and is still refused — the field width does not follow the curve.
+    #[test]
+    fn only_the_bound_width_is_accepted() {
+        let pubkey = test_pubkey();
+
+        for field in [pubkey.as_bytes(), &[0u8; SWAP_HTLC_PUBKEY_LEN + 1][..], &[][..]] {
+            assert_eq!(
+                ed25519_pubkey_from_swap_field(field).unwrap_err().into_inner(),
+                HtlcPubkeyError::UnexpectedLength(field.len())
+            );
+        }
+    }
+
+    /// A field of the right width whose leading bytes are not a curve point is
+    /// rejected, rather than carried into a swap transaction that cannot be
+    /// satisfied.
+    #[test]
+    fn a_bound_width_field_that_is_not_a_curve_point_is_rejected() {
+        // y = 2 has no matching x on the Edwards curve, so this encodes no point.
+        let mut field = [0u8; SWAP_HTLC_PUBKEY_LEN];
+        field[0] = 2;
+
+        assert!(matches!(
+            ed25519_pubkey_from_swap_field(&field).unwrap_err().into_inner(),
+            HtlcPubkeyError::NotOnCurve("ed25519", _)
+        ));
+    }
+
+    /// A swap negotiated before Sia pairs required the 32-byte SHA256 secret
+    /// hash (select_secret_hash_algo, ch.51 R71/R72) has the legacy 20-byte
+    /// RIPEMD160(SHA256(_)) one instead. That must be reported as the
+    /// structural fact it is -- "this swap can't be checked against Sia" --
+    /// not `Hash256Error`'s generic "invalid slice length", which said
+    /// nothing about *why* a 20-byte hash showed up (observed verbatim in a
+    /// real recover_funds_of_swap failure).
+    #[test]
+    fn check_if_my_payment_sent_args_reports_a_legacy_20_byte_secret_hash_by_name() {
+        let other_pub = ed25519_pubkey_to_swap_field(&test_pubkey());
+        let legacy_secret_hash = [0u8; 20];
+
+        let err = SiaCheckIfMyPaymentSentArgs::try_from_positional(
+            1787000000,
+            &other_pub,
+            &legacy_secret_hash,
+            BigDecimal::from(1),
+        )
+        .err()
+        .unwrap();
+
+        assert!(matches!(err, SiaCheckIfMyPaymentSentArgsError::WrongSecretHashLength {
+            actual: 20
+        }));
+    }
+}
+
+#[cfg(test)]
+mod swap_spend_search_tests {
+    //! Regression surface for `classify_htlc_spend` (CRD ch.20 §20.10 D3).
+    //!
+    //! Follows `siacoin_history.rs`'s test style: events are constructed from
+    //! the JSON shape walletd actually returns, and the walk itself is pure
+    //! (it takes an already-fetched event set), so none of these need a
+    //! walletd instance.
+
+    use super::*;
+
+    /// Output id the constructed HTLC payment funded -- 64 hex chars, a
+    /// well-formed but otherwise arbitrary `Hash256`.
+    const HTLC_OUTPUT_ID: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+    /// A different output id, used to prove an event that spends *something
+    /// else* is not mistaken for the HTLC spend.
+    const OTHER_OUTPUT_ID: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+    const ADDR: &str = "c34caa97740668de2bbdb7174572ed64c861342bf27e80313cbfa02e9251f52e30aad3892533";
+    /// Placeholder `pk` policy/signature -- their content is never inspected
+    /// by `classify_htlc_spend` (it distinguishes success vs. refund purely
+    /// by the revealed preimage, per R-S6), only their shape needs to parse.
+    const PLACEHOLDER_PUBKEY: &str = "a729be53dae7b0ed812f2a123ce93556014bbad8516ba6b1b496a112b46bbd97";
+    const PLACEHOLDER_SIG: &str = "160e79ac52e0eaab5e92bd1675604a94b56ec58fdd0be3f3a842a4ece07d794f7ee1e8cc8f29b596bf71b2dc594df53347b9a4bcbec46fe09244ce6d3f6a6708";
+    const EVENT_ID: &str = "0f088eddda5320f8453a55349063abe43ba5b282631d5d2b9e684548f083055a";
+    const BLOCK_ID: &str = "b37a5387883748f73c1475ca85c8f3200eef09126c44824d0f44574109dabedc";
+
+    fn htlc_output_id() -> SiacoinOutputId { SiacoinOutputId(Hash256::from_str(HTLC_OUTPUT_ID).expect("valid hash")) }
+
+    /// A v2Transaction event whose single input consumes `consumed_output_id`,
+    /// optionally revealing `preimage` (present for a success-path spend,
+    /// absent for a refund-path spend).
+    fn spend_event(consumed_output_id: &str, preimage: Option<[u8; 32]>) -> Event {
+        let mut satisfied_policy = json!({
+            "policy": { "type": "pk", "policy": format!("ed25519:{}", PLACEHOLDER_PUBKEY) },
+            "signatures": [PLACEHOLDER_SIG],
+        });
+        if let Some(secret) = preimage {
+            satisfied_policy["preimages"] = json!([hex::encode(secret)]);
+        }
+
+        let json = json!({
+            "id": EVENT_ID,
+            "index": { "height": 42, "id": BLOCK_ID },
+            "confirmations": 7,
+            "timestamp": "2024-05-01T12:00:00Z",
+            "maturityHeight": 0,
+            "type": "v2Transaction",
+            "data": {
+                "siacoinInputs": [{
+                    "parent": {
+                        "id": consumed_output_id,
+                        "stateElement": { "leafIndex": 3, "merkleProof": [] },
+                        "siacoinOutput": { "value": "1000000000000000000000000", "address": ADDR },
+                        "maturityHeight": 0,
+                    },
+                    "satisfiedPolicy": satisfied_policy,
+                }],
+                "siacoinOutputs": [{ "value": "999990000000000000000000", "address": ADDR }],
+                "minerFee": "10000000000000000000",
+            },
+        });
+        serde_json::from_value(json).expect("valid walletd event")
+    }
+
+    /// R-H2: a spend revealing the secret preimage is the success path.
+    #[test]
+    fn a_spend_revealing_the_preimage_is_classified_as_spent() {
+        let secret = [7u8; 32];
+        let secret_hash = Hash256(sha256(&secret).take());
+        let event = spend_event(HTLC_OUTPUT_ID, Some(secret));
+
+        let found = classify_htlc_spend(&[event], &htlc_output_id(), &secret_hash);
+
+        assert!(matches!(found, Some(FoundSwapTxSpend::Spent(_))));
+    }
+
+    /// R-H3: a spend of the same output with no revealed preimage is the
+    /// refund path.
+    #[test]
+    fn a_spend_without_the_preimage_is_classified_as_refunded() {
+        let secret_hash = Hash256(sha256(&[7u8; 32]).take());
+        let event = spend_event(HTLC_OUTPUT_ID, None);
+
+        let found = classify_htlc_spend(&[event], &htlc_output_id(), &secret_hash);
+
+        assert!(matches!(found, Some(FoundSwapTxSpend::Refunded(_))));
+    }
+
+    /// An event that spends a *different* output is not a match, regardless
+    /// of whether it reveals a preimage.
+    #[test]
+    fn an_event_consuming_a_different_output_is_not_a_match() {
+        let secret_hash = Hash256(sha256(&[7u8; 32]).take());
+        let event = spend_event(OTHER_OUTPUT_ID, Some([7u8; 32]));
+
+        assert_eq!(classify_htlc_spend(&[event], &htlc_output_id(), &secret_hash), None);
+    }
+
+    /// No event in the set spends the HTLC output at all: genuinely unspent,
+    /// the one case "not found" was always the correct answer for (§20.10 D3).
+    #[test]
+    fn no_matching_event_is_not_found() {
+        let secret_hash = Hash256(sha256(&[7u8; 32]).take());
+        assert_eq!(classify_htlc_spend(&[], &htlc_output_id(), &secret_hash), None);
     }
 }

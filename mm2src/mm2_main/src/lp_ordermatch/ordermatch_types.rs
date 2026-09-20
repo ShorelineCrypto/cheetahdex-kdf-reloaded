@@ -893,7 +893,7 @@ impl MakerOrder {
     pub(crate) fn is_cancellable(&self) -> bool { !self.has_ongoing_matches() }
 
     pub(crate) fn has_ongoing_matches(&self) -> bool {
-        for (_, order_match) in self.matches.iter() {
+        for order_match in self.matches.values() {
             // if there's at least 1 ongoing match the order is not cancellable
             if order_match.connected.is_none() && order_match.connect.is_none() {
                 return true;

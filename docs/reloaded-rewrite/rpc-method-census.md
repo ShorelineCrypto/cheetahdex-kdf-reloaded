@@ -359,3 +359,16 @@ parity diff must preserve every name in each group, not just one.
 | OTHER (`experimental::` incl. children) | 16 |
 | LEGACY | 52 |
 | **TOTAL (all surfaces)** | **232** |
+
+> **Reconciling this total with the 223 figure in
+> [`UPSTREAM-PARITY-GAPS.md`](UPSTREAM-PARITY-GAPS.md).** These are two
+> different, both-correct counts, not a discrepancy: 232 is the *sum of
+> each surface's distinct method-string count*, so any name routed on more
+> than one surface is counted once per surface; 223 is the count of
+> *globally-unique method strings* across the whole census, counting each
+> name once no matter how many surfaces route it. The gap is exactly the 9
+> names that exist on both the LEGACY and V2 surfaces under the same wire
+> string (`active_swaps`, `best_orders`, `get_enabled_coins`,
+> `my_recent_swaps`, `my_swap_status`, `my_tx_history`, `orderbook`,
+> `trade_preimage`, `withdraw` -- each flagged `v1+v2 (envelope)` in its
+> alias-of column above): 232 - 9 = 223.

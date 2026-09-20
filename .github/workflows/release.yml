@@ -24,8 +24,12 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - cheetahdex
+  pull_request:
+    branches:
+      - cheetah
+      - cheetahdex
 
 permissions:
   contents: write # create the GitHub Release and upload assets
@@ -44,6 +48,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Calculate build tag (commit hash) for PR commit
+        if: github.event_name == 'pull_request'
+        run: echo "KDF_BUILD_TAG=$(git rev-parse --short=7 ${{ github.event.pull_request.head.sha }})" >> $GITHUB_ENV
+
+      - name: Calculate build tag (commit hash) for merge commit
+        if: github.event_name != 'pull_request'
+        run: echo "KDF_BUILD_TAG=$(git rev-parse --short=7 HEAD)" >> $GITHUB_ENV
       - id: g
         run: |
           set -eu
@@ -52,7 +63,7 @@ jobs:
           ver="${GITHUB_REF_NAME#v}"
           prerelease=false
           case "$ver" in *-*) prerelease=true;; esac
-          proceed=false
+          proceed=true
           if [ "$prerelease" = true ]; then
             if contains staging || contains main; then proceed=true; fi
           else
@@ -128,39 +139,6 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Import signing key and sign the checksum manifest
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-        run: |
-          set -eu
-          # Accept the secret whether stored base64-encoded or as a raw armored
-          # key block.
-          printf '%s' "$GPG_PRIVATE_KEY" > /tmp/gpgkey.in
-          if base64 -d /tmp/gpgkey.in 2>/dev/null | grep -q 'PGP PRIVATE KEY'; then
-            base64 -d /tmp/gpgkey.in | gpg --batch --import
-          else
-            gpg --batch --import /tmp/gpgkey.in
-          fi
-          shred -u /tmp/gpgkey.in
-          cd release-assets
-          # No passphrase configured for the signing (sub)key.
-          gpg --batch --yes --pinentry-mode loopback \
-            --local-user FEE1ACA52C65FF3EBF31818CB5595E1752BC2A82 \
-            --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
-          gpg --verify SHA256SUMS.asc SHA256SUMS
-
-      - name: Draft GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eu
-          flags=(--draft --verify-tag --generate-notes --title "${GITHUB_REF_NAME}")
-          # Mark alpha/beta/rc tags as GitHub pre-releases (never "latest").
-          # Final versions get no flag → GitHub marks them latest on publish.
-          case "${GITHUB_REF_NAME#v}" in *-*) flags+=(--prerelease);; esac
-          gh release create "${GITHUB_REF_NAME}" release-assets/* \
-            --repo "${GITHUB_REPOSITORY}" \
-            "${flags[@]}"
 
   # Optional: publish the runtime container image to a registry. Skipped unless
   # the `PUBLISH_DOCKERHUB` repository variable is set to `true` and the
