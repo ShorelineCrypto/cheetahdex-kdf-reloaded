@@ -418,11 +418,14 @@ MUST therefore always emit `Standard` for EVM-side dex-fee
 delivery. EVM-side pre-burn integration is bound by chapter 17,
 not by this chapter.
 
-**R24.** The parallel Tendermint version-two path MUST NOT be
-modified by the substrate. Tendermint's swap-operations module
-already branches on the chapter-08 `WithBurn` variant and routes
-the burn portion through a separate bank-message recipient; the
-substrate consumes this prior work and is the structural
+**R24.** The parallel Tendermint `WithBurn` implementation MUST
+NOT be modified by the substrate. Tendermint has no version-two
+swap-trait implementation ([Chapter 18 §18.5.1](18-tendermint-ibc-htlc.md#1851-pre-burn-dexfeewithburn-is-supported)
+binds Tendermint as a V1-only counterparty of the V2 state-machine
+driver); the existing `WithBurn` branch lives on the V1
+swap-operations trait's taker-fee-send method and routes the burn
+portion through a separate bank-message recipient. The substrate
+consumes this prior work and is the structural
 reference behavioural pattern that informed R14, R15, R16, R17
 (split-output with explicit burn recipient, single-transaction
 atomic delivery).
@@ -566,11 +569,16 @@ and `NoFee` arms per R14, R16, R17, R18.
   three version-two UTXO taker-payment-spend helpers and their
   deferred-variant rejection arms); chapter 17 (the parallel
   version-two EVM path, sibling-allowlist reference for D1);
-  public Bitcoin script and signature-hash documentation; KDF
-  Reloaded issue #1 and its public swap-failure attachment.
-- *Permitted-input classes used:* baseline source; bound substrate
-  identifiers introduced with in-chapter justification; public
-  protocol documentation.
+  chapter 18 (the Tendermint `WithBurn` implementation's V1-only
+  scope, referenced by R24); public Bitcoin script and
+  signature-hash documentation; KDF Reloaded issue #1 and its
+  public swap-failure attachment.
+- *Permitted-input classes used:* baseline source; the present-day
+  working tree (R24's Tendermint scope correction, re-verified
+  against `mm2src/coins/tendermint/tendermint_swap_ops.rs` — no
+  version-two swap-trait implementation exists for the Tendermint
+  coin family); bound substrate identifiers introduced with
+  in-chapter justification; public protocol documentation.
 - *Sibling-allowlist consultations:* none beyond the
   cross-chapter references listed in *Inputs*.
 - *Forbidden corpus:* not consulted.

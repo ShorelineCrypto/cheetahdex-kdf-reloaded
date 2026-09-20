@@ -4,8 +4,25 @@ A release is not cut until every box below is ticked. This checklist applies to 
 
 ## Code
 
-- [ ] `cargo fmt --all -- --check` passes.
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings` passes.
+- [ ] First-party formatting is clean. `cargo fmt --all -- --check` also
+      descends into the vendored `*-patched/` trees and aborts before
+      formatting anything (a `zcash_client_backend` build-generated module
+      doesn't exist yet on a clean checkout); use the same first-party-only
+      selection the `fmt` CI job runs instead:
+      ```sh
+      pkgs=$(cargo metadata --no-deps --format-version 1 \
+        | jq -r '.packages[] | select(.manifest_path | test("-patched/") | not) | .name')
+      cargo +nightly-2026-05-08 fmt $(printf -- '-p %s ' $pkgs) -- --check
+      ```
+- [ ] No new first-party Clippy warnings. `cargo clippy --all-targets
+      --all-features -- -D warnings` fails outright regardless of first-party
+      code quality -- the vendored, patched `rust-lightning-patched/lightning`
+      crate trips 13 deny-level lints against its own source. CI does not run
+      Clippy as a gate, so this is manual-only; use
+      `RUSTFLAGS="--cap-lints=warn" cargo clippy --workspace --all-targets`
+      (per `AGENTS.md` §6) for a release-time sweep, or the per-package
+      `cargo clippy -p <package> --all-targets --no-deps -- -D warnings`
+      pattern crate by crate.
 - [ ] `cargo test --bins --lib` passes.
 - [ ] Integration tests pass (`cargo test --test 'mm2_tests_main'`).
 - [ ] Docker tests pass (`cargo test --bin docker_tests --features regtest-netid -- --test-threads=1`).

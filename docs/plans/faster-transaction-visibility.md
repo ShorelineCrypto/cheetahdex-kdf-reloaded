@@ -229,11 +229,13 @@ Each stage is independently shippable and independently revertible.
 > address and racing notifications against the poll deadline. Workstream B
 > landed as mempool-derived pending receipts.
 >
-> Still open from the plan: the subscription cap for HD wallets (open decision
-> 1), the QRC20 trigger question (open decision 2), and whether the wake should
-> also drive transaction-history refresh (open decision 3). Coverage is
-> Electrum-backed UTXO, QTUM and BCH; EVM and ZHTLC remain out of scope for push
-> for the reasons given above.
+> All three open decisions are resolved. History refresh (3): the history loop
+> wakes on the same signal. Subscription cap (1): **no cap** — an Iguana wallet
+> contributes one subscription per activated Electrum coin, an HD wallet one per
+> known address, and a 10,000-watcher stress test registers and notifies in
+> milliseconds, so the ceiling is orders of magnitude above any real wallet.
+> QRC20 trigger (2): per-token contract-event subscription, because a token
+> balance is contract storage and need not disturb the holder's UTXOs.
 
 1. **Refresh-trigger abstraction** + balance streamer awaits it. No behaviour
    change on its own; everything else builds on it.

@@ -57,13 +57,15 @@
 
 use crate::mm2::lp_network::{broadcast_p2p_msg, Libp2pPeerId};
 use async_std::sync as async_std_sync;
-use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, TradeFee, TransactionEnum};
+use coins::{lp_coinfind, lp_coinfind_or_err, CoinFindError, MmCoinEnum, TradeFee, TransactionEnum,
+            SWAP_HTLC_PUBKEY_LEN};
 use common::log::{debug, warn};
 use common::{bits256, calc_total_pages,
              executor::{spawn, Timer},
              log::{error, info},
              mm_number::{BigDecimal, MmNumber, MmNumberMultiRepr},
              now_ms, HttpStatusCode, PagingOptions};
+use crypto::secret_hash_algo::SecretHashAlgo;
 use derive_more::Display;
 use futures::future::{abortable, AbortHandle, TryFutureExt};
 use http::{Response, StatusCode};
@@ -280,10 +282,23 @@ impl From<TakerSwapEvent> for SwapEvent {
     fn from(taker_event: TakerSwapEvent) -> Self { SwapEvent::Taker(taker_event) }
 }
 
+/// What a V2 ledger entry reserves. One swap can hold two entries for the same
+/// coin — an ERC20 trade against its own platform coin puts the volume entry and
+/// the spend headroom in the same bucket — so removal has to name the kind as
+/// well as the swap.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LockedAmountV2Kind {
+    /// The role's own outgoing volume and the fee to send it (CRD ch.52 R58).
+    Volume,
+    /// Balance kept free to pay for spending the incoming payment (ch.52 R64).
+    SpendHeadroom,
+}
+
 /// V2 swap locked amount information, keyed by coin ticker in SwapsContext.
 #[derive(Debug)]
 struct LockedAmountV2Info {
     swap_uuid: Uuid,
+    kind: LockedAmountV2Kind,
     locked_amount: LockedAmount,
 }
 
@@ -401,6 +416,119 @@ impl SwapsContext {
     pub async fn swap_db(&self) -> InitDbResult<SwapDbLocked<'_>> { Ok(self.swap_db.get_or_initialize().await?) }
 }
 
+/// How much of a trade fee that is not itself skimmed from a payment the payer
+/// must keep free in its own balance.
+///
+/// Both protocols owe the same answer here (CRD ch.51 R53/R54/R55, ch.52
+/// R58/R62/R64), and it is not simply the fee amount. A coin that reports
+/// `paid_from_trading_vol` takes the fee out of the payment it concerns — a
+/// UTXO spend pays the miner from the HTLC output itself — so nothing has to
+/// stay free for it. A coin that does not report it burns the fee from the
+/// account balance, and that balance is the one named by `TradeFee::coin`,
+/// which for an ERC20 payment is the platform coin rather than the token.
+/// This is the same predicate V1's `get_locked_amount` applies to a
+/// registry entry's nested `trade_fee` (chapter 51 R53); here it is applied
+/// once, at estimation time, rather than re-evaluated on every query.
+///
+/// Returns the reservable amount; the caller files it under `fee.coin`.
+fn fee_reservable_amount(fee: &TradeFee) -> MmNumber {
+    if fee.paid_from_trading_vol {
+        MmNumber::from(0)
+    } else {
+        fee.amount.clone()
+    }
+}
+
+/// Record one component of a running V2 swap's ledger entry — a headroom
+/// reservation (ch.52 R64) or a volume/send-fee reservation (R58) — under the
+/// named coin's bucket. Idempotent per (swap, kind, coin): re-applying the same
+/// event does not double-reserve, which matters because a resumed process
+/// re-derives its reservations by reading its own persisted log back (R63).
+///
+/// The whole reservation goes in `LockedAmount::amount` rather than in a
+/// synthesised nested `trade_fee`: the caller has already applied
+/// `fee_reservable_amount`'s paid-from-trading-volume rule, so nesting it
+/// would apply that rule a second time and, worse, only when the bucket
+/// happens to equal the descriptor's own coin — which is exactly the
+/// coin-conflation bug this per-kind, per-coin bucketing avoids.
+fn reserve_v2_amount(ctx: &MmArc, uuid: Uuid, kind: LockedAmountV2Kind, coin: &str, amount: MmNumber) {
+    let swap_ctx = match SwapsContext::from_ctx(ctx) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to reserve amount for swap {}: {}", uuid, e);
+            return;
+        },
+    };
+    let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+    let entries = locked.entry(coin.to_owned()).or_default();
+    if entries.iter().any(|info| info.swap_uuid == uuid && info.kind == kind) {
+        return;
+    }
+    entries.push(LockedAmountV2Info {
+        swap_uuid: uuid,
+        kind,
+        locked_amount: LockedAmount {
+            coin: coin.to_owned(),
+            amount,
+            trade_fee: None,
+        },
+    });
+}
+
+/// Release every entry of `kind` that `uuid` holds in `coin`'s bucket. A no-op
+/// if none exist, so callers may name a bucket unconditionally — including one
+/// a swap never actually reserved in, such as a trading coin whose platform
+/// ticker is itself, where the volume and send-fee entries share a bucket and
+/// a caller releasing both by coin need not know they coincided.
+fn release_v2_amount(ctx: &MmArc, uuid: &Uuid, kind: LockedAmountV2Kind, coin: &str) {
+    let swap_ctx = match SwapsContext::from_ctx(ctx) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to release amount for swap {}: {}", uuid, e);
+            return;
+        },
+    };
+    let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+    if let Some(entries) = locked.get_mut(coin) {
+        entries.retain(|info| !(info.swap_uuid == *uuid && info.kind == kind));
+    }
+}
+
+/// Record the headroom a running V2 swap needs to spend the payment it is owed
+/// (ch.52 R64).
+///
+/// `fee_coin` is the coin that actually pays the fee — `platform_ticker()` of
+/// the counterparty coin — which is also the ledger bucket the balance checks
+/// read.
+fn reserve_v2_spend_headroom(ctx: &MmArc, uuid: Uuid, fee_coin: &str, headroom: MmNumber) {
+    reserve_v2_amount(ctx, uuid, LockedAmountV2Kind::SpendHeadroom, fee_coin, headroom);
+}
+
+/// Release the headroom entry of `uuid` once the incoming payment has been spent
+/// and the fee is no longer owed (ch.52 R64).
+fn release_v2_spend_headroom(ctx: &MmArc, uuid: &Uuid, fee_coin: &str) {
+    release_v2_amount(ctx, uuid, LockedAmountV2Kind::SpendHeadroom, fee_coin);
+}
+
+/// Remove every ledger entry belonging to `uuid`, whatever coin it was filed
+/// under (ch.52 R59).
+///
+/// The two coins of the swap are not enough to find them all: an ERC20 leg files
+/// its spend headroom under the platform coin, which need be neither of them.
+fn release_all_v2_locked_amounts(ctx: &MmArc, uuid: &Uuid) {
+    let swap_ctx = match SwapsContext::from_ctx(ctx) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to release locked amounts for swap {}: {}", uuid, e);
+            return;
+        },
+    };
+    let mut locked = swap_ctx.locked_amounts_v2.lock().unwrap();
+    for entries in locked.values_mut() {
+        entries.retain(|info| info.swap_uuid != *uuid);
+    }
+}
+
 /// Get total amount of selected coin locked by all currently ongoing swaps
 pub fn get_locked_amount(ctx: &MmArc, coin: &str) -> MmNumber {
     let swap_ctx = SwapsContext::from_ctx(ctx).unwrap();
@@ -510,7 +638,7 @@ fn get_locked_amount_by_other_swaps(ctx: &MmArc, except_uuid: &Uuid, coin: &str)
     let swap_ctx = SwapsContext::from_ctx(ctx).unwrap();
     let swap_lock = swap_ctx.running_swaps.lock().unwrap();
 
-    swap_lock
+    let v1_total = swap_lock
         .iter()
         .filter_map(|swap| swap.upgrade())
         .filter(|swap| swap.uuid() != except_uuid)
@@ -525,7 +653,35 @@ fn get_locked_amount_by_other_swaps(ctx: &MmArc, except_uuid: &Uuid, coin: &str)
                 }
             }
             total_amount
+        });
+    drop(swap_lock);
+
+    // V2 swaps reserve through their own ledger rather than the running-swap
+    // registry above, so reading only the registry would report a node with
+    // live V2 swaps as having balance it has already committed — admitting a
+    // new swap against it (CRD ch.52 R61). The aggregate `get_locked_amount`
+    // already sums both; this self-excluding variant is what every swap-start
+    // balance check calls, so it must agree.
+    let locked_v2 = swap_ctx.locked_amounts_v2.lock().unwrap();
+    let v2_total = locked_v2
+        .get(coin)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|info| &info.swap_uuid != except_uuid)
+                .fold(MmNumber::from(0), |mut total, info| {
+                    total += info.locked_amount.amount.clone();
+                    if let Some(ref fee) = info.locked_amount.trade_fee {
+                        if fee.coin == coin && !fee.paid_from_trading_vol {
+                            total += fee.amount.clone();
+                        }
+                    }
+                    total
+                })
         })
+        .unwrap_or_else(|| MmNumber::from(0));
+
+    v1_total + v2_total
 }
 
 pub fn active_swaps_using_coin(ctx: &MmArc, coin: &str) -> Result<Vec<Uuid>, String> {
@@ -724,6 +880,114 @@ impl NegotiationDataMsg {
     }
 }
 
+/// Width of a public-key field on the legacy swap wire (CRD ch.51 R62).
+///
+/// The same width the coin layer is held to by R63, seen from the message
+/// layer, so the two are one constant rather than two that could drift.
+pub const SWAP_WIRE_PUBKEY_LEN: usize = SWAP_HTLC_PUBKEY_LEN;
+
+/// Width of the secret hash carried by the shape-1 negotiation payload
+/// (CRD ch.51 R65). Shapes 2 and 3 carry a variable-length hash, so this is a
+/// lower bound on what the fixed-width field can be narrowed to, not an
+/// equality.
+pub const SWAP_WIRE_SECRET_HASH_MIN_LEN: usize = 20;
+
+/// Reject a counterparty-supplied field that cannot fill its fixed-width slot.
+///
+/// These fields arrive as variable-length byte sequences and are narrowed to
+/// fixed-width types whose conversion indexes the slice without checking it. A
+/// field shorter than the target therefore panics the swap task, and a longer
+/// one is silently truncated — both reachable from a peer-supplied negotiation
+/// message, so neither may be left to the conversion.
+///
+/// A chain whose native key is not a 33-byte secp256k1 point reaches the short
+/// case honestly rather than maliciously; ch.51 R64 binds how such a key
+/// occupies the field, and until a coin produces that form its negotiation must
+/// fail as a length error (R62) rather than take the process down.
+pub fn validate_wire_field_len(field: &[u8], expected: usize, what: &str) -> Result<(), String> {
+    if field.len() < expected {
+        return Err(format!("{what} is {} bytes, expected at least {expected}", field.len()));
+    }
+    Ok(())
+}
+
+/// Exact-width check for the public-key fields bound by ch.51 R62.
+pub fn validate_wire_pubkey(field: &[u8], what: &str) -> Result<(), String> {
+    if field.len() != SWAP_WIRE_PUBKEY_LEN {
+        return Err(format!(
+            "{what} must be exactly {SWAP_WIRE_PUBKEY_LEN} bytes, got {}",
+            field.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Select the secret-hash algorithm for a legacy swap's `(maker_coin,
+/// taker_coin)` pair (CRD ch.51 R71/R72).
+///
+/// The 20-byte `RIPEMD160(SHA-256(_))` default is correct for the ordinary
+/// case, but a coin family whose own atomic-swap payment construction
+/// commits to a native 32-byte hash -- Siacoin's spend-policy HTLC, Bitcoin
+/// Lightning, or a Tendermint-family coin's IBC-HTLC -- has no way to accept
+/// or be satisfied by a shorter external value. Whenever one of those
+/// families sits on either side of the pair, both peers must independently
+/// select the 32-byte `SHA-256(_)` alternate instead; the algorithm itself is
+/// never carried on the wire, only its result, so this selection has to be a
+/// pure function of the two coins' identities that every conforming peer
+/// evaluates identically (R71).
+pub fn select_secret_hash_algo(maker_coin: &MmCoinEnum, taker_coin: &MmCoinEnum) -> SecretHashAlgo {
+    fn commits_to_a_native_32_byte_hash(coin: &MmCoinEnum) -> bool {
+        match coin {
+            MmCoinEnum::SiaCoin(_) | MmCoinEnum::TendermintCoin(_) | MmCoinEnum::TendermintToken(_) => true,
+            #[cfg(not(target_arch = "wasm32"))]
+            MmCoinEnum::LightningCoin(_) => true,
+            _ => false,
+        }
+    }
+
+    if commits_to_a_native_32_byte_hash(maker_coin) || commits_to_a_native_32_byte_hash(taker_coin) {
+        SecretHashAlgo::SHA256
+    } else {
+        SecretHashAlgo::DHASH160
+    }
+}
+
+/// Resolve the two per-coin public keys this node negotiates a legacy swap
+/// with, by asking each coin (ch.51 R63).
+///
+/// A secp256k1 chain answers with the key it is handed — its own HTLC keypair
+/// when [`SwapOps::get_htlc_key_pair`] gives one, otherwise this node's
+/// persistent key — so nothing changes for it. A chain that signs with another
+/// curve answers with its own key, in the 33-byte form R64 dictates. Neither
+/// the negotiation message nor the swap machines become key-length-polymorphic
+/// in the process: the result is exactly `SWAP_WIRE_PUBKEY_LEN` bytes either
+/// way.
+///
+/// # Errors
+///
+/// Fails when either coin cannot produce a key of the bound width; the swap
+/// then fails to start rather than negotiating a key it cannot sign with.
+pub fn derive_htlc_pubkeys(
+    ctx: &MmArc,
+    maker_coin: &MmCoinEnum,
+    maker_coin_htlc_key_pair: &Option<KeyPair>,
+    taker_coin: &MmCoinEnum,
+    taker_coin_htlc_key_pair: &Option<KeyPair>,
+) -> Result<(H264, H264), String> {
+    let node_pubkey = *ctx.secp256k1_key_pair().public();
+    let maker_coin_htlc_pubkey = maker_coin
+        .derive_htlc_pubkey(maker_coin_htlc_key_pair.as_ref().map_or(&node_pubkey, |k| k.public()))
+        .map_err(|e| format!("!{}.derive_htlc_pubkey {}", maker_coin.ticker(), e))?;
+    let taker_coin_htlc_pubkey = taker_coin
+        .derive_htlc_pubkey(taker_coin_htlc_key_pair.as_ref().map_or(&node_pubkey, |k| k.public()))
+        .map_err(|e| format!("!{}.derive_htlc_pubkey {}", taker_coin.ticker(), e))?;
+
+    Ok((
+        H264::from(&maker_coin_htlc_pubkey[..]),
+        H264::from(&taker_coin_htlc_pubkey[..]),
+    ))
+}
+
 /// Data to be exchanged and validated on swap start, the replacement of LP_pubkeys_data, LP_choosei_data, etc.
 #[derive(Debug, Default, Deserializable, Eq, PartialEq, Serializable)]
 struct SwapNegotiationData {
@@ -739,4 +1003,462 @@ pub struct TransactionIdentifier {
     tx_hex: BytesJson,
     /// Transaction hash in hexadecimal format
     tx_hash: BytesJson,
+}
+
+#[cfg(test)]
+mod wire_field_tests {
+    use super::*;
+
+    /// ch.51 R62: a key field is exactly 33 bytes, and any other width is a
+    /// length error rather than something the narrowing conversion has to cope
+    /// with. The conversion indexes the slice unchecked, so a short field would
+    /// otherwise panic the swap task on a peer-supplied message.
+    #[test]
+    fn wire_pubkey_accepts_only_the_bound_width() {
+        assert!(validate_wire_pubkey(&[0u8; SWAP_WIRE_PUBKEY_LEN], "k").is_ok());
+
+        // A 32-byte ed25519 key is the honest short case: until it is padded to
+        // the bound width (R64) it must be refused, not truncated or panicked on.
+        assert!(validate_wire_pubkey(&[0u8; 32], "k").is_err());
+
+        assert!(validate_wire_pubkey(&[], "k").is_err());
+        assert!(validate_wire_pubkey(&[0u8; 34], "k").is_err());
+    }
+
+    /// R64's padding convention makes an ed25519 key acceptable: native bytes
+    /// first, trailing zero. Guards the width, not the curve.
+    #[test]
+    fn ed25519_key_padded_to_the_bound_width_is_accepted() {
+        let mut padded = [7u8; SWAP_WIRE_PUBKEY_LEN];
+        padded[SWAP_WIRE_PUBKEY_LEN - 1] = 0;
+        assert!(validate_wire_pubkey(&padded, "k").is_ok());
+        assert_eq!(&padded[..32], &[7u8; 32], "native key occupies the leading bytes");
+    }
+
+    /// R65: the secret hash is fixed-width in shape 1 but variable in shapes 2
+    /// and 3, so the guard is a lower bound — enough to keep the narrowing
+    /// conversion in range without rejecting a legitimately wider hash.
+    #[test]
+    fn secret_hash_guard_is_a_lower_bound() {
+        assert!(validate_wire_field_len(&[0u8; 20], SWAP_WIRE_SECRET_HASH_MIN_LEN, "h").is_ok());
+        assert!(validate_wire_field_len(&[0u8; 32], SWAP_WIRE_SECRET_HASH_MIN_LEN, "h").is_ok());
+        assert!(validate_wire_field_len(&[0u8; 19], SWAP_WIRE_SECRET_HASH_MIN_LEN, "h").is_err());
+    }
+}
+
+#[cfg(test)]
+mod persisted_event_vocabulary_tests {
+    use super::maker_swap::{MAKER_ERROR_EVENTS, MAKER_SUCCESS_EVENTS};
+    use super::taker_swap::{TAKER_ERROR_EVENTS, TAKER_SUCCESS_EVENTS};
+
+    /// Pin the legacy persisted event vocabularies.
+    ///
+    /// The saved-swap JSON is a public compatibility surface: deployed peers
+    /// and GUIs read these lists, and CRD ch.44 R44.8A.3/.4 binds the names
+    /// each side's parser accepts. Nothing else in this tree checks them
+    /// against a fixed expectation — the recreate-swap fixtures derive them
+    /// from these same constants, so they agree by construction, and the
+    /// integration tests that use them need a live network.
+    ///
+    /// So this test exists to make a change deliberate rather than silent:
+    /// adding, removing, renaming or reordering an event must be accompanied
+    /// by updating this list and the chapter that binds it.
+    #[test]
+    fn legacy_event_vocabulary_is_pinned() {
+        assert_eq!(
+            TAKER_SUCCESS_EVENTS.as_slice(),
+            [
+            "Started",
+            "Negotiated",
+            "TakerFeeSent",
+            "TakerPaymentInstructionsReceived",
+            "MakerPaymentReceived",
+            "MakerPaymentWaitConfirmStarted",
+            "MakerPaymentValidatedAndConfirmed",
+            "TakerPaymentSent",
+            "WatcherMessageSent",
+            "TakerPaymentSpent",
+            "MakerPaymentSpent",
+            "MakerPaymentSpendConfirmed",
+            "MakerPaymentSpentByWatcher",
+            "TakerPaymentRefundStarted",
+            "TakerPaymentRefundFinished",
+            "TakerPaymentRefundedByWatcher",
+            "Finished",
+            ],
+            "TAKER_SUCCESS_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+        assert_eq!(
+            TAKER_ERROR_EVENTS.as_slice(),
+            [
+            "StartFailed",
+            "NegotiateFailed",
+            "TakerFeeSendFailed",
+            "MakerPaymentValidateFailed",
+            "MakerPaymentWaitConfirmFailed",
+            "TakerPaymentTransactionFailed",
+            "TakerPaymentWaitConfirmFailed",
+            "TakerPaymentDataSendFailed",
+            "TakerPaymentWaitForSpendFailed",
+            "MakerPaymentSpendFailed",
+            "MakerPaymentSpendConfirmFailed",
+            "TakerPaymentWaitRefundStarted",
+            "TakerPaymentRefunded",
+            "TakerPaymentRefundFailed",
+            ],
+            "TAKER_ERROR_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+        assert_eq!(
+            MAKER_SUCCESS_EVENTS.as_slice(),
+            [
+            "Started",
+            "Negotiated",
+            "MakerPaymentInstructionsReceived",
+            "TakerFeeValidated",
+            "MakerPaymentSent",
+            "TakerPaymentReceived",
+            "TakerPaymentWaitConfirmStarted",
+            "TakerPaymentValidatedAndConfirmed",
+            "TakerPaymentSpent",
+            "TakerPaymentSpendConfirmStarted",
+            "TakerPaymentSpendConfirmed",
+            "MakerPaymentRefundStarted",
+            "MakerPaymentRefundFinished",
+            "Finished",
+            ],
+            "MAKER_SUCCESS_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+        assert_eq!(
+            MAKER_ERROR_EVENTS.as_slice(),
+            [
+            "StartFailed",
+            "NegotiateFailed",
+            "TakerFeeValidateFailed",
+            "MakerPaymentTransactionFailed",
+            "MakerPaymentDataSendFailed",
+            "MakerPaymentWaitConfirmFailed",
+            "TakerPaymentValidateFailed",
+            "TakerPaymentWaitConfirmFailed",
+            "TakerPaymentSpendFailed",
+            "TakerPaymentSpendConfirmFailed",
+            "MakerPaymentWaitRefundStarted",
+            "MakerPaymentRefunded",
+            "MakerPaymentRefundFailed",
+            ],
+            "MAKER_ERROR_EVENTS is a persisted compatibility surface (CRD ch.44 R44.8A); changing it must be deliberate"
+        );
+    }
+}
+
+#[cfg(test)]
+mod v2_spend_headroom_tests {
+    use super::*;
+    use common::new_uuid;
+    use mm2_core::mm_ctx::MmCtxBuilder;
+
+    fn test_ctx() -> MmArc {
+        MmCtxBuilder::default()
+            .with_conf(json::json!({"netid": 8762}))
+            .into_mm_arc()
+    }
+
+    /// The shape V1 files its counterparty-spend reservation in: zero volume,
+    /// carrying the coin's own fee descriptor (ch.51 R54/R55, and see
+    /// `TakerSwap::locked_amount`). Placed in the V2 ledger so that both shapes
+    /// are scored by the same predicate — which ch.52 R62 requires the two totals
+    /// to share anyway.
+    fn v1_shaped_headroom_total(fee: &TradeFee) -> MmNumber {
+        let ctx = test_ctx();
+        let swap_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+        swap_ctx
+            .locked_amounts_v2
+            .lock()
+            .unwrap()
+            .entry(fee.coin.clone())
+            .or_default()
+            .push(LockedAmountV2Info {
+                swap_uuid: new_uuid(),
+                kind: LockedAmountV2Kind::Volume,
+                locked_amount: LockedAmount {
+                    coin: fee.coin.clone(),
+                    amount: MmNumber::from(0),
+                    trade_fee: Some(fee.clone()),
+                },
+            });
+        get_locked_amount(&ctx, &fee.coin)
+    }
+
+    fn v2_headroom_total(fee: &TradeFee) -> MmNumber {
+        let ctx = test_ctx();
+        reserve_v2_spend_headroom(&ctx, new_uuid(), &fee.coin, fee_reservable_amount(fee));
+        get_locked_amount(&ctx, &fee.coin)
+    }
+
+    /// A UTXO spend pays the miner out of the HTLC output it is claiming, so no
+    /// balance has to stay free for it. An EVM spend burns gas from the account,
+    /// so it does. These are the two coin families on the V2 surface, and they are
+    /// the reason the answer cannot be "reserve the fee" or "reserve nothing".
+    fn utxo_style_fee() -> TradeFee {
+        TradeFee {
+            coin: "MORTY".into(),
+            amount: MmNumber::from("0.00001"),
+            paid_from_trading_vol: true,
+        }
+    }
+
+    fn evm_style_fee() -> TradeFee {
+        TradeFee {
+            coin: "ETH".into(),
+            amount: MmNumber::from("0.0021"),
+            paid_from_trading_vol: false,
+        }
+    }
+
+    /// ch.52 R64 with ch.51 R54/R55: closing the V2 gap only helps if the two
+    /// protocols then answer the same question the same way, since one node runs
+    /// both and `max_taker_vol` sums them.
+    #[test]
+    fn v2_spend_headroom_agrees_with_the_v1_reservation() {
+        for (label, fee) in [
+            ("a fee paid out of the payment being claimed", utxo_style_fee()),
+            ("a fee burned from our own balance", evm_style_fee()),
+        ] {
+            assert_eq!(
+                v1_shaped_headroom_total(&fee),
+                v2_headroom_total(&fee),
+                "V1 and V2 must reserve the same amount for {label}"
+            );
+        }
+
+        // And the answers are actually different from each other, so the
+        // agreement above is not two zeroes agreeing by accident.
+        assert_eq!(v2_headroom_total(&utxo_style_fee()), MmNumber::from(0));
+        assert_eq!(v2_headroom_total(&evm_style_fee()), MmNumber::from("0.0021"));
+    }
+
+    /// Both directions, as `finished_swap_releases_its_reservation` does for the
+    /// legacy registry: reserving must be visible, and releasing must undo it.
+    /// A headroom that were never released would shrink `max_taker_vol` for the
+    /// life of the process, the ledger being in-memory only (ch.52 R65).
+    #[test]
+    fn v2_spend_headroom_is_held_until_the_incoming_payment_is_spent() {
+        let ctx = test_ctx();
+        let uuid = new_uuid();
+        let fee = evm_style_fee();
+
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from(0),
+            "nothing is reserved before the swap initialises"
+        );
+
+        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, fee_reservable_amount(&fee));
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from("0.0021"),
+            "a live swap must hold the fee it needs to claim what it is owed"
+        );
+
+        // Re-applying the same event must not double-reserve; a resume can apply
+        // it a second time (ch.52 R63).
+        reserve_v2_spend_headroom(&ctx, uuid, &fee.coin, fee_reservable_amount(&fee));
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from("0.0021"),
+            "reserving twice for one swap must not reserve twice"
+        );
+
+        release_v2_spend_headroom(&ctx, &uuid, &fee.coin);
+        assert_eq!(
+            get_locked_amount(&ctx, &fee.coin),
+            MmNumber::from(0),
+            "once the payment is spent the fee is no longer owed"
+        );
+    }
+
+    /// ch.52 R61: the self-excluding total is what every swap-start balance check
+    /// reads, so a headroom invisible to it would admit a second swap against the
+    /// balance the first needs to collect — the failure R61 was written for,
+    /// reached by a different route.
+    #[test]
+    fn v2_spend_headroom_is_visible_to_the_self_excluding_total() {
+        let ctx = test_ctx();
+        let holder = new_uuid();
+        let other = new_uuid();
+        let fee = evm_style_fee();
+
+        reserve_v2_spend_headroom(&ctx, holder, &fee.coin, fee_reservable_amount(&fee));
+
+        assert_eq!(
+            get_locked_amount_by_other_swaps(&ctx, &other, &fee.coin),
+            MmNumber::from("0.0021"),
+            "another swap's balance check must see the headroom"
+        );
+        assert_eq!(
+            get_locked_amount_by_other_swaps(&ctx, &holder, &fee.coin),
+            MmNumber::from(0),
+            "a swap must not block itself"
+        );
+    }
+
+    /// An ERC20 leg files its headroom under the platform coin, which need be
+    /// neither of the swap's two coins — and which may equally well be one of
+    /// them, when the other leg is that same platform coin. Both cases have to
+    /// work: the volume entry must not carry the headroom away with it, and
+    /// termination must still find the headroom to release (ch.52 R59).
+    #[test]
+    fn erc20_headroom_shares_a_bucket_with_the_volume_entry_without_colliding() {
+        let ctx = test_ctx();
+        let swap_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+        let uuid = new_uuid();
+
+        // Volume reserved in ETH, headroom for spending an ERC20 payment also
+        // billed to ETH: one bucket, two entries, one swap.
+        swap_ctx
+            .locked_amounts_v2
+            .lock()
+            .unwrap()
+            .entry("ETH".to_owned())
+            .or_default()
+            .push(LockedAmountV2Info {
+                swap_uuid: uuid,
+                kind: LockedAmountV2Kind::Volume,
+                locked_amount: LockedAmount {
+                    coin: "ETH".into(),
+                    amount: MmNumber::from("1"),
+                    trade_fee: None,
+                },
+            });
+        reserve_v2_spend_headroom(&ctx, uuid, "ETH", MmNumber::from("0.0021"));
+        assert_eq!(get_locked_amount(&ctx, "ETH"), MmNumber::from("1.0021"));
+
+        // The payment goes out: the volume is committed, the headroom is not.
+        if let Some(entries) = swap_ctx.locked_amounts_v2.lock().unwrap().get_mut("ETH") {
+            entries.retain(|info| info.swap_uuid != uuid || info.kind != LockedAmountV2Kind::Volume);
+        }
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from("0.0021"),
+            "committing the volume must leave the headroom standing"
+        );
+
+        release_all_v2_locked_amounts(&ctx, &uuid);
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from(0),
+            "termination must clear every bucket the swap wrote to"
+        );
+    }
+
+    /// ch.52 R58/V5: this is the shape the volume entry used before this fix —
+    /// one `LockedAmountV2Info`, filed under the trading coin's bucket, with the
+    /// send fee nested inside as a `TradeFee` naming whatever coin the fee is
+    /// actually billed to. `get_locked_amount` only ever checks a nested
+    /// `trade_fee` against the bucket it is iterating, never against the fee's
+    /// own coin — so a fee that disagrees with its bucket, which is exactly what
+    /// an ERC20 leg's platform-coin gas fee does, was silently uncounted
+    /// everywhere: not in the trading coin's total, and not in the fee's own
+    /// coin's total either. Confirms the defect this fix closes actually existed
+    /// in the shape the old code produced, independent of any code this commit
+    /// changed.
+    #[test]
+    fn nested_trade_fee_naming_a_different_coin_than_its_bucket_was_invisible() {
+        let ctx = test_ctx();
+        let swap_ctx = SwapsContext::from_ctx(&ctx).unwrap();
+        swap_ctx
+            .locked_amounts_v2
+            .lock()
+            .unwrap()
+            .entry("MYTOKEN".to_owned())
+            .or_default()
+            .push(LockedAmountV2Info {
+                swap_uuid: new_uuid(),
+                kind: LockedAmountV2Kind::Volume,
+                locked_amount: LockedAmount {
+                    coin: "MYTOKEN".into(),
+                    amount: MmNumber::from("1"),
+                    trade_fee: Some(TradeFee {
+                        coin: "ETH".into(),
+                        amount: MmNumber::from("0.01"),
+                        paid_from_trading_vol: false,
+                    }),
+                },
+            });
+
+        assert_eq!(
+            get_locked_amount(&ctx, "MYTOKEN"),
+            MmNumber::from("1"),
+            "the volume amount is still counted in its own bucket"
+        );
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from(0),
+            "but the nested fee, naming a coin other than the bucket it was filed under, was invisible everywhere — the real gas fee this represents was never reserved"
+        );
+    }
+
+    /// The fix for the test above: the send fee is its own ledger entry, in its
+    /// own coin's bucket, rather than nested inside the volume entry (ch.52 R58,
+    /// closing V5). Mirrors `finished_swap_releases_its_reservation` and
+    /// `erc20_headroom_shares_a_bucket_with_the_volume_entry_without_colliding`:
+    /// both directions, plus idempotency and a shared-bucket case.
+    #[test]
+    fn send_fee_in_a_different_coin_than_the_trading_coin_is_reserved_and_released_in_its_own_bucket() {
+        let ctx = test_ctx();
+        let uuid = new_uuid();
+
+        // A token traded against its own platform coin's gas: the volume lives
+        // under the token, the send fee under the platform coin.
+        reserve_v2_amount(&ctx, uuid, LockedAmountV2Kind::Volume, "MYTOKEN", MmNumber::from("1"));
+        reserve_v2_amount(&ctx, uuid, LockedAmountV2Kind::Volume, "ETH", MmNumber::from("0.01"));
+
+        assert_eq!(get_locked_amount(&ctx, "MYTOKEN"), MmNumber::from("1"));
+        assert_eq!(
+            get_locked_amount(&ctx, "ETH"),
+            MmNumber::from("0.01"),
+            "the send fee must be visible in its own coin's bucket, unlike the nested shape above"
+        );
+
+        // A resume re-derives its reservations by reading the persisted log
+        // back (R63); re-applying the same event must not double-reserve.
+        reserve_v2_amount(&ctx, uuid, LockedAmountV2Kind::Volume, "ETH", MmNumber::from("0.01"));
+        assert_eq!(get_locked_amount(&ctx, "ETH"), MmNumber::from("0.01"));
+
+        // The payment is broadcast: both halves were committed together and
+        // release together, whether or not they shared a bucket.
+        release_v2_amount(&ctx, &uuid, LockedAmountV2Kind::Volume, "MYTOKEN");
+        release_v2_amount(&ctx, &uuid, LockedAmountV2Kind::Volume, "ETH");
+        assert_eq!(get_locked_amount(&ctx, "MYTOKEN"), MmNumber::from(0));
+        assert_eq!(get_locked_amount(&ctx, "ETH"), MmNumber::from(0));
+    }
+}
+
+#[cfg(test)]
+mod secret_hash_algo_selection_tests {
+    use super::*;
+    use coins::TestCoin;
+
+    // The overwhelmingly common case, and the one this repository's swap
+    // test suite already builds coin pairs for throughout
+    // (`MmCoinEnum::Test`) -- confirms the default stays the 20-byte
+    // algorithm when neither side is one of the R72-named families.
+    #[test]
+    fn an_ordinary_pair_selects_the_20_byte_default() {
+        let a = MmCoinEnum::Test(TestCoin::default());
+        let b = MmCoinEnum::Test(TestCoin::default());
+        assert!(matches!(select_secret_hash_algo(&a, &b), SecretHashAlgo::DHASH160));
+    }
+
+    // NOT independently tested here: that Sia, Tendermint, TendermintToken,
+    // and (off-wasm32) Lightning select the 32-byte alternate. This
+    // repository's test infrastructure has no lightweight way to construct a
+    // functional SiaCoin/TendermintCoin/LightningCoin (each wraps a real API
+    // client, unlike the MmCoinEnum::Test double used above), and a test that
+    // merely re-typed the same family list a second time to compare against
+    // itself would pass regardless of whether `select_secret_hash_algo`'s
+    // match arms were ever kept in sync with it — worse than no test, since
+    // it would look like coverage. That branch is verified by CRD ch.51 R72
+    // cross-reference and code review instead (see the doc comment on
+    // `select_secret_hash_algo` above); a real regression test needs test
+    // doubles for these coin families that do not exist yet.
 }

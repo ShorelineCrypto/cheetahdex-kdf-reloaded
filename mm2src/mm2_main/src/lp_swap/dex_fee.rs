@@ -208,4 +208,44 @@ mod tests {
         );
         assert!(!taker_swap_v2.contains("dex_fee: &DexFee::NoFee"));
     }
+
+    /// T9/P2.1: the 7 `net_config_or_panic` call sites in the V2 swap `on_changed`
+    /// handlers (4 in `taker_swap_v2.rs`, 3 in `maker_swap_v2.rs`) must all have been
+    /// replaced with the fallible `net_config_for`, which each site matches on and
+    /// aborts the state machine cleanly (`AbortReason::InternalError`) rather than
+    /// panicking, on `None`. `on_changed` itself needs a live coin implementing
+    /// `MakerCoinSwapOpsV2`/`TakerCoinSwapOpsV2` to actually drive execution down to
+    /// this call, which this codebase has no mocking infrastructure for (same
+    /// limitation `taker_swap_v2.rs`'s own
+    /// `maker_payment_spent_confirmation_timeout_no_longer_falls_back_to_empty_bytes`
+    /// documents for T1/D8); this checks the fixed call sites' source shape directly
+    /// instead, the same way `t16_4a`/`t16_4b` above do.
+    #[test]
+    fn t18_net_config_for_replaces_net_config_or_panic_in_v2_swap_files() {
+        let maker_swap_v2 = include_str!("maker_swap_v2.rs");
+        let taker_swap_v2 = include_str!("taker_swap_v2.rs");
+
+        assert!(
+            !maker_swap_v2.contains("net_config_or_panic"),
+            "maker_swap_v2.rs must not call net_config_or_panic from a fallible on_changed context"
+        );
+        assert!(
+            !taker_swap_v2.contains("net_config_or_panic"),
+            "taker_swap_v2.rs must not call net_config_or_panic from a fallible on_changed context"
+        );
+        assert_eq!(
+            maker_swap_v2
+                .matches("mm2_net_config::net_config_for(sm.ctx.netid())")
+                .count(),
+            3,
+            "maker_swap_v2.rs should have exactly 3 net_config_for call sites (P2.1)"
+        );
+        assert_eq!(
+            taker_swap_v2
+                .matches("mm2_net_config::net_config_for(sm.ctx.netid())")
+                .count(),
+            4,
+            "taker_swap_v2.rs should have exactly 4 net_config_for call sites (P2.1)"
+        );
+    }
 }

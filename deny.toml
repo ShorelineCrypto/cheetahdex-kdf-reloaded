@@ -86,6 +86,17 @@ ignore = [
     # - secp256k1 0.20 (RUSTSEC-2022-0070): pinned by deeper dependencies.
     "RUSTSEC-2022-0092", # rmp-serde Raw/RawRef unsound
     "RUSTSEC-2022-0070", # secp256k1 0.20 use-after-free in safe code
+
+    # --- hyper 0.14 / h2 0.3 (workspace-wide) ---
+    # RUSTSEC-2026-0258 (low severity: unbounded empty DATA frames -> unbounded
+    # memory or a length-overflow panic if a stream is never drained) is fixed
+    # only in h2 >=0.4.16, which pairs with hyper 1.x -- there is no in-line
+    # 0.3.x patch. hyper 0.14 is the version axum 0.6, tonic 0.11, and this
+    # workspace's own client code are all still built against; moving to h2
+    # 0.4 means moving the whole hyper stack to 1.x across every one of those,
+    # not a `cargo update -p h2`. Scheduled, not upstream-blocked: tracked as
+    # its own migration rather than folded into this ignore silently.
+    "RUSTSEC-2026-0258", # h2 0.3.27 unbounded empty DATA frames
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories

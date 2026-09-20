@@ -55,6 +55,32 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
   sharing either file between the two implementations would permit an older
   binary to open a schema it does not understand and could compromise shielded
   wallet state.
+- **V2 atomic swaps reserve the fee needed to collect the incoming payment.**
+  GLEEC KDF reserves this headroom for V1 swaps but not for V2 ones, so on a
+  GLEEC node a concurrent trade can spend the balance a live V2 swap needs to
+  claim what it has been sent. Reloaded reserves it on both protocols, in the
+  same amount (CRD ch.52 R64, ch.51 R54/R55). The visible effect is that
+  `max_taker_vol` and `get_locked_amount` shrink by that fee while a V2 swap is
+  live against a coin that pays its spend fee from the account balance — EVM
+  coins, where it is the spend gas, and where an ERC-20 leg bills it to the
+  platform coin. Coins that pay the fee out of the payment being claimed, such
+  as UTXO coins, are unaffected, and no V1 answer changes. No compat switch is
+  provided: the alternative behaviour is a node that can be left unable to
+  collect a payment it has already been sent, and a node running both protocols
+  must not answer one balance question two ways. Code:
+  `mm2_main/src/lp_swap.rs`, `mm2_main/src/lp_swap/maker_swap_v2.rs`,
+  `mm2_main/src/lp_swap/taker_swap_v2.rs`.
+- **Siacoin transaction history on the mmrpc-2.0 `my_tx_history`.** GLEEC KDF
+  serves SC history through the legacy tier-1 `my_tx_history` only, and rejects
+  an SC request on the mmrpc-2.0 method with the not-supported error. Reloaded
+  accepts SC on both tiers, serving the mmrpc-2.0 request from the same
+  coin-generic runtime history store the tier-1 method reads (CRD ch.53
+  R53.2.7). No compat switch is provided because the change is strictly
+  additive: it accepts a request GLEEC KDF refuses and alters no response GLEEC
+  KDF produces, so no existing integration observes a behaviour change. SC is
+  still deliberately *not* routed through the SQL-indexed history storage
+  (R53.3.1, ch.53 D53.1). Code: `coins/my_tx_history_v2.rs`,
+  `coins/siacoin/siacoin_history.rs`.
 
 ### Removed / disabled in KDF Reloaded
 
@@ -64,7 +90,15 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
 ### Work in progress
 
 - Hardware wallet — Ledger transport (scaffolding only; crate not built into any artifact).
-- Siacoin atomic-swap operations (HD-wallet stubs only; not wired to any default activation flow).
+- Siacoin V1 atomic-swap operations. No longer a stub: SC now negotiates its
+  own ed25519 HTLC key (ch.51 R-S9), gets the CRD-dictated 32-byte secret
+  hash whenever it is on either side of the pair (ch.51 R71/R72), and has
+  completed real send/spend/refund swaps against UTXO counterparties
+  (confirmed live, both directions). Still open: the swap-spend search
+  event-walk remains unimplemented (ch.20 D3/R-S8 — the affected RPC now
+  fails cleanly instead of silently guessing "not spent", but does not yet
+  actually search), and the V2 swap protocol is not implemented for SC
+  (ch.20 D5, V1 only).
 - HD wallet dispatch in swap/ordermatch paths (legacy iguana-key fallback retained for parity with upstream and GLEEC; documented in code).
 - *(further entries to be enumerated.)*
 

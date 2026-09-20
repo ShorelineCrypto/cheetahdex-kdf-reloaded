@@ -3458,6 +3458,7 @@ mod tests {
 
         let mut rng = OsRng;
         let extsk = sapling::zip32::ExtendedSpendingKey::master(&[0u8; 32]);
+        #[allow(deprecated)]
         let extfvk = extsk.to_extended_full_viewing_key();
         let (_, payment_address) = extfvk.default_address();
 
@@ -3490,6 +3491,7 @@ mod tests {
 
         // A different wallet's key must not match, or every mempool output on
         // the network would be reported as an incoming payment.
+        #[allow(deprecated)]
         let other = sapling::zip32::ExtendedSpendingKey::master(&[7u8; 32]).to_extended_full_viewing_key();
         let other_ivk = PreparedIncomingViewingKey::new(&other.fvk.vk.ivk());
         assert!(

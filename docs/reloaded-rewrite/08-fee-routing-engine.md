@@ -274,6 +274,22 @@ magnitude of the taker coin's minimum-transferable amount on either network.
 implementation only. No fee-substrate code change is permitted to add or
 adjust a network's numeric policy.
 
+> **Code-quality finding (informative).** R16 binds the burn-destination
+> raw public-key bytes (and every other network numeric) as sourced
+> exclusively through the Chapter 06 network-config accessor surface. One
+> coin-layer consumer beneath the arithmetic core does not follow that rule:
+> the UTXO-family V2 swap path's `DexFee::Standard` fee-output builder
+> resolves the fee-recipient public key from a deprecated global constant
+> instead of resolving it through the active network's config accessor,
+> so a UTXO V2 swap on one supported network identifier would build its
+> standard dex-fee output against another network identifier's fee
+> address. This is the same defect, with its proposed fix, already
+> recorded as a Code-quality finding in
+> [Chapter 29](29-license-conditions-e-f.md#291-reproduction-detail)
+> §29.1.4; it is cross-referenced here rather than re-analysed because
+> the rule it violates (R16, network-parameter sourcing) belongs to this
+> chapter.
+
 ## 8.7 Tests (test invariants)
 
 **T1.** *Floor.* For a trade amount whose exact-rational product with the
@@ -388,13 +404,17 @@ git -C <baseline> grep -nE 'fn (validate_fee|send_taker_fee)\b'
 - *Inputs consulted for this chapter:* the baseline tree at project
   baseline commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, Chapter 04
   (error envelope), Chapter 06 (network-id and parameter substrate), the
-  public issue-1 failure record, and the external specifications listed in
-  §8.9.
-- *Permitted-input classes used:* baseline source; chapter-bound type
-  identifiers introduced here as substrate-contract surface (`DexFee`,
-  `DexFeeBurnDestination`, `ValidateFeeArgs`, `compute_dex_fee`,
-  `send_taker_fee`, `validate_fee`); standard chain-protocol terminology
-  (`OP_RETURN`, ERC-20, Cosmos SDK `x/bank`).
-- *Sibling chapters cross-referenced:* Chapter 04, Chapter 06.
+  public issue-1 failure record, the present-day working tree (the
+  `dex_fee_standard_output` R16 finding cross-referenced from Chapter 29),
+  and the external specifications listed in §8.9.
+- *Permitted-input classes used:* baseline source; the present-day working
+  tree, quoted as evidence under the legal-position carve-out of chapter 01
+  R11, for the R16 finding; chapter-bound type identifiers introduced here
+  as substrate-contract surface (`DexFee`, `DexFeeBurnDestination`,
+  `ValidateFeeArgs`, `compute_dex_fee`, `send_taker_fee`, `validate_fee`);
+  standard chain-protocol terminology (`OP_RETURN`, ERC-20, Cosmos SDK
+  `x/bank`).
+- *Sibling chapters cross-referenced:* Chapter 04, Chapter 06, Chapter 29
+  (R16 finding cross-reference).
 - *Author of this chapter:* clean-room round-2 driving-spec working set.
 - *Forbidden corpus:* not consulted.

@@ -202,7 +202,9 @@ RPCs remain gated (Chapter 43 R43.3.1). Any derivation of a default password
 from the passphrase, and the startup strength-policy validation, are governed
 by Chapter 43; in no-login mode (no passphrase) there is no passphrase to
 derive from, and the node still starts with only its identity-free surface
-reachable.
+reachable. (Chapter 43 §43.3 records a code-quality finding on a shipped
+gap in this floor for the *absent*-`rpc_password` case specifically; the
+binding requirement in this paragraph is unchanged.)
 
 R45.5.3 **`netid` range.** An absent, empty, or non-integer `netid` resolves to
 the default network id `0`. A `netid` value that exceeds the unsigned 16-bit

@@ -97,6 +97,10 @@ impl MmVersionResult {
     pub fn to_json(&self) -> Json { json::to_value(self).expect("expected valid JSON object") }
 }
 
+impl Default for MmVersionResult {
+    fn default() -> Self { Self::new() }
+}
+
 pub struct LpMainParams {
     conf: Json,
     filter: Option<LogLevel>,

@@ -211,10 +211,20 @@ R16. **Per-coin opt-in predicate.** The swap-operations
      The watcher substrate shall short-circuit on any coin
      pair where either side reports opt-out.
 
-R17. **UTXO-style families are the eligible set today.**
-     At the time of writing the eligible families are
-     UTXO-standard, BCH (Bitcoin Cash), and QTUM. Other
-     coin families inherit the opt-out default.
+R17. **UTXO-style families and Siacoin are the eligible set
+     today.** At the time of writing the eligible families are
+     UTXO-standard, BCH (Bitcoin Cash), QTUM, and Siacoin
+     ([Chapter 20](20-siacoin-integration.md) §20.10 D7 — a
+     non-UTXO family that opts in via the same per-coin
+     predicate of R16 despite its structurally different
+     native-spend-policy HTLC). Other coin families inherit the
+     opt-out default. Opting in via the predicate is independent
+     of how many of the coin-trait's other watcher methods a
+     family actually implements: the three named UTXO-style
+     families opt in with none of those methods overridden,
+     relying entirely on the trait's own graceful-error defaults,
+     while Siacoin's opt-in is paired with real implementations of
+     four of the five non-trivial methods (Chapter 20 §20.10 D7).
 
 R18. **`watcher_reward` field placeholder.** The codebase
      shall carry a `watcher_reward` boolean field on the
@@ -282,12 +292,18 @@ D2. **Cryptographically-bound watcher attribution.** R5
     (D1) could distinguish honest watchers from
     free-riders. Not in scope today.
 
-D3. **Eligible-coin-family expansion.** R17 lists the
-    three eligible families today. Adding a new family
-    requires the family's transaction format to permit
-    deterministic third-party rebroadcast given the
-    watcher payload; each new family is an additive
-    opt-in (R16).
+D3. **Eligible-coin-family expansion.** *Partially
+    discharged.* R17 lists four eligible families today,
+    up from the three UTXO-style families this entry
+    originally described; Chapter 20 §20.10 D7 is the record
+    of Siacoin's addition, including which of the coin-trait's
+    non-trivial watcher methods it implements and which one
+    (`create_maker_payment_spend_preimage`) it judges
+    infeasible and deliberately leaves on the trait's own
+    graceful default. Adding any further family still requires
+    the family's transaction format to permit deterministic
+    third-party rebroadcast given the watcher payload; each new
+    family remains an additive opt-in (R16).
 
 D4. **Operator-tunable timing.** R13's constants are
     literals. Exposing them as operator-tunables (per-coin
@@ -315,6 +331,10 @@ D4. **Operator-tunable timing.** R13's constants are
   ([Chapter 8](08-fee-routing-engine.md)) whose
   validate-fee surface the watcher invokes during the
   validate-taker-fee state of §9.6.
+- The Siacoin integration
+  ([Chapter 20](20-siacoin-integration.md) §20.10 D7), the
+  fourth family added to R17's eligible set and the record
+  of which coin-trait watcher methods it implements.
 
 ## 9.14 Baseline Verifications
 
@@ -352,5 +372,9 @@ V3. The publish-subscribe overlay the substrate rides on is
   bound by Chapter 14; the per-network configuration
   registry of Chapter 6 (referenced by D1); the fee-
   routing substrate of Chapter 8 (referenced by §9.6's
-  validate-taker-fee state).
+  validate-taker-fee state); the Siacoin integration of
+  Chapter 20 §20.10 D7 (R17's fourth eligible family,
+  cross-checked against this repository's own
+  `is_supported_by_watchers` overrides across
+  `mm2src/coins/`, not the forbidden corpus).
 - *Forbidden corpus:* not consulted.

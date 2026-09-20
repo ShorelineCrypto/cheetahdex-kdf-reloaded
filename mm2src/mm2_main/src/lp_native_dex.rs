@@ -543,6 +543,14 @@ pub async fn lp_init(ctx: MmArc) -> MmInitResult<()> {
 
     let ctx_id = ctx.ffi_handle().map_to_mm(MmInitError::Internal)?;
 
+    // Native `spawn_rpc` binds a real TCP listener and can fail (port in use,
+    // permission denied, ...); CRD ch.45 R45.7.1 requires that surface as a clean
+    // launch error, not a panic, so it now returns a `Result`. The WASM build
+    // never binds a socket (in-process channel bridge only) and keeps its
+    // existing infallible signature.
+    #[cfg(not(target_arch = "wasm32"))]
+    spawn_rpc(ctx_id).map_to_mm(MmInitError::Internal)?;
+    #[cfg(target_arch = "wasm32")]
     spawn_rpc(ctx_id);
     #[cfg(all(unix, not(target_arch = "wasm32")))]
     if let Err(err) =

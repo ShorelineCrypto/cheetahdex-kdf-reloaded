@@ -20,7 +20,8 @@ Reloaded ships some of it and lacks the rest, so the chapter is split:
 - **§38.1--§38.5 (T-DOC, as-built):** capabilities verified present in reloaded
   -- Qtum split & staking-param naming, config-driven maturity, baseline address
   types (P2PKH / P2SH / segwit v0), KMD rewards/dust policy, `sign_raw_transaction`,
-  `consolidate_utxos`, and the chain-variant model (shared with §37).
+  `consolidate_utxos`, and the chain-variant model (shared with
+  [chapter 37](37-utxo-spv-and-block-header-validation.md) §37.5).
 - **§38.6 (T-PORT, required, NOT yet in reloaded):** capabilities verified
   **absent** in reloaded that must be ported -- PoSV support, Taproot output
   parsing & withdraw guard, P2PK show/spend, Electrum connection prioritisation
@@ -89,6 +90,38 @@ address advances the address index under that same purpose; a UTXO coin
 configured with an `m/44'` `derivation_path` continues to activate and derive.
 Each derived address's reported `derivation_path` carries the configured purpose.
 
+R38.3.4 **Withdraw-request derivation-path purpose generality (fifth
+consumer).** The withdraw RPC's own `from` selector, when supplied as an
+explicit derivation-path string (as opposed to being omitted, or supplied as
+the structured account/chain/address-index selector), is a fifth UTXO HD
+consumer of the purpose-generic parse rule R38.3.3 binds — not an exception to
+it. The withdraw sender-resolution path shall deserialize that string with the
+same generic purpose-level standard HD path of Chapter 5 R18, exactly as the
+four consumers R38.3.3 names, and shall NOT use the strict BIP-44 alias of
+Chapter 5 R19. Only the coin-type component of the parsed path is validated
+against the activated coin's own configured SLIP-44 coin type; the account,
+chain, and address-index components select which already-derived HD address
+the withdrawal is sent from, and the resolved address itself is always the one
+the coin's own configured account extended public key derives at that
+account/chain/index — the purpose digit the caller supplies is not itself
+trusted as a derivation input, only checked for being one of the recognised
+BIP-43 purposes (32, 44, 49, 84) so a malformed or nonsensical path is still
+rejected. Consequently a UTXO coin configured with a non-44 purpose (BIP-84
+native segwit or BIP-49 nested segwit, per R38.3.3) shall accept a withdraw
+`from.derivation_path` written at that same purpose, instead of being refused
+with a purpose-mismatch error merely because the purpose is not 44. Acceptance
+(two-direction): a UTXO segwit coin activated with an `m/84'` `derivation_path`
+(R38.3.3) accepts a withdraw request whose `from.derivation_path` is a full
+`purpose'/coin_type'/account'/chain/address_index` string at purpose `84'`
+naming an already-derived address, and resolves it to the same sender address
+the my-address / new-address consumers report for that path (two-direction
+with R38.3.3's own acceptance); the same coin's withdraw continues to be
+refused when the path's coin-type component does not match the activated
+coin, independent of the path's purpose. This rule binds the same coin family
+this chapter otherwise covers (UTXO); the identically-shaped question for
+non-UTXO coin families that also accept an explicit withdraw derivation path
+is outside this chapter's scope.
+
 ## 38.4 KMD interest / rewards & dust policy
 
 R38.4.1 KMD active-user-reward (interest) calculation shall follow the KMD
@@ -111,7 +144,11 @@ optional broadcast flag; when broadcast is not requested it returns the
 constructed transaction without sending it.
 
 R38.5.3 The coin's header/byte handling shall use the configuration-selected
-chain-variant model defined in §37.5 (shared contract).
+chain-variant model defined in
+[chapter 37](37-utxo-spv-and-block-header-validation.md) §37.5 (shared
+contract). Chapter 37 additionally binds the SPV activation configuration,
+header-store, and confirmation-proof behaviour a UTXO coin may separately
+opt into; this chapter does not restate it.
 
 ---
 
@@ -306,3 +343,40 @@ R38.8.6 **Tests (two-direction, observable).**
   returns ticker-keyed balances even for empty accounts, and `get_new_address`
   returns successive external addresses matching a reference wallet;
   Iguana-mode HD requests stay refused.
+
+## 38.9 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree, for the
+  T-DOC baseline of §38.1-§38.5 (Qtum split/staking-param naming,
+  config-driven maturity, baseline address types, KMD rewards/dust
+  policy, `sign_raw_transaction`, `consolidate_utxos`, the chain-variant
+  model shared with [Chapter 37](37-utxo-spv-and-block-header-validation.md)
+  §37.5 -- by public behaviour and config-key shape only, no code
+  transcribed); published BIP-341/342 (Taproot), BIP-44/BIP-84 (HD
+  derivation), and Electrum protocol documentation (public specifications
+  for the §38.6/§38.8 port targets); [Chapter 5](05-hd-wallet-and-key-derivation.md)
+  §5.9A (the software-HD crypto substrate §38.8 consumes); [Chapter 7](07-mnemonic-and-passphrase-management.md)
+  (a cross-referenced sibling chapter); [Chapter 45](45-startup-configuration-and-environment-tolerance.md)
+  (a cross-referenced sibling chapter).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  UTXO maintenance surface, for the T-DOC majority); external public
+  specification (BIP-341/342, BIP-44/BIP-84, the Electrum protocol);
+  cross-chapter contracts (Chapters 5, 7, 37, 45). For the §38.6/§38.8
+  scope determination itself -- identifying which post-2022 UTXO
+  features (PoSV, Taproot, P2PK, connection prioritisation, balance
+  streaming, fixed-fee policy, FIRO Spark) exist upstream and are
+  genuinely absent from reloaded's baseline -- Forbidden corpus, under
+  the chapter-01 two-team clean-room workflow; see below.
+- *Sibling-allowlist consultations:* [Chapter 5](05-hd-wallet-and-key-derivation.md)
+  §5.9A, [Chapter 37](37-utxo-spv-and-block-header-validation.md) §37.5.
+- *Forbidden corpus:* consulted, under the chapter-01 two-team clean-room
+  workflow, for the absence-verification and feature-scope determination
+  of §38.6/§38.8 only -- identifying that PoSV support, Taproot output
+  handling, P2PK balance/spend, Electrum connection prioritisation, UTXO
+  balance event streaming, fixed-fee/min-volume policy, and FIRO Spark
+  verbose-tx support exist upstream and are absent from reloaded's
+  baseline. The behavioural contracts themselves (R38.6.x, R38.8.x) are
+  independently authored specification bound to public protocol
+  documentation (BIPs, Electrum protocol) and this project's own
+  software-HD substrate, not corpus expression. No other section of this
+  chapter draws on the forbidden corpus.

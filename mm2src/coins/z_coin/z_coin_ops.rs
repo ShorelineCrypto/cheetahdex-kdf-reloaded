@@ -342,19 +342,18 @@ impl ZCoin {
         z_outputs: Vec<ZOutput>,
         tx_fee: BigDecimal,
     ) -> Result<(ZTransaction, AdditionalTxData), MmError<GenTxError>> {
-        if !t_outputs.is_empty() {
-            return MmError::err(GenTxError::UnsupportedLightWalletOutput);
-        }
         if !self.shielded_wallet_db_scan_complete() {
             return MmError::err(GenTxError::ShieldedWalletDb(
                 "shielded wallet DB scan is not complete".to_owned(),
             ));
         }
 
+        let t_output_sat: u64 = t_outputs.iter().fold(0, |cur, out| cur + u64::from(out.value()));
         let z_output_sat: u64 = z_outputs.iter().fold(0, |cur, out| cur + u64::from(out.amount));
         let tx_fee_sat = sat_from_big_decimal(&tx_fee, self.decimals()).mm_err(Into::into)?;
-        let total_required_sat = z_output_sat
-            .checked_add(tx_fee_sat)
+        let total_required_sat = t_output_sat
+            .checked_add(z_output_sat)
+            .and_then(|outputs_sat| outputs_sat.checked_add(tx_fee_sat))
             .or_mm_err(|| GenTxError::NumConversion(NumConversError("ZCoin total output overflow".to_owned())))?;
         let target_value = Amount::from_u64(total_required_sat).map_to_mm(|_| {
             GenTxError::NumConversion(NumConversError(format!(
@@ -462,6 +461,13 @@ impl ZCoin {
                 })?,
                 MemoBytes::empty(),
             )?;
+        }
+
+        // Swap HTLCs are transparent P2SH outputs paid for out of shielded notes, so the
+        // light-wallet path has to emit them too. Added last to keep the vout ordering the
+        // native path produces: `z_p2sh_spend` spends transparent output 0.
+        for output in t_outputs {
+            tx_builder.add_transparent_output_raw(output);
         }
 
         let fee_rule = FixedFeeRule::non_standard(

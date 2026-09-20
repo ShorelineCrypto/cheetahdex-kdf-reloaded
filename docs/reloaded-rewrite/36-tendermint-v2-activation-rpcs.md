@@ -63,7 +63,8 @@ Tendermint activation is available on **all targets, including WASM**.
 A long-running, **task-based** activation variant
 (`task::enable_tendermint::{init,status,user_action,cancel}`) is also part of the
 published KDF surface; it is specified in §36.6 and is delivered by the shared
-platform-coin task-activation framework of ch. 48 (which wraps the one-shot
+platform-coin task-activation framework of
+[Chapter 48](48-platform-coin-task-activation.md) (which wraps the one-shot
 activation of this chapter as its unit of work).
 
 ---
@@ -371,6 +372,13 @@ This note orients the implementer; it is not normative.
   mmrpc-2.0 layer reaches these handlers;
 - ensure the surface compiles and is routed on **all targets including WASM**.
 
+> **Status update (reloaded).** Implemented. The platform-coin-with-tokens
+> activation trait is implemented for the Tendermint platform coin and the token
+> activation trait for the Tendermint token; `enable_tendermint_with_assets` and
+> `enable_tendermint_token` are both routed on native and WASM. The long-running
+> task family `task::enable_tendermint::*` is also implemented, via the
+> [Chapter 48](48-platform-coin-task-activation.md) substrate (§36.6).
+
 The placement of these implementations (which crate/module they live in) should
 follow the existing activation layout used by the other platform coins (the
 coins-activation crate); their internal decomposition is the implementer's
@@ -378,7 +386,7 @@ choice.
 
 ---
 
-## 36.6 Task-based activation (delivered via ch. 48 substrate)
+## 36.6 Task-based activation (delivered via [Chapter 48](48-platform-coin-task-activation.md) substrate)
 
 R36.6.1 The published KDF surface also exposes a long-running, task-based
 Tendermint platform-activation family
@@ -388,10 +396,11 @@ This variant is the intended path for activation policies that need interactive
 user actions (e.g. hardware-backed signing).
 
 R36.6.2 This task variant is delivered by the **shared platform-coin
-task-activation framework of ch. 48** -- the third sibling alongside the
-standalone-coin and l2 task substrates. The framework wraps the one-shot
-activation of §36.1 as its unit of work; the same dependency was recorded for the
-EVM `task::enable_eth` family (ch. 35 §35.3), and ch. 48 unblocks both.
+task-activation framework of [Chapter 48](48-platform-coin-task-activation.md)**
+-- the third sibling alongside the standalone-coin and l2 task substrates. The
+framework wraps the one-shot activation of §36.1 as its unit of work; the same
+dependency was recorded for the EVM `task::enable_eth` family
+([Chapter 35](35-evm-v2-activation-rpcs.md) §35.3), and ch. 48 unblocks both.
 
 R36.6.3 `task::enable_tendermint::init` shall accept the same activation
 parameters as `enable_tendermint_with_assets` (§36.1) and ultimately yield the
@@ -400,6 +409,13 @@ and `user_action` supplying interactive confirmations, per ch. 48 §§48.1--48.3
 The family shall not be stubbed: it performs the real one-shot activation as its
 unit of work, so the one-shot `enable_tendermint_with_assets` of §36.1 and the
 task variant share a single activation path.
+
+> **Status update (reloaded).** Implemented. `task::enable_tendermint::{init,
+> status,user_action,cancel}` is routed via the
+> [Chapter 48](48-platform-coin-task-activation.md) substrate on native and
+> WASM, wrapping `enable_tendermint_with_assets` unchanged as its unit of work,
+> and the family is not stubbed (R36.6.3). This is not merely "unblocked in
+> principle" -- the substrate and this registration are both shipped.
 
 ---
 
@@ -441,3 +457,34 @@ task variant share a single activation path.
 - The task-based `task::enable_tendermint::*` family is delivered via the shared
   platform-coin task-activation framework of ch. 48, wrapping the one-shot
   activation of §36.1 as its unit of work (R36.6).
+
+## 36.7 Provenance Footer
+
+- *Inputs:* the published Komodo DeFi Framework API documentation (the
+  Tendermint/token activation method family, its request/response JSON
+  field names, and its error discriminants -- the source of truth this
+  chapter distills per its own "Source of truth" note); the Cosmos/
+  Tendermint RPC endpoint contract, IBC denom and channel identification,
+  the Cosmos secp256k1 public-key/account-id model, and CAIP-style chain
+  identification (public dictated-interop specifications cited throughout
+  §36.1-§36.6); reloaded's existing Tendermint coin/token types and
+  activation-parameter scaffolding (§36.5, already present in the
+  workspace); [Chapter 18](18-swap-v2-tendermint-path.md) (the IBC/HTLC
+  layer and channel routing this chapter's activation establishes coins
+  for); [Chapter 22](22-walletconnect-v2.md) (the WalletConnect activation
+  binding this chapter's activation-parameter scaffolding accommodates);
+  [Chapter 35](35-evm-v2-activation-rpcs.md) (the sibling EVM
+  platform-coin-with-tokens activation chapter this chapter mirrors in
+  shape); [Chapter 48](48-platform-coin-task-activation.md) (the shared
+  platform-coin task-activation framework the `task::enable_tendermint::*`
+  family is delivered through).
+- *Permitted-input classes used:* external public specification (the
+  published KDF API documentation; the Cosmos/Tendermint RPC/IBC/secp256k1/
+  CAIP specifications); baseline source (the existing Tendermint coin/token
+  types); cross-chapter contracts (Chapters 18, 22, 35, 48); Interop /
+  wire-and-API-bound reuse (R29/R31) for the dictated method strings, JSON
+  field names, and error discriminants this chapter distills.
+- *Sibling-allowlist consultations:* [Chapter 18](18-swap-v2-tendermint-path.md),
+  [Chapter 22](22-walletconnect-v2.md), [Chapter 35](35-evm-v2-activation-rpcs.md),
+  [Chapter 48](48-platform-coin-task-activation.md).
+- *Forbidden corpus:* not consulted.

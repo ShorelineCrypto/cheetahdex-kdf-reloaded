@@ -16,11 +16,15 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::{EnableStreamingRequest, EnableStreamingResponse, StreamingError};
+use coins::qrc20::rpc_clients::Qrc20ElectrumOps;
+use coins::qrc20::{contract_addr_into_rpc_format, QRC20_TRANSFER_TOPIC};
+use coins::utxo::qtum::contract_addr_from_utxo_addr;
 use coins::utxo::rpc_clients::{electrum_script_hash, ElectrumClient, UtxoRpcClientEnum};
 use coins::utxo::{output_script, ScriptType, UtxoCoinFields};
 use coins::{lp_coinfind, MarketCoinOps, MmCoinEnum};
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
+use rpc::v1::types::H160 as H160Json;
 
 /// The Electrum client and P2PKH script hash for an Electrum-backed UTXO coin.
 ///
@@ -31,23 +35,90 @@ use mm2_err_handle::prelude::*;
 /// (`output_script(.., P2PKH)` then `electrum_script_hash`), because a hash that
 /// does not match the one the balance read uses would subscribe successfully and
 /// then never fire — a silent failure indistinguishable from an idle address.
-fn electrum_subscription_target(coin: &MmCoinEnum) -> Option<(ElectrumClient, String)> {
-    fn resolve(fields: &UtxoCoinFields, address_str: &str) -> Option<(ElectrumClient, String)> {
-        let electrum = match &fields.rpc_client {
-            UtxoRpcClientEnum::Electrum(client) => client.clone(),
-            UtxoRpcClientEnum::Native(_) => return None,
-        };
-        let address = address_from_str_unchecked(fields, address_str).ok()?;
-        let script = output_script(&address, ScriptType::P2PKH);
-        Some((electrum, hex::encode(electrum_script_hash(&script))))
+async fn electrum_subscription_targets(coin: &MmCoinEnum) -> Option<(ElectrumClient, Vec<String>)> {
+    /// HD wallets have no single address, so every address the wallet currently
+    /// knows about is watched. Without this an HD wallet subscribes to nothing
+    /// and silently falls back to polling for its whole lifetime.
+    async fn hd_targets<T>(coin: &T) -> Vec<String>
+    where
+        T: coins::coin_balance::HDWalletBalanceOps<HDAccount = coins::utxo::UtxoHDAccount>
+            + AsRef<UtxoCoinFields>
+            + Sync,
+        T::Address: Clone + Into<coins::utxo::Address>,
+    {
+        coins::utxo::utxo_common::all_known_hd_addresses(coin)
+            .await
+            .into_iter()
+            .map(|address| {
+                let address: coins::utxo::Address = address.into();
+                hex::encode(electrum_script_hash(&output_script(&address, ScriptType::P2PKH)))
+            })
+            .collect()
     }
 
+    let electrum = |fields: &UtxoCoinFields| match &fields.rpc_client {
+        UtxoRpcClientEnum::Electrum(client) => Some(client.clone()),
+        UtxoRpcClientEnum::Native(_) => None,
+    };
+
     match coin {
-        MmCoinEnum::UtxoCoin(c) => resolve(c.as_ref(), &c.my_address().ok()?),
-        MmCoinEnum::QtumCoin(c) => resolve(c.as_ref(), &c.my_address().ok()?),
-        MmCoinEnum::Bch(c) => resolve(c.as_ref(), &c.my_address().ok()?),
+        MmCoinEnum::UtxoCoin(c) => {
+            let client = electrum(c.as_ref())?;
+            let hashes = match single_address_script_hash(c.as_ref(), c.my_address().ok()) {
+                Some(hash) => vec![hash],
+                None => hd_targets(c).await,
+            };
+            (!hashes.is_empty()).then_some((client, hashes))
+        },
+        MmCoinEnum::QtumCoin(c) => {
+            let client = electrum(c.as_ref())?;
+            let hashes = match single_address_script_hash(c.as_ref(), c.my_address().ok()) {
+                Some(hash) => vec![hash],
+                None => hd_targets(c).await,
+            };
+            (!hashes.is_empty()).then_some((client, hashes))
+        },
+        // BCH does not implement the HD wallet traits, so it has the
+        // single-address path only.
+        MmCoinEnum::Bch(c) => {
+            let client = electrum(c.as_ref())?;
+            let hash = single_address_script_hash(c.as_ref(), c.my_address().ok())?;
+            Some((client, vec![hash]))
+        },
         _ => None,
     }
+}
+
+/// Script hash of a single Iguana-derivation address, if there is one.
+fn single_address_script_hash(fields: &UtxoCoinFields, address: Option<String>) -> Option<String> {
+    let address = address_from_str_unchecked(fields, &address?).ok()?;
+    Some(hex::encode(electrum_script_hash(&output_script(
+        &address,
+        ScriptType::P2PKH,
+    ))))
+}
+
+/// The Electrum client, contract-event subscription arguments, and registry key
+/// for a QRC20 token.
+///
+/// Subscribing per token rather than per platform address is what makes token
+/// balances observable: a transfer changes the contract's storage and logs an
+/// event, without necessarily touching the holder's QTUM UTXOs.
+fn qrc20_subscription_target(coin: &MmCoinEnum) -> Option<(ElectrumClient, H160Json, H160Json, String)> {
+    let MmCoinEnum::Qrc20Coin(c) = coin else { return None };
+    let electrum = match &c.as_ref().rpc_client {
+        UtxoRpcClientEnum::Electrum(client) => client.clone(),
+        UtxoRpcClientEnum::Native(_) => return None,
+    };
+    let my_address = c.utxo.derivation_method.iguana()?;
+    let address = contract_addr_into_rpc_format(&contract_addr_from_utxo_addr(my_address.clone()).ok()?);
+    let contract = contract_addr_into_rpc_format(&c.contract_address);
+    let key = coins::utxo::rpc_clients::contract_event_key(
+        &format!("{address:#x}"),
+        &format!("{contract:#x}"),
+        QRC20_TRANSFER_TOPIC,
+    );
+    Some((electrum, address, contract, key))
 }
 
 fn electrum_utxo_watch_address(coin: &MmCoinEnum) -> Option<String> {
@@ -184,15 +255,36 @@ impl EventStreamer for BalanceEventStreamer {
         // aborting: a coin with no subscription is exactly as correct as it was
         // before, only slower to notice.
         let (wake_tx, mut wake_rx) = futures_mpsc::unbounded::<String>();
-        let mut subscribed_script_hash: Option<String> = None;
-        if let Some((electrum, script_hash)) = electrum_subscription_target(&coin) {
-            match electrum.subscribe_scripthash(script_hash.clone()).await {
-                Ok(()) => {
-                    coins::utxo::rpc_clients::watch_scripthash(script_hash.clone(), wake_tx);
-                    subscribed_script_hash = Some(script_hash);
+        let mut subscribed_keys: Vec<String> = Vec::new();
+        if let Some((electrum, script_hashes)) = electrum_subscription_targets(&coin).await {
+            // An HD wallet contributes one subscription per known address, so a
+            // partial failure is normal and non-fatal: whatever subscribes is a
+            // strict improvement, and the poll below still covers the rest.
+            for script_hash in script_hashes {
+                match electrum.subscribe_scripthash(script_hash.clone()).await {
+                    Ok(()) => {
+                        coins::utxo::rpc_clients::watch_scripthash(script_hash.clone(), wake_tx.clone());
+                        subscribed_keys.push(script_hash);
+                    },
+                    Err(e) => log::debug!(
+                        "Balance streamer for {}: script-hash subscription unavailable ({}); polling for that address",
+                        self.ticker,
+                        e
+                    ),
+                }
+            }
+        } else if let Some((electrum, address, contract, key)) = qrc20_subscription_target(&coin) {
+            match electrum
+                .blockchain_contract_event_subscribe(&address, &contract, QRC20_TRANSFER_TOPIC)
+                .compat()
+                .await
+            {
+                Ok(_) => {
+                    coins::utxo::rpc_clients::watch_scripthash(key.clone(), wake_tx);
+                    subscribed_keys.push(key);
                 },
                 Err(e) => log::debug!(
-                    "Balance streamer for {}: script-hash subscription unavailable ({}); polling only",
+                    "Balance streamer for {}: contract-event subscription unavailable ({}); polling only",
                     self.ticker,
                     e
                 ),
@@ -246,21 +338,34 @@ impl EventStreamer for BalanceEventStreamer {
             // Whichever comes first: the poll deadline, or a server telling us
             // the address changed. The timer is retained as the correctness
             // floor, so a subscription that silently dies costs latency only.
-            let tick = async {
-                let sleep = Timer::sleep(interval_secs);
-                futures::pin_mut!(sleep);
-                let woken = wake_rx.next();
-                futures::pin_mut!(woken);
-                match select(sleep, woken).await {
-                    Either::Left(_) => {},
-                    // Drain anything that arrived while we were busy so a burst
-                    // of notifications collapses into a single refresh.
-                    Either::Right(_) => while wake_rx.try_next().is_ok() {},
+            //
+            // The race is confined to this block so that the borrow `tick`
+            // takes on `wake_rx` ends before the arms below run — one of them
+            // closes the receiver, and holding the borrow across the match is
+            // rejected on some targets even where the host accepts it.
+            let notified = {
+                let tick = async {
+                    let sleep = Timer::sleep(interval_secs);
+                    futures::pin_mut!(sleep);
+                    let woken = wake_rx.next();
+                    futures::pin_mut!(woken);
+                    matches!(select(sleep, woken).await, Either::Right(_))
+                };
+                let tick = core::pin::pin!(tick);
+                match select(tick, &mut shutdown).await {
+                    Either::Left((notified, _)) => Some(notified),
+                    Either::Right(_) => None,
                 }
             };
-            let tick = core::pin::pin!(tick);
-            match select(tick, &mut shutdown).await {
-                Either::Left(_) => {
+
+            // Drain anything that arrived while we were busy so a burst of
+            // notifications collapses into a single refresh.
+            if notified == Some(true) {
+                while wake_rx.try_recv().is_ok() {}
+            }
+
+            match notified {
+                Some(_) => {
                     match watched_balance(&coin, &watched_address).await {
                         Ok(balance) => {
                             let spendable = balance.spendable.to_string();
@@ -308,9 +413,16 @@ impl EventStreamer for BalanceEventStreamer {
                         },
                     }
                 },
-                Either::Right(_) => {
-                    if let Some(script_hash) = subscribed_script_hash.take() {
-                        coins::utxo::rpc_clients::unwatch_scripthash(&script_hash);
+                None => {
+                    if !subscribed_keys.is_empty() {
+                        // Drop the receiver first: the registry prunes by
+                        // receiver liveness, so closing ours is what actually
+                        // releases the registrations. Other consumers watching
+                        // the same addresses keep theirs.
+                        wake_rx.close();
+                        for script_hash in subscribed_keys.drain(..) {
+                            coins::utxo::rpc_clients::unwatch_scripthash(&script_hash);
+                        }
                     }
                     break;
                 },
@@ -435,7 +547,7 @@ mod tests {
         common::block_on(async move {
             rx.next().await.expect("first notification");
             let mut drained = 0;
-            while rx.try_next().is_ok() {
+            while rx.try_recv().is_ok() {
                 drained += 1;
             }
             assert_eq!(

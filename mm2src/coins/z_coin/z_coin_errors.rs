@@ -15,8 +15,6 @@ pub enum GenTxError {
     DecryptedOutputNotFound,
     GetWitnessErr(GetUnspentWitnessErr),
     FailedToGetMerklePath,
-    #[display(fmt = "ZCoin light-mode transaction generation supports shielded outputs only")]
-    UnsupportedLightWalletOutput,
     #[display(fmt = "ZCoin shielded wallet DB error: {}", _0)]
     ShieldedWalletDb(String),
     #[display(
@@ -77,7 +75,6 @@ impl From<GenTxError> for WithdrawError {
             | GenTxError::PrevTxNotConfirmed
             | GenTxError::GetWitnessErr(_)
             | GenTxError::NumConversion(_)
-            | GenTxError::UnsupportedLightWalletOutput
             | GenTxError::ShieldedWalletDb(_)
             | GenTxError::TxReadError { .. } => WithdrawError::InternalError(gen_tx.to_string()),
             #[cfg(not(target_arch = "wasm32"))]

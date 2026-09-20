@@ -225,8 +225,13 @@ shall be supplied via `task::enable_eth::user_action`.
 
 R35.3.3 `status` shall report observable in-progress states covering at least
 activating the coin, requesting balances, and completion, plus the hardware
-interaction states of R35.3.2 when applicable. A task that exceeds its activation
-deadline shall fail with a timeout-class `error_type`.
+interaction states of R35.3.2 when applicable. Per the shared platform-coin
+task-activation framework this family is delivered by
+([Chapter 48](48-platform-coin-task-activation.md) §48.3.1, R35.3.6), the
+framework imposes no separate activation wall-clock deadline of its own; the
+only timeout-class `error_type` this family surfaces is the shared
+task-framework one (e.g. a bounded `user_action` wait elapsing), not a
+freestanding activation-deadline timeout.
 
 R35.3.4 A parallel single-token task family
 `task::enable_erc20::{init,status,user_action,cancel}` shall exist as the task
@@ -241,13 +246,21 @@ discriminants of R35.2.5 (for `task::enable_erc20`), plus task-framework
 discriminants for unknown-task and task-timeout conditions.
 
 R35.3.6 The `task::enable_eth` family is delivered by the shared **platform-coin
-task-activation framework of ch. 48**, which wraps the one-shot
-`enable_eth_with_tokens` activation of §35.1 as its unit of work (so the one-shot
-and task variants share a single activation path). Under reloaded's shipped EVM
-signing policies -- local/context (Iguana, HD) and, on WASM, MetaMask (ch. 47) --
-activation completes without any `user_action`; the `user_action` method is
-routed for wire parity and for the hardware (Trezor) policy that the published
-surface targets (ch. 48 §48.6).
+task-activation framework of [Chapter 48](48-platform-coin-task-activation.md)**,
+which wraps the one-shot `enable_eth_with_tokens` activation of §35.1 as its unit
+of work (so the one-shot and task variants share a single activation path).
+Under reloaded's shipped EVM signing policies -- local/context (Iguana, HD) and,
+on WASM, MetaMask (ch. 47) -- activation completes without any `user_action`;
+the `user_action` method is routed for wire parity and for the hardware (Trezor)
+policy that the published surface targets (ch. 48 §48.6).
+
+> **Implementation status (informative).** `task::enable_eth::{init,status,
+> user_action,cancel}` is implemented and routed via the Chapter 48 substrate on
+> both native and WASM targets, wrapping `enable_eth_with_tokens` unchanged as
+> its unit of work. The parallel single-token family of R35.3.4,
+> `task::enable_erc20::{init,status,user_action,cancel}`, is **not yet routed**;
+> only the one-shot `enable_erc20` (§35.2) is currently reachable for single-token
+> activation. This is the one remaining gap in this chapter's task-RPC surface.
 
 ---
 
@@ -374,6 +387,18 @@ This note orients the implementer; it is not normative.
 - ensure the surface compiles and is routed on **all targets including WASM**
   (the WASM-only external-signer policy of R35.1.4 is gated to the WASM target).
 
+> **Status update (reloaded).** Implemented, with one exception. The
+> platform-coin-with-tokens activation trait is implemented for the EVM platform
+> coin, and the token activation trait (one-shot) is implemented for the ERC-20
+> token; `enable_eth_with_tokens`, `enable_erc20` (and its `enable_nft` alias),
+> `get_token_info`, `get_swap_gas_fee_policy`, and `set_swap_gas_fee_policy` are
+> all routed on native and WASM. ETH/ERC-20 activation is therefore no longer
+> legacy-`enable`-only. The long-running platform task family
+> `task::enable_eth::*` is also implemented, via the
+> [Chapter 48](48-platform-coin-task-activation.md) substrate (§35.3.6). The one
+> remaining gap is the single-token task family `task::enable_erc20::*` of
+> R35.3.4, which is not yet routed (§35.3.6).
+
 The placement of these implementations (which crate/module they live in) should
 follow the existing activation layout used by the other platform coins; their
 internal decomposition is the implementer's choice.
@@ -405,3 +430,33 @@ internal decomposition is the implementer's choice.
   (R35.6).
 - The entire surface builds and is routed on native **and** WASM targets, with
   the external-signer activation policy available only on WASM (R35.1.4, R35.7).
+
+## 35.9 Provenance Footer
+
+- *Inputs:* the published Komodo DeFi Framework API documentation (the
+  `enable_eth_with_tokens`/token/task-activation method family, its
+  request/response JSON field names, and its error discriminants -- the
+  source of truth this chapter distills per its own "Source of truth"
+  note); the EVM JSON-RPC, EIP-1559 fee semantics, ERC-20 contract ABI, and
+  CAIP-style chain identification (public dictated-interop specifications
+  cited throughout §35.1-§35.6); reloaded's existing EVM coin type and its
+  legacy `enable` path (§35.7, already present in the workspace);
+  [Chapter 17](17-swap-v2-evm-path.md) (the swap-v2 EVM chapter this
+  chapter's activation surface feeds when V2 swaps are used);
+  [Chapter 19](19-nft-integration.md) (the NFT-provider activation block
+  and error contract this chapter's §35.4 and R35.4 build on);
+  [Chapter 39](39-zcash---z_coin-shielded-coin.md) (a cross-referenced
+  sibling activation chapter); [Chapter 47](47-metamask-integration.md) and
+  [Chapter 48](48-platform-coin-task-activation.md) (the MetaMask signing
+  policy and platform-coin task-activation substrate this chapter's
+  activation surface is built on and unblocks, respectively).
+- *Permitted-input classes used:* external public specification (the
+  published KDF API documentation; EVM JSON-RPC/EIP-1559/ERC-20/CAIP
+  specifications); baseline source (the existing EVM coin type and legacy
+  `enable` path); cross-chapter contracts (Chapters 17, 19, 39, 47, 48);
+  Interop / wire-and-API-bound reuse (R29/R31) for the dictated method
+  strings, JSON field names, and error discriminants this chapter distills.
+- *Sibling-allowlist consultations:* [Chapter 17](17-swap-v2-evm-path.md),
+  [Chapter 19](19-nft-integration.md), [Chapter 39](39-zcash---z_coin-shielded-coin.md),
+  [Chapter 47](47-metamask-integration.md), [Chapter 48](48-platform-coin-task-activation.md).
+- *Forbidden corpus:* not consulted.
