@@ -481,6 +481,9 @@ pub struct MakerPreimage {
     pub total_fees: Vec<TotalTradeFeeForTest>,
 }
 
+// Test-only response fixture: its size does not matter, and boxing a variant
+// would only complicate the expected values the tests construct.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(untagged)]
@@ -546,6 +549,11 @@ pub enum TransactionType {
 #[serde(deny_unknown_fields)]
 pub struct TransactionDetails {
     pub tx_hex: String,
+    /// Present only for a coin whose native transaction serialisation is JSON
+    /// text (CRD ch.20 R-W7); `deny_unknown_fields` above would otherwise
+    /// reject such a response outright.
+    #[serde(default)]
+    pub tx_json: Option<Json>,
     pub tx_hash: String,
     pub from: Vec<String>,
     pub to: Vec<String>,

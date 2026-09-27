@@ -124,7 +124,15 @@ uuid = { workspace = true }
 # vendored locally in `eth/wire_types.rs`.
 alloy = { workspace = true }
 tower = { workspace = true }
-winapi = "0.3"
+# winapi features must be declared HERE, not inherited. Every one of these
+# call sites used to compile only because some other crate in the graph
+# happened to enable the feature and Cargo unified it. That broke on
+# 2026-09-23: bumping `dirs` 1 -> 6 moved dirs-sys from winapi to
+# windows-sys, the `shlobj` feature stopped being enabled by anyone, and the
+# Windows build failed with "unresolved import winapi::um::shlobj". Nothing
+# in CI catches this on push -- no Windows job runs outside workflow_dispatch.
+# shlobj: SHGetSpecialFolderPathA + CSIDL_APPDATA, minwindef: MAX_PATH (utxo.rs:155-161).
+winapi = { version = "0.3", features = ["shlobj", "minwindef"] }
 zbase32 = "0.1.2"
 incrementalmerkletree = { version = "=0.8.2", features = ["legacy-api", "std"] }
 zcash_note_encryption = "=0.4.2"
@@ -153,7 +161,11 @@ sapling = { package = "sapling-crypto", version = "=0.7.0", default-features = f
 zcash_primitives = { version = "=0.28.0", default-features = false, features = ["non-standard-fees", "std", "transparent-inputs"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-dirs = { version = "1" }
+# 1.0.5 (2018) pulls redox_users 0.3 -> rust-argon2 0.7 -> crossbeam-utils 0.7.2
+# (RUSTSEC-2022-0041). Only `dirs::home_dir()` is used, which is unchanged across
+# the major versions. Note dirs >= 4 resolves the Windows home via
+# SHGetKnownFolderPath rather than %HOME%/%USERPROFILE%.
+dirs = { version = "6" }
 hyper = { version = "0.14", features = ["client", "http2", "http1"] }
 hyper-rustls = { version = "0.23", default-features = false, features = ["http1", "http2", "webpki-roots", "webpki-tokio"] }
 # The `lightning` module (mm2src/coins/lightning/) is itself
@@ -181,6 +193,9 @@ lightning-persister = { path = "lightning_persister" }
 lightning-net-tokio = { path = "../../rust-lightning-patched/lightning-net-tokio" }
 rust-ini = { version = "0.13" }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
+# Already in the tree via the Zcash stack; declared directly because
+# `SentTransaction::new` takes a `time::OffsetDateTime`.
+time = { version = "0.3", default-features = false, features = ["std"] }
 tokio = { version = "1.7" }
 tokio-rustls = { version = "0.23" }
 tonic = { version = "0.11", features = ["tls", "tls-webpki-roots", "channel"] }

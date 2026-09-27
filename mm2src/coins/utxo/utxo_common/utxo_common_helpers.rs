@@ -365,7 +365,10 @@ pub async fn get_raw_transaction(coin: &UtxoCoinFields, req: RawTransactionReque
         .compat()
         .await
         .map_err(|e| RawTransactionError::Transport(e.to_string()))?;
-    Ok(RawTransactionRes { tx_hex: hex })
+    Ok(RawTransactionRes {
+        tx_hex: hex,
+        tx_json: None,
+    })
 }
 
 pub async fn withdraw<T>(coin: T, req: WithdrawRequest) -> WithdrawResult
@@ -653,7 +656,7 @@ mod tests {
     }
 
     fn withdraw_req(from: Option<WithdrawFrom>) -> WithdrawRequest {
-        WithdrawRequest::new("RICK".to_owned(), from, "receiver".to_owned(), 1.into(), false, None)
+        WithdrawRequest::new("DOC".to_owned(), from, "receiver".to_owned(), 1.into(), false, None)
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use super::z_rpc::z_coin_grpc;
-use super::{CheckPointBlockInfo, ZCoinBuildError, ZcoinConsensusParams};
+use super::{CheckPointBlockInfo, ZCoinBuildError, ZcoinConsensusParams, ZcoinDecryptionParams};
 use crate::utxo::utxo_common::big_decimal_from_sat_unsigned;
 use common::mm_number::BigDecimal;
 use common::{calc_total_pages, log, PagingOptionsEnum};
@@ -34,6 +34,27 @@ const LIGHTWALLETD_BLOCK_BATCH_SIZE: u64 = 500;
 const LIGHTWALLETD_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const LIGHTWALLETD_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const LIGHTWALLETD_GRPC_SERVICE: &str = "pirate.wallet.sdk.rpc.CompactTxStreamer";
+/// How far back the shielded wallet rewinds when it finds it has scanned a block
+/// that is no longer on the chain.
+///
+/// A wallet that syncs to the chain tip records the tip block, and an ordinary
+/// one-block reorg then leaves it holding a block the network has dropped. Pirate
+/// is notarised, so its reorgs are shallow; 100 blocks is far beyond anything dPoW
+/// permits and costs well under a second to rescan.
+const ZCOIN_REORG_REWIND_DEPTH: u64 = 100;
+
+/// How many times the wallet rewinds before giving up and rebuilding from scratch.
+///
+/// A divergence still present [`ZCOIN_REORG_REWIND_DEPTH`] x this many blocks back
+/// is not a reorg any more; rebuilding is then both correct and cheaper than
+/// walking back block by block. Nothing is lost either way -- every shielded note
+/// is recoverable from the chain with the wallet's own viewing key.
+const ZCOIN_MAX_REORG_REWINDS: u32 = 3;
+
+/// Length of a Sapling commitment root, which a lightwalletd `TreeState` must never
+/// carry in place of a serialized commitment tree. See
+/// [`parse_checkpoint_commitment_tree`].
+const SAPLING_COMMITMENT_ROOT_LEN: usize = 32;
 
 type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
 type ReloadedWalletDb = WalletDb<Connection, ZcoinConsensusParams, SystemClock, OsRng>;
@@ -71,6 +92,13 @@ pub(crate) struct ZCoinShieldedHistory {
     consensus_params: ZcoinConsensusParams,
     extfvk: ExtendedFullViewingKey,
     initial_chain_state: Arc<Mutex<Option<ChainState>>>,
+    /// The anchor this wallet is *born* at: the coin configuration's checkpoint
+    /// height, or Sapling activation when the coin declares no checkpoint.
+    ///
+    /// Distinguishes a wallet that has never been anchored anywhere else from one
+    /// deliberately re-anchored by a caller-supplied sync start. The two are
+    /// otherwise indistinguishable until a scan finds its first transaction.
+    birth_anchor_height: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -235,12 +263,22 @@ impl ZCoinShieldedHistory {
         }
         drop(wallet_db);
 
+        let birth_anchor_height = check_point_block
+            .map(|check_point| u64::from(check_point.height))
+            .unwrap_or_else(|| {
+                consensus_params
+                    .activation_height(NetworkUpgrade::Sapling)
+                    .map(|height| u64::from(u32::from(height)))
+                    .unwrap_or(0)
+            });
+
         Ok(ZCoinShieldedHistory {
             compact_blocks_path: paths.compact_blocks_path,
             wallet_db_path: paths.wallet_db_path,
             consensus_params,
             extfvk: extfvk.clone(),
             initial_chain_state: Arc::new(Mutex::new(initial_chain_state)),
+            birth_anchor_height,
         })
     }
 
@@ -376,8 +414,19 @@ impl ZCoinShieldedHistory {
             // If the wallet is still empty and its seed checkpoint predates the
             // default recent window, jump forward to that window instead of
             // replaying long-dead history.
+            //
+            // Only for a wallet still sitting at the anchor it was born with. One
+            // deliberately re-anchored -- a caller-supplied sync start, which is how
+            // a restored seed reaches its older funds -- looks *identical* to a
+            // fresh wallet right up until the rescan reaches its first transaction,
+            // so without this check the very next activation that carries no
+            // `sync_params` silently discards the rescan and skips forward past the
+            // funds it was asked to find (R39.8.0an).
+            let anchored_at_birth = self
+                .wallet_sync_start_height()?
+                .is_some_and(|start| start <= self.birth_anchor_height.saturating_add(1));
             let should_reseed_empty_checkpoint =
-                resumed_start < default_recent_start && self.wallet_scan_state_is_empty()?;
+                anchored_at_birth && resumed_start < default_recent_start && self.wallet_scan_state_is_empty()?;
             return Ok(Some(LightwalletdFetchPlan {
                 start_height: if should_reseed_empty_checkpoint {
                     default_recent_start
@@ -452,10 +501,24 @@ impl ZCoinShieldedHistory {
             self.reset_wallet_scan_state()?;
         }
 
-        if start_height > 0 {
-            self.ensure_lightwalletd_chain_state(&mut client, consensus_params.clone(), start_height - 1)
+        // A rewind past a chain divergence lowers the anchor, so the fetch has to
+        // start from where the wallet actually ends up rather than from the plan's
+        // height -- resuming above it would leave the rewound blocks unscanned.
+        let start_height = if start_height > 0 {
+            let anchor = self
+                .ensure_lightwalletd_chain_state(&mut client, consensus_params.clone(), start_height - 1)
                 .await?;
-        }
+            if anchor + 1 != start_height {
+                log::info!(
+                    "ZCoin lightwalletd fetch start moved from {} to {} after re-anchoring the wallet",
+                    start_height,
+                    anchor + 1
+                );
+            }
+            anchor + 1
+        } else {
+            start_height
+        };
 
         let mut fetched_height = start_height.saturating_sub(1);
         match self.validated_cached_resume_height(start_height, target_height) {
@@ -541,6 +604,28 @@ impl ZCoinShieldedHistory {
         initialize_wallet_db(&self.wallet_db_path, self.consensus_params.clone())
     }
 
+    /// Rewinds the shielded wallet database to `height`, dropping everything
+    /// scanned above it, and reports the height actually reached.
+    ///
+    /// The note commitment tree constrains how far back a truncation can go, so
+    /// the backend may stop higher than asked; the caller must check the returned
+    /// height rather than assume the request was honoured.
+    fn truncate_wallet_to_height(&self, height: u64) -> Result<u64, String> {
+        let height_u32 = u32::try_from(height)
+            .map_err(|_| format!("Shielded wallet rewind height {} does not fit into u32", height))?;
+        let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
+        let _guard = mutation_lock.lock();
+        // The cached anchor describes the pre-rewind chain, so drop it before the
+        // truncation rather than after: a failure in between must not leave a
+        // stale anchor pointing above the wallet's new tip.
+        *self.initial_chain_state.lock() = None;
+        let mut wallet_db = open_wallet_db(&self.wallet_db_path, self.consensus_params.clone())?;
+        let truncated = wallet_db
+            .truncate_to_height(BlockHeight::from_u32(height_u32))
+            .map_err(|e| format!("Shielded wallet rewind to height {} failed: {}", height, e))?;
+        Ok(u64::from(u32::from(truncated)))
+    }
+
     fn reset_unscanned_wallet_db(&self) -> Result<(), String> {
         if !self.wallet_scan_state_is_empty()? {
             return Err("Refusing to rebuild an unscanned shielded wallet DB that contains transactions".to_owned());
@@ -577,12 +662,19 @@ impl ZCoinShieldedHistory {
         ))
     }
 
+    /// Establishes the wallet's sync anchor from lightwalletd, rewinding past a
+    /// chain divergence if the wallet has scanned a block the chain has dropped.
+    ///
+    /// Returns the height actually anchored at, which is **lower** than
+    /// `checkpoint_height` when a rewind was needed and `0` when the wallet had to
+    /// be rebuilt. Callers must resume fetching from the returned height, not from
+    /// the one they asked for.
     async fn ensure_lightwalletd_chain_state(
         &self,
         client: &mut LightwalletdClient,
         consensus_params: ZcoinConsensusParams,
         checkpoint_height: u64,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         if self
             .initial_chain_state
             .lock()
@@ -593,7 +685,7 @@ impl ZCoinShieldedHistory {
                 "ZCoin shielded wallet reusing in-memory chain state at height {}",
                 checkpoint_height
             );
-            return Ok(());
+            return Ok(checkpoint_height);
         }
 
         let scanned_height = self.scanned_block_height()?;
@@ -615,33 +707,92 @@ impl ZCoinShieldedHistory {
             self.reset_unscanned_wallet_db()?;
         }
 
-        log::info!(
-            "ZCoin lightwalletd requesting wallet checkpoint tree state at height {}",
-            checkpoint_height
-        );
-        let request = z_coin_grpc::BlockId {
-            height: checkpoint_height,
-            hash: Vec::new(),
-        };
-        let tree_state = tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, client.get_tree_state(request))
-            .await
-            .map_err(|_| format!("GetTreeState timed out at height {}", checkpoint_height))?
-            .map_err(|e| lightwalletd_error_with_sources(&e))?
-            .into_inner();
-        if tree_state.height != checkpoint_height {
-            return Err(format!(
-                "lightwalletd returned tree state at height {}, expected {}",
-                tree_state.height, checkpoint_height
-            ));
+        // A wallet that scanned to the chain tip may hold a block a later reorg
+        // dropped. That makes the stored anchor stale, not corrupt, so rewind past
+        // the divergence and re-anchor rather than refusing to sync -- otherwise
+        // every subsequent activation repeats the same comparison and the wallet
+        // never recovers (R39.8.0al).
+        let mut anchor_height = checkpoint_height;
+        for attempt in 0..=ZCOIN_MAX_REORG_REWINDS {
+            log::info!(
+                "ZCoin lightwalletd requesting wallet checkpoint tree state at height {}",
+                anchor_height
+            );
+            let request = z_coin_grpc::BlockId {
+                height: anchor_height,
+                hash: Vec::new(),
+            };
+            let tree_state = tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, client.get_tree_state(request))
+                .await
+                .map_err(|_| format!("GetTreeState timed out at height {}", anchor_height))?
+                .map_err(|e| lightwalletd_error_with_sources(&e))?
+                .into_inner();
+            if tree_state.height != anchor_height {
+                return Err(format!(
+                    "lightwalletd returned tree state at height {}, expected {}",
+                    tree_state.height, anchor_height
+                ));
+            }
+
+            match self.init_wallet_checkpoint_from_tree_state(consensus_params.clone(), tree_state)? {
+                CheckpointOutcome::Accepted => return Ok(anchor_height),
+                CheckpointOutcome::Diverged if attempt == ZCOIN_MAX_REORG_REWINDS => break,
+                CheckpointOutcome::Diverged => {},
+            }
+
+            // `saturating_sub` keeps the request inside the chain; a wallet whose
+            // anchor is already at or below the rewind depth has nothing useful to
+            // rewind to and is rebuilt below instead.
+            let requested = anchor_height.saturating_sub(ZCOIN_REORG_REWIND_DEPTH);
+            if requested == 0 {
+                break;
+            }
+            // The backend refuses a rewind to a height it holds no commitment-tree
+            // checkpoint for. That is not fatal -- it only means this wallet cannot
+            // be rewound, so fall through to the rebuild rather than replacing one
+            // permanent failure with another.
+            let truncated = match self.truncate_wallet_to_height(requested) {
+                Ok(truncated) => truncated,
+                Err(error) => {
+                    log::warn!(
+                        "ZCoin shielded wallet cannot rewind to height {}: {}; rebuilding",
+                        requested,
+                        error
+                    );
+                    break;
+                },
+            };
+            if truncated >= anchor_height {
+                // The commitment tree would not let us rewind past the divergence,
+                // so walking back further cannot help.
+                log::warn!(
+                    "ZCoin shielded wallet could not rewind below height {} (stopped at {}); rebuilding",
+                    anchor_height,
+                    truncated
+                );
+                break;
+            }
+            log::info!(
+                "ZCoin shielded wallet rewound from height {} to {} after a chain divergence",
+                anchor_height,
+                truncated
+            );
+            anchor_height = truncated;
         }
-        self.init_wallet_checkpoint_from_tree_state(consensus_params, tree_state)
+
+        // Rewinding did not reach agreement with the chain. Rebuild and rescan:
+        // correct regardless of how the wallet got here, and lossless, because
+        // every shielded note is recoverable from the chain with the viewing key.
+        log::warn!("ZCoin shielded wallet still diverges from the chain after rewinding; rebuilding and rescanning");
+        self.reset_wallet_scan_state()?;
+        Ok(0)
     }
 
     fn init_wallet_checkpoint_from_tree_state(
         &self,
         consensus_params: ZcoinConsensusParams,
         tree_state: z_coin_grpc::TreeState,
-    ) -> Result<(), String> {
+    ) -> Result<CheckpointOutcome, String> {
         let hash = decode_display_block_hash("lightwalletd tree-state block hash", &tree_state.hash)?;
         let sapling_tree = decode_hex_field("lightwalletd tree-state sapling tree", &tree_state.tree)?;
         let checkpoint_height = BlockHeight::from_u32(tree_state.height.try_into().map_err(|_| {
@@ -650,8 +801,23 @@ impl ZCoinShieldedHistory {
                 tree_state.height
             )
         })?);
+        // The frontier field, when the server sends one, must carry the same bytes
+        // as the tree field. A divergence is a server-side defect we want visible;
+        // field 5 stays authoritative because every supported server populates it.
+        if !tree_state.sapling_frontier.is_empty() && tree_state.sapling_frontier != tree_state.tree {
+            log::warn!(
+                "lightwalletd tree-state at height {} disagrees with itself: sapling tree is {} hex chars, \
+                 sapling frontier is {} hex chars; using the tree field",
+                checkpoint_height,
+                tree_state.tree.len(),
+                tree_state.sapling_frontier.len()
+            );
+        }
+        let sapling_activation = consensus_params
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap_or(BlockHeight::from_u32(0));
         let commitment_tree: sapling::CommitmentTree =
-            read_commitment_tree(sapling_tree.as_slice()).map_err(|e| e.to_string())?;
+            parse_checkpoint_commitment_tree(&sapling_tree, checkpoint_height, sapling_activation)?;
         let chain_state = ChainState::new(checkpoint_height, BlockHash(hash), commitment_tree.to_frontier());
         let mut wallet_db = open_wallet_db(&self.wallet_db_path, consensus_params)?;
         if wallet_db.get_account_ids().map_err(|e| e.to_string())?.is_empty() {
@@ -668,10 +834,18 @@ impl ZCoinShieldedHistory {
                     )
                 })?;
             if block_metadata.block_hash() != chain_state.block_hash() {
-                return Err(format!(
-                    "lightwalletd tree-state hash at height {} does not match the shielded wallet DB",
-                    checkpoint_height
-                ));
+                // The wallet scanned a block that is no longer on the chain --
+                // almost always a block it scanned while that block was the tip,
+                // which a later reorg replaced. Report it for the caller to rewind
+                // past rather than failing: the stored state is stale, not corrupt.
+                log::warn!(
+                    "ZCoin shielded wallet diverges from the chain at height {}: wallet has block {}, \
+                     lightwalletd reports {}",
+                    checkpoint_height,
+                    display_block_hash(&block_metadata.block_hash()),
+                    display_block_hash(&chain_state.block_hash()),
+                );
+                return Ok(CheckpointOutcome::Diverged);
             }
             let sapling_tree_size = u32::try_from(chain_state.final_sapling_tree().tree_size()).map_err(|_| {
                 format!(
@@ -695,7 +869,7 @@ impl ZCoinShieldedHistory {
             checkpoint_height,
             sapling_tree_size
         );
-        Ok(())
+        Ok(CheckpointOutcome::Accepted)
     }
 
     async fn fetch_compact_block_batch_from_server(
@@ -1005,8 +1179,12 @@ impl ZCoinShieldedHistory {
                 first_height: from_height,
                 sapling_tree_size_before,
             };
+            // Decryption-only parameters: Pirate accepts both note plaintext
+            // versions at every height, which upstream can only express inside the
+            // ZIP-212 grace period (R39.8.0am). Never used to build a transaction.
+            let decryption_params = ZcoinDecryptionParams::new(consensus_params.clone());
             let summary = match scan_cached_blocks(
-                &consensus_params,
+                &decryption_params,
                 &block_source,
                 &mut wallet_db,
                 from_height,
@@ -1145,7 +1323,7 @@ impl ZCoinShieldedHistory {
                 let spent: i64 = row.get(5)?;
                 Ok(ZCoinStoredHistoryRow {
                     internal_id: row.get(0)?,
-                    tx_hash: hex::encode(txid),
+                    tx_hash: encode_display_txid(txid),
                     block_height: row.get::<_, u32>(2)? as u64,
                     timestamp: row.get::<_, u32>(3)? as u64,
                     received_by_me: non_negative_amount(received, 4)?,
@@ -1231,6 +1409,103 @@ fn decode_32_byte_hex(name: &str, value: &str) -> Result<[u8; 32], String> {
     bytes
         .try_into()
         .map_err(|bytes: Vec<u8>| format!("Invalid {} length: expected 32 bytes, got {}", name, bytes.len()))
+}
+
+/// Parses the Sapling commitment tree a lightwalletd `TreeState` carries, refusing
+/// the shapes that would otherwise be accepted as a silently wrong anchor.
+///
+/// Pirate's lightwalletd fills this field through `preferredTreeState(finalState,
+/// finalRoot)`, which substitutes the **32-byte commitment root** whenever the node
+/// cannot supply a frontier — in `GetTreeState` and `GetBridgeTreeState` alike, so
+/// there is no alternative RPC to ask instead. Three rejections are needed, because
+/// `read_commitment_tree` alone catches none of them reliably:
+///
+/// 1. A bare 32-byte root. It is not a serialized tree at all.
+/// 2. Trailing bytes. `read_commitment_tree` reads `left`, `right` and `parents` and
+///    returns without checking that the buffer is exhausted, so a root beginning
+///    `00 00 00` parses **successfully** as an *empty* tree while 29 bytes are
+///    silently discarded — anchoring the wallet on a tree of size 0.
+/// 3. An empty field above Sapling activation. Upstream treats the empty string as
+///    the empty tree, which is only legitimate at or below the activation height;
+///    the fetch plan floors every request at that height.
+fn parse_checkpoint_commitment_tree(
+    sapling_tree: &[u8],
+    checkpoint_height: BlockHeight,
+    sapling_activation: BlockHeight,
+) -> Result<sapling::CommitmentTree, String> {
+    if sapling_tree.is_empty() {
+        if checkpoint_height <= sapling_activation {
+            return Ok(sapling::CommitmentTree::empty());
+        }
+        return Err(format!(
+            "lightwalletd tree-state sapling tree at height {} is empty, but Sapling activated at {}",
+            checkpoint_height, sapling_activation
+        ));
+    }
+
+    if sapling_tree.len() == SAPLING_COMMITMENT_ROOT_LEN {
+        return Err(format!(
+            "lightwalletd tree-state sapling tree at height {} is a bare {}-byte commitment root, not a \
+             serialized commitment tree; the server substituted finalRoot for finalState and the wallet \
+             must not anchor on it",
+            checkpoint_height, SAPLING_COMMITMENT_ROOT_LEN
+        ));
+    }
+
+    let mut cursor = std::io::Cursor::new(sapling_tree);
+    let tree: sapling::CommitmentTree = read_commitment_tree(&mut cursor).map_err(|e| {
+        format!(
+            "lightwalletd tree-state sapling tree at height {} is not a serialized commitment tree: {}",
+            checkpoint_height, e
+        )
+    })?;
+    let consumed = cursor.position();
+    if consumed != sapling_tree.len() as u64 {
+        return Err(format!(
+            "lightwalletd tree-state sapling tree at height {} has {} trailing byte(s) after a {}-byte \
+             commitment tree; refusing a partially parsed anchor",
+            checkpoint_height,
+            sapling_tree.len() as u64 - consumed,
+            consumed
+        ));
+    }
+    Ok(tree)
+}
+
+/// Whether a lightwalletd tree state could be adopted as the wallet's sync anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckpointOutcome {
+    /// The tree state agrees with the wallet, and is now the anchor.
+    Accepted,
+    /// The wallet has scanned a block the chain no longer carries. The stored
+    /// state is stale rather than corrupt, so the caller rewinds past the
+    /// divergence instead of failing.
+    Diverged,
+}
+
+/// Renders a block hash in the big-endian display order block explorers use.
+///
+/// Block hashes are held internally in little-endian byte order, so a hash logged
+/// verbatim cannot be looked up anywhere; a divergence report is only actionable
+/// if both sides can be pasted into an explorer.
+fn display_block_hash(hash: &BlockHash) -> String {
+    let mut bytes = hash.0;
+    bytes.reverse();
+    hex::encode(bytes)
+}
+
+/// Renders a transaction ID in the big-endian *display* order every block
+/// explorer, every other KDF coin's history, and this coin's own `withdraw`
+/// response use.
+///
+/// `zcash_client_sqlite` stores `transactions.txid` in the internal
+/// little-endian byte order, so the raw column must be reversed before it is
+/// shown. Skipping the reversal produced an `z_coin_tx_history` `tx_hash` that
+/// no explorer could resolve and that disagreed with the value
+/// `send_raw_transaction` returned for the very same transaction (R39.8.7).
+fn encode_display_txid(mut txid: Vec<u8>) -> String {
+    txid.reverse();
+    hex::encode(txid)
 }
 
 /// Converts the display-order block ID returned by `z_gettreestate` (and thus
@@ -2263,6 +2538,57 @@ mod tests {
         hash
     }
 
+    /// Two real ARRR mainnet transaction IDs, in the internal little-endian byte
+    /// order `zcash_client_sqlite` stores in `transactions.txid`, paired with the
+    /// big-endian display order block explorers resolve. Captured from the
+    /// 2026-09-18 live verification run (see
+    /// `docs/plans/arrr-ironwood-compatibility.md`): a 0.1 ARRR receive mined at
+    /// height 4138653 and the sweep that spent it, mined at 4138661.
+    ///
+    /// These are deliberately **not** byte-order-symmetric. The previous fixture
+    /// used `[1u8; 32]` / `[2u8; 32]`, which read identically forwards and
+    /// backwards and so could never have detected a missing reversal.
+    const FIXTURE_RECEIVE_TXID_INTERNAL: [u8; 32] =
+        hex_literal_32("a4d43b3b60f54559abed8c6ba71354214c7f20b6a4e5e74ac318ba0a53409733");
+    const FIXTURE_RECEIVE_TXID_DISPLAY: &str = "339740530aba18c34ae7e5a4b6207f4c215413a76b8cedab5945f5603b3bd4a4";
+    const FIXTURE_SPEND_TXID_INTERNAL: [u8; 32] =
+        hex_literal_32("0e3774441248e313b0c0bc1bf49a23e2d523c61c30fc4c897c6fc1e3da6cbb23");
+    const FIXTURE_SPEND_TXID_DISPLAY: &str = "23bb6cdae3c16f7c894cfc301cc623d5e2239af41bbcc0b013e348124474370e";
+
+    /// `const`-evaluable hex decoder, so the fixture IDs above can be written as
+    /// the hex strings they are quoted as everywhere else.
+    const fn hex_literal_32(hex: &str) -> [u8; 32] {
+        const fn nibble(b: u8) -> u8 {
+            match b {
+                b'0'..=b'9' => b - b'0',
+                b'a'..=b'f' => b - b'a' + 10,
+                _ => panic!("fixture txid hex must be lowercase [0-9a-f]"),
+            }
+        }
+        let bytes = hex.as_bytes();
+        assert!(bytes.len() == 64, "fixture txid hex must be 32 bytes");
+        let mut out = [0u8; 32];
+        let mut i = 0;
+        while i < 32 {
+            out[i] = (nibble(bytes[2 * i]) << 4) | nibble(bytes[2 * i + 1]);
+            i += 1;
+        }
+        out
+    }
+
+    /// Anchors a freshly rebuilt wallet at `start_height`, the way the fetch path
+    /// does when it adopts a caller-supplied sync start.
+    fn seed_wallet_anchor(history: &ZCoinShieldedHistory, start_height: u64) {
+        let mut wallet_db = open_wallet_db(history.wallet_db_path(), test_params()).unwrap();
+        let ufvk = sapling_ufvk(&history.extfvk).unwrap();
+        import_wallet_account(
+            &mut wallet_db,
+            &ufvk,
+            ChainState::empty(BlockHeight::from_u32(start_height as u32 - 1), BlockHash([7u8; 32])),
+        )
+        .unwrap();
+    }
+
     fn insert_history_fixture(history: &ZCoinShieldedHistory) {
         let mut wallet_db = open_wallet_db(history.wallet_db_path(), test_params()).unwrap();
         if wallet_db.get_account_ids().unwrap().is_empty() {
@@ -2307,14 +2633,14 @@ mod tests {
             "INSERT INTO transactions (
                 id_tx, txid, block, mined_height, tx_index, min_observed_height
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![1i64, vec![1u8; 32], 10u32, 10u32, 0u32, 10u32],
+            params![1i64, FIXTURE_RECEIVE_TXID_INTERNAL.to_vec(), 10u32, 10u32, 0u32, 10u32],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO transactions (
                 id_tx, txid, block, mined_height, tx_index, min_observed_height
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![2i64, vec![2u8; 32], 11u32, 11u32, 0u32, 11u32],
+            params![2i64, FIXTURE_SPEND_TXID_INTERNAL.to_vec(), 11u32, 11u32, 0u32, 11u32],
         )
         .unwrap();
         conn.execute(
@@ -2370,6 +2696,38 @@ mod tests {
             params![spent_note_id, 2i64],
         )
         .unwrap();
+    }
+
+    /// Recording a broadcast this wallet made inserts a `transactions` row while
+    /// the transaction is still unmined (CRD ch.39 R39.8.0ap). That row carries no
+    /// received note, so counting it as scanned would drop the in-flight exclusion
+    /// early and hide the transaction's unconfirmed change from the pending-receipt
+    /// balance (R39.8.0ah). Only a mined height means the block was scanned.
+    #[test]
+    fn unmined_transaction_row_is_not_reported_as_scanned() {
+        const UNMINED_TXID: [u8; 32] = [0xab; 32];
+
+        let history = open_test_history();
+        insert_history_fixture(&history);
+
+        let conn = Connection::open(history.wallet_db_path()).unwrap();
+        conn.execute(
+            "INSERT INTO transactions (
+                id_tx, txid, block, mined_height, tx_index, min_observed_height
+             ) VALUES (?1, ?2, NULL, NULL, NULL, ?3)",
+            params![99i64, UNMINED_TXID.to_vec(), 11u32],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(
+            !history.transaction_is_scanned(&UNMINED_TXID).unwrap(),
+            "a recorded but unmined transaction must not count as scanned"
+        );
+        assert!(
+            history.transaction_is_scanned(&FIXTURE_RECEIVE_TXID_INTERNAL).unwrap(),
+            "a mined transaction must count as scanned"
+        );
     }
 
     #[test]
@@ -2562,6 +2920,58 @@ mod tests {
         );
     }
 
+    /// A caller-supplied sync start must survive activations that do not repeat it.
+    ///
+    /// Regression: a wallet part-way through a deep rescan is indistinguishable
+    /// from a fresh one -- empty, anchored far behind the recent window -- until
+    /// the rescan reaches its first transaction. The reseed therefore fired on the
+    /// next activation carrying no `sync_params` and jumped the wallet forward to
+    /// the recent window, silently discarding the rescan. Observed in the wild: a
+    /// rescan requested at 02:02:11 was wiped 53 seconds later. The damaging case
+    /// is restoring a seed whose funds predate the recent window -- the rescan that
+    /// would have found them is thrown away and the balance stays at zero
+    /// (R39.8.0an).
+    #[test]
+    fn a_requested_sync_start_is_not_discarded_by_the_reseed() {
+        // Born at the coin configuration's checkpoint: the reseed is correct here,
+        // because this wallet has never been anchored anywhere deliberately.
+        let fresh = open_checkpointed_test_history(42);
+        let plan = fresh
+            .lightwalletd_fetch_plan(&test_params(), 10_000, None, false)
+            .unwrap();
+        assert_eq!(
+            plan.unwrap().reset_stale_empty_checkpoint,
+            true,
+            "a wallet still at its birth anchor should skip long-dead history"
+        );
+
+        // Now re-anchor it deliberately, as a caller-supplied sync start does.
+        let requested_start = 5_000;
+        let rescan = fresh
+            .lightwalletd_fetch_plan(&test_params(), 10_000, Some(requested_start), false)
+            .unwrap()
+            .expect("an explicit start must produce a plan");
+        assert_eq!(rescan.start_height, requested_start);
+        assert!(rescan.reset_scan_state, "a changed anchor rebuilds the wallet");
+        fresh.reset_wallet_scan_state().unwrap();
+        seed_wallet_anchor(&fresh, requested_start);
+
+        // The next activation carries no sync_params -- exactly what a GUI sends on
+        // restart. The rescan must survive it.
+        let plan = fresh
+            .lightwalletd_fetch_plan(&test_params(), 10_000, None, false)
+            .unwrap()
+            .expect("a plan is still required");
+        assert!(
+            !plan.reset_stale_empty_checkpoint,
+            "a deliberately re-anchored wallet must not be reseeded forward"
+        );
+        assert_eq!(
+            plan.start_height, requested_start,
+            "the rescan must resume from the requested start, not jump to the recent window"
+        );
+    }
+
     #[test]
     fn reset_empty_wallet_scan_state_clears_checkpoint_and_compact_cache() {
         let history = open_checkpointed_test_history(42);
@@ -2616,6 +3026,54 @@ mod tests {
         assert_eq!(user_version, 8);
     }
 
+    /// A shielded transaction ID must be reported in the same byte order as every
+    /// block explorer, every other KDF coin's history, and this coin's own
+    /// `withdraw` response -- big-endian display order.
+    ///
+    /// Regression: `load_page` hex-encoded the raw `transactions.txid` column,
+    /// which `zcash_client_sqlite` stores in internal little-endian order. The
+    /// resulting `z_coin_tx_history` `tx_hash` resolved on no explorer and
+    /// disagreed with the ID `send_raw_transaction` returned for the very same
+    /// transaction. Reproduced live on ARRR mainnet 2026-09-18 with exactly the
+    /// two transactions used as fixtures here.
+    #[test]
+    fn tx_history_reports_txids_in_explorer_display_order() {
+        // The stored bytes and the displayed string are byte reversals of each
+        // other -- pin that, so neither constant can drift alone.
+        let mut reversed = FIXTURE_RECEIVE_TXID_INTERNAL;
+        reversed.reverse();
+        assert_eq!(hex::encode(reversed), FIXTURE_RECEIVE_TXID_DISPLAY);
+        let mut reversed = FIXTURE_SPEND_TXID_INTERNAL;
+        reversed.reverse();
+        assert_eq!(hex::encode(reversed), FIXTURE_SPEND_TXID_DISPLAY);
+
+        assert_eq!(
+            encode_display_txid(FIXTURE_RECEIVE_TXID_INTERNAL.to_vec()),
+            FIXTURE_RECEIVE_TXID_DISPLAY
+        );
+
+        let history = open_test_history();
+        insert_history_fixture(&history);
+        let page = history
+            .load_page(
+                "ARRR",
+                "zs-wallet",
+                8,
+                12,
+                &PagingOptionsEnum::PageNumber(NonZeroUsize::new(1).unwrap()),
+                10,
+            )
+            .unwrap();
+
+        let rendered: Vec<&str> = page.transactions.iter().map(|t| t.tx_hash.as_str()).collect();
+        assert_eq!(rendered, vec![FIXTURE_SPEND_TXID_DISPLAY, FIXTURE_RECEIVE_TXID_DISPLAY]);
+        // Guard the specific failure: the raw internal order must never surface.
+        for tx in &page.transactions {
+            assert_ne!(tx.tx_hash, hex::encode(FIXTURE_RECEIVE_TXID_INTERNAL));
+            assert_ne!(tx.tx_hash, hex::encode(FIXTURE_SPEND_TXID_INTERNAL));
+        }
+    }
+
     #[test]
     fn load_page_returns_newest_first_wallet_scan_history() {
         let history = open_test_history();
@@ -2634,6 +3092,11 @@ mod tests {
 
         assert_eq!(page.total, 2);
         assert_eq!(page.transactions[0].internal_id, 2);
+        // Newest first, so index 0 is the spend and index 1 the receive. Both
+        // must be rendered in explorer display order, not the internal
+        // little-endian order the wallet database stores (R39.8.7).
+        assert_eq!(page.transactions[0].tx_hash, FIXTURE_SPEND_TXID_DISPLAY);
+        assert_eq!(page.transactions[1].tx_hash, FIXTURE_RECEIVE_TXID_DISPLAY);
         assert_eq!(
             page.transactions[0].spent_by_me,
             BigDecimal::from(25) / BigDecimal::from(100)
@@ -2695,6 +3158,243 @@ mod tests {
         assert_eq!(scanned, 10);
     }
 
+    /// Builds a `TreeState` for the checkpoint-validation tests. Height 10 is above
+    /// `test_params()`'s Sapling activation of 2, so the empty-tree shortcut does
+    /// not apply and every payload is validated on its merits.
+    fn tree_state_with_tree(tree_hex: &str) -> z_coin_grpc::TreeState {
+        z_coin_grpc::TreeState {
+            network: "main".to_owned(),
+            height: 10,
+            hash: hex::encode((0u8..32).collect::<Vec<_>>()),
+            time: 10,
+            tree: tree_hex.to_owned(),
+            ..Default::default()
+        }
+    }
+
+    /// A bare 32-byte commitment root is not a commitment tree. Pirate's
+    /// lightwalletd substitutes one whenever the node cannot supply a frontier, so
+    /// the wallet must refuse it rather than anchor on it.
+    /// A wallet that syncs to the chain tip records the tip block. An ordinary
+    /// one-block reorg then leaves it holding a block the network has dropped, and
+    /// the tree state the servers return for that height no longer matches.
+    ///
+    /// Regression: that mismatch was a hard error with no rewind, so every later
+    /// activation repeated the same comparison and the wallet could never sync
+    /// again -- observed in the wild as "all lightwalletd servers failed", with all
+    /// reachable servers agreeing precisely because it was the wallet that was
+    /// stale. The divergence must instead be reported, rewound past, and
+    /// re-anchored (R39.8.0al).
+    #[test]
+    fn a_reorged_scan_tip_is_rewound_past_instead_of_failing_forever() {
+        let params = test_params_with_zip212();
+        let db_dir = test_db_dir("reorged-scan-tip");
+        let extfvk = test_extfvk(21);
+        let check_point = CheckPointBlockInfo {
+            height: 10,
+            hash: rpc::v1::types::H256([9u8; 32]),
+            time: 1234,
+            sapling_tree: empty_sapling_tree_bytes().into(),
+        };
+        let history =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), params.clone(), &extfvk, Some(&check_point))
+                .unwrap();
+
+        // Note-bearing blocks, so each one advances the commitment tree and leaves
+        // a checkpoint the backend can later rewind to. A rewind target without a
+        // checkpoint is refused outright.
+        let other = test_extfvk(22);
+        let blocks: Vec<_> = (11..=30)
+            .map(|height| {
+                let mut block = compact_block_with_received_note(height, 0, 0, &other, 1_000);
+                // The fixture hardcodes one txid, which collides across blocks on
+                // `tx_locator_map`'s uniqueness constraint.
+                block.vtx[0].txid = deterministic_compact_hash(height + 10_000);
+                block.hash = deterministic_compact_hash(height);
+                block.prev_hash = if height == 11 {
+                    vec![9u8; 32]
+                } else {
+                    deterministic_compact_hash(height - 1)
+                };
+                block.chain_metadata = None;
+                block
+            })
+            .collect();
+        history.insert_compact_blocks(&blocks).unwrap();
+        assert_eq!(
+            history
+                .scan_cached_blocks_to_height(params.clone(), 30, 1_000, 0, |_, _| {})
+                .unwrap(),
+            30
+        );
+
+        // The tree state the chain reports for the scan tip, built from the
+        // wallet's own frontier so that only the block hash can disagree.
+        let tip_state = history.initial_chain_state.lock().as_ref().unwrap().clone();
+        let tip_tree = sapling::CommitmentTree::from_frontier(tip_state.final_sapling_tree());
+        let mut tip_tree_bytes = Vec::new();
+        zcash_primitives::merkle_tree::write_commitment_tree(&tip_tree, &mut tip_tree_bytes).unwrap();
+
+        // The reorg: the chain's block 30 is not the block the wallet scanned.
+        let mut reorged_hash = deterministic_compact_hash(30);
+        reorged_hash[0] ^= 0xff;
+        reorged_hash.reverse(); // a TreeState hash is in display order
+        let reorged_tip = z_coin_grpc::TreeState {
+            network: "main".to_owned(),
+            height: 30,
+            hash: hex::encode(&reorged_hash),
+            time: 30,
+            tree: hex::encode(&tip_tree_bytes),
+            ..Default::default()
+        };
+
+        drop(history);
+        let reopened = ZCoinShieldedHistory::open_or_create("ARRR", db_dir, params.clone(), &extfvk, None).unwrap();
+
+        // Before the fix this was an unrecoverable error, repeated on every retry.
+        assert_eq!(
+            reopened
+                .init_wallet_checkpoint_from_tree_state(params.clone(), reorged_tip)
+                .unwrap(),
+            CheckpointOutcome::Diverged
+        );
+        assert!(
+            reopened.initial_chain_state.lock().is_none(),
+            "a diverged tip must never become the anchor"
+        );
+
+        // Rewind past the divergence, as ensure_lightwalletd_chain_state does.
+        let rewound = reopened.truncate_wallet_to_height(20).unwrap();
+        assert!(rewound <= 20, "rewind must not stop above the request, got {}", rewound);
+        assert!(rewound < 30, "rewind must drop the reorged tip");
+        assert_eq!(
+            reopened.scanned_block_height().unwrap(),
+            Some(rewound),
+            "the wallet's scan tip must follow the rewind"
+        );
+
+        // Re-anchoring at the rewound height now succeeds, so the next fetch
+        // resumes there and rescans the reorged range.
+        let mut rewound_db = open_wallet_db(reopened.wallet_db_path(), params.clone()).unwrap();
+        let rewound_state =
+            wallet_chain_state_before(&mut rewound_db, BlockHeight::from_u32(rewound as u32 + 1)).unwrap();
+        drop(rewound_db);
+        let rewound_tree = sapling::CommitmentTree::from_frontier(rewound_state.final_sapling_tree());
+        let mut rewound_tree_bytes = Vec::new();
+        zcash_primitives::merkle_tree::write_commitment_tree(&rewound_tree, &mut rewound_tree_bytes).unwrap();
+        let mut rewound_display = deterministic_compact_hash(rewound);
+        rewound_display.reverse();
+        let rewound_tip = z_coin_grpc::TreeState {
+            network: "main".to_owned(),
+            height: rewound,
+            hash: hex::encode(rewound_display),
+            time: rewound as u32,
+            tree: hex::encode(rewound_tree_bytes),
+            ..Default::default()
+        };
+        assert_eq!(
+            reopened
+                .init_wallet_checkpoint_from_tree_state(params, rewound_tip)
+                .unwrap(),
+            CheckpointOutcome::Accepted,
+            "the wallet must re-anchor once it has rewound past the divergence"
+        );
+        assert!(reopened.initial_chain_state.lock().is_some());
+    }
+
+    #[test]
+    fn tree_state_bare_commitment_root_is_rejected() {
+        let history = open_test_history();
+        let root = hex::encode([0x7au8; 32]);
+        assert_eq!(root.len(), 64);
+        let error = history
+            .init_wallet_checkpoint_from_tree_state(test_params(), tree_state_with_tree(&root))
+            .unwrap_err();
+        assert!(error.contains("bare 32-byte commitment root"), "{}", error);
+        assert!(history.initial_chain_state.lock().is_none());
+    }
+
+    /// The dangerous variant: a root whose leading bytes happen to be zero parses
+    /// *successfully* as an empty tree, because `read_commitment_tree` never checks
+    /// that it consumed the whole buffer. Before the length guard this was accepted
+    /// and anchored the wallet on a tree of size 0.
+    #[test]
+    fn tree_state_bare_root_of_leading_zeros_is_rejected_not_silently_empty() {
+        let mut root = [0xabu8; 32];
+        root[0] = 0;
+        root[1] = 0;
+        root[2] = 0;
+        // Demonstrate the trap directly: the raw parse succeeds and yields an empty
+        // tree, discarding 29 bytes.
+        let parsed: sapling::CommitmentTree = read_commitment_tree(&root[..]).unwrap();
+        assert_eq!(parsed.size(), 0, "fixture no longer reproduces the silent-empty parse");
+
+        let history = open_test_history();
+        let error = history
+            .init_wallet_checkpoint_from_tree_state(test_params(), tree_state_with_tree(&hex::encode(root)))
+            .unwrap_err();
+        assert!(error.contains("bare 32-byte commitment root"), "{}", error);
+        assert!(history.initial_chain_state.lock().is_none());
+    }
+
+    /// Anything appended after a well-formed tree means the payload is not what the
+    /// server claimed; a partially consumed buffer must not become an anchor.
+    #[test]
+    fn tree_state_with_trailing_bytes_is_rejected() {
+        let history = open_test_history();
+        let mut bytes = empty_sapling_tree_bytes();
+        let tree_len = bytes.len();
+        bytes.extend_from_slice(&[0xffu8; 8]);
+        let error = history
+            .init_wallet_checkpoint_from_tree_state(test_params(), tree_state_with_tree(&hex::encode(bytes)))
+            .unwrap_err();
+        assert!(error.contains("trailing byte"), "{}", error);
+        assert!(
+            error.contains(&format!("{}-byte commitment tree", tree_len)),
+            "{}",
+            error
+        );
+        assert!(history.initial_chain_state.lock().is_none());
+    }
+
+    /// An empty tree field is only legitimate at or below Sapling activation. The
+    /// fetch plan floors every request at that height, so above it an empty field
+    /// means the server had nothing to give us.
+    #[test]
+    fn tree_state_empty_tree_is_rejected_above_sapling_activation_and_allowed_at_it() {
+        let history = open_test_history();
+        let error = history
+            .init_wallet_checkpoint_from_tree_state(test_params(), tree_state_with_tree(""))
+            .unwrap_err();
+        assert!(error.contains("is empty"), "{}", error);
+        assert!(error.contains("Sapling activated at 2"), "{}", error);
+        assert!(history.initial_chain_state.lock().is_none());
+
+        // At activation itself the empty tree is the correct answer.
+        let mut at_activation = tree_state_with_tree("");
+        at_activation.height = 2;
+        history
+            .init_wallet_checkpoint_from_tree_state(test_params(), at_activation)
+            .unwrap();
+        assert!(history.initial_chain_state.lock().is_some());
+    }
+
+    /// A server that sends both fields must agree with itself; when it does, the
+    /// checkpoint is accepted exactly as before.
+    #[test]
+    fn tree_state_sapling_frontier_matching_tree_is_accepted() {
+        let history = open_test_history();
+        let tree_hex = hex::encode(empty_sapling_tree_bytes());
+        let mut state = tree_state_with_tree(&tree_hex);
+        state.height = 2;
+        state.sapling_frontier = tree_hex;
+        state.ironwood_tree = hex::encode([0x11u8; 32]);
+        history
+            .init_wallet_checkpoint_from_tree_state(test_params(), state)
+            .unwrap();
+        assert!(history.initial_chain_state.lock().is_some());
+    }
+
     #[test]
     fn tree_state_display_hash_is_the_compact_chain_little_endian_anchor() {
         let history = open_test_history();
@@ -2708,6 +3408,7 @@ mod tests {
                 hash: hex::encode(display_hash),
                 time: 10,
                 tree: hex::encode(empty_sapling_tree_bytes()),
+                ..Default::default()
             })
             .unwrap();
 
@@ -2858,6 +3559,7 @@ mod tests {
             hash: hex::encode(display_hash),
             time: 8011,
             tree: hex::encode(final_tree_bytes),
+            ..Default::default()
         };
         let db_dir = history.wallet_db_path().parent().unwrap().to_owned();
         drop(history);
@@ -2866,12 +3568,17 @@ mod tests {
             ZCoinShieldedHistory::open_or_create("ARRR", db_dir, params.clone(), &tracked_extfvk, None).unwrap();
         assert!(reopened.initial_chain_state.lock().is_none());
 
+        // A hash the wallet disagrees with is reported as a divergence, not an
+        // error: the caller rewinds past it. Either way it must never become the
+        // anchor.
         let mut wrong_hash_state = tree_state.clone();
         wrong_hash_state.hash = hex::encode([0u8; 32]);
-        let error = reopened
-            .init_wallet_checkpoint_from_tree_state(params.clone(), wrong_hash_state)
-            .unwrap_err();
-        assert!(error.contains("does not match the shielded wallet DB"));
+        assert_eq!(
+            reopened
+                .init_wallet_checkpoint_from_tree_state(params.clone(), wrong_hash_state)
+                .unwrap(),
+            CheckpointOutcome::Diverged
+        );
         assert!(reopened.initial_chain_state.lock().is_none());
 
         let mut wrong_size_frontier = final_state.final_sapling_tree().clone();
@@ -2887,9 +3594,12 @@ mod tests {
         assert!(error.contains("tree size"));
         assert!(reopened.initial_chain_state.lock().is_none());
 
-        reopened
-            .init_wallet_checkpoint_from_tree_state(params.clone(), tree_state)
-            .unwrap();
+        assert_eq!(
+            reopened
+                .init_wallet_checkpoint_from_tree_state(params.clone(), tree_state)
+                .unwrap(),
+            CheckpointOutcome::Accepted
+        );
         reopened
             .insert_compact_block(zcash_compact::CompactBlock {
                 proto_version: 0,
@@ -3534,7 +4244,13 @@ impl ZCoinShieldedHistory {
         let ivk = PreparedIncomingViewingKey::new(&self.extfvk.fvk.vk.ivk());
         // Mempool transactions will be mined at the next height at the
         // earliest, so enforcement is evaluated against the tip.
-        let enforcement = zip212_enforcement(&self.consensus_params, BlockHeight::from_u32(tip as u32));
+        // Same reason as the scanner: a mempool note from a modern Pirate wallet
+        // carries the post-ZIP-212 lead byte, which the coin's own parameters would
+        // reject outright (R39.8.0am).
+        let enforcement = zip212_enforcement(
+            &ZcoinDecryptionParams::new(self.consensus_params.clone()),
+            BlockHeight::from_u32(tip as u32),
+        );
 
         for server in servers {
             let mut client = match Self::connect_lightwalletd(server).await {
@@ -3613,9 +4329,13 @@ impl ZCoinShieldedHistory {
     pub(crate) fn transaction_is_scanned(&self, txid: &[u8; 32]) -> Result<bool, String> {
         let conn = Connection::open_with_flags(&self.wallet_db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| e.to_string())?;
+        // A row alone does not mean scanned: recording a broadcast we made inserts
+        // one while the transaction is still unmined (R39.8.0ap), and such a row
+        // carries no received note. Only a mined height means the block was scanned
+        // and the wallet holds the real notes.
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM transactions WHERE txid = ?1;",
+                "SELECT COUNT(*) FROM transactions WHERE txid = ?1 AND mined_height IS NOT NULL;",
                 params![&txid[..]],
                 |row| row.get(0),
             )

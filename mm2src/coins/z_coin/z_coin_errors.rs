@@ -38,6 +38,19 @@ pub enum GenTxError {
         hex: BytesJson,
         err: std::io::Error,
     },
+    /// The coin's Ironwood network upgrade has activated and this build cannot
+    /// construct the transaction format the network now requires.
+    #[display(
+        fmt = "{} network upgrade (Ironwood) activated at {}; this build cannot create {} transactions -- \
+               please upgrade",
+        coin,
+        activation_time,
+        coin
+    )]
+    IronwoodUpgradeUnsupported {
+        coin: String,
+        activation_time: u32,
+    },
 }
 
 impl From<GetUnspentWitnessErr> for GenTxError {
@@ -77,6 +90,9 @@ impl From<GenTxError> for WithdrawError {
             | GenTxError::NumConversion(_)
             | GenTxError::ShieldedWalletDb(_)
             | GenTxError::TxReadError { .. } => WithdrawError::InternalError(gen_tx.to_string()),
+            // Actionable by the user (upgrade), so it keeps its own message rather
+            // than being flattened into an internal error.
+            GenTxError::IronwoodUpgradeUnsupported { .. } => WithdrawError::InternalError(gen_tx.to_string()),
             #[cfg(not(target_arch = "wasm32"))]
             GenTxError::TxBuilderError(_) => WithdrawError::InternalError(gen_tx.to_string()),
         }
@@ -91,6 +107,26 @@ pub enum SendOutputsErr {
     Rpc(UtxoRpcError),
     TxNotMined(String),
     PrivKeyNotAllowed(PrivKeyNotAllowed),
+    #[display(
+        fmt = "Timed out after {}s waiting for an in-flight shielded spend to be scanned",
+        _0
+    )]
+    InFlightSpendWaitTimeout(u64),
+}
+
+/// Failure to record a broadcast shielded transaction in the wallet database
+/// (CRD ch.39 R39.8.0ap/as). Never fails the send: the transaction is already on
+/// the network by the time recording runs.
+#[derive(Debug, Display)]
+pub enum RecordSentTxErr {
+    #[display(fmt = "Shielded wallet DB is unavailable: {}", _0)]
+    ShieldedWalletDb(String),
+    #[display(fmt = "Shielded wallet DB has no account")]
+    NoAccount,
+    #[display(fmt = "Shielded wallet DB has not been scanned")]
+    ScanRequired,
+    #[display(fmt = "Invalid fee amount {}", _0)]
+    InvalidFeeAmount(u64),
 }
 
 impl From<PrivKeyNotAllowed> for SendOutputsErr {
