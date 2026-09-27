@@ -13,6 +13,7 @@ use crate::utxo::rpc_clients::{BlockHashOrHeight, ElectrumBalance, ElectrumClien
 use crate::utxo::tx_cache::dummy_tx_cache::DummyVerboseCache;
 use crate::utxo::tx_cache::UtxoVerboseCacheOps;
 use crate::utxo::utxo_builder::{UtxoArcBuilder, UtxoCoinBuilderCommonOps};
+use crate::utxo::utxo_common::calc_interest_of_tx;
 use crate::utxo::utxo_common::{address_from_pubkey, get_htlc_key_pair_v2, my_public_key,
                                trade_preimage_sender_address, UtxoTxBuilder};
 use crate::utxo::utxo_common_tests;
@@ -22,7 +23,7 @@ use crate::{CoinBalance, CommonSwapOpsV2, ParseCoinAssocTypes, PrivKeyBuildPolic
             SwapOps, TradePreimageValue, TxFeeDetails};
 use crate::{DexFee, ValidateFeeArgs};
 use bigdecimal::{BigDecimal, Signed};
-use chain::OutPoint;
+use chain::{OutPoint, TransactionInput};
 use common::executor::Timer;
 use common::{block_on, now_ms, OrdRange, PagingOptionsEnum};
 use crypto::{privkey::key_pair_from_seed, Bip44Chain, RpcDerivationPath};
@@ -667,6 +668,24 @@ fn test_kmd_interest() {
     // at least 1 hour should pass
     let actual = kmd_interest(height, value, lock_time, lock_time + 30);
     assert_eq!(actual, Err(KmdRewardsNotAccruedReason::OneHourNotPassedYet));
+
+    // CRD ch.38 R38.4.3 -- KIP-0001 reward reduction (issue #11).
+    // Issue #11 vector, post-fork: the pre-reduction figure (1,744,260) MUST NOT
+    // be produced; the KIP-0001-reduced figure (3,488) MUST be.
+    let issue11_value = 1_473_232_138;
+    let issue11_height = Some(5_108_257);
+    let issue11_lock_time = 1_789_721_423;
+    let issue11_ref_time = 1_790_472_552;
+    let actual = kmd_interest(issue11_height, issue11_value, issue11_lock_time, issue11_ref_time).unwrap();
+    assert_eq!(actual, 3_488);
+
+    // Same vector, pre-fork height: the reward keeps the pre-reduction figure.
+    let actual = kmd_interest(Some(3_484_957), issue11_value, issue11_lock_time, issue11_ref_time).unwrap();
+    assert_eq!(actual, 1_744_260);
+
+    // Fork boundary: height exactly 3,484,958 already applies the reduction.
+    let actual = kmd_interest(Some(3_484_958), issue11_value, issue11_lock_time, issue11_ref_time).unwrap();
+    assert_eq!(actual, 3_488);
 }
 
 #[test]
@@ -1179,6 +1198,200 @@ fn test_withdraw_kmd_rewards_zero() {
 
     let expected_rewards = BigDecimal::from(0);
     test_withdraw_kmd_rewards_impl(TX_HASH, TX_HEX, VERBOSE_SERIALIZED, CURRENT_MTP, Some(expected_rewards));
+}
+
+/// CRD ch.38 R38.4.3 "build-surface integration" vector (issue #11): a KMD
+/// spend of a post-KIP-0001 UTXO must claim the reduced reward (3,488 base
+/// units, i.e. 0.00003488 KMD), not the pre-reduction figure (1,744,260 /
+/// 0.0174426 KMD).
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn test_withdraw_kmd_rewards_post_fork_reduction() {
+    const UTXO_VALUE: u64 = 1_473_232_138;
+    const UTXO_HEIGHT: u64 = 5_108_257;
+    const UTXO_LOCKTIME: u32 = 1_789_721_423;
+    const REF_TIME: u32 = 1_790_472_552;
+
+    let mut prev_tx = UtxoTx::default();
+    prev_tx.version = 4;
+    prev_tx.outputs.push(TransactionOutput {
+        value: UTXO_VALUE,
+        script_pubkey: vec![0xaa; 23].into(),
+    });
+    let prev_tx_hash = prev_tx.hash();
+
+    UtxoStandardCoin::get_unspent_ordered_list.mock_safe(move |coin, _| {
+        let unspents = vec![UnspentInfo {
+            outpoint: OutPoint {
+                hash: prev_tx_hash,
+                index: 0,
+            },
+            value: UTXO_VALUE,
+            height: Some(UTXO_HEIGHT),
+        }];
+        let cache = block_on(coin.as_ref().recently_spent_outpoints.lock());
+        MockResult::Return(Box::pin(futures::future::ok((unspents, cache))))
+    });
+    UtxoStandardCoin::get_current_mtp
+        .mock_safe(move |_fields| MockResult::Return(Box::pin(futures::future::ok(REF_TIME))));
+    NativeClient::get_verbose_transaction.mock_safe(move |_coin, _txid| {
+        let verbose = RpcTransaction {
+            hex: Default::default(),
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            hash: None,
+            size: Default::default(),
+            vsize: Default::default(),
+            version: 4,
+            locktime: UTXO_LOCKTIME,
+            vin: vec![],
+            vout: vec![],
+            blockhash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            confirmations: 100,
+            rawconfirmations: None,
+            time: UTXO_LOCKTIME,
+            blocktime: UTXO_LOCKTIME,
+            height: Some(UTXO_HEIGHT),
+        };
+        MockResult::Return(Box::new(futures01::future::ok(verbose)))
+    });
+
+    let client = NativeClient(Arc::new(NativeClientImpl::default()));
+    let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
+    fields.conf.ticker = "KMD".to_owned();
+    let coin = utxo_coin_from_fields(fields);
+
+    let withdraw_req = WithdrawRequest {
+        amount: BigDecimal::from_str("0.00001").unwrap(),
+        from: None,
+        to: "RQq6fWoy8aGGMLjvRfMY5mBNVm2RQxJyLa".to_string(),
+        coin: "KMD".to_owned(),
+        max: false,
+        fee: None,
+    };
+    let tx_details = coin.withdraw(withdraw_req).wait().unwrap();
+
+    let expected_rewards = Some(KmdRewardsDetails {
+        amount: BigDecimal::from_str("0.00003488").unwrap(),
+        claimed_by_me: true,
+    });
+    assert_eq!(tx_details.kmd_rewards, expected_rewards);
+}
+
+/// CRD ch.38 R38.4.3 "surface agreement": the transaction-history reward
+/// (`calc_interest_of_tx`) MUST equal the R38.4.1 value for the same UTXO and
+/// reference time used by the build-surface test above.
+#[test]
+fn test_calc_interest_of_tx_agrees_with_kmd_interest_post_fork() {
+    use std::collections::HashMap;
+
+    const UTXO_VALUE: u64 = 1_473_232_138;
+    const UTXO_HEIGHT: u64 = 5_108_257;
+    const UTXO_LOCKTIME: u32 = 1_789_721_423;
+    const REF_TIME: u32 = 1_790_472_552;
+
+    let mut prev_tx = UtxoTx::default();
+    prev_tx.version = 4;
+    prev_tx.lock_time = UTXO_LOCKTIME;
+    prev_tx.outputs.push(TransactionOutput {
+        value: UTXO_VALUE,
+        script_pubkey: vec![0xaa; 23].into(),
+    });
+    let prev_tx_hash = prev_tx.hash();
+
+    let mut input_transactions: HistoryUtxoTxMap = HashMap::new();
+    input_transactions.insert(prev_tx_hash.reversed().into(), HistoryUtxoTx {
+        tx: prev_tx,
+        height: Some(UTXO_HEIGHT),
+    });
+
+    let mut spending_tx = UtxoTx::default();
+    spending_tx.lock_time = REF_TIME;
+    spending_tx.inputs.push(TransactionInput {
+        previous_output: OutPoint {
+            hash: prev_tx_hash,
+            index: 0,
+        },
+        script_sig: vec![].into(),
+        sequence: 0,
+        script_witness: vec![],
+    });
+
+    let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(native_client_for_test()), None, false);
+    fields.conf.ticker = "KMD".to_owned();
+    let coin = utxo_coin_from_fields(fields);
+
+    let history_reward = block_on(calc_interest_of_tx(&coin, &spending_tx, &mut input_transactions)).unwrap();
+    let direct_reward = kmd_interest(Some(UTXO_HEIGHT), UTXO_VALUE, UTXO_LOCKTIME as u64, REF_TIME as u64).unwrap();
+    assert_eq!(history_reward, 3_488);
+    assert_eq!(history_reward, direct_reward);
+}
+
+/// CRD ch.38 R38.4.3 "surface agreement": `kmd_rewards_info`'s
+/// `accrued_rewards` MUST equal the same R38.4.1 value for the same UTXO and
+/// reference time.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn test_kmd_rewards_info_agrees_with_kmd_interest_post_fork() {
+    const UTXO_VALUE: u64 = 1_473_232_138;
+    const UTXO_HEIGHT: u64 = 5_108_257;
+    const UTXO_LOCKTIME: u32 = 1_789_721_423;
+    const REF_TIME: u32 = 1_790_472_552;
+
+    let mut prev_tx = UtxoTx::default();
+    prev_tx.version = 4;
+    prev_tx.outputs.push(TransactionOutput {
+        value: UTXO_VALUE,
+        script_pubkey: vec![0xaa; 23].into(),
+    });
+    let prev_tx_hash = prev_tx.hash();
+
+    NativeClient::list_unspent.mock_safe(move |_coin, _address, _decimals| {
+        let unspents = vec![UnspentInfo {
+            outpoint: OutPoint {
+                hash: prev_tx_hash,
+                index: 0,
+            },
+            value: UTXO_VALUE,
+            height: Some(UTXO_HEIGHT),
+        }];
+        MockResult::Return(Box::new(futures01::future::ok(unspents)))
+    });
+    NativeClient::get_verbose_transaction.mock_safe(move |_coin, _txid| {
+        let verbose = RpcTransaction {
+            hex: Default::default(),
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            hash: None,
+            size: Default::default(),
+            vsize: Default::default(),
+            version: 4,
+            locktime: UTXO_LOCKTIME,
+            vin: vec![],
+            vout: vec![],
+            blockhash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            confirmations: 100,
+            rawconfirmations: None,
+            time: UTXO_LOCKTIME,
+            blocktime: UTXO_LOCKTIME,
+            height: Some(UTXO_HEIGHT),
+        };
+        MockResult::Return(Box::new(futures01::future::ok(verbose)))
+    });
+    UtxoStandardCoin::get_current_mtp
+        .mock_safe(move |_fields| MockResult::Return(Box::pin(futures::future::ok(REF_TIME))));
+
+    let client = NativeClient(Arc::new(NativeClientImpl::default()));
+    let mut fields = utxo_coin_fields_for_test(UtxoRpcClientEnum::Native(client), None, false);
+    fields.conf.ticker = "KMD".to_owned();
+    let coin = utxo_coin_from_fields(fields);
+
+    let info = block_on(kmd_rewards_info(&coin)).unwrap();
+    assert_eq!(info.len(), 1);
+    match &info[0].accrued_rewards {
+        KmdRewardsAccrueInfo::Accrued(amount) => {
+            assert_eq!(*amount, BigDecimal::from_str("0.00003488").unwrap());
+        },
+        KmdRewardsAccrueInfo::NotAccruedReason(_) => panic!("expected Accrued"),
+    }
 }
 
 #[test]
@@ -5100,7 +5313,7 @@ mod swap_v2_pre_burn_tests {
     use crate::utxo::utxo_common;
     use crate::utxo::utxo_standard::UtxoStandardCoin;
     use crate::utxo::utxo_tests::{native_client_for_test, utxo_coin_fields_for_test, utxo_coin_from_fields};
-    use crate::utxo::{output_script, ActualTxFee, GenerateTxError, ScriptType, UtxoTx};
+    use crate::utxo::{output_script, sat_from_big_decimal, ActualTxFee, GenerateTxError, ScriptType, UtxoTx};
     use crate::{calc_dex_fee_for_burn_account, calc_dex_fee_for_op_return, DexFee, DexFeeBurnDestination,
                 GenTakerPaymentSpendArgs, MmCoin, ValidateTakerPaymentSpendPreimageError};
     use chain::{OutPoint, TransactionOutput};
@@ -5260,109 +5473,172 @@ mod swap_v2_pre_burn_tests {
         );
     }
 
-    /// A small netid-8762 KMD trade legitimately has a fee-collection leg
-    /// below KMD's generic output dust after the legacy 75/25 split. Only that
-    /// protocol-defined output is exempt; the OP_RETURN leg is already
-    /// unspendable and under-dust change is still folded into the miner fee.
+    /// CRD ch.08 R8 / T5A -- the three exact-rational ranges of the KMD
+    /// direct-burn split, netid 8762, eight decimals, dust 1,000 base units.
+    /// Replaces the withdrawn pre-correction test that asserted the 868/289
+    /// split and a builder dust exemption (issue #11): the reference emits
+    /// 1,000 + 158 for a 0.01 KMD taker, not 868 + 289. No descriptor this
+    /// factory emits needs any builder dust exemption any more (R15A).
     #[test]
-    fn should_build_small_v2_6_0_beta_kmd_taker_fee_without_weakening_dust_policy() {
+    fn should_apply_kmd_direct_burn_ranges_t5a() {
         let kmd = kmd_coin();
         let net_cfg = net_config_or_panic(8762);
+        let fee_address = maker_address_for(&kmd);
+        let discounted_rate = MmNumber::from((9, 7770));
+
+        // (trade amount as an exact fraction, expected fee-output value,
+        // expected burn value or None for a single-output Standard(dust)
+        // descriptor).
+        let cases: &[((u64, u64), u64, Option<u64>)] = &[
+            ((84, 10000), 1_000, None),
+            // 259/30000 KMD is the exact range-1/range-3 boundary (product == dust).
+            ((259, 30000), 1_000, None),
+            ((1, 100), 1_000, Some(158)),
+            ((115, 10000), 1_000, Some(332)),
+            ((116, 10000), 1_007, Some(335)),
+        ];
+
+        for (trade_amount, expected_fee, expected_burn) in cases {
+            let trade_amount = MmNumber::from(*trade_amount);
+            let total = &trade_amount * &discounted_rate;
+            let dex_fee = DexFee::new_from_taker_coin(&kmd as &dyn MmCoin, net_cfg, total);
+            let outputs = utxo_common::generate_taker_fee_tx_outputs(&kmd, &dex_fee, &fee_address).unwrap();
+
+            match expected_burn {
+                None => {
+                    assert_eq!(outputs.len(), 1, "trade {}", trade_amount);
+                    assert_eq!(outputs[0].value, *expected_fee, "trade {}", trade_amount);
+                    assert_eq!(
+                        outputs[0].script_pubkey,
+                        output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+                        "trade {}",
+                        trade_amount
+                    );
+                },
+                Some(expected_burn) => {
+                    assert_eq!(outputs.len(), 2, "trade {}", trade_amount);
+                    assert_eq!(outputs[0].value, *expected_fee, "trade {}", trade_amount);
+                    assert_eq!(
+                        outputs[0].script_pubkey,
+                        output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+                        "trade {}",
+                        trade_amount
+                    );
+                    assert_eq!(outputs[1].value, *expected_burn, "trade {}", trade_amount);
+                    assert_eq!(
+                        outputs[1].script_pubkey,
+                        Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes(),
+                        "trade {}",
+                        trade_amount
+                    );
+                },
+            }
+
+            // None of these descriptors needs a builder dust exemption any more.
+            let builder_coin = doc_coin();
+            let unspents = vec![UnspentInfo {
+                value: 10_000_000,
+                outpoint: OutPoint::default(),
+                height: None,
+            }];
+            let (tx, _) = block_on(
+                utxo_common::UtxoTxBuilder::new(&builder_coin)
+                    .add_available_inputs(unspents)
+                    .add_outputs(outputs.clone())
+                    .with_fee(ActualTxFee::FixedPerKb(1_000))
+                    .build(),
+            )
+            .unwrap();
+            assert_eq!(tx.outputs.len(), outputs.len() + 1, "trade {} (+ change)", trade_amount);
+        }
+    }
+
+    /// CRD ch.08 T5B -- a maker validating the 0.01 KMD descriptor of T5A
+    /// MUST accept the `v2.6.0-beta` on-wire shape (1,000 + 158) and MUST
+    /// reject the withdrawn pre-correction shape (868 + 289).
+    #[test]
+    fn should_validate_kmd_taker_fee_per_reference_wire_shape_t5b() {
+        let kmd = kmd_coin();
+        let net_cfg = net_config_or_panic(8762);
+        let fee_address = maker_address_for(&kmd);
         let trade_amount = MmNumber::from("0.01");
         let total = &trade_amount * &MmNumber::from((9, 7770));
         let dex_fee = DexFee::new_from_taker_coin(&kmd as &dyn MmCoin, net_cfg, total);
-        let fee_address = maker_address_for(&kmd);
-        let outputs = utxo_common::generate_taker_fee_tx_outputs(&kmd, &dex_fee, &fee_address).unwrap();
 
-        assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].value, 868);
-        assert_eq!(
-            outputs[0].script_pubkey,
-            output_script(&fee_address, ScriptType::P2PKH).to_bytes()
-        );
-        assert_eq!(outputs[1].value, 289);
-        assert_eq!(
-            outputs[1].script_pubkey,
-            Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes()
-        );
-        let allowed_underdust_output = utxo_common::taker_fee_allowed_underdust_output(&dex_fee);
-        assert_eq!(allowed_underdust_output, Some(utxo_common::DEFAULT_FEE_VOUT));
+        // v2.6.0-beta wire shape: 1,000 to the fee address, then 158 on a
+        // bare OP_RETURN, then change.
+        let reference_outputs = vec![
+            TransactionOutput {
+                value: 1_000,
+                script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+            },
+            TransactionOutput {
+                value: 158,
+                script_pubkey: Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes(),
+            },
+            TransactionOutput {
+                value: 5_000,
+                script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+            },
+        ];
+        let mut reference_tx = UtxoTx::default();
+        reference_tx.version = 4;
+        reference_tx.outputs = reference_outputs;
 
-        // Use the non-KMD fixture to exercise the pure builder without KMD
-        // interest RPCs. Its dust and fixed transaction fee are both 1,000.
-        let builder_coin = doc_coin();
-        let unspents = vec![UnspentInfo {
-            value: 3_156,
-            outpoint: OutPoint::default(),
-            height: None,
-        }];
+        match &dex_fee {
+            DexFee::WithBurn {
+                fee_amount,
+                burn_amount,
+                burn_destination: DexFeeBurnDestination::KmdOpReturn,
+            } => {
+                let decimals = kmd.as_ref().decimals;
+                let fee_sat = sat_from_big_decimal(&fee_amount.to_decimal(), decimals).unwrap();
+                let burn_sat = sat_from_big_decimal(&burn_amount.to_decimal(), decimals).unwrap();
+                assert_eq!(fee_sat, 1_000);
+                assert_eq!(burn_sat, 158);
+                assert!(reference_tx.outputs[0].value >= fee_sat);
+                assert!(reference_tx.outputs[1].value >= burn_sat);
 
-        let generic_error = block_on(
-            utxo_common::UtxoTxBuilder::new(&builder_coin)
-                .add_available_inputs(unspents.clone())
-                .add_outputs(outputs.clone())
-                .with_fee(ActualTxFee::FixedPerKb(1_000))
-                .build(),
-        )
-        .unwrap_err()
-        .into_inner();
-        assert!(matches!(generic_error, GenerateTxError::OutputValueLessThanDust {
-            value: 868,
-            dust: 1_000
-        }));
-
-        let (tx, tx_data) = block_on(
-            utxo_common::UtxoTxBuilder::new(&builder_coin)
-                .add_available_inputs(unspents)
-                .add_outputs(outputs)
-                .with_fee(ActualTxFee::FixedPerKb(1_000))
-                .allow_underdust_output(allowed_underdust_output.unwrap())
-                .build(),
-        )
-        .unwrap();
-        assert_eq!(tx.outputs.len(), 2);
-        assert_eq!(tx.outputs[0].value, 868);
-        assert_eq!(tx.outputs[1].value, 289);
-        assert_eq!(tx_data.unused_change, Some(999));
-
-        let unrelated_underdust_output = TransactionOutput {
-            value: 999,
-            script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
-        };
-        let scoped_error = block_on(
-            utxo_common::UtxoTxBuilder::new(&builder_coin)
-                .add_available_inputs(vec![UnspentInfo {
-                    value: 10_000,
-                    outpoint: OutPoint::default(),
-                    height: None,
-                }])
-                .add_outputs(vec![
-                    TransactionOutput {
-                        value: 868,
-                        script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
-                    },
-                    unrelated_underdust_output,
-                ])
-                .with_fee(ActualTxFee::FixedPerKb(1_000))
-                .allow_underdust_output(utxo_common::DEFAULT_FEE_VOUT)
-                .build(),
-        )
-        .unwrap_err()
-        .into_inner();
-        assert!(matches!(scoped_error, GenerateTxError::OutputValueLessThanDust {
-            value: 999,
-            dust: 1_000
-        }));
+                // The withdrawn pre-correction shape (868 fee) MUST be rejected:
+                // its value is below the now-expected 1,000.
+                let old_fee_output = TransactionOutput {
+                    value: 868,
+                    script_pubkey: output_script(&fee_address, ScriptType::P2PKH).to_bytes(),
+                };
+                assert!(old_fee_output.value < fee_sat);
+            },
+            other => panic!("expected WithBurn{{KmdOpReturn}}, got {:?}", other),
+        }
     }
 
-    /// An inactive netid-6133 burn key must not turn a standard fee into NoFee.
+    /// CRD ch.08 R15C / ch.16 R7 (issue #11): a taker whose taker-coin swap
+    /// public key equals the network burn/waiver key pays no fee, on both
+    /// production networks, independently of the burn gate. This inverts the
+    /// withdrawn `should_not_waive_fee_for_inactive_burn_key_on_netid_6133`
+    /// (which asserted the opposite before the R7 correction).
     #[test]
-    fn should_not_waive_fee_for_inactive_burn_key_on_netid_6133() {
+    fn should_waive_fee_for_burn_key_taker_on_both_netids() {
+        for netid in [8762u16, 6133u16] {
+            let coin = doc_coin();
+            let net_cfg = net_config_or_panic(netid);
+            let total = MmNumber::from("1");
+            let burn_pubkey = net_cfg.burn_addr_raw_pubkey().to_vec();
+            assert!(!burn_pubkey.is_empty(), "netid {} burn key must be non-empty", netid);
+            let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total, &burn_pubkey);
+            assert_eq!(dex_fee, DexFee::NoFee, "netid {}", netid);
+        }
+    }
+
+    /// A key differing in one byte from the waiver key MUST NOT waive the fee.
+    #[test]
+    fn should_not_waive_fee_for_a_different_pubkey() {
         let coin = doc_coin();
-        let net_cfg = net_config_or_panic(6133);
+        let net_cfg = net_config_or_panic(8762);
         let total = MmNumber::from("1");
-        let burn_pubkey = net_cfg.burn_addr_raw_pubkey();
-        let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total.clone(), burn_pubkey);
+        let mut not_burn_pubkey = net_cfg.burn_addr_raw_pubkey().to_vec();
+        let last = not_burn_pubkey.len() - 1;
+        not_burn_pubkey[last] ^= 0x01;
+        let dex_fee = DexFee::new_with_taker_pubkey(&coin as &dyn MmCoin, net_cfg, total.clone(), &not_burn_pubkey);
         assert_eq!(dex_fee, DexFee::Standard(total));
     }
 

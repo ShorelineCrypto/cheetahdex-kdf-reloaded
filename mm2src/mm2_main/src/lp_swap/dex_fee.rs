@@ -161,8 +161,13 @@ mod tests {
 
     fn mock_min_tx_amount() { TestCoin::min_tx_amount.mock_safe(|_| MockResult::Return(BigDecimal::from(0))); }
 
+    /// CRD ch.08 R15C / ch.16 R7 (issue #11): the no-fee waiver does not
+    /// depend on the network burn gate. Netid 6133 has `burn_enabled() ==
+    /// false`, but a taker holding the network's burn/waiver key still pays
+    /// no fee via the pubkey-aware path. This inverts the withdrawn test of
+    /// the same name that asserted the opposite before the R7 correction.
     #[test]
-    fn burn_disabled_network_does_not_waive_fee_for_burn_pubkey() {
+    fn burn_disabled_network_still_waives_fee_for_burn_pubkey() {
         mock_min_tx_amount();
 
         let net_cfg = net_config_or_panic(6133);
@@ -173,8 +178,59 @@ mod tests {
         let aware_fee = compute_dex_fee_with_taker_pubkey(net_cfg, &taker_coin, "DOC", &trade_amount, burn_pubkey);
         let blind_fee = compute_dex_fee(net_cfg, &taker_coin, "DOC", &trade_amount);
 
-        assert_eq!(aware_fee, DexFee::Standard(MmNumber::from((2, 100))));
-        assert_eq!(aware_fee, blind_fee);
+        // The pubkey-blind path cannot apply the waiver (it doesn't know the
+        // taker's pubkey), so it still returns the standard fee.
+        assert_eq!(blind_fee, DexFee::Standard(MmNumber::from((2, 100))));
+        // The pubkey-aware path applies the R7 waiver regardless of the
+        // (false) burn gate.
+        assert_eq!(aware_fee, DexFee::NoFee);
+    }
+
+    /// CRD ch.51 R14 ordering regression (issue #11 follow-up). The taker's
+    /// `negotiate` step blocks on receiving the maker's `SwapMsg::Negotiated(true)`
+    /// before it will do anything else, including deciding it owes no fee; that
+    /// broadcast is sent only from inside `MakerSwap::wait_taker_fee`. R14's "MUST
+    /// NOT require or decode a fee transaction" governs the fee transaction only.
+    /// If the `DexFee::NoFee` short-circuit ran before the `Negotiated` broadcast,
+    /// a burn-key taker's negotiation would time out because the maker never
+    /// acknowledges it. There is no harness to drive `MakerSwap::wait_taker_fee`
+    /// end-to-end (same limitation `t18` below documents for the V2 machines), so
+    /// this pins the ordering at the source level instead: within
+    /// `wait_taker_fee`, the `Negotiated(true)` broadcast and the taker-fee
+    /// message receipt MUST both textually precede the `DexFee::NoFee` match.
+    #[test]
+    fn ch51_r14_negotiated_broadcast_precedes_nofee_short_circuit_in_wait_taker_fee() {
+        let maker_swap = include_str!("maker_swap.rs");
+        let fn_start = maker_swap
+            .find("async fn wait_taker_fee(")
+            .expect("wait_taker_fee must exist in maker_swap.rs");
+        let fn_body = &maker_swap[fn_start..];
+        let fn_end = fn_body
+            .find("\n    async fn maker_payment(")
+            .expect("wait_taker_fee must be followed by maker_payment in maker_swap.rs");
+        let fn_body = &fn_body[..fn_end];
+
+        let negotiated_pos = fn_body
+            .find("SwapMsg::Negotiated(true)")
+            .expect("wait_taker_fee must broadcast SwapMsg::Negotiated(true)");
+        let recv_pos = fn_body
+            .find("store.taker_fee.take()")
+            .expect("wait_taker_fee must still receive the taker's SwapMsg::TakerFee");
+        let nofee_pos = fn_body
+            .find("DexFee::NoFee")
+            .expect("wait_taker_fee must short-circuit on DexFee::NoFee");
+
+        assert!(
+            negotiated_pos < nofee_pos,
+            "the Negotiated(true) broadcast must precede the NoFee short-circuit, \
+             otherwise a burn-key taker's negotiation times out"
+        );
+        assert!(
+            recv_pos < nofee_pos,
+            "the taker-fee message must still be received (unparsed) before the \
+             NoFee short-circuit, since the taker's SwapMsg::TakerFee carries no \
+             other progress signal for this combined broadcast+receive step"
+        );
     }
 
     #[test]
@@ -207,6 +263,29 @@ mod tests {
                 >= 4
         );
         assert!(!taker_swap_v2.contains("dex_fee: &DexFee::NoFee"));
+    }
+
+    /// CRD ch.16 T4B (decision-point only; the full version-two preimage /
+    /// funding rewrite bound by R12B and R13-R20 is out of scope for this
+    /// change). The V2 maker- and taker-side dex-fee decision point is the
+    /// same `compute_dex_fee_with_taker_pubkey` exercised by t16_4b above;
+    /// for a non-KMD pair (so ch.16 R12B does not apply) and a taker key
+    /// equal to the network waiver key, it MUST yield `NoFee` on both
+    /// production netids (ch.16 R7, R12A).
+    #[test]
+    fn t4b_v2_dex_fee_decision_point_waives_fee_for_burn_pubkey_both_netids() {
+        mock_min_tx_amount();
+
+        for netid in [8762u16, 6133u16] {
+            let net_cfg = net_config_or_panic(netid);
+            let taker_coin = MmCoinEnum::Test(TestCoin::new("MARTY"));
+            let trade_amount = MmNumber::from("1");
+            let burn_pubkey = net_cfg.burn_addr_raw_pubkey().to_vec();
+            assert!(!burn_pubkey.is_empty(), "netid {} burn key must be non-empty", netid);
+
+            let fee = compute_dex_fee_with_taker_pubkey(net_cfg, &taker_coin, "DOC", &trade_amount, &burn_pubkey);
+            assert_eq!(fee, DexFee::NoFee, "netid {}", netid);
+        }
     }
 
     /// T9/P2.1: the 7 `net_config_or_panic` call sites in the V2 swap `on_changed`

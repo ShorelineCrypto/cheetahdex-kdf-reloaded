@@ -243,11 +243,16 @@ duration; compute the expected fee descriptor for the taker coin, the
 maker coin ticker, the taker volume and the taker's taker-coin public
 key; and — unless the descriptor is the no-fee form — decode and
 validate the fee transaction against the expected sender, the expected
-descriptor and the taker-coin start block. Any failure MUST emit
+descriptor and the taker-coin start block. The output structure and
+the one-sided value tolerance of that validation are bound by
+[chapter 08](08-fee-routing-engine.md) R15B. Any failure MUST emit
 `TakerFeeValidateFailed` and transition to `STAGE-FINISH`.
 
 **R14.** *No-fee short circuit.* When the fee descriptor for the trade
-is the no-fee form, `STAGE-AWAIT-TAKER-FEE` MUST NOT require or decode a
+is the no-fee form (on the legacy protocol this happens only through the
+waiver of [chapter 08](08-fee-routing-engine.md) R15C / chapter 16 R7;
+the version-two ticker exemption of chapter 16 R12B never applies here),
+`STAGE-AWAIT-TAKER-FEE` MUST NOT require or decode a
 fee transaction. It MUST emit `TakerFeeValidated` carrying an
 empty transaction identifier — empty transaction bytes and empty hash
 bytes — and proceed. The empty identifier is the dictated
@@ -1104,9 +1109,12 @@ legacy swap machines.
 
 **R68.** *Differences that exist are outside this substrate.* Where the
 v3 lineage differs in the legacy files it does so only in: the dex-fee
-rate and discount policy, which is bound by
-[chapter 08](08-fee-routing-engine.md) and by the network configuration
-and is therefore netid-selected, not swap-machine-selected; the
+rate and discount policy and the KMD direct-burn policy (on netid 8762
+a KMD taker fee has three ranges, dust-only, clamped split and 75/25
+split; on netid 6133 it is always a single output), which are bound
+by [chapter 08](08-fee-routing-engine.md) R8/R15B and by the network
+configuration and are therefore netid-selected, not
+swap-machine-selected; the
 plumbing by which a watcher-reward amount reaches the coin layer, which
 is an internal detail carrying no wire or persisted-log consequence; and
 the argument lists of two coin-layer operations, likewise with no wire

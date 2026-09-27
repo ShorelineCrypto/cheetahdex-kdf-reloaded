@@ -21,11 +21,17 @@ The original AtomicDEX network.
 | Discounted tickers | KMD |
 | Discounted fee rate | 9/7770 (~0.116%, 10% discount) |
 | Minimum fee | Taker coin's minimum transaction amount (no additional network floor) |
-| Burn | KMD taker only — 75% fee output, 25% OP_RETURN output |
+| Burn | KMD taker only — three ranges on the dust-floored total: at or below dust, a single fee output for exactly dust; above dust with a 75% share at or above dust, a 75%/25% fee/OP_RETURN split; otherwise a fee output of exactly dust and an OP_RETURN burn of the remainder |
+| No-fee waiver key | `0369aa10c061cd9e085f4adb7399375ba001b54136145cb748eb4c48657be13153` — a taker whose taker-coin swap public key equals this value pays no DEX fee, on both swap protocols, independently of the burn setting above |
+| Version-two no-fee tickers | `KMD` — a version-two swap with KMD on either side of the pair carries no dex fee |
 | Hardcoded seed nodes | None — provide `"seednodes"` in MM2.json |
 
 Swap fee behavior on this network is pinned to the `v2.6.0-beta` compatibility
-reference. Non-KMD takers keep the standard single-output fee transaction.
+reference. Non-KMD takers keep the standard single-output fee transaction. For
+a KMD taker, the exact split is dust-aware, not a flat 75/25: a 0.01 KMD trade
+converts to a 1,000-base-unit fee output and a 158-base-unit OP_RETURN output,
+matching a `v2.6.0-beta` node on the wire (issue #11) — not the 868/289 an
+earlier revision of this project produced.
 
 ### netid 6133 — GLEEC DEX
 
@@ -38,11 +44,14 @@ The GLEEC decentralized exchange network.
 | Discounted fee rate | 1/100 (1%, 50% discount) |
 | Minimum fee | Taker coin's minimum transaction amount (no additional network floor) |
 | Burn | Disabled — all takers use a single standard fee output |
+| No-fee waiver key | `03a778d9bd346fa704cf3e2508cd074d93a1bbc1e504fbecbb0a8d48e7cccbbf5c` (equal to the fee key) — a taker whose taker-coin swap public key equals this value pays no DEX fee, on both swap protocols, even though burn is disabled |
+| Version-two no-fee tickers | None |
 | Hardcoded seed nodes | None — provide `"seednodes"` in MM2.json |
 
 Swap fee behavior on this network follows the applicable unreleased v3/dev
-compatibility reference. The configured inactive burn key is retained as a
-compatibility value but does not enable a burn transaction.
+compatibility reference. The configured burn key equals the fee key: it does
+not enable a burn split (burn stays disabled), but it is still live as the
+no-fee waiver key above — this does not depend on the burn setting.
 
 ### netid 7777 — Deprecated
 

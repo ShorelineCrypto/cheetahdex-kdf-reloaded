@@ -277,20 +277,46 @@ impl fmt::Display for DexFee {
     }
 }
 
-/// KMD path: split the fee between the fee address and an `OP_RETURN` burn
-/// output. The `min_tx_amount` check applies to the total fee; if the entire
-/// fee is below that minimum, fall back to `Standard`.
-pub fn calc_dex_fee_for_op_return(fee: MmNumber, min_tx_amount: MmNumber, fee_share: MmNumber) -> DexFee {
-    if fee < min_tx_amount {
-        return DexFee::Standard(fee);
+/// KMD path (CRD ch.08 R8 / ch.16 R8): split the (already dust-floored) total
+/// fee between the fee address and an `OP_RETURN` burn output using three
+/// exact-rational ranges, evaluated in order:
+///
+/// 1. `total <= dust` -- `Standard(dust)`: one fee output, no burn.
+/// 2. `total * share >= dust` -- full split: `fee = total * share`,
+///    `burn = total - fee`.
+/// 3. otherwise (`dust < total` and `total * share < dust`) -- clamped
+///    split: `fee = dust`, `burn = total - dust`. The fee-collection leg is
+///    never below dust; only the burn leg can be.
+///
+/// This is the netid-8762 `v2.6.0-beta` wire contract (issue #11): it
+/// replaces an earlier, incorrect implementation that always split 75/25
+/// above dust and then exempted the resulting under-dust fee output from the
+/// builder's dust guard (see ch.08 R15A's compatibility correction).
+pub fn calc_dex_fee_for_op_return(total: MmNumber, min_tx_amount: MmNumber, fee_share: MmNumber) -> DexFee {
+    if total <= min_tx_amount {
+        return DexFee::Standard(min_tx_amount);
     }
-    let fee_part = &fee * &fee_share;
-    let burn_part = &fee - &fee_part;
-    if fee_part <= MmNumber::from(0) || burn_part <= MmNumber::from(0) {
-        return DexFee::Standard(fee);
+    let fee_part = &total * &fee_share;
+    if fee_part >= min_tx_amount {
+        let burn_part = &total - &fee_part;
+        // Ch.08 R10 safety fallback: never emit a degenerate WithBurn. Not
+        // reachable for either production network's parameters (R8), but a
+        // non-default share (e.g. 1) can still hit this.
+        if fee_part <= MmNumber::from(0) || burn_part <= MmNumber::from(0) {
+            return DexFee::Standard(total);
+        }
+        return DexFee::WithBurn {
+            fee_amount: fee_part,
+            burn_amount: burn_part,
+            burn_destination: DexFeeBurnDestination::KmdOpReturn,
+        };
+    }
+    let burn_part = &total - &min_tx_amount;
+    if burn_part <= MmNumber::from(0) {
+        return DexFee::Standard(total);
     }
     DexFee::WithBurn {
-        fee_amount: fee_part,
+        fee_amount: min_tx_amount,
         burn_amount: burn_part,
         burn_destination: DexFeeBurnDestination::KmdOpReturn,
     }
@@ -349,17 +375,21 @@ impl DexFee {
         calc_dex_fee_for_burn_account(base_fee, min_tx_amount, fee_share, burn_pubkey)
     }
 
-    /// Validation-time variant. Returns `NoFee` when an active account-burn
-    /// coin is itself the taker; inactive network keys and direct OP_RETURN
-    /// burns do not waive the fee. Otherwise delegates to
-    /// `new_from_taker_coin`.
+    /// Validation-time variant (CRD ch.16 R7). Step 1: if the taker coin is
+    /// not a privacy coin and its resolved burn public key (the coin's own
+    /// non-empty value, else the network's) is byte-for-byte equal to the
+    /// taker's public key, return `NoFee` -- the burn-key holder pays no fee
+    /// on its own trades. This does NOT depend on the network burn gate or
+    /// on either per-coin burn predicate, and applies on both production
+    /// networks (netid 8762 and 6133) and both swap protocols. Otherwise
+    /// delegates to `new_from_taker_coin`.
     pub fn new_with_taker_pubkey(
         taker_coin: &dyn MmCoin,
         net_cfg: &dyn mm2_net_config::NetConfig,
         base_fee: MmNumber,
         taker_pubkey: &[u8],
     ) -> DexFee {
-        if net_cfg.burn_enabled() && !taker_coin.should_burn_directly() && taker_coin.should_burn_dex_fee() {
+        if !taker_coin.is_privacy() {
             let burn_pubkey = match taker_coin.burn_pubkey() {
                 ref v if !v.is_empty() => v.clone(),
                 _ => net_cfg.burn_addr_raw_pubkey().to_vec(),

@@ -158,7 +158,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `mm2src/coins_activation/src/z_coin_activation.rs`,
   `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
 
-- **Small KMD direct-burn DEX fees retain the legacy wire shape.** Netid 8762
+- **Superseded (issue #11): KMD direct-burn DEX-fee split corrected; the
+  small-KMD dust exemption below is withdrawn.** The entry below ("Small KMD
+  direct-burn DEX fees retain the legacy wire shape") described a flat 75/25
+  split above dust plus a builder dust exemption for the resulting
+  under-dust fee output. Public-network observation of a `v2.6.0-beta` node
+  contradicts that: for a 0.01 KMD taker it emits 1,000 base units to the
+  fee address and 158 to `OP_RETURN`, not 868 + 289. The DEX-fee split is now
+  computed from three exact-rational ranges on the dust-floored total: at or
+  below dust, a single fee output for exactly dust; above dust with the 75%
+  share at or above dust, the 75/25 split; otherwise a fee output of exactly
+  dust and an OP_RETURN burn of the remainder. Because the fee-collection
+  leg is now never below dust, the generic UTXO builder needs no per-output
+  or per-descriptor dust exemption for this descriptor any more — the
+  under-dust exemption plumbing (builder option, taker-fee send variant, and
+  selector) has been removed entirely. Code: `mm2src/coins/lp_coins_types.rs`,
+  `mm2src/coins/utxo.rs`, `mm2src/coins/utxo/utxo_common/`.
+- **KMD taker no longer over-claims Active User Reward (interest) on
+  post-KIP-0001 UTXOs (issue #11).** The reward computation was missing the
+  KIP-0001 500x reduction that took effect at the dPoW Season-7 hard fork
+  (height 3,484,958). A KMD spend whose inputs include an eligible UTXO
+  confirmed at or after that height now claims the correct, reduced reward
+  instead of a figure 500x too large, which the network previously rejected
+  with `bad-txns-in-belowout`. Reported and validated on the same
+  transaction/history/`kmd_rewards_info` surfaces. Code: `mm2src/coins/utxo.rs`.
+- **No-fee waiver for the network burn/waiver-key taker (issue #11).** A
+  taker whose taker-coin swap public key equals the active network's
+  burn/waiver key now pays no DEX fee, on both netid 8762 and netid 6133 and
+  on the legacy swap protocol, independently of whether the network's burn
+  split is enabled. Previously the waiver only applied while an (inactive,
+  on both production networks) general burn-account path was active, so it
+  never took effect in production. Netid 8762's burn key
+  (`0369aa…3153`) is no longer empty. Code: `mm2src/coins/lp_coins_types.rs`,
+  `mm2src/mm2_net_config/`, `mm2src/mm2_main/src/lp_swap/maker_swap.rs`,
+  `mm2src/mm2_main/src/lp_swap/taker_swap.rs`.
+- **Small KMD direct-burn DEX fees retain the legacy wire shape (superseded,
+  see above).** Netid 8762
   KMD taker-fee construction now permits the positive 75% fee-collection
   output selected by the `v2.6.0-beta` policy even when that split component
   is below KMD's generic spendable-output dust threshold. The exception is
@@ -172,8 +207,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   ticker's zero-valued entry in `total_balance` instead of returning an untyped
   empty object. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
 - **DEX-fee wire compatibility on both production netids.** Netid 8762 KMD
-  takers now use the `v2.6.0-beta`-compatible discounted fee and two-output
-  75/25 fee/OP_RETURN structure, while non-KMD takers remain single-output.
+  takers now use the `v2.6.0-beta`-compatible discounted fee and dust-aware
+  fee/OP_RETURN split (see the corrected three-range entry above for the
+  exact structure), while non-KMD takers remain single-output.
   Netid 6133 follows the v3/dev single-output fee structure. Both networks now
   use only the taker coin's minimum transaction amount as the fee floor,
   removing the erroneous additional `0.0001` floor. Fixes #1. Code:
