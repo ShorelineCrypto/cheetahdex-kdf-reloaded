@@ -527,6 +527,11 @@ pub struct ZCoinFields {
     /// after a restart: the map is empty, so a shortfall simply fails fast.
     #[cfg(not(target_arch = "wasm32"))]
     in_flight_spends: Mutex<HashMap<[u8; 32], u64>>,
+    /// Message from the most recent shielded sync failure, cleared by the next
+    /// successful scan. Without it a failed scan is reported as a scan still in
+    /// progress, because both leave `wallet_db_scan_complete` false (R39.8.0au).
+    #[cfg(not(target_arch = "wasm32"))]
+    shielded_sync_error: Mutex<Option<String>>,
     sapling_state_synced: AtomicBool,
     /// Platform-agnostic sapling state cache (SQLite on native, IndexedDB on WASM).
     sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync>,
@@ -589,7 +594,20 @@ fn z_coin_history_sync_status(
     wallet_db_scan_complete: bool,
     wallet_db_scanned_through: u64,
     sapling_state_synced: bool,
+    last_sync_error: Option<&str>,
 ) -> HistorySyncState {
+    // Reported ahead of the scan-completion check, because a failed scan also
+    // leaves the scan incomplete: without this the two are indistinguishable and
+    // a wallet that can no longer sync looks like one that is still catching up
+    // (R39.8.0au).
+    if let Some(message) = last_sync_error {
+        return HistorySyncState::Error(json!({
+            "code": 0,
+            "message": message,
+            "scanned_through": wallet_db_scanned_through
+        }));
+    }
+
     if !wallet_db_scan_complete {
         return HistorySyncState::InProgress(json!({
             "type": "shielded_wallet_db_scan",
@@ -1028,7 +1046,7 @@ mod shielded_history_status_tests {
 
     #[test]
     fn unscanned_wallet_db_does_not_report_finished_even_if_sapling_cache_synced() {
-        let status = z_coin_history_sync_status(false, 10, true);
+        let status = z_coin_history_sync_status(false, 10, true, None);
         match status {
             HistorySyncState::InProgress(info) => {
                 assert_eq!(info["type"], "shielded_wallet_db_scan");
@@ -1042,16 +1060,52 @@ mod shielded_history_status_tests {
     #[test]
     fn finished_requires_wallet_db_and_sapling_cache_completion() {
         assert!(matches!(
-            z_coin_history_sync_status(true, 10, true),
+            z_coin_history_sync_status(true, 10, true, None),
             HistorySyncState::Finished
         ));
 
-        let status = z_coin_history_sync_status(true, 10, false);
+        let status = z_coin_history_sync_status(true, 10, false, None);
         match status {
             HistorySyncState::InProgress(info) => assert_eq!(info["type"], "sapling_state_cache_scan"),
             HistorySyncState::Finished => panic!("sapling cache completion is still required"),
             other => panic!("unexpected status {:?}", other),
         }
+    }
+
+    /// A failed scan and a scan still running both leave the wallet database
+    /// incomplete, so without the recorded failure the two report identically and
+    /// a wallet that can no longer sync is indistinguishable from one catching up
+    /// (R39.8.0au).
+    #[test]
+    fn a_failed_sync_is_reported_as_error_not_as_progress() {
+        let status = z_coin_history_sync_status(false, 10, true, Some("all lightwalletd servers failed"));
+        match status {
+            HistorySyncState::Error(info) => {
+                assert_eq!(info["message"], "all lightwalletd servers failed");
+                assert_eq!(info["scanned_through"], 10);
+            },
+            other => panic!("a failed sync must not be reported as {:?}", other),
+        }
+    }
+
+    /// The failure is reported even once the scan flag has been set, because a
+    /// periodic sync can fail after the initial scan already completed.
+    #[test]
+    fn a_failure_after_a_completed_scan_still_reports_error() {
+        assert!(matches!(
+            z_coin_history_sync_status(true, 10, true, Some("could not reach the chain tip")),
+            HistorySyncState::Error(_)
+        ));
+    }
+
+    /// A later successful scan clears the record, so the state returns to normal
+    /// rather than latching on the first failure.
+    #[test]
+    fn clearing_the_failure_restores_the_normal_state() {
+        assert!(matches!(
+            z_coin_history_sync_status(true, 10, true, None),
+            HistorySyncState::Finished
+        ));
     }
 }
 
@@ -1374,6 +1428,7 @@ async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<
             Ok(tip) => tip,
             Err(e) => {
                 log::warn!("ZCoin periodic sync for {ticker}: could not get block count: {e}");
+                coin.set_shielded_sync_error(&format!("could not reach the chain tip: {e}"));
                 continue;
             },
         };
@@ -1388,6 +1443,7 @@ async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<
             .await
         {
             log::warn!("ZCoin periodic sync for {ticker}: compact block fetch to height {tip} failed: {e}");
+            coin.set_shielded_sync_error(&format!("compact block fetch to height {tip} failed: {e}"));
             continue;
         }
 
@@ -1615,6 +1671,8 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             z_unspent_mutex: AsyncMutex::new(()),
             #[cfg(not(target_arch = "wasm32"))]
             in_flight_spends: Mutex::new(HashMap::new()),
+            #[cfg(not(target_arch = "wasm32"))]
+            shielded_sync_error: Mutex::new(None),
             sapling_state_synced: AtomicBool::new(false),
             sapling_cache,
             #[cfg(not(target_arch = "wasm32"))]
@@ -2016,10 +2074,12 @@ impl MmCoin for ZCoin {
     fn history_sync_status(&self) -> HistorySyncState {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let last_sync_error = self.shielded_sync_error();
             z_coin_history_sync_status(
                 self.z_fields.wallet_db_scan_complete.load(AtomicOrdering::Relaxed),
                 self.z_fields.wallet_db_scanned_through.load(AtomicOrdering::Relaxed),
                 self.is_sapling_state_synced(),
+                last_sync_error.as_deref(),
             )
         }
 
