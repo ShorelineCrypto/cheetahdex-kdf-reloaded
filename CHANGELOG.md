@@ -8,6 +8,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Version-two (V2) UTXO swap wire contract corrected to match deployed
+  peers (issue #11 batch 2).** The version-two taker-payment-spend preimage
+  now matches the reference `v2.6.0-beta`/v3-lineage contract instead of an
+  earlier, incompatible one:
+  - the `Standard` preimage carries the fee-collection output alone (the
+    maker appends its own payout afterward), not the maker's payout with the
+    fee appended;
+  - the `WithBurn` preimage orders its outputs fee, then burn, then maker
+    payout, not maker-first;
+  - the `OP_RETURN` burn output carries the burned value in the output's own
+    value with a bare `OP_RETURN` script, not a zero-value output with an
+    8-byte little-endian payload;
+  - the maker's validation now rebuilds the expected preimage and requires
+    an exact match (no tolerance), instead of a ±10% value tolerance;
+  - the version-two funding-spend and taker-payment-spend fee estimate is
+    now proportional to a 496-byte reference size (matching the reference
+    nodes), not the previous whole-kilobyte-rounded, 305-byte estimate;
+  - the fee-collection output now resolves the active network's DEX-fee
+    address via `NetConfig`, not a deprecated constant fixed to netid 8762
+    (previously wire-incorrect on netid 6133);
+  - each cooperative-branch signature now carries its own signature-hash
+    flag byte (maker always `ALL`, taker `SINGLE` for `Standard`) — a single
+    shared byte could not represent the corrected `Standard` case.
+  Every version-two swap with a UTXO taker coin between this project and a
+  reference node previously failed at preimage validation, on both netids,
+  for any ticker. Code: `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`.
+- **Version-two no-fee ticker exemption (chapter 16 R12B) is now wired into
+  the version-two swap machinery (issue #11 batch 2).** A version-two swap
+  with `KMD` on either side of the pair now carries `NoFee` end to end
+  (both roles, before and after negotiation) on netid 8762; the accessor
+  existed since the previous release but nothing in the version-two path
+  consulted it. The legacy protocol is unaffected — it never applies this
+  exemption. Code: `mm2src/mm2_main/src/lp_swap/dex_fee.rs`,
+  `mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs`,
+  `mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs`.
+- **Version-two UTXO funding amount no longer omits the burn leg (issue #11
+  batch 2).** The taker's version-two funding output value is now trading
+  amount + premium + the dex-fee *total* spend amount (fee plus burn for a
+  `WithBurn` descriptor), matching chapter 15 R16/R17. It previously used
+  the fee component alone, which would have underfunded a `WithBurn`
+  version-two swap (not currently reachable in production, since neither
+  production network negotiates a version-two `WithBurn` descriptor today).
+  Code: `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`.
+
 - **Siacoin swap payment validation is now covered by tests — CRD ch.20 R-H1.** Nine cases around the check `validate_maker_payment`/`validate_taker_payment` make before a swap commits to a counterparty's on-chain payment: eight of them rejection properties (roles swapped, wrong amount, different secret hash, different counterparty key, different timelock, no outputs, HTLC funded at a decoy index). **Known limitation:** SC still has no automated end-to-end swap test — one that boots a containerised Sia node and settles a real swap on both legs — so SC swaps rest on these logic tests plus manual testing. Deferred to the next release; tracked with the rest of the Siacoin deferred work in CRD ch.20 §20.10. Code: `mm2src/coins/siacoin/siacoin_swap_ops.rs`.
 - **A shielded coin now refuses to build transactions once a network upgrade it cannot transact on has activated — CRD ch.39 R39.6.4c.** The swap freeze added alongside it stops *new swaps* ahead of Pirate Chain's Ironwood upgrade, but a withdrawal passes none of the swap gates — so after activation it would still have built a version-4 transaction and failed at broadcast, surfacing as an opaque network rejection. Every ARRR transaction is now refused from the activation time onwards, at the single point they are all constructed, with an error naming the coin, the activation time and the need to upgrade. The check runs before the path's blocking wait, so a caller is refused promptly rather than made to wait first. The two cut-offs are deliberately staggered and are not merged: the freeze starts ~44.5 h earlier and blocks only *entering* swaps, because between the two a swap begun before the freeze must still be able to spend or refund itself — a build refusal starting at the freeze would strand exactly the swaps the freeze exists to protect. A test pins that ordering. Receiving, balance, address derivation and history are unaffected throughout. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_errors.rs`.
 - **A shielded coin now stops accepting new swaps ahead of a network upgrade it cannot yet transact on — CRD ch.39 R39.6.4b.** Pirate Chain's Ironwood upgrade (3 Oct 2026 19:00 UTC) makes only version-6 transactions standard; a build that cannot construct them would be unable to spend *or refund* an HTLC funded shortly before activation, stranding one side of any swap that straddles it. A coin declaring `ironwood_activation_time` therefore reports itself wallet-only from a cut-off ahead of activation, which `buy`, `sell` and `setprice` already gate on, and additionally declines incoming peer matches — the wallet-only report is never consulted on that path, so a remote taker could otherwise still match an order already posted. The cut-off is 160 300 s (44 h 32 m): the longest maker payment lock this framework can produce (156 000 s — `PAYMENT_LOCKTIME` x 10 for the legacy slow-coin rule, x 2 for the maker leg), plus the 3 700 s refund grace the swap machines wait before acting, plus ~10 blocks for the refund to be mined. For ARRR that means trading pauses at **1 Oct 2026 22:28 UTC**. Receiving, balance, address, `withdraw`, history and every swap already in flight are untouched, and a coin declaring no Ironwood activation is never affected. Because the locktime rules live in the swap layer, which depends on the coin layer rather than the reverse, the margin is a constant in `coins` guarded by a test in `mm2_main` that fails if the two drift — that guard is what caught the first draft, which covered the lock but not the refund grace. Code: `mm2src/coins/z_coin.rs`, `mm2src/mm2_main/src/lp_swap.rs`.

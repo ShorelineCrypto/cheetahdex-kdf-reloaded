@@ -1044,6 +1044,11 @@ pub struct GenTakerPaymentSpendArgs<'a, Coin: ParseCoinAssocTypes + ?Sized> {
     pub dex_fee: &'a DexFee,
     pub premium_amount: BigDecimal,
     pub trading_amount: BigDecimal,
+    /// Raw bytes of the active network's DEX-fee-collection public key (CRD
+    /// ch.16 R14 / chapter 08 R16 finding). The version-two taker-payment-spend
+    /// fee-collection output MUST be derived from this, not from a
+    /// network-fixed constant.
+    pub dex_fee_addr_raw_pubkey: &'a [u8],
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "state", content = "additional_info")]

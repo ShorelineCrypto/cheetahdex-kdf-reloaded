@@ -151,9 +151,77 @@ pub(crate) fn compute_dex_fee_with_taker_pubkey_from_coin(
     DexFee::new_with_taker_pubkey(taker_coin, net_cfg, total, taker_pubkey)
 }
 
+/// CRD ch.16 R12B: on the version-two protocol only, if either coin's ticker
+/// is in the network's version-two no-fee ticker set, every version-two
+/// dex-fee computation MUST yield `NoFee`, before any step of R7. Empty on
+/// netid 6133; `["KMD"]` on netid 8762.
+fn v2_ticker_exemption_applies(net_cfg: &dyn NetConfig, maker_coin: &str, taker_coin: &str) -> bool {
+    let no_fee_tickers = net_cfg.no_fee_tickers_v2();
+    no_fee_tickers.contains(&maker_coin) || no_fee_tickers.contains(&taker_coin)
+}
+
+/// Version-two, taker-pubkey-aware dex-fee computation (CRD ch.16 R12A/R12B).
+///
+/// Every version-two maker/taker call site that knows the taker's pubkey MUST
+/// route through this (not the plain [`compute_dex_fee_with_taker_pubkey`]),
+/// so the netid-selected version-two ticker exemption of R12B is applied
+/// before the R7 no-fee waiver and the ordinary fee computation.
+pub fn compute_dex_fee_v2_with_taker_pubkey(
+    net_cfg: &dyn NetConfig,
+    taker_coin: &MmCoinEnum,
+    maker_coin: &str,
+    trade_amount: &MmNumber,
+    taker_pubkey: &[u8],
+) -> DexFee {
+    compute_dex_fee_v2_with_taker_pubkey_from_coin(net_cfg, &**taker_coin, maker_coin, trade_amount, taker_pubkey)
+}
+
+pub(crate) fn compute_dex_fee_v2_with_taker_pubkey_from_coin(
+    net_cfg: &dyn NetConfig,
+    taker_coin: &dyn MmCoin,
+    maker_coin: &str,
+    trade_amount: &MmNumber,
+    taker_pubkey: &[u8],
+) -> DexFee {
+    if v2_ticker_exemption_applies(net_cfg, maker_coin, taker_coin.ticker()) {
+        return DexFee::NoFee;
+    }
+    compute_dex_fee_with_taker_pubkey_from_coin(net_cfg, taker_coin, maker_coin, trade_amount, taker_pubkey)
+}
+
+/// Version-two, pubkey-blind dex-fee estimate (CRD ch.16 R12A/R12B).
+///
+/// The pre-negotiation counterpart of [`compute_dex_fee_v2_with_taker_pubkey`]
+/// for a future version-two call site that needs an estimate before the
+/// taker's pubkey is known (none currently exists: every V2 maker/taker
+/// dex-fee call site in `maker_swap_v2.rs`/`taker_swap_v2.rs` already knows
+/// the relevant pubkey). Provided for R12B completeness and symmetry with
+/// the V1 pubkey-blind/pubkey-aware pair.
+pub fn compute_dex_fee_v2(
+    net_cfg: &dyn NetConfig,
+    taker_coin: &MmCoinEnum,
+    maker_coin: &str,
+    trade_amount: &MmNumber,
+) -> DexFee {
+    compute_dex_fee_v2_from_coin(net_cfg, &**taker_coin, maker_coin, trade_amount)
+}
+
+pub(crate) fn compute_dex_fee_v2_from_coin(
+    net_cfg: &dyn NetConfig,
+    taker_coin: &dyn MmCoin,
+    maker_coin: &str,
+    trade_amount: &MmNumber,
+) -> DexFee {
+    if v2_ticker_exemption_applies(net_cfg, maker_coin, taker_coin.ticker()) {
+        return DexFee::NoFee;
+    }
+    compute_dex_fee_from_coin(net_cfg, taker_coin, maker_coin, trade_amount)
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::{compute_dex_fee, compute_dex_fee_with_taker_pubkey};
+    use super::{compute_dex_fee, compute_dex_fee_v2, compute_dex_fee_v2_with_taker_pubkey,
+                compute_dex_fee_with_taker_pubkey};
     use coins::{DexFee, MarketCoinOps, MmCoinEnum, TestCoin};
     use common::mm_number::{BigDecimal, MmNumber};
     use mm2_net_config::net_config_or_panic;
@@ -244,6 +312,9 @@ mod tests {
         assert!(taker_swap.contains("my_taker_coin_htlc_keypair"));
     }
 
+    /// CRD ch.16 R12A/R12B (updated for issue #11 batch 2): the V2 machines
+    /// now MUST route every dex-fee computation through the `_v2_` wrapper so
+    /// the netid-selected ticker exemption of R12B applies before R7.
     #[test]
     fn t16_4b_v2_known_pubkey_paths_use_pubkey_aware_fee_computation() {
         let maker_swap_v2 = include_str!("maker_swap_v2.rs");
@@ -251,27 +322,25 @@ mod tests {
 
         assert!(
             maker_swap_v2
-                .matches("compute_dex_fee_with_taker_pubkey_from_coin(")
+                .matches("compute_dex_fee_v2_with_taker_pubkey_from_coin(")
                 .count()
                 >= 3
         );
         assert!(!maker_swap_v2.contains("dex_fee: &DexFee::NoFee"));
         assert!(
             taker_swap_v2
-                .matches("compute_dex_fee_with_taker_pubkey_from_coin(")
+                .matches("compute_dex_fee_v2_with_taker_pubkey_from_coin(")
                 .count()
                 >= 4
         );
         assert!(!taker_swap_v2.contains("dex_fee: &DexFee::NoFee"));
     }
 
-    /// CRD ch.16 T4B (decision-point only; the full version-two preimage /
-    /// funding rewrite bound by R12B and R13-R20 is out of scope for this
-    /// change). The V2 maker- and taker-side dex-fee decision point is the
-    /// same `compute_dex_fee_with_taker_pubkey` exercised by t16_4b above;
-    /// for a non-KMD pair (so ch.16 R12B does not apply) and a taker key
-    /// equal to the network waiver key, it MUST yield `NoFee` on both
-    /// production netids (ch.16 R7, R12A).
+    /// CRD ch.16 T4B. The V2 maker- and taker-side dex-fee decision point is
+    /// `compute_dex_fee_v2_with_taker_pubkey`, now wired into every V2 call
+    /// site (see `t16_4b` below); for a non-KMD pair (so ch.16 R12B does not
+    /// apply) and a taker key equal to the network waiver key, it MUST yield
+    /// `NoFee` on both production netids (ch.16 R7, R12A).
     #[test]
     fn t4b_v2_dex_fee_decision_point_waives_fee_for_burn_pubkey_both_netids() {
         mock_min_tx_amount();
@@ -283,9 +352,71 @@ mod tests {
             let burn_pubkey = net_cfg.burn_addr_raw_pubkey().to_vec();
             assert!(!burn_pubkey.is_empty(), "netid {} burn key must be non-empty", netid);
 
-            let fee = compute_dex_fee_with_taker_pubkey(net_cfg, &taker_coin, "DOC", &trade_amount, &burn_pubkey);
+            let fee = compute_dex_fee_v2_with_taker_pubkey(net_cfg, &taker_coin, "DOC", &trade_amount, &burn_pubkey);
             assert_eq!(fee, DexFee::NoFee, "netid {}", netid);
         }
+    }
+
+    /// CRD ch.16 T5 -- version-two ticker exemption (R12B). On netid 8762, a
+    /// version-two swap with KMD as the taker coin, and separately as the
+    /// maker coin, MUST yield `NoFee` in both the pubkey-blind estimate and
+    /// the pubkey-aware value (both roles, both before and after
+    /// negotiation). On netid 6133 the same pairs MUST yield `Standard`. On
+    /// netid 8762 the *legacy* (non-V2) computation for the same pair MUST
+    /// still yield the chapter-08 R8 descriptor -- R12B never applies to the
+    /// legacy protocol.
+    #[test]
+    fn t5_v2_ticker_exemption_applies_to_both_roles_both_forms() {
+        mock_min_tx_amount();
+        let trade_amount = MmNumber::from("1");
+        let some_pubkey = vec![0x02; 33];
+
+        // KMD as taker coin.
+        let kmd_taker = MmCoinEnum::Test(TestCoin::new("KMD"));
+        // KMD as maker coin (taker coin is an arbitrary non-KMD ticker).
+        let non_kmd_taker = MmCoinEnum::Test(TestCoin::new("MARTY"));
+
+        let net_cfg_8762 = net_config_or_panic(8762);
+        assert_eq!(
+            compute_dex_fee_v2(net_cfg_8762, &kmd_taker, "DOC", &trade_amount),
+            DexFee::NoFee,
+            "8762 blind, KMD taker"
+        );
+        assert_eq!(
+            compute_dex_fee_v2_with_taker_pubkey(net_cfg_8762, &kmd_taker, "DOC", &trade_amount, &some_pubkey),
+            DexFee::NoFee,
+            "8762 aware, KMD taker"
+        );
+        assert_eq!(
+            compute_dex_fee_v2(net_cfg_8762, &non_kmd_taker, "KMD", &trade_amount),
+            DexFee::NoFee,
+            "8762 blind, KMD maker"
+        );
+        assert_eq!(
+            compute_dex_fee_v2_with_taker_pubkey(net_cfg_8762, &non_kmd_taker, "KMD", &trade_amount, &some_pubkey),
+            DexFee::NoFee,
+            "8762 aware, KMD maker"
+        );
+
+        let net_cfg_6133 = net_config_or_panic(6133);
+        assert!(!matches!(
+            compute_dex_fee_v2(net_cfg_6133, &kmd_taker, "DOC", &trade_amount),
+            DexFee::NoFee
+        ));
+        assert!(!matches!(
+            compute_dex_fee_v2_with_taker_pubkey(net_cfg_6133, &kmd_taker, "DOC", &trade_amount, &some_pubkey),
+            DexFee::NoFee
+        ));
+
+        // Legacy (non-V2) protocol on 8762 with the same taker coin MUST NOT
+        // apply the V2-only exemption -- `compute_dex_fee` (not the `_v2_`
+        // wrapper) never yields `NoFee` from a ticker match alone.
+        let legacy_fee = compute_dex_fee(net_cfg_8762, &kmd_taker, "DOC", &trade_amount);
+        assert_ne!(
+            legacy_fee,
+            DexFee::NoFee,
+            "legacy protocol must not apply the V2 ticker exemption"
+        );
     }
 
     /// T9/P2.1: the 7 `net_config_or_panic` call sites in the V2 swap `on_changed`

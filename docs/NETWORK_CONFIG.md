@@ -33,6 +33,13 @@ converts to a 1,000-base-unit fee output and a 158-base-unit OP_RETURN output,
 matching a `v2.6.0-beta` node on the wire (issue #11) — not the 868/289 an
 earlier revision of this project produced.
 
+The version-two no-fee ticker exemption is now wired into the version-two
+swap machinery itself (both roles, before and after negotiation): a
+version-two swap with `KMD` on either side carries `NoFee` end to end, and
+the taker-payment-spend preimage takes the single-output `NoFee` layout.
+Previously the accessor existed but nothing in the version-two path consulted
+it.
+
 ### netid 6133 — GLEEC DEX
 
 The GLEEC decentralized exchange network.
