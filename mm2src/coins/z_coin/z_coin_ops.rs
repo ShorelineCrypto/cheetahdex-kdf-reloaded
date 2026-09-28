@@ -102,6 +102,7 @@ impl ZCoin {
                 self.z_fields
                     .wallet_db_scan_complete
                     .store(true, AtomicOrdering::Relaxed);
+                self.clear_shielded_sync_error();
                 Ok(scanned_height)
             },
             Err(err) => {
@@ -113,6 +114,7 @@ impl ZCoin {
                 self.z_fields
                     .wallet_db_scan_complete
                     .store(false, AtomicOrdering::Relaxed);
+                self.set_shielded_sync_error(&err);
                 log::error!(
                     "ZCoin shielded wallet DB scan failed for {} at target height {}: {}",
                     self.ticker(),
@@ -122,6 +124,32 @@ impl ZCoin {
                 Err(err)
             },
         }
+    }
+
+    /// Records why the shielded sync last failed, so the reported history-sync
+    /// state can say "failed" rather than "still scanning" (R39.8.0au). A later
+    /// successful scan clears it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_shielded_sync_error(&self, message: &str) {
+        if let Ok(mut slot) = self.z_fields.shielded_sync_error.lock() {
+            *slot = Some(message.to_owned());
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn clear_shielded_sync_error(&self) {
+        if let Ok(mut slot) = self.z_fields.shielded_sync_error.lock() {
+            *slot = None;
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn shielded_sync_error(&self) -> Option<String> {
+        self.z_fields
+            .shielded_sync_error
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
     }
 
     /// Returns all unspents included currently unspendable (not confirmed)
