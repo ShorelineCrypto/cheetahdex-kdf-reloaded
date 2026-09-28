@@ -8,6 +8,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Version-two (V2) UTXO swap wire contract corrected to match deployed
+  peers (issue #11 batch 2).** The version-two taker-payment-spend preimage
+  now matches the reference `v2.6.0-beta`/v3-lineage contract instead of an
+  earlier, incompatible one:
+  - the `Standard` preimage carries the fee-collection output alone (the
+    maker appends its own payout afterward), not the maker's payout with the
+    fee appended;
+  - the `WithBurn` preimage orders its outputs fee, then burn, then maker
+    payout, not maker-first;
+  - the `OP_RETURN` burn output carries the burned value in the output's own
+    value with a bare `OP_RETURN` script, not a zero-value output with an
+    8-byte little-endian payload;
+  - the maker's validation now rebuilds the expected preimage and requires
+    an exact match (no tolerance), instead of a ±10% value tolerance;
+  - the version-two funding-spend and taker-payment-spend fee estimate is
+    now proportional to a 496-byte reference size (matching the reference
+    nodes), not the previous whole-kilobyte-rounded, 305-byte estimate;
+  - the fee-collection output now resolves the active network's DEX-fee
+    address via `NetConfig`, not a deprecated constant fixed to netid 8762
+    (previously wire-incorrect on netid 6133);
+  - each cooperative-branch signature now carries its own signature-hash
+    flag byte (maker always `ALL`, taker `SINGLE` for `Standard`) — a single
+    shared byte could not represent the corrected `Standard` case.
+  Every version-two swap with a UTXO taker coin between this project and a
+  reference node previously failed at preimage validation, on both netids,
+  for any ticker. Code: `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`.
+- **Version-two no-fee ticker exemption (chapter 16 R12B) is now wired into
+  the version-two swap machinery (issue #11 batch 2).** A version-two swap
+  with `KMD` on either side of the pair now carries `NoFee` end to end
+  (both roles, before and after negotiation) on netid 8762; the accessor
+  existed since the previous release but nothing in the version-two path
+  consulted it. The legacy protocol is unaffected — it never applies this
+  exemption. Code: `mm2src/mm2_main/src/lp_swap/dex_fee.rs`,
+  `mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs`,
+  `mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs`.
+- **Version-two UTXO funding amount no longer omits the burn leg (issue #11
+  batch 2).** The taker's version-two funding output value is now trading
+  amount + premium + the dex-fee *total* spend amount (fee plus burn for a
+  `WithBurn` descriptor), matching chapter 15 R16/R17. It previously used
+  the fee component alone, which would have underfunded a `WithBurn`
+  version-two swap (not currently reachable in production, since neither
+  production network negotiates a version-two `WithBurn` descriptor today).
+  Code: `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`.
+
 - **Siacoin swap payment validation is now covered by tests — CRD ch.20 R-H1.** Nine cases around the check `validate_maker_payment`/`validate_taker_payment` make before a swap commits to a counterparty's on-chain payment: eight of them rejection properties (roles swapped, wrong amount, different secret hash, different counterparty key, different timelock, no outputs, HTLC funded at a decoy index). **Known limitation:** SC still has no automated end-to-end swap test — one that boots a containerised Sia node and settles a real swap on both legs — so SC swaps rest on these logic tests plus manual testing. Deferred to the next release; tracked with the rest of the Siacoin deferred work in CRD ch.20 §20.10. Code: `mm2src/coins/siacoin/siacoin_swap_ops.rs`.
 - **A shielded coin now refuses to build transactions once a network upgrade it cannot transact on has activated — CRD ch.39 R39.6.4c.** The swap freeze added alongside it stops *new swaps* ahead of Pirate Chain's Ironwood upgrade, but a withdrawal passes none of the swap gates — so after activation it would still have built a version-4 transaction and failed at broadcast, surfacing as an opaque network rejection. Every ARRR transaction is now refused from the activation time onwards, at the single point they are all constructed, with an error naming the coin, the activation time and the need to upgrade. The check runs before the path's blocking wait, so a caller is refused promptly rather than made to wait first. The two cut-offs are deliberately staggered and are not merged: the freeze starts ~44.5 h earlier and blocks only *entering* swaps, because between the two a swap begun before the freeze must still be able to spend or refund itself — a build refusal starting at the freeze would strand exactly the swaps the freeze exists to protect. A test pins that ordering. Receiving, balance, address derivation and history are unaffected throughout. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_errors.rs`.
 - **A shielded coin now stops accepting new swaps ahead of a network upgrade it cannot yet transact on — CRD ch.39 R39.6.4b.** Pirate Chain's Ironwood upgrade (3 Oct 2026 19:00 UTC) makes only version-6 transactions standard; a build that cannot construct them would be unable to spend *or refund* an HTLC funded shortly before activation, stranding one side of any swap that straddles it. A coin declaring `ironwood_activation_time` therefore reports itself wallet-only from a cut-off ahead of activation, which `buy`, `sell` and `setprice` already gate on, and additionally declines incoming peer matches — the wallet-only report is never consulted on that path, so a remote taker could otherwise still match an order already posted. The cut-off is 160 300 s (44 h 32 m): the longest maker payment lock this framework can produce (156 000 s — `PAYMENT_LOCKTIME` x 10 for the legacy slow-coin rule, x 2 for the maker leg), plus the 3 700 s refund grace the swap machines wait before acting, plus ~10 blocks for the refund to be mined. For ARRR that means trading pauses at **1 Oct 2026 22:28 UTC**. Receiving, balance, address, `withdraw`, history and every swap already in flight are untouched, and a coin declaring no Ironwood activation is never affected. Because the locktime rules live in the swap layer, which depends on the coin layer rather than the reverse, the margin is a constant in `coins` guarded by a test in `mm2_main` that fails if the two drift — that guard is what caught the first draft, which covered the lock but not the refund grace. Code: `mm2src/coins/z_coin.rs`, `mm2src/mm2_main/src/lp_swap.rs`.
@@ -158,7 +202,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `mm2src/coins_activation/src/z_coin_activation.rs`,
   `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
 
-- **Small KMD direct-burn DEX fees retain the legacy wire shape.** Netid 8762
+- **Superseded (issue #11): KMD direct-burn DEX-fee split corrected; the
+  small-KMD dust exemption below is withdrawn.** The entry below ("Small KMD
+  direct-burn DEX fees retain the legacy wire shape") described a flat 75/25
+  split above dust plus a builder dust exemption for the resulting
+  under-dust fee output. Public-network observation of a `v2.6.0-beta` node
+  contradicts that: for a 0.01 KMD taker it emits 1,000 base units to the
+  fee address and 158 to `OP_RETURN`, not 868 + 289. The DEX-fee split is now
+  computed from three exact-rational ranges on the dust-floored total: at or
+  below dust, a single fee output for exactly dust; above dust with the 75%
+  share at or above dust, the 75/25 split; otherwise a fee output of exactly
+  dust and an OP_RETURN burn of the remainder. Because the fee-collection
+  leg is now never below dust, the generic UTXO builder needs no per-output
+  or per-descriptor dust exemption for this descriptor any more — the
+  under-dust exemption plumbing (builder option, taker-fee send variant, and
+  selector) has been removed entirely. Code: `mm2src/coins/lp_coins_types.rs`,
+  `mm2src/coins/utxo.rs`, `mm2src/coins/utxo/utxo_common/`.
+- **KMD taker no longer over-claims Active User Reward (interest) on
+  post-KIP-0001 UTXOs (issue #11).** The reward computation was missing the
+  KIP-0001 500x reduction that took effect at the dPoW Season-7 hard fork
+  (height 3,484,958). A KMD spend whose inputs include an eligible UTXO
+  confirmed at or after that height now claims the correct, reduced reward
+  instead of a figure 500x too large, which the network previously rejected
+  with `bad-txns-in-belowout`. Reported and validated on the same
+  transaction/history/`kmd_rewards_info` surfaces. Code: `mm2src/coins/utxo.rs`.
+- **No-fee waiver for the network burn/waiver-key taker (issue #11).** A
+  taker whose taker-coin swap public key equals the active network's
+  burn/waiver key now pays no DEX fee, on both netid 8762 and netid 6133 and
+  on the legacy swap protocol, independently of whether the network's burn
+  split is enabled. Previously the waiver only applied while an (inactive,
+  on both production networks) general burn-account path was active, so it
+  never took effect in production. Netid 8762's burn key
+  (`0369aa…3153`) is no longer empty. Code: `mm2src/coins/lp_coins_types.rs`,
+  `mm2src/mm2_net_config/`, `mm2src/mm2_main/src/lp_swap/maker_swap.rs`,
+  `mm2src/mm2_main/src/lp_swap/taker_swap.rs`.
+- **Small KMD direct-burn DEX fees retain the legacy wire shape (superseded,
+  see above).** Netid 8762
   KMD taker-fee construction now permits the positive 75% fee-collection
   output selected by the `v2.6.0-beta` policy even when that split component
   is below KMD's generic spendable-output dust threshold. The exception is
@@ -172,8 +251,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   ticker's zero-valued entry in `total_balance` instead of returning an untyped
   empty object. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
 - **DEX-fee wire compatibility on both production netids.** Netid 8762 KMD
-  takers now use the `v2.6.0-beta`-compatible discounted fee and two-output
-  75/25 fee/OP_RETURN structure, while non-KMD takers remain single-output.
+  takers now use the `v2.6.0-beta`-compatible discounted fee and dust-aware
+  fee/OP_RETURN split (see the corrected three-range entry above for the
+  exact structure), while non-KMD takers remain single-output.
   Netid 6133 follows the v3/dev single-output fee structure. Both networks now
   use only the taker coin's minimum transaction amount as the fee floor,
   removing the erroneous additional `0.0001` floor. Fixes #1. Code:

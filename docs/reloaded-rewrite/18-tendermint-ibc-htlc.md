@@ -333,15 +333,14 @@ treatment of a V2 path for Tendermint is out of scope here.
 > completing a fee-less send. The UTXO fee-send implementation
 > ([Chapter 16](16-swap-v2-pre-burn-output.md) family) treats
 > `NoFee` as a zero-output, gracefully-completed case instead of an
-> error. Under the per-coin burn-policy matrix bound by
-> [Chapter 16 §16.3](16-swap-v2-pre-burn-output.md#163-bound-per-coin-burn-policy-surface),
-> Tendermint's general burn-account predicate is `false` for every
-> currently configured network, so the factory of Chapter 16 §16.4
-> never constructs a `NoFee` value for a Tendermint taker today and
-> this branch is not reachable in current production configuration.
-> It would become reachable, and would then incorrectly fail a
-> taker's own trade instead of completing it fee-free, if Tendermint
-> were ever given a non-default general burn-account opt-in. Aligning
+> error. Since 2026-09-27 the factory of
+> [Chapter 16 §16.4](16-swap-v2-pre-burn-output.md) returns `NoFee` for
+> any non-privacy taker whose key equals the network burn key (Chapter
+> 16 R7, Chapter 08 R15C), independent of the burn predicates. So a
+> Tendermint taker can now receive `NoFee`. The legacy state machine
+> never calls fee-send for `NoFee` (Chapter 51 R27), so the rejecting
+> branch is still unreachable through a swap. It stays a latent
+> inconsistency for any other caller. Aligning
 > the Tendermint branch with the UTXO precedent (zero-output success
 > rather than a rejection) is a reasonable fix; not applied here
 > because it is untested production behavior change outside this

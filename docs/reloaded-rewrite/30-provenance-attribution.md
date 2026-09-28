@@ -163,6 +163,8 @@ citation.
 - Sia spend-policy semantics — cited in Chapter 20.
 - Tron transaction protobuf, TAPOS, and TRC-20 — cited in Chapter 21.
 - Zcash shielded-transaction primitives — referenced from Chapter 29.
+- Komodo consensus: KIP-0001 and the public Komodo daemon's
+  active-user-reward rule — cited in Chapter 38 (§38.4, §38.10).
 
 ### 30.4.7 External APIs and wire-format counterparties
 
@@ -204,6 +206,9 @@ explicitly:
   gossipsub mesh as the motivation for the recently-cancelled time cache.
 - Chapter 13 cites the observed presence of mixed-version peers as the
   motivation for the swap-version tag.
+- Chapters 08, 16 and 38 cite the issue #11 KMD mainnet observations
+  (the on-wire legacy taker-fee split and the network's rejection of
+  over-claimed KMD rewards).
 
 ### 30.4.11 Ledger companion artifact
 
