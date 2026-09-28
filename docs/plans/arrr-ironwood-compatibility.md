@@ -106,32 +106,31 @@ the dependency change, so it ships first as a low‑risk release that also carri
 safety net; the crate bump — the longest and riskiest item — follows on a clean base; B
 builds on the bump because only the new crates know the v6 format.
 
-### What we would like the Pirate team to confirm
+### What we asked the Pirate team — **answered 2026‑09‑28**
 
-Short form — full list with context in §7. Most of the original questions were **answered
-from published code** on 2026‑09‑21 (Treasure Chest, `piratenetwork/librustzcash`, Stashi,
-Pirate `lightwalletd`) and are recorded in §9 rather than asked again. In particular we no
-longer need to ask about wire/txid/sighash identity, the v6 Sapling digest personalizations,
-the `ac_private` P2SH exemption, the activation‑height derivation rule, or whether Sapling
-survives v6 — the code settles all five. What is left:
+Most of the original questions were **answered from published code** on 2026‑09‑21 (Treasure
+Chest, `piratenetwork/librustzcash`, Stashi, Pirate `lightwalletd`) and are recorded in §9
+rather than asked: wire/txid/sighash identity, the v6 Sapling digest personalizations, the
+`ac_private` P2SH exemption, the activation‑height derivation rule, and whether Sapling
+survives v6. The rest went to the Pirate maintainer and came back on **2026‑09‑28**. Short
+form; full record with quotations in §7.
 
-1. Would a **standardness grace period** be considered? The code has none — v4 becomes
-   non‑standard at the activation block with no taper.
-2. The mainnet activation height will be **published** once derived, and ideally exposed by
-   `lightwalletd` (a `LightdInfo` field).
-3. `lightwalletd`'s `GetTreeState`/`GetBridgeTreeState` should not put a bare 32‑byte
-   `finalRoot` in the `saplingTree` field when `finalState` is missing.
-4. Which `lightwalletd` endpoints are canonical (5 of 8 in the shared coin list are down),
-   and can `LightdInfo.piratedBuild` be populated?
-5. A public **Ironwood‑activated testnet** (`lightwalletd` + Electrum), or a regtest recipe
-   *with standardness enforced*, for third‑party wallet testing.
-6. Will the cipig ElectrumX servers deserialize, index and relay **v6** transactions? If not
-   we move tip/broadcast/spend‑detection to `lightwalletd`.
-7. A **compact‑format divergence inside Pirate's own stack**: `lightwalletd` carries Ironwood
-   actions in `actions = 6`, while the `librustzcash` Treasure Chest links expects a separate
-   `ironwoodActions = 9`. Harmless for Sapling‑only clients; which is canonical?
-8. **Confirmation of intent** that Sapling‑only v6 stays standard indefinitely. The code says
-   yes; we are asking about the roadmap, not the current rule.
+| Asked | Answer |
+|---|---|
+| Grace period for v4 after activation? | **No — not possible.** His advice: *disable ARRR swaps from 2 Oct.* |
+| Publish the activation height / expose via `lightwalletd`? | **No.** Timestamp rule only: 3 Oct 19:00 UTC + 60 blocks. Deriving it ourselves is now mandatory. |
+| Fix `GetTreeState` returning a bare `finalRoot`? | **No — intentional legacy.** Client must not let it overwrite local `finalState`. Our validation is the only protection. |
+| Current endpoints? `piratedBuild`? | **List supplied** (§1.1); the shared coin list is stale. `piratedBuild` not addressed. |
+| Public Ironwood testnet? | **Live now** — `testlightwalletd1/2.cryptoforge.cc`, Ironwood already active. Perishable. |
+| cipig ElectrumX v6 ready? | **Unknown to Pirate** — ask cipig directly. Still open. |
+| Compact format: field 6 or `ironwoodActions = 9`? | **Field 6.** Upstream's Ironwood scanner cannot be used against Pirate unmodified. |
+| Sapling deprecation? | **Not soon;** ≥1 yr notice, first step would be a one‑way pool. Currently open both ways. |
+| 19 Sep `requiredSigs` relevant? | **No.** |
+
+**What this changes:** the swap freeze is vindicated by the chain's own maintainer and our
+cut‑off is the conservative one; runtime height derivation is promoted from fallback to
+required; the tree‑state validation is permanent rather than a stopgap; and there is a live
+Ironwood network to test against, today, that will not necessarily be there next week.
 
 ---
 
@@ -139,6 +138,30 @@ survives v6 — the code settles all five. What is left:
 
 All external facts were read from source on 2026‑09‑16; nothing is inferred from
 announcements alone.
+
+### 1.1 Infrastructure, probed 2026‑09‑28
+
+Supplied by the Pirate maintainer (§7 item 4/5) and verified by direct connection the same
+day. **The shared coin list is stale**: `light_wallet_d/ARRR` in `GLEECBTC/coins` still lists
+four `piratelightd*.cryptoforge.cc` hosts that no longer resolve, plus
+`electrum3.cipig.net:9447` which refuses connections.
+
+| Endpoint | Probe result (2026‑09‑28) |
+|---|---|
+| `testlightwalletd1.cryptoforge.cc:443` | **`branchId=37a5165b` — Ironwood ACTIVE**, tip 53 041, `v1.0.0.0` |
+| `testlightwalletd2.cryptoforge.cc:443` | **`branchId=37a5165b` — Ironwood ACTIVE**, tip 53 041, `v1.0.0.0` |
+| `lightd1.pirate.black:443` | up, `branchId=76b809bb` (pre‑Ironwood), tip 4 153 707, `v1.0.0.0` |
+| `lightwalletd1.cryptoforge.cc:443`, `lightwalletd2.cryptoforge.cc:443` | TCP open; gRPC probe timed out at 40 s (not concluded dead) |
+| `pirate.mathnodes.com:443`, `arrr{,2,3}.qortal.link:443` | TCP open; gRPC probe timed out at 40 s |
+| `electrum1.cipig.net:9447`, `electrum2.cipig.net:9447` | TCP open |
+| `electrum3.cipig.net:9447` | **connection refused** |
+| `piratelightd1‑4.cryptoforge.cc:443` | **no DNS** — renamed to `lightwalletd1‑2`, and four hosts became two |
+
+The testnet result is the important one: **Ironwood is already active on Pirate testnet**, so
+the v4‑rejected / v6‑accepted behaviour can be exercised there before mainnet. Per the
+maintainer those servers are perishable ("no idea how long they will stay up").
+
+### 1.2 Protocol facts
 
 | Fact | Source |
 |---|---|
@@ -384,7 +407,9 @@ behind the `orchard` feature we do not enable.
    runtime but `ZcoinConsensusParams` is a plain `Clone + Serialize` value copied into every
    builder and into `WalletDb<_, ZcoinConsensusParams, _, _>` — hold it in an
    `Arc<AtomicU32>` marked `#[serde(skip)]` (0 = unknown), or rebuild the params per build.
-2. **Activation‑height discovery at runtime** (maintainer decision: layered; ordered so that
+2. **Activation‑height discovery at runtime** — **mandatory as of 2026‑09‑28**: the Pirate
+   team will not publish the height and offered no `LightdInfo` field (§7 item 1), so this is
+   the only route by which a light client can learn it. (Layered; ordered so that
    fresh installs after 3 Oct still work): (a) **derive on demand** — estimate the transition
    height from the Electrum tip and `ironwood_activation_time`, fetch a ±200‑block window
    with `GetBlockRange` (compact blocks carry `time`), take the first block with `time > T`,
@@ -409,8 +434,11 @@ behind the `orchard` feature we do not enable.
    harness with `pirated -regtest` (Ironwood fixed at height 200) + Pirate `lightwalletd`:
    mine past 200, activate the KDF light wallet, receive, then send/refund an HTLC and a
    withdrawal. **Regtest has `fRequireStandard = false`, so it proves consensus validity
-   only** — the "v4 rejected, v6 accepted" case needs Pirate testnet (Ironwood at 280 500) or
-   a regtest with standardness switched on (§7 item 5). Then Step 0 on mainnet after 3 Oct.
+   only** — the "v4 rejected, v6 accepted" case needs a standardness‑enforcing network.
+   **As of 2026‑09‑28 that exists and is reachable:** `testlightwalletd1/2.cryptoforge.cc`
+   report `branchId=37a5165b` (Ironwood active) at tip 53 041 (§1.1). Use it in preference to
+   the regtest harness, and use it soon — the maintainer does not guarantee it stays up.
+   Then Step 0 on mainnet after 3 Oct.
 
 ### 5A. Open decision — which parser reads v6 ARRR transactions in the swap layer
 
@@ -495,85 +523,118 @@ defects were found only in live GUI wallets):
 | 3 B (params + discovery + boundary 2–3; v6 parsing 2–4 or 4–7 per §5A; regtest harness 2; verification 1–2) | 7–12 |
 | **Total** | **17–25** |
 
-**That exceeds the window.** The plan is therefore built so that a slip is safe rather than
-fast:
+**That exceeds the window, and the window has now closed** — this entry is written on
+2026‑09‑28 with activation 5.2 days away and step 2 not started. ARRR will lose send/swap
+capability on 3 Oct and regain it when steps 2–3 land. That was the anticipated outcome, and
+the plan is built so that this slip is safe rather than fast:
 
 - The **guard and swap freeze ship in step 1**, before any dependency change. Whatever
   happens to steps 2–3, a step‑1 build stops opening ARRR swaps ahead of activation and stops
   building ARRR transactions at activation, with clear messages; receiving and balance display
   keep working (Sapling notes are unaffected by Ironwood). Users lose nothing; they wait for
   the next release to trade ARRR again.
-- There is **no useful shortcut around step 2**. Patching `Nu6_3` into the old
-  `zcash_protocol 0.9.0` would give us the branch ID but the old `zcash_primitives` would
-  still emit v4 (or, if `Nu6_2` were reused, a v5 header Pirate does not accept), which is
-  non‑standard after activation — unless Pirate relaxes `IRONWOOD_MIN_CURRENT_VERSION` to 4
-  (§7 item 2). If they do, a ~40‑line vendored patch becomes a viable interim for B.
+- There is **no useful shortcut around step 2**, and as of 2026‑09‑28 the one hypothetical
+  escape is closed. Patching `Nu6_3` into the old `zcash_protocol 0.9.0` would give us the
+  branch ID but the old `zcash_primitives` would still emit v4 (or, if `Nu6_2` were reused, a
+  v5 header Pirate does not accept), which is non‑standard after activation. That was only
+  survivable if Pirate relaxed `IRONWOOD_MIN_CURRENT_VERSION` to 4; **they have refused a
+  grace period outright** (§7 item 2), so the ~40‑line vendored‑patch interim is dead and
+  step 2 is unavoidable.
 - Any KDF build (ours or Komodo's) that is not upgraded will be unable to send or swap ARRR
   after activation.
+- **The freeze only protects deployments whose coin configuration declares
+  `ironwood_activation_time`.** No published configuration does, so as things stand the safety
+  net is inert everywhere but our own development setup — see the reopened decision in §9,
+  which must be settled by **1 Oct 22:28 UTC**.
 
 ---
 
-## 7. Open items for the Pirate Chain team
+## 7. Open items for the Pirate Chain team — **answered 2026‑09‑28**
 
-**Most of the original list has been answered from published code** — Treasure Chest
-(`PirateNetwork/pirate`), `piratenetwork/librustzcash`, `piratenetwork/sapling-crypto`,
-Stashi Wallet and Pirate's `lightwalletd` — on 2026‑09‑21. Those answers are recorded in §9
-with their sources and are **not** restated as questions here. What remains is what code
-cannot answer: operational facts, third‑party readiness, and forward‑looking intent.
+The list below was put to the Pirate Chain maintainer (Øswald) and answered on
+**2026‑09‑28**. Answers are recorded verbatim in substance, each with what it means for us.
+Everything that the published code already settled is in §9 and was not asked again.
 
-### 7.1 Requests (things only the Pirate team can do)
+**Headline outcomes:** there will be **no grace period** and **no published activation
+height**; the maintainer's own recommendation is to **disable ARRR swaps from 2 Oct** until a
+v6‑capable build ships. Sapling is safe for the long term. An **Ironwood‑activated testnet
+with `lightwalletd` is live now**. The `GetTreeState` behaviour is intentional and will not
+change. The compact‑format divergence resolves in favour of field 6.
 
-1. **Publish the derived mainnet activation height** as soon as the network has settled it.
-   We can derive it ourselves (§5 step 3.2) but a published value removes a whole class of
-   disagreement. Could `lightwalletd` expose it, e.g. `LightdInfo.ironwoodActivationHeight`?
-   `LightdInfo.consensusBranchId` reports the chain‑tip branch, not the next block's, so it
-   cannot serve this purpose.
-2. **Would a standardness grace period be considered?** The code has none: `IsStandardTx`
-   switches hard to `IRONWOOD_MIN_CURRENT_VERSION = 6` the moment `ironwoodActive` is true
-   (`src/main.cpp:941‑947`), so v4 becomes non‑standard at the activation block with no
-   taper. A grace period would decouple third‑party wallet upgrades from the fork date. We
-   are asking whether one is wanted, not whether one exists.
-3. **`GetTreeState` fallback.** `preferredTreeState()` returns `finalRoot` — a bare 32‑byte
-   hash — in the `saplingTree` field of both `GetTreeState` and `GetBridgeTreeState` when
-   `finalState` is unavailable. A client parsing that field as a serialized commitment tree
-   fails, or worse: a root beginning `00 00 00` parses *silently* as the empty tree. Could
-   the field be left empty, or the RPC return an error, in that case? (We validate against
-   this ourselves — R39.8.0ak — but every other light client is exposed.)
-4. **Canonical endpoints.** `piratelightd1‑4.cryptoforge.cc` no longer resolve and
-   `electrum3.cipig.net:9447` refuses connections. Which `lightwalletd` endpoints should the
-   shared coin list carry? `LightdInfo.piratedBuild` is empty on every server we reach — can
-   it be populated? It is the cheapest upgrade signal a light client has.
-5. **A public Ironwood testnet with `lightwalletd`**, ideally reachable by third‑party
-   wallets. Regtest sets `fRequireStandard = false`, so it can prove consensus validity but
-   never the "v4 rejected / v6 accepted" mempool behaviour that actually breaks wallets on
-   3 Oct. Is there a flag to enforce standardness on regtest, or a recommended recipe?
+### 7.1 Requests
 
-### 7.2 Facts we cannot determine from your repositories
+1. **Publish the activation height / expose it via `lightwalletd`** — *not offered.* The
+   answer restated the rule only: activation is **timestamp‑based**, 3 Oct 2026 19:00 UTC
+   **+ 60 blocks** ("the 60th block that shows up after 19:00 UTC"). No height will be
+   published ahead of time and no `LightdInfo` field was offered.
+   **Consequence: the runtime derivation in §5 step 3.2 is mandatory, not a fallback.** It is
+   now the only way a light client can learn the height. `ironwood_activation_height` in the
+   coin config remains useful only as an operator override after the fact.
+2. **A standardness grace period** — **refused, and not possible.** Verbatim: *"Not possible
+   unfortunately, would recommend disabling ARRR swaps on OCT 2 till the update is ready."*
+   This is an independent confirmation of the R39.6.4b swap freeze from the chain's own
+   maintainer, and his date (2 Oct) is *later* than our cut‑off (1 Oct 22:28 UTC), so our
+   margin is the conservative one. It also means the post‑activation failure is hard: every
+   v4 transaction becomes non‑standard at the activation block with no taper.
+3. **`GetTreeState` returning a bare `finalRoot`** — **intentional legacy behaviour; it will
+   not be changed.** The maintainer hit the same problem building Stashi and gave the
+   client‑side rule: *"you should prevent finalroot from overwriting local finalstate when
+   finalstate is not available as that would cause anchor mismatches. It is intentional legacy
+   behavior, but it is confusing because it is serialized as a tree state."*
+   This is exactly what R39.8.0ak does. **No server‑side fix is coming, so client‑side
+   validation is the only protection** — ours stays load‑bearing, and every other light client
+   remains exposed.
+4. **Endpoint list** — **supplied** (see §1 for the reachability probe). Pirate team
+   `lightwalletd`: `lightwalletd1.cryptoforge.cc:443`, `lightwalletd2.cryptoforge.cc:443`,
+   `pirate.mathnodes.com:443`, `lightd1.pirate.black:443`, plus two I2P and two Onion
+   addresses. Third‑party: `arrr.qortal.link:443`, `arrr2.qortal.link:443`,
+   `arrr3.qortal.link:443`. Explorers: `explorer1/2.cryptoforge.cc`,
+   `explorer.piratechain.com`. On cipig's servers: *"I think Cipi also runs a few servers but
+   idk if they are updated, better to ask him directly."* **`LightdInfo.piratedBuild` was not
+   addressed**, so it stays empty and unusable as an upgrade signal.
+   Note the rename: the four `piratelightd1‑4.cryptoforge.cc` entries in the shared coin list
+   are gone (no DNS) and are replaced by two `lightwalletd1‑2.cryptoforge.cc`.
+5. **A public Ironwood testnet** — **live now.** `testlightwalletd1.cryptoforge.cc` and
+   `testlightwalletd2.cryptoforge.cc`, with explorers `testexplorer1/2.cryptoforge.cc`. Both
+   verified reachable on 2026‑09‑28 reporting **`branchId=37a5165b` (Nu6_3/Ironwood active)**
+   at tip 53 041 — i.e. Ironwood is already activated there, which is precisely the
+   environment needed to prove the v4‑rejected / v6‑accepted behaviour before mainnet.
+   **Caveat, in his words:** *"No idea how long they will stay up or if Forge has the test
+   node still mining."* Treat it as perishable and use it immediately.
 
-6. **Electrum readiness.** `arrr.electrum1/2.cipig.net:20008` (ElectrumX 2.0.0) are our chain
-   tip, our broadcast path and our spend‑detection path (scripthash history, raw tx by txid).
-   Will they deserialize v6, index it under its ZIP‑244 txid, and relay it after activation?
-   They are third‑party infrastructure, so you may not own the answer — but you likely know
-   it sooner than we do. If the answer is no, we move those three functions to `lightwalletd`
-   (`GetLatestBlock`, `SendTransaction`, `GetTaddressTxids`); please confirm those are stable.
-7. **A compact‑format divergence inside your own stack.** Pirate's `lightwalletd` declares
-   `repeated CompactOrchardAction actions = 6;` commented "*legacy v5 transactions and
-   Ironwood in v6 transactions*", i.e. field 6 carries Ironwood actions. The
-   `piratenetwork/librustzcash` that Treasure Chest itself links declares a *separate*
-   `repeated CompactOrchardAction ironwoodActions = 9;` alongside `actions = 6`. An
-   Ironwood‑aware Rust scanner built on your own fork would therefore look in field 9 and
-   find nothing. Harmless for Sapling‑only clients such as ours, which read `spends`/
-   `outputs` and never `actions` — but worth settling before Ironwood‑aware third‑party
-   scanners appear. Which is canonical?
-8. **Sapling longevity — confirmation of intent.** The evidence says Sapling is permanent:
-   it is a first‑class field of the v6 wire format, your coincontrol RPC defaults
-   `"type"` to `"sapling"` "for backward compatibility" (release notes 6.0.4), and the
-   Ironwood turnstile is Orchard→Ironwood, a pool Pirate never activated. We read that as
-   "Sapling‑only v6 stays standard indefinitely". Is that the intent, or is a
-   Sapling→Ironwood migration or deprecation date foreseen? Our swap protocol is
-   Sapling‑only, so a deprecation would be a redesign rather than an upgrade.
-9. **Sanity.** The 19 Sep `requiredSigs` dPoW change has no effect on light clients —
-   correct?
+### 7.2 Facts we could not determine ourselves
+
+6. **cipig's ElectrumX v6 readiness** — **to be asked directly of cipig**; the Pirate team
+   does not know. Still open, and still on the critical path: those servers are our chain
+   tip, broadcast and spend‑detection path. (`electrum3.cipig.net:9447` is confirmed refusing
+   connections; `electrum1`/`electrum2` are up.)
+7. **The compact‑format divergence** — **resolved in favour of field 6.** Verbatim: *"We
+   don't use the librustzcash scanner in neither the node nor in stashi, for both we use
+   field 6, I suggest just using Stashi's scanner for KDF."*
+   So Pirate's wire truth is `actions = 6` carrying Ironwood actions, and upstream
+   librustzcash's `ironwoodActions = 9` is **not** what Pirate emits. Harmless for us today —
+   we are Sapling‑only and read `spends`/`outputs`, never `actions`. But it is a hard
+   constraint on any future Ironwood support: **upstream's Ironwood scanner cannot be used
+   against Pirate unmodified**, and the field number would have to be patched. His suggestion
+   to adopt Stashi's scanner was assessed and declined for the reasons in §9 (it comes
+   attached to a whole alternative storage and sync stack).
+8. **Sapling longevity** — **confirmed safe.** Verbatim: *"Sapling won't be depreciated
+   anytime soon, and even if we decide that, we would probably have to give over 1 yr notice
+   and it would start by making the pool one way only i.e. no ironwood to sapling, but as is
+   right now its open both ways."* Our Sapling‑only swap protocol is therefore sound for the
+   foreseeable future, we would get ≥1 year of notice, and the first signal would be the pool
+   becoming one‑way — something we can watch for rather than be surprised by.
+9. **The 19 Sep `requiredSigs` dPoW change** — **confirmed irrelevant** to light clients.
+
+### 7.3 Left with them / left with us
+
+- **Unanswered:** populating `LightdInfo.piratedBuild` (item 4), and any means of learning the
+  activation height other than deriving it (item 1).
+- **Ours to do:** ask cipig about v6 (item 6); exercise the Ironwood testnet while it is up
+  (item 5); arm the swap freeze before 1–2 Oct (§9).
+- **A question back to us:** the maintainer asked what distinguishes this project from the
+  KMDCL KDF and why we do not work on that instead. That is the maintainer's to answer, not
+  a technical item; noted here so it is not lost.
 
 ---
 
@@ -705,7 +766,51 @@ Decisions taken with the maintainer:
   behind `sync`/`sync-decryptor`. We build with `default-features = false` and neither
   feature, so Ironwood is compiled out entirely.
 
+- **The Pirate maintainer answered §7 on 2026‑09‑28; four answers change the plan.**
+  Full record in §7. The load‑bearing ones:
+  - *No grace period, and the maintainer's own advice is to stop ARRR swaps from 2 Oct.*
+    "Not possible unfortunately, would recommend disabling ARRR swaps on OCT 2 till the update
+    is ready." This independently confirms R39.6.4b from the chain's own maintainer, and our
+    cut‑off (1 Oct 22:28 UTC) is the more conservative of the two. **It also makes the dormant
+    gates a live problem — see the reopened decision below.**
+  - *No activation height will be published, and no `LightdInfo` field was offered.* The
+    runtime derivation in §5 step 3.2 is therefore **mandatory infrastructure, not a
+    fallback**; it is the only route by which a light client can learn the height.
+    `ironwood_activation_height` in the coin config survives only as an after‑the‑fact
+    operator override.
+  - *The `GetTreeState` bare‑root behaviour is intentional and will not be fixed server‑side.*
+    The maintainer independently arrived at our rule — do not let `finalRoot` overwrite a local
+    `finalState`, because it causes anchor mismatches — having hit it while building Stashi.
+    R39.8.0ak is therefore permanent load‑bearing validation, not a workaround awaiting a fix.
+  - *Sapling is safe long term*: no deprecation soon, ≥1 year of notice if ever, and the first
+    step would be making the pool one‑way (no Ironwood→Sapling) — currently it is open both
+    ways. Our Sapling‑only swap protocol is sound, and we have a specific signal to watch.
+  Also settled: the compact‑format divergence resolves **in favour of field 6** ("we don't use
+  the librustzcash scanner in neither the node nor in stashi, for both we use field 6"), which
+  means upstream's Ironwood scanner cannot be used against Pirate unmodified should we ever
+  add Ironwood support; and the 19 Sep `requiredSigs` change is confirmed irrelevant to light
+  clients.
+- **An Ironwood‑activated testnet exists and is perishable (2026‑09‑28).** `testlightwalletd1/
+  2.cryptoforge.cc` both report `branchId=37a5165b` at tip 53 041 — Ironwood already active.
+  This is the only environment in which the v4‑rejected / v6‑accepted mempool behaviour can be
+  proven before mainnet, and the maintainer does not guarantee it stays up. It supersedes the
+  regtest‑only acceptance path in §5 step 3.7, which could never show standardness rejection
+  (`fRequireStandard = false`).
+
 **Open (to be decided with the wider team):**
+
+- **REOPENED — arming the swap freeze before 2 Oct.** On 2026‑09‑21 we shipped R39.6.4b/c
+  dormant, because `ironwood_activation_time` is absent from every published coin
+  configuration and because a compiled‑in date would be *worse* than none if Pirate slipped
+  the upgrade. **The second premise has now weakened:** the maintainer restated 3 Oct
+  19:00 UTC + 60 blocks as fixed, five days out, and explicitly recommends disabling ARRR
+  swaps from 2 Oct. Meanwhile the freeze cannot fire on any deployment whose coin
+  configuration omits the field, and `GLEECBTC/coins` still omits it. The local
+  `~/.kdf/coins` used for development now carries `1791054000`, which covers our own testing
+  and nothing else. Decision needed on how third‑party deployments get gated — a coins‑repo
+  entry (not ours to make), a built‑in default with an explicit opt‑out (reverses a documented
+  compat switch), or an operator instruction to disable ARRR manually. **Deadline is
+  1 Oct 22:28 UTC**, ~3 days from this entry.
 
 - **§5A — which parser reads v6 ARRR transactions in the swap layer:** Option 1 (ZCoin
   overrides on the Zcash crate parser) vs Option 2 (extend `kdf_chain` to v5/v6 with
