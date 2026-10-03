@@ -1753,7 +1753,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for N
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
-        let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
+        let dex_fee = super::compute_dex_fee_v2_with_taker_pubkey_from_coin(
             net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),
@@ -2220,7 +2220,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return self.abort_to_payment_refund_required(reason, sm).await;
             },
         };
-        let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
+        let dex_fee = super::compute_dex_fee_v2_with_taker_pubkey_from_coin(
             net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),
@@ -2238,6 +2238,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
             dex_fee: &dex_fee,
             premium_amount: sm.taker_premium.to_decimal(),
             trading_amount: sm.taker_volume.to_decimal(),
+            dex_fee_addr_raw_pubkey: net_config.dex_fee_addr_raw_pubkey(),
         };
 
         // Generate taker payment spend preimage.
@@ -2522,7 +2523,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
-        let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
+        let dex_fee = super::compute_dex_fee_v2_with_taker_pubkey_from_coin(
             net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),
@@ -2612,7 +2613,7 @@ impl<M: MmCoin + MakerCoinSwapOpsV2, T: MmCoin + TakerCoinSwapOpsV2> State for T
                 return Self::change_state(Aborted::new(reason), sm).await;
             },
         };
-        let dex_fee = super::compute_dex_fee_with_taker_pubkey_from_coin(
+        let dex_fee = super::compute_dex_fee_v2_with_taker_pubkey_from_coin(
             net_config,
             &sm.taker_coin,
             sm.maker_coin.ticker(),

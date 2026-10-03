@@ -378,11 +378,14 @@ argument list.
 The V2 EVM contracts accept a flat `dexFee` `uint256` argument on
 the `*TakerPayment` entry points and forward the entire amount to
 the network's fee-collection address on `spendTakerPayment`. The
-EVM path delivers only the `Standard` dex-fee shape;
-[Chapter 16](16-swap-v2-pre-burn-output.md) fixes that the
-factory used to construct the dex-fee value returns `Standard`
-for an EVM taker coin, so the `WithBurn` variant never reaches an
-EVM contract argument. Extending pre-burn to the EVM contracts
+EVM path delivers only the `Standard` dex-fee shape, or a `dexFee`
+of zero when the descriptor is `NoFee`.
+[Chapter 16](16-swap-v2-pre-burn-output.md) fixes that the factory
+returns `Standard` for an EVM taker coin, or `NoFee` under the waiver
+of chapter 16 R7 or the netid-8762 version-two KMD-pair exemption of
+chapter 16 R12B. The `WithBurn` variant therefore never reaches an EVM
+contract argument, and the `dexFee` argument is the descriptor's fee
+amount. Extending pre-burn to the EVM contracts
 requires the ABI to grow `burnAmount` and `burnAddress`
 parameters; that change is out of scope here.
 

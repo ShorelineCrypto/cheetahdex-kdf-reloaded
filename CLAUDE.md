@@ -4,6 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
+## Clean-room wall: read this before anything else
+
+These rules are not optional. They apply to every Claude Code session and every subagent that
+touches this repository, including sessions started in another directory that only
+reach this repository through an added working directory.
+
+1. **Never read the post-anchor upstream/GLEEC implementation** unless you are dispatched as the
+   KDF Spec Reader or KDF Dirty Gate role. That covers the corpus under
+   `/home/tomas_admin/kdf-analysis-2022/`, and equally any other checkout, clone, cache, web page,
+   GitHub API response, issue discussion or excerpt of the GLEEC/Komodo KDF source
+   (`GLEECBTC/komodo-defi-framework`, formerly `KomodoPlatform/komodo-defi-framework`, and local
+   forks of it). Running their published release binaries as black boxes is allowed. It counts
+   as a public-network observation.
+2. **"What does upstream do?" is always a Spec Reader question.** For a bug, a compatibility
+   question or a feature, investigate with this repository, public specifications, chain data and
+   observed network behavior. Anything about upstream behavior goes to a KDF Spec Reader
+   subagent that writes it into the governing CRD chapter. The chapter then passes KDF Dirty Gate,
+   and the clean Coder implements from the gated chapter only. The role definitions are in
+   `.github/agents/`.
+3. **A context that has seen upstream implementation expression never implements**, not even a
+   "small obvious fix". It may orchestrate: dispatch the Spec Reader, the Dirty Gate and the Coder,
+   and review and commit the Coder's work. It must not pass upstream expression into the Coder's
+   prompt.
+4. **A suspected breach halts commits and pushes** and is reported to the maintainer, as
+   `AGENTS.md` §2 says.
+
+On the maintainer's machine, a Claude Code hook (`~/.claude/hooks/kdf-cleanroom-guard.py`)
+enforces rules 1 and 3 mechanically. It is a safety net, not a substitute for following the
+rules.
+
 The imported `AGENTS.md` above is the governing contributor contract for this
 repository: project mission, the clean-room wall and forbidden-corpus rules,
 the two-team (Spec Reader / Dirty Gate / Coder) workflow, upstream-version and

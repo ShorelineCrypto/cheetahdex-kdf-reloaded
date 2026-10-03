@@ -1136,6 +1136,22 @@ activation and therefore inherits the sequential-height and hash-link validation
 and the rewind/refetch-on-discontinuity behaviour of R39.8.0n, including the
 handling of a reorg that invalidates already-cached blocks.
 
+R39.8.0au **A failed sync shall be reported as failed, not as progress.** When a
+background pass fails — the chain tip cannot be reached, every configured
+shielded backend has failed under R39.8.0ae, or the scan itself errors — the
+history-sync state the coin reports shall be the error state, carrying a message
+describing the failure and the height scanned so far. It shall not be reported as
+a sync still in progress.
+
+A failed pass and a pass still running both leave the wallet database short of
+the chain tip, so a state derived from scan completion alone cannot tell them
+apart, and a wallet that can no longer sync is then indistinguishable from one
+that is merely slow — the two call for opposite responses from the operator. The
+reported failure shall be cleared by the next successful pass, so that the state
+tracks the current condition rather than latching on the first failure, and shall
+be reported whether or not the initial scan had already completed, because a
+background pass can fail after activation succeeded.
+
 ### 39.8.0.6 Pending (unconfirmed) shielded receipts
 
 R39.8.0af A **pending shielded receipt** is a wallet-owned Sapling output that
@@ -1523,7 +1539,7 @@ R39.8.6 On success the `result` object shall carry:
 | `target` | object | Echo of the request `target`. |
 | `current_block` | integer | Current tip height known to the coin's backend at query time. |
 | `transactions` | array of objects | The page of shielded transaction detail entries (see R39.8.7). |
-| `sync_status` | object | History-sync state, tagged on field `state` with optional `additional_info`. For the shielded coin this is always the terminal `Finished` state, because a shielded coin is only active after its initial scan completes (§39.3). |
+| `sync_status` | object | History-sync state, tagged on field `state` with optional `additional_info`. Normally the terminal `Finished` state, because a shielded coin is only active after its initial scan completes (§39.3). It is not always `Finished`: a background pass that fails after activation reports the error state, with a message and the height scanned so far, and one still catching up reports the in-progress state (R39.8.0au, §39.8.0.5). |
 | `limit` | integer | Echo of the effective page limit. |
 | `skipped` | integer | Number of entries skipped ahead of this page. |
 | `total` | integer | Total number of known shielded transactions. |
@@ -1822,8 +1838,14 @@ storage error that reflects the store failure.
 - `z_coin_tx_history` returns a paginated page of shielded transaction detail
   entries for an activated shielded coin, honours `limit` and both
   `PageNumber`/`FromId` paging modes, echoes paging metadata, reports
-  `sync_status: Finished`, and rejects non-shielded coins (`NotSupportedFor`)
-  and inactive coins (`CoinIsNotActive`) (§39.8).
+  `sync_status: Finished` while the shielded sync is healthy, and rejects
+  non-shielded coins (`NotSupportedFor`) and inactive coins (`CoinIsNotActive`)
+  (§39.8).
+- Sync-failure reporting (§39.8.0.5, R39.8.0au): when a background pass fails —
+  unreachable chain tip, every shielded backend failed, or a scan error — the
+  reported history-sync state is the error state carrying a message and the
+  height scanned so far, not the in-progress state; the next successful pass
+  clears it.
 
 ## 39.9 Provenance Footer
 

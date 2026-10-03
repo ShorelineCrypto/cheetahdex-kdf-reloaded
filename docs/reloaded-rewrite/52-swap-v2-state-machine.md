@@ -339,7 +339,10 @@ MUST, in order:
    payment and funding locktimes, both secret hashes, the taker's
    taker-coin public key, the premium, the trading amount, and the
    dex-fee descriptor **recomputed with the taker's public key** rather
-   than the pre-negotiation estimate (chapter 16 R14);
+   than the pre-negotiation estimate (chapter 16 R12A, including the
+   no-fee waiver of R7 and the netid-selected ticker exemption of
+   R12B), requiring the funding output value to match exactly
+   (chapter 15 R17);
 2. apply the propagation gate of R20;
 3. generate the funding-spend preimage and the maker's signature over
    it;
@@ -543,7 +546,8 @@ keys and its optional swap-contract addresses.
 
 **R27.** *Send funding.* `Negotiated` MUST construct and broadcast the
 taker funding transaction, whose value is the trading amount plus the
-premium plus the dex-fee component (chapter 15 R16, chapter 16). Failure
+premium plus the dex-fee total spend amount (fee plus any burn; zero
+for `NoFee`) (chapter 15 R16, chapter 16 R12A/R12B). Failure
 MUST transition to `Aborted`; this is the last taker failure that
 terminates with nothing committed. On success it MUST transition to
 `TakerFundingSent`, whose event carries the funding identifier.
@@ -1216,9 +1220,12 @@ encoding or decoding decision on the reference version.
 
 **R76.** *Differences that exist are outside this substrate.* Where the
 v3 lineage differs in the version-two role modules it does so only in
-the dex-fee exemption and discount policy applied to a named ticker set,
-which is bound by [chapter 08](08-fee-routing-engine.md) and by the
-network configuration and is therefore netid-selected, not
+the dex-fee exemption and discount policy applied to a named ticker set.
+The exemption is the version-two no-fee ticker set of
+[chapter 16](16-swap-v2-pre-burn-output.md) R12B: `"KMD"` under
+`v2.6.0-beta`, none under the v3 lineage. The discount is bound by
+[chapter 08](08-fee-routing-engine.md). Both are bound through the
+network configuration and are therefore netid-selected, not
 swap-machine-selected. That policy is consumed by this substrate at
 exactly three points — the taker's start-time balance reservation, the
 maker's funding validation, and both roles' spend construction — and at
@@ -1230,7 +1237,9 @@ version-two swap machines are netid-independent. Netid `8762` and netid
 `6133` MUST run the identical version-two state machines. Everything
 netid-specific a version-two swap consumes — the dex-fee policy, the
 dex-fee recipient, the discount ticker set, the burn policy of
-chapter 16 — MUST be reached through the active network configuration,
+chapter 16, the no-fee waiver key of chapter 16 R7, and the
+version-two no-fee ticker set of chapter 16 R12B (`"KMD"` on netid
+8762, empty on netid 6133) — MUST be reached through the active network configuration,
 consistent with the repository-wide rule that network-specific behaviour
 is selected by configuration rather than by divergent code paths.
 

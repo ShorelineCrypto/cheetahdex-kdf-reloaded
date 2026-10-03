@@ -8,6 +8,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Version-two (V2) UTXO swap wire contract corrected to match deployed
+  peers (issue #11 batch 2).** The version-two taker-payment-spend preimage
+  now matches the reference `v2.6.0-beta`/v3-lineage contract instead of an
+  earlier, incompatible one:
+  - the `Standard` preimage carries the fee-collection output alone (the
+    maker appends its own payout afterward), not the maker's payout with the
+    fee appended;
+  - the `WithBurn` preimage orders its outputs fee, then burn, then maker
+    payout, not maker-first;
+  - the `OP_RETURN` burn output carries the burned value in the output's own
+    value with a bare `OP_RETURN` script, not a zero-value output with an
+    8-byte little-endian payload;
+  - the maker's validation now rebuilds the expected preimage and requires
+    an exact match (no tolerance), instead of a ±10% value tolerance;
+  - the version-two funding-spend and taker-payment-spend fee estimate is
+    now proportional to a 496-byte reference size (matching the reference
+    nodes), not the previous whole-kilobyte-rounded, 305-byte estimate;
+  - the fee-collection output now resolves the active network's DEX-fee
+    address via `NetConfig`, not a deprecated constant fixed to netid 8762
+    (previously wire-incorrect on netid 6133);
+  - each cooperative-branch signature now carries its own signature-hash
+    flag byte (maker always `ALL`, taker `SINGLE` for `Standard`) — a single
+    shared byte could not represent the corrected `Standard` case.
+  Every version-two swap with a UTXO taker coin between this project and a
+  reference node previously failed at preimage validation, on both netids,
+  for any ticker. Code: `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`.
+- **Version-two no-fee ticker exemption (chapter 16 R12B) is now wired into
+  the version-two swap machinery (issue #11 batch 2).** A version-two swap
+  with `KMD` on either side of the pair now carries `NoFee` end to end
+  (both roles, before and after negotiation) on netid 8762; the accessor
+  existed since the previous release but nothing in the version-two path
+  consulted it. The legacy protocol is unaffected — it never applies this
+  exemption. Code: `mm2src/mm2_main/src/lp_swap/dex_fee.rs`,
+  `mm2src/mm2_main/src/lp_swap/maker_swap_v2.rs`,
+  `mm2src/mm2_main/src/lp_swap/taker_swap_v2.rs`.
+- **Version-two UTXO funding amount no longer omits the burn leg (issue #11
+  batch 2).** The taker's version-two funding output value is now trading
+  amount + premium + the dex-fee *total* spend amount (fee plus burn for a
+  `WithBurn` descriptor), matching chapter 15 R16/R17. It previously used
+  the fee component alone, which would have underfunded a `WithBurn`
+  version-two swap (not currently reachable in production, since neither
+  production network negotiates a version-two `WithBurn` descriptor today).
+  Code: `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`.
+
 - **Siacoin swap payment validation is now covered by tests — CRD ch.20 R-H1.** Nine cases around the check `validate_maker_payment`/`validate_taker_payment` make before a swap commits to a counterparty's on-chain payment: eight of them rejection properties (roles swapped, wrong amount, different secret hash, different counterparty key, different timelock, no outputs, HTLC funded at a decoy index). **Known limitation:** SC still has no automated end-to-end swap test — one that boots a containerised Sia node and settles a real swap on both legs — so SC swaps rest on these logic tests plus manual testing. Deferred to the next release; tracked with the rest of the Siacoin deferred work in CRD ch.20 §20.10. Code: `mm2src/coins/siacoin/siacoin_swap_ops.rs`.
 - **A shielded coin now refuses to build transactions once a network upgrade it cannot transact on has activated — CRD ch.39 R39.6.4c.** The swap freeze added alongside it stops *new swaps* ahead of Pirate Chain's Ironwood upgrade, but a withdrawal passes none of the swap gates — so after activation it would still have built a version-4 transaction and failed at broadcast, surfacing as an opaque network rejection. Every ARRR transaction is now refused from the activation time onwards, at the single point they are all constructed, with an error naming the coin, the activation time and the need to upgrade. The check runs before the path's blocking wait, so a caller is refused promptly rather than made to wait first. The two cut-offs are deliberately staggered and are not merged: the freeze starts ~44.5 h earlier and blocks only *entering* swaps, because between the two a swap begun before the freeze must still be able to spend or refund itself — a build refusal starting at the freeze would strand exactly the swaps the freeze exists to protect. A test pins that ordering. Receiving, balance, address derivation and history are unaffected throughout. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_errors.rs`.
 - **A shielded coin now stops accepting new swaps ahead of a network upgrade it cannot yet transact on — CRD ch.39 R39.6.4b.** Pirate Chain's Ironwood upgrade (3 Oct 2026 19:00 UTC) makes only version-6 transactions standard; a build that cannot construct them would be unable to spend *or refund* an HTLC funded shortly before activation, stranding one side of any swap that straddles it. A coin declaring `ironwood_activation_time` therefore reports itself wallet-only from a cut-off ahead of activation, which `buy`, `sell` and `setprice` already gate on, and additionally declines incoming peer matches — the wallet-only report is never consulted on that path, so a remote taker could otherwise still match an order already posted. The cut-off is 160 300 s (44 h 32 m): the longest maker payment lock this framework can produce (156 000 s — `PAYMENT_LOCKTIME` x 10 for the legacy slow-coin rule, x 2 for the maker leg), plus the 3 700 s refund grace the swap machines wait before acting, plus ~10 blocks for the refund to be mined. For ARRR that means trading pauses at **1 Oct 2026 22:28 UTC**. Receiving, balance, address, `withdraw`, history and every swap already in flight are untouched, and a coin declaring no Ironwood activation is never affected. Because the locktime rules live in the swap layer, which depends on the coin layer rather than the reverse, the margin is a constant in `coins` guarded by a test in `mm2_main` that fails if the two drift — that guard is what caught the first draft, which covered the lock but not the refund grace. Code: `mm2src/coins/z_coin.rs`, `mm2src/mm2_main/src/lp_swap.rs`.
@@ -23,9 +67,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A shielded wallet that could no longer sync looked like one still catching up — CRD ch.39 R39.8.0au.** ZCoin derived its history-sync state from whether the wallet-database scan had completed, and a failed background pass leaves that flag exactly where an unfinished one does. So a wallet whose sync was broken — unreachable chain tip, every configured lightwalletd failed, or a scan error — reported the same in-progress state as one that was merely slow, and kept reporting it indefinitely. The two call for opposite responses from the operator: wait, or investigate. The failure is now recorded with its message and the height reached, reported through the existing error state that other coins already use, and cleared by the next successful pass so the state tracks the current condition instead of latching on the first failure. It is reported whether or not the initial scan had completed, because a background pass can fail long after activation succeeded. `z_coin_tx_history`'s `sync_status` can therefore now carry the error state; the chapter previously described it as always terminal, which was already inaccurate for a failed pass. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`.
 - **`kdf --version` exited with status 1.** It printed the version and then went on to parse the flag as a JSON configuration. `kdf --version` (and `kdf version`) now prints the version and exits with status 0. Code: `mm2src/mm2_main/src/mm2.rs`.
 - **Swaps on a UTXO coin whose blocks carry version `0x30000000` could not be spent or refunded — CRD ch.37 R37.5.4a, R37.5.6.** That version value is what a chain signalling only BIP9 version bit 28 produces (Bitcoin Core regtest does so while its test deployment is started or locked in), and it is also the KawPoW header family's version value. The header reader chose the 120-byte KawPoW layout from the version alone, so a list of standard 80-byte headers read misaligned and ended early. Median-time-past failed with it, and so did every spend or refund that sets its lock-time from that value: the maker stopped at the taker-payment spend, and both sides fell back to waiting for the refund locktime. Header reads now require the served bytes to be consumed exactly, and fall back to the standard 80-byte layout when the served bytes are exactly 80 per header. A header list that leaves trailing bytes is now rejected rather than silently accepted. Standard headers with this version and a zero nonce also re-encode and hash correctly. KawPoW coins keep their current behaviour. Selecting the header family from the coin configuration (`protocol.chain_variant`) remains deferred work (CRD ch.37 §37.9 D1). Code: `mm2src/kdf_chain/src/header.rs` and the UTXO header read paths.
-- **Back-to-back ARRR sends could be rejected for reusing a note — CRD ch.39 R39.8.0ao–R39.8.0at.** In Light mode nothing told the wallet that a note had already been committed to a transaction it had just broadcast. The shielded wallet database only learns a note was spent when the block containing the spend is scanned, and that scan runs on a 30-second timer, so between *mined* and *scanned* the spent note still satisfied every condition of the spendable-note query. The next send re-selected it, and the resulting transaction re-presented the same nullifier and was refused by the network. Nothing in the request explained why. The 1-confirmation wait the send path already performed did not help, because selection depends on the scan, not on the confirmation. A taker swap using ARRR was the likeliest way to hit it — the DEX fee and the taker payment are two shielded sends in quick succession — but any two sends inside the window could collide, including a withdrawal issued during a swap. The send path now records each broadcast transaction in the shielded wallet database immediately after the backend accepts it, which marks the spent nullifiers and takes the notes out of selection, and performs selection, construction, broadcast and recording under a single per-wallet exclusive section so two concurrent sends cannot choose the same notes. A send that is short only because of an in-flight spend releases the section, waits under a bounded budget and re-selects; one that could not be funded even with every note available fails immediately instead. Recording happens only after a successful broadcast, so a refused broadcast leaves every note immediately reusable. The same change corrects a balance inconsistency in that window, where the spent input was still counted as spendable while its change was also reported as pending. Light mode only; in Native mode the full node already accounts for its own mempool spends. A withdrawal submitted outside the daemon remains uncovered (CRD ch.39 D39.8.0e). **Known limitation:** the regression coverage this change ships is one deterministic test, for the predicate that decides whether a recorded transaction counts as scanned. The rest of the specified coverage — a second send declining the excluded notes, a rejected broadcast leaving them reusable, survival across a restart, the mined-and-scanned transition, expiry lapse, and two concurrent sends — needs a harness able to drive a shielded wallet database through broadcast, scan and expiry transitions, which does not exist yet; deferred and tracked in CRD ch.39 D39.8.0f. Code: `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_wallet_db.rs`, `mm2src/coins/z_coin.rs`.
+- **Back-to-back ARRR sends could be rejected for reusing a note — CRD ch.39 R39.8.0ao–R39.8.0at.** In Light mode nothing told the wallet that a note had already been committed to a transaction it had just broadcast. The shielded wallet database only learns a note was spent when the block containing the spend is scanned, and that scan runs on a 30-second timer, so between *mined* and *scanned* the spent note still satisfied every condition of the spendable-note query. The next send re-selected it, and the resulting transaction re-presented the same nullifier and was refused by the network. Nothing in the request explained why. The 1-confirmation wait the send path already performed did not help, because selection depends on the scan, not on the confirmation. A taker swap using ARRR was the likeliest way to hit it — the DEX fee and the taker payment are two shielded sends in quick succession — but any two sends inside the window could collide, including a withdrawal issued during a swap. The send path now records each broadcast transaction in the shielded wallet database immediately after the backend accepts it, which marks the spent nullifiers and takes the notes out of selection, and performs selection, construction, broadcast and recording under a single per-wallet exclusive section so two concurrent sends cannot choose the same notes. A send that is short only because of an in-flight spend releases the section, waits under a bounded budget and re-selects; one that could not be funded even with every note available fails immediately instead. Recording happens only after a successful broadcast, so a refused broadcast leaves every note immediately reusable. The same change corrects a balance inconsistency in that window, where the spent input was still counted as spendable while its change was also reported as pending. Light mode only; in Native mode the full node already accounts for its own mempool spends. **Still to do, deferred:** cover a withdrawal broadcast outside the daemon, which the send path never observes and therefore cannot record (CRD ch.39 D39.8.0e); complete the specified regression coverage — a second send declining the excluded notes, a rejected broadcast leaving them reusable, survival across a restart, the mined-and-scanned transition, expiry lapse, and two concurrent sends — which needs a harness able to drive a shielded wallet database through broadcast, scan and expiry transitions, so only the scanned-transaction predicate is covered today (CRD ch.39 D39.8.0f); and test and fine-tune how long a short send waits for an in-flight spend before giving up, currently 300 seconds, chosen to sit under the swap timeouts above it but not yet measured against real ARRR sync timings. Code: `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_wallet_db.rs`, `mm2src/coins/z_coin.rs`.
 - **A shielded transaction that was never mined blocked the send path indefinitely.** The send path's wait for its own transaction to confirm passed a millisecond timestamp into a deadline compared in seconds, putting the deadline roughly fifty thousand years out, so the intended ~66-minute cap never fired. A transaction that stayed in the mempool without ever being mined or dropped left the swap or withdrawal waiting forever rather than failing. Code: `mm2src/coins/z_coin/z_coin_ops.rs`.
 - **A requested shielded rescan was silently discarded by the next activation — CRD ch.39 R39.8.0an.** Activation skips forward to the recent scan window rather than replay long-dead history, which is right for a new wallet. But a wallet part-way through a caller-requested deep rescan is indistinguishable from a fresh one — empty, anchored far behind the window — until the rescan reaches its first transaction, so the skip fired on the next activation that carried no `sync_params` (which is what a GUI sends on restart) and threw the rescan away. Observed in the wild: a rescan requested at 02:02:11 was wiped 53 seconds later and jumped forward ~156 000 blocks. The case it damages most is restoring a seed whose funds predate the recent window — the rescan that would have found them is discarded and the balance stays at zero. The skip is now confined to a wallet still anchored where it was born (the coin configuration's checkpoint, or Sapling activation when none is declared); a deliberately re-anchored wallet keeps its anchor. Code: `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
 - **Incoming ARRR payments from current Pirate wallets were invisible — CRD ch.39 R39.8.0am.** Pirate accepts both the pre- and post-ZIP-212 note plaintext versions at every height, and says so explicitly in its own `plaintext_version_is_valid`. But Pirate has no Canopy upgrade, and librustzcash derives ZIP-212 enforcement solely from Canopy — so with `canopy_activation_height: null` (which is correct for Pirate) enforcement resolved to `Off`, which accepts **only** the `0x01` lead byte. Every note sent by a current Pirate wallet carries `0x02` and was discarded. Nothing errored: a failed trial decryption is indistinguishable from a note that is not ours, so the payment simply never appeared — no balance, no history entry, no warning. Payments sent *from* KDF were unaffected, because KDF built them with the same `Off` policy and so produced `0x01` notes that both sides could read; this is why sending appeared to work perfectly in both directions while receiving from Treasure Chest silently failed. Note decryption now uses parameters derived separately from the coin's consensus parameters, reporting the enforcement state that accepts both versions, applied at every trial-decryption site: the compact-block scanner, mempool detection, full-transaction decryption and outgoing-output recovery. Those parameters are deliberately confined to decryption and never reach transaction construction — the consensus branch ID is the branch of the last active upgrade, so parameters reporting Canopy active would move every signed transaction off the Sapling branch; a test pins that the real parameters still resolve to Sapling and the decryption parameters do not. Upgrading the crates does not help: `sapling-crypto 0.7.0` is the newest release and applies the identical rule, as does `zcash_primitives 0.30.1` — the rule is a correct implementation of *Zcash's* consensus, which Pirate deliberately departs from. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_wallet_db.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_swap_ops.rs`.
@@ -158,7 +203,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `mm2src/coins_activation/src/z_coin_activation.rs`,
   `mm2src/coins/z_coin/z_coin_wallet_db.rs`.
 
-- **Small KMD direct-burn DEX fees retain the legacy wire shape.** Netid 8762
+- **Superseded (issue #11): KMD direct-burn DEX-fee split corrected; the
+  small-KMD dust exemption below is withdrawn.** The entry below ("Small KMD
+  direct-burn DEX fees retain the legacy wire shape") described a flat 75/25
+  split above dust plus a builder dust exemption for the resulting
+  under-dust fee output. Public-network observation of a `v2.6.0-beta` node
+  contradicts that: for a 0.01 KMD taker it emits 1,000 base units to the
+  fee address and 158 to `OP_RETURN`, not 868 + 289. The DEX-fee split is now
+  computed from three exact-rational ranges on the dust-floored total: at or
+  below dust, a single fee output for exactly dust; above dust with the 75%
+  share at or above dust, the 75/25 split; otherwise a fee output of exactly
+  dust and an OP_RETURN burn of the remainder. Because the fee-collection
+  leg is now never below dust, the generic UTXO builder needs no per-output
+  or per-descriptor dust exemption for this descriptor any more — the
+  under-dust exemption plumbing (builder option, taker-fee send variant, and
+  selector) has been removed entirely. Code: `mm2src/coins/lp_coins_types.rs`,
+  `mm2src/coins/utxo.rs`, `mm2src/coins/utxo/utxo_common/`.
+- **KMD taker no longer over-claims Active User Reward (interest) on
+  post-KIP-0001 UTXOs (issue #11).** The reward computation was missing the
+  KIP-0001 500x reduction that took effect at the dPoW Season-7 hard fork
+  (height 3,484,958). A KMD spend whose inputs include an eligible UTXO
+  confirmed at or after that height now claims the correct, reduced reward
+  instead of a figure 500x too large, which the network previously rejected
+  with `bad-txns-in-belowout`. Reported and validated on the same
+  transaction/history/`kmd_rewards_info` surfaces. Code: `mm2src/coins/utxo.rs`.
+- **No-fee waiver for the network burn/waiver-key taker (issue #11).** A
+  taker whose taker-coin swap public key equals the active network's
+  burn/waiver key now pays no DEX fee, on both netid 8762 and netid 6133 and
+  on the legacy swap protocol, independently of whether the network's burn
+  split is enabled. Previously the waiver only applied while an (inactive,
+  on both production networks) general burn-account path was active, so it
+  never took effect in production. Netid 8762's burn key
+  (`0369aa…3153`) is no longer empty. Code: `mm2src/coins/lp_coins_types.rs`,
+  `mm2src/mm2_net_config/`, `mm2src/mm2_main/src/lp_swap/maker_swap.rs`,
+  `mm2src/mm2_main/src/lp_swap/taker_swap.rs`.
+- **Small KMD direct-burn DEX fees retain the legacy wire shape (superseded,
+  see above).** Netid 8762
   KMD taker-fee construction now permits the positive 75% fee-collection
   output selected by the `v2.6.0-beta` policy even when that split component
   is below KMD's generic spendable-output dust threshold. The exception is
@@ -172,8 +252,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   ticker's zero-valued entry in `total_balance` instead of returning an untyped
   empty object. Code: `mm2src/coins/`, `mm2src/coins_activation/`.
 - **DEX-fee wire compatibility on both production netids.** Netid 8762 KMD
-  takers now use the `v2.6.0-beta`-compatible discounted fee and two-output
-  75/25 fee/OP_RETURN structure, while non-KMD takers remain single-output.
+  takers now use the `v2.6.0-beta`-compatible discounted fee and dust-aware
+  fee/OP_RETURN split (see the corrected three-range entry above for the
+  exact structure), while non-KMD takers remain single-output.
   Netid 6133 follows the v3/dev single-output fee structure. Both networks now
   use only the taker coin's minimum transaction amount as the fee floor,
   removing the erroneous additional `0.0001` floor. Fixes #1. Code:

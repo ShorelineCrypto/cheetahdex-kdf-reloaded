@@ -14,8 +14,8 @@ use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MatchBy, OrderConfirmationsSettings, TakerAction, TakerOrderBuilder};
 use crate::mm2::lp_swap::{broadcast_p2p_tx_msg, tx_helper_topic};
 use crate::mm2::MM_VERSION;
-use coins::{lp_coinfind, CanRefundHtlc, FeeApproxStage, FoundSwapTxSpend, MmCoinEnum, PaymentInstructions, TradeFee,
-            TradePreimageValue, ValidatePaymentInput};
+use coins::{lp_coinfind, CanRefundHtlc, DexFee, FeeApproxStage, FoundSwapTxSpend, MmCoinEnum, PaymentInstructions,
+            TradeFee, TradePreimageValue, ValidatePaymentInput};
 use common::executor::Timer;
 use common::log::{debug, error, warn};
 use common::mm_number::{BigDecimal, MmNumber};
@@ -1316,6 +1316,19 @@ impl TakerSwap {
             &self.taker_amount,
             &my_taker_coin_htlc_pub,
         );
+
+        // CRD ch.51 R14 / ch.08 R15C / ch.16 R7 (issue #11): a `NoFee`
+        // descriptor (the taker's taker-coin swap public key equals the
+        // active network's burn/waiver key) sends no on-chain transaction.
+        if matches!(dex_fee, DexFee::NoFee) {
+            return Ok((Some(TakerSwapCommand::WaitForMakerPayment), vec![
+                TakerSwapEvent::TakerFeeSent(TransactionIdentifier {
+                    tx_hex: Vec::new().into(),
+                    tx_hash: Vec::new().into(),
+                }),
+            ]));
+        }
+
         let fee_tx = self
             .taker_coin
             .send_taker_fee(&dex_fee, self.net_cfg().dex_fee_addr_raw_pubkey(), self.uuid.as_bytes())

@@ -14,7 +14,7 @@ use crate::mm2::lp_network::subscribe_to_topic;
 use crate::mm2::lp_ordermatch::{MakerOrderBuilder, OrderConfirmationsSettings};
 use crate::mm2::lp_swap::{broadcast_p2p_tx_msg, tx_helper_topic};
 use crate::mm2::MM_VERSION;
-use coins::{CanRefundHtlc, FeeApproxStage, FoundSwapTxSpend, MmCoinEnum, PaymentInstructions, TradeFee,
+use coins::{CanRefundHtlc, DexFee, FeeApproxStage, FoundSwapTxSpend, MmCoinEnum, PaymentInstructions, TradeFee,
             TradePreimageValue, TransactionEnum, ValidateFeeArgs, ValidatePaymentInput};
 use common::log::{debug, error, warn};
 use common::mm_number::{BigDecimal, MmNumber};
@@ -670,6 +670,13 @@ impl MakerSwap {
 
     async fn wait_taker_fee(&self) -> Result<(Option<MakerSwapCommand>, Vec<MakerSwapEvent>), String> {
         const TAKER_FEE_RECV_TIMEOUT: u64 = 600;
+
+        // The taker's `negotiate` step blocks on receiving this `Negotiated`
+        // broadcast before it will do anything else (including deciding it
+        // owes no fee), so it MUST run unconditionally, before any dex-fee
+        // descriptor is even computed. Ch.51 R14's "MUST NOT require or
+        // decode a fee transaction" governs the fee transaction only, not
+        // this negotiation acknowledgement.
         let negotiated = SwapMsg::Negotiated(true);
         let send_abort_handle = broadcast_swap_message_every(
             self.ctx.clone(),
@@ -694,6 +701,32 @@ impl MakerSwap {
             },
         };
         drop(send_abort_handle);
+
+        let taker_amount = MmNumber::from(self.taker_amount.clone());
+        let other_taker_coin_htlc_pub = self.r().other_taker_coin_htlc_pub;
+        let dex_fee = compute_dex_fee_with_taker_pubkey(
+            self.net_cfg(),
+            &self.taker_coin,
+            &self.r().data.maker_coin,
+            &taker_amount,
+            &*other_taker_coin_htlc_pub,
+        );
+
+        // CRD ch.51 R14 / ch.08 R15C / ch.16 R7 (issue #11): a `NoFee`
+        // descriptor MUST NOT require or decode a fee transaction. The
+        // negotiation acknowledgement above has already run; `payload` here
+        // is the taker's empty `SwapMsg::TakerFee` (chapter 16 T4A), which is
+        // deliberately left unparsed and unvalidated -- emit `TakerFeeValidated`
+        // with an empty identifier and proceed.
+        if matches!(dex_fee, DexFee::NoFee) {
+            return Ok((Some(MakerSwapCommand::SendPayment), vec![
+                MakerSwapEvent::TakerFeeValidated(TransactionIdentifier {
+                    tx_hex: Vec::new().into(),
+                    tx_hash: Vec::new().into(),
+                }),
+            ]));
+        }
+
         let taker_fee = match self.taker_coin.tx_enum_from_bytes(&payload) {
             Ok(tx) => tx,
             Err(e) => {
@@ -706,15 +739,6 @@ impl MakerSwap {
         let hash = taker_fee.tx_hash();
         log!({ "Taker fee tx {:02x}", hash });
 
-        let taker_amount = MmNumber::from(self.taker_amount.clone());
-        let other_taker_coin_htlc_pub = self.r().other_taker_coin_htlc_pub;
-        let dex_fee = compute_dex_fee_with_taker_pubkey(
-            self.net_cfg(),
-            &self.taker_coin,
-            &self.r().data.maker_coin,
-            &taker_amount,
-            &*other_taker_coin_htlc_pub,
-        );
         let taker_coin_start_block = self.r().data.taker_coin_start_block;
 
         let mut attempts = 0;

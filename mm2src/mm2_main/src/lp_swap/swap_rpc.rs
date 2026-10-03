@@ -1018,13 +1018,16 @@ mod lp_swap_tests {
         assert!(display.starts_with("WithBurn("));
     }
 
-    /// Netid 8762 enables the KMD-only 75/25 OP_RETURN burn policy.
+    /// Netid 8762 enables the KMD-only OP_RETURN burn policy (three ranges,
+    /// ch.08 R8), and its burn key doubles as the no-fee waiver key (ch.08
+    /// R15C / ch.16 R7), so it MUST be non-empty (issue #11).
     #[test]
     fn should_configure_kmd_burn_on_netid_8762() {
         let net_cfg = mm2_net_config::net_config_or_panic(8762);
         assert!(net_cfg.burn_enabled());
         assert_eq!(MmNumber::from(net_cfg.dex_fee_share()), MmNumber::from((3, 4)));
-        assert!(net_cfg.burn_addr_raw_pubkey().is_empty());
+        assert!(!net_cfg.burn_addr_raw_pubkey().is_empty());
+        assert_eq!(net_cfg.no_fee_tickers_v2(), &["KMD"]);
     }
 
     /// The v3/netid-6133 reference emits a single standard fee output.
