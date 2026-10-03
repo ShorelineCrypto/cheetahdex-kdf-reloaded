@@ -187,9 +187,29 @@ pub async fn lp_register_coin(
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn lp_spawn_tx_history(ctx: MmArc, coin: MmCoinEnum) -> Result<(), String> {
-    try_s!(std::thread::Builder::new()
-        .name(format!("tx_history_{}", coin.ticker()))
-        .spawn(move || coin.process_history_loop(ctx).wait()));
+    // A plain std::thread + futures01 .wait() has no ambient Tokio runtime
+    // context. That was never a problem for the coins that have used this
+    // path so far (their history fetch doesn't need one), but a coin whose
+    // history loop makes async HTTP calls through a Tokio-based client
+    // (e.g. Sia's, built on reqwest) silently fails the moment it tries to
+    // do any I/O: reqwest/tokio's internals require a runtime handle a raw
+    // OS thread doesn't have. This surfaces as the loop never completing
+    // even its first pass -- sync_status stuck at its initial NotStarted
+    // value forever, with nothing to log, because the failure happens
+    // before the loop body ever runs far enough to call
+    // set_history_sync_state even once.
+    //
+    // ETH already hit this and worked around it by routing its own history
+    // loop through `spawn` (the shared Tokio runtime, CORE) instead of this
+    // function (see start_history_background_fetching in
+    // eth_with_tokens_activation.rs) -- do the same here, generically, so
+    // every coin gets a runtime-aware spawn rather than only the one coin
+    // that happened to need it worked around first. This mirrors the
+    // wasm32 branch below, which already spawns onto its own executor
+    // rather than a raw thread.
+    common::executor::spawn(async move {
+        let _res = coin.process_history_loop(ctx).compat().await;
+    });
     Ok(())
 }
 #[cfg(target_arch = "wasm32")]
@@ -455,10 +475,51 @@ pub async fn send_raw_transaction(ctx: MmArc, req: Json) -> Result<Response<Vec<
         Ok(None) => return ERR!("No such coin: {}", ticker),
         Err(err) => return ERR!("!lp_coinfind({}): {}", ticker, err),
     };
-    let bytes_string = try_s!(req["tx_hex"].as_str().ok_or("No 'tx_hex' field"));
-    let res = try_s!(coin.send_raw_tx(bytes_string).compat().await);
+    let res = match try_s!(select_raw_tx_carrier(&req)) {
+        RawTxCarrier::Hex(hex) => try_s!(coin.send_raw_tx(hex).compat().await),
+        // A JSON carrier is already the coin's native serialised form, so its
+        // bytes go to the bytes-taking half of the trait rather than through
+        // the hex layer `send_raw_tx` exists to strip.
+        RawTxCarrier::Json(tx_json) => {
+            let bytes = try_s!(json::to_vec(tx_json));
+            try_s!(coin.send_raw_tx_bytes(&bytes).compat().await)
+        },
+    };
     let body = try_s!(json::to_vec(&json!({ "tx_hash": res })));
     Ok(try_s!(Response::builder().body(body)))
+}
+
+/// Which of `send_raw_transaction`'s two accepted transaction carriers a
+/// request selected (CRD ch.20 R-W8).
+#[derive(Debug, PartialEq)]
+enum RawTxCarrier<'a> {
+    /// `tx_hex`: hex, for every coin whose transactions have a binary wire form.
+    Hex(&'a str),
+    /// `tx_json`: the transaction's native JSON object, for a coin whose native
+    /// serialisation is JSON text -- currently Sia only.
+    Json(&'a Json),
+}
+
+/// Pick the carrier a `send_raw_transaction` request supplied, per ch.20 R-W8.
+///
+/// `tx_hex` wins whenever it is present, so a caller that echoes back a whole
+/// transaction-details object -- which for Sia carries both (ch.20 R-W6/R-W7) --
+/// broadcasts the same transaction whichever coin it holds. A present-but-
+/// malformed carrier is an error rather than a reason to fall through to the
+/// other one: falling through would broadcast a transaction the caller did not
+/// select. A `null` counts as absent, so that echoing an object whose optional
+/// carrier was serialised as `null` behaves like omitting it.
+fn select_raw_tx_carrier(req: &Json) -> Result<RawTxCarrier<'_>, String> {
+    let present = |field| req.get(field).filter(|value| !value.is_null());
+    match (present("tx_hex"), present("tx_json")) {
+        (Some(tx_hex), _) => match tx_hex.as_str() {
+            Some(tx_hex) => Ok(RawTxCarrier::Hex(tx_hex)),
+            None => ERR!("'tx_hex' must be a string"),
+        },
+        (None, Some(tx_json)) if tx_json.is_object() => Ok(RawTxCarrier::Json(tx_json)),
+        (None, Some(_)) => ERR!("'tx_json' must be an object"),
+        (None, None) => ERR!("Request must carry either a 'tx_hex' or a 'tx_json' field"),
+    }
 }
 #[derive(Deserialize)]
 struct MyTxHistoryRequest {
@@ -692,19 +753,27 @@ pub fn update_coins_config(mut config: Json) -> Result<Json, String> {
                     .as_str()
                     .ok_or(ERRL!("Expected etomic as string, found {:?}", etomic))?;
                 if etomic == "0x0000000000000000000000000000000000000000" {
-                    CoinProtocol::ETH { chain_id: None }
+                    // This legacy-upgrade path never knows a chain_id, so build the
+                    // wire shape directly instead of round-tripping
+                    // `CoinProtocol::ETH { chain_id: None }` through serde: the
+                    // adjacently-tagged derive emits `"protocol_data": {"chain_id":
+                    // null}` for that value (chain_id's `#[serde(default)]` only
+                    // affects deserialization, not serialization), which is a
+                    // config-shape regression a pre-chain_id `coins` file never
+                    // had and callers do not expect from this upgrade step.
+                    json!({ "type": "ETH" })
                 } else {
                     let contract_address = etomic.to_owned();
-                    CoinProtocol::ERC20 {
+                    json::to_value(CoinProtocol::ERC20 {
                         platform: "ETH".into(),
                         contract_address,
-                    }
+                    })
+                    .map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?
                 }
             },
-            _ => CoinProtocol::UTXO,
+            _ => json::to_value(CoinProtocol::UTXO).map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?,
         };
 
-        let protocol = json::to_value(protocol).map_err(|e| ERRL!("Error {:?} on process {:?}", e, coin_as_str))?;
         coin.insert("protocol".into(), protocol);
     }
 
@@ -901,4 +970,67 @@ where
         Ok(())
     };
     Box::new(fut.boxed().compat())
+}
+
+#[cfg(test)]
+mod send_raw_transaction_carrier_tests {
+    //! `send_raw_transaction`'s carrier selection (CRD ch.20 R-W8, T-W2/T-W3).
+    //! Only the selection is exercised here: the broadcast itself needs an
+    //! activated coin and a live node.
+
+    use super::*;
+
+    #[test]
+    fn a_hex_carrier_is_selected() {
+        let req = json!({ "coin": "SC", "tx_hex": "7b7d" });
+        assert_eq!(select_raw_tx_carrier(&req), Ok(RawTxCarrier::Hex("7b7d")));
+    }
+
+    #[test]
+    fn a_json_carrier_is_selected_when_hex_is_absent() {
+        let req = json!({ "coin": "SC", "tx_json": { "minerFee": "0" } });
+        let expected = json!({ "minerFee": "0" });
+        assert_eq!(select_raw_tx_carrier(&req), Ok(RawTxCarrier::Json(&expected)));
+    }
+
+    /// T-W2: a caller that echoes back a whole transaction-details object hands
+    /// in both carriers. `tx_hex` wins, so the same transaction is broadcast
+    /// whichever coin the object came from.
+    #[test]
+    fn hex_wins_when_both_carriers_are_present() {
+        let req = json!({ "coin": "SC", "tx_hex": "7b7d", "tx_json": { "minerFee": "0" } });
+        assert_eq!(select_raw_tx_carrier(&req), Ok(RawTxCarrier::Hex("7b7d")));
+    }
+
+    /// T-W2: a malformed selected carrier is an error, never a reason to fall
+    /// through to the other one -- falling through would broadcast a
+    /// transaction the caller did not select.
+    #[test]
+    fn a_malformed_hex_carrier_does_not_fall_through_to_json() {
+        let req = json!({ "coin": "SC", "tx_hex": 42, "tx_json": { "minerFee": "0" } });
+        assert!(select_raw_tx_carrier(&req).is_err());
+    }
+
+    /// T-W3: neither carrier present fails validation, naming both fields.
+    #[test]
+    fn neither_carrier_is_a_validation_error_naming_both() {
+        let err = select_raw_tx_carrier(&json!({ "coin": "SC" })).expect_err("neither carrier is supplied");
+        assert!(err.contains("tx_hex"), "{err}");
+        assert!(err.contains("tx_json"), "{err}");
+    }
+
+    /// A `null` counts as absent, so echoing an object whose optional carrier
+    /// serialised as `null` behaves like omitting it rather than failing.
+    #[test]
+    fn a_null_carrier_counts_as_absent() {
+        let req = json!({ "coin": "SC", "tx_hex": null, "tx_json": { "minerFee": "0" } });
+        let expected = json!({ "minerFee": "0" });
+        assert_eq!(select_raw_tx_carrier(&req), Ok(RawTxCarrier::Json(&expected)));
+    }
+
+    #[test]
+    fn a_non_object_json_carrier_is_rejected() {
+        let req = json!({ "coin": "SC", "tx_json": "not an object" });
+        assert!(select_raw_tx_carrier(&req).is_err());
+    }
 }

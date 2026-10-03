@@ -74,7 +74,8 @@ across threads.
 | Burn-share enabled                 | `bool` (default `false`)   | Whether a fraction of the fee is burned          |
 | DEX-fee share                      | `BigRational` (default 1)  | Fraction retained as fee (vs burned)             |
 | Burn address (secp256k1)           | `&'static str` (default "")| Hex-encoded compressed-secp256k1 pubkey          |
-| Burn address raw pubkey            | `&'static [u8]` (default &[])| Burn pubkey as raw bytes                       |
+| Burn address raw pubkey            | `&'static [u8]` (default &[])| Burn pubkey as raw bytes; also the no-fee waiver key of chapter 08 R15C / chapter 16 R7, non-empty on both production netids |
+| Version-two no-fee ticker set      | `&'static [&'static str]` (default empty) | Version-two swaps with either coin in this set carry no dex fee (chapter 16 R12B); `["KMD"]` on netid 8762, empty on 6133 |
 | Seed-node list                     | `&'static [&'static str]`  | Optional DNS names or address strings            |
 
 Return-type discipline:

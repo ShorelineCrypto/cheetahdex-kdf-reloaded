@@ -17,6 +17,13 @@ pub(crate) const _PAYMENT_STATE_SPENT: u8 = 2;
 pub(crate) const _PAYMENT_STATE_REFUNDED: u8 = 3;
 // Ethgasstation API returns response in 10^8 wei units. So 10 from their API mean 1 gwei
 pub(crate) const ETH_GAS_STATION_DECIMALS: u8 = 8;
+/// Gas fees are denominated in the platform coin, which is 18-decimal on every
+/// EVM chain regardless of the traded token's own decimals.
+pub(crate) const ETH_DECIMALS: u8 = 18;
+/// The EVM's fixed intrinsic gas cost of any transaction. Used as an
+/// unarguable lower bound when reporting how much gas money is missing after
+/// `estimate_gas` failed outright — never to actually send a transaction.
+pub(crate) const MIN_TX_GAS_LIMIT: u64 = 21_000;
 pub(crate) const GAS_PRICE_PERCENT: u64 = 10;
 /// It can change 12.5% max each block according to https://www.blocknative.com/blog/eip-1559-fees
 pub(crate) const BASE_BLOCK_FEE_DIFF_PCT: u64 = 13;

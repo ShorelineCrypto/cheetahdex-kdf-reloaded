@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use url::Url;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::nft::providers::{update_chain, HttpCrawlProvider};
+use crate::nft::providers::{HttpCrawlProvider, NftCrawlProvider};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::nft::store::{ensure_initialised, NftListStore};
 #[cfg(not(target_arch = "wasm32"))]
@@ -182,15 +182,33 @@ async fn activate_chain(
 
     let NftProvider::Moralis(info) = provider;
     let crawl = HttpCrawlProvider::new(info.url.clone(), info.komodo_proxy);
-    update_chain(store, &crawl, chain, coin.my_address)
-        .await
-        .mm_err(|err| EnableNftError::CrawlFailed(format!("{err:?}")))?;
 
-    let list = NftListStore::list_owned(store, vec![chain], true, 0, None, None)
+    // Activation is deliberately the narrowest fetch that satisfies the
+    // response contract (CRD ch.19 R9a): owned inventory only, paged to
+    // completion. Walking transfer history here multiplies provider requests
+    // by history size and turns any one of them into an activation-blocking
+    // failure, while contributing nothing the response needs. The transfer
+    // walk, per-token detail lookups, metadata back-fill, and bookmark
+    // advance all belong to `update_nft`.
+    let owned = crawl
+        .fetch_owned_inventory(chain, coin.my_address)
+        .await
+        .mm_err(|err| EnableNftError::CrawlFailed(err.to_string()))?;
+
+    // Persist before returning so the operational read methods observe the
+    // same snapshot the caller is handed.
+    //
+    // The bookmark is written as 0 rather than advanced: R9a forbids
+    // activation moving it, and the store's bulk register has no
+    // leave-unchanged mode. 0 is the safe direction — it can only make a
+    // later `update_nft` re-walk history it already has, which dedupes on
+    // append, whereas any higher value could skip transfers permanently.
+    NftListStore::register_owned(store, chain, owned.clone(), 0)
         .await
         .mm_err(|err| EnableNftError::Storage(format!("{err:?}")))?;
-    let mut nfts = HashMap::with_capacity(list.nfts.len());
-    for nft in list.nfts {
+
+    let mut nfts = HashMap::with_capacity(owned.len());
+    for nft in owned {
         nfts.insert(nft.token_id.to_string(), NftInfo {
             token_address: nft.common.token_address,
             token_id: nft.token_id,

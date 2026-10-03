@@ -44,8 +44,14 @@ does not introduce a new coin (the Sia coin itself is bound by ch. 20).
 Sia is a **standalone coin** (it is not a platform-with-tokens coin and has no
 child tokens). It therefore activates through the project's shared
 **standalone-coin task-activation** mechanism -- the same long-running task
-family used by UTXO, Qtum, and Z-coin -- rather than the platform-coin activator
-used by EVM (ch. 35) and Tendermint (ch. 36). The surface specified here is:
+family used by UTXO, Qtum, and Z-coin -- rather than the **platform-coin
+task-activation framework** of [Chapter 48](48-platform-coin-task-activation.md)
+that EVM ([Chapter 35](35-evm-v2-activation-rpcs.md)) and Tendermint
+([Chapter 36](36-tendermint-v2-activation-rpcs.md)) use for their
+platform-with-tokens activation. Sia is a standalone-coin consumer of the
+**sibling** substrate ch. 48 §48.9 itself names, not a ch. 48 consumer: it has no
+platform/token split for ch. 48's framework to wrap. The surface specified here
+is:
 
 | Method string | Tier | Purpose |
 | --- | --- | --- |
@@ -102,7 +108,9 @@ R46.1.4 The activation flow shall: reject activation of an already-active coin
 coin configuration; construct the walletd HTTP client from `client_conf`; build
 the Sia coin via the existing Sia coin builder under the resolved signing policy;
 resolve and cache the per-network DEX-fee address (ch. 20 §20.4.2); register the
-activated coin; and, when `tx_history` is set, start history tracking.
+activated coin; and, when `tx_history` is set, start history tracking (the
+observable meaning of that step is bound by
+[Chapter 53](53-sia-transaction-history.md) §53.6).
 
 R46.1.5 The success `result` of `init` shall carry a single `task_id`
 (the long-running-task identifier) used by `status`, `user_action`, and `cancel`.
@@ -286,3 +294,33 @@ implementer's choice.
   `task_id` (§46.6).
 - The activation reuses the existing Sia coin builder and the shared
   standalone-coin task framework; no coin construction is reinvented (§46.7).
+
+## 46.9 Provenance Footer
+
+- *Inputs:* the published Komodo DeFi Framework API documentation (the
+  `task::enable_sia` method family, its request/response JSON field names,
+  and its error discriminants -- the source of truth this chapter distills
+  per its own "Source of truth" note); reloaded's existing standalone-coin
+  task-activation framework (the generic `init_standalone_coin` entry
+  points and `InitStandaloneCoinActivationOps` trait already driving UTXO
+  and [Chapter 39](39-zcash---z_coin-shielded-coin.md)'s `task::enable_z_coin`
+  family, the precedent this chapter's own executive summary names);
+  [Chapter 20](20-siacoin-integration.md) (the Sia coin type, builder,
+  activation config/protocol types, and walletd backend this chapter
+  activates); [Chapter 48](48-platform-coin-task-activation.md) §48.9 (named
+  only as the contrasting sibling substrate for platform-coin activation,
+  which Sia -- a standalone coin -- does not use); [Chapter 53](53-sia-transaction-history.md)
+  §53.6 (the `tx_history` activation parameter this chapter's §46.1.2/§46.1.4
+  give meaning to downstream).
+- *Permitted-input classes used:* external public specification (the
+  published KDF API documentation); baseline/sibling source (the existing
+  standalone-coin task framework and its UTXO/Z-coin precedent); cross-chapter
+  contracts (Chapters 20, 48, 53); Interop / wire-and-API-bound reuse (R29/R31)
+  for the dictated method strings, JSON field names, and error discriminants
+  this chapter distills -- whose authoritative source is the published API
+  contract any conforming KDF-family client must exchange, not discretionary
+  expression.
+- *Sibling-allowlist consultations:* [Chapter 20](20-siacoin-integration.md),
+  [Chapter 48](48-platform-coin-task-activation.md) §48.9,
+  [Chapter 53](53-sia-transaction-history.md) §53.6.
+- *Forbidden corpus:* not consulted.

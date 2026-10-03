@@ -40,6 +40,7 @@ pub mod wc_integration;
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
+#[cfg(not(target_arch = "wasm32"))]
 use bitcoin::network::constants::Network as BitcoinNetwork;
 pub use chain::Transaction as UtxoTx;
 use chain::{OutPoint, TransactionOutput, TxHashAlgo};
@@ -64,6 +65,7 @@ pub use kdf_crypto::{dhash160, sha256, ChecksumType};
 use keys::bytes::Bytes;
 pub use keys::{Address, AddressFormat as UtxoAddressFormat, AddressHashEnum, KeyPair, Private, Public, Secret,
                Type as ScriptType};
+#[cfg(not(target_arch = "wasm32"))]
 use lightning_invoice::Currency as LightningCurrency;
 use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
@@ -436,6 +438,7 @@ pub enum BlockchainNetwork {
     Regtest,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<BlockchainNetwork> for BitcoinNetwork {
     fn from(network: BlockchainNetwork) -> Self {
         match network {
@@ -446,6 +449,7 @@ impl From<BlockchainNetwork> for BitcoinNetwork {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<BlockchainNetwork> for LightningCurrency {
     fn from(network: BlockchainNetwork) -> Self {
         match network {
@@ -1334,6 +1338,9 @@ pub struct UtxoActivationParams {
     pub requires_notarization: Option<bool>,
     pub address_format: Option<UtxoAddressFormat>,
     pub gap_limit: Option<u32>,
+    /// Minimum number of known external addresses to expose for every HD account.
+    #[serde(default)]
+    pub min_addresses_number: Option<u32>,
     #[serde(default)]
     pub scan_policy: EnableCoinScanPolicy,
     #[serde(default = "PrivKeyActivationPolicy::context_priv_key")]
@@ -1399,6 +1406,7 @@ impl UtxoActivationParams {
             requires_notarization,
             address_format,
             gap_limit: None,
+            min_addresses_number: None,
             scan_policy,
             priv_key_policy,
             check_utxo_maturity,
@@ -1531,6 +1539,12 @@ fn kmd_interest(
 ) -> Result<u64, KmdRewardsNotAccruedReason> {
     const KOMODO_ENDOFERA: u64 = 7_777_777;
     const LOCKTIME_THRESHOLD: u64 = 500_000_000;
+    /// KIP-0001 ("Reduce the KMD Active User Reward") dPoW Season-7 hard-fork
+    /// height. A UTXO confirmed at or after this height has its reward
+    /// divided by 500 (CRD ch.38 R38.4.1 step 6). The reduction is keyed on
+    /// the height of the UTXO being spent, not on the current chain height
+    /// or the height of the spending transaction.
+    const KIP_0001_HARDFORK_HEIGHT: u64 = 3_484_958;
 
     // value must be at least 10 KMD
     if value < 1_000_000_000 {
@@ -1574,7 +1588,14 @@ fn kmd_interest(
     }
     // next 2 lines ported as is from Komodo codebase
     minutes -= 59;
-    let accrued = (value / 10_512_000) * minutes;
+    let mut accrued = (value / 10_512_000) * minutes;
+
+    // KIP-0001: the reward rate was cut 500x at the dPoW Season-7 hard fork.
+    // This depends on the height of the UTXO being spent (`height`), not on
+    // the current chain height.
+    if height >= KIP_0001_HARDFORK_HEIGHT {
+        accrued /= 500;
+    }
 
     Ok(accrued)
 }
@@ -2225,6 +2246,7 @@ pub fn address_by_conf_and_pubkey_str(
         requires_notarization: None,
         address_format: None,
         gap_limit: None,
+        min_addresses_number: None,
         scan_policy: EnableCoinScanPolicy::default(),
         priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
         check_utxo_maturity: None,

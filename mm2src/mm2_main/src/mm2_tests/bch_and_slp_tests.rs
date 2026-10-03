@@ -10,7 +10,7 @@ const T_BCH_ELECTRUMS: &[&str] = &[
     "testnet.imaginary.cash:50001",
 ];
 
-fn t_bch_electrums_legacy_json() -> Vec<Json> { T_BCH_ELECTRUMS.into_iter().map(|url| json!({ "url": url })).collect() }
+fn t_bch_electrums_legacy_json() -> Vec<Json> { T_BCH_ELECTRUMS.iter().map(|url| json!({ "url": url })).collect() }
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
@@ -310,7 +310,7 @@ fn test_common_cashaddresses() {
     log!({ "log path: {}", mm.log_path.display() });
 
     // Enable BCH electrum client with tx_history loop.
-    // Enable RICK electrum client with tx_history loop.
+    // Enable DOC electrum client with tx_history loop.
     let electrum = block_on(mm.rpc(&json! ({
         "userpass": mm.userpass,
         "method": "electrum",

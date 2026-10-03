@@ -7,6 +7,11 @@ lazy_static! {
         DalekDerivationPath::from_str("m/44'/1991'/0'/0'/0'").expect("Valid single address mode path");
 }
 
+/// Default HD gap limit for a `SiaHDWallet` built at activation (CRD ch.20 D1) when
+/// the activation request's `gap_limit` field is absent. Matches UTXO's own
+/// `DEFAULT_GAP_LIMIT` (`utxo.rs`) and `sia_hd_wallet.rs`'s own test fixtures.
+pub(crate) const DEFAULT_HD_GAP_LIMIT: u32 = 20;
+
 /// The index of the HTLC output in the transaction that locks the funds
 pub(crate) const HTLC_VOUT_INDEX: u32 = 0;
 
@@ -264,6 +269,11 @@ impl SiaCheckIfMyPaymentSentArgs {
             ));
         }
         let success_public_key = PublicKey::from_bytes(&other_pub[..32])?;
+        if secret_hash.len() != 32 {
+            return Err(SiaCheckIfMyPaymentSentArgsError::WrongSecretHashLength {
+                actual: secret_hash.len(),
+            });
+        }
         let secret_hash = Hash256::try_from(secret_hash)?;
         let amount = siacoin_to_hastings(amount)?;
 
@@ -276,6 +286,20 @@ impl SiaCheckIfMyPaymentSentArgs {
     }
 }
 
+/// `ValidatePaymentInput.taker_pub`/`.maker_pub` are always the real taker's
+/// and real maker's keys -- never "mine" vs "other" (both `validate_maker_payment`
+/// and `validate_taker_payment` share the same struct and populate it that way;
+/// see maker_swap.rs's and taker_swap.rs's construction of it). So the pubkey
+/// a Sia HTLC validation needs as its refund/counterparty key depends on which
+/// side's payment is being validated, not on a fixed field -- the caller must
+/// say which, since `SiaValidatePaymentInputArgs` alone can't tell.
+pub(crate) enum ValidatingPaymentOwner {
+    /// We are the taker, validating the maker's payment (SwapOps::validate_maker_payment).
+    Maker,
+    /// We are the maker, validating the taker's payment (SwapOps::validate_taker_payment).
+    Taker,
+}
+
 /// Sia typed ValidatePaymentInput
 #[derive(Clone, Debug)]
 pub(crate) struct SiaValidatePaymentInputArgs {
@@ -286,15 +310,24 @@ pub(crate) struct SiaValidatePaymentInputArgs {
     pub amount: Currency,
 }
 
-impl TryFrom<ValidatePaymentInput> for SiaValidatePaymentInputArgs {
-    type Error = SiaValidatePaymentInputError;
-
-    fn try_from(args: ValidatePaymentInput) -> Result<Self, Self::Error> {
+impl SiaValidatePaymentInputArgs {
+    pub fn try_from_validate_payment_input(
+        args: ValidatePaymentInput,
+        payment_owner: ValidatingPaymentOwner,
+    ) -> Result<Self, SiaValidatePaymentInputError> {
         let payment_tx = SiaTransaction::try_from(args.payment_tx.to_vec())?;
 
-        // The "other_pub" in ValidatePaymentInput is split into taker_pub and maker_pub
-        // For Sia, we use taker_pub as the "other" party (the one who can reveal the secret)
-        let other_pub_bytes = &args.taker_pub;
+        // Whichever side's payment we were asked to validate names the
+        // counterparty pubkey directly: validating the maker's payment means
+        // *we* are the taker and the maker is the counterparty (maker_pub),
+        // and vice versa. Using the wrong field here silently validates a
+        // payment against our own key instead of the counterparty's,
+        // producing a spend-policy address that can never match what the
+        // real counterparty actually paid to (ch.51 R63).
+        let other_pub_bytes = match payment_owner {
+            ValidatingPaymentOwner::Maker => &args.maker_pub,
+            ValidatingPaymentOwner::Taker => &args.taker_pub,
+        };
         if other_pub_bytes.len() != 33 {
             return Err(SiaValidatePaymentInputError::InvalidOtherPublicKeyLength(
                 other_pub_bytes.clone(),
@@ -302,6 +335,11 @@ impl TryFrom<ValidatePaymentInput> for SiaValidatePaymentInputArgs {
         }
         let other_pub = PublicKey::from_bytes(&other_pub_bytes[..32])?;
 
+        if args.secret_hash.len() != 32 {
+            return Err(SiaValidatePaymentInputError::WrongSecretHashLength {
+                actual: args.secret_hash.len(),
+            });
+        }
         let secret_hash = Hash256::try_from(args.secret_hash.as_slice())?;
         let amount = siacoin_to_hastings(args.amount)?;
 

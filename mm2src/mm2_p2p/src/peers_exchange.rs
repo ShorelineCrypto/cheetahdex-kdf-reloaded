@@ -9,7 +9,7 @@ use libp2p::{multiaddr::{Multiaddr, Protocol},
              swarm::{ConnectionDenied, ConnectionId, FromSwarm, NetworkBehaviour, PollParameters, THandler,
                      THandlerInEvent, THandlerOutEvent, ToSwarm},
              PeerId};
-use log::{error, info, warn};
+use log::{debug, error, info, trace, warn};
 use rand::seq::SliceRandom;
 use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
 use std::collections::HashSet;
@@ -50,7 +50,7 @@ impl From<PeerId> for PeerIdSerde {
 
 impl Serialize for PeerIdSerde {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.clone().to_bytes().serialize(serializer)
+        self.0.to_bytes().serialize(serializer)
     }
 }
 
@@ -186,7 +186,7 @@ impl PeersExchange {
     fn request_known_peers_from_random_peer(&mut self) {
         let mut rng = rand::thread_rng();
         if let Some(from_peer) = self.known_peers.choose(&mut rng) {
-            info!("Try to request {} peers from peer {}", DEFAULT_PEERS_NUM, from_peer);
+            debug!("Requesting up to {} peers from peer {}", DEFAULT_PEERS_NUM, from_peer);
             let request = PeersExchangeRequest::GetKnownPeers { num: DEFAULT_PEERS_NUM };
             self.request_response.send_request(from_peer, request);
         }
@@ -289,7 +289,8 @@ impl PeersExchange {
                 },
                 RequestResponseMessage::Response { response, .. } => match response {
                     PeersExchangeResponse::KnownPeers { peers } => {
-                        info!("Got peers {:?}", peers);
+                        debug!("Received {} peers from {}", peers.len(), peer);
+                        trace!("Peers-exchange response from {}: {:?}", peer, peers);
 
                         if !self.validate_get_known_peers_response(&peers) {
                             // if peer provides invalid response forget it and try to request from other peer
@@ -315,10 +316,18 @@ impl PeersExchange {
                         peer, request_id
                     );
                 } else {
-                    error!(
-                        "Outbound failure {:?} while requesting {:?} to peer {}",
-                        error, request_id, peer
-                    );
+                    match &error {
+                        // The swarm reports the attempted address and transport reason separately.
+                        // Keep this automatic peers-exchange recovery detail available at debug level.
+                        OutboundFailure::DialFailure => debug!(
+                            "Peers-exchange dial failed for request {:?} to peer {}; trying another peer",
+                            request_id, peer
+                        ),
+                        _ => warn!(
+                            "Peers-exchange request {:?} to peer {} failed with {:?}; trying another peer",
+                            request_id, peer, error
+                        ),
+                    }
                     self.forget_peer(&peer);
                     self.request_known_peers_from_random_peer();
                 }

@@ -105,6 +105,14 @@ pub enum UtxoCoinBuildError {
         electrum_servers: Vec<ElectrumRpcRequest>,
         seconds: u64,
     },
+    #[display(
+        fmt = "No usable Electrum servers for {}: none are configured, or every configured server was rejected as \
+               unusable by this build (native builds cannot use 'ws'/'wss' servers).",
+        ticker
+    )]
+    NoUsableElectrumServers {
+        ticker: String,
+    },
     ElectrumProtocolVersionCheckError(String),
     #[display(fmt = "Can not detect the user home directory")]
     CantDetectUserHome,
@@ -620,6 +628,16 @@ pub trait UtxoCoinBuilderCommonOps {
             event_handlers.push(ElectrumProtoVerifier { on_connect_tx }.into_shared());
         }
 
+        // Distinguish "nothing to try" from "everything we tried failed": waiting five
+        // seconds only to report an empty candidate list gives no hint that the coin's
+        // `electrum` entry is missing, or that every entry was dropped as unusable
+        // (native builds skip 'ws'/'wss' servers, so a WSS-only coin lands here).
+        if servers.is_empty() {
+            return MmError::err(UtxoCoinBuildError::NoUsableElectrumServers {
+                ticker: self.ticker().to_owned(),
+            });
+        }
+
         let all_servers = servers.clone();
         let max_connected = max_connected.unwrap_or(servers.len()).max(1);
         let min_connected = min_connected.unwrap_or(1).max(1).min(max_connected);
@@ -860,6 +878,14 @@ fn spawn_electrum_version_loop(
                 client_name.clone(),
                 electrum_addr,
             ));
+
+            // A script-hash subscription belongs to a single session, so a
+            // reconnect or a server swap drops it without saying so. Re-arm
+            // every watched hash on each newly connected server rather than
+            // assuming any survived (R38.6.5).
+            if let Some(client) = weak_client.upgrade() {
+                spawn(async move { ElectrumClient(client).resubscribe_watched_scripthashes().await });
+            }
         }
 
         log!("Electrum server.version loop stopped");

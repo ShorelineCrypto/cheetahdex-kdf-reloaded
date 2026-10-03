@@ -855,7 +855,7 @@ pub(crate) async fn handle_timed_out_maker_matches(ctx: MmArc, ordermatch_ctx: &
     let storage = MyOrdersStorage::new(ctx.clone());
     let my_maker_orders = ordermatch_ctx.maker_orders_ctx.lock().clone_orders();
 
-    for (_, order) in my_maker_orders.iter() {
+    for order in my_maker_orders.values() {
         let mut order = order.lock().await;
         let old_len = order.matches.len();
         order.matches.retain(|_, order_match| {

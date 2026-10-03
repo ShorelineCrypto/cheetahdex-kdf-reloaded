@@ -1,10 +1,19 @@
 // utxo_common_swap — HTLC/swap operations, payment scripts, validation
 
 use super::*;
+use kdf_crypto::ripemd160;
+use primitives::hash::H160;
 
 pub const DEFAULT_SWAP_TX_SPEND_SIZE: u64 = 305;
 
 pub const DEFAULT_SWAP_VOUT: usize = 0;
+
+/// CRD ch.15 R40 / ch.16 R14A: the reference spend size for the version-two
+/// funding-spend (ch.15 R21/R22) and taker-payment-spend (ch.16 R14/R17) fee
+/// estimate. Distinct from the legacy [`DEFAULT_SWAP_TX_SPEND_SIZE`], which
+/// stays 305 and governs unrelated, pre-existing V1/V2 maker-payment spend
+/// paths this batch does not touch.
+pub const V2_SWAP_SPEND_TX_SIZE: u64 = 496;
 
 /// returns the fee required to be paid for HTLC spend transaction
 pub async fn get_htlc_spend_fee<T: UtxoCommonOps>(coin: &T, tx_size: u64) -> UtxoRpcResult<u64> {
@@ -27,6 +36,34 @@ pub async fn get_htlc_spend_fee<T: UtxoCommonOps>(coin: &T, tx_size: u64) -> Utx
         let relay_fee_sat = sat_from_big_decimal(&relay_fee, coin.as_ref().decimals).mm_err(Into::into)?;
         if fee < relay_fee_sat {
             fee = relay_fee_sat;
+        }
+    }
+    Ok(fee)
+}
+
+/// CRD ch.16 R14A: the version-two funding-spend / taker-payment-spend
+/// spend-fee estimate `S`. Proportional to `tx_size` (496 bytes, R40) and
+/// truncated -- NOT rounded up to a whole kilobyte the way the legacy
+/// [`get_htlc_spend_fee`]'s `FixedPerKb` arm is. R14A's "whole-kB-rounding
+/// fixed-fee option" (chapter 38 R38.6.6) names a distinct per-coin config
+/// flag that does not exist in this codebase yet (§38.6 lists it as
+/// not-yet-ported); that branch is therefore unreachable and is not
+/// implemented here. If the coin forces the node's minimum relay fee, the
+/// estimate is raised to at least the same proportional share of the relay
+/// rate.
+pub async fn get_v2_swap_spend_fee<T: UtxoCommonOps>(coin: &T, tx_size: u64) -> UtxoRpcResult<u64> {
+    let coin_fee = coin.get_tx_fee().await?;
+    let rate = match coin_fee {
+        ActualTxFee::Dynamic(fee_per_kb) => fee_per_kb,
+        ActualTxFee::FixedPerKb(fee_per_kb) => fee_per_kb,
+    };
+    let mut fee = (rate * tx_size) / KILO_BYTE;
+    if coin.as_ref().conf.force_min_relay_fee {
+        let relay_fee = coin.as_ref().rpc_client.get_relay_fee().compat().await?;
+        let relay_rate = sat_from_big_decimal(&relay_fee, coin.as_ref().decimals).mm_err(Into::into)?;
+        let relay_component = (relay_rate * tx_size) / KILO_BYTE;
+        if fee < relay_component {
+            fee = relay_component;
         }
     }
     Ok(fee)
@@ -57,7 +94,7 @@ where
 /// Builds the transaction outputs for a taker fee payment.
 ///
 /// Returns 0 outputs for `NoFee`, 1 for `Standard`, or 2 for `WithBurn`.
-fn generate_taker_fee_tx_outputs(
+pub(crate) fn generate_taker_fee_tx_outputs(
     coin: &impl UtxoCommonOps,
     dex_fee: &DexFee,
     fee_address: &Address,
@@ -199,7 +236,27 @@ pub fn send_maker_spends_taker_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx = try_tx_fus!(deserialize(taker_payment_tx).map_err(|e| ERRL!("{:?}", e)));
     prev_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
@@ -251,7 +308,27 @@ pub fn send_taker_spends_maker_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx = try_tx_fus!(deserialize(maker_payment_tx).map_err(|e| ERRL!("{:?}", e)));
     prev_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
@@ -303,7 +380,27 @@ pub fn send_taker_refunds_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx =
         try_tx_fus!(deserialize(taker_payment_tx).map_err(|e| TransactionErr::Plain(format!("{:?}", e))));
@@ -353,7 +450,27 @@ pub fn send_maker_refunds_payment<T: UtxoCommonOps>(
     htlc_privkey: &[u8],
 ) -> TransactionFut {
     let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
-    let my_address = try_tx_fus!(coin.as_ref().derivation_method.iguana_or_err()).clone();
+    // `derivation_method.iguana_or_err()` only ever succeeds for a
+    // single-address (Iguana) account -- it fails outright with
+    // IguanaPrivKeyUnavailable for an HD-wallet-activated one, since there
+    // is no single "the" address to hand back for those (ch.51 R63: ask
+    // for what's actually needed instead of assuming one shared shape).
+    // What this spend/refund actually needs is the output address for
+    // *this* key -- and `key_pair` above, from `htlc_privkey`, already is
+    // the correct per-swap signing key for either derivation mode (R63's
+    // selection already resolved that at negotiation time, in
+    // get_htlc_key_pair). Deriving the address from it directly is both
+    // more correct (guaranteed to match what's actually signing) and
+    // works for both derivation modes, so there is no need to separately
+    // consult `derivation_method` at all.
+    let my_address = address_from_pubkey(
+        key_pair.public(),
+        coin.as_ref().conf.pub_addr_prefix,
+        coin.as_ref().conf.pub_t_addr_prefix,
+        coin.as_ref().conf.checksum_type,
+        coin.as_ref().conf.bech32_hrp.clone(),
+        coin.addr_format().clone(),
+    );
 
     let mut prev_tx: UtxoTx = try_tx_fus!(deserialize(maker_payment_tx).map_err(|e| ERRL!("{:?}", e)));
     prev_tx.tx_hash_algo = coin.as_ref().tx_hash_algo;
@@ -811,9 +928,22 @@ pub fn extract_secret(secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, St
             },
         };
 
-        let actual_secret_hash = &*dhash160(&secret);
-        if actual_secret_hash != secret_hash {
-            log!("Warning: invalid 'dhash160(secret)' "[actual_secret_hash]", expected "[secret_hash]);
+        // ch.51 R72A: `secret_hash` may be R71's 20-byte default or R72's
+        // 32-byte alternate; either way, the revealed value on-chain is
+        // always checked against `OP_HASH160(secret)`, so that's what this
+        // extraction must reproduce and compare against too -- see
+        // htlc_hash160_comparator's doc comment for why that isn't simply
+        // `dhash160(secret_hash)` in the 32-byte case.
+        let expected_secret_hash = match htlc_hash160_comparator(secret_hash) {
+            Ok(h) => h,
+            Err(e) => {
+                error!("extract_secret: {}", e);
+                continue;
+            },
+        };
+        let actual_secret_hash = dhash160(&secret);
+        if actual_secret_hash != expected_secret_hash {
+            log!("Warning: invalid 'dhash160(secret)' "[actual_secret_hash]", expected "[expected_secret_hash]);
             continue;
         }
         return Ok(secret);
@@ -932,9 +1062,24 @@ async fn search_for_swap_output_spend(
     let script = payment_script(time_lock, secret_hash, first_pub, second_pub);
     let expected_script_pubkey = Builder::build_p2sh(&dhash160(&script).into()).to_bytes();
     if tx.outputs[0].script_pubkey != expected_script_pubkey {
+        // Reached from `recover_funds`: the pubkeys/secret_hash/locktime this
+        // recovery attempt reconstructed from the swap's own saved record
+        // don't reproduce the HTLC script that's actually on chain in this
+        // payment, so it's not safe to search for or act on its spend --
+        // could mean the on-chain tx isn't really this swap's payment, or
+        // the saved record's negotiated data is itself inconsistent with it
+        // (seen in practice on swaps predating later fixes to how that data
+        // gets derived/persisted). Either way this is a hard stop, not
+        // something to retry -- report the two script hashes and this
+        // transaction's own hash rather than a full Debug-formatted dump of
+        // the deserialized transaction, which said nothing a caller could
+        // act on.
         return ERR!(
-            "Transaction {:?} output 0 script_pubkey doesn't match expected {:?}",
-            tx,
+            "Payment tx {:?} output 0 does not pay the HTLC script this swap negotiated \
+             (found script_pubkey {:?}, expected {:?} from the swap's saved pubkeys/secret_hash/locktime) \
+             -- this payment cannot be recovered automatically",
+            tx.hash(),
+            tx.outputs[0].script_pubkey,
             expected_script_pubkey
         );
     }
@@ -1038,7 +1183,55 @@ where
     Ok(result)
 }
 
+/// Derives the 20-byte value UTXO's `OP_HASH160`-based HTLC satisfaction
+/// opcode must be compared against, from the swap's single shared
+/// `secret_hash` (ch.51 R72A): UTXO's native hash-lock can only ever verify
+/// a fixed-width `RIPEMD160(SHA-256(secret))` digest -- that is what
+/// `OP_HASH160 <secret>` computes on-chain when the real secret is pushed,
+/// unconditionally, regardless of which algorithm ch.51 R71/R72 selected at
+/// the swap level.
+///
+/// - 20 bytes (R71's default): already that exact digest -- used unchanged.
+/// - 32 bytes (R72's alternate, forced whenever a native-32-byte-hash-lock
+///   coin -- Sia, Tendermint/IBC-HTLC, Lightning -- is on either side): this
+///   value *is* `SHA-256(secret)`, the inner half of the same
+///   `RIPEMD160(SHA-256(secret))` composite (R72A), so applying `RIPEMD160`
+///   alone -- the remaining, outer half -- reproduces exactly what
+///   `OP_HASH160(secret)` computes on-chain. Applying the *whole* `dhash160`
+///   composite here instead (i.e. re-hashing with SHA-256 first) would
+///   derive `RIPEMD160(SHA-256(SHA-256(secret)))`, which nothing on-chain
+///   ever produces -- a payment built or checked against a wrong-by-that-
+///   difference constant is unspendable by anyone, including the legitimate
+///   secret holder, invisible until an actual spend is attempted (this is
+///   the third gap ch.51 §51.9.1's Code-quality finding describes, and what
+///   a live testnet swap pairing SC against a UTXO coin was observed to
+///   fail on).
+///
+/// Errors on any other width: R65's wire contract admits only these two.
+fn htlc_hash160_comparator(secret_hash: &[u8]) -> Result<H160, String> {
+    match secret_hash.len() {
+        20 => Ok(H160::from(secret_hash)),
+        32 => Ok(ripemd160(secret_hash)),
+        other => ERR!("secret_hash must be 20 or 32 bytes (ch.51 R65/R71/R72), got {}", other),
+    }
+}
+
 pub fn payment_script(time_lock: u32, secret_hash: &[u8], pub_0: &Public, pub_1: &Public) -> Script {
+    // A malformed width here would otherwise silently build a script nobody
+    // can ever satisfy (see htlc_hash160_comparator's doc comment) -- fail
+    // loudly and immediately instead. Every caller already validates
+    // secret_hash's width against R65 before reaching this point in the
+    // ordinary case, so this is a last-resort guard, not the primary check.
+    let secret_hash_hash160 = match htlc_hash160_comparator(secret_hash) {
+        Ok(h) => h,
+        Err(e) => {
+            error!(
+                "payment_script: {} -- building an unsatisfiable placeholder script rather than panicking",
+                e
+            );
+            H160::default()
+        },
+    };
     let builder = Builder::default();
     builder
         .push_opcode(Opcode::OP_IF)
@@ -1052,7 +1245,7 @@ pub fn payment_script(time_lock: u32, secret_hash: &[u8], pub_0: &Public, pub_1:
         .push_bytes(&[32])
         .push_opcode(Opcode::OP_EQUALVERIFY)
         .push_opcode(Opcode::OP_HASH160)
-        .push_bytes(secret_hash)
+        .push_bytes(&*secret_hash_hash160)
         .push_opcode(Opcode::OP_EQUALVERIFY)
         .push_bytes(pub_1)
         .push_opcode(Opcode::OP_CHECKSIG)
@@ -1111,12 +1304,29 @@ where
     Ok(lock_time.max(htlc_locktime))
 }
 
+/// Returns `Some(keypair)` when this coin's negotiated V1 HTLC key must be
+/// something other than the node's persistent secp256k1 identity key, `None`
+/// when the persistent key is itself the address that will sign (ch.51 R63).
+///
+/// `PrivKeyPolicy::KeyPair` (Iguana/legacy single-address activation) derives
+/// its one and only address straight from the node's persistent key, so
+/// `None` (fall back to it) is correct. `PrivKeyPolicy::HDWallet` is not: its
+/// `activated_key` is a distinct, path-derived key that both the wallet's
+/// address display and its normal UTXO-selection/signing path already use
+/// for this coin -- returning `None` here used to negotiate the *node's* key
+/// while `send_taker_fee`/`send_maker_payment` went on signing with
+/// `activated_key`, so the counterparty's `check_all_inputs_signed_by_pub`
+/// validation (comparing against the negotiated key) failed every time an
+/// HD-activated coin was used, with "The dex fee was sent from wrong
+/// address" surfacing on the maker side. Mirrors `get_htlc_pubkey_v2` below,
+/// which already reads the enabled HD address for the V2 path.
 pub fn get_htlc_key_pair<T>(coin: &T) -> Option<KeyPair>
 where
     T: AsRef<UtxoCoinFields>,
 {
     match &coin.as_ref().priv_key_policy {
-        PrivKeyPolicy::KeyPair(_) | PrivKeyPolicy::HDWallet { .. } => None,
+        PrivKeyPolicy::KeyPair(_) => None,
+        PrivKeyPolicy::HDWallet { activated_key, .. } => Some(*activated_key),
         PrivKeyPolicy::Trezor => Some(KeyPair::random_compressed()),
     }
 }
@@ -1469,7 +1679,10 @@ where
         &htlc_pub,
         &maker_pub,
     );
-    let total = &args.trading_amount + &args.premium_amount + &args.dex_fee.fee_amount().to_decimal();
+    // CRD ch.15 R16: funding value is trading amount + premium + the dex-fee
+    // *total spend amount* (fee plus burn for `WithBurn`, zero for `NoFee`) --
+    // not `fee_amount()` alone, which would silently omit the burn leg.
+    let total = &args.trading_amount + &args.premium_amount + &args.dex_fee.total_spend_amount().to_decimal();
     let amount_sat = try_tx_s!(sat_from_big_decimal(&total, coin.as_ref().decimals));
     let htlc_out = TransactionOutput {
         value: amount_sat,
@@ -1505,7 +1718,8 @@ where
     );
     let expected_script_pubkey: Bytes = Builder::build_p2sh(&dhash160(&expected_redeem).into()).into();
 
-    let total = &args.trading_amount + &args.premium_amount + &args.dex_fee.fee_amount().to_decimal();
+    // CRD ch.15 R17: same total-spend-amount formula as the builder (R16).
+    let total = &args.trading_amount + &args.premium_amount + &args.dex_fee.total_spend_amount().to_decimal();
     let expected_amount_sat = sat_from_big_decimal(&total, coin.as_ref().decimals)
         .mm_err(|e| ValidateSwapV2TxError::InternalError(e.to_string()))?;
 
@@ -1822,8 +2036,9 @@ where
         args.taker_pub,
         args.maker_pub,
     );
-    let fee = coin
-        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+    // CRD ch.15 R21 / ch.16 R14A: the version-two funding-spend fee estimate
+    // (496 bytes, proportional, not rounded up to a whole kilobyte).
+    let fee = get_v2_swap_spend_fee(coin, V2_SWAP_SPEND_TX_SIZE)
         .await
         .mm_err(|e| TxGenError::Rpc(e.to_string()))?;
     let signer =
@@ -1851,8 +2066,10 @@ where
             "funding tx has no output 0".to_string(),
         ))
     })?;
-    let expected_fee = coin
-        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+    // CRD ch.15 R22 / ch.16 R14A: same 496-byte proportional fee estimate as
+    // the builder (R21); the ±10% tolerance below is chapter 15 R22's own
+    // and is unchanged by this batch (chapter 16 D5).
+    let expected_fee = get_v2_swap_spend_fee(coin, V2_SWAP_SPEND_TX_SIZE)
         .await
         .mm_err(|e| ValidateTakerFundingSpendPreimageError::InternalError(e.to_string()))?;
     let expected_value = funding_output.value.checked_sub(expected_fee).ok_or_else(|| {
@@ -2115,17 +2332,23 @@ pub(crate) fn sign_taker_payment_spend_input(
 /// OP_IF whose ELSE arm runs cooperative spending. Stack contributions
 /// (bottom→top): `maker_sig, taker_sig, maker_secret, OP_0 (selects ELSE)`.
 /// The script is not OP_CHECKMULTISIG so no leading OP_0 stuffer.
+/// CRD ch.16 R15/R18: each signature in the script-sig carries its own flag
+/// byte. The maker always signs `ALL`; the taker's byte is `SINGLE` for
+/// `Standard` and `ALL` for `WithBurn`/`NoFee` -- the two bytes differ for
+/// `Standard`, so they MUST be supplied separately (a single shared byte,
+/// the withdrawn pre-correction contract, cannot represent that case).
 pub(crate) fn build_taker_payment_spend_cooperative_script_sig(
     maker_sig_der: &[u8],
     taker_sig_der: &[u8],
     maker_secret: &[u8],
-    sighash_byte: u8,
+    maker_sighash_byte: u8,
+    taker_sighash_byte: u8,
     taker_payment_redeem: &Script,
 ) -> Bytes {
     let mut maker_sig = maker_sig_der.to_vec();
-    maker_sig.push(sighash_byte);
+    maker_sig.push(maker_sighash_byte);
     let mut taker_sig = taker_sig_der.to_vec();
-    taker_sig.push(sighash_byte);
+    taker_sig.push(taker_sighash_byte);
     Builder::default()
         .push_data(&maker_sig)
         .push_data(&taker_sig)
@@ -2136,10 +2359,19 @@ pub(crate) fn build_taker_payment_spend_cooperative_script_sig(
         .to_bytes()
 }
 
-/// Resolve the dex-fee P2PKH output for a given `DexFee::Standard` amount.
-fn dex_fee_standard_output<T: UtxoCommonOps>(coin: &T, fee_sat: u64) -> Result<TransactionOutput, TxGenError> {
+/// Resolve the dex-fee P2PKH output for a given `DexFee::Standard`/`WithBurn`
+/// fee-leg amount. CRD ch.16 R14 / chapter 08 R16 finding: the
+/// fee-collection address MUST be derived from the active network's
+/// `NetConfig::dex_fee_addr_raw_pubkey()`, passed in by the caller -- not
+/// from the deprecated, netid-8762-fixed `common::DEX_FEE_ADDR_RAW_PUBKEY`
+/// (chapter 29 §29.1.4's code-quality finding).
+fn dex_fee_standard_output<T: UtxoCommonOps>(
+    coin: &T,
+    fee_sat: u64,
+    dex_fee_addr_raw_pubkey: &[u8],
+) -> Result<TransactionOutput, TxGenError> {
     let fee_address = address_from_raw_pubkey(
-        &common::DEX_FEE_ADDR_RAW_PUBKEY,
+        dex_fee_addr_raw_pubkey,
         coin.as_ref().conf.pub_addr_prefix,
         coin.as_ref().conf.pub_t_addr_prefix,
         coin.as_ref().conf.checksum_type,
@@ -2153,9 +2385,10 @@ fn dex_fee_standard_output<T: UtxoCommonOps>(coin: &T, fee_sat: u64) -> Result<T
     })
 }
 
-/// §16.5.4 — Build the burn-leg output of a `DexFee::WithBurn`
-/// taker-payment-spend. `KmdOpReturn` encodes the burned amount as an
-/// 8-byte little-endian payload of an `OP_RETURN` (output value is zero).
+/// CRD ch.16 R20 — Build the burn-leg output of a `DexFee::WithBurn`
+/// taker-payment-spend. `KmdOpReturn` carries the burned value in the
+/// output's own value with a bare `OP_RETURN` script (no data push) -- the
+/// same form as the legacy taker-fee burn output of chapter 08 R15B/R20.
 /// `PreBurnAccount` produces a P2PKH paying the burn address.
 fn build_burn_output<T: UtxoCommonOps>(
     coin: &T,
@@ -2164,11 +2397,8 @@ fn build_burn_output<T: UtxoCommonOps>(
 ) -> Result<TransactionOutput, TxGenError> {
     match destination {
         DexFeeBurnDestination::KmdOpReturn => Ok(TransactionOutput {
-            value: 0,
-            script_pubkey: Builder::default()
-                .push_opcode(Opcode::OP_RETURN)
-                .push_bytes(&burn_amount_sat.to_le_bytes())
-                .into_bytes(),
+            value: burn_amount_sat,
+            script_pubkey: Builder::default().push_opcode(Opcode::OP_RETURN).into_bytes(),
         }),
         DexFeeBurnDestination::PreBurnAccount { burn_pubkey } => {
             let burn_address = address_from_raw_pubkey(
@@ -2188,9 +2418,70 @@ fn build_burn_output<T: UtxoCommonOps>(
     }
 }
 
-/// §15.5.11 — Taker builds the unsigned taker-payment-spend preimage and
-/// partial-signs it. `DexFee::Standard` uses SIGHASH_SINGLE so the maker can
-/// later append the dex-fee output; other variants are deferred to ch16.
+/// CRD ch.16 R14/R20 — the taker-payment-spend preimage's expected output
+/// list and signature-hash type (R15) for a given `DexFee` variant. Shared
+/// by the builder and the validator so the two sides can never independently
+/// drift: R17 requires the maker to "re-derive the expected preimage
+/// itself," which this makes literal.
+fn taker_payment_spend_outputs<T: UtxoCommonOps>(
+    coin: &T,
+    dex_fee: &DexFee,
+    taker_output_value: u64,
+    spend_fee: u64,
+    maker_script_pubkey: &Bytes,
+    dex_fee_addr_raw_pubkey: &[u8],
+) -> Result<(Vec<TransactionOutput>, u32), TxGenError> {
+    match dex_fee {
+        DexFee::Standard(amount) => {
+            let dex_fee_sat = sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| TxGenError::NumConversion(e.to_string()))?;
+            let fee_out = dex_fee_standard_output(coin, dex_fee_sat, dex_fee_addr_raw_pubkey)?;
+            Ok((vec![fee_out], SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id))
+        },
+        DexFee::WithBurn {
+            fee_amount,
+            burn_amount,
+            burn_destination,
+        } => {
+            let dex_fee_sat = sat_from_big_decimal(&fee_amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| TxGenError::NumConversion(e.to_string()))?;
+            let burn_sat = sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals)
+                .map_err(|e| TxGenError::NumConversion(e.to_string()))?;
+            let maker_value = taker_output_value
+                .checked_sub(dex_fee_sat)
+                .and_then(|v| v.checked_sub(burn_sat))
+                .and_then(|v| v.checked_sub(spend_fee))
+                .ok_or(TxGenError::PrevOutputTooLow)?;
+            let fee_out = dex_fee_standard_output(coin, dex_fee_sat, dex_fee_addr_raw_pubkey)?;
+            let burn_out = build_burn_output(coin, burn_sat, burn_destination)?;
+            let outs = vec![fee_out, burn_out, TransactionOutput {
+                value: maker_value,
+                script_pubkey: maker_script_pubkey.clone(),
+            }];
+            Ok((outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id))
+        },
+        DexFee::NoFee => {
+            let maker_value = taker_output_value
+                .checked_sub(spend_fee)
+                .ok_or(TxGenError::PrevOutputTooLow)?;
+            let outs = vec![TransactionOutput {
+                value: maker_value,
+                script_pubkey: maker_script_pubkey.clone(),
+            }];
+            Ok((outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id))
+        },
+    }
+}
+
+/// CRD ch.16 R14/R14A/R15/R20 — Taker builds the unsigned taker-payment-spend
+/// preimage and partial-signs it. Output layout (fee-first, per variant):
+///
+/// - `Standard`: one output, the fee-collection P2PKH (`fee_sat`). Signed
+///   `SINGLE` so the maker can append its own payout without invalidating
+///   the signature (R18).
+/// - `WithBurn`: three outputs, in order: fee-collection P2PKH, the R20 burn
+///   output, then the maker payout. Signed `ALL`.
+/// - `NoFee`: one output, the maker payout. Signed `ALL`.
 pub async fn gen_taker_payment_spend_preimage<T>(
     coin: &T,
     args: &GenTakerPaymentSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
@@ -2211,66 +2502,20 @@ where
             "taker-payment tx has no output 0".to_string(),
         ))
     })?;
-    let fee = coin
-        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+    let spend_fee = get_v2_swap_spend_fee(coin, V2_SWAP_SPEND_TX_SIZE)
         .await
         .mm_err(|e| TxGenError::Rpc(e.to_string()))?;
     let maker_script_pubkey = output_script(args.maker_address, ScriptType::P2PKH).to_bytes();
 
-    let (outputs, sighash_type) = match args.dex_fee {
-        DexFee::Standard(amount) => {
-            let dex_fee_sat = sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals)
-                .map_err(|e| MmError::new(TxGenError::NumConversion(e.to_string())))?;
-            let maker_value = taker_output
-                .value
-                .checked_sub(dex_fee_sat)
-                .and_then(|v| v.checked_sub(fee))
-                .ok_or_else(|| MmError::new(TxGenError::PrevOutputTooLow))?;
-            let outs = vec![TransactionOutput {
-                value: maker_value,
-                script_pubkey: maker_script_pubkey,
-            }];
-            (outs, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
-        },
-        DexFee::WithBurn {
-            fee_amount,
-            burn_amount,
-            burn_destination,
-        } => {
-            let dex_fee_sat = sat_from_big_decimal(&fee_amount.to_decimal(), coin.as_ref().decimals)
-                .map_err(|e| MmError::new(TxGenError::NumConversion(e.to_string())))?;
-            let burn_sat = sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals)
-                .map_err(|e| MmError::new(TxGenError::NumConversion(e.to_string())))?;
-            let maker_value = taker_output
-                .value
-                .checked_sub(dex_fee_sat)
-                .and_then(|v| v.checked_sub(burn_sat))
-                .and_then(|v| v.checked_sub(fee))
-                .ok_or_else(|| MmError::new(TxGenError::PrevOutputTooLow))?;
-            let fee_out = dex_fee_standard_output(coin, dex_fee_sat).map_to_mm(|e| e)?;
-            let burn_out = build_burn_output(coin, burn_sat, burn_destination).map_to_mm(|e| e)?;
-            let outs = vec![
-                TransactionOutput {
-                    value: maker_value,
-                    script_pubkey: maker_script_pubkey,
-                },
-                fee_out,
-                burn_out,
-            ];
-            (outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id)
-        },
-        DexFee::NoFee => {
-            let maker_value = taker_output
-                .value
-                .checked_sub(fee)
-                .ok_or_else(|| MmError::new(TxGenError::PrevOutputTooLow))?;
-            let outs = vec![TransactionOutput {
-                value: maker_value,
-                script_pubkey: maker_script_pubkey,
-            }];
-            (outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id)
-        },
-    };
+    let (outputs, sighash_type) = taker_payment_spend_outputs(
+        coin,
+        args.dex_fee,
+        taker_output.value,
+        spend_fee,
+        &maker_script_pubkey,
+        args.dex_fee_addr_raw_pubkey,
+    )
+    .map_to_mm(|e| e)?;
 
     let signer = build_taker_payment_spend_preimage_tx(coin.as_ref(), args.taker_tx, outputs).map_to_mm(|e| e)?;
     let sig = sign_taker_payment_spend_input(&signer, &taker_payment_redeem, &htlc_kp, coin.as_ref(), sighash_type)
@@ -2281,8 +2526,8 @@ where
     })
 }
 
-/// §15.5.12 — Maker validates the taker-payment-spend preimage's shape and
-/// the taker's partial signature.
+/// CRD ch.16 R17 — Maker validates the taker-payment-spend preimage's shape
+/// (rebuilt exactly, no value tolerance) and the taker's partial signature.
 pub async fn validate_taker_payment_spend_preimage<T>(
     coin: &T,
     gen_args: &GenTakerPaymentSpendArgs<'_, crate::utxo::utxo_standard::UtxoStandardCoin>,
@@ -2296,125 +2541,47 @@ where
             "taker-payment tx has no output 0".to_string(),
         ))
     })?;
-    let expected_fee = coin
-        .get_htlc_spend_fee(DEFAULT_SWAP_TX_SPEND_SIZE)
+    let spend_fee = get_v2_swap_spend_fee(coin, V2_SWAP_SPEND_TX_SIZE)
         .await
         .mm_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
     let maker_script_pubkey = output_script(gen_args.maker_address, ScriptType::P2PKH).to_bytes();
 
-    let (expected_outputs_len, expected_maker_value, sighash_type, with_burn_extras) = match gen_args.dex_fee {
-        DexFee::Standard(ref amount) => {
-            let dex_fee_sat = sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals)
-                .map_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
-            let expected = taker_output
-                .value
-                .checked_sub(dex_fee_sat)
-                .and_then(|v| v.checked_sub(expected_fee))
-                .ok_or_else(|| {
-                    MmError::new(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
-                        "taker-payment value below dex_fee + spend_fee".to_string(),
-                    ))
-                })?;
-            (1usize, expected, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id, None)
-        },
-        DexFee::WithBurn {
-            fee_amount,
-            burn_amount,
-            burn_destination,
-        } => {
-            let dex_fee_sat = sat_from_big_decimal(&fee_amount.to_decimal(), coin.as_ref().decimals)
-                .map_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
-            let burn_sat = sat_from_big_decimal(&burn_amount.to_decimal(), coin.as_ref().decimals)
-                .map_err(|e| ValidateTakerPaymentSpendPreimageError::InternalError(e.to_string()))?;
-            let expected = taker_output
-                .value
-                .checked_sub(dex_fee_sat)
-                .and_then(|v| v.checked_sub(burn_sat))
-                .and_then(|v| v.checked_sub(expected_fee))
-                .ok_or_else(|| {
-                    MmError::new(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
-                        "taker-payment value below fee + burn + spend_fee".to_string(),
-                    ))
-                })?;
-            (
-                3usize,
-                expected,
-                SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id,
-                Some((dex_fee_sat, burn_sat, burn_destination.clone())),
-            )
-        },
-        DexFee::NoFee => {
-            let expected = taker_output.value.checked_sub(expected_fee).ok_or_else(|| {
-                MmError::new(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
-                    "taker-payment value below spend_fee".to_string(),
-                ))
-            })?;
-            (1usize, expected, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id, None)
-        },
-    };
+    let (expected_outputs, sighash_type) = taker_payment_spend_outputs(
+        coin,
+        gen_args.dex_fee,
+        taker_output.value,
+        spend_fee,
+        &maker_script_pubkey,
+        gen_args.dex_fee_addr_raw_pubkey,
+    )
+    .map_to_mm(|e| ValidateTakerPaymentSpendPreimageError::InternalError(format!("{:?}", e)))?;
 
     let signer = &preimage.preimage.0;
+
     if signer.inputs.len() != 1
         || signer.inputs[0].previous_output.hash != gen_args.taker_tx.hash()
         || signer.inputs[0].previous_output.index != DEFAULT_SWAP_VOUT as u32
+        || signer.inputs[0].sequence != SEQUENCE_FINAL
     {
         return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
             "preimage input does not spend the taker-payment outpoint".to_string(),
         ));
     }
-    if signer.outputs.len() != expected_outputs_len {
-        return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
-            "expected {} output(s) in preimage, got {}",
-            expected_outputs_len,
-            signer.outputs.len()
-        )));
-    }
-    if signer.outputs[0].script_pubkey != maker_script_pubkey {
+    if signer.version != coin.as_ref().conf.tx_version
+        || signer.overwintered != coin.as_ref().conf.overwintered
+        || signer.lock_time != 0
+    {
         return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
-            "preimage output 0 script does not pay the maker address".to_string(),
+            "preimage version/overwintered/lock_time does not match the expected transaction shape".to_string(),
         ));
     }
-    let actual_value = signer.outputs[0].value;
-    let diff = actual_value.abs_diff(expected_maker_value);
-    let tolerance = expected_maker_value / 10;
-    if diff > tolerance {
+    // Exact equality on output count, order, every value and every script --
+    // no value tolerance (R17). `TransactionOutput` derives `PartialEq`.
+    if signer.outputs != expected_outputs {
         return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
-            "preimage maker output value {} differs from expected {} by more than 10% (fee tolerance)",
-            actual_value, expected_maker_value
+            "preimage outputs {:?} do not exactly match the expected {:?}",
+            signer.outputs, expected_outputs
         )));
-    }
-
-    if let Some((expected_dex_fee_sat, expected_burn_sat, burn_destination)) = with_burn_extras {
-        let expected_fee_out = dex_fee_standard_output(coin, expected_dex_fee_sat)
-            .map_to_mm(|e| ValidateTakerPaymentSpendPreimageError::InternalError(format!("{:?}", e)))?;
-        if signer.outputs[1].script_pubkey != expected_fee_out.script_pubkey {
-            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
-                "preimage output 1 script does not pay the dex-fee address".to_string(),
-            ));
-        }
-        let actual_fee = signer.outputs[1].value;
-        let fee_diff = actual_fee.abs_diff(expected_dex_fee_sat);
-        let fee_tol = (expected_dex_fee_sat / 10).max(1);
-        if fee_diff > fee_tol {
-            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
-                "preimage dex-fee output value {} differs from expected {} by more than 10%",
-                actual_fee, expected_dex_fee_sat
-            )));
-        }
-
-        let expected_burn_out = build_burn_output(coin, expected_burn_sat, &burn_destination)
-            .map_to_mm(|e| ValidateTakerPaymentSpendPreimageError::InternalError(format!("{:?}", e)))?;
-        if signer.outputs[2].script_pubkey != expected_burn_out.script_pubkey {
-            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(
-                "preimage burn output script does not match expected destination".to_string(),
-            ));
-        }
-        if signer.outputs[2].value != expected_burn_out.value {
-            return MmError::err(ValidateTakerPaymentSpendPreimageError::InvalidPreimage(format!(
-                "preimage burn output value {} does not match expected {}",
-                signer.outputs[2].value, expected_burn_out.value
-            )));
-        }
     }
 
     let taker_payment_redeem = taker_payment_script(
@@ -2442,7 +2609,11 @@ where
     Ok(())
 }
 
-/// §15.5.13 — Maker appends the dex-fee output (Standard only), signs with
+/// CRD ch.16 R18 — For `Standard`, the maker first requires
+/// `S + dust + fee_sat <= P`, then appends its own payout as output 1 (the
+/// preimage carries the fee output alone, at output 0). For `WithBurn` and
+/// `NoFee` the preimage already carries every output; the maker MUST NOT
+/// add, remove, or change any of them. In every case the maker signs with
 /// her HTLC key under the same sighash scheme the taker used, assembles the
 /// cooperative-branch script_sig (revealing the maker secret) and
 /// broadcasts.
@@ -2468,44 +2639,64 @@ where
         gen_args.maker_pub,
     );
 
-    let (mut outputs, sighash_type) = match gen_args.dex_fee {
+    // CRD ch.16 R15: the taker's flag is SINGLE for `Standard`, ALL for
+    // `WithBurn`/`NoFee`. R18: the maker's OWN signature is always ALL,
+    // regardless of the taker's flag -- the two bytes differ for `Standard`.
+    let (mut outputs, taker_sighash_type) = match gen_args.dex_fee {
         DexFee::Standard(ref amount) => {
+            let taker_output = match gen_args.taker_tx.outputs.get(DEFAULT_SWAP_VOUT) {
+                Some(o) => o,
+                None => return TX_PLAIN_ERR!("taker-payment tx has no output 0"),
+            };
             let dex_fee_sat = try_tx_s!(sat_from_big_decimal(&amount.to_decimal(), coin.as_ref().decimals));
-            let fee_out = try_tx_s!(dex_fee_standard_output(coin, dex_fee_sat));
+            let spend_fee = try_tx_s!(get_v2_swap_spend_fee(coin, V2_SWAP_SPEND_TX_SIZE).await);
+            let dust = coin.as_ref().dust_amount;
+            let min_required = spend_fee.checked_add(dust).and_then(|v| v.checked_add(dex_fee_sat));
+            let maker_value = match min_required {
+                Some(min_required) if taker_output.value >= min_required => {
+                    taker_output.value - spend_fee - dex_fee_sat
+                },
+                _ => return TX_PLAIN_ERR!("taker-payment value below spend fee + dust + dex fee"),
+            };
+            let maker_script_pubkey = output_script(gen_args.maker_address, ScriptType::P2PKH).to_bytes();
             let mut outs = preimage.preimage.0.outputs.clone();
-            outs.push(fee_out);
+            outs.push(TransactionOutput {
+                value: maker_value,
+                script_pubkey: maker_script_pubkey,
+            });
             (outs, SIGHASH_SINGLE_BASE | coin.as_ref().conf.fork_id)
         },
         DexFee::WithBurn { .. } | DexFee::NoFee => {
             // For WithBurn / NoFee the preimage already contains the final output set;
-            // the maker does not append anything, only (re-)signs under SIGHASH_ALL.
+            // the maker does not append anything.
             let outs = preimage.preimage.0.outputs.clone();
             (outs, SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id)
         },
     };
     // Re-attach outputs onto a fresh signer so the maker's signature commits
-    // to the final output set under SIGHASH_SINGLE (which only covers
-    // output[input_index] anyway, but keep the signer self-consistent so the
-    // serialised tx matches what is signed).
+    // to the final output set.
     let signer = TransactionInputSigner {
         outputs: std::mem::take(&mut outputs),
         ..preimage.preimage.0.clone()
     };
 
+    let maker_sighash_type = SIGHASH_ALL_BASE | coin.as_ref().conf.fork_id;
     let maker_sig = try_tx_s!(sign_taker_payment_spend_input(
         &signer,
         &taker_payment_redeem,
         &htlc_kp,
         coin.as_ref(),
-        sighash_type,
+        maker_sighash_type,
     ));
 
-    let sighash_byte = sighash_type as u8;
+    let maker_sighash_byte = maker_sighash_type as u8;
+    let taker_sighash_byte = taker_sighash_type as u8;
     let script_sig = build_taker_payment_spend_cooperative_script_sig(
         maker_sig.as_ref(),
         preimage.signature.as_ref(),
         secret,
-        sighash_byte,
+        maker_sighash_byte,
+        taker_sighash_byte,
         &taker_payment_redeem,
     );
 
@@ -2586,4 +2777,66 @@ fn test_pubkey_from_script_sig() {
 
     let script_sig_err = Script::from("493044022071edae37cf518e98db3f7637b9073a7a980b957b0c7b871415dbb4898ec3ebdc022031b402a6b98e64ffdf752266449ca979a9f70144dba77ed7a6a25bfab11648f6012103ad6f89abc2e5beaa8a3ac28e22170659b3209fe2ddf439681b4b8f31508c36fa");
     pubkey_from_script_sig(&script_sig_err).unwrap_err();
+}
+
+// ch.51 R72A: htlc_hash160_comparator's whole job is to reproduce, from the
+// swap's shared secret_hash alone, exactly what OP_HASH160(secret) computes
+// on-chain when the real secret is later pushed. The tests below aren't
+// exercisable through an integration test in this environment (every
+// existing send/spend/extract test needs a live electrum connection), so
+// they check the derivation directly -- most importantly, that it agrees
+// with dhash160(secret) for a real secret, which is the property the whole
+// fix depends on.
+#[test]
+fn test_htlc_hash160_comparator_20_byte_input_is_unchanged() {
+    // dhash160 of the real secret used by test_extract_secret_finds_the_secret_against_a_32_byte_secret_hash below.
+    let narrow = H160::from("2fb610d856c19fd57f2d0cffe8dff689074b3d8a");
+    assert_eq!(htlc_hash160_comparator(&*narrow).unwrap(), narrow);
+}
+
+#[test]
+fn test_htlc_hash160_comparator_32_byte_input_is_ripemd160_of_it() {
+    let wide = sha256(&[7u8; 32]);
+    let expected = ripemd160(wide.as_slice());
+    assert_eq!(htlc_hash160_comparator(wide.as_slice()).unwrap(), expected);
+}
+
+#[test]
+fn test_htlc_hash160_comparator_rejects_other_widths() {
+    assert!(htlc_hash160_comparator(&[0u8; 19]).is_err());
+    assert!(htlc_hash160_comparator(&[0u8; 21]).is_err());
+    assert!(htlc_hash160_comparator(&[0u8; 33]).is_err());
+    assert!(htlc_hash160_comparator(&[]).is_err());
+}
+
+/// The property the whole fix depends on: for a real secret, deriving the
+/// comparator from R72's 32-byte alternate (`SHA-256(secret)`) must equal
+/// `dhash160(secret)` -- exactly what `OP_HASH160(secret)` computes
+/// on-chain when the real secret is pushed at spend time, regardless of
+/// which algorithm ch.51 R71/R72 selected. If this property doesn't hold,
+/// nothing built or checked with the 32-byte alternate is spendable by
+/// anyone, which is the bug this fix closes.
+#[test]
+fn test_htlc_hash160_comparator_agrees_with_dhash160_of_the_real_secret() {
+    let secret = [7u8; 32];
+    let secret_hash_32 = sha256(&secret); // R72's alternate: SHA-256(secret)
+    let derived = htlc_hash160_comparator(secret_hash_32.as_slice()).unwrap();
+    assert_eq!(derived, dhash160(&secret));
+}
+
+#[test]
+fn test_extract_secret_finds_the_secret_against_a_32_byte_secret_hash() {
+    // Same real spend tx and secret as utxo_tests::test_extract_secret,
+    // which confirms this raw tx's script_sig pushes this exact secret at
+    // instruction index 1 and that dhash160(secret) is the 20-byte hash
+    // embedded at that spend's origin (R71's default). This test checks the
+    // other half of the same property (R72's 32-byte alternate): the same
+    // observed spend must also extract successfully when the swap had
+    // instead negotiated secret_hash = SHA-256(secret).
+    let tx_hex = hex::decode("0100000001de7aa8d29524906b2b54ee2e0281f3607f75662cbc9080df81d1047b78e21dbc00000000d7473044022079b6c50820040b1fbbe9251ced32ab334d33830f6f8d0bf0a40c7f1336b67d5b0220142ccf723ddabb34e542ed65c395abc1fbf5b6c3e730396f15d25c49b668a1a401209da937e5609680cb30bff4a7661364ca1d1851c2506fa80c443f00a3d3bf7365004c6b6304f62b0e5cb175210270e75970bb20029b3879ec76c4acd320a8d0589e003636264d01a7d566504bfbac6782012088a9142fb610d856c19fd57f2d0cffe8dff689074b3d8a882103f368228456c940ac113e53dad5c104cf209f2f102a409207269383b6ab9b03deac68ffffffff01d0dc9800000000001976a9146d9d2b554d768232320587df75c4338ecc8bf37d88ac40280e5c").unwrap();
+    let expected_secret = hex::decode("9da937e5609680cb30bff4a7661364ca1d1851c2506fa80c443f00a3d3bf7365").unwrap();
+    let secret_hash_32 = sha256(&expected_secret);
+
+    let extracted = extract_secret(secret_hash_32.as_slice(), &tx_hex).unwrap();
+    assert_eq!(extracted, expected_secret);
 }

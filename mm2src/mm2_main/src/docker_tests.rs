@@ -1,7 +1,25 @@
 #![feature(custom_test_frameworks)]
-#![feature(test)]
+#![cfg_attr(test, feature(test))]
 #![test_runner(docker_tests_runner)]
 #![recursion_limit = "512"]
+// This is a separate crate root from `mm2_lib.rs`/`mm2_bin.rs` (its own [[bin]]
+// target), so it does not inherit their crate-level lint policy even though it
+// pulls in the same first-party modules. Mirroring their allows here (KDF-009)
+// keeps that policy consistent instead of letting already-accepted lints
+// resurface just because this crate root happened to omit the same headers.
+#![allow(uncommon_codepoints)]
+#![allow(dead_code)]
+#![allow(mismatched_lifetime_syntaxes)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::diverging_sub_expression)]
+#![allow(clippy::explicit_auto_deref)]
+// Test builds expand `#[mockable]` (mocktopus) on the mocked items; the
+// generated injection code trips these lints, which cannot be fixed at the
+// source, so they are allowed for test builds only.
+#![cfg_attr(
+    test,
+    allow(clippy::swap_ptr_to_ref, clippy::forget_non_drop, clippy::let_unit_value)
+)]
 
 #[cfg(test)] use docker_tests::docker_tests_runner;
 
@@ -78,7 +96,7 @@ mod docker_tests {
             })
             .collect();
         let args: Vec<String> = std::env::args().collect();
-        let _exit_code = test_main(&args, owned_tests, None);
+        test_main(&args, owned_tests, None);
     }
 }
 
@@ -192,7 +210,7 @@ mod docker_tests {
             })
             .collect();
         let args: Vec<String> = std::env::args().collect();
-        let _exit_code = test_main(&args, owned_tests, None);
+        test_main(&args, owned_tests, None);
     }
 
     fn pull_docker_image(name: &str) {
@@ -330,7 +348,7 @@ mod docker_tests {
             let mut slp_outputs = vec![];
 
             for _ in 0..18 {
-                let priv_key = SecretKey::new(&mut rand6::thread_rng());
+                let priv_key = SecretKey::new(&mut rand::thread_rng());
                 let key_pair = key_pair_from_secret(priv_key.as_ref()).unwrap();
                 let address_hash = key_pair.public().address_hash();
                 let address = Address {
@@ -396,7 +414,7 @@ mod docker_tests {
         ticker: &str,
         balance: BigDecimal,
     ) -> (MmArc, UtxoStandardCoin, [u8; 32]) {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
         let (ctx, coin) = utxo_coin_from_privkey(ticker, priv_key.as_ref());
         let timeout = 30; // timeout if test takes more than 30 seconds to run
         let my_address = coin.my_address().expect("!my_address");
@@ -431,7 +449,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &[0; 20],
             &tx.tx_hex(),
             0,
@@ -469,7 +487,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &[0; 20],
             &tx.tx_hex(),
             0,
@@ -508,7 +526,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &*dhash160(&secret),
             &tx.tx_hex(),
             0,
@@ -547,7 +565,7 @@ mod docker_tests {
 
         let found = block_on(coin.search_for_swap_tx_spend_my(
             time_lock,
-            &*coin.my_public_key().unwrap(),
+            coin.my_public_key().unwrap(),
             &*dhash160(&secret),
             &tx.tx_hex(),
             0,
@@ -1611,7 +1629,7 @@ mod docker_tests {
 
     #[test]
     fn test_maker_trade_preimage() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
 
         let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", &priv_key[..]);
         let my_address = mycoin.my_address().expect("!my_address");
@@ -1751,7 +1769,7 @@ mod docker_tests {
 
     #[test]
     fn test_taker_trade_preimage() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
 
         let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", priv_key.as_ref());
         let my_address = mycoin.my_address().expect("!my_address");
@@ -1898,7 +1916,7 @@ mod docker_tests {
             assert_eq!(actual.error_data, Some(expected));
         }
 
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
         let fill_balance_functor = |amount: BigDecimal| {
             let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", priv_key.as_ref());
             let my_address = mycoin.my_address().expect("!my_address");
@@ -2016,7 +2034,7 @@ mod docker_tests {
     /// https://github.com/KomodoPlatform/atomicDEX-API/issues/902
     #[test]
     fn test_trade_preimage_additional_validation() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
 
         let (_ctx, mycoin1) = utxo_coin_from_privkey("MYCOIN1", priv_key.as_ref());
         let my_address = mycoin1.my_address().expect("!my_address");
@@ -2161,7 +2179,7 @@ mod docker_tests {
 
     #[test]
     fn test_trade_preimage_legacy() {
-        let priv_key = SecretKey::new(&mut rand6::thread_rng());
+        let priv_key = SecretKey::new(&mut rand::thread_rng());
         let (_ctx, mycoin) = utxo_coin_from_privkey("MYCOIN", priv_key.as_ref());
         let my_address = mycoin.my_address().expect("!my_address");
         fill_address(&mycoin, &my_address, 10.into(), 30);
@@ -2669,7 +2687,7 @@ mod docker_tests {
 
         thread::sleep(Duration::from_secs(2));
 
-        log!("Get RICK/MORTY orderbook on Bob side");
+        log!("Get DOC/MARTY orderbook on Bob side");
         let rc = block_on(mm_bob_dup.rpc(&json! ({
             "userpass": mm_bob_dup.userpass,
             "method": "orderbook",
@@ -2743,7 +2761,7 @@ mod docker_tests {
 
         thread::sleep(Duration::from_secs(2));
 
-        log!("Get RICK/MORTY orderbook on Bob side");
+        log!("Get DOC/MARTY orderbook on Bob side");
         let rc = block_on(mm_bob_dup.rpc(&json! ({
             "userpass": mm_bob_dup.userpass,
             "method": "orderbook",
@@ -3232,7 +3250,7 @@ mod docker_tests {
 
         thread::sleep(Duration::from_secs(2));
         let (unspents, _) =
-            block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
+            block_on(coin.get_unspent_ordered_list(coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
         assert_eq!(unspents.len(), 1);
     }
 
@@ -3290,14 +3308,14 @@ mod docker_tests {
 
         thread::sleep(Duration::from_secs(2));
         let (unspents, _) =
-            block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
+            block_on(coin.get_unspent_ordered_list(coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
         // 4 utxos are merged of 5 so the resulting unspents len must be 2
         assert_eq!(unspents.len(), 2);
     }
 
     #[test]
     fn test_withdraw_not_sufficient_balance() {
-        let privkey = SecretKey::new(&mut rand6::thread_rng());
+        let privkey = SecretKey::new(&mut rand::thread_rng());
         let coins = json! ([
             {"coin":"MYCOIN","asset":"MYCOIN","txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
             {"coin":"MYCOIN1","asset":"MYCOIN1","txversion":4,"overwintered":1,"txfee":1000,"protocol":{"type":"UTXO"}},
@@ -3334,7 +3352,7 @@ mod docker_tests {
         })))
         .unwrap();
 
-        assert!(withdraw.0.is_client_error(), "RICK withdraw: {}", withdraw.1);
+        assert!(withdraw.0.is_client_error(), "DOC withdraw: {}", withdraw.1);
         log!("error: "[withdraw.1]);
         let error: RpcErrorResponse<withdraw_error::NotSufficientBalance> =
             json::from_str(&withdraw.1).expect("Expected 'RpcErrorResponse<NotSufficientBalance>'");
@@ -3367,7 +3385,7 @@ mod docker_tests {
         })))
         .unwrap();
 
-        assert!(withdraw.0.is_client_error(), "RICK withdraw: {}", withdraw.1);
+        assert!(withdraw.0.is_client_error(), "DOC withdraw: {}", withdraw.1);
         log!("error: "[withdraw.1]);
         let error: RpcErrorResponse<withdraw_error::NotSufficientBalance> =
             json::from_str(&withdraw.1).expect("Expected 'RpcErrorResponse<NotSufficientBalance>'");
@@ -4072,7 +4090,7 @@ mod docker_tests {
         }
 
         let (unspents, _) =
-            block_on(coin.get_unspent_ordered_list(&coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
+            block_on(coin.get_unspent_ordered_list(coin.as_ref().derivation_method.unwrap_iguana())).unwrap();
         assert_eq!(unspents.len(), 5, "Expected 5 unspent outputs, got: {}", unspents.len());
 
         // Verify total value: 100 + 4*10 = 140

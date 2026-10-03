@@ -33,7 +33,7 @@ use kdf_walletconnect::{Topic, WalletConnectCtx};
 use primitives::hash::H256;
 use rpc::v1::types::H256 as H256Json;
 use serde_json::{json, Map, Value};
-use serialization::deserialize;
+use serialization::CoinVariant;
 
 /// The CAIP-2 `bip122` reference is the leading 16 bytes (32 hex characters) of
 /// the genesis block hash in conventional big-endian display order; the
@@ -275,7 +275,7 @@ impl UtxoStandardCoin {
                     .compat()
                     .await
                     .map_err(|e| WalletConnectError::Relay(format!("genesis header query failed: {e:?}")))?;
-                let header: BlockHeader = deserialize(header_bytes.0.as_slice())
+                let header = BlockHeader::from_served_bytes(&header_bytes.0, CoinVariant::Standard)
                     .map_err(|e| WalletConnectError::InvalidResponse(format!("genesis header decode failed: {e:?}")))?;
                 // `hash()` is internal order; reverse it for conventional display.
                 Ok(header.hash().reversed())
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn sign_message_result_parse() {
-        let signature_b64 = base64::encode([0xab, 0xcd, 0xef].as_ref());
+        let signature_b64 = base64::encode(&[0xab_u8, 0xcd, 0xef]);
         let result = json!({ "signature": signature_b64, "address": "bc1qexampleaddr" });
         let parsed = parse_sign_message_result(&result).expect("valid result");
         assert_eq!(parsed.signature, vec![0xab, 0xcd, 0xef]);

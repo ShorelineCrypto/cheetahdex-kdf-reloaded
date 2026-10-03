@@ -255,6 +255,8 @@ impl<'a, T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps> UtxoTxBuilder<'a, T> {
         let mut received_by_me = 0;
         for output in self.tx.outputs.iter() {
             let script: Script = output.script_pubkey.clone().into();
+            // CRD ch.08 R15A: the only per-output dust exemption is a script
+            // beginning with OP_RETURN; there is no per-descriptor exemption.
             if script.opcodes().next() != Some(Ok(Opcode::OP_RETURN)) {
                 true_or!(output.value >= dust, GenerateTxError::OutputValueLessThanDust {
                     value: output.value,
@@ -1294,6 +1296,7 @@ async fn sign_raw_utxo_tx<T: AsRef<UtxoCoinFields> + UtxoTxGenerationOps>(
 
     let tx_signed_bytes = serialize_with_flags(&tx_signed, SERIALIZE_TRANSACTION_WITNESS);
     Ok(RawTransactionRes {
+        tx_json: None,
         tx_hex: tx_signed_bytes.into(),
     })
 }

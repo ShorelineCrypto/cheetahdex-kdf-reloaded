@@ -378,13 +378,36 @@ argument list.
 The V2 EVM contracts accept a flat `dexFee` `uint256` argument on
 the `*TakerPayment` entry points and forward the entire amount to
 the network's fee-collection address on `spendTakerPayment`. The
-EVM path delivers only the `Standard` dex-fee shape;
-[Chapter 16](16-swap-v2-pre-burn-output.md) fixes that the
-factory used to construct the dex-fee value returns `Standard`
-for an EVM taker coin, so the `WithBurn` variant never reaches an
-EVM contract argument. Extending pre-burn to the EVM contracts
+EVM path delivers only the `Standard` dex-fee shape, or a `dexFee`
+of zero when the descriptor is `NoFee`.
+[Chapter 16](16-swap-v2-pre-burn-output.md) fixes that the factory
+returns `Standard` for an EVM taker coin, or `NoFee` under the waiver
+of chapter 16 R7 or the netid-8762 version-two KMD-pair exemption of
+chapter 16 R12B. The `WithBurn` variant therefore never reaches an EVM
+contract argument, and the `dexFee` argument is the descriptor's fee
+amount. Extending pre-burn to the EVM contracts
 requires the ABI to grow `burnAmount` and `burnAddress`
 parameters; that change is out of scope here.
+
+> **Fee-collection-address resolution contrasts with the UTXO V2
+> path (informative).** On this path the fee-collection address is
+> a constructor argument of the deployed taker-payment contract —
+> fixed once, on chain, at contract-deployment time. The project's
+> Rust coin implementation never resolves or passes a
+> fee-collection address for a V2 EVM call; only the `dexFee`
+> amount travels in the calldata, and the deployed contract routes
+> it to its own baked-in address. There is therefore no per-swap,
+> per-network address-resolution step on this path for a
+> network-identifier mismatch to corrupt. This is a structural
+> contrast, not a parity gap, with the version-two
+> unspent-transaction-output path, where the fee-collection address
+> *is* resolved per swap by Rust code building an explicit output —
+> and where [Chapter 29 §29.1.4](29-license-conditions-e-f.md#2914-the-fee-routing-logic-is-independently-re-expressed)
+> records a code-quality finding that one such builder resolves the
+> address from a deprecated global fixed to network identifier
+> `8762` instead of through the active network's `NetConfig`. That
+> finding is scoped to the unspent-transaction-output builder; it
+> does not apply to this chapter's contracts.
 
 ---
 
@@ -716,7 +739,7 @@ with parallel error/abort branches.
 
 Both state machines dispatch through the V2 maker- and taker-side
 coin traits — the same dispatch surface used by the UTXO V2 path
-([Chapter 15 §15.5](15-swap-v2-utxo-path.md#155-protocol-surface)).
+([Chapter 15 §15.3](15-swap-v2-utxo-path.md#153-bound-coin-trait-implementation-surface)).
 A single state-machine driver therefore supports UTXO×UTXO,
 EVM×EVM, and cross-asset combinations (UTXO×EVM, EVM×Tendermint,
 and so on). When the maker asset is an EVM NFT, the production
@@ -808,7 +831,13 @@ The chapter relies on one baseline-state claim:
   EIP-1155; the Solidity Contract ABI Specification; the
   Ethereum JSON-RPC method definitions for `eth_call`,
   `eth_sendRawTransaction`, `eth_getLogs`, `eth_estimateGas`,
-  `eth_blockNumber`; keccak-256.
+  `eth_blockNumber`; keccak-256; the on-disk taker- and
+  maker-contract ABI JSON files under `mm2src/coins/eth/`
+  (constructor argument shape, §17.7); [Chapter 15](15-swap-v2-utxo-path.md)
+  (the coin-trait dispatch surface shared with the UTXO V2 path,
+  §17.10); [Chapter 29](29-license-conditions-e-f.md) (the
+  UTXO-side dex-fee-address resolution finding contrasted in
+  §17.7).
 - *Forbidden corpus:* consulted by the KDF Spec Reader for
   upstream-compatible behaviour; no private implementation
   expression is normative in this chapter.

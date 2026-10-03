@@ -275,6 +275,20 @@ pub trait Qrc20ElectrumOps {
         topic: &str,
     ) -> RpcRes<Vec<TxHistoryItem>>;
 
+    /// Ask the server to notify us when a matching contract event is logged.
+    /// Takes the same parameters as `blockchain.contract.event.get_history`.
+    ///
+    /// A QRC20 balance lives in contract storage, not in the address's UTXO
+    /// set, so a token transfer need not disturb the QTUM address's script hash
+    /// and cannot be observed through a script-hash subscription.
+    /// https://github.com/qtumproject/qtum-electrumx-server/blob/master/docs/qrc20-integration.md
+    fn blockchain_contract_event_subscribe(
+        &self,
+        address: &H160Json,
+        contract_addr: &H160Json,
+        topic: &str,
+    ) -> RpcRes<Json>;
+
     /// This can be used to get eventlogs in the transaction, the returned data is the same as Qtum Core RPC gettransactionreceipt.
     /// from the eventlogs, we can get QRC20 Token transafer informations(from, to, amount).
     /// https://github.com/qtumproject/qtum-electrumx-server/blob/master/docs/qrc20-integration.md#blochchaintransactionget_receipttxid
@@ -354,6 +368,21 @@ impl Qrc20ElectrumOps for ElectrumClient {
         rpc_func!(
             self,
             "blockchain.contract.event.get_history",
+            address,
+            contract_addr,
+            topic
+        )
+    }
+
+    fn blockchain_contract_event_subscribe(
+        &self,
+        address: &H160Json,
+        contract_addr: &H160Json,
+        topic: &str,
+    ) -> RpcRes<Json> {
+        rpc_func!(
+            self,
+            "blockchain.contract.event.subscribe",
             address,
             contract_addr,
             topic

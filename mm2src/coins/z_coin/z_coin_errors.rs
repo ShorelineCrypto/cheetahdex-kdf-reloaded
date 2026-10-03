@@ -8,15 +8,13 @@ use db_common::sqlite::rusqlite::Error as SqliteError;
 use derive_more::Display;
 use rpc::v1::types::Bytes as BytesJson;
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_primitives::transaction::builder::Error as ZTxBuilderError;
+type ZTxBuilderError = zcash_primitives::transaction::builder::Error<std::convert::Infallible>;
 
 #[derive(Debug, Display)]
 pub enum GenTxError {
     DecryptedOutputNotFound,
     GetWitnessErr(GetUnspentWitnessErr),
     FailedToGetMerklePath,
-    #[display(fmt = "ZCoin light-mode transaction generation supports shielded outputs only")]
-    UnsupportedLightWalletOutput,
     #[display(fmt = "ZCoin shielded wallet DB error: {}", _0)]
     ShieldedWalletDb(String),
     #[display(
@@ -39,6 +37,19 @@ pub enum GenTxError {
     TxReadError {
         hex: BytesJson,
         err: std::io::Error,
+    },
+    /// The coin's Ironwood network upgrade has activated and this build cannot
+    /// construct the transaction format the network now requires.
+    #[display(
+        fmt = "{} network upgrade (Ironwood) activated at {}; this build cannot create {} transactions -- \
+               please upgrade",
+        coin,
+        activation_time,
+        coin
+    )]
+    IronwoodUpgradeUnsupported {
+        coin: String,
+        activation_time: u32,
     },
 }
 
@@ -77,9 +88,11 @@ impl From<GenTxError> for WithdrawError {
             | GenTxError::PrevTxNotConfirmed
             | GenTxError::GetWitnessErr(_)
             | GenTxError::NumConversion(_)
-            | GenTxError::UnsupportedLightWalletOutput
             | GenTxError::ShieldedWalletDb(_)
             | GenTxError::TxReadError { .. } => WithdrawError::InternalError(gen_tx.to_string()),
+            // Actionable by the user (upgrade), so it keeps its own message rather
+            // than being flattened into an internal error.
+            GenTxError::IronwoodUpgradeUnsupported { .. } => WithdrawError::InternalError(gen_tx.to_string()),
             #[cfg(not(target_arch = "wasm32"))]
             GenTxError::TxBuilderError(_) => WithdrawError::InternalError(gen_tx.to_string()),
         }
@@ -94,6 +107,26 @@ pub enum SendOutputsErr {
     Rpc(UtxoRpcError),
     TxNotMined(String),
     PrivKeyNotAllowed(PrivKeyNotAllowed),
+    #[display(
+        fmt = "Timed out after {}s waiting for an in-flight shielded spend to be scanned",
+        _0
+    )]
+    InFlightSpendWaitTimeout(u64),
+}
+
+/// Failure to record a broadcast shielded transaction in the wallet database
+/// (CRD ch.39 R39.8.0ap/as). Never fails the send: the transaction is already on
+/// the network by the time recording runs.
+#[derive(Debug, Display)]
+pub enum RecordSentTxErr {
+    #[display(fmt = "Shielded wallet DB is unavailable: {}", _0)]
+    ShieldedWalletDb(String),
+    #[display(fmt = "Shielded wallet DB has no account")]
+    NoAccount,
+    #[display(fmt = "Shielded wallet DB has not been scanned")]
+    ScanRequired,
+    #[display(fmt = "Invalid fee amount {}", _0)]
+    InvalidFeeAmount(u64),
 }
 
 impl From<PrivKeyNotAllowed> for SendOutputsErr {
@@ -134,6 +167,11 @@ pub enum ZCoinBuildError {
     Rpc(UtxoRpcError),
     #[display(fmt = "Sapling cache storage error: {}", _0)]
     SaplingCacheError(String),
+    #[display(fmt = "Shielded database schema error at {}: {}", path, reason)]
+    ShieldedDbSchema {
+        path: String,
+        reason: String,
+    },
     #[display(fmt = "Sapling cache DB does not exist at {}. Please download it.", path)]
     SaplingCacheDbDoesNotExist {
         path: String,
@@ -163,6 +201,8 @@ pub enum ZCoinBuildError {
         path: String,
     },
     ZCashParamsNotFound,
+    #[display(fmt = "HD shielded key derivation failed: {}", _0)]
+    HdDerivationError(String),
 }
 
 #[cfg(not(target_arch = "wasm32"))]

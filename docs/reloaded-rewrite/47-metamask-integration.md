@@ -772,3 +772,26 @@ wallet-bridged message-signing flow for MetaMask / external-wallet EVM coins?
 This section records **no** such surface and rejects `sign_message` under those
 policies (R47.11.8, R47.11.10). If the docs define one, they govern and §47.11.C
 must be revisited.
+
+## 47.12 Provenance Footer
+
+- *Inputs:* the published Komodo DeFi Framework API documentation (the
+  `task::connect_metamask` method family and the EVM activation sections,
+  the source of truth this chapter distills per its own "Source of truth"
+  note); the EIP-1193 provider contract, EIP-712 typed-data signing,
+  EIP-155 chain identification, and secp256k1 public-key recovery (public
+  Ethereum-ecosystem specifications, cited throughout §47.1-§47.11);
+  reloaded's existing EIP-1193 transport, MetaMask session abstraction, and
+  crypto-context login handshake (§47.8, already present in the workspace);
+  [Chapter 35](35-evm-v2-activation-rpcs.md) (the EVM V2 platform activation
+  RPC, its request/response shapes, and its aggregated activation error
+  contract that §47.5 and §47.11.D bind against throughout).
+- *Permitted-input classes used:* external public specification (the
+  published KDF API documentation; the EIP-1193/EIP-712/EIP-155/secp256k1
+  public-key-recovery specifications); baseline source (the existing
+  EIP-1193 transport and MetaMask session/login handshake); cross-chapter
+  contracts (Chapter 35); Interop / wire-and-API-bound reuse (R29/R31) for
+  the dictated method strings, JSON field names, and error discriminants
+  this chapter distills.
+- *Sibling-allowlist consultations:* [Chapter 35](35-evm-v2-activation-rpcs.md).
+- *Forbidden corpus:* not consulted.

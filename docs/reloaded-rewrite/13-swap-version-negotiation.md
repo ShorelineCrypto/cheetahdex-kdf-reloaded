@@ -277,7 +277,11 @@ R14. **Non-fungible-token outcome enum.** Where the
      "version mismatch (advertise maker+taker values)",
      and "no NFT contract configured", so callers can
      distinguish a downgrade decision from a
-     mis-configuration.
+     mis-configuration. [Chapter 17 §17.9](17-swap-v2-evm-path.md#179-nft-variant)
+     binds the concrete dispatch-decision interface, production
+     call-site contract, and per-outcome behaviour for the EVM
+     coin family — the only family the non-fungible-token-extended
+     value currently applies to.
 
 ## 13.7A Non-Method `cancel_swap` Behaviour
 

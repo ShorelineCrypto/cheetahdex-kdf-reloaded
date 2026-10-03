@@ -134,12 +134,18 @@ impl FetchRequest {
         let window = web_sys::window().expect("!window");
         let uri = request.uri;
 
-        let mut req_init = RequestInit::new();
-        req_init.method(request.method.as_str());
-        req_init.body(request.body.map(RequestBody::into_js_value).as_ref());
+        let req_init = RequestInit::new();
+        req_init.set_method(request.method.as_str());
+        req_init.set_body(
+            request
+                .body
+                .map(RequestBody::into_js_value)
+                .as_ref()
+                .unwrap_or(&JsValue::NULL),
+        );
 
         if let Some(mode) = request.mode {
-            req_init.mode(mode);
+            req_init.set_mode(mode);
         }
 
         let js_request = Request::new_with_str_and_init(&uri, &req_init)

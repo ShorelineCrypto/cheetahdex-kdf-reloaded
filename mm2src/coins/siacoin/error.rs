@@ -95,6 +95,23 @@ pub enum SiaCheckIfMyPaymentSentArgsError {
     InvalidOtherPublicKeyLength(Vec<u8>),
     #[error("[chk-payment-args] other_pub parse failed: {0}")]
     ParseOtherPublicKey(#[from] PublicKeyError),
+    // Checked explicitly ahead of `Hash256::try_from` (see try_from_positional)
+    // rather than left to fall through to `ParseSecretHash` below, because the
+    // 20-byte case isn't malformed input -- it's the legacy RIPEMD160(SHA256(_))
+    // secret hash width every non-Sia-paired swap still negotiates
+    // (select_secret_hash_algo, ch.51 R71/R72). A swap negotiated before that
+    // 32-byte requirement existed for a Sia-paired swap carries a 20-byte hash
+    // that can never satisfy it; that's a structural fact about the swap, not
+    // a bug to retry past, so it gets a message that says so instead of
+    // `Hash256Error`'s generic "invalid slice length" (observed verbatim in a
+    // real recover_funds_of_swap failure with no indication of why 20 bytes
+    // showed up at all).
+    #[error(
+        "[chk-payment-args] secret_hash is {actual} bytes, Siacoin HTLCs require exactly 32 -- \
+         this swap most likely negotiated the legacy 20-byte secret hash used for non-Sia pairs, \
+         so its Sia-side payment cannot be checked or recovered automatically"
+    )]
+    WrongSecretHashLength { actual: usize },
     #[error("[chk-payment-args] secret_hash parse failed: {0}")]
     ParseSecretHash(#[from] Hash256Error),
     #[error("[chk-payment-args] amount conversion failed: {0}")]
@@ -119,6 +136,15 @@ pub enum SiaValidatePaymentInputError {
     InvalidOtherPublicKeyLength(Vec<u8>),
     #[error("[validate-payment-in] other_pub parse failed: {0}")]
     ParseOtherPublicKey(#[from] PublicKeyError),
+    // See SiaCheckIfMyPaymentSentArgsError::WrongSecretHashLength -- same
+    // reasoning, same fix, for the live validate_maker_payment/
+    // validate_taker_payment path rather than recover_funds's.
+    #[error(
+        "[validate-payment-in] secret_hash is {actual} bytes, Siacoin HTLCs require exactly 32 -- \
+         this swap most likely negotiated the legacy 20-byte secret hash used for non-Sia pairs, \
+         so its Sia-side payment cannot be validated"
+    )]
+    WrongSecretHashLength { actual: usize },
     #[error("[validate-payment-in] secret_hash parse failed: {0}")]
     ParseSecretHash(#[from] Hash256Error),
     #[error("[validate-payment-in] amount conversion failed: {0}")]
@@ -351,6 +377,24 @@ pub enum SiaCheckIfMyPaymentSentError {
     EventVariant(EventDataWrapper),
 }
 
+/// Errors raised while searching for the spend of an HTLC payment (CRD
+/// ch.20 §20.10 D3).
+#[derive(Debug, Error)]
+pub enum SiaCoinSearchSwapTxSpendError {
+    #[error("[search-swap-spend] keypair fetch failed: {0}")]
+    MyKeypair(#[from] SiaCoinMyKeypairError),
+    #[error("[search-swap-spend] other_pub wrong length, expected 33 bytes, got: {0:?}")]
+    InvalidOtherPublicKeyLength(Vec<u8>),
+    #[error("[search-swap-spend] other_pub parse failed: {0}")]
+    ParseOtherPublicKey(#[from] PublicKeyError),
+    #[error("[search-swap-spend] payment tx parse failed: {0}")]
+    ParseTx(#[from] SiaTransactionError),
+    #[error("[search-swap-spend] secret_hash parse failed: {0}")]
+    ParseSecretHash(#[from] Hash256Error),
+    #[error("[search-swap-spend] walletd event fetch failed: {0}")]
+    FetchEvents(#[from] SiaHistoryFetchError),
+}
+
 /// Errors raised while extracting the HTLC preimage from a spend tx.
 #[derive(Debug, Error)]
 #[allow(clippy::large_enum_variant)]
@@ -411,6 +455,8 @@ pub enum SiaCoinNewError {
     Builder(#[from] SiaCoinBuilderError),
     #[error("[new] address derivation from master xkey failed: {0}")]
     DeriveExtendedKey(#[from] PrivKeyError),
+    #[error("[new] HD wallet root derivation failed: {0}")]
+    HDWalletCreation(#[from] SiaHDWalletCreationError),
 }
 
 /// Errors raised by the `my_keypair` accessor when the wallet is not
@@ -419,4 +465,39 @@ pub enum SiaCoinNewError {
 pub enum SiaCoinMyKeypairError {
     #[error("[my_keypair] PrivKeyPolicy unsupported (Iguana seed required)")]
     PrivKeyPolicy,
+}
+
+// =====================================================================
+// 4. Transaction-history errors (CRD ch.53)
+// =====================================================================
+
+/// Failure projecting a walletd event onto a transaction-history record
+/// (CRD ch.53 §53.5).
+///
+/// Mapping is otherwise total: every represented event kind yields a record,
+/// and the three unrepresented kinds are skipped without error (R53.5.1).
+#[derive(Debug, Error)]
+pub enum SiaHistoryMapError {
+    #[error("[sia-history] event {event_id}: summing {field} values overflowed u128")]
+    AmountOverflow { event_id: String, field: &'static str },
+}
+
+/// Failure retrieving the wallet address's event set from walletd
+/// (CRD ch.53 §53.4).
+#[derive(Debug, Error)]
+pub enum SiaHistoryFetchError {
+    #[error("[sia-history] walletd address-events request failed: {0}")]
+    Transport(String),
+}
+
+// =====================================================================
+// 5. Multi-account HD wallet errors (CRD ch.20 D1)
+// =====================================================================
+
+/// Failure deriving a [`crate::siacoin::sia_hd_wallet::SiaHDWallet`]'s SLIP-10
+/// ed25519 root key (`m/44'/1991'`, the node every HD account is derived from).
+#[derive(Debug, Error)]
+pub enum SiaHDWalletCreationError {
+    #[error("[hd-wallet] failed to derive the Sia ed25519 HD root key: {0}")]
+    DeriveRoot(String),
 }

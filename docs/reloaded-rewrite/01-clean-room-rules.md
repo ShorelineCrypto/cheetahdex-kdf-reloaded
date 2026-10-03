@@ -221,10 +221,10 @@ section listing the chapter's cited external-specification, wire-
 format, and sibling-allowlist citations; a bulleted *Provenance
 Footer* (R20).
 
-Meta-chapters (chapter 00, this chapter, chapter 30) MAY adjust the
-substrate-binding sections to bind methodology or index discipline
-rather than substrate contract surface; the rules-tests-deferred-
-verifications shape applies otherwise unchanged.
+Meta-chapters (chapter 00, this chapter, chapter 30, chapter 34) MAY
+adjust the substrate-binding sections to bind methodology or index
+discipline rather than substrate contract surface; the rules-tests-
+deferred-verifications shape applies otherwise unchanged.
 
 **R20.** The *Provenance Footer* of every chapter MUST be a short
 bulleted block recording exactly the following four bound items:
@@ -304,11 +304,25 @@ clean-room-derived in user-facing documentation.
 Most components in this repository are produced by clean-room derivation
 under Sections 1.3–1.5. This section names the additional, narrowly-bound
 categories under which verbatim reuse of upstream or third-party content is
-permitted, and the rules that govern each. The five categories are mutually
-exhaustive: a file (and each fragment of a file) belongs to exactly one of
-them. **Clean-room** is the default category and is the only one that does
-not require an explicit category marker in CRD chapters; the four reuse
-categories defined below MUST be explicitly marked at the point of reuse.
+permitted *within an otherwise clean-room-governed file*, and the rules
+that govern each. Restricted to that scope, the five categories are
+mutually exhaustive: a fragment falling under this section (and each such
+fragment of a file) belongs to exactly one of them. **Clean-room** is the
+default category and is the only one that does not require an explicit
+category marker in CRD chapters; the four reuse categories defined below
+MUST be explicitly marked at the point of reuse.
+
+This section's five-way split does not by itself cover every file in the
+repository. Content that is the baseline itself, or that predates the
+baseline, is governed by the permitted-input classes of §1.3 (R1, R2), not
+by this section. Post-anchor content that is a derivative of GPLv2
+baseline or upstream-lineage code, and whole third-party projects imported
+wholesale rather than reused as a fragment, are additional provenance
+categories with their own license basis, outside this section's scope.
+The repository-level provenance ledger (chapter 34) tracks all of these
+alongside the categories of this section; chapter 34 §34.1 is the
+complete, ledger-level provenance taxonomy this section's five categories
+are a bounded part of.
 
 ### Category: Generated artifact
 
@@ -498,7 +512,11 @@ licenses).
   chapter 02 (the pinned baseline anchor every R-rule in §1.3 refers
   to); chapter 29 (the second of the two legal-position chapters,
   paired with this one under R18); chapter 30 (the audit-tooling-gap
-  this chapter's D1 hands off to).
+  this chapter's D1 hands off to); chapter 34 (the repository-level
+  provenance ledger that operationalises the R27–R36 categories of
+  §1.10–§1.11 and that this chapter's R19 now names as a fourth
+  meta-chapter, and whose §34.1 taxonomy §1.11's five-category split
+  is a bounded part of).
 - *Permitted-input classes used:* the document set as it stands.
 - *Sibling-allowlist consultations:* none.
 - *Forbidden corpus:* not consulted.
