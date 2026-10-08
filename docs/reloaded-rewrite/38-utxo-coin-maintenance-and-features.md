@@ -325,6 +325,18 @@ use a bounded timeout and retry if the tx is not yet on chain. Acceptance: with 
 list of servers, connections are bounded and ordered by priority; a downed server
 does not stall block-count discovery.
 
+> **Shielded coins reuse this client.** The transparent side of a Light-mode
+> Zcash-family shielded coin is backed by the same Electrum client and the same
+> connection-pool policy as any UTXO coin, so the floor/ceiling semantics here
+> also decide whether a shielded activation can start at all: an empty server
+> list cannot satisfy the default floor of one and fails activation outright
+> ([chapter 39](39-zcash---z_coin-shielded-coin.md) R39.11.5). Note that this
+> requirement's "downed server" case is *not* the only failure mode a shielded
+> coin cares about: a server that stays connected while its chain tip stops
+> advancing is healthy by every criterion here, and chapter 39 R39.11.9--R39.11.12
+> govern that condition. Which shielded-coin functions this client serves, and
+> which are served by lightwalletd instead, is chapter 39 §39.11.1.
+
 ### 38.6.5 UTXO balance event streaming
 R38.6.5 For Electrum-backed UTXO coins the project shall emit balance-change
 events over the streaming infrastructure, registering the addresses to be watched
