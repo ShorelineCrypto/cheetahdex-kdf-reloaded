@@ -609,6 +609,10 @@ start height used.
 > - A requested start **beyond the current tip** is clamped to the tip; if that
 >   still differs from the anchor it rebuilds and scans the (empty) tip window,
 >   matching "sync from a future point".
+>   For a start given as a **date** in the future this is superseded by
+>   R39.10.11 (maintainer decision, 2026-10-11: such a date is rejected with
+>   `CoinCreationError`, as in the reference); that is a required change, not
+>   implemented (§39.10 Reloaded status, item 2).
 >
 > Because the wallet is re-seeded at `requested_start - 1` on rebuild, the anchor
 > afterwards equals the requested start, so the next unchanged activation matches
@@ -1799,6 +1803,17 @@ storage error that reflects the store failure.
 
 ## 39.10 `task::enable_z_coin` activation wire contract
 
+> **Dirty-side derivation record (sanitized).** This section was authored by
+> the KDF Spec Reader under the chapter-01 two-team workflow, at the GLEEC KDF
+> release tags `v3.0.0-beta` (reference) and `v2.6.0-beta` (legacy
+> cross-check), for the cases where the public KDF API reference is silent,
+> ambiguous or self-contradictory. It carries only the externally observable
+> activation wire contract (method routing, request field names, types and
+> defaults, in-progress values, result shape, error discriminants, error-data
+> shapes, HTTP statuses, failure-to-discriminant mapping) and behavioral
+> code-quality findings. It carries no private implementation expression. It
+> passed the KDF Dirty Gate before clean-side implementation.
+
 > **Sources and reference version.** The public KDF API reference (the
 > task-managed `enable_z_coin` page, the `ActivationRpcData` and
 > `ZcoinRpcModeEnum` common structures, and the error-type catalogue) governs
@@ -1859,9 +1874,9 @@ R39.10.4 `activation_params` members (all at the top level of
 | `mode` | object `{ "rpc": string, "rpc_data": object }` | **optional**; when absent it behaves as Light mode with empty server lists (which then fails at status level, R39.10.13) | backend selection (R39.2.2) |
 | `mode.rpc` | string: `"Native"` or `"Light"`; `"Electrum"` is accepted as a synonym of `"Light"` | required inside `mode` | `"Native"` exists only on native builds: on a WASM build it is an unknown variant and the request fails to parse (`InvalidRequest`, §55.1) |
 | `mode.rpc_data` | object | required for Light; absent for Native | Light-mode backend settings (rows below) |
-| `rpc_data.electrum_servers` | array of Electrum server objects (the same server object as the UTXO Electrum activation, §55.5 R55.5.10); `servers` is accepted as a synonym | required in Light | transparent-side backend |
-| `rpc_data.min_connected` | integer (unsigned) | optional; default 1 | minimum number of Electrum connections to keep |
-| `rpc_data.max_connected` | integer (unsigned) | optional; default = number of listed Electrum servers | maximum number of Electrum connections |
+| `rpc_data.electrum_servers` | array of Electrum server objects (the same server object as the UTXO Electrum activation, §55.5 R55.5.10); `servers` is accepted as a synonym | required in Light | transparent-side backend (see the supersession note below) |
+| `rpc_data.min_connected` | integer (unsigned) | optional; default 1 | minimum number of Electrum connections to keep (see the supersession note below) |
+| `rpc_data.max_connected` | integer (unsigned) | optional; default = number of listed Electrum servers | maximum number of Electrum connections (see the supersession note below) |
 | `rpc_data.light_wallet_d_servers` | array of strings (lightwalletd gRPC endpoint URLs) | required in Light | shielded-side backends (R39.2.4) |
 | `rpc_data.sync_params` | `{"height": u64}`, `{"date": u64}` or `"earliest"` | optional | sync start point (R39.6.2, R39.8.0g) |
 | `rpc_data.skip_sync_params` | boolean | optional; default false | resume from prior local sync state (R39.6.2) |
@@ -1871,6 +1886,13 @@ R39.10.4 `activation_params` members (all at the top level of
 | `scan_blocks_per_iteration` | integer, unsigned 32-bit, **non-zero** | optional; default 1000 | blocks per scan batch; the value `0` is a request-parse failure (`InvalidRequest`), not a silent clamp |
 | `scan_interval_ms` | integer (unsigned 64-bit) | optional; default 0 | pause between scan batches |
 | `account` | integer (unsigned 32-bit) | optional; default 0 | HD shielded account index (R39.6.4 §2); ignored under the single-key policy |
+
+> **Supersession (informative, 2026-10-11).** The `rpc_data.electrum_servers`
+> row and the `rpc_data.min_connected` / `rpc_data.max_connected` rows are
+> superseded by §39.11, a required change, not implemented; until it lands this row describes the code as built (Electrum mandatory and load-bearing in Light mode). The maintainer removed Electrum for shielded (ZHTLC) coins
+> (§39.11; `docs/plans/arrr-ironwood-compatibility.md` §10): once implemented,
+> these members are parsed and ignored, as are the `"Electrum"` / `servers`
+> synonyms, so the request stays wire compatible.
 
 R39.10.5 Fields that the public `ActivationRpcData` table lists but that have
 no Z-coin meaning -- `tx_history`, `get_balances`, `gap_limit`,
@@ -1968,7 +1990,7 @@ changes the 200 of the `status` call that reports a task error.
 | `error_type` | When (failure class) | `error_data` | HTTP if at mmrpc level |
 | --- | --- | --- | --- |
 | `CoinCreationError` | the coin could not be constructed: Sapling parameters missing, unreadable or failing their integrity digest (R39.6.3); local block-cache / wallet-database / locked-note storage cannot be opened; shielded key derivation fails (incl. HD policy without `z_derivation_path`); **no lightwalletd endpoint can be connected, or the initial chain-tip / tree-state query to the shielded backend fails**, or `light_wallet_d_servers` is empty; the requested sync date is in the future or cannot be resolved; the key policy is not supported for the shielded coin (hardware wallet, WalletConnect); any other build-time failure | object `{"ticker": string (the requested ticker), "error": string}` | 400 |
-| `Transport` | the coin was built and the shielded sync finished, but the transparent backend could not deliver the current block height, or the wallet balance could not be read (e.g. **all Electrum servers unreachable**, native daemon unreachable at the result step) | string | 500 |
+| `Transport` | the coin was built and the shielded sync finished, but the transparent backend could not deliver the current block height, or the wallet balance could not be read (e.g. **all Electrum servers unreachable** -- superseded by §39.11, a required change, not implemented; until it lands this row describes the code as built (Electrum mandatory and load-bearing in Light mode) --, native daemon unreachable at the result step) | string | 500 |
 | `CoinIsAlreadyActivated` | while this task ran, a concurrent activation of the same ticker registered the coin first | object `{"ticker": string}` | 400 |
 | `TaskTimedOut` | only produced by a timed-out wait for a user action; a Z-coin task never waits for one (R39.10.8), so this is not reachable in practice | object `{"duration": {"secs": u64, "nanos": u32}}` | 408 |
 | `Internal` | the wallet key context is not initialised; the shielded sync process stopped before reporting completion; task-handle or registration failures; any otherwise unclassified failure | string | 500 |
@@ -1997,17 +2019,18 @@ backends is:
 | --- | --- |
 | Light mode, **every** lightwalletd endpoint unreachable when the task starts (or the endpoint list is empty, or the first chain-tip / tree-state query fails) | terminal `status` `Error`, `CoinCreationError` `{ticker, error}` |
 | Light mode, lightwalletd fails **after** the shielded sync has started (download or scan error) | the task does **not** fail: `status` reports `InProgress` with `{"TemporaryError": <string>}`, the sync retries after a pause on the order of ten seconds, and progress values resume once the backend answers; the task ends only on success, on `cancel`, or on a non-transient failure |
-| Light mode, **every** Electrum server unreachable | not detected while the coin is built (Electrum connections are established lazily); after the shielded sync completes, the height/balance step fails: terminal `Error`, `Transport` (string) |
+| Light mode, **every** Electrum server unreachable (row superseded by §39.11, a required change, not implemented; until it lands this row describes the code as built (Electrum mandatory and load-bearing in Light mode); once §39.11 is implemented the state cannot occur for a shielded coin) | not detected while the coin is built (Electrum connections are established lazily); after the shielded sync completes, the height/balance step fails: terminal `Error`, `Transport` (string) |
 | Native mode, full-node daemon unreachable | shielded sync reports `TemporaryError` and retries as above; if the height step fails: `Transport` (string) |
 | Shielded sync process stops without reporting completion | terminal `Error`, `Internal` (string) |
 
-> **Held (maintainer decision pending, 2026-10-11).** Whether Light mode must
-> fail when every Electrum server is unusable, or may continue with
-> lightwalletd only, is an open maintainer decision (it is live for ARRR, whose
-> Electrum servers can lag the chain). Until it is taken, Reloaded keeps its
-> current behavior for that row (unreachable Electrum servers are detected
-> while the coin is built and end the task with `CoinCreationError`), and
-> `fix/activation-api-parity` does not implement the row above.
+> **Resolved (maintainer decision, 2026-10-11).** Electrum is removed for
+> shielded (ZHTLC) coins entirely; the transparent side is served by
+> lightwalletd and `electrum_servers` becomes accepted and ignored (§39.11;
+> `docs/plans/arrr-ironwood-compatibility.md` §10). That is a required change,
+> not implemented. Until it lands, Reloaded keeps its current behavior: Light
+> mode requires Electrum, unreachable Electrum servers are detected while the
+> coin is built and end the task with `CoinCreationError`, and the reference's
+> lazy-Electrum row above is not implemented.
 
 No Z-coin backend failure is reported as an HTTP 5xx on the `status` call
 itself; the only 5xx responses come from `init` (R39.10.10) or from the
@@ -2064,12 +2087,15 @@ framework errors of §55.2.
 >    wallet database, so it cannot compute a balance, and reporting a zero
 >    balance instead would misstate the user's funds.
 > 2. **Future sync date.** The reference rejects a sync date in the future
->    with `CoinCreationError` (R39.10.11). Reloaded clamps a start beyond the
->    current tip to the tip (R39.8.0h status note). This is an open maintainer
->    decision.
-> 3. **Held row.** Light mode with every Electrum server unreachable keeps
->    Reloaded's build-time `CoinCreationError` (see the held note under the
->    backend table).
+>    with `CoinCreationError` (R39.10.11). By maintainer decision (2026-10-11)
+>    Reloaded follows the reference; the code still clamps a start beyond the
+>    current tip to the tip (R39.8.0h status note). The change is a required
+>    change, not implemented, and is carried out together with §39.11, where
+>    the date resolution moves to the shielded backend.
+> 3. **Electrum in Light mode.** Light mode with every Electrum server
+>    unreachable keeps the build-time `CoinCreationError`; Electrum's removal
+>    is §39.11's required change, not implemented (see the resolved note under
+>    the backend table).
 > 4. A retry after `TemporaryError` re-runs the fetch with the original
 >    `sync_params`, so a re-anchored wallet can rescan once per retry.
 > 5. In Native mode a local wallet-database scan failure still ends the task
@@ -2217,14 +2243,12 @@ canonical counterparts for the same task.
   wire-and-API-bound reuse (R29/R31) for the dictated method strings, JSON
   field names, and error discriminants this chapter distills.
 - *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* consulted **only for §39.10** (and the matching
-  wording updates of §39.0, R39.2.1, R39.3.1 and R39.3.2), by the KDF Spec
-  Reader role under the two-team workflow, at the GLEEC KDF release tags
-  `v3.0.0-beta` (reference, per the maintainer's "match GLEEC where the public
-  docs are silent" decision) and `v2.6.0-beta` (legacy cross-check; identical
-  activation wire surface). Only the externally observable activation wire
-  contract was distilled (method routing, request field names/types/defaults,
-  in-progress values, result shape, error discriminants, error-data shapes,
-  HTTP statuses, failure-to-discriminant mapping); no implementation
-  expression was carried across. The section is subject to KDF Dirty Gate
-  clearance before use. §39.1--§39.9 are unchanged in provenance.
+- *Forbidden corpus:* consulted by the KDF Spec Reader role under the
+  chapter-01 two-team workflow for §39.8.0.4, §39.8.0.7 and §39.10 (and, for
+  §39.10, the matching wording updates of §39.0, R39.2.1, R39.3.1 and R39.3.2),
+  as each of those subsections' derivation record states; §39.10 at the GLEEC
+  KDF release tags `v3.0.0-beta` (reference) and `v2.6.0-beta` (legacy
+  cross-check). Only externally observable behavior and dictated interfaces
+  were distilled; no implementation expression was carried across. Each
+  consulted subsection is subject to KDF Dirty Gate clearance, as its
+  derivation record states; §39.10 passed it.

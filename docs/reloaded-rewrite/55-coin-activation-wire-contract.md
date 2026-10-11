@@ -191,6 +191,22 @@ in this chapter, the `error_type` values a caller can observe are exactly the
 values listed in the governing table; a failure class the table maps to a
 discriminant shall produce that discriminant and no other.
 
+**R55.1.12** *Serialized same-ticker activation (maintainer decision,
+2026-10-11).* Reloaded shall serialize activations of the same ticker across
+every family and path (task, one-shot and legacy): an activation that starts
+while another activation of the same ticker is still running waits until that
+one has finished, then re-checks whether the ticker is registered. If it is,
+the waiting activation ends with its family's already-activated discriminant in
+that family's usual placement (`CoinIsAlreadyActivated` at status level for the
+standalone-coin family, `PlatformIsAlreadyActivated` / `TokenIsAlreadyActivated`
+for the platform and token families, the legacy error for `enable` /
+`electrum`); if it is not, it proceeds with its own activation. The reference
+runs such activations in parallel and the loser reports the same discriminant
+(R55.5.7), so this is not a wire divergence: only the timing differs. It avoids
+two activations building the same coin at once; for a shielded coin, which
+writes its wallet database during activation, that would be a corruption
+risk.
+
 > **Reloaded status (informative).** The success and error envelopes, the
 > `id` echo, the adjacently tagged encoding and the dispatcher errors already
 > match. Two cross-cutting differences sit with
@@ -679,7 +695,9 @@ standalone-coin member (`enable_utxo`, `enable_qtum`, `enable_bch`,
 1. a second `init` for a ticker whose first activation is still running is
    **not** rejected: it passes the synchronous checks of R55.5.3 and answers a
    new `task_id`;
-2. the two tasks run **in parallel**; neither waits for the other;
+2. in the reference the two tasks run **in parallel**; neither waits for the
+   other (Reloaded serializes them, R55.1.12, without changing what either
+   caller observes);
 3. whichever task registers the coin first succeeds; the other ends at status
    level with `CoinIsAlreadyActivated` `{ticker}` (HTTP 200 status answer; 400
    if it were mmrpc-level) -- it never reports success and never replaces the
@@ -707,10 +725,12 @@ another activation untouched when it is cancelled.
 > activation registered successfully. R55.5.8 binds the corrected behaviour;
 > it changes no wire field.
 
-> **Reloaded status (informative).** Concurrent tasks for the same ticker run
-> in parallel, as in the reference; since `fix/activation-api-parity` the losing
-> standalone task ends with `CoinIsAlreadyActivated`, and a cancelled task
-> removes only a coin it registered itself (R55.5.8).
+> **Reloaded status (informative).** Since `fix/activation-api-parity` the
+> losing standalone task ends with `CoinIsAlreadyActivated`, and a cancelled
+> task removes only a coin it registered itself (R55.5.8). The serialization of
+> R55.1.12 is a decided change, not yet implemented outside the Z-coin, whose
+> activation already holds a per-ticker lock; elsewhere concurrent activations
+> still run in parallel, with the same observable outcome.
 
 ### 55.5.1 UTXO-family members (`enable_utxo`, `enable_qtum`, `enable_bch`)
 
