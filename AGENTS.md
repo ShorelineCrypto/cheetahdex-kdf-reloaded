@@ -96,7 +96,9 @@ Use the role files under `.github/agents/` exactly as intended:
   It writes clean-channel behavioral/interface requirements into the relevant
   CRD chapter and never edits implementation code.
 - `kdf-dirty-gate.agent.md` compares a candidate chapter with the corpus and
-  returns only its sanitized verdict. A Spec Reader change is not ready to
+  returns only the sanitized verdict CRD chapter 01 R39 bounds: a leak
+  report, a scope attestation every verdict must carry, and optionally a
+  labelled non-leak section. A Spec Reader change is not ready to
   cross the wall until this gate passes.
 - `coder.agent.md` is the clean-side implementer. It reads the approved chapter
   and this repository, never the forbidden corpus, and implements only the
