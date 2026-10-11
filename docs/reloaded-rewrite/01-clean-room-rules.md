@@ -468,22 +468,51 @@ regime the procedure joins. R35's gate scores a file against the
 relicensed historical record, so it needs both operands: the file,
 and material of the R8 class. R8–R10 withhold the second operand
 from every contributor and from every implementation role this
-chapter otherwise contemplates. R35's gate has therefore never been
-executable by any role this chapter permitted — not because the rule
-is wrong, but because the chapter named no role that could hold both
-operands and bound nothing about what such a role might emit if it
-did. R39 is the first rule that does both. On this one point §1.4A is
-not an addition to the regime: it supplies the only role that can
-execute a gate this chapter has bound since R35 was written, and the
-only output contract under which that gate's result can cross back
-without carrying what it measured.
+chapter otherwise contemplates, and before §1.4A the chapter named no
+role at all that could hold both operands and bound nothing about
+what such a role might emit if it did. §1.4A supplies a role that may
+hold both operands — the clean-room gate of R37 — and an output
+contract under which a verdict can cross back without carrying what
+it measured (R39). That much stands, and so does the reasoning behind
+it.
 
-That observation has a limit worth recording. R35 is conditional — it
-governs a measurement when one is taken, and its mechanical
-thresholds and tooling are deferred to chapter 30 D1 — so its
-unexecutability was never an unmet standing obligation, and no
-chapter is retrospectively defective for having been committed
-without a score. The gap was in executability, not in compliance.
+What that role is bound to compare, however, is a *candidate
+chapter*: R37 states its mandate in those terms, and an R39 finding
+names a line of the candidate. No rule of this chapter submits a
+*file of source* to a corpus-side clearance, and R35 states its test
+without naming a performer. The measurement of a file against
+forbidden-class material is therefore assigned by no rule — which is
+not the same as its being unperformable, and the difference matters.
+That measurement is specified in R35, is given mechanical thresholds
+and an implementation by this repository's own tooling under `tools/`,
+and is recorded as performed: chapter 34 states that the tool's
+manifest enrols the source files of a clean-room-reimplemented crate
+against a pinned reference of the relicensed historical record so
+that the R35 gate enforces that position going forward, and the
+tooling's own documentation records the enrolled set passing in full,
+run against a reference tree held outside this checkout. The defect
+is accordingly narrower and of a different kind: a performer exists
+and operates, but that performer is none of the three roles R37
+separates, no rule of this chapter names them, and what assigns the
+work to them is tooling documentation that R44 does not enumerate as
+the operational elaboration and that no rule here subordinates to
+this chapter. §1.4A closes the half of the gap that concerns prose;
+for source it leaves practice running beside the rules rather than a
+rule that cannot be run. D4 carries that forward. Curing it would
+take a rule change — naming the role that may hold both operands over
+a file, and subordinating the tooling and its documentation as R44
+subordinates the role definitions — which is deliberately not made
+here.
+
+That gap has a limit worth recording. R35 is conditional: it governs
+a measurement when one is taken, so the absence of a rule assigning
+it was never an unmet standing obligation, and no chapter is
+retrospectively defective for having been committed without a score.
+Where the measurement has in fact been taken over an enrolled file,
+what is missing is not the measurement but its binding — no rule
+names the role that took it, and no verdict of the R39 form records
+it in the document set. The gap is in assignment and in the record,
+not in compliance with R8–R11.
 
 One thing still follows for R38, and it is not a point about who
 decides to measure. Because R35 triggers conditionally, the party
@@ -508,15 +537,36 @@ the shipped code's residual similarity as deferred to that gate and
 states that the gate enforces the position going forward. That is a
 standing-governance form rather than a conditional one: read plainly,
 six chapters and the provenance ledger declare themselves governed by
-a measurement that, until §1.4A, no role this chapter permitted could
-lawfully take. The tension is recorded rather than argued away. Those
-declarations are honest as to *content* — R8–R11 bound each of those
-chapters when it was written and bind it still, and R43 makes none of
-them defective for carrying no score — but as to *governance* they
-named a gate that was unperformable, and §1.4A is what turns them into
-declarations about something performable. What remains outstanding is
-the measurement itself, which still waits on chapter 30 D1 for its
-thresholds and tooling; D4 carries that forward.
+a measurement no rule of this chapter assigns to any role. The
+tension is recorded rather than argued away. Those declarations are
+honest as to *content* — R8–R11 bound each of those chapters when it
+was written and bind it still, and R43 makes none of them defective
+for carrying no score — and for a realisation the tooling manifest
+enrols they are more than forward-looking, because that manifest
+holds those files against a pinned reference and the tooling's own
+documentation records them passing. It is the manifest and that
+documentation which establish enrolment for these chapters, not the
+ledger: where the ledger names the gate tooling it does so for the
+single clean-room-reimplemented crate it discusses, whose chapter is
+not among the six, and for two of the six it says the converse in
+form, recording the shipped code's residual expressive similarity as
+still deferred to the gate rather than already measured against it.
+What is unbound is the governance and not the activity. What those
+footers put under the gate is a realisation in source, while the
+role §1.4A supplies is
+bound to a candidate chapter; the party that runs the gate over
+source is named by no rule here; and a result so obtained is recorded
+as a tooling pass rather than as a verdict carrying the R39 scope
+attestation. Not every realisation those footers reach is enrolled
+either, and chapter 32 is not the only case: the manifest enrols no
+file from the daemon crate, so the orderbook peer-to-peer surface of
+chapter 32 has no enrolled file at all, and chapter 53's dedicated
+transaction-history realisation file is unenrolled as well, leaving
+that chapter enrolled only in part — the rest of its realisation sits
+in enrolled coin files and in baseline-derived coin-generic code.
+Wherever a footer reaches a realisation the manifest does not enrol,
+the declaration is forward-looking in the plainer sense. D4 carries
+all of this forward.
 
 Requiring the route costs the project nothing it was relying on. R43
 scopes the requirement forward, so no already-committed chapter
@@ -1008,10 +1058,36 @@ clean-room role of R37 is permitted and does not fail T3 (R20).
 ## 1.14 Deferred Work
 
 **D1.** Automated linting of R11 (identifier hygiene), R13–R15
-(citation discipline), R16 / R19 / R20 (per-chapter shape), the
-§1.4A documentary checks T1–T3, and the R35 residual-similarity gate
-(mechanical thresholds and the tool that applies it) is deferred to
-chapter 30 D1; chapter 30 binds the audit-tooling-gap.
+(citation discipline), R16 / R19 / R20 (per-chapter shape) and the
+§1.4A documentary checks T1–T3 is deferred to chapter 30 D1; chapter
+30 binds the audit-tooling-gap.
+
+For the R35 residual-similarity gate the deferral is narrower than it
+was, and this item no longer defers the gate's mechanics. The
+mechanical thresholds and a tool that applies them exist in this
+repository's own tooling under `tools/`, whose manifest enrols
+reloaded source files against a pinned reference of the relicensed
+historical record, and whose documentation records the enrolled set
+passing in full. What remains outstanding for this constituent is
+enforcement rather than capability: the gate is run by hand at
+chapter-edit and pre-publication time, so the machine-checked audit
+at a pre-commit boundary that chapter 30 D1 describes for its own
+audits is what is still owed, alongside the rule-side gap D4 records.
+
+Two statements elsewhere are left standing and are recorded here as
+stale rather than corrected in this revision. R35's closing sentence
+defers its mechanical thresholds and automated tool to chapter 30
+(D1), reaching this item only indirectly — this item hands its
+linting gap to chapter 30 D1, and chapter 30 D1 folds this item back
+in as one of its constituents, expressly including the R35
+residual-similarity gate — and chapter 30 D1 states that none of its
+five constituent checks exist; both statements predate the tooling.
+Each is, under R24, the defect of record of the chapter that carries
+it, recorded here rather than left unlabelled. Correcting the first
+is a rule change and is announceable under R25–R26, and correcting
+the second belongs to chapter 30's next revision; neither is made
+here, and neither sentence may be read as evidence that the gate's
+mechanics are absent.
 
 **D2.** A bound machine-readable manifest of the seven permitted-input
 classes (R1–R7) and the three forbidden-input classes (R8–R10)
@@ -1028,22 +1104,46 @@ record gap by relaxing a rule. The work is therefore a record
 improvement rather than a remediation, and is taken chapter by
 chapter as each chapter is next revised.
 
-**D4.** Taking the R35 measurement for the chapters that declare their
-realisation governed by that gate — chapters 20, 21, 23, 24, 32 and
-53, together with the shipped-code position chapter 34 records — is
-deferred. §1.4A now supplies the one role that may hold both operands
-and the output contract under which a result may cross back, so the
-gate has become performable; chapter 30 D1 still owes the mechanical
-thresholds and the tool that applies them. Until that tooling exists,
-each such declaration is forward-looking governance and not a record
-that a measurement was taken, and no chapter may be read as asserting
-a measure it does not carry. When the tooling lands, each declaration is
-either backed by a measurement taken through §1.4A and recorded with
-the R39 scope attestation, or restated in the conditional form R35
-actually binds. This item is the record of the tension §1.4A's
-"Why the procedure is required" discussion states, and it is a record
-improvement for the same reason D3 is: R43 makes no affected chapter
-defective, and R26 bars curing a record gap by relaxing a rule.
+**D4.** *Binding* the R35 measurement for the chapters that declare
+their realisation governed by that gate — chapters 20, 21, 23, 24, 32
+and 53, together with the shipped-code position chapter 34 records —
+is deferred. Two things are owed, and neither is the measurement as
+such.
+
+The first is assignment. R35 states its test without naming a
+performer, and the one role §1.4A supplies that may hold both
+operands is bound by R37 to a candidate chapter, so the measurement
+of a file of source against forbidden-class material is assigned by
+no rule of this chapter. It is nevertheless specified, thresholded,
+implemented and run for the files this repository's own tooling
+manifest enrols, as chapter 34 records and as that tooling's
+documentation reports. The gap is therefore unbound practice rather
+than an unperformable measurement, and the party that runs the gate
+is one this chapter's role separation does not describe. Naming the
+role that may hold both operands over a file of source, and
+subordinating the tooling and its documentation to this chapter as
+R44 subordinates the role definitions, are rule changes under
+R25–R26 and are deliberately not made in the revision that records
+the gap.
+
+The second is enforcement. The gate is run by hand at chapter-edit
+and pre-publication time and is not wired into continuous
+integration, so the machine-checked pre-commit audit chapter 30 D1
+defers is still outstanding for this constituent; D1 above records
+the same point from the tooling side.
+
+Until both are settled, a declaration that names the gate states
+governance and not that a verdict was taken: for an enrolled file it
+is backed by a tooling pass recorded outside the document set, for a
+realisation no enrolled file covers it is forward-looking only, and
+in neither case may a chapter be read as asserting a measure it does
+not carry. When both are settled, each declaration is either backed
+by a measurement recorded with the R39 scope attestation, or restated
+in the conditional form R35 actually binds. This item is the record
+of the tension §1.4A's "Why the procedure is required" discussion
+states, and it is a record improvement for the same reason D3 is:
+R43 makes no affected chapter defective, and R26 bars curing a record
+gap by relaxing a rule.
 
 **D5.** Bringing the one pre-adoption scoped record that names
 post-anchor commit identifiers — the derivation record of chapter 39's
@@ -1095,12 +1195,21 @@ licenses).
   in §1.4A and in D4: chapters 20, 21, 23, 24, 32 and 53 (the
   provenance footers and binding-scope notes that declare a conformant
   realisation's residual similarity governed by the R35 gate) and
-  chapter 34 (the ledger-level form of the same declaration). For the
+  chapter 34 (the ledger-level form of the same declaration, and its
+  record that the repository's own R35 gate tooling enrols a
+  clean-room-reimplemented crate's source files against a pinned
+  reference); and, for the state of that gate's mechanics and for the
+  enrolment on which §1.4A's "more than forward-looking" conclusion
+  rests, the repository's own clean-room gate tooling under `tools/`
+  together with its documentation, read for the thresholds it
+  defines, the files its manifest enrols and the chapters they
+  realise, and the manner in which it is run. For the
   R25 re-check behind the §1.7 reference-version constraint and D5:
   the document set's scoped records and derivation records as they
   stand, read for the reference identifiers they name.
 - *Permitted-input classes used:* the document set as it stands; this
-  repository's own instruction and role-definition files, cited as
+  repository's own instruction, role-definition and clean-room
+  tooling files, cited as
   evidence under R11's legal-position evidentiary-citation carve-out
   (chapter 01 being the legal-position chapter that citation depends
   on).
@@ -1110,6 +1219,9 @@ licenses).
   *Forbidden corpus* item, and the R39 verdict contract are bound from
   this document set's own text and from this repository's own role
   definitions and contributor instructions, which R44 subordinates to
-  this chapter. Because no forbidden-class input was taken, R38
-  required no clearance for this revision and the footer accordingly
-  records no scope attestation (T1).
+  this chapter; the state of the R35 gate recorded in §1.4A, D1 and D4
+  is read from this repository's own clean-room gate tooling and that
+  tooling's documentation, which R44 does not subordinate and which D4
+  records as the unbound part. Because no forbidden-class input was
+  taken, R38 required no clearance for this revision and the footer
+  accordingly records no scope attestation (T1).
