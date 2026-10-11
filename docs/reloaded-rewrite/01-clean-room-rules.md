@@ -5,9 +5,10 @@
 The chapter binds the rules every other chapter in the document set
 claims to follow: the pinned baseline anchor, the seven
 permitted-input classes, the three forbidden-input classes, the
-identifier-hygiene rule, the citation discipline, the canonical
-chapter shape, the missing-derivation policy, and the rule-stability
-and source-of-truth discipline.
+two-team procedure by which forbidden-class input is taken, cleared
+and recorded, the identifier-hygiene rule, the citation discipline,
+the canonical chapter shape, the missing-derivation policy, and the
+rule-stability and source-of-truth discipline.
 
 ## 1.1 Executive Summary
 
@@ -20,12 +21,18 @@ must not be represented as clean-room-derived. A chapter or a source
 change that contradicts the rules below is a bug to be tracked and
 remediated against the offending artefact, not against this chapter.
 
-The methodology is structured as four normative groups: an *input*
+The methodology is structured as six normative groups: an *input*
 group (permitted-input classes R1–R7; forbidden-input classes R8–R10);
-an *expression* group (identifier-hygiene rule R11; citation
-discipline R12–R15); a *shape* group (per-chapter status and section
-layout R16–R20); a *process* group (missing-derivation discipline R21;
-source-and-chapter consistency R22–R24; rule-stability R25–R26).
+a *procedure* group (the two-team clean-room procedure R37–R44, which
+is how the forbidden-input classes are honoured in the one case where
+only forbidden-class material can answer a question); an *expression*
+group (identifier-hygiene rule R11; citation discipline R12–R15); a
+*shape* group (per-chapter status and section layout R16–R20); a
+*process* group (missing-derivation discipline R21; source-and-chapter
+consistency R22–R24; rule-stability R25–R26; the provenance-ledger
+duty R27); and a *component-provenance* group (the bounded reuse
+categories, the residual-similarity gate, and the binding force of
+chapter code blocks, R28–R36).
 
 The legal-position status applies because the chapter records a
 methodology statement rather than a substrate-binding driving
@@ -126,6 +133,245 @@ equivalent to the material itself and are forbidden.
 **R10.** *Private channels.* Material obtained from non-public
 channels (private chats, internal documents, leaked archives, etc.),
 regardless of its license status, is forbidden.
+
+## 1.4A Bound Two-Team Clean-Room Procedure
+
+R8–R10 bind *what* must not enter the document set, and R11 binds
+what must not be quoted. None of them binds *how* a question that
+only forbidden-class material can answer is answered without
+breaching them. This section binds that procedure.
+
+The procedure is the *means* by which R8–R11 are satisfied in that
+case, never a relaxation of them. No rule in this section permits any
+content R8–R11 forbid, no rule in this section widens a
+permitted-input class, and R26 continues to bar reading any of them
+that way.
+
+Throughout this section, *forbidden-class material* is material of
+the three classes R8–R10, and *taking forbidden-class input* is
+reading, searching, listing, diffing, or otherwise inspecting such
+material.
+
+The section's rules are numbered R37–R44 and its number is §1.4A
+because R1–R36 and §1.5–§1.11 were already bound and cited from
+other chapters when the procedure was codified; renumbering them
+would break those citations. The section is placed next to the
+forbidden-input classes it serves rather than at the end of the
+chapter where its rule numbers would fall.
+
+**R37.** *Bound role separation.* The procedure binds exactly three
+separated roles:
+
+| Role                            | Bound mandate                                                                                                                                          | Bound prohibition                                                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dirty-side specification author | Takes forbidden-class input and writes clean-channel chapter text — behavioural requirements, public and dictated interface surface, and nothing else. | MUST NOT write or edit source code; MUST NOT carry forbidden-class expression into a chapter, a report, a verdict, or an instruction to another role. |
+| Clean-room gate                 | Compares a candidate chapter against the forbidden-class material and returns a sanitized verdict (R39).                                               | MUST NOT author or edit the candidate it clears; MUST NOT emit forbidden-class expression, nor the candidate text it flags.                           |
+| Clean-side implementer          | Reads a cleared chapter and this repository, and writes the source that satisfies the chapter.                                                         | MUST NOT take forbidden-class input by any route, including an excerpt relayed by another role, a generated artefact, a cache, or a human.            |
+
+The dirty-side specification author is the only
+implementation-analysis role permitted to take forbidden-class input,
+and it takes that input for a single purpose: to establish facts that
+are themselves of the permitted-input classes — the published
+specification and node interfaces of R3, the counterparty-dictated
+inter-operability shapes of R4, and the externally observable
+behaviour of R6 — and to restate those facts as this document set's
+own prose. Expression is not carried across; it is left where it was
+read.
+
+The clean-room gate also takes forbidden-class input, because a
+comparison requires both sides. It is not an implementation-analysis
+role: it authors nothing, specifies nothing, and emits only the
+verdict R39 bounds. These two roles are exhaustive — no other role,
+context, or contributor takes forbidden-class input at all.
+
+**R38.** *Bound mandatory route.* Where a chapter's content cannot be
+established from the permitted-input classes R1–R7 alone and
+forbidden-class input is taken in order to establish it, that input
+MUST be taken only by the R37 dirty-side specification author, and
+the resulting chapter text MUST be cleared by the R39 gate before
+R40 lifts. A context acting in neither of the two R37 roles that may
+take forbidden-class input MUST NOT take it at all.
+
+A self-certification is not a substitute for the route. An assertion
+by an arbitrary context that it looked but took only behaviour is not
+checkable by any reader of the document set, carries no evidence that
+R11 was honoured, and therefore does not discharge the citation duty
+of R12. The procedure is checkable precisely because the role that
+took the input is not the role that cleared what came out.
+
+**R39.** *Bound sanitized verdict.* The gate's output MUST be limited
+to a verdict, a discretionary-similarity score measured per R35, and,
+on failure, a list whose entries name a candidate line location and a
+leak category and carry nothing else. The gate MUST NOT quote,
+paraphrase, transcribe, or otherwise reproduce forbidden-class
+material in its verdict, and MUST NOT quote the candidate text it
+flags.
+
+That limit is load-bearing rather than hygienic. The verdict crosses
+to the clean side; a verdict carrying the expression it objected to
+would breach the wall in the act of policing it and would contaminate
+every context that read it. A gate that cannot describe a finding
+without reproducing it MUST describe it by category alone.
+
+What the gate verifies is the substance of R11 and R35: whether each
+candidate line carries clean-channel content — public and dictated
+interface surface, abstract behaviour, lifecycle and ordering
+semantics — or discretionary expression. The judgement is made per
+identifier and not by aggregate match density, because a
+dictated-interop chapter is *required* to match on most of its
+identifiers and that matching carries no inference of copying (R35).
+
+**R40.** *Bound clearance precondition.* A candidate produced under
+R38 is not usable until the R39 gate has cleared it. Until then it
+MUST NOT be relied on as a statement of required behaviour, MUST NOT
+be implemented from, and MUST NOT be committed as content satisfying
+this chapter's standard. A chapter or subsection written into the
+tree while its clearance is pending MUST say so at the point at
+which it appears, so that neither a reader nor an implementer
+mistakes a candidate for a cleared requirement.
+
+A failed clearance is remediated by scrubbing the lines the verdict
+named and re-clearing the result. Rewording a flagged line is not
+remediation: R9 makes a paraphrase of forbidden-class material
+equivalent to the material itself.
+
+**R41.** *Bound non-combination.* The three roles of R37 MUST NOT be
+combined in one context. Specifically:
+
+- a context that has taken forbidden-class input MUST NOT act as the
+  clean-side implementer, and MUST NOT write or edit source code
+  presented as clean-room-derived;
+- the gate MUST be a context other than the one that authored the
+  candidate it clears, because an author cannot independently verify
+  the boundary that author drew;
+- an orchestrating context that has taken forbidden-class input MAY
+  direct the work, but MUST NOT pass forbidden-class material into an
+  instruction to the clean-side implementer, and MUST NOT substitute
+  its own text for a cleared chapter's.
+
+Separation is a property of the context, not of an intention. A
+context cannot un-take input it has already taken, so each
+prohibition above attaches at the moment the input is taken and does
+not lapse within that context's lifetime.
+
+**R42.** *Bound breach discipline.* Forbidden-class material that
+reaches a chapter, a report, an instruction, or the source tree other
+than through R38–R40 is a clean-room breach. A suspected breach is
+handled as a breach until an investigation establishes otherwise. The
+discipline MUST be exactly:
+
+1. commit and push activity in this repository halts — every
+   in-flight change, not only the one that triggered the breach;
+2. the material is removed rather than reworded (R9);
+3. every affected chapter is held under R21 and MUST NOT be committed
+   in its present state;
+4. the breach is reported promptly to the maintainer;
+5. each affected artefact is re-established under R38–R40, or
+   re-derived from the permitted-input classes, before commit
+   activity resumes;
+6. every context that read the material is treated as having taken
+   forbidden-class input, and R41 attaches to it.
+
+The document set records the provenance of its content, not an
+incident narrative: R20's provenance footer states a chapter's inputs
+and says nothing about the handling of a breach. The report of item 4
+is the record of the incident.
+
+**R43.** *Bound temporal scope.* R37–R44 bind every chapter revision
+committed on or after the commit that adopts them. A chapter revision
+committed earlier is not defective merely for carrying no record of
+the procedure. Three consequences follow, and no others:
+
+- the content standard of R8–R11 bound such a revision when it was
+  written and binds it still; a chapter in which forbidden-class
+  material is actually present is held under R21 whatever its date;
+- where such a chapter is revised in a way that takes fresh
+  forbidden-class input, that fresh input is subject to R38–R40;
+- a pre-adoption chapter whose record is silent about the route by
+  which a fact was established is not thereby required to be
+  re-opened; recording such a route retrospectively is the deferred
+  work of D3.
+
+This is a statement of the rules' temporal scope and not a
+retroactive relaxation barred by R26: no pre-revision rule of this
+chapter bound the procedure, so R43 permits no chapter that an
+earlier rule forbade.
+
+**R44.** *Bound operational elaboration.* The repository's own role
+definitions under `.github/agents/` — `kdf-spec-reader.agent.md`,
+`kdf-dirty-gate.agent.md` and `coder.agent.md` — together with the
+two-team section of the repository's contributor instructions
+(`AGENTS.md` §2) are the *operational elaboration* of R37–R43: they
+fix dispatch mechanics, the wording of each role's own output
+contract, the concrete verdict format, and the host location at which
+the forbidden-class material happens to sit. The elaboration is
+subordinate to this chapter:
+
+- it MAY add operational detail;
+- it MUST NOT weaken, broaden, or substitute for R37–R43, and MUST
+  NOT authorise any input R8–R10 forbid;
+- where the elaboration and this chapter disagree, this chapter
+  governs and the elaboration is the defect of record;
+- it is not itself subject to the rule-stability discipline of
+  R25–R26, which is the reason the normative content of the procedure
+  is bound here rather than there.
+
+The file paths and role names quoted in this rule are this
+repository's own artefacts, cited as evidence under R11's
+legal-position evidentiary-citation carve-out; chapter 01 — this
+chapter — is the legal-position chapter on which that citation
+depends.
+
+### Why the procedure is required and not merely recognised
+
+R38 makes the procedure the only permitted route rather than one
+sufficient means among several. The alternative — recognising the
+procedure as sufficient while leaving a direct, self-certified
+consultation open beside it — is rejected on three grounds.
+
+First, a self-certification is not checkable. A reader of the
+document set has no way to distinguish a context that took only
+R3 / R4 / R6 facts from one that took expression and restated it,
+and R9 makes the second indistinguishable from clean work in its
+output alone — it becomes distinguishable only when the comparison
+against the material is actually performed. Second, R12 obliges every
+chapter to cite the input that produced a behaviour; an input no
+second party ever examined is a citation to a closed record. Third,
+the one measurement this chapter already binds — the
+residual-similarity gate of R35 — cannot be performed by a context
+that may not see both sides, so the comparison must be delegated to a
+role that may, and R39 is what makes that delegation safe.
+
+Requiring the route costs the project nothing it was relying on. R43
+scopes the requirement forward, so no already-committed chapter
+becomes defective by its adoption; and because the dirty-side role is
+already the only role permitted to take the input at all (R37),
+requiring clearance of what that role produces narrows no
+permitted-input class and closes no question the document set can
+otherwise answer.
+
+### Why the normative content is bound here
+
+R44 binds the content of the procedure in this chapter and leaves the
+mechanics to the role definitions, rather than citing those
+definitions as the authority for the procedure. The document set is
+the project's derivation record, and a rule the record relies on must
+sit inside the regime R25 makes announceable and R26 makes
+un-relaxable. An operational instruction file is not in that regime —
+it can be rewritten without a rule-change announcement and without
+the re-checking of past chapters R25 requires — so a chapter drawing
+its authority from one would make the derivation record depend on a
+document the record cannot hold still.
+
+Honesty requires the converse to be stated as well. The procedure as
+actually practised *is* bounded in part by the role definitions: the
+precise output contract each role works to, the exact shape of the
+verdict, and the dispatch mechanics are theirs and are not restated
+here. R44 therefore names them rather than ignoring them, and directs
+them to conform. The citation is deliberately inward — this chapter
+cites the elaboration as subordinate detail, and the elaboration
+cites this chapter as its authority — so that the dependency runs
+from the process document to the specification and not the other way.
 
 ## 1.5 Bound Identifier-Hygiene Rule
 
@@ -236,10 +482,59 @@ bulleted block recording exactly the following four bound items:
 - *Sibling-allowlist consultations:* the sibling-repository citations
   the chapter relied on per R5 / R14, or *none* if the chapter relied
   on no sibling repositories;
-- *Forbidden corpus:* the mandatory trailer `not consulted`. The
-  trailer reads exactly so; if it cannot honestly be written, the
-  chapter MUST NOT be committed in its present state and the
-  missing-derivation discipline of R21 applies.
+- *Forbidden corpus:* a statement about the chapter's *inputs*, in
+  one of the two bound forms of the following sub-section — the
+  blanket trailer `not consulted`, or a scoped record. Where neither
+  form can honestly be written, the chapter MUST NOT be committed in
+  its present state and the missing-derivation discipline of R21
+  applies.
+
+### The *Forbidden corpus* item of R20
+
+The item is a statement about the chapter's *inputs*, not about how
+any fact in it was discovered. It asserts one thing only: that the
+chapter contains no R8–R10 material — no forbidden-class expression,
+and no identifier outside R11's carve-out classes. Two bound forms
+make that assertion, and a chapter carries exactly one of them:
+
+1. the *blanket trailer* `not consulted`, which reads exactly so. A
+   chapter MAY add clarifying prose after the trailer, but MUST NOT
+   vary the trailer itself;
+2. a *scoped record* stating what, if anything, was taken from
+   forbidden-class material, for which sections, and under which
+   reference versions. A scoped record MAY be framed positively
+   ("consulted only for …") or as a qualified negative ("not
+   consulted for …, except …"). It asserts the same thing about the
+   chapter's content as the blanket trailer does; it adds the route
+   and withholds nothing.
+
+Either form is satisfied when the chapter's content rests on the
+permitted-input classes of §1.3 — including R3's published
+specification and node interfaces, R4's dictated inter-operability
+shapes, and R6's externally observable behaviour. R8 forbids
+forbidden-class material *as input to a clean-room claim*; chapter
+34's provenance model states that scoping. Establishing an
+R3 / R4 / R6 fact does not become an R8 derivation by reason of the
+route through which the fact was noticed, provided that nothing
+outside those classes entered the chapter and that the route was the
+procedure of §1.4A wherever that procedure applies (R38, R43).
+
+Where §1.4A applies, the scoped record is also how the assertion is
+*verified* rather than merely claimed: the record names the route,
+and the gate clearance of R39–R40 is the verification. A chapter MAY
+carry that detail alongside a blanket trailer instead, in this item
+or in a separate footer item; doing so adds route information and
+neither weakens nor contradicts the assertion.
+
+The item records inputs and the procedure under which they were
+taken. It MUST NOT identify the person, the session, or the
+authoring context behind any passage. Naming a clean-room role of
+R37 is procedure rather than author attribution, and is permitted.
+
+Where the assertion cannot honestly be made in either form —
+forbidden-class expression is present, or an identifier fails R11 —
+the chapter MUST NOT be committed in its present state and the
+missing-derivation discipline of R21 applies.
 
 ## 1.8 Bound Missing-Derivation Discipline
 
@@ -470,22 +765,54 @@ extend the document set in a consistent voice.
 
 ## 1.13 Tests
 
-This chapter binds methodology; it has no test surface of its own.
-The testing discipline the rules bind is carried per chapter on the
-substantive chapters' *Tests* sections (R19).
+Most of this chapter binds methodology and has no test surface of its
+own; the testing discipline those rules bind is carried per chapter on
+the substantive chapters' *Tests* sections (R19). The procedure of
+§1.4A is the exception: it is checkable against the document set
+itself, so the three documentary checks below are bound here. Each is
+a check over the repository's own files, performed by inspection until
+the tooling of D1 exists.
+
+**T1.** *Clearance record.* For every chapter whose provenance footer
+records forbidden-class input taken under R38 on or after the adoption
+of §1.4A, a clearance statement exists: either the footer records that
+the gate cleared the consulted sections, or each consulted section
+carries the pending-clearance statement R40 requires. A chapter that
+records the input and carries neither statement fails T1.
+
+**T2.** *Verdict sanitation.* No clearance statement, derivation
+record, or relayed verdict anywhere in the document set quotes the
+candidate text it concerns or any forbidden-class material. A record
+that identifies a finding by anything beyond its location and its
+category fails T2 (R39).
+
+**T3.** *Attribution hygiene.* No R20 *Forbidden corpus* item, no
+derivation record, and no clearance statement identifies the person,
+the session, or the authoring context behind a passage. Naming a
+clean-room role of R37 is permitted and does not fail T3 (R20).
 
 ## 1.14 Deferred Work
 
 **D1.** Automated linting of R11 (identifier hygiene), R13–R15
-(citation discipline), R16 / R19 / R20 (per-chapter shape), and the
-R35 residual-similarity gate (mechanical thresholds and the tool that
-applies it) is deferred to chapter 30 D1; chapter 30 binds the
-audit-tooling-gap.
+(citation discipline), R16 / R19 / R20 (per-chapter shape), the
+§1.4A documentary checks T1–T3, and the R35 residual-similarity gate
+(mechanical thresholds and the tool that applies it) is deferred to
+chapter 30 D1; chapter 30 binds the audit-tooling-gap.
 
 **D2.** A bound machine-readable manifest of the seven permitted-input
 classes (R1–R7) and the three forbidden-input classes (R8–R10)
 suitable for cross-checking commit-message and chapter-citation
 metadata against is deferred.
+
+**D3.** Retrospectively recording the §1.4A route for chapter
+revisions committed before R37–R44 were adopted — the chapters whose
+provenance footers record forbidden-class input without naming the
+role that took it or the clearance it passed — is deferred. R43 does
+not require it: those revisions were bound by the content standard of
+R8–R11, which this chapter leaves unchanged, and R26 bars curing a
+record gap by relaxing a rule. The work is therefore a record
+improvement rather than a remediation, and is taken chapter by
+chapter as each chapter is next revised.
 
 ## 1.15 Baseline Verifications
 
@@ -516,7 +843,17 @@ licenses).
   provenance ledger that operationalises the R27–R36 categories of
   §1.10–§1.11 and that this chapter's R19 now names as a fourth
   meta-chapter, and whose §34.1 taxonomy §1.11's five-category split
-  is a bounded part of).
-- *Permitted-input classes used:* the document set as it stands.
+  is a bounded part of). For §1.4A and the R20 *Forbidden corpus*
+  item: this repository's own role definitions under `.github/agents/`
+  and the two-team section of its contributor instructions
+  (`AGENTS.md` §2), read as the existing operational practice R37–R44
+  now bind and R44 subordinates; and the provenance footers of the
+  document set as they already stand, read to establish which bound
+  forms of the R20 item are in use.
+- *Permitted-input classes used:* the document set as it stands; this
+  repository's own instruction and role-definition files, cited as
+  evidence under R11's legal-position evidentiary-citation carve-out
+  (chapter 01 being the legal-position chapter that citation depends
+  on).
 - *Sibling-allowlist consultations:* none.
 - *Forbidden corpus:* not consulted.
