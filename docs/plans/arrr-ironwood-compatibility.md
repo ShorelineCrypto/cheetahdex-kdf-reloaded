@@ -5,6 +5,10 @@
 > Written to be readable without knowledge of KDF Reloaded internals: the **Overview** is for
 > everyone; §1 lists verified facts with sources; §2–§5 are implementation detail for our
 > engineers; §6 is the timeline; §7 the open items for the Pirate team; §9 the decisions log.
+>
+> **Start at §10.** It carries the current plan as of 2026‑10‑11 — one backend
+> (`lightwalletd`), Electrum removed, and a bump to a stable v6 release — and says which of
+> the earlier sections it supersedes.
 
 ## Overview
 
@@ -332,6 +336,10 @@ the ARRR light path).
 
 ## 4. Step 2 — upgrade the Zcash library stack
 
+> **Superseded in part by §10.4 step B (2026‑10‑11).** The target versions and the ordering
+> here are out of date: v6 reading requires `zcash_primitives 0.30.1`, and the bump is now a
+> hard prerequisite rather than a parallel track. The factual content below stands.
+
 Target line (mutually compatible on crates.io; MSRV 1.88, our toolchain is pinned at 1.98.0):
 
 | Crate | From | To |
@@ -385,6 +393,10 @@ byte‑identical before and after (gate 4).
 ---
 
 ## 5. Step 3 — Problem B: Ironwood‑era transactions
+
+> **Superseded in part by §10.4 steps C–E (2026‑10‑11).** This section assumes Electrum
+> remains a backend; it is being removed for ZHTLC coins. §5A's open design decision is
+> resolved in favour of the Zcash parser (§10.4 step D).
 
 Definition: *every ARRR transaction KDF Reloaded builds for a height at or after Ironwood
 activation is a version‑6 transaction committing to branch ID `0x37a5165b`; before activation
@@ -690,9 +702,7 @@ Decisions taken with the maintainer:
 - **A5 dropped (2026‑09‑21):** updating ARRR's entry in `GLEECBTC/coins` is the Pirate
   team's call, not ours; we do not edit another project's coin definition.
 - **The beta ships with both gates dormant (2026‑09‑21).** `ironwood_activation_time` and
-  `ironwood_activation_height` were confirmed to be **our own invention**: upstream KDF's
-  `ZcoinConsensusParams` declares no equivalent (checked live against
-  `KomodoPlatform/komodo-defi-framework` master and an Apr‑2026 reference copy), and no coin
+  `ironwood_activation_height` are **our own invention**: no coin
   in `GLEECBTC/coins` mentions Ironwood — ARRR is the only coin there carrying
   `consensus_params` at all. Since both A3 and A4 read `ironwood_activation_time` and both
   return `false` when it is absent, neither gate fires on a default installation. Accepted
@@ -822,6 +832,221 @@ Open items depending on Pirate's answers:
   Pirate‑specific vendored patch on `zcash_primitives`; q4 (no testnet) ⇒ regtest harness
   only, standardness unproven before mainnet.
 - q6 decides whether tip/broadcast/spend‑detection move from Electrum to `lightwalletd`.
+
+## 10. Revised plan (2026‑10‑11): one backend, stable v6
+
+**Sections 4 and 5 are superseded in part by this section.** Their step ordering and their
+assumption that Electrum remains a backend no longer hold; their factual content stands.
+
+### 10.1 Why the plan changed
+
+Three things arrived after activation, in this order:
+
+1. **The Electrum provider disappeared.** cipig's Pirate node never upgraded past Ironwood: on
+   2026‑10‑08 his `arrr.electrum1/2.cipig.net` ElectrumX *and* his
+   `electrum1/2.cipig.net:9447` lightwalletd all reported tip 4 161 184 with
+   `branchId=76b809bb`, against a real chain at ~4 167 700 and `37a5165b`. Both froze at the
+   first post‑activation block containing transactions. A probe of all ten Pirate‑official
+   hosts found **no ElectrumX anywhere**: they serve lightwalletd or HTTP only. So the
+   Electrum dependency has no healthy provider and nothing to wait for.
+2. **The chain's maintainer said the dependency is wrong in principle:** *"Pirate needs
+   lightwalletd not electrum, because of zk-snarks/zcash requires it."*
+3. **`lightwalletd` turns out to serve the transparent side too** — verified in §10.2, not
+   merely declared.
+
+### 10.2 Step A — the transparent surface, verified against the live network (done)
+
+Probed 2026‑10‑11. The method that distinguishes "works" from "always returns empty" is
+comparing an address with real history against a synthetic one: `RM6uyifBAuowR7LKyzkdSmsjzAUBvGTT1p`
+(the test chain's miner address, recovered from 300 input `scriptSig` pubkeys in the local
+fixture corpus) versus an unused address of the same form.
+
+| Function | RPC | Verdict |
+|---|---|---|
+| chain tip | `GetLatestBlock` | **works** |
+| compact blocks, block time | `GetBlock` / `GetBlockRange` | **works** |
+| raw transaction, mined height | `GetTransaction` (by `hash`) | **works** |
+| commitment‑tree anchor | `GetTreeState` | **works** |
+| mempool | `GetMempoolTx` | **works** |
+| consensus branch id | `GetLightdInfo` | **works** |
+| transparent history (spend detection) | `GetTaddressTxids` | **works** — streamed 8 661 transactions, ~1 MB, for the real address; empty for the control |
+| transparent UTXOs and balance | `GetAddressUtxos` | **works** — one UTXO returned for the real address; empty for the control |
+| broadcast | `SendTransaction` | **declared, untested** — needs a valid signed transaction |
+| transparent balance (direct) | `GetTaddressBalance` | **works** — see the correction below; several addresses per call, reply carries only `valueZat` |
+| fee rate | — | not needed; ARRR declares a fixed per‑kB fee |
+
+**Corrected 2026‑10‑11 after reading Pirate's published source.** Two of the three findings
+first recorded here were wrong, in opposite directions — one blamed Pirate for our own defect,
+the other understated a real one. Both corrections are kept visible rather than silently
+rewritten, because the first is the kind of mistake worth not repeating.
+
+- **`GetTaddressBalance` works; the failure was ours.** It was reported here as returning
+  `-5: Invalid addresses` for every address. The probe encoded `AddressList` as field 1
+  *containing* a field‑1 submessage, where `repeated string addresses = 1` requires a flat
+  `0a <len> <addr>` per address. With the correct encoding the same address on the same server
+  returns `grpc-status 0` and a balance of 17 935 616.0014 ARRR, verified directly. Nothing to
+  report to Pirate, and no workaround is needed. The lesson generalises: a gRPC error carrying a
+  *daemon* error code (`-5`) is evidence the request reached the node, which should have
+  prompted suspicion of the request rather than of the server.
+- **P2SH lookups are broken by a Pirate daemon defect**, not merely unproven. The transparent
+  index does store P2SH rows, but under the wrong key type, so a `b…` query can never match
+  them. `GetAddressType` (`src/main.cpp:3378‑3403`) guards on
+  `vDest.index() != std::variant_npos`, which for a `std::variant` is always true, so the
+  `TX_SCRIPTHASH → keyType = 2` branch is dead code and every indexed output is written as
+  type 1; `CBitcoinAddress::GetIndexKey` (`src/base58.cpp:298‑312`) resolves a
+  `SCRIPT_ADDRESS` to type 2, and the type is the first byte of the LevelDB key, so the two are
+  disjoint ranges. It reads as a `boost::variant` → `std::variant` port regression — the
+  correct form survives for the input path in `src/txmempool.cpp:190‑192`. **So
+  `getaddresstxids` / `getaddressutxos` / `getaddressbalance` are empty forever for the HTLC's
+  address, however much activity it has**, and the earlier "accepted, returned empty" probe was
+  not evidence of coverage.
+
+  *Workaround, source‑derived and unverified at runtime:* query the redeem script's `hash160`
+  re‑encoded as an **R‑address** (version byte 60), which hashes to the same twenty bytes under
+  type 1, where the rows actually are. Two constraints follow: the implementation must prove
+  this on first use rather than trust it, and it must probe **both** encodings, because the
+  stored type depends on which binary indexed the block — a datadir indexed by an older
+  boost‑variant build may hold P2SH under type 2. It must fail loudly rather than report "not
+  spent" if neither resolves.
+- **`GetTaddressTxids`' mid‑stream failure is fully explained**, and is neither a cap nor a
+  range limit — there are none. The daemon cannot serve a transaction that is fully spent or
+  has no transparent output when the tx index is off (`src/main.cpp:2631‑2696`), and
+  `lightwalletd` returns on the first such failure (`frontend/service.go:208`), ending the
+  stream. It also buffers a height group and flushes only on seeing a higher height
+  (`service.go:212‑224`), so the last group is always lost — which is exactly why 8 662
+  messages became 8 661 delivered. Only seven 1 000‑block windows of the whole test chain are
+  affected. Four rules follow: request in bounded windows; on that error bisect and skip the
+  offending height rather than failing the sync; resume from `last_received_height` and **not**
+  `+ 1`; and always send `start >= 1` and `end >= 1`, because the daemon applies the range only
+  when both exceed zero (`src/rpc/misc.cpp:1466‑1474`) and `start = 0` silently means the whole
+  chain.
+- **`TxFilter{block, index}` is not served**; only `TxFilter{hash}`, and the txid must be in
+  **internal** (compact‑block) byte order — display order errors.
+
+The transparent index is also **opt‑in**: `-addressindex=1` is required and switching it on an
+existing datadir forces a reindex. Both probed servers have it enabled, and it can be detected
+from outside — with the index off, `GetTaddressBalance` returns
+`-5: No information available for address` rather than a balance.
+
+One consensus fact found while reading, and it is in our favour: on a private chain a
+non‑coinbase transparent output is legal in exactly one shape —
+`vin` empty, `vout.size() == 2`, `vout[0]` pay‑to‑script‑hash and `vout[0].IsRedeemScriptReveal(vout[1])`
+(`src/main.cpp:1697‑1711`, `1740‑1752`) — and `IsRedeemScriptReveal`
+(`src/script/script.cpp:259‑284`) is hard‑coded to the 110‑byte atomic‑swap redeem‑script
+shape. The HTLC is therefore a consensus‑blessed special case whose shape cannot drift, which
+is also why a second implementation cannot diverge from ours on it.
+
+### 10.3 Maintainer decisions (2026‑10‑11)
+
+- **Electrum support is removed for ZHTLC coins, not retained behind a switch.** There is no
+  need for it and no working provider. Recorded as a deliberate divergence from GLEEC KDF with
+  the documentation the compatibility rule requires (§10.5).
+- **The crate bump targets stable v6**, not a prerelease and not a git dependency.
+
+### 10.4 Steps
+
+**B — bump the Zcash stack to published stable releases.** A hard prerequisite for everything
+else, because v6 *reading* does not work today: in the pinned `zcash_primitives 0.28.0` the v6
+arm of `TxVersion::read` sits behind `#[cfg(zcash_unstable = "nu7")]`, a rustc cfg we do not
+set, so a v6 transaction is rejected as "Unknown transaction format". It is **unconditional in
+0.30.1**, which is published and stable.
+
+| Crate | Pinned now | Target | Note |
+|---|---|---|---|
+| `zcash_primitives` | 0.28.0 | **0.30.1** | v6 unconditional |
+| `zcash_client_backend` | 0.23.0 | 0.24.0 | keep `orchard` off |
+| `zcash_client_sqlite` | 0.21.1 | 0.22.0 | wallet‑DB migration |
+| `zcash_protocol` | 0.9.0 | 0.10.6 | carries `BranchId::Nu6_3` |
+| `sapling-crypto` | 0.7.0 | 0.9.0 | |
+
+These are **newer than the Pirate node's own stack**, which pins `zcash_primitives 0.29.0` plus
+two `-rc.1` prereleases via git. We take published releases and keep our own ZIP‑212 handling,
+which is narrower than the fork's: theirs patches `plaintext_version_is_valid` globally, so
+their builder also accepts both lead bytes, whereas R39.8.0am confines the behaviour to
+decryption with a test pinning that transaction construction still resolves to Sapling. Re‑check
+that the fix is still required after the bump; the upstream Canopy rule is unchanged, so expect
+it to be.
+
+**C — `lightwalletd` becomes the only backend.** Move every function in §10.2 off Electrum;
+make the Electrum server list unused for ZHTLC; give all shielded construction paths **one**
+height authority, which is what fixes the refund defect; add a `GetLightdInfo`
+consensus‑branch‑id check that **excludes** off‑branch servers rather than reporting them. With
+a single backend the two‑backend divergence tolerance largely dissolves and the branch‑id check
+replaces it — three of the eight published `light_wallet_d_servers` entries are cipig's and
+serve a different fork, and an off‑branch server above the wallet's anchor can otherwise make
+the wallet rewind and follow that server's chain.
+
+> **Step C's branch‑id check inverts if written naively, and this section originally ordered it
+> wrongly.** "Expected branch id" has to be relative to something. Derived from the coin's
+> configured network‑upgrade heights — the obvious reading — the expectation at today's ARRR
+> heights is the **pre‑upgrade** value, because `ironwood_activation_height` is optional
+> (R39.6.4a), no published configuration carries it, and a test pins that the branch lookup
+> still returns Sapling at any height. A naive check would therefore have **admitted the stale
+> fork and excluded every healthy endpoint** — the exact inverse of the intent, shipped as a
+> safety feature. CRD `R39.11.7a` is written to be correct in both configuration states and
+> `T39.11.f` pins the inversion case, so the ordering hazard is closed by the requirement rather
+> than by sequencing C after E. **Carry this into the Coder prompt**; it is the single most
+> likely way to implement this step backwards.
+
+> **Step C's one hard dependency is the P2SH defect in §10.2.** Spend detection for the swap
+> HTLC rests on a source‑derived, runtime‑unverified workaround (query the redeem script's
+> `hash160` as an R‑address). If that workaround does not hold, the swap half of this step has
+> no indexed way to find an HTLC and would need either a fix released by Pirate or a different
+> detection strategy — scanning blocks for the known 110‑byte redeem‑script shape is the
+> obvious fallback, since consensus guarantees it is revealed in `vout[1]`. **Prove the
+> workaround on a funded HTLC before building on it.** The wallet half of this step — tip,
+> broadcast, raw transactions, balance, history, mempool, anchor — has no such dependency and
+> can proceed regardless.
+
+> **A related risk, measured rather than left open.** An HTLC spend is exactly the transaction
+> shape a node without a transaction index cannot serve — a transparent P2SH input in, a
+> shielded output out, so no transparent output — which would hide the `scriptSig` carrying the
+> swap secret, and a compact block cannot substitute because it carries no `scriptSig`. Probing
+> the provider set on 2026‑10‑11 with a fully shielded mainnet transaction (which only the
+> transaction index can serve) resolved it on **six of seven** endpoints:
+> `lightwalletd1`/`lightwalletd2.cryptoforge.cc`, `pirate.mathnodes.com` and
+> `arrr`/`arrr2`/`arrr3.qortal.link`. So this is a reportable condition, not a blocker. The
+> seventh, `lightd1.pirate.black`, returned an nginx **502** for that method while answering
+> `GetLightdInfo` and `GetLatestBlock` normally — which is its own constraint: **endpoint
+> admission cannot rest on one probe**, because an endpoint can pass admission and then fail
+> the methods actually needed. Recorded as CRD `D39.11.g`.
+
+**D — route ARRR's transaction parsing to the Zcash parser.** The shared UTXO parser applies
+the v4 layout to any overwintered version ≥ 4 with double‑SHA256 txids, so it mis‑parses v6 and
+computes the wrong txid by construction. It cannot simply be deleted: `UtxoTx` is referenced in
+42 files and is the transaction type for every UTXO coin. `zcash_primitives::Transaction::read`
+handles Sprout, v3, v4, v5 and v6 in one parser, so routing ARRR to it removes the duplication
+*and* keeps the v4 history an old wallet still needs when restoring from a pre‑fork birthday.
+
+**E — v6 construction, then lift the gates.** Map `NetworkUpgrade::Nu6_3` to the Ironwood
+activation height so the builder selects v6; implement runtime activation‑height discovery,
+which is mandatory because the Pirate team will publish no height; correct the built‑in
+activation‑time guard, whose test/regtest withholding keys on address HRPs and therefore does
+not detect Pirate's test chain, which presents as mainnet; then set `IRONWOOD_V6_SUPPORTED`
+true, which makes R39.6.4b and R39.6.4c inert by their own terms.
+
+**F — verification.** The offline corpus first (`local/arrr-ironwood-fixtures`, 19 transactions
+covering v4, Sapling‑only v6, Ironwood‑only v6 and mixed), then the test chain while it lasts,
+then mainnet.
+
+### 10.5 Obligations this creates
+
+- **A documented divergence.** Removing Electrum changes behaviour relative to GLEEC KDF, so
+  `RELOADED_VS_GLEEC.md`, `docs/GLEEC_COMPATIBILITY.md` and the governing CRD chapter must be
+  updated in the same commit as the behaviour. Unlike the Ironwood gates there is no opt‑in to
+  offer, because the removed path has no working provider; the entry must say so plainly rather
+  than naming a switch that does not exist.
+- **CRD chapter 39 §39.11 reverses.** R39.11.5–R39.11.7 move from "a non‑empty Electrum server
+  list is mandatory and shielded‑backend‑only operation is unsupported" to the opposite;
+  R39.11.9–R39.11.12 simplify to a single authority; D39.11.a resolves; D39.11.b largely
+  dissolves in favour of the branch‑id check; D39.11.c resolves to the Zcash‑parser option.
+  This is a KDF Spec Reader pass plus a Dirty Gate round.
+- **Sequencing against other sessions.** `fix/activation-api-parity` holds chapter 39 Part D /
+  §39.10 and has deliberately held the "all Electrum servers unusable" behaviour pending this
+  decision; it should finish without implementing it, since the path is being removed.
+  `fix/zcoin-reorg-stale-anchor` does not conflict. §39.11 is amended after Part D merges.
+
+---
 
 ## Working rules and log
 
