@@ -2001,6 +2001,14 @@ backends is:
 | Native mode, full-node daemon unreachable | shielded sync reports `TemporaryError` and retries as above; if the height step fails: `Transport` (string) |
 | Shielded sync process stops without reporting completion | terminal `Error`, `Internal` (string) |
 
+> **Held (maintainer decision pending, 2026-10-11).** Whether Light mode must
+> fail when every Electrum server is unusable, or may continue with
+> lightwalletd only, is an open maintainer decision (it is live for ARRR, whose
+> Electrum servers can lag the chain). Until it is taken, Reloaded keeps its
+> current behavior for that row (unreachable Electrum servers are detected
+> while the coin is built and end the task with `CoinCreationError`), and
+> `fix/activation-api-parity` does not implement the row above.
+
 No Z-coin backend failure is reported as an HTTP 5xx on the `status` call
 itself; the only 5xx responses come from `init` (R39.10.10) or from the
 framework errors of §55.2.
@@ -2038,41 +2046,34 @@ framework errors of §55.2.
 > Proposed upstream fix: treat "skip requested and a prior synced height
 > exists" as the resume condition.
 
-> **Reloaded status (informative).** Deviations of the current Reloaded code
-> from §39.10, for the clean implementer:
+> **Reloaded status (informative).** On `fix/activation-api-parity` all twelve
+> deviations previously listed here are resolved: WASM routing (but see item 1
+> below), optional `mode`, the `"Electrum"` / `servers` synonyms and the
+> connection bounds, the `scan_blocks_per_iteration` parse failure, `"Native"`
+> unknown on WASM, `Transport` for post-build height and balance failures,
+> `CoinCreationError {ticker, error}` for an unresolvable sync date, the
+> R39.10.14 outage mapping with the `TemporaryError` in-progress value and an
+> uncapped retry about every 10 s (maintainer decision: follow the reference),
+> `CoinCreationError` for the hardware-wallet class, the bare
+> `ZCashParamsNotFound` token, the registration race and the cancel set.
+> Remaining deviations:
 >
-> 1. `task::enable_z_coin::*` and the flat `init_z_coin*` aliases are routed on
->    native builds only; R39.10.1--R39.10.2 require them on WASM as well.
-> 2. `activation_params.mode` is required (a missing `mode` is an
->    `InvalidRequest`); R39.10.4 makes it optional.
-> 3. The `"Electrum"` synonym of `"Light"`, the `servers` synonym of
->    `electrum_servers`, and `min_connected` / `max_connected` are not
->    accepted (the connection bounds are fixed); R39.10.4 requires them.
-> 4. `scan_blocks_per_iteration: 0` is accepted and clamped to 1; R39.10.4
->    requires a parse failure.
-> 5. `"Native"` deserializes on WASM; R39.10.4 requires it to be an unknown
->    variant there.
-> 6. Failures to read the block height or the balance after the coin is built
->    are reported as `Internal`; R39.10.11 requires `Transport` with a string.
-> 7. A sync-start date that cannot be resolved is reported as `Internal` and
->    loses its ticker; R39.10.11 requires `CoinCreationError {ticker, error}`.
-> 8. Any lightwalletd download or wallet-scan failure during activation ends
->    the task with `Internal` (ticker and activation tip are dropped from the
->    wire). R39.10.14 requires: all endpoints unreachable at the start ->
->    `CoinCreationError {ticker, error}`; failures after the sync started ->
->    `InProgress` `{"TemporaryError": string}` with retry, task kept alive.
->    There is no `TemporaryError` in-progress value today (R39.10.7).
-> 9. The hardware-wallet-not-supported class maps to `PrivKeyNotAllowed`
->    (HTTP 400 at mmrpc level); R39.10.11/R39.10.13 require `CoinCreationError`
->    for an unsupported key policy and `Internal` for the residual
->    hardware-wallet class, and forbid `PrivKeyNotAllowed`.
-> 10. For missing Sapling parameters `error_data.error` is a descriptive
->     sentence naming the path; R39.10.12 requires the bare token.
-> 11. A task that loses the registration race to a concurrent activation of
->     the same ticker reports success instead of `CoinIsAlreadyActivated`
->     (shared standalone-task behaviour, decided in §55.5).
-> 12. `cancel` errors use the standalone activation discriminant set rather
->     than the framework cancel set of §55.2 (shared; decided there).
+> 1. **WebAssembly.** The family is routed on WASM, but a WASM activation ends
+>    with `CoinCreationError {ticker, error}` stating that shielded activation
+>    is not available in the WebAssembly build. The WASM build has no shielded
+>    wallet database, so it cannot compute a balance, and reporting a zero
+>    balance instead would misstate the user's funds.
+> 2. **Future sync date.** The reference rejects a sync date in the future
+>    with `CoinCreationError` (R39.10.11). Reloaded clamps a start beyond the
+>    current tip to the tip (R39.8.0h status note). This is an open maintainer
+>    decision.
+> 3. **Held row.** Light mode with every Electrum server unreachable keeps
+>    Reloaded's build-time `CoinCreationError` (see the held note under the
+>    backend table).
+> 4. A retry after `TemporaryError` re-runs the fetch with the original
+>    `sync_params`, so a re-anchored wallet can rescan once per retry.
+> 5. In Native mode a local wallet-database scan failure still ends the task
+>    with `Internal`.
 
 ### 39.10.7 Tests
 

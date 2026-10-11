@@ -94,6 +94,9 @@ fn flat_task_aliases_stay_routed() {
         "init_trezor",
         "init_trezor_status",
         "init_trezor_user_action",
+        "init_z_coin",
+        "init_z_coin_status",
+        "init_z_coin_user_action",
     ] {
         assert!(
             DISPATCHER_SOURCE.contains(&format!("\"{method}\"")),
@@ -261,4 +264,44 @@ fn trezor_connection_status_method_is_routed() {
         DISPATCHER_SOURCE.contains("\"trezor_connection_status\""),
         "v2 dispatcher lost routing for the native-only method `trezor_connection_status`"
     );
+}
+
+#[test]
+fn z_coin_activation_methods_are_routed_on_every_target() {
+    // CRD ch. 39 R39.10.1-R39.10.2: the shielded coin's task methods and flat aliases are routed on
+    // native and WASM alike, so none of them may sit inside a native-only block.
+    let native_only_methods_at = DISPATCHER_SOURCE
+        .find("native_only_methods => match native_only_methods")
+        .expect("native-only method block not found");
+    let native_only_task_at = DISPATCHER_SOURCE
+        .find("native_only_task => match native_only_task")
+        .expect("native-only task block not found");
+    // The flat aliases live in the main dispatcher, the namespaced methods in the task dispatcher; each
+    // must sit before the native-only block of its own dispatcher.
+    for (methods, native_only_block_at) in [
+        (
+            ["init_z_coin", "init_z_coin_status", "init_z_coin_user_action"].as_slice(),
+            native_only_methods_at,
+        ),
+        (
+            [
+                "enable_z_coin::init",
+                "enable_z_coin::status",
+                "enable_z_coin::user_action",
+                "enable_z_coin::cancel",
+            ]
+            .as_slice(),
+            native_only_task_at,
+        ),
+    ] {
+        for method in methods {
+            let arm_at = DISPATCHER_SOURCE
+                .find(&format!("\"{method}\" =>"))
+                .unwrap_or_else(|| panic!("v2 dispatcher lost routing for `{method}`"));
+            assert!(
+                arm_at < native_only_block_at,
+                "`{method}` is routed only inside a native-only block"
+            );
+        }
+    }
 }

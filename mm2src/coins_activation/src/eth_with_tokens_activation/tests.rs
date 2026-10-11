@@ -246,6 +246,24 @@ fn a_wallet_only_coin_needs_no_swap_contract() {
 }
 
 #[test]
+fn a_v2_activation_without_a_configured_value_waits_for_three_confirmations() {
+    // CRD ch.35 R35.1.1, erratum (g): the mmrpc 2.0 default is 3 (the legacy `enable` keeps 1).
+    let ctx = iguana_ctx();
+    let node = healthy_node();
+    let mut req = request_json(
+        std::slice::from_ref(&node.url),
+        json!({ "swap_contract_address": null }),
+    );
+    req["ticker"] = json!("ETHW");
+    let req: Req = serde_json::from_value(req).unwrap();
+    activate(&ctx, req).unwrap_or_else(|e| panic!("activation failed: {}", e));
+    match block_on(lp_coinfind(&ctx, "ETHW")).unwrap().unwrap() {
+        coins::MmCoinEnum::EthCoin(coin) => assert_eq!(coin.required_confirmations(), 3),
+        other => panic!("expected an EVM coin, got {other:?}"),
+    }
+}
+
+#[test]
 fn missing_and_empty_nodes_are_at_least_one_node_required() {
     let ctx = iguana_ctx();
     let empty = request(&[], json!({}));

@@ -1,5 +1,5 @@
 use super::z_rpc::z_coin_grpc;
-use super::{CheckPointBlockInfo, ZCoinBuildError, ZcoinConsensusParams, ZcoinDecryptionParams};
+use super::{CheckPointBlockInfo, ShieldedFetchError, ZCoinBuildError, ZcoinConsensusParams, ZcoinDecryptionParams};
 use crate::utxo::utxo_common::big_decimal_from_sat_unsigned;
 use common::mm_number::BigDecimal;
 use common::{calc_total_pages, log, PagingOptionsEnum};
@@ -294,19 +294,25 @@ impl ZCoinShieldedHistory {
         requested_start_height: Option<u64>,
         skip_sync_params: bool,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
-    ) -> Result<u64, String> {
-        let Some(fetch_plan) = self.lightwalletd_fetch_plan(
-            consensus_params,
-            target_height,
-            requested_start_height,
-            skip_sync_params,
-        )?
+    ) -> Result<u64, ShieldedFetchError> {
+        // Local wallet storage that cannot be read means the sync cannot start.
+        let Some(fetch_plan) = self
+            .lightwalletd_fetch_plan(
+                consensus_params,
+                target_height,
+                requested_start_height,
+                skip_sync_params,
+            )
+            .map_err(ShieldedFetchError::BeforeSync)?
         else {
             log::info!(
                 "ZCoin shielded wallet DB already scanned through requested lightwalletd target height {}",
                 target_height
             );
-            return Ok(self.scanned_height()?.unwrap_or(0));
+            return Ok(self
+                .scanned_height()
+                .map_err(ShieldedFetchError::BeforeSync)?
+                .unwrap_or(0));
         };
 
         log::info!(
@@ -321,6 +327,9 @@ impl ZCoinShieldedHistory {
         );
 
         let mut errors = Vec::new();
+        // The sync counts as started as soon as any server got past its initial connection and
+        // chain-state query; only then is an overall failure a retriable mid-sync failure.
+        let mut sync_started = false;
         for server in servers {
             match self
                 .fetch_compact_blocks_from_server(consensus_params.clone(), server, fetch_plan, target_height, progress)
@@ -329,6 +338,7 @@ impl ZCoinShieldedHistory {
                 Ok(fetched_height) => return Ok(fetched_height),
                 Err(e) => {
                     log::warn!("ZCoin lightwalletd server {} failed: {}", server, e);
+                    sync_started |= matches!(e, ShieldedFetchError::DuringSync(_));
                     errors.push(format!("{}: {}", server, e));
                 },
             }
@@ -340,7 +350,11 @@ impl ZCoinShieldedHistory {
             format!("All lightwalletd servers failed: {}", errors.join("; "))
         };
         log::warn!("ZCoin lightwalletd fetch failed: {}", error);
-        Err(error)
+        Err(if sync_started {
+            ShieldedFetchError::DuringSync(error)
+        } else {
+            ShieldedFetchError::BeforeSync(error)
+        })
     }
 
     fn lightwalletd_fetch_plan(
@@ -475,7 +489,7 @@ impl ZCoinShieldedHistory {
         fetch_plan: LightwalletdFetchPlan,
         target_height: u64,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
-    ) -> Result<u64, String> {
+    ) -> Result<u64, ShieldedFetchError> {
         let started = Instant::now();
         let start_height = fetch_plan.start_height;
         log::info!(
@@ -485,20 +499,25 @@ impl ZCoinShieldedHistory {
             target_height
         );
 
-        let mut client = Self::connect_lightwalletd(server).await?;
+        // Connecting, the local resets and the initial chain-state query below happen before any block
+        // is downloaded: a failure there means the sync could not start (CRD ch.39 R39.10.14).
+        let mut client = Self::connect_lightwalletd(server)
+            .await
+            .map_err(ShieldedFetchError::BeforeSync)?;
 
         if fetch_plan.reset_stale_empty_checkpoint {
             log::info!(
                 "ZCoin shielded wallet DB has stale empty checkpoint; resetting before fetching from height {}",
                 start_height
             );
-            self.reset_empty_wallet_scan_state()?;
+            self.reset_empty_wallet_scan_state()
+                .map_err(ShieldedFetchError::BeforeSync)?;
         } else if fetch_plan.reset_scan_state {
             log::info!(
                 "ZCoin shielded wallet DB scan state reset requested before fetching from height {}",
                 start_height
             );
-            self.reset_wallet_scan_state()?;
+            self.reset_wallet_scan_state().map_err(ShieldedFetchError::BeforeSync)?;
         }
 
         // A rewind past a chain divergence lowers the anchor, so the fetch has to
@@ -507,7 +526,8 @@ impl ZCoinShieldedHistory {
         let start_height = if start_height > 0 {
             let anchor = self
                 .ensure_lightwalletd_chain_state(&mut client, consensus_params.clone(), start_height - 1)
-                .await?;
+                .await
+                .map_err(ShieldedFetchError::BeforeSync)?;
             if anchor + 1 != start_height {
                 log::info!(
                     "ZCoin lightwalletd fetch start moved from {} to {} after re-anchoring the wallet",
@@ -543,25 +563,27 @@ impl ZCoinShieldedHistory {
                 {
                     let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
                     let _guard = mutation_lock.lock();
-                    preserve_database_for_rebuild(&self.compact_blocks_path, "invalid-chain")?;
-                    initialize_compact_db(&self.compact_blocks_path)?;
+                    preserve_database_for_rebuild(&self.compact_blocks_path, "invalid-chain")
+                        .map_err(ShieldedFetchError::DuringSync)?;
+                    initialize_compact_db(&self.compact_blocks_path).map_err(ShieldedFetchError::DuringSync)?;
                 }
             },
         }
         progress(fetched_height, target_height);
         let mut batch_start = fetched_height
             .checked_add(1)
-            .ok_or_else(|| "Compact block height overflow".to_owned())?;
+            .ok_or_else(|| ShieldedFetchError::DuringSync("Compact block height overflow".to_owned()))?;
         while batch_start <= target_height {
             let batch_end = std::cmp::min(target_height, batch_start + LIGHTWALLETD_BLOCK_BATCH_SIZE - 1);
             fetched_height = self
                 .fetch_compact_block_batch_from_server(&mut client, batch_start, batch_end)
-                .await?;
+                .await
+                .map_err(ShieldedFetchError::DuringSync)?;
             if fetched_height < batch_end {
-                return Err(format!(
+                return Err(ShieldedFetchError::DuringSync(format!(
                     "lightwalletd returned compact blocks through {}, below requested batch end {}",
                     fetched_height, batch_end
-                ));
+                )));
             }
             progress(fetched_height, target_height);
             batch_start = batch_end + 1;

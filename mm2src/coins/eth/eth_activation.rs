@@ -62,8 +62,13 @@ pub struct EthCoinActivationParams {
     pub swap_v2_contracts: Option<SwapV2Contracts>,
     /// The NFT maker v2 swap contract.
     pub nft_swap_v2_contract: Option<Address>,
-    /// Swap confirmations of the platform coin; the coin configuration, then `1`, when absent.
+    /// Swap confirmations of the platform coin; the coin configuration, then
+    /// [`Self::default_required_confirmations`], when absent.
     pub required_confirmations: Option<u64>,
+    /// The confirmations used when neither the request nor the coin configuration gives a value: `1` for the
+    /// legacy `enable`/`electrum` methods ([`LEGACY_EVM_REQUIRED_CONFIRMATIONS`]), `3` for the mmrpc 2.0 EVM
+    /// methods ([`V2_EVM_REQUIRED_CONFIRMATIONS`]).
+    pub default_required_confirmations: u64,
     /// Whether the transaction history is preloaded in the background.
     pub tx_history: bool,
     /// The gas-station endpoint used for legacy gas-price estimation.
@@ -96,6 +101,7 @@ impl EthCoinActivationParams {
             swap_v2_contracts: None,
             nft_swap_v2_contract: None,
             required_confirmations: req["required_confirmations"].as_u64(),
+            default_required_confirmations: LEGACY_EVM_REQUIRED_CONFIRMATIONS,
             tx_history: req["tx_history"].as_bool().unwrap_or(false),
             gas_station_url,
             gas_station_decimals,
@@ -389,6 +395,24 @@ async fn probe_eth_nodes(
     Ok(web3_instances)
 }
 
+/// Default confirmations of the legacy `enable`/`electrum` EVM methods when neither the request nor the coin
+/// configuration gives a value (unchanged from before the mmrpc 2.0 default was introduced).
+pub const LEGACY_EVM_REQUIRED_CONFIRMATIONS: u64 = 1;
+/// Default confirmations of the mmrpc 2.0 EVM methods (`enable_eth_with_tokens`, `task::enable_eth`).
+pub const V2_EVM_REQUIRED_CONFIRMATIONS: u64 = 3;
+
+/// The swap confirmations of an EVM platform coin: the request, else the coin configuration, else `default`.
+///
+/// Docs vs reference (CRD ch.35 R35.1.1, erratum (g)): the public docs state a default of 3. The reference
+/// version uses the coin configuration, else 1. Reloaded implements the docs' default of 3 by maintainer
+/// decision (2026-10-11) for the mmrpc 2.0 methods only; the legacy methods keep 1. The 3 is also the rule
+/// the docs' own BCH page states: a coin without a configured value waits for the safer of the two documented numbers. A token falls back to "its configuration, else
+/// the platform's effective value" instead (R35.1.1), so this default reaches a token only through its
+/// platform.
+pub(crate) fn platform_required_confirmations(requested: Option<u64>, conf: &Json, default: u64) -> u64 {
+    requested.unwrap_or_else(|| conf["required_confirmations"].as_u64().unwrap_or(default))
+}
+
 /// Shared EVM-coin builder body: identical for every signing policy except how the [`EthSigner`] and the
 /// [`DerivationMethod`] are constructed.
 pub(crate) async fn build_eth_coin(
@@ -455,12 +479,12 @@ pub(crate) async fn build_eth_coin(
         _ => return MmError::err(EthCoinBuildError::Internal("Expect ETH or ERC20 protocol".to_owned())),
     };
 
-    // The request overrides the configuration; without either, 1. The docs state a default of 3, the reference does
-    // not (CRD ch.35 R35.1.1, erratum (g); open maintainer decision).
-    let required_confirmations = params
-        .required_confirmations
-        .unwrap_or_else(|| conf["required_confirmations"].as_u64().unwrap_or(1))
-        .into();
+    let required_confirmations = platform_required_confirmations(
+        params.required_confirmations,
+        conf,
+        params.default_required_confirmations,
+    )
+    .into();
 
     let sign_message_prefix: Option<String> = json::from_value(conf["sign_message_prefix"].clone()).unwrap_or(None);
 
@@ -556,6 +580,41 @@ mod tests {
             taker_swap_v2_contract: Address::default(),
         });
         assert!(invalid_payload(zero_v2.validate_swap_contracts(&conf)));
+    }
+
+    #[test]
+    fn platform_confirmations_default_to_the_config_value_then_the_method_default() {
+        // CRD ch.35 R35.1.1: request, else coin config, else the method family's default (v2: 3).
+        let v2 = V2_EVM_REQUIRED_CONFIRMATIONS;
+        assert_eq!(
+            platform_required_confirmations(Some(5), &json!({ "required_confirmations": 2 }), v2),
+            5
+        );
+        assert_eq!(
+            platform_required_confirmations(None, &json!({ "required_confirmations": 2 }), v2),
+            2
+        );
+        assert_eq!(platform_required_confirmations(None, &json!({}), v2), 3);
+        assert_eq!(
+            platform_required_confirmations(None, &json!({ "required_confirmations": "x" }), v2),
+            3
+        );
+        assert_eq!(platform_required_confirmations(Some(1), &json!({}), v2), 1);
+    }
+
+    #[test]
+    fn legacy_request_keeps_the_default_of_one_confirmation() {
+        let req = json!({ "urls": ["http://localhost:8545"] });
+        let params = EthCoinActivationParams::from_legacy_request(&req).unwrap();
+        assert_eq!(params.default_required_confirmations, 1);
+        assert_eq!(
+            platform_required_confirmations(
+                params.required_confirmations,
+                &json!({}),
+                params.default_required_confirmations
+            ),
+            1
+        );
     }
 
     #[test]

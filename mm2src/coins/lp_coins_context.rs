@@ -7,7 +7,6 @@ pub enum MmCoinEnum {
     QtumCoin(QtumCoin),
     Qrc20Coin(Qrc20Coin),
     EthCoin(EthCoin),
-    #[cfg(not(target_arch = "wasm32"))]
     ZCoin(ZCoin),
     Bch(BchCoin),
     SlpToken(SlpToken),
@@ -55,7 +54,6 @@ impl From<SlpToken> for MmCoinEnum {
 impl From<LightningCoin> for MmCoinEnum {
     fn from(c: LightningCoin) -> MmCoinEnum { MmCoinEnum::LightningCoin(c) }
 }
-#[cfg(not(target_arch = "wasm32"))]
 impl From<ZCoin> for MmCoinEnum {
     fn from(c: ZCoin) -> MmCoinEnum { MmCoinEnum::ZCoin(c) }
 }
@@ -80,7 +78,6 @@ impl Deref for MmCoinEnum {
             MmCoinEnum::SlpToken(ref c) => c,
             #[cfg(not(target_arch = "wasm32"))]
             MmCoinEnum::LightningCoin(ref c) => c,
-            #[cfg(not(target_arch = "wasm32"))]
             MmCoinEnum::ZCoin(ref c) => c,
             MmCoinEnum::Test(ref c) => c,
             #[cfg(not(target_arch = "wasm32"))]
@@ -390,7 +387,6 @@ pub enum CoinProtocol {
     /// (R39.6.4). Because `consensus_params` is required, a bare
     /// `{"type":"ZHTLC"}` with no `protocol_data` is non-conformant and fails
     /// deserialization by design.
-    #[cfg(not(target_arch = "wasm32"))]
     ZHTLC(ZcoinProtocolInfo),
     SIA,
     TENDERMINT {

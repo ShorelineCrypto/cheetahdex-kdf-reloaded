@@ -19,6 +19,9 @@ use ser_error_derive::SerializeErrorType;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{self as json, Value as Json};
 
+/// The node colour used when the request has none (CRD ch.41 R41.2.4).
+const DEFAULT_NODE_COLOR: &str = "2b6680";
+
 const DEFAULT_LISTENING_PORT: u16 = 9735;
 
 impl TryPlatformCoinFromMmCoinEnum for UtxoStandardCoin {
@@ -325,8 +328,10 @@ impl L2ActivationOps for LightningCoin {
     fn validate_activation_params(
         activation_params: Self::ActivationParams,
     ) -> Result<Self::ValidatedParams, MmError<Self::ActivationError>> {
-        // The public `LightningActivationParams` table states a colour default of `2b6680`; the reference defaults
-        // to `000000` and so does Reloaded (CRD ch.41 R41.2.4).
+        // Docs vs reference (CRD ch.41 R41.2.4): the public `LightningActivationParams` table states a colour
+        // default of `2b6680`; the reference defaults to `000000`. Reloaded implements the documented `2b6680`
+        // by maintainer decision (2026-10-11): the docs are explicit and the value is cosmetic, it is only the
+        // node's colour in the network graph.
         if activation_params.name.len() > 32 {
             return MmError::err(
                 LightningValidationErr::InvalidRequest("Node name length can't be more than 32 characters".into())
@@ -338,7 +343,7 @@ impl L2ActivationOps for LightningCoin {
 
         let mut node_color = [0u8; 3];
         hex::decode_to_slice(
-            activation_params.color.unwrap_or_else(|| "000000".into()),
+            activation_params.color.unwrap_or_else(|| DEFAULT_NODE_COLOR.into()),
             &mut node_color as &mut [u8],
         )
         .map_to_mm(|_| LightningValidationErr::InvalidRequest("Invalid Hex Color".into()))
@@ -452,8 +457,8 @@ impl InitL2ActivationOps for LightningCoin {
     fn validate_activation_params(
         activation_params: Self::ActivationParams,
     ) -> Result<Self::ValidatedParams, MmError<Self::ActivationError>> {
-        // Colour default `000000`, not the `2b6680` of the public docs table: see the one-shot twin above (CRD
-        // ch.41 R41.2.4).
+        // Colour default `2b6680` as the public docs table states, not the reference's `000000`: see the one-shot
+        // twin above (CRD ch.41 R41.2.4).
         if activation_params.name.len() > 32 {
             return MmError::err(LightningTaskError::Validation(
                 "Node name length can't be more than 32 characters".into(),
@@ -464,7 +469,7 @@ impl InitL2ActivationOps for LightningCoin {
 
         let mut node_color = [0u8; 3];
         hex::decode_to_slice(
-            activation_params.color.unwrap_or_else(|| "000000".into()),
+            activation_params.color.unwrap_or_else(|| DEFAULT_NODE_COLOR.into()),
             &mut node_color as &mut [u8],
         )
         .map_to_mm(|_| LightningTaskError::Validation("Invalid Hex Color".into()))?;

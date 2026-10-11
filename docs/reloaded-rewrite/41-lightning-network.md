@@ -86,15 +86,18 @@ R41.2.4 **Request** (`params`):
 | `activation_params` | object | **required** | node parameters below; unknown members ignored |
 | `activation_params.name` | string | **required** | node alias announced to the network; at most 32 bytes (UTF-8 length), space-padded to 32 bytes on the wire |
 | `activation_params.listening_port` | integer (0-65535) | optional, default `9735` | P2P listening port; a non-integer (e.g. a string) is a request-parse failure (`InvalidRequest`, ch. 55 §55.1) |
-| `activation_params.color` | string | optional, default `"000000"` | node RGB colour as exactly 6 hex digits |
+| `activation_params.color` | string | optional, default `"2b6680"` | node RGB colour as exactly 6 hex digits |
 | `activation_params.payment_retries` | integer | optional, default `5` | payment retry attempts |
 | `activation_params.backup_path` | string | optional | directory for channel backups |
 
 > **Upstream divergence (informative).** The public `LightningActivationParams`
 > table states a colour default of `2b6680`; the reference defaults to
-> `000000`. The docs page also carries a second `LightningActivationParams`
-> definition (`backup_password`, `node_pubkey`) that is not part of the
-> activation request. Both points are resolved in favour of the reference.
+> `000000`. By maintainer decision (2026-10-11) the documented `2b6680` is
+> bound, because the docs are explicit and the value is cosmetic (the node's
+> colour in the network graph). The docs page also carries a second
+> `LightningActivationParams` definition (`backup_password`, `node_pubkey`) that
+> is not part of the activation request; that point is resolved in favour of
+> the reference.
 
 R41.2.5 **Success:** `{"task_id": <integer>}` (HTTP 200).
 
@@ -580,7 +583,7 @@ T41.6 *Coin configuration.* A `LIGHTNING` entry with `confirmation_targets`
 integers and `our_channels_configs` parses; one with only the baseline-era
 `confirmations` member fails with `L2ProtocolParseError`.
 
-T41.7 *Activation parameters.* `color` absent yields colour `000000`;
+T41.7 *Activation parameters.* `color` absent yields colour `2b6680`;
 `listening_port` absent yields 9735; a 33-byte `name` yields HTTP 500
 `Internal` at `init`.
 

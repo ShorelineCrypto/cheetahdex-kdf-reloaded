@@ -39,6 +39,32 @@ impl ZCoin {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn shielded_history(&self) -> &ZCoinShieldedHistory { &self.z_fields.shielded_history }
 
+    /// Records why the commitment-tree sync loop could not read from its backend.
+    pub(crate) fn set_sapling_loop_error(&self, message: String) {
+        if let Ok(mut slot) = self.z_fields.sapling_loop_error.lock() {
+            *slot = Some(message);
+        }
+    }
+
+    pub(crate) fn clear_sapling_loop_error(&self) {
+        if let Ok(mut slot) = self.z_fields.sapling_loop_error.lock() {
+            *slot = None;
+        }
+    }
+
+    /// The current failure of the commitment-tree sync loop, if its backend is failing right now.
+    pub fn sapling_loop_error(&self) -> Option<String> {
+        self.z_fields
+            .sapling_loop_error
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+
+    /// Whether the commitment-tree sync loop has ended (finished, bailed out or panicked). When it
+    /// has ended without `is_sapling_state_synced` ever becoming true, the sync died.
+    pub fn sapling_loop_stopped(&self) -> bool { self.z_fields.sapling_loop_stopped.load(AtomicOrdering::SeqCst) }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn shielded_wallet_db_scan_complete(&self) -> bool {
         self.z_fields.wallet_db_scan_complete.load(AtomicOrdering::Relaxed)
@@ -52,7 +78,7 @@ impl ZCoin {
         requested_start_height: Option<u64>,
         skip_sync_params: bool,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
-    ) -> Result<u64, String> {
+    ) -> Result<u64, ShieldedFetchError> {
         self.z_fields
             .shielded_history
             .fetch_compact_blocks_from_lightwalletd(
@@ -72,6 +98,17 @@ impl ZCoin {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn shielded_wallet_sync_start_height(&self) -> Option<u64> {
         self.z_fields.shielded_history.wallet_sync_start_height().ok().flatten()
+    }
+
+    /// WASM has no wallet database. Its commitment-tree sync starts right after the coin
+    /// config's checkpoint block, or at Sapling activation when the config has none, so the
+    /// anchor is the checkpoint height (CRD ch.39 R39.10.9, `first_sync_block`).
+    #[cfg(target_arch = "wasm32")]
+    pub fn shielded_wallet_sync_start_height(&self) -> Option<u64> {
+        self.z_fields
+            .check_point_block
+            .as_ref()
+            .map(|check_point| u64::from(check_point.height))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

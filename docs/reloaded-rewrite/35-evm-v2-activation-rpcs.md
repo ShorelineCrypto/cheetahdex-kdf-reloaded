@@ -133,7 +133,7 @@ field, which is ignored). "Absent" means the key is missing or `null`.
 | `fallback_swap_contract` | string (0x-hex EVM address) | documented as required; reference version: optional | D/G | Fallback V1 swap contract. The zero address → `InvalidPayload` (trading-capable coins). |
 | `swap_v2_contracts` | object | optional; mandatory for a trading-capable coin when the node configuration enables trading protocol v2 (`use_trading_proto_v2`) | D/G | Members `maker_swap_v2_contract`, `taker_swap_v2_contract`, `nft_maker_swap_v2_contract`, each a required 0x-hex address string (ch. 17). Missing when mandatory, or any member the zero address → `InvalidPayload`; a missing member → `InvalidRequest`. |
 | `contract_supports_watchers` | boolean | default `false` | G | Whether the V1 swap contract supports the watcher protocol. |
-| `required_confirmations` | integer | default: coin config `required_confirmations`, else `1` | G | Swap confirmations for the platform coin. The reference table states a default of `3`; the reference version uses config-then-1. |
+| `required_confirmations` | integer | default: coin config `required_confirmations`, else `3` | D/G | Swap confirmations for the platform coin. Maintainer decision (2026-10-11): config, else `3`. The docs table states `3`; the reference version uses config, else `1`; the docs' own BCH page states this config-then-3 rule. Legacy EVM `enable` / `electrum` (ch. 55 §55.4) keep their own default. |
 | `requires_notarization` | boolean | default `false` | D | No effect on EVM coins. |
 | `mm2` | integer | optional | D/G | Accepted as an unsigned 8-bit integer and not otherwise enforced (G); a non-integer or out-of-range value → `InvalidRequest`. |
 | `tx_history` | boolean | default `false` | D | When `true`, background transaction-history preloading for the platform starts after activation (the documented effect). |
@@ -376,7 +376,11 @@ version for all nodes" (public-docs citation; the message text is not bound).
 > `data` as a list -- the reference version requires
 > `{"type":"WalletConnect","params":{"session_topic":"<topic>"}}`, which this
 > chapter binds; (f) spells `PrivKeyNotAllowed` and `InternalError` in the method
-> table; (g) states defaults of `3` for `required_confirmations`; (h) marks
+> table; (g) states a default of `3` for `required_confirmations`; the reference
+> version uses the coin config, else 1. By maintainer decision (2026-10-11) this
+> chapter binds the coin config, else 3 -- the rule the docs' own BCH page
+> states -- so a coin without a configured value waits for 3 confirmations, the
+> safer of the two documented numbers; (h) marks
 > `swap_contract_address` and `fallback_swap_contract` as required while the
 > reference version accepts their absence as described in R35.1.1; (i) shows the
 > bare `NftProvider` for `nft_req` while the reference version requires the

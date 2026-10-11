@@ -61,6 +61,40 @@ Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
     `path_to_address` for a software HD account, accept a per-server
     `timeout_sec` and default the WebAssembly Electrum protocol to `WSS`.
     `task::enable_bch` activates the BCH coin only, for a single address.
+- **Tendermint and Lightning activation wire contract (CRD chapters 36, 41).**
+  Tendermint platform activation reports an empty node list, an unusable node
+  URL, `decimals` above 18 and unreachable nodes as `PlatformCoinCreationError`
+  (HTTP 500) instead of `AtLeastOneNodeRequired` / `Transport` (502);
+  `tokens_params` is required; a token naming another platform is
+  `PlatformCoinMismatch`; `enable_tendermint_token` answers
+  `CouldNotFetchBalance` for a balance failure. A request carrying
+  `activation_params` is now rejected with `PlatformCoinCreationError` instead
+  of silently activating with the local key, until public-key and WalletConnect
+  activation are implemented. The Lightning task uses the documented error names
+  (`L2IsAlreadyActivated`, `L2ConfigIsNotFound`, `UnexpectedL2Protocol` with its
+  `protocol`, `InvalidPlatformConfiguration`, ...), checks the platform's
+  `avg_blocktime` at `init`, and its default node colour is the documented
+  `2b6680`. A protocol without parameters is reported in `error_data` without a
+  `protocol_data` key.
+- **Z-coin, Sia, legacy and BCH/SLP activation wire contract (CRD chapters 39,
+  46, 55).** `task::enable_z_coin` accepts an optional `mode`, the `"Electrum"`
+  and `servers` synonyms and `min_connected` / `max_connected`, reports a
+  lightwalletd outage after the sync has started as the in-progress value
+  `{"TemporaryError": ...}` and keeps retrying, and reports post-build height
+  and balance failures as `Transport`; it is routed on WebAssembly but answers
+  `CoinCreationError` there (no shielded wallet database). Sia reports an
+  unsupported key policy as `CoinCreationError` and post-build failures as
+  `Transport`, and legacy `enable` activates Sia coins. Legacy `electrum` bounds
+  its balance read to 20 s, and both legacy methods deregister a coin whose
+  balance read failed. `enable_bch_with_tokens` honours `get_balances`, checks
+  the token platform and rejects a hardware key policy; `enable_slp` records the
+  token on its platform coin. The mmrpc 2.0 EVM activation defaults
+  `required_confirmations` to 3 when neither the request nor the coin config
+  sets it.
+- **Two compatibility switches** (see `docs/GLEEC_COMPATIBILITY.md`):
+  `sia_activation_single_address_balance` (Sia activation result under an HD
+  wallet) and `legacy_enable_keeps_coin_on_balance_failure` (legacy `enable`
+  after a failed balance read).
 - **EVM activation wire contract, wave 2 (CRD chapter 35).**
   `enable_eth_with_tokens` and `task::enable_eth`:
   - every request field of the chapter is honored: both forms of `nft_req`

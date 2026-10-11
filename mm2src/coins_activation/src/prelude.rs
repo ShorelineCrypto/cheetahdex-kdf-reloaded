@@ -32,6 +32,8 @@ pub enum DerivationMethod {
     HDWallet(String),
 }
 
+// Only the Solana result uses it, and Solana is native-only.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Clone, Debug, Serialize)]
 pub struct CoinAddressInfo<Balance> {
     pub(crate) derivation_method: DerivationMethod,

@@ -148,7 +148,7 @@ pub(crate) enum EvmTokenProtocol {
 }
 
 /// Reads and parses the `protocol` of a token's coins configuration entry.
-fn configured_protocol(ctx: &MmArc, ticker: &str) -> Result<CoinProtocol, ProtocolResolveError> {
+pub(crate) fn configured_protocol(ctx: &MmArc, ticker: &str) -> Result<CoinProtocol, ProtocolResolveError> {
     let conf = coin_conf(ctx, ticker);
     if conf.is_null() {
         return Err(ProtocolResolveError::ConfigIsNotFound(ticker.to_owned()));

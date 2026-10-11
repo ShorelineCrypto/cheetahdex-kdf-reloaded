@@ -182,10 +182,21 @@ R46.2.4 The final **ok** `details` shall be:
 }
 ```
 
-`wallet_balance` is **always** the single-address form with
-`"wallet_type": "Iguana"` -- also when the wallet key context is HD, in which
-case `address` is the single derived address of ch. 20 §20.4.1. There is no
-per-account HD balance report in the activation result. Balances are decimal
+When the wallet key context is single-address (Iguana), `wallet_balance` is the
+single-address form above.
+
+**Deliberate divergence (binding, maintainer decision 2026-10-11).** When the
+wallet key context is HD, Reloaded reports `wallet_balance` as the HD
+per-account report (`"wallet_type": "HD"`, the accounts and the single derived
+address of ch. 20 §20.4.1 with its balance), so that a Sia coin reports its
+balance in the same shape as the other coins of an HD wallet. The reference
+always reports the single-address `"Iguana"` form, also under HD; both shapes
+carry the same single address and balance. **Compatibility switch:** the
+`MM2.json` key `sia_activation_single_address_balance` (boolean, default
+`false`). Set it to `true` for the reference behavior: `wallet_balance` is then
+always the single-address `"Iguana"` form above, with `address` being the single
+derived address under HD. A client can tell the two shapes apart by
+`wallet_type`. Balances are decimal
 strings in whole siacoin (1 SC = 10^24 hastings, ch. 20 §20.5).
 
 R46.2.5 Sia activation has **no activation deadline**. The `TaskTimedOut`
@@ -281,29 +292,14 @@ number of times before reporting the failure; each attempt is bounded by the
 > names is observable on the activation wire (R46.5.3); the observable set is
 > the shared standalone set of §46.5.1--§46.5.2.
 
-> **Reloaded status (informative).** Deviations of the current Reloaded code
-> from this chapter, for the clean implementer:
->
-> 1. An unsupported signing policy is reported as `PrivKeyNotAllowed`
->    (HTTP 400 if surfaced at mmrpc level); R46.1.3/R46.5.2 require
->    `CoinCreationError {ticker, error}`.
-> 2. Failures to read the height or the balance after the coin is built are
->    reported as `Internal`; R46.5.2 requires `Transport` with a string.
-> 3. Under an HD wallet key context `wallet_balance` is the HD per-account
->    report; R46.2.4 requires the single-address `"Iguana"` form always.
-> 4. The legacy v1 `enable` path rejects Sia-protocol coins; §46.6.3 requires
->    it to activate them.
-> 5. The shared standalone error set additionally contains
->    `PrivKeyNotAllowed` and `UnexpectedDerivationMethod` and lacks `HwError`;
->    a task that loses the registration race reports success instead of
->    `CoinIsAlreadyActivated`; `cancel` errors use the standalone set rather
->    than the framework cancel set. These are shared with the other standalone
->    families and are decided in §55.2/§55.5; for Sia, R46.5.3 already forbids
->    the two extra discriminants.
->
-> The routes of §46.6.1--§46.6.2, the request object of R46.1.2 (same client
-> library configuration object), the in-progress values, the `Ok` shape in the
-> single-key case, and the `init` errors of §46.5.1 already conform.
+> **Reloaded status (informative).** On `fix/activation-api-parity`: an
+> unsupported signing policy is `CoinCreationError`; height and balance read
+> failures after the probe are `Transport`; the HD report under an HD wallet is
+> the default with the `sia_activation_single_address_balance` switch for the
+> reference form (R46.2.4); legacy v1 `enable` activates Sia-protocol coins
+> (§46.6.3); the shared standalone rules of §55.5 apply. Remaining: the HD and
+> single-address result paths are tested through the shape selector only, as
+> no walletd test double exists.
 
 ---
 
@@ -372,9 +368,11 @@ HTTP 200: (a) walletd unreachable at start -> `CoinCreationError` with
 balance read failure after a successful probe -> `Transport` with a string;
 (c) unsupported key policy -> `CoinCreationError`, never `PrivKeyNotAllowed`.
 
-T46.8.3 Result shape: under an HD wallet key context the `Ok` `details`
-carry `wallet_balance.wallet_type == "Iguana"` with the single derived
-address; under the single-key context likewise.
+T46.8.3 Result shape: under the single-key context the `Ok` `details` carry
+`wallet_balance.wallet_type == "Iguana"`. Under an HD wallet key context they
+carry the HD report (`wallet_type == "HD"`) by default, and the `"Iguana"` form
+with the single derived address when `sia_activation_single_address_balance` is
+`true` (R46.2.4).
 
 T46.8.4 `init` errors: `CoinIsAlreadyActivated` (object, 400),
 `CoinConfigIsNotFound` (string = ticker, 400), `CoinProtocolParseError`
@@ -397,7 +395,7 @@ error.
   activation_params}` per R46.1.2 and return a `task_id` (§46.1, §46.6).
 - `task::enable_sia::status` reports `"ActivatingCoin"` /
   `"RequestingWalletBalance"` and ultimately an `Ok` with `ticker`,
-  `current_block` and an `"Iguana"`-form `wallet_balance` (§46.2).
+  `current_block` and a `wallet_balance` in the form R46.2.4 selects (§46.2).
 - Errors map exactly as §46.5: init-time config/protocol/already-active errors
   at mmrpc level with HTTP 400; walletd unreachable at start ->
   `CoinCreationError {ticker, error}`; height/balance failure -> `Transport`

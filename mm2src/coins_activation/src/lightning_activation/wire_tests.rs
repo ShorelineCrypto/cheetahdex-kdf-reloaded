@@ -247,7 +247,22 @@ fn activation_parameters_are_validated_as_bound() {
     let validated =
         <LightningCoin as InitL2ActivationOps>::validate_activation_params(params(json!({ "name": "node" })))
             .unwrap_or_else(|e| panic!("{}", e));
-    assert_eq!(validated.node_color, [0, 0, 0]);
+    // `color` absent yields the documented `2b6680` (R41.2.4; the reference's `000000` is not used).
+    assert_eq!(validated.node_color, [0x2b, 0x66, 0x80]);
+    // The one-shot twin (`enable_lightning`) uses the same default.
+    let one_shot = match <LightningCoin as crate::l2::L2ActivationOps>::validate_activation_params(params(
+        json!({ "name": "node" }),
+    )) {
+        Ok(validated) => validated,
+        Err(_) => panic!("the one-shot validation accepts a request with a name only"),
+    };
+    assert_eq!(one_shot.node_color, [0x2b, 0x66, 0x80]);
+    // An explicit colour is still honoured.
+    let explicit = <LightningCoin as InitL2ActivationOps>::validate_activation_params(params(
+        json!({ "name": "node", "color": "ff0001" }),
+    ))
+    .unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(explicit.node_color, [0xff, 0x00, 0x01]);
     assert_eq!(validated.listening_port, 9735);
     assert_eq!(&validated.node_name[..4], b"node");
     assert!(validated.node_name[4..].iter().all(|b| *b == b' '));

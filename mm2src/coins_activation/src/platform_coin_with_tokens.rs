@@ -32,6 +32,10 @@ pub trait TokenOf: Into<MmCoinEnum> {
 
 pub struct TokenActivationParams<Req, Protocol> {
     pub(crate) ticker: String,
+    /// The per-token request fields. No generic initializer reads them at present: the BCH initializer,
+    /// which did, resolves its tokens itself (it accepts an inline custom-token `protocol`, CRD ch.55
+    /// R55.9.2), the same way the EVM initializer does.
+    #[allow(dead_code)]
     pub(crate) activation_request: Req,
     pub(crate) protocol: Protocol,
 }

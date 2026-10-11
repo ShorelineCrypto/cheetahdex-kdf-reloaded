@@ -214,8 +214,8 @@ time onwards (CRD ch.39 R39.6.4b/R39.6.4c); when it is absent, neither gate
 exists and behaviour matches GLEEC KDF exactly. The gates protect a counterparty
 whose HTLC would otherwise be left unspendable and unrefundable across Pirate
 Chain's Ironwood upgrade (3 Oct 2026 19:00 UTC), so omitting the field on a coin
-that *does* upgrade accepts that risk knowingly. No other operator configuration
-is required to match GLEEC KDF behaviour.
+that *does* upgrade accepts that risk knowingly. The two coin-activation
+switches below are the only other settings needed to match GLEEC KDF behaviour.
 
 Note that omission is the situation **as shipped**: both members are an extension
 this project introduced, no published coin configuration declares either of them
@@ -230,6 +230,19 @@ timestamp could still move, and a compiled-in date that fired early would refuse
 every ARRR transaction until a new binary shipped, which is a worse failure than
 the one the gates prevent. Supplying the member in any coin configuration the
 build loads is sufficient to arm both gates; no code change is needed.
+
+Two coin-activation behaviours differ from GLEEC KDF by default (CRD ch.46
+R46.2.4, ch.55 R55.4.6):
+
+- Set `sia_activation_single_address_balance` to `true` to get GLEEC KDF's Sia
+  activation result under an HD wallet: `wallet_balance` always in the
+  single-address `"Iguana"` form. By default Reloaded reports the HD
+  per-account report there, like the other coins of an HD wallet.
+- Set `legacy_enable_keeps_coin_on_balance_failure` to `true` to get GLEEC
+  KDF's legacy `enable` behaviour: the coin stays registered when its first
+  balance read fails, so a retry fails as already active. By default Reloaded
+  deregisters it, as GLEEC KDF's own `electrum` does. This switch only exists
+  to reproduce that inconsistency and is not recommended.
 
 ## Detail sections
 

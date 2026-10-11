@@ -465,17 +465,14 @@ other row the public reference is silent and the reference release decides.
 > there).
 
 > **Reloaded status (informative).** Matching on `fix/activation-api-parity`:
-> the UTXO, QTUM and BCH task families (`Transport` for unreachable Electrum
-> servers and a failed block-height read), the EVM platform (`Transport`, 502),
-> the ERC20 token and the NFT provider (Chapters 35, 19). Remaining deviations:
-> the Tendermint platform reports node failure as `Transport` (502) instead of
-> `PlatformCoinCreationError` (500) (Chapter 36); the Tendermint token reports
-> `Transport` instead of `CouldNotFetchBalance`; the Solana platform reports
-> `Internal` (Chapter 40); Z-coin and Sia report post-build failures as
-> `Internal` instead of `Transport`, and a Z-coin native-mode daemon outage can
-> leave the task in progress indefinitely (Chapters 39, 46); the Lightning task
-> reports a start failure as `Internal` (Chapter 41); the legacy `electrum`
-> method does not deregister the coin when the balance query fails (§55.4).
+> the UTXO, QTUM and BCH task families, the EVM platform, the ERC20 token and the
+> NFT provider (Chapters 35, 19), Tendermint platform and token (Chapter 36),
+> Z-coin and Sia (`Transport` after the build; Z-coin `TemporaryError` while the
+> sync runs; Chapters 39, 46), the Lightning task (Chapter 41) and the legacy
+> methods (§55.4). Remaining deviations: the Solana platform reports `Internal`
+> (Chapter 40, deferred); Z-coin Light mode with every Electrum server
+> unreachable keeps the build-time `CoinCreationError` while a maintainer
+> decision is pending (Chapter 39).
 
 ---
 
@@ -551,6 +548,16 @@ seconds; if it fails or exceeds the bound the coin shall be deregistered before
 the error is returned, so a retry can succeed. For `enable` the reference
 release leaves the coin registered when the balance read fails; Reloaded
 shall deregister it as `electrum` does (see the code-quality finding below).
+
+**Deliberate divergence (binding, maintainer decision 2026-10-11).** Reloaded
+deregisters on a failed balance read in both methods; the reference does so in
+`electrum` only. No wire field changes; a retry of a failed `enable` succeeds
+instead of failing as already active. **Compatibility switch:** the `MM2.json`
+key `legacy_enable_keeps_coin_on_balance_failure` (boolean, default `false`).
+Set it to `true` for the reference behavior: `enable` then leaves the coin
+registered when its balance read fails (`electrum` is unaffected). The switch
+exists to make the reference's inconsistency reproducible; it is not
+recommended.
 After success, `enable` subscribes the node to the coin's transaction-helper
 topic when the coin is a UTXO coin in native mode, and to the coin's watcher
 topic when the node runs as a watcher ([Chapter 09](09-watcher-reward-infrastructure.md));
@@ -591,13 +598,16 @@ one-shot activation of the same ticker (R55.5.7).
 > on balance failure in both methods (R55.4.6). This changes no wire field; it
 > only makes a retry succeed.
 
-> **Reloaded status (informative).** Request and success shapes match. Every
-> error is HTTP 500 `{"error": string}`, as bound. Deviations: `electrum`
-> neither bounds the balance read nor deregisters the coin on failure;
-> `enable` does not deregister either (R55.4.6); Reloaded activates TRX and
-> TRC20 through this path, which the reference release rejects (a documented
-> extension, D55.5), and
-> rejects Sia, which R55.4.8 requires it to activate.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> the 20-second bound on `electrum`'s balance read, deregistration on a failed
+> read in both methods (R55.4.6) with the `legacy_enable_keeps_coin_on_balance_failure`
+> switch, cleanup limited to the coin the call registered (R55.4.9), and Sia
+> activation (R55.4.8). TRX and TRC20 stay accepted (D55.5). Remaining: the
+> cleanup removes the coin by ticker, because the coin registry has no instance
+> identity, so if another call disabled and re-registered the same ticker while
+> this call's balance read was still pending, that other coin would be removed.
+> Closing it needs an instance identity on every coin type and a
+> compare-and-remove in the registry.
 
 ---
 
@@ -913,7 +923,8 @@ only to reject a hardware policy (R55.9.4).
 
 *Public-docs erratum:* the reference marks `utxo_merge_params` required and
 `requires_notarization` defaulting to `true`; the former is optional and the
-latter defaults from the coin's configuration (R55.5.10). The duplicate
+latter defaults from the coin's configuration (R55.5.10) -- the reference
+behavior, confirmed by maintainer decision (2026-10-11). The duplicate
 `tx_history` rows resolve to default `false`.
 
 **R55.9.3** *Success:*
@@ -973,12 +984,12 @@ other, the first to register wins, and the other answers mmrpc-level
 registering anything. No call is deduplicated or joined. A call made after the
 platform was registered is rejected at once with the same discriminant.
 
-> **Reloaded status (informative).** Deviations: `get_balances` is ignored and
-> the `tickers` field is never emitted (address infos always carry balances);
-> the token-to-platform mismatch check is absent; the token `protocol` field is
-> not accepted; a hardware `priv_key_policy` is not rejected with
-> `UnexpectedDeviceActivationPolicy`. (`AtLeastOneNodeRequired` carries its
-> string since `fix/activation-api-parity`.)
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> `get_balances` with `tickers`, the token-to-platform mismatch check, the
+> token `protocol` field (custom SLP tokens to the extent D55.3 binds them), and
+> the rejection of a hardware `priv_key_policy` with
+> `UnexpectedDeviceActivationPolicy`. The Electrum-down row stays
+> `PlatformCoinCreationError`, as the public docs show.
 
 ---
 
@@ -1043,10 +1054,10 @@ answers mmrpc-level `TokenIsAlreadyActivated` (string: the token ticker, HTTP
 platform. No call is deduplicated or joined.
 
 > **Reloaded status (informative).** Request (without `protocol`) and success
-> shapes match, and since `fix/activation-api-parity` the shared token error set
-> has every bound discriminant. Remaining deviation: the token's information is
-> never recorded on the platform coin (an incidental defect: a token activated
-> with `enable_slp` is unknown to the platform's SLP-aware operations).
+> shapes match, the shared token error set has every bound discriminant, and
+> since `fix/activation-api-parity` the token's information is recorded on the
+> platform coin after registration. Remaining: the top-level `protocol` of
+> `enable_slp` (custom SLP tokens, D55.3).
 
 ---
 

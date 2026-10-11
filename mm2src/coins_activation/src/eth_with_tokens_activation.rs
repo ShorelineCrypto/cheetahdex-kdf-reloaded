@@ -479,6 +479,7 @@ fn activation_params(
             .as_ref()
             .map(|contracts| contracts.nft_maker_swap_v2_contract),
         required_confirmations: request.required_confirmations,
+        default_required_confirmations: coins::eth::V2_EVM_REQUIRED_CONFIRMATIONS,
         tx_history: request.tx_history(),
         gas_station_url: request.gas_station_url.clone(),
         gas_station_decimals: request.gas_station_decimals,

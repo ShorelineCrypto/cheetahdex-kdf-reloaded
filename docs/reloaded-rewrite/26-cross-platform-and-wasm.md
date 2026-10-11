@@ -416,7 +416,10 @@ equivalent:
 > remains native-only. Chapter 39 R39.10.1 accordingly requires the
 > `task::enable_z_coin::*` activation methods to be routed on WebAssembly
 > builds as well. Where this row and chapter 39 disagree, chapter 39 governs
-> for the Z-coin.
+> for the Z-coin. In Reloaded the methods are routed on WebAssembly, but a WASM
+> activation currently ends with `CoinCreationError`, because the WASM build has
+> no shielded wallet database to compute a balance from (chapter 39 §39.10
+> Reloaded status, item 1).
 
 **R18.** Conversely, the browser-wallet integration
 crate `mm2_metamask` is browser-only by definition

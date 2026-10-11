@@ -5,18 +5,14 @@ use crate::l2::L2TaskManagerShared;
 use crate::sia_activation::SiaTaskManagerShared;
 use crate::tendermint_with_tokens_activation::TendermintTaskManagerShared;
 use crate::utxo_activation::{BchTaskManagerShared, QtumTaskManagerShared, UtxoStandardTaskManagerShared};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::z_coin_activation::ZcoinTaskManagerShared;
 #[cfg(not(target_arch = "wasm32"))]
 use coins::lightning::LightningCoin;
-#[cfg(not(target_arch = "wasm32"))]
 use futures::lock::Mutex as AsyncMutex;
 use mm2_core::mm_ctx::{from_ctx, MmArc};
 use rpc_task::RpcTaskManager;
-#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
-use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))] use std::sync::{Mutex, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 pub struct CoinsActivationContext {
     pub(crate) init_utxo_standard_task_manager: UtxoStandardTaskManagerShared,
@@ -26,9 +22,7 @@ pub struct CoinsActivationContext {
     pub(crate) init_eth_task_manager: EthTaskManagerShared,
     pub(crate) init_erc20_task_manager: InitTokenTaskManagerShared<coins::eth::EthCoin>,
     pub(crate) init_tendermint_task_manager: TendermintTaskManagerShared,
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) init_z_coin_task_manager: ZcoinTaskManagerShared,
-    #[cfg(not(target_arch = "wasm32"))]
     z_coin_activation_locks: ZCoinActivationLocks,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) init_lightning_task_manager: L2TaskManagerShared<LightningCoin>,
@@ -50,9 +44,7 @@ impl CoinsActivationContext {
                 init_eth_task_manager: RpcTaskManager::new_shared(),
                 init_erc20_task_manager: RpcTaskManager::new_shared(),
                 init_tendermint_task_manager: RpcTaskManager::new_shared(),
-                #[cfg(not(target_arch = "wasm32"))]
                 init_z_coin_task_manager: RpcTaskManager::new_shared(),
-                #[cfg(not(target_arch = "wasm32"))]
                 z_coin_activation_locks: ZCoinActivationLocks::default(),
                 #[cfg(not(target_arch = "wasm32"))]
                 init_lightning_task_manager: RpcTaskManager::new_shared(),
@@ -62,19 +54,16 @@ impl CoinsActivationContext {
         })
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn z_coin_activation_lock(&self, ticker: &str) -> Result<Arc<AsyncMutex<()>>, String> {
         self.z_coin_activation_locks.lock_for(ticker)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct ZCoinActivationLocks {
     by_ticker: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl ZCoinActivationLocks {
     fn lock_for(&self, ticker: &str) -> Result<Arc<AsyncMutex<()>>, String> {
         let mut by_ticker = self

@@ -30,6 +30,8 @@ use coins::my_tx_history_v2::my_tx_history_v2_rpc;
 #[cfg(not(target_arch = "wasm32"))]
 use coins::nft::rpc::{clear_nft_db, get_nft_list, get_nft_metadata, get_nft_transfers, refresh_nft_metadata,
                       update_nft, withdraw_nft};
+// The shielded coin is activated on every target (CRD ch. 39 R39.10.1); only its history method is
+// native-only.
 use coins::rpc_command::account_balance::account_balance;
 use coins::rpc_command::consolidate_utxos::consolidate_utxos_rpc;
 use coins::rpc_command::fetch_utxos::fetch_utxos_rpc;
@@ -51,6 +53,7 @@ use coins::utxo::bch::BchCoin;
 use coins::utxo::qtum::QtumCoin;
 use coins::utxo::slp::SlpToken;
 use coins::utxo::utxo_standard::UtxoStandardCoin;
+use coins::z_coin::ZCoin;
 use coins::{add_delegation, claim_staking_rewards, delegations_info, get_raw_transaction, get_staking_infos,
             ongoing_undelegations_info, remove_delegation, sign_message, sign_raw_transaction, validators_info,
             verify_message, withdraw};
@@ -80,7 +83,6 @@ cfg_native! {
         get_claimable_balances, get_payment_details, list_closed_channels_by_filter, list_open_channels_by_filter, list_payments_by_filter, list_trusted_nodes, open_channel,
         remove_trusted_node, send_payment, update_channel, LightningCoin};
     use coins::{SolanaCoin, SplToken};
-    use coins::z_coin::ZCoin;
     use coins::my_tx_history_v2::z_coin_tx_history_rpc;
     use crate::mm2::lp_wallet::{change_mnemonic_password_rpc, create_wallet_rpc, delete_wallet_rpc, get_mnemonic_rpc, get_wallet_names_rpc};
     use crate::mm2::rpc::trezor::trezor_connection_status_rpc;
@@ -268,6 +270,9 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "init_trezor" => handle_mmrpc(ctx, request, init_trezor).await,
         "init_trezor_status" => handle_mmrpc(ctx, request, init_trezor_status).await,
         "init_trezor_user_action" => handle_mmrpc(ctx, request, init_trezor_user_action).await,
+        "init_z_coin" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
+        "init_z_coin_status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
+        "init_z_coin_user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
         "init_utxo" => handle_mmrpc(ctx, request, init_standalone_coin::<UtxoStandardCoin>).await,
         "init_utxo_status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<UtxoStandardCoin>).await,
         "init_utxo_user_action" => {
@@ -329,9 +334,6 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
             "init_lightning_status" => handle_mmrpc(ctx, request, init_l2_status::<LightningCoin>).await,
             "init_lightning_user_action" => handle_mmrpc(ctx, request, init_l2_user_action::<LightningCoin>).await,
             "cancel_init_lightning" => handle_mmrpc(ctx, request, cancel_l2_activation::<LightningCoin>).await,
-            "init_z_coin" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
-            "init_z_coin_status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
-            "init_z_coin_user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
             "z_coin_tx_history" => handle_mmrpc(ctx, request, z_coin_tx_history_rpc).await,
             "list_closed_channels_by_filter" => handle_mmrpc(ctx, request, list_closed_channels_by_filter).await,
             "list_open_channels_by_filter" => handle_mmrpc(ctx, request, list_open_channels_by_filter).await,
@@ -459,6 +461,10 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "enable_qtum::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<QtumCoin>).await,
         "enable_qtum::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<QtumCoin>).await,
         "enable_qtum::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<QtumCoin>).await,
+        "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
+        "enable_z_coin::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
+        "enable_z_coin::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
+        "enable_z_coin::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<ZCoin>).await,
         // BCH standalone-coin task family (CRD ch. 55 §55.8): activates the BCH coin only.
         "enable_bch::init" => handle_mmrpc(ctx, request, init_standalone_coin::<BchCoin>).await,
         "enable_bch::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<BchCoin>).await,
@@ -527,10 +533,6 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "connect_metamask::cancel" => handle_mmrpc(ctx, request, connect_metamask_cancel).await,
         #[cfg(not(target_arch = "wasm32"))]
         native_only_task => match native_only_task {
-            "enable_z_coin::init" => handle_mmrpc(ctx, request, init_standalone_coin::<ZCoin>).await,
-            "enable_z_coin::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<ZCoin>).await,
-            "enable_z_coin::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<ZCoin>).await,
-            "enable_z_coin::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<ZCoin>).await,
             "enable_lightning::init" => handle_mmrpc(ctx, request, init_l2::<LightningCoin>).await,
             "enable_lightning::status" => handle_mmrpc(ctx, request, init_l2_status::<LightningCoin>).await,
             "enable_lightning::user_action" => handle_mmrpc(ctx, request, init_l2_user_action::<LightningCoin>).await,
