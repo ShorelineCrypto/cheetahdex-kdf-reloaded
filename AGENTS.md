@@ -96,7 +96,9 @@ Use the role files under `.github/agents/` exactly as intended:
   It writes clean-channel behavioral/interface requirements into the relevant
   CRD chapter and never edits implementation code.
 - `kdf-dirty-gate.agent.md` compares a candidate chapter with the corpus and
-  returns only its sanitized verdict. A Spec Reader change is not ready to
+  returns only the sanitized verdict CRD chapter 01 R39 bounds: a leak
+  report, a scope attestation every verdict must carry, and optionally a
+  labelled non-leak section. A Spec Reader change is not ready to
   cross the wall until this gate passes.
 - `coder.agent.md` is the clean-side implementer. It reads the approved chapter
   and this repository, never the forbidden corpus, and implements only the
@@ -275,9 +277,13 @@ For CRD edits:
   upstream expression.
 - Update a governing chapter in the same commit as the source behavior it
   describes.
-- Do not write `Forbidden corpus: not consulted` unless that statement is true
-  for the authoring context or the chapter has completed the documented
-  Spec Reader and Dirty Gate workflow.
+- The provenance footer's *Forbidden corpus* item is a statement about the
+  chapter's inputs, not about what an authoring context did. Write it in one of
+  the two forms CRD chapter 01 R20 binds — the blanket `not consulted` trailer,
+  or a scoped record naming what was taken, for which sections, and under which
+  reference versions — and only where the chapter contains no R8–R10 material.
+  Where forbidden-class input was taken, it must have been taken through the
+  two-team procedure of CRD §1.4A, which R38 requires.
 - Before finishing any edit to a CRD chapter — whether authored via `KDF
   Spec Reader` or edited directly in a session — identify every other
   chapter that references it, is referenced by it, or states a binding

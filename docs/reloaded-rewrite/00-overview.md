@@ -93,7 +93,11 @@ binding rules of the form `R<n>`, a `Tests` section of the form
 `T<n>`, a `Deferred Work` section of the form `D<n>`, a `Baseline
 Verifications` section of the form `V<n>`, an `External References`
 section, and a bulleted *Provenance Footer* closing with the
-chapter-bound *Forbidden corpus: not consulted.* trailer.
+chapter-bound *Forbidden corpus* item. This rule binds the item's
+presence and position only; which of the two bound forms the item
+takes — the blanket `not consulted` trailer or a scoped record — and
+what either form asserts are bound by chapter 01 R20 and the
+*Forbidden corpus* item sub-section of chapter 01 §1.7.
 
 **R6.** Each chapter's contract surface MUST be carried by the
 rules-tests-deferred-verifications shape of R5 (the R/T/D/V

@@ -360,7 +360,8 @@ other chapter's own automated-tooling gap resolves to when it names
 tracking a separate open item of its own: chapter 00's D1 (automated lint
 enforcement of its R5/R6 per-chapter-shape rules), chapter 01's D1
 (automated linting of R11 identifier hygiene, R13–R15 citation discipline,
-R16/R19/R20 per-chapter shape, and the R35 residual-similarity gate),
+R16/R19/R20 per-chapter shape, the §1.4A documentary checks T1–T3, and
+the R35 residual-similarity gate),
 chapter 02's D1 (a mechanical verification harness re-deriving the R4
 workspace-member registry, the R5 patched-dependency registry, and the
 §2.8 module layout from the anchor commit), and chapter 34's D2 (automated
