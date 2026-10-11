@@ -2,7 +2,7 @@
 use crate::prelude::CoinConfWithProtocolError;
 use common::{HttpStatusCode, StatusCode};
 use derive_more::Display;
-use rpc_task::rpc_common::{RpcTaskStatusError, RpcTaskUserActionError};
+use rpc_task::rpc_common::{CancelRpcTaskError, RpcTaskStatusError, RpcTaskUserActionError};
 use rpc_task::RpcTaskError;
 use ser_error_derive::SerializeErrorType;
 use serde_derive::Serialize;
@@ -10,7 +10,7 @@ use std::time::Duration;
 
 pub type L2ActivationStatusError = RpcTaskStatusError;
 pub type L2ActivationUserActionError = RpcTaskUserActionError;
-pub type CancelL2ActivationError = RpcTaskStatusError;
+pub type CancelL2ActivationError = CancelRpcTaskError;
 
 #[derive(Clone, Debug, Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]

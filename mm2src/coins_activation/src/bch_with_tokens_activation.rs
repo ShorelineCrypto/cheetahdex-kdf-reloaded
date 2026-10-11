@@ -2,6 +2,7 @@ use crate::platform_coin_with_tokens::*;
 use crate::prelude::*;
 use crate::slp_token_activation::SlpActivationRequest;
 use async_trait::async_trait;
+use coins::hd_pubkey::HDXPubExtractor;
 use coins::my_tx_history_v2::TxHistoryStorage;
 use coins::utxo::bch::{bch_coin_from_conf_and_params, BchActivationRequest, BchCoin, CashAddrPrefix};
 use coins::utxo::bch_and_slp_tx_history::bch_and_slp_history_loop;
@@ -92,7 +93,7 @@ impl From<BchWithTokensActivationError> for EnablePlatformCoinWithTokensError {
                 ))
             },
             BchWithTokensActivationError::PrivKeyNotAllowed(e) => {
-                EnablePlatformCoinWithTokensError::PrivKeyNotAllowed(e)
+                EnablePlatformCoinWithTokensError::PrivKeyPolicyNotAllowed(e)
             },
             BchWithTokensActivationError::UnexpectedDerivationMethod(e) => {
                 EnablePlatformCoinWithTokensError::UnexpectedDerivationMethod(e)
@@ -116,6 +117,10 @@ impl TxHistory for BchWithTokensActivationRequest {
 
 pub struct BchProtocolInfo {
     slp_prefix: String,
+}
+
+impl BchProtocolInfo {
+    pub(crate) fn slp_prefix(&self) -> &str { &self.slp_prefix }
 }
 
 impl TryFromCoinProtocol for BchProtocolInfo {
@@ -227,9 +232,15 @@ impl PlatformWithTokensActivationOps for BchCoin {
         })]
     }
 
-    async fn get_activation_result(
+    async fn get_activation_result<XPubExtractor>(
         &self,
-    ) -> Result<BchWithTokensActivationResult, MmError<BchWithTokensActivationError>> {
+        _ctx: &MmArc,
+        _activation_request: &Self::ActivationRequest,
+        _xpub_extractor: Option<&XPubExtractor>,
+    ) -> Result<BchWithTokensActivationResult, MmError<BchWithTokensActivationError>>
+    where
+        XPubExtractor: HDXPubExtractor + Sync,
+    {
         let my_address = self.as_ref().derivation_method.iguana_or_err().mm_err(Into::into)?;
         let my_slp_address = self
             .get_my_slp_address()

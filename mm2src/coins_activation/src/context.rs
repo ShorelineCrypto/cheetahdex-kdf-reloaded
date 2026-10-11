@@ -1,9 +1,10 @@
 use crate::eth_with_tokens_activation::EthTaskManagerShared;
+use crate::init_token::InitTokenTaskManagerShared;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::l2::L2TaskManagerShared;
 use crate::sia_activation::SiaTaskManagerShared;
 use crate::tendermint_with_tokens_activation::TendermintTaskManagerShared;
-use crate::utxo_activation::{QtumTaskManagerShared, UtxoStandardTaskManagerShared};
+use crate::utxo_activation::{BchTaskManagerShared, QtumTaskManagerShared, UtxoStandardTaskManagerShared};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::z_coin_activation::ZcoinTaskManagerShared;
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,8 +21,10 @@ use std::sync::Arc;
 pub struct CoinsActivationContext {
     pub(crate) init_utxo_standard_task_manager: UtxoStandardTaskManagerShared,
     pub(crate) init_qtum_task_manager: QtumTaskManagerShared,
+    pub(crate) init_bch_task_manager: BchTaskManagerShared,
     pub(crate) init_sia_task_manager: SiaTaskManagerShared,
     pub(crate) init_eth_task_manager: EthTaskManagerShared,
+    pub(crate) init_erc20_task_manager: InitTokenTaskManagerShared<coins::eth::EthCoin>,
     pub(crate) init_tendermint_task_manager: TendermintTaskManagerShared,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) init_z_coin_task_manager: ZcoinTaskManagerShared,
@@ -29,6 +32,10 @@ pub struct CoinsActivationContext {
     z_coin_activation_locks: ZCoinActivationLocks,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) init_lightning_task_manager: L2TaskManagerShared<LightningCoin>,
+    /// The registry of the task-framework tests, which drive a scripted coin through the standalone-coin family.
+    #[cfg(test)]
+    pub(crate) init_test_coin_task_manager:
+        crate::standalone_coin::InitStandaloneCoinTaskManagerShared<coins::TestCoin>,
 }
 
 impl CoinsActivationContext {
@@ -38,8 +45,10 @@ impl CoinsActivationContext {
             Ok(CoinsActivationContext {
                 init_utxo_standard_task_manager: RpcTaskManager::new_shared(),
                 init_qtum_task_manager: RpcTaskManager::new_shared(),
+                init_bch_task_manager: RpcTaskManager::new_shared(),
                 init_sia_task_manager: RpcTaskManager::new_shared(),
                 init_eth_task_manager: RpcTaskManager::new_shared(),
+                init_erc20_task_manager: RpcTaskManager::new_shared(),
                 init_tendermint_task_manager: RpcTaskManager::new_shared(),
                 #[cfg(not(target_arch = "wasm32"))]
                 init_z_coin_task_manager: RpcTaskManager::new_shared(),
@@ -47,6 +56,8 @@ impl CoinsActivationContext {
                 z_coin_activation_locks: ZCoinActivationLocks::default(),
                 #[cfg(not(target_arch = "wasm32"))]
                 init_lightning_task_manager: RpcTaskManager::new_shared(),
+                #[cfg(test)]
+                init_test_coin_task_manager: RpcTaskManager::new_shared(),
             })
         })
     }

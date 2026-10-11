@@ -389,53 +389,22 @@ version for all nodes" (public-docs citation; the message text is not bound).
 > pricing); this chapter keeps their documented effect (R35.1.1a), which changes
 > no wire shape.
 
-> **Reloaded status (informative).** Current reloaded deviates from §35.1 as
-> follows (behavioural terms; the Coder fixes each):
-> 1. With every node unresponsive, the node probe fails and the call answers
->    `PlatformCoinCreationError` with an object `error_data` and HTTP 500
->    instead of `Transport` / string / 502 (R35.1.6).
-> 2. All token-construction failures -- including an unreachable node during the
->    on-chain decimals read and a non-checksummed or invalid configured contract
->    address -- surface as `Internal`; they must be `Transport` (R35.1.6) and
->    `UnexpectedTokenProtocol` (R35.1.5) respectively.
-> 3. Swap-contract validation failures (absent, zero, malformed fallback) and an
->    invalid node URL surface as `PlatformCoinCreationError` (500); they must be
->    `InvalidPayload` (400). `swap_contract_address` is mandatory even for a
->    wallet-only coin; it must be optional there.
-> 4. The result never carries `nfts_infos`; `get_balances: false` is not
->    supported (balances are always returned, never `tickers`).
-> 5. There is no HD result shape. Under an HD (mnemonic) daemon the activated
->    EVM address appears to be the daemon-internal identity key's address rather
->    than the address at the coin config `derivation_path` and `path_to_address`
->    (verify and fix: the HD address and the HD shape of R35.1.3(b) are
->    required). `path_to_address`, `gap_limit`, `scan_policy`,
->    `min_addresses_number` are not parsed.
-> 6. `pubkey` is rendered as `0x` followed by the 64-byte key without the `04`
->    prefix; it must be the 130-hex-character `04`-prefixed form without `0x`.
-> 7. `erc20_tokens_requests` defaults to empty when absent (must be
->    `InvalidRequest`); an absent `nodes` is an `InvalidRequest` (must be
->    `AtLeastOneNodeRequired`); `AtLeastOneNodeRequired` serializes without
->    `error_data` (must carry a string).
-> 8. The `Trezor` policy on the one-shot call answers `Transport` / 502; it must
->    be `UnexpectedDeviceActivationPolicy`, no `error_data`, 400.
-> 9. Not parsed or not honoured: `rpc_mode` (so `"Metamask"` on native is
->    silently accepted instead of `InvalidRequest`, and on WASM the
->    both-or-neither rule of R35.1.4a is not enforced), `swap_v2_contracts`,
->    `contract_supports_watchers`, `swap_gas_fee_policy`, `nft_req`, the
->    `WalletConnect` policy, per-token `protocol` (custom tokens), and the
->    gas-station fields (not forwarded from this method to the coin builder).
->    `komodo_proxy` is parsed but requests are not proxy-signed.
-> 10. The error enum names `PrivKeyNotAllowed` (must be
->     `PrivKeyPolicyNotAllowed`) and lacks `InvalidPayload`,
->     `PlatformCoinMismatch`, `UnexpectedDeviceActivationPolicy`,
->     `CustomTokenError`, `WalletConnectError`, `FailedSpawningBalanceEvents`,
->     `NoSuchTask`, `TaskTimedOut`; a token whose protocol names another platform
->     is not rejected (must be `PlatformCoinMismatch`).
-> 11. A platform config whose EVM protocol lacks `chain_id` is not rejected (must
->     be `CoinProtocolParseError`).
-> 12. Whether `ws`/`wss` node URLs are usable must be verified; an unusable
->     scheme must be `InvalidPayload`, not a probe failure.
-> 13. A chain-height read failure already maps to `Transport` (conforms).
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> the full request table, the R35.1.2 precedence including the three-pass token
+> batch, both result shapes with `nfts_infos` and `get_balances`, the HD address
+> at the coin's `derivation_path` plus `path_to_address` (Reloaded previously
+> bound the daemon's internal identity key; see the upgrade note in
+> `CHANGELOG.md`), the `04`-prefixed `pubkey`, the R35.1.5 error table and the
+> R35.1.6 backend-failure mapping (every node unresponsive is `Transport`,
+> string, 502). Remaining deviations:
+> 1. The `WalletConnect` policy parses but answers `WalletConnectError` (400):
+>    WalletConnect signing for EVM coins is not available in this build.
+> 2. `ws://` / `wss://` node URLs are rejected as `InvalidPayload`, because the
+>    node transport is HTTP-only.
+> 3. `komodo_proxy` is parsed but requests are not proxy-signed.
+> 4. `contract_supports_watchers` is parsed only.
+> 5. Under MetaMask (WASM) chain requests still go to `nodes`, not through the
+>    provider.
 
 ---
 
@@ -543,27 +512,13 @@ HD-derived → `UnexpectedDerivationMethod`; unsupported chain → `Internal`;
 request-parse failure; provider unreachable / non-success / unparseable → `Transport` (500); provider
 rejected the request → `InvalidPayload`.
 
-> **Reloaded status (informative).** Current reloaded deviates from §35.2:
-> 1. No inline `protocol` (custom tokens, R35.2.7).
-> 2. Every token-construction failure surfaces as `Internal`; an unreachable
->    node during the decimals read must be `Transport` (500), and a
->    non-checksummed or invalid configured address must be
->    `UnexpectedTokenProtocol` (400).
-> 3. `token_contract_address` echoes the config string verbatim; it must be
->    lower-case 0x hex (R35.2.3).
-> 4. `required_confirmations` falls back to the platform's value without
->    consulting the token config first.
-> 5. The token's info is registered on the platform before the balance read and
->    before registration of the token; a failure in between leaves the platform
->    tracking a token that is not active (R35.2.6).
-> 6. The error enum lacks `CustomTokenError`, `InvalidPayload`,
->    `PrivKeyPolicyNotAllowed`, `PlatformCoinMismatch`, `CouldNotFetchBalance`,
->    `InvalidConfig`.
-> 7. `enable_nft` is served by a separate handler with its own discriminants
->    (an object-shaped platform-not-activated error, an NFT-specific
->    already-activated name, invalid-ticker, unsupported-platform,
->    platform-mismatch and crawl-failure names); it must answer with the
->    single-token discriminants and shapes of R35.2.5 / R35.2.8.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> custom tokens, the token-construction mapping, lower-case
+> `token_contract_address`, the token-config confirmation fallback, token
+> registration on the platform only after success, the full error set, and
+> `enable_nft` served by the single-token handler. Remaining: a custom token is
+> not marked wallet-only (kdf-reloaded/kdf#16); a provider rejection maps to
+> `InvalidPayload` only for an indexer HTTP 400.
 
 ---
 
@@ -646,16 +601,11 @@ task-activation framework of [Chapter 48](48-platform-coin-task-activation.md),
 whose unit of work is the activation of §35.1 (one activation path for one-shot
 and task). Cancellation follows ch. 48 §48.7 and ch. 55 §55.2.
 
-> **Reloaded status (informative).** `task::enable_eth::*` is routed on native
-> and WASM. Deviations: (1) `init` does not reject an already-active ticker
-> synchronously -- the failure appears only in `status`; it must be the
-> mmrpc-level `PlatformIsAlreadyActivated` (400). (2) Trezor: a missing
-> hardware-wallet context answers `Transport` and device/coin failures
-> `PlatformCoinCreationError`; both must be `Internal`. (3) The device
-> confirmation state is reported with a non-vocabulary value; it must be
-> `FollowHwDeviceInstructions`. (4) The Trezor terminal result is single-address
-> shaped with `derivation_method` `Iguana`; it must be the HD shape. (5) All
-> §35.1 deviations apply to the terminal result and error.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> the synchronous already-active check, the Trezor failure mapping to
+> `Internal`, `FollowHwDeviceInstructions`, and the HD shape for the Trezor
+> result. The §35.1 remaining deviations apply. A real Trezor flow is covered
+> only by the emulator-gated tests.
 
 ---
 
@@ -745,9 +695,9 @@ cancellation is processed, the token is removed again; a token registered by
 another activation stays (ch. 55 §55.2 for the wire contract, R55.5.8 for the
 scope of the cleanup).
 
-> **Reloaded status (informative).** `task::enable_erc20::*` is not routed.
-> Required: the four routes on all targets, a token-task registry independent
-> of the platform-task registry, and the full contract of §35.3A.
+> **Reloaded status (informative).** Routed on `fix/activation-api-parity` on
+> every target, with its own registry and the full contract of §35.3A; see
+> Chapter 48 §48.11 for the substrate's remaining limits.
 
 ---
 

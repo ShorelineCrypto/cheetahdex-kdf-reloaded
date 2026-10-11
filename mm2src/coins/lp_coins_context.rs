@@ -191,7 +191,10 @@ impl CoinsContext {
     }
 }
 /// This enum is used in coin activation requests.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+///
+/// It is accepted both as a bare string (`"Trezor"`) and as the object form `{"type": "Trezor"}` that the
+/// public API reference documents (CRD ch. 55 R55.5.11). It serialises as the bare string.
+#[derive(Copy, Clone, Debug, Serialize)]
 pub enum PrivKeyActivationPolicy {
     /// Use whatever key policy the CryptoCtx was initialized with (Iguana or GlobalHD).
     ContextPrivKey,
@@ -199,6 +202,38 @@ pub enum PrivKeyActivationPolicy {
     IguanaPrivKey,
     Trezor,
 }
+#[derive(Deserialize)]
+enum PrivKeyActivationPolicyName {
+    ContextPrivKey,
+    IguanaPrivKey,
+    Trezor,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PrivKeyActivationPolicyRepr {
+    Name(PrivKeyActivationPolicyName),
+    Tagged {
+        #[serde(rename = "type")]
+        policy: PrivKeyActivationPolicyName,
+    },
+}
+
+impl<'de> Deserialize<'de> for PrivKeyActivationPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let (PrivKeyActivationPolicyRepr::Name(name) | PrivKeyActivationPolicyRepr::Tagged { policy: name }) =
+            PrivKeyActivationPolicyRepr::deserialize(deserializer)?;
+        Ok(match name {
+            PrivKeyActivationPolicyName::ContextPrivKey => PrivKeyActivationPolicy::ContextPrivKey,
+            PrivKeyActivationPolicyName::IguanaPrivKey => PrivKeyActivationPolicy::IguanaPrivKey,
+            PrivKeyActivationPolicyName::Trezor => PrivKeyActivationPolicy::Trezor,
+        })
+    }
+}
+
 impl PrivKeyActivationPolicy {
     /// The function can be used as a default deserialization constructor:
     /// `#[serde(default = "PrivKeyActivationPolicy::context_priv_key")]`

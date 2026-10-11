@@ -18,6 +18,7 @@ pub async fn electrum_client_for_test(servers: &[&str]) -> ElectrumClient {
                 url: server.to_string(),
                 protocol: ElectrumProtocol::WSS,
                 disable_cert_verification: false,
+                timeout_sec: None,
             })
             .await
             .expect("!add_server");

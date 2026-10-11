@@ -75,8 +75,6 @@ pub enum SiaInitError {
     CoinIsAlreadyActivated {
         ticker: String,
     },
-    #[display(fmt = "Private key is not allowed: {}", _0)]
-    PrivKeyNotAllowed(String),
     #[display(fmt = "Initialization task has timed out {:?}", duration)]
     TaskTimedOut {
         duration: Duration,
@@ -89,9 +87,10 @@ pub enum SiaInitError {
 impl SiaInitError {
     fn from_new_err(err: SiaCoinNewError, ticker: String) -> Self {
         match err {
-            SiaCoinNewError::UnsupportedPrivKeyPolicy => SiaInitError::PrivKeyNotAllowed(
-                "Sia supports only the single-key and single-address HD signing policies".to_string(),
-            ),
+            SiaCoinNewError::UnsupportedPrivKeyPolicy => SiaInitError::CoinCreationError {
+                ticker,
+                error: "Sia supports only the single-key and single-address HD signing policies".to_string(),
+            },
             other => SiaInitError::CoinCreationError {
                 ticker,
                 error: other.to_string(),
@@ -137,7 +136,6 @@ impl From<SiaInitError> for InitStandaloneCoinError {
             SiaInitError::CoinIsAlreadyActivated { ticker } => {
                 InitStandaloneCoinError::CoinIsAlreadyActivated { ticker }
             },
-            SiaInitError::PrivKeyNotAllowed(e) => InitStandaloneCoinError::PrivKeyNotAllowed(e),
             SiaInitError::TaskTimedOut { duration } => InitStandaloneCoinError::TaskTimedOut { duration },
             SiaInitError::CouldNotGetBalance(e) | SiaInitError::CouldNotGetBlockCount(e) => {
                 InitStandaloneCoinError::Internal(e)

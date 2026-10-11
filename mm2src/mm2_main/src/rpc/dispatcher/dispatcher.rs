@@ -1,5 +1,5 @@
 use super::{DispatcherError, DispatcherResult, PUBLIC_METHODS};
-use crate::mm2::lp_native_dex::init_hw::{init_trezor, init_trezor_status, init_trezor_user_action};
+use crate::mm2::lp_native_dex::init_hw::{init_trezor, init_trezor_cancel, init_trezor_status, init_trezor_user_action};
 use crate::mm2::lp_ordermatch::{best_orders_rpc_v2, orderbook_rpc_v2, start_simple_market_maker_bot, start_swap_rpc,
                                 stop_simple_market_maker_bot};
 #[cfg(target_arch = "wasm32")]
@@ -23,7 +23,6 @@ use coins::eth::fee_estimation::rpc::get_eth_estimated_fee_per_gas;
 use coins::eth::EthCoin;
 use coins::hd_wallet::get_new_address;
 use coins::my_tx_history_v2::my_tx_history_v2_rpc;
-use coins::nft::activation::enable_nft;
 // `coins::nft::rpc` and the `withdraw_nft` handler are native-only:
 // `coins/nft/mod.rs` gates `pub mod rpc;` and `pub mod withdraw;` behind
 // `#[cfg(not(target_arch = "wasm32"))]`. The matching dispatcher arms
@@ -55,8 +54,10 @@ use coins::utxo::utxo_standard::UtxoStandardCoin;
 use coins::{add_delegation, claim_staking_rewards, delegations_info, get_raw_transaction, get_staking_infos,
             ongoing_undelegations_info, remove_delegation, sign_message, sign_raw_transaction, validators_info,
             verify_message, withdraw};
-use coins_activation::{cancel_init_platform_coin_with_tokens, init_platform_coin_with_tokens,
-                       init_platform_coin_with_tokens_status, init_platform_coin_with_tokens_user_action};
+use coins_activation::{cancel_init_platform_coin_with_tokens, cancel_init_token, enable_evm_token,
+                       init_platform_coin_with_tokens, init_platform_coin_with_tokens_status,
+                       init_platform_coin_with_tokens_user_action, init_token, init_token_status,
+                       init_token_user_action};
 use coins_activation::{cancel_init_standalone_coin, cancel_l2_activation, enable_l2, enable_platform_coin_with_tokens,
                        enable_token, init_l2, init_l2_status, init_l2_user_action, init_standalone_coin,
                        init_standalone_coin_status, init_standalone_coin_user_action};
@@ -227,9 +228,10 @@ async fn dispatcher_v2(request: MmRpcRequest, ctx: MmArc) -> DispatcherResult<Re
         "best_orders" => handle_mmrpc(ctx, request, best_orders_rpc_v2).await,
         "consolidate_utxos" => handle_mmrpc(ctx, request, consolidate_utxos_rpc).await,
         "enable_bch_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<BchCoin>).await,
-        "enable_erc20" => handle_mmrpc(ctx, request, enable_token::<EthCoin>).await,
+        // `enable_erc20` and its alias `enable_nft` share one single-token handler (CRD ch. 35 R35.2.4).
+        "enable_erc20" => handle_mmrpc(ctx, request, enable_evm_token).await,
         "enable_eth_with_tokens" => handle_mmrpc(ctx, request, enable_platform_coin_with_tokens::<EthCoin>).await,
-        "enable_nft" => handle_mmrpc(ctx, request, enable_nft).await,
+        "enable_nft" => handle_mmrpc(ctx, request, enable_evm_token).await,
         "enable_sia" => handle_mmrpc(ctx, request, init_standalone_coin::<SiaCoin>).await,
         "enable_slp" => handle_mmrpc(ctx, request, enable_token::<SlpToken>).await,
         "enable_tendermint_token" => handle_mmrpc(ctx, request, enable_token::<TendermintToken>).await,
@@ -457,6 +459,11 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "enable_qtum::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<QtumCoin>).await,
         "enable_qtum::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<QtumCoin>).await,
         "enable_qtum::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<QtumCoin>).await,
+        // BCH standalone-coin task family (CRD ch. 55 §55.8): activates the BCH coin only.
+        "enable_bch::init" => handle_mmrpc(ctx, request, init_standalone_coin::<BchCoin>).await,
+        "enable_bch::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<BchCoin>).await,
+        "enable_bch::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<BchCoin>).await,
+        "enable_bch::cancel" => handle_mmrpc(ctx, request, cancel_init_standalone_coin::<BchCoin>).await,
         "enable_sia::init" => handle_mmrpc(ctx, request, init_standalone_coin::<SiaCoin>).await,
         "enable_sia::status" => handle_mmrpc(ctx, request, init_standalone_coin_status::<SiaCoin>).await,
         "enable_sia::user_action" => handle_mmrpc(ctx, request, init_standalone_coin_user_action::<SiaCoin>).await,
@@ -471,6 +478,11 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
             handle_mmrpc(ctx, request, init_platform_coin_with_tokens_user_action::<EthCoin>).await
         },
         "enable_eth::cancel" => handle_mmrpc(ctx, request, cancel_init_platform_coin_with_tokens::<EthCoin>).await,
+        // ERC-20 token task family (CRD ch. 35 §35.3A / ch. 48 §48.11), on all targets like `enable_erc20`.
+        "enable_erc20::init" => handle_mmrpc(ctx, request, init_token::<EthCoin>).await,
+        "enable_erc20::status" => handle_mmrpc(ctx, request, init_token_status::<EthCoin>).await,
+        "enable_erc20::user_action" => handle_mmrpc(ctx, request, init_token_user_action::<EthCoin>).await,
+        "enable_erc20::cancel" => handle_mmrpc(ctx, request, cancel_init_token::<EthCoin>).await,
         // Tendermint platform activation task family (CRD ch. 36 §36.6 / ch. 48).
         // Mirrors `enable_tendermint_with_assets`' params and result;
         // cross-platform for the same reason as `enable_eth::*`.
@@ -492,6 +504,7 @@ async fn task_dispatcher(request: MmRpcRequest, ctx: MmArc, task_method: &str) -
         "init_trezor::init" => handle_mmrpc(ctx, request, init_trezor).await,
         "init_trezor::status" => handle_mmrpc(ctx, request, init_trezor_status).await,
         "init_trezor::user_action" => handle_mmrpc(ctx, request, init_trezor_user_action).await,
+        "init_trezor::cancel" => handle_mmrpc(ctx, request, init_trezor_cancel).await,
         "account_balance::init" => handle_mmrpc(ctx, request, init_account_balance).await,
         "account_balance::status" => handle_mmrpc(ctx, request, init_account_balance_status).await,
         "create_new_account::init" => handle_mmrpc(ctx, request, init_create_new_account).await,
@@ -676,6 +689,86 @@ mod tests {
             result.is_err(),
             "a configured password must still reject a caller who gets it wrong"
         );
+    }
+
+    /// The dispatcher error of an EVM activation request as the dispatcher serializes it, with its HTTP status.
+    fn evm_request_failure(method: &str, params: serde_json::Value) -> (serde_json::Value, http::StatusCode) {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let request = MmRpcRequest {
+            mmrpc: MmRpcVersion::V2,
+            userpass: None,
+            method: method.to_owned(),
+            params,
+            id: Some(1),
+        };
+        match block_on(dispatcher_v2(request, ctx)) {
+            Ok(_) => panic!("`{}` must be rejected before the activation starts", method),
+            Err(e) => (
+                serde_json::to_value(e.get_inner()).unwrap(),
+                e.get_inner().status_code(),
+            ),
+        }
+    }
+
+    fn assert_invalid_request(failure: (serde_json::Value, http::StatusCode)) {
+        assert_eq!(failure.0["error_type"], "InvalidRequest", "{:?}", failure.0);
+        assert!(failure.0["error_data"].is_string(), "{:?}", failure.0);
+        assert_eq!(failure.1, http::StatusCode::BAD_REQUEST);
+    }
+
+    /// CRD ch. 35 T35.5, T35.9: a request that cannot be decoded is rejected by the dispatcher with
+    /// `InvalidRequest` (string, 400) before the activation starts.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn evm_activation_request_parse_failures_are_invalid_request() {
+        let valid = json!({
+            "ticker": "ETH",
+            "nodes": [{ "url": "http://127.0.0.1:1" }],
+            "erc20_tokens_requests": [],
+        });
+        let with = |key: &str, value: serde_json::Value| {
+            let mut params = valid.clone();
+            params[key] = value;
+            params
+        };
+        for method in ["enable_eth_with_tokens", "task::enable_eth::init"] {
+            // The MetaMask values do not exist on native builds.
+            assert_invalid_request(evm_request_failure(method, with("rpc_mode", json!("Metamask"))));
+            assert_invalid_request(evm_request_failure(
+                method,
+                with("priv_key_policy", json!({ "type": "Metamask" })),
+            ));
+            // A string-form policy.
+            assert_invalid_request(evm_request_failure(method, with("priv_key_policy", json!("Trezor"))));
+            // Absent token requests.
+            let mut absent = valid.clone();
+            absent.as_object_mut().unwrap().remove("erc20_tokens_requests");
+            assert_invalid_request(evm_request_failure(method, absent));
+        }
+        for method in ["enable_erc20", "enable_nft", "task::enable_erc20::init"] {
+            // `activation_params` is required.
+            assert_invalid_request(evm_request_failure(method, json!({ "ticker": "USDT-ERC20" })));
+        }
+    }
+
+    /// CRD ch. 35 §35.3A: the token task family is routed under its own namespace and an unknown sub-method of it
+    /// resolves to the standard no-such-method error.
+    #[test]
+    fn the_erc20_task_family_is_routed_and_unknown_sub_methods_are_not() {
+        let failure = evm_request_failure("task::enable_erc20::bogus", json!({}));
+        assert_eq!(failure.0["error_type"], "NoSuchMethod");
+        assert!(failure.0.get("error_data").is_none());
+        assert_eq!(failure.1, http::StatusCode::BAD_REQUEST);
+
+        // A routed method reaches its handler, which rejects the undecodable params.
+        for sub_method in ["init", "status", "user_action", "cancel"] {
+            let failure = evm_request_failure(&format!("task::enable_erc20::{sub_method}"), json!({ "no": "task" }));
+            assert_eq!(
+                failure.0["error_type"], "InvalidRequest",
+                "{sub_method}: {:?}",
+                failure.0
+            );
+        }
     }
 
     #[cfg(all(unix, not(target_arch = "wasm32")))]

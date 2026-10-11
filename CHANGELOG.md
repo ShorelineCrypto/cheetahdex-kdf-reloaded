@@ -8,6 +8,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Coin-activation wire contract, wave 1 (CRD chapter 55).** The task
+  activation families now answer with the bound wire shapes:
+  - `cancel` of every task family answers `NoSuchTask` (integer task id,
+    HTTP 404) for an unknown, forgotten or already cancelled task,
+    `TaskFinished` (integer task id, HTTP 409) for a finished task whose
+    result has not been forgotten, and `Internal` (string, HTTP 500)
+    otherwise; the Lightning task no longer maps every failure to `Internal`.
+    A cancelled activation deregisters a coin it had already registered, and
+    a cancelled task is no longer observable by `status`. Every `init`
+    accepts the optional `client_id` (accepted and ignored; streaming of task
+    events is deferred).
+  - `task::init_trezor::init` accepts no parameters, `null`, `{}`, a
+    `device_pubkey` and a `client_id`; its success details are the device
+    object (`type`, `model`, `device_name`, `device_id`, `device_pubkey`); its
+    errors are `HwContextInitializingAlready`, `HwError` (string vocabulary,
+    HTTP 410), `UnexpectedUserAction`, `Timeout` and `Internal`; and the new
+    `task::init_trezor::cancel` returns the hardware-wallet context to the
+    not-initialised state.
+  - `task::enable_utxo`, `task::enable_qtum` and the new
+    `task::enable_bch` share the bound standalone-coin error set (including
+    `HwError` and `Transport`, without the private-key and
+    derivation-method discriminants), report a lost registration race as
+    `CoinIsAlreadyActivated`, put `ticker` and ticker-keyed balances in the
+    success object, report `FollowHwDeviceInstructions`, accept
+    `priv_key_policy` as a string or as `{"type": ...}`, honor
+    `path_to_address` for a software HD account, accept a per-server
+    `timeout_sec` and default the WebAssembly Electrum protocol to `WSS`.
+    `task::enable_bch` activates the BCH coin only, for a single address.
+- **EVM activation wire contract, wave 2 (CRD chapter 35).**
+  `enable_eth_with_tokens` and `task::enable_eth`:
+  - every request field of the chapter is honored: both forms of `nft_req`
+    (inline owned-inventory fetch, reported in the always-present
+    `nfts_infos`), `get_balances` (with `tickers` instead of balances),
+    `swap_v2_contracts`, `swap_gas_fee_policy`, the gas-station fields,
+    `rpc_mode` (WebAssembly only, paired with the MetaMask policy),
+    `priv_key_policy` as an object (`ContextPrivKey`, `Trezor`, `WalletConnect`
+    with `params.session_topic`, `Metamask` on WebAssembly), inline `protocol`
+    custom tokens, and a missing `swap_contract_address` for a wallet-only
+    coin;
+  - an HD daemon now activates the address at the coin's `derivation_path`
+    plus `path_to_address` (it used to bind the daemon's internal identity
+    key) and answers the HD shape (`ticker`, `wallet_balance`, `nfts_infos`);
+    the Trezor task answers the HD shape too; `pubkey` is the `04`-prefixed
+    uncompressed key without `0x`;
+  - every node unresponsive, or a failing chain-height, decimals or balance
+    read, is `Transport` (string, HTTP 502) instead of
+    `PlatformCoinCreationError`/`Internal`; invalid node URLs and swap
+    contracts are `InvalidPayload`; absent `nodes` is `AtLeastOneNodeRequired`
+    (string); the hardware policy on the one-shot call is
+    `UnexpectedDeviceActivationPolicy`; `PrivKeyNotAllowed` is now
+    `PrivKeyPolicyNotAllowed`; tokens are enabled in three passes
+    (resolution, platform consistency, construction), so the first failing
+    token of the earliest failing pass decides;
+  - `task::enable_eth::init` answers an already active ticker at mmrpc level;
+    the device confirmation is reported as `FollowHwDeviceInstructions`.
+
+  `enable_erc20` and `enable_nft` share one single-token handler with the
+  bound discriminants (`Transport` is HTTP 500 there), on-chain decimals,
+  EIP-55 contract validation, lower-case `token_contract_address`, token
+  confirmations from the token config, and custom tokens (`CustomTokenError`).
+  The new `task::enable_erc20::{init,status,user_action,cancel}` family runs on
+  a token task substrate with its own registry, answers the HD wallet report on
+  an HD platform, and deregisters a token on cancel.
 - **Version-two (V2) UTXO swap wire contract corrected to match deployed
   peers (issue #11 batch 2).** The version-two taker-payment-spend preimage
   now matches the reference `v2.6.0-beta`/v3-lineage contract instead of an

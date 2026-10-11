@@ -16,6 +16,7 @@ use crate::platform_coin_with_tokens::*;
 use crate::prelude::*;
 use crate::tendermint_token_activation::TendermintTokenProtocol;
 use async_trait::async_trait;
+use coins::hd_pubkey::HDXPubExtractor;
 use coins::my_tx_history_v2::TxHistoryStorage;
 use coins::tendermint::{tendermint_coin_from_conf_and_request, RpcNode, TendermintCoin, TendermintInitError,
                         TendermintInitErrorKind, TendermintToken, TendermintTokenActivationParams,
@@ -200,7 +201,9 @@ impl From<TendermintActivationError> for EnablePlatformCoinWithTokensError {
                 EnablePlatformCoinWithTokensError::PlatformCoinCreationError { ticker, error }
             },
             TendermintActivationError::AtLeastOneNodeRequired => {
-                EnablePlatformCoinWithTokensError::AtLeastOneNodeRequired
+                EnablePlatformCoinWithTokensError::AtLeastOneNodeRequired(
+                    "Activation request must contain at least one node".to_owned(),
+                )
             },
             TendermintActivationError::UnexpectedDerivationMethod(e) => {
                 EnablePlatformCoinWithTokensError::UnexpectedDerivationMethod(e)
@@ -265,7 +268,15 @@ impl PlatformWithTokensActivationOps for TendermintCoin {
         })]
     }
 
-    async fn get_activation_result(&self) -> Result<TendermintActivationResult, MmError<TendermintActivationError>> {
+    async fn get_activation_result<XPubExtractor>(
+        &self,
+        _ctx: &MmArc,
+        _activation_request: &Self::ActivationRequest,
+        _xpub_extractor: Option<&XPubExtractor>,
+    ) -> Result<TendermintActivationResult, MmError<TendermintActivationError>>
+    where
+        XPubExtractor: HDXPubExtractor + Sync,
+    {
         let ticker = self.ticker().to_owned();
         let address = self.my_address().map_to_mm(TendermintActivationError::Internal)?;
         let current_block = self

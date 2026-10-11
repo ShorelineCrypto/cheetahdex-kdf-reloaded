@@ -90,6 +90,7 @@ pub mod nft_swap_v2 {
     pub use crate::eth::eth_swap_v2::nft_swap_v2::*;
 }
 
+mod eth_activation;
 mod eth_impl;
 mod eth_market_ops;
 mod eth_mm_coin;
@@ -106,12 +107,14 @@ mod eth_types;
 pub mod wc_integration;
 mod wire_types;
 // Re-export split module contents for backward-compatible access paths
+pub use eth_activation::*;
 pub use eth_impl::*;
 pub use eth_mm_coin::EthTxFeeDetails;
 pub use eth_types::*;
 // EVM Trezor activation entrypoints (native, non-iOS).
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
-pub use eth_trezor_activation::{eth_coin_activate_with_trezor, eth_coin_from_conf_and_request_with_trezor};
+pub use eth_trezor_activation::{eth_coin_activate_with_trezor, eth_coin_activate_with_trezor_hd,
+                                eth_coin_from_conf_and_request_with_trezor};
 
 pub(crate) use crate::DerivationMethod;
 pub(crate) use crate::{CommonSwapOpsV2, DexFee, FindPaymentSpendError, FundingTxSpend, GenPreimageResult,

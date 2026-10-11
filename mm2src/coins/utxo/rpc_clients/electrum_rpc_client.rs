@@ -65,7 +65,12 @@ pub fn spawn_electrum(
         },
     };
 
-    Ok(electrum_connect(req.url.clone(), config, event_handlers))
+    Ok(electrum_connect(
+        req.url.clone(),
+        config,
+        event_handlers,
+        req.request_timeout(),
+    ))
 }
 
 /// Attempts to process the request (parse url, etc), build up the config and create new electrum connection
@@ -100,7 +105,7 @@ pub fn spawn_electrum(
         },
     };
 
-    Ok(electrum_connect(url, config, event_handlers))
+    Ok(electrum_connect(url, config, event_handlers, req.request_timeout()))
 }
 
 #[derive(Debug)]
@@ -119,6 +124,8 @@ pub struct ElectrumConnection {
     responses: JsonRpcPendingRequestsShared,
     /// Selected protocol version. The value is initialized after the server.version RPC call.
     protocol_version: AsyncMutex<Option<f32>>,
+    /// The request timeout the server was configured with. The default timeout applies when unset.
+    request_timeout: Option<Duration>,
 }
 
 impl ElectrumConnection {
@@ -228,7 +235,9 @@ async fn electrum_request_multi(
                     request.clone(),
                     tx.clone(),
                     connection.responses.clone(),
-                    ELECTRUM_TIMEOUT / (connections.len() - i) as u64,
+                    connection
+                        .request_timeout
+                        .unwrap_or_else(|| Duration::from_secs(ELECTRUM_TIMEOUT / (connections.len() - i) as u64)),
                 )
                 .map(|response| (JsonRpcRemoteAddr(connection_addr), response));
                 futures.push(fut)
@@ -266,7 +275,7 @@ async fn electrum_request_to(
     request: JsonRpcRequestEnum,
     to_addr: String,
 ) -> Result<(JsonRpcRemoteAddr, JsonRpcResponseEnum), String> {
-    let (tx, responses) = {
+    let (tx, responses, request_timeout) = {
         let connections = client.connections.lock().await;
         let connection = connections
             .iter()
@@ -279,13 +288,18 @@ async fn electrum_request_to(
                 None => return ERR!("Connection {} is not established yet", to_addr),
             }
         };
-        (tx, responses)
+        (tx, responses, connection.request_timeout)
     };
 
     let response = try_s!(
-        electrum_request(request.clone(), tx, responses, ELECTRUM_TIMEOUT)
-            .compat()
-            .await
+        electrum_request(
+            request.clone(),
+            tx,
+            responses,
+            request_timeout.unwrap_or_else(|| Duration::from_secs(ELECTRUM_TIMEOUT))
+        )
+        .compat()
+        .await
     );
     Ok((JsonRpcRemoteAddr(to_addr.to_owned()), response))
 }
@@ -1443,6 +1457,7 @@ fn electrum_connect(
     addr: String,
     config: ElectrumConfig,
     event_handlers: Vec<RpcTransportEventHandlerShared>,
+    request_timeout: Option<Duration>,
 ) -> ElectrumConnection {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let responses = Arc::new(AsyncMutex::new(JsonRpcPendingRequests::default()));
@@ -1465,6 +1480,7 @@ fn electrum_connect(
         shutdown_tx: Some(shutdown_tx),
         responses,
         protocol_version: AsyncMutex::new(None),
+        request_timeout,
     }
 }
 
@@ -1472,7 +1488,7 @@ fn electrum_request(
     request: JsonRpcRequestEnum,
     tx: mpsc::Sender<Vec<u8>>,
     responses: JsonRpcPendingRequestsShared,
-    timeout: u64,
+    timeout: Duration,
 ) -> Box<dyn Future<Item = JsonRpcResponseEnum, Error = String> + Send + 'static> {
     let send_fut = async move {
         let json = try_s!(json::to_string(&request));
@@ -1493,7 +1509,7 @@ fn electrum_request(
     };
     let send_fut = send_fut
         .boxed()
-        .timeout(Duration::from_secs(timeout))
+        .timeout(timeout)
         .compat()
         .then(|res| match res {
             Ok(response) => response,

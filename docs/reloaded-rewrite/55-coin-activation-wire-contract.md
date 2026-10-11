@@ -385,19 +385,16 @@ R55.2.10.
 | `user_action` | `"success"`, 200 | R55.2.12 | -- |
 | `cancel` | `"success"`, 200 | R55.2.15 | -- |
 
-> **Reloaded status (informative).** `status` and `user_action` already match
-> R55.2.6–R55.2.12, and the status envelope places the error object directly
-> in `details`. Deviations: (1) cancelling a finished task answers `Internal`
-> (500) in every family instead of `TaskFinished` (integer, 409); (2) `cancel`
-> of an unknown id answers `NoSuchTask` with HTTP 400 instead of 404, and the
-> standalone-coin families report cancel errors through their activation error
-> set rather than the cancel set; (3) the Lightning task's `cancel` answers
-> `Internal` (500) for every failure including an unknown id; (4)
-> `task::init_trezor` has no `cancel`; (5) there is no cleanup step on cancel,
-> so `task::init_trezor` cannot reset the hardware-wallet context; (6)
-> `client_id` is silently ignored by most `init` methods and rejected by
-> `task::init_trezor::init`, and no task-status events are streamed; (7) no
-> unit test serialises the status envelope or any cancel error.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> the cancel set of R55.2.15 (`NoSuchTask` 404, `TaskFinished` 409, `Internal`
+> 500) in every family including the Lightning task, the cleanup of R55.2.14
+> (a coin the task registered is deregistered; `task::init_trezor` resets the
+> hardware-wallet context it owned), `task::init_trezor::cancel`, `client_id` on
+> every `init`, and wire-shape tests for the status envelope and every cancel
+> error. Remaining: task-status events are not streamed (D55.1); the first
+> `cancel` answers before the cleanup has run, so a caller listing enabled coins
+> in the following moment may still see the coin (R55.2.16 permits the repeated
+> `cancel` to answer `NoSuchTask` at once).
 
 ---
 
@@ -467,22 +464,18 @@ other row the public reference is silent and the reference release decides.
 > the task families above report `Transport` (the public reference is silent
 > there).
 
-> **Reloaded status (informative).** Deviations from the table: the UTXO and
-> QTUM task families report unreachable Electrum servers (which Reloaded
-> detects while building the coin) and a block-height failure after build as
-> `CoinCreationError` instead of `Transport`; the EVM platform reports an
-> all-nodes-unreachable probe as `PlatformCoinCreationError` (500) instead of
-> `Transport` (502) (Chapter 35); the Tendermint platform reports node failure
-> as `Transport` (502) instead of `PlatformCoinCreationError` (500)
-> (Chapter 36); the Tendermint token reports `Transport` instead of
-> `CouldNotFetchBalance`; the Solana platform reports `Internal` instead of
-> `PlatformCoinCreationError` (Chapter 40); the NFT activation reports a
-> dedicated indexer-failure discriminant with HTTP 424 instead of `Transport`
-> (Chapter 19); Z-coin and Sia report post-build failures as `Internal`
-> instead of `Transport`, and a Z-coin native-mode daemon outage can leave the
-> task in progress indefinitely (Chapters 39, 46); the Lightning task reports a
-> start failure as `Internal` (Chapter 41); the legacy `electrum` method does
-> not deregister the coin when the balance query fails (§55.4).
+> **Reloaded status (informative).** Matching on `fix/activation-api-parity`:
+> the UTXO, QTUM and BCH task families (`Transport` for unreachable Electrum
+> servers and a failed block-height read), the EVM platform (`Transport`, 502),
+> the ERC20 token and the NFT provider (Chapters 35, 19). Remaining deviations:
+> the Tendermint platform reports node failure as `Transport` (502) instead of
+> `PlatformCoinCreationError` (500) (Chapter 36); the Tendermint token reports
+> `Transport` instead of `CouldNotFetchBalance`; the Solana platform reports
+> `Internal` (Chapter 40); Z-coin and Sia report post-build failures as
+> `Internal` instead of `Transport`, and a Z-coin native-mode daemon outage can
+> leave the task in progress indefinitely (Chapters 39, 46); the Lightning task
+> reports a start failure as `Internal` (Chapter 41); the legacy `electrum`
+> method does not deregister the coin when the balance query fails (§55.4).
 
 ---
 
@@ -700,10 +693,10 @@ another activation untouched when it is cancelled.
 > activation registered successfully. R55.5.8 binds the corrected behaviour;
 > it changes no wire field.
 
-> **Reloaded status (informative).** Reloaded also starts and runs concurrent
-> tasks for the same ticker in parallel, but the losing task reports success
-> instead of `CoinIsAlreadyActivated` (see the §55.5.1 note). Its cancel has no
-> cleanup step, so it cannot remove another activation's coin.
+> **Reloaded status (informative).** Concurrent tasks for the same ticker run
+> in parallel, as in the reference; since `fix/activation-api-parity` the losing
+> standalone task ends with `CoinIsAlreadyActivated`, and a cancelled task
+> removes only a coin it registered itself (R55.5.8).
 
 ### 55.5.1 UTXO-family members (`enable_utxo`, `enable_qtum`, `enable_bch`)
 
@@ -797,21 +790,19 @@ account semantics).
 | registration conflict (R55.5.5) | `CoinIsAlreadyActivated` | `{ticker}` |
 | history storage or wallet context unavailable; any other task-framework failure | `Internal` | string |
 
-> **Reloaded status (informative).** The `init` request and synchronous checks
-> match. Deviations: the error set carries two discriminants the reference set
-> does not have (a private-key-not-allowed and an unexpected-derivation-method
-> discriminant) and lacks `HwError`; the success object lacks `ticker`; the
-> Iguana `balance` is a flat `{spendable, unspendable}` object instead of a
-> ticker-keyed map; the progress vocabulary uses a confirm-public-key value in
-> place of `FollowHwDeviceInstructions` and lacks `SyncingBlockHeaders` and
-> `TemporaryError`; a block-height failure is reported as `CoinCreationError`
-> instead of `Transport`, and unreachable Electrum servers are detected while
-> building and reported as `CoinCreationError` instead of `Transport`; device
-> and timeout failures during HD account
-> creation are folded into `CoinCreationError`; a registration conflict is
-> silently treated as success; the `path_to_address` and per-server
-> `timeout_sec` fields are ignored; the WASM default Electrum protocol is `WS`
-> instead of `WSS`; and only the string form of `priv_key_policy` is accepted.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> the bound error set (with `HwError`, without the private-key and
+> derivation-method discriminants), the success object with `ticker` and
+> ticker-keyed balances, `FollowHwDeviceInstructions`, the R55.5.14 failure
+> mapping (`Transport` for unreachable Electrum servers and a failed
+> block-height read; device and timeout failures during HD account creation
+> mapped separately), the registration conflict, `path_to_address`, per-server
+> `timeout_sec`, the WASM default `WSS` protocol and both forms of
+> `priv_key_policy`. Remaining: `SyncingBlockHeaders` and `TemporaryError`
+> exist on the wire but are never emitted (D55.4); `path_to_address` is honored
+> for a software global-HD account only, not under the Trezor policy;
+> unreachable Electrum servers are detected while building the coin rather than
+> lazily (the observable discriminant is the bound `Transport`).
 
 ---
 
@@ -884,10 +875,10 @@ cannot be parsed -> `CoinCreationError` `{ticker, error}`.
 **R55.8.5** *Success.* The success object is R55.5.13, keyed by the BCH ticker,
 with addresses in the coin's configured or requested address format.
 
-> **Reloaded status (informative).** The family is not routed at all:
-> every `task::enable_bch::*` method answers `NoSuchMethod`. A BCH
-> standalone-coin task member, its task registry and its four routes are
-> required.
+> **Reloaded status (informative).** Routed on `fix/activation-api-parity`
+> with its own registry, on all targets. Remaining deviation: BCH activates for
+> a single address only (Reloaded's BCH coin has no HD or hardware-wallet
+> paths); the `Trezor` policy ends with status-level `CoinCreationError`.
 
 ---
 
@@ -982,9 +973,8 @@ platform was registered is rejected at once with the same discriminant.
 > the `tickers` field is never emitted (address infos always carry balances);
 > the token-to-platform mismatch check is absent; the token `protocol` field is
 > not accepted; a hardware `priv_key_policy` is not rejected with
-> `UnexpectedDeviceActivationPolicy`; the shared set's `AtLeastOneNodeRequired`
-> carries no `error_data` in Reloaded but a string in the reference set
-> (relevant to Chapters 35 and 36).
+> `UnexpectedDeviceActivationPolicy`. (`AtLeastOneNodeRequired` carries its
+> string since `fix/activation-api-parity`.)
 
 ---
 
@@ -1049,11 +1039,10 @@ answers mmrpc-level `TokenIsAlreadyActivated` (string: the token ticker, HTTP
 platform. No call is deduplicated or joined.
 
 > **Reloaded status (informative).** Request (without `protocol`) and success
-> shapes match. Deviations: the token's information is never recorded on the
-> platform coin (an incidental defect: a token activated with `enable_slp` is
-> unknown to the platform's SLP-aware operations); the error set lacks
-> `PlatformCoinMismatch`, `CustomTokenError`, `CouldNotFetchBalance`,
-> `InvalidConfig`, `InvalidPayload` and `PrivKeyPolicyNotAllowed`.
+> shapes match, and since `fix/activation-api-parity` the shared token error set
+> has every bound discriminant. Remaining deviation: the token's information is
+> never recorded on the platform coin (an incidental defect: a token activated
+> with `enable_slp` is unknown to the platform's SLP-aware operations).
 
 ---
 
@@ -1126,16 +1115,13 @@ with `priv_key_policy` `Trezor` started before the context is initialised fails
 at status level with `CoinCreationError` `{ticker, error}` (R55.5.14); the
 public reference shows this case.
 
-> **Reloaded status (informative).** Deviations: `init` accepts only a `null`
-> request (it rejects `{}`, `device_pubkey` and `client_id` with
-> `InvalidRequest`); `cancel` is not routed; the `Ok` details are the string
-> `"success"` instead of the device object; the error set reports a missing
-> device and other device failures as their own discriminants (a
-> no-device-available discriminant with no data, and a device-internal
-> discriminant with a string) instead of `HwError` with a string, carries an
-> already-initialised discriminant that is never produced, and lacks
-> `UnexpectedUserAction`; the in-progress vocabulary has a read-public-key value
-> in place of `FollowHwDeviceInstructions`.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> every request form, the device-object `Ok` details, the error set with
+> `HwError` and `UnexpectedUserAction`, the progress vocabulary, and `cancel`
+> with the context reset. Remaining: the `device_pubkey` check runs after the
+> device is initialised, so the context is briefly ready for the wrong device
+> before the task resets it and reports `FoundUnexpectedDevice`; `device_name`
+> is taken from the device label.
 
 ---
 

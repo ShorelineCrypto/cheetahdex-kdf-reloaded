@@ -17,7 +17,7 @@ mod task;
 
 pub use handle::RpcTaskHandle;
 pub use manager::{RpcTaskManager, RpcTaskManagerShared};
-pub use task::{RpcTask, RpcTaskTypes};
+pub use task::{CancelCleanup, CancelCleanupFuture, RpcTask, RpcTaskTypes};
 
 pub type FinishedTaskResult<Item, Error> = MmRpcResult<Item, Error>;
 pub type RpcTaskResult<T> = Result<T, MmError<RpcTaskError>>;
@@ -51,6 +51,12 @@ pub enum RpcTaskError {
         expected: TaskStatusError,
     },
     Canceled,
+    /// The user action delivered to the task is not the kind the task waits for.
+    /// `expected` names the `action_type` the task waits for.
+    #[display(fmt = "Unexpected user action: expected '{}'", expected)]
+    UnexpectedUserAction {
+        expected: &'static str,
+    },
     Internal(String),
 }
 

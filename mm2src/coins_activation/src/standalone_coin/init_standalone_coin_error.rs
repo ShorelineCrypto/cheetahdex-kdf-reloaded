@@ -1,6 +1,7 @@
 use crate::prelude::CoinConfWithProtocolError;
-use coins::CoinProtocol;
+use coins::{CoinProtocol, RegisterCoinError};
 use common::{HttpStatusCode, StatusCode};
+use crypto::HwRpcError;
 use derive_more::Display;
 use rpc_task::rpc_common::{RpcTaskStatusError, RpcTaskUserActionError};
 use rpc_task::{RpcTaskError, TaskId};
@@ -39,10 +40,9 @@ pub enum InitStandaloneCoinError {
         ticker: String,
         error: String,
     },
-    #[display(fmt = "Private key is not allowed: {}", _0)]
-    PrivKeyNotAllowed(String),
-    #[display(fmt = "Unexpected derivation method: {}", _0)]
-    UnexpectedDerivationMethod(String),
+    /// A hardware-wallet failure classified into the public hardware RPC error names (CRD ch. 55 R55.2.17).
+    #[display(fmt = "Hardware wallet error: {}", _0)]
+    HwError(HwRpcError),
     Transport(String),
     Internal(String),
 }
@@ -60,6 +60,17 @@ impl From<CoinConfWithProtocolError> for InitStandaloneCoinError {
             CoinConfWithProtocolError::UnexpectedProtocol { ticker, protocol } => {
                 InitStandaloneCoinError::UnexpectedCoinProtocol { ticker, protocol }
             },
+        }
+    }
+}
+
+impl From<RegisterCoinError> for InitStandaloneCoinError {
+    fn from(e: RegisterCoinError) -> Self {
+        match e {
+            RegisterCoinError::CoinIsInitializedAlready { coin } => {
+                InitStandaloneCoinError::CoinIsAlreadyActivated { ticker: coin }
+            },
+            RegisterCoinError::Internal(internal) => InitStandaloneCoinError::Internal(internal),
         }
     }
 }
@@ -82,9 +93,8 @@ impl HttpStatusCode for InitStandaloneCoinError {
             | InitStandaloneCoinError::CoinConfigIsNotFound { .. }
             | InitStandaloneCoinError::CoinProtocolParseError { .. }
             | InitStandaloneCoinError::UnexpectedCoinProtocol { .. }
-            | InitStandaloneCoinError::CoinCreationError { .. }
-            | InitStandaloneCoinError::PrivKeyNotAllowed(_)
-            | InitStandaloneCoinError::UnexpectedDerivationMethod(_) => StatusCode::BAD_REQUEST,
+            | InitStandaloneCoinError::CoinCreationError { .. } => StatusCode::BAD_REQUEST,
+            InitStandaloneCoinError::HwError(_) => StatusCode::GONE,
             InitStandaloneCoinError::TaskTimedOut { .. } => StatusCode::REQUEST_TIMEOUT,
             InitStandaloneCoinError::Transport(_) | InitStandaloneCoinError::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR

@@ -254,24 +254,26 @@ pub trait UtxoFieldsWithGlobalHDBuilder: UtxoCoinBuilderCommonOps + UtxoFieldsWi
             .build()
             .mm_err(Into::into)?;
 
-        // Derive key pair at the default activated address: m/44'/coin_type'/0'/0/0
+        // Derive key pair at the activated address: `path_to_address` of the request,
+        // defaulting to account 0, the external chain and address 0 (m/44'/coin_type'/0'/0/0).
         let derivation_path = self.derivation_path().mm_err(Into::into)?;
+        let path_to_address = self.activation_params().path_to_address.clone().unwrap_or_default();
 
-        // Build the full derivation path to the first receiving address.
+        // Build the full derivation path to the activated address.
         let mut full_path = derivation_path.to_derivation_path();
-        // account 0' (hardened)
+        // account (hardened)
         full_path.push(
-            crypto::ChildNumber::new(0, true)
+            crypto::ChildNumber::new(path_to_address.account_id, true)
                 .map_err(|_| UtxoCoinBuildError::Internal("failed to create hardened child number".to_owned()))?,
         );
-        // external chain 0 (non-hardened)
+        // chain (non-hardened)
         full_path.push(
-            crypto::ChildNumber::new(0, false)
+            crypto::ChildNumber::new(path_to_address.chain as u32, false)
                 .map_err(|_| UtxoCoinBuildError::Internal("failed to create child number".to_owned()))?,
         );
-        // address index 0 (non-hardened)
+        // address index (non-hardened)
         full_path.push(
-            crypto::ChildNumber::new(0, false)
+            crypto::ChildNumber::new(path_to_address.address_id, false)
                 .map_err(|_| UtxoCoinBuildError::Internal("failed to create child number".to_owned()))?,
         );
 

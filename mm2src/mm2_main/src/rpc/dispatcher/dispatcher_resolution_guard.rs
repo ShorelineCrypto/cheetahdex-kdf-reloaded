@@ -38,10 +38,18 @@ fn task_namespace_methods_are_routed() {
         "enable_qtum::status",
         "enable_qtum::user_action",
         "enable_qtum::cancel",
+        "enable_bch::init",
+        "enable_bch::status",
+        "enable_bch::user_action",
+        "enable_bch::cancel",
         "enable_eth::init",
         "enable_eth::status",
         "enable_eth::user_action",
         "enable_eth::cancel",
+        "enable_erc20::init",
+        "enable_erc20::status",
+        "enable_erc20::user_action",
+        "enable_erc20::cancel",
         "enable_tendermint::init",
         "enable_tendermint::status",
         "enable_tendermint::user_action",
@@ -57,6 +65,7 @@ fn task_namespace_methods_are_routed() {
         "init_trezor::init",
         "init_trezor::status",
         "init_trezor::user_action",
+        "init_trezor::cancel",
         "account_balance::init",
         "account_balance::status",
         "create_new_account::init",
@@ -69,6 +78,28 @@ fn task_namespace_methods_are_routed() {
         "withdraw::user_action",
         "withdraw::cancel",
     ]);
+}
+
+#[test]
+fn flat_task_aliases_stay_routed() {
+    // The baseline flat aliases of the task methods follow the namespaced ones (CRD ch. 55 R55.6.3,
+    // R55.7.1, R55.11.1).
+    for method in [
+        "init_utxo",
+        "init_utxo_status",
+        "init_utxo_user_action",
+        "init_qtum",
+        "init_qtum_status",
+        "init_qtum_user_action",
+        "init_trezor",
+        "init_trezor_status",
+        "init_trezor_user_action",
+    ] {
+        assert!(
+            DISPATCHER_SOURCE.contains(&format!("\"{method}\"")),
+            "v2 dispatcher lost routing for the flat task alias `{method}`"
+        );
+    }
 }
 
 #[test]
@@ -167,6 +198,7 @@ fn evm_v2_flat_methods_are_routed() {
     for method in [
         "enable_eth_with_tokens",
         "enable_erc20",
+        "enable_nft",
         "get_token_info",
         "get_swap_gas_fee_policy",
         "set_swap_gas_fee_policy",

@@ -256,7 +256,10 @@ pub enum ZcoinInitError {
     CoinIsAlreadyActivated {
         ticker: String,
     },
-    HardwareWalletsAreNotSupportedYet,
+    #[display(fmt = "Hardware wallets are not supported yet for {}", ticker)]
+    HardwareWalletsAreNotSupportedYet {
+        ticker: String,
+    },
     #[display(fmt = "Initialization task has timed out {:?}", duration)]
     TaskTimedOut {
         duration: Duration,
@@ -332,8 +335,11 @@ impl From<ZcoinInitError> for InitStandaloneCoinError {
             ZcoinInitError::CoinIsAlreadyActivated { ticker } => {
                 InitStandaloneCoinError::CoinIsAlreadyActivated { ticker }
             },
-            ZcoinInitError::HardwareWalletsAreNotSupportedYet => {
-                InitStandaloneCoinError::PrivKeyNotAllowed("Hardware wallets are not supported yet".into())
+            ZcoinInitError::HardwareWalletsAreNotSupportedYet { ticker } => {
+                InitStandaloneCoinError::CoinCreationError {
+                    ticker,
+                    error: "Hardware wallets are not supported yet".into(),
+                }
             },
             ZcoinInitError::TaskTimedOut { duration } => InitStandaloneCoinError::TaskTimedOut { duration },
             ZcoinInitError::CouldNotGetBalance(e)
@@ -410,6 +416,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             scan_policy: Default::default(),
             priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
             check_utxo_maturity: None,
+            path_to_address: None,
         };
 
         // Wire sync parameters from RPC request into protocol_info (R39.6.2)

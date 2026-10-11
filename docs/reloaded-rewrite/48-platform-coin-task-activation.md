@@ -227,9 +227,10 @@ values as single-key objects):
 The initial status is `ActivatingCoin`; `RequestingWalletBalance`, when
 balances are requested, precedes `Ok`; no other ordering is bound.
 
-> **Reloaded status (informative).** Reloaded's platform in-progress vocabulary
-> has a confirm-public-key value in place of `FollowHwDeviceInstructions` and
-> lacks `SyncingBlockHeaders` and `TemporaryError`.
+> **Reloaded status (informative).** The device-confirmation state is
+> `FollowHwDeviceInstructions` since `fix/activation-api-parity`.
+> `SyncingBlockHeaders` and `TemporaryError` are not produced (no EVM or
+> Tendermint producer exists).
 
 ---
 
@@ -316,12 +317,10 @@ discriminant and `error_data` the one-shot call would use.
 > and the page does not say whether `init` or `status` returns them. The
 > reference release reports them at status level; R48.5.4 follows it.
 
-> **Reloaded status (informative).** Reloaded's platform `init` performs no
-> synchronous check, so an already-active platform is reported only at status
-> level (R48.5.4 item 1 is missing); the platform `cancel` answers `Internal`
-> (500) for a finished task instead of `TaskFinished` (409) and `NoSuchTask`
-> with HTTP 400 instead of 404; the shared platform error set lacks
-> `TaskTimedOut`, `NoSuchTask` and `UnexpectedDeviceActivationPolicy`.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`:
+> the synchronous already-active check of R48.5.4, the cancel set of Chapter 55
+> R55.2.15, and the shared platform error set with `TaskTimedOut`, `NoSuchTask`
+> and `UnexpectedDeviceActivationPolicy`.
 
 ---
 
@@ -544,9 +543,12 @@ concurrent registration of the same ticker ends the task with status-level
 if that task itself had registered it; a token registered by another
 activation stays (Chapter 55 R55.2.14, R55.5.8).
 
-> **Reloaded status (informative).** Reloaded has no token task substrate:
-> `task::enable_erc20::*` answers `NoSuchMethod`. The substrate of this
-> section, its ERC20 registration (Chapter 35) and its routes are required.
+> **Reloaded status (informative).** Implemented on `fix/activation-api-parity`
+> with the ERC20 registration of Chapter 35 (`task::enable_erc20::*`).
+> Remaining: the hardware progress values of R48.11.5 are never emitted (the
+> token task performs no device exchange); a token can be enabled only at the
+> platform's enabled address, and `scan_policy` / `min_addresses_number` are
+> accepted and ignored.
 
 ## 48.12 Provenance Footer
 

@@ -27,7 +27,7 @@ use crate::{coin_conf, CoinProtocol};
 /// Optional BIP-44 coordinate selecting a specific hierarchical-deterministic
 /// address. Absent fields default to the first account's first external
 /// address (account 0, external branch, address 0).
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PathToAddress {
     /// BIP-44 account index.
     #[serde(default)]
@@ -41,6 +41,16 @@ pub struct PathToAddress {
 }
 
 fn external_chain() -> Bip44Chain { Bip44Chain::External }
+
+impl Default for PathToAddress {
+    fn default() -> Self {
+        PathToAddress {
+            account_id: 0,
+            chain: Bip44Chain::External,
+            address_id: 0,
+        }
+    }
+}
 
 #[derive(Deserialize)]
 pub struct GetMyAddressRequest {

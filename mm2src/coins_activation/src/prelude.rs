@@ -18,6 +18,10 @@ impl TxHistory for UtxoActivationParams {
     fn tx_history(&self) -> bool { self.tx_history }
 }
 
+impl TxHistory for coins::utxo::bch::BchActivationRequest {
+    fn tx_history(&self) -> bool { self.utxo_params.tx_history }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", content = "data")]
 pub enum DerivationMethod {

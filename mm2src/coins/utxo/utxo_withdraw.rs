@@ -89,9 +89,9 @@ impl From<RpcTaskError> for WithdrawError {
         match e {
             RpcTaskError::Canceled => WithdrawError::InternalError("Canceled".to_owned()),
             RpcTaskError::Timeout(timeout) => WithdrawError::Timeout(timeout),
-            RpcTaskError::NoSuchTask(_) | RpcTaskError::UnexpectedTaskStatus { .. } => {
-                WithdrawError::InternalError(error)
-            },
+            RpcTaskError::NoSuchTask(_)
+            | RpcTaskError::UnexpectedTaskStatus { .. }
+            | RpcTaskError::UnexpectedUserAction { .. } => WithdrawError::InternalError(error),
             RpcTaskError::Internal(internal) => WithdrawError::InternalError(internal),
         }
     }
