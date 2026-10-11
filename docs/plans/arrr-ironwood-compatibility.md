@@ -976,6 +976,18 @@ replaces it — three of the eight published `light_wallet_d_servers` entries ar
 serve a different fork, and an off‑branch server above the wallet's anchor can otherwise make
 the wallet rewind and follow that server's chain.
 
+> **Step C's branch‑id check inverts if written naively, and this section originally ordered it
+> wrongly.** "Expected branch id" has to be relative to something. Derived from the coin's
+> configured network‑upgrade heights — the obvious reading — the expectation at today's ARRR
+> heights is the **pre‑upgrade** value, because `ironwood_activation_height` is optional
+> (R39.6.4a), no published configuration carries it, and a test pins that the branch lookup
+> still returns Sapling at any height. A naive check would therefore have **admitted the stale
+> fork and excluded every healthy endpoint** — the exact inverse of the intent, shipped as a
+> safety feature. CRD `R39.11.7a` is written to be correct in both configuration states and
+> `T39.11.f` pins the inversion case, so the ordering hazard is closed by the requirement rather
+> than by sequencing C after E. **Carry this into the Coder prompt**; it is the single most
+> likely way to implement this step backwards.
+
 > **Step C's one hard dependency is the P2SH defect in §10.2.** Spend detection for the swap
 > HTLC rests on a source‑derived, runtime‑unverified workaround (query the redeem script's
 > `hash160` as an R‑address). If that workaround does not hold, the swap half of this step has
@@ -985,6 +997,19 @@ the wallet rewind and follow that server's chain.
 > workaround on a funded HTLC before building on it.** The wallet half of this step — tip,
 > broadcast, raw transactions, balance, history, mempool, anchor — has no such dependency and
 > can proceed regardless.
+
+> **A related risk, measured rather than left open.** An HTLC spend is exactly the transaction
+> shape a node without a transaction index cannot serve — a transparent P2SH input in, a
+> shielded output out, so no transparent output — which would hide the `scriptSig` carrying the
+> swap secret, and a compact block cannot substitute because it carries no `scriptSig`. Probing
+> the provider set on 2026‑10‑11 with a fully shielded mainnet transaction (which only the
+> transaction index can serve) resolved it on **six of seven** endpoints:
+> `lightwalletd1`/`lightwalletd2.cryptoforge.cc`, `pirate.mathnodes.com` and
+> `arrr`/`arrr2`/`arrr3.qortal.link`. So this is a reportable condition, not a blocker. The
+> seventh, `lightd1.pirate.black`, returned an nginx **502** for that method while answering
+> `GetLightdInfo` and `GetLatestBlock` normally — which is its own constraint: **endpoint
+> admission cannot rest on one probe**, because an endpoint can pass admission and then fail
+> the methods actually needed. Recorded as CRD `D39.11.g`.
 
 **D — route ARRR's transaction parsing to the Zcash parser.** The shared UTXO parser applies
 the v4 layout to any overwintered version ≥ 4 with double‑SHA256 txids, so it mis‑parses v6 and
