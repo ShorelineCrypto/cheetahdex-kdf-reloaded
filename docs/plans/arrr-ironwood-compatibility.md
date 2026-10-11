@@ -872,22 +872,69 @@ fixture corpus) versus an unused address of the same form.
 | transparent history (spend detection) | `GetTaddressTxids` | **works** — streamed 8 661 transactions, ~1 MB, for the real address; empty for the control |
 | transparent UTXOs and balance | `GetAddressUtxos` | **works** — one UTXO returned for the real address; empty for the control |
 | broadcast | `SendTransaction` | **declared, untested** — needs a valid signed transaction |
-| transparent balance (direct) | `GetTaddressBalance` | **unusable** — returns the daemon's `-5: Invalid addresses` for *every* address, valid or not. Not needed: sum `GetAddressUtxos`. |
+| transparent balance (direct) | `GetTaddressBalance` | **works** — see the correction below; several addresses per call, reply carries only `valueZat` |
 | fee rate | — | not needed; ARRR declares a fixed per‑kB fee |
 
-Three operational findings that constrain the design:
+**Corrected 2026‑10‑11 after reading Pirate's published source.** Two of the three findings
+first recorded here were wrong, in opposite directions — one blamed Pirate for our own defect,
+the other understated a real one. Both corrections are kept visible rather than silently
+rewritten, because the first is the kind of mistake worth not repeating.
 
-- **`GetTaddressTxids` can fail mid‑stream.** The real‑address call returned 8 661 messages and
-  *then* `-5: No information available about`. The implementation must tolerate a partial
-  stream and use bounded height ranges rather than assuming a clean one.
+- **`GetTaddressBalance` works; the failure was ours.** It was reported here as returning
+  `-5: Invalid addresses` for every address. The probe encoded `AddressList` as field 1
+  *containing* a field‑1 submessage, where `repeated string addresses = 1` requires a flat
+  `0a <len> <addr>` per address. With the correct encoding the same address on the same server
+  returns `grpc-status 0` and a balance of 17 935 616.0014 ARRR, verified directly. Nothing to
+  report to Pirate, and no workaround is needed. The lesson generalises: a gRPC error carrying a
+  *daemon* error code (`-5`) is evidence the request reached the node, which should have
+  prompted suspicion of the request rather than of the server.
+- **P2SH lookups are broken by a Pirate daemon defect**, not merely unproven. The transparent
+  index does store P2SH rows, but under the wrong key type, so a `b…` query can never match
+  them. `GetAddressType` (`src/main.cpp:3378‑3403`) guards on
+  `vDest.index() != std::variant_npos`, which for a `std::variant` is always true, so the
+  `TX_SCRIPTHASH → keyType = 2` branch is dead code and every indexed output is written as
+  type 1; `CBitcoinAddress::GetIndexKey` (`src/base58.cpp:298‑312`) resolves a
+  `SCRIPT_ADDRESS` to type 2, and the type is the first byte of the LevelDB key, so the two are
+  disjoint ranges. It reads as a `boost::variant` → `std::variant` port regression — the
+  correct form survives for the input path in `src/txmempool.cpp:190‑192`. **So
+  `getaddresstxids` / `getaddressutxos` / `getaddressbalance` are empty forever for the HTLC's
+  address, however much activity it has**, and the earlier "accepted, returned empty" probe was
+  not evidence of coverage.
+
+  *Workaround, source‑derived and unverified at runtime:* query the redeem script's `hash160`
+  re‑encoded as an **R‑address** (version byte 60), which hashes to the same twenty bytes under
+  type 1, where the rows actually are. Two constraints follow: the implementation must prove
+  this on first use rather than trust it, and it must probe **both** encodings, because the
+  stored type depends on which binary indexed the block — a datadir indexed by an older
+  boost‑variant build may hold P2SH under type 2. It must fail loudly rather than report "not
+  spent" if neither resolves.
+- **`GetTaddressTxids`' mid‑stream failure is fully explained**, and is neither a cap nor a
+  range limit — there are none. The daemon cannot serve a transaction that is fully spent or
+  has no transparent output when the tx index is off (`src/main.cpp:2631‑2696`), and
+  `lightwalletd` returns on the first such failure (`frontend/service.go:208`), ending the
+  stream. It also buffers a height group and flushes only on seeing a higher height
+  (`service.go:212‑224`), so the last group is always lost — which is exactly why 8 662
+  messages became 8 661 delivered. Only seven 1 000‑block windows of the whole test chain are
+  affected. Four rules follow: request in bounded windows; on that error bisect and skip the
+  offending height rather than failing the sync; resume from `last_received_height` and **not**
+  `+ 1`; and always send `start >= 1` and `end >= 1`, because the daemon applies the range only
+  when both exceed zero (`src/rpc/misc.cpp:1466‑1474`) and `start = 0` silently means the whole
+  chain.
 - **`TxFilter{block, index}` is not served**; only `TxFilter{hash}`, and the txid must be in
   **internal** (compact‑block) byte order — display order errors.
-- **P2SH is accepted but its history is unproven.** A syntactically valid Pirate P2SH address
-  (version byte 85) is accepted by both transparent RPCs — status 0, empty — rather than
-  rejected, so the format is supported. No P2SH address with history exists on the test chain
-  to prove the index covers it. **This is the one residual risk**, and it falls only on the
-  swap half: it will be settled the first time an HTLC is funded on a test chain. It does not
-  block the wallet half.
+
+The transparent index is also **opt‑in**: `-addressindex=1` is required and switching it on an
+existing datadir forces a reindex. Both probed servers have it enabled, and it can be detected
+from outside — with the index off, `GetTaddressBalance` returns
+`-5: No information available for address` rather than a balance.
+
+One consensus fact found while reading, and it is in our favour: on a private chain a
+non‑coinbase transparent output is legal in exactly one shape —
+`vin` empty, `vout.size() == 2`, `vout[0]` pay‑to‑script‑hash and `vout[0].IsRedeemScriptReveal(vout[1])`
+(`src/main.cpp:1697‑1711`, `1740‑1752`) — and `IsRedeemScriptReveal`
+(`src/script/script.cpp:259‑284`) is hard‑coded to the 110‑byte atomic‑swap redeem‑script
+shape. The HTLC is therefore a consensus‑blessed special case whose shape cannot drift, which
+is also why a second implementation cannot diverge from ours on it.
 
 ### 10.3 Maintainer decisions (2026‑10‑11)
 
@@ -928,6 +975,16 @@ a single backend the two‑backend divergence tolerance largely dissolves and th
 replaces it — three of the eight published `light_wallet_d_servers` entries are cipig's and
 serve a different fork, and an off‑branch server above the wallet's anchor can otherwise make
 the wallet rewind and follow that server's chain.
+
+> **Step C's one hard dependency is the P2SH defect in §10.2.** Spend detection for the swap
+> HTLC rests on a source‑derived, runtime‑unverified workaround (query the redeem script's
+> `hash160` as an R‑address). If that workaround does not hold, the swap half of this step has
+> no indexed way to find an HTLC and would need either a fix released by Pirate or a different
+> detection strategy — scanning blocks for the known 110‑byte redeem‑script shape is the
+> obvious fallback, since consensus guarantees it is revealed in `vout[1]`. **Prove the
+> workaround on a funded HTLC before building on it.** The wallet half of this step — tip,
+> broadcast, raw transactions, balance, history, mempool, anchor — has no such dependency and
+> can proceed regardless.
 
 **D — route ARRR's transaction parsing to the Zcash parser.** The shared UTXO parser applies
 the v4 layout to any overwintered version ≥ 4 with double‑SHA256 txids, so it mis‑parses v6 and
