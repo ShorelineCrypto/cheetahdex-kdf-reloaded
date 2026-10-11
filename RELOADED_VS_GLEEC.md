@@ -82,6 +82,13 @@ The developer-facing rule (mandatory for AI assistants, strong recommendation fo
   names are additive and need no switch. See
   `docs/reloaded-rewrite/rpc-method-census.md`.
 
+- **TRX and TRC20 through legacy `enable` / `electrum`.** GLEEC KDF
+  `v3.0.0-beta` rejects TRON coins on the legacy activation methods and
+  requires an mmrpc 2.0 activation. Reloaded has no mmrpc 2.0 TRON activation
+  and keeps activating them on the legacy methods (CRD ch.21, ch.55 D55.5). A
+  client written for GLEEC never sends such a request, so nothing breaks; no
+  switch is needed.
+
 ### Behavioural divergences without a compatibility switch
 
 These are divergences from GLEEC KDF that are **not** operator-configurable in this release (no compat switch yet). They are logged here and in [`CHANGELOG.md`](CHANGELOG.md) per the convention; a per-feature switch may be added in a later release.

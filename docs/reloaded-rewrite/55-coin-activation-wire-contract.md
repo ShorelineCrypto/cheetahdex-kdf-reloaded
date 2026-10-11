@@ -561,8 +561,10 @@ topic when the node runs as a watcher ([Chapter 09](09-watcher-reward-infrastruc
 absent from configuration or `mm2` unset in both request and configuration;
 invalid parameter values; a backend that cannot be reached (§55.3); a failed
 balance read. Coins whose protocol requires an mmrpc 2.0 activation are
-rejected on this path: Tendermint and Tendermint tokens, Z-coin, NFT, TRX and
-TRC20 (subject to D55.5), Lightning, Solana and Solana tokens.
+rejected on this path: Tendermint and Tendermint tokens, Z-coin, NFT,
+Lightning, Solana and Solana tokens. TRX and TRC20, which the reference also
+rejects here, are activated by Reloaded on this path as a documented extension
+(D55.5).
 
 **R55.4.8** *Sia on the legacy path.* A coin whose configured protocol is the
 Sia protocol is activated synchronously by the legacy path, with the request
@@ -593,7 +595,8 @@ one-shot activation of the same ticker (R55.5.7).
 > error is HTTP 500 `{"error": string}`, as bound. Deviations: `electrum`
 > neither bounds the balance read nor deregisters the coin on failure;
 > `enable` does not deregister either (R55.4.6); Reloaded activates TRX and
-> TRC20 through this path, which the reference release rejects (D55.5), and
+> TRC20 through this path, which the reference release rejects (a documented
+> extension, D55.5), and
 > rejects Sia, which R55.4.8 requires it to activate.
 
 ---
@@ -1239,12 +1242,15 @@ custom-token surface is implemented.
 ([Chapter 37](37-utxo-spv-and-block-header-validation.md)); their emission
 waits on Chapter 37's progress surface.
 
-**D55.5** *TRX and TRC20 through the legacy methods.* Reloaded activates TRX
-and TRC20 through legacy `enable`/`electrum` ([Chapter 21](21-tron-integration.md));
-the reference release rejects both there and requires an mmrpc 2.0 activation.
-Whether Reloaded keeps this extension is a maintainer decision; until it is
-taken the existing Reloaded behaviour is retained and R55.4.7's rejection of
-these two protocols is not enforced.
+**D55.5** *TRX and TRC20 through the legacy methods -- closed (maintainer
+decision, 2026-10-11).* Reloaded activates TRX and TRC20 through legacy
+`enable`/`electrum` ([Chapter 21](21-tron-integration.md)); the reference release
+rejects both there and requires an mmrpc 2.0 activation. Reloaded has no mmrpc
+2.0 TRON activation, so rejecting them here would remove TRON activation
+entirely. Reloaded keeps them on the legacy path as a documented extension: a
+client written for the reference never sends such a request, so it is
+unaffected. Adding the mmrpc 2.0 TRON activation the reference uses is future
+work (the RPC wire-parity plan).
 
 **D55.6** *Re-activation of a passive platform coin.* The reference release
 treats a platform coin that was disabled while dependent tokens stayed active
