@@ -111,6 +111,8 @@ fn test_ctx() -> MmArc {
             "coins": [
                 { "coin": TICKER, "protocol": { "type": "UTXO" } },
                 { "coin": "ETH1", "protocol": { "type": "ETH" } },
+                { "coin": "ERC1", "protocol": { "type": "ERC20", "protocol_data": {
+                    "platform": "ETH", "contract_address": "0xdAC17F958D2ee523a2206206994597C13D831ec7" } } },
             ]
         }))
         .into_mm_arc()
@@ -257,6 +259,17 @@ fn init_checks_run_in_the_bound_order_and_answer_at_mmrpc_level() {
     assert_eq!(wire["error_data"]["ticker"], json!("ETH1"));
     assert!(wire["error_data"]["protocol"]["type"].is_string());
     assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
+
+    // CRD ch. 36 R36.0.3: the offending protocol is in the canonical coin-configuration form, with its
+    // `protocol_data`.
+    let mut erc20 = init_request("ok");
+    erc20.ticker = "ERC1".to_owned();
+    let error = expect_err(block_on(init_standalone_coin::<TestCoin>(ctx.clone(), erc20)));
+    assert_eq!(
+        serde_json::to_value(&error).unwrap()["error_data"]["protocol"],
+        json!({ "type": "ERC20", "protocol_data": {
+            "platform": "ETH", "contract_address": "0xdAC17F958D2ee523a2206206994597C13D831ec7" } })
+    );
 
     // R55.5.3 (1): an active coin is reported before anything else.
     block_on(register_test_coin(&ctx));

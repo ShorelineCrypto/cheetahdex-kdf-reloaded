@@ -49,6 +49,10 @@ impl TokenOf for EthCoin {
 }
 
 /// A single EVM JSON-RPC endpoint (R35.1.1 `nodes` entry). A `ws_url` next to the `url` is not consumed.
+///
+/// The CoinNode table of the public docs names the proxy flag `komodo_auth`; every docs example and the reference
+/// use `komodo_proxy`, so only that spelling is read and `komodo_auth` is ignored. The docs examples also show a
+/// `ws_url` that the reference does not consume; it is accepted and ignored (CRD ch.35 R35.1.1, erratum).
 #[derive(Clone, Debug, Deserialize)]
 pub struct EthNode {
     pub url: String,
@@ -71,6 +75,10 @@ pub enum EthRpcMode {
 
 /// The EVM signing policy, selected through the `priv_key_policy` request field as an object tagged by `type`
 /// with any payload in a sibling `params` object (CRD R35.1.4).
+///
+/// The docs show the WalletConnect policy as `{"type": "WalletConnect", "data": <topic>}`; the reference requires
+/// `{"type": "WalletConnect", "params": {"session_topic": <topic>}}`, which is what is parsed here. The docs form
+/// is to be accepted alongside it when EVM WalletConnect signing is implemented (CRD ch.35 R35.1.4, erratum (e)).
 ///
 /// `ContextPrivKey` (the default, also accepted as `Iguana` and `IguanaPrivKey`) is the daemon's own key:
 /// single-address in Iguana mode, HD derivation in HD mode. `Metamask` is defined **only on the WASM target**
@@ -96,7 +104,8 @@ pub enum EthPrivKeyPolicy {
 }
 
 /// The inline NFT activation of the request: the documented bare provider or the `{"provider": ...}` wrapper
-/// of the reference version (CRD R35.1.4b).
+/// of the reference version (CRD R35.1.4b). The docs show the bare form, the reference requires the wrapper;
+/// both are accepted.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum NftReq {
@@ -112,7 +121,8 @@ impl NftReq {
     }
 }
 
-/// The v2 swap contracts of the request (CRD R35.1.1 `swap_v2_contracts`).
+/// The v2 swap contracts of the request (CRD R35.1.1 `swap_v2_contracts`). The docs link the member table to one
+/// copied from TokensRequest; the members here are those of the docs example and the reference (erratum (c)).
 #[derive(Clone, Debug, Deserialize)]
 pub struct SwapV2ContractsRequest {
     maker_swap_v2_contract: Address,
@@ -133,10 +143,15 @@ where
 /// `enable_eth_with_tokens` request parameters (CRD R35.1.1).
 #[derive(Clone, Debug, Deserialize)]
 pub struct EthWithTokensActivationRequest {
-    /// Absent is treated as empty and rejected by the activation (CRD R35.1.5 `AtLeastOneNodeRequired`).
+    /// Absent is treated as empty and rejected by the activation (CRD R35.1.5 `AtLeastOneNodeRequired`). The docs
+    /// mark `nodes` required, which would make an absent array a request-parse failure; the reference treats it as
+    /// empty and Reloaded does the same (CRD ch.35 R35.1.1).
     #[serde(default)]
     nodes: Option<Vec<EthNode>>,
     erc20_tokens_requests: Vec<TokenActivationRequest<Erc20ActivationRequest>>,
+    // The docs mark `swap_contract_address` and `fallback_swap_contract` required. The reference accepts their
+    // absence, so Reloaded does too, a superset of the documented requests. A trading-capable coin without a swap
+    // contract is still `InvalidPayload` (CRD ch.35 R35.1.1, erratum (h)).
     #[serde(default)]
     swap_contract_address: Option<Address>,
     #[serde(default)]
@@ -147,6 +162,8 @@ pub struct EthWithTokensActivationRequest {
     #[serde(default)]
     #[allow(dead_code)]
     contract_supports_watchers: Option<bool>,
+    // The docs state a default of 3. The reference falls back to the coin configuration, else 1, and Reloaded does the
+    // same (CRD ch.35 R35.1.1, erratum (g); the default is an open maintainer decision).
     #[serde(default)]
     required_confirmations: Option<u64>,
     /// No effect on EVM coins.
@@ -157,6 +174,9 @@ pub struct EthWithTokensActivationRequest {
     #[serde(default)]
     #[allow(dead_code)]
     mm2: Option<u8>,
+    // The reference does not consume `tx_history`, `requires_notarization` and the gas-station fields of this method.
+    // The docs describe their effect, so Reloaded keeps the documented effect; it changes no wire shape (CRD ch.35
+    // R35.1.1a).
     #[serde(default, deserialize_with = "lenient")]
     tx_history: Option<bool>,
     #[serde(default, deserialize_with = "lenient")]
@@ -361,6 +381,8 @@ pub struct IguanaEthWithTokensActivationResult {
     current_block: u64,
     eth_addresses_infos: HashMap<String, EvmAddressInfo<CoinBalance>>,
     erc20_addresses_infos: HashMap<String, EvmAddressInfo<TokenBalances>>,
+    // The docs call `nfts_infos` a list; every docs example and the reference return an object map keyed
+    // `<token_address>,<token_id>`, which is what Reloaded returns (CRD ch.35 R35.1.3, erratum (d)).
     nfts_infos: HashMap<String, NftInfo>,
 }
 
@@ -600,6 +622,8 @@ impl PlatformWithTokensActivationOps for EthCoin {
             None => HashMap::new(),
         };
 
+        // The docs document `Transport` for a chain-height read that gets no usable answer, which is explicit.
+        // The reference release answers `Internal` there. Reloaded follows the docs (CRD ch.35 R35.1.6).
         let current_block = self
             .current_block()
             .compat()

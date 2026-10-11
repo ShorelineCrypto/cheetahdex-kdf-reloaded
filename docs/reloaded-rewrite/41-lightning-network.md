@@ -192,6 +192,19 @@ from the platform backend at activation (the `GettingFeesFromRPC` phase). A
 
 ### Reloaded status of §41.2 (informative)
 
+> **Maintainer decision (binding, 2026-10-11).** This branch implements the
+> wire contract of §41.2: items 1-4 below. Items 5-8 (progress sequence,
+> `user_action` payload, fee estimates and the `confirmation_targets` /
+> `our_channels_configs` coins-configuration forms) are deferred to
+> `docs/plans/lightning-activation-features.md`. Item 9 is decided separately
+> (D41.2).
+
+> **Implemented on `fix/activation-api-parity`:** items 1-4 below (the bound
+> error names and shapes, the `avg_blocktime` check, the status-level mapping).
+> Until item 7 lands, the status-level `Transport` of an unreachable platform
+> backend is raised at the node's first chain read rather than at the fee
+> fetch. Remaining: items 5-8 (deferred to the Lightning plan).
+
 Current reloaded behaviour that deviates from §41.2:
 
 1. **Error names.** Reloaded's task errors are `AlreadyActivated`,

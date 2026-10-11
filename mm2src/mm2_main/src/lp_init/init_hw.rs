@@ -30,6 +30,9 @@ pub type InitHwStatus = RpcTaskStatus<InitHwSuccess, InitHwError, InitHwInProgre
 type InitHwTaskHandle = RpcTaskHandle<InitHwTask>;
 
 /// The description of the initialised hardware wallet (CRD ch. 55 R55.11.5).
+///
+/// The status page of the public docs shows these fields wrapped in a `result` object inside `details`. Its field
+/// table and the reference release place them directly in `details`, and so does Reloaded.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct InitHwSuccess {
     #[serde(rename = "type")]

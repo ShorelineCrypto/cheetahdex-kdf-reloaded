@@ -81,6 +81,10 @@ impl HttpStatusCode for RpcTaskUserActionError {
 /// The errors of the `cancel` method of every task family (CRD ch. 55 R55.2.15).
 ///
 /// `NoSuchTask` and `TaskFinished` carry the requested task id as a JSON integer.
+///
+/// The response tables of the public docs type `error_data` as a string and head the `TaskFinished` example as a
+/// success. Every example and the reference release carry an integer and answer `TaskFinished` as an mmrpc-level
+/// error, which is what Reloaded does (CRD ch.55 R55.2.15).
 #[derive(Debug, Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
 pub enum CancelRpcTaskError {

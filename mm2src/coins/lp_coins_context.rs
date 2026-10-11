@@ -194,6 +194,9 @@ impl CoinsContext {
 ///
 /// It is accepted both as a bare string (`"Trezor"`) and as the object form `{"type": "Trezor"}` that the
 /// public API reference documents (CRD ch. 55 R55.5.11). It serialises as the bare string.
+///
+/// The public docs show only the object form; the reference release accepts only the bare string and rejects the
+/// documented object. Reloaded accepts both, so a client written against either source works (R55.5.11).
 #[derive(Copy, Clone, Debug, Serialize)]
 pub enum PrivKeyActivationPolicy {
     /// Use whatever key policy the CryptoCtx was initialized with (Iguana or GlobalHD).
@@ -332,24 +335,9 @@ impl<Address, HDWallet> DerivationMethod<Address, HDWallet> {
     pub fn unwrap_iguana(&self) -> &Address { self.iguana_or_err().unwrap() }
 }
 #[allow(clippy::upper_case_acronyms)]
-/// Deserialize a Tendermint `decimals` value, rejecting any value above 18 as
-/// invalid protocol data (R36.3.1). The Cosmos base-denom-to-whole-coin scale is
-/// bounded at 18 places; a higher value would make every balance/amount
-/// conversion undefined, so it fails `protocol_data` parsing rather than
-/// silently activating a mis-scaled coin.
-fn deserialize_tendermint_decimals<'de, D>(deserializer: D) -> Result<u8, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let decimals = u8::deserialize(deserializer)?;
-    if decimals > 18 {
-        return Err(serde::de::Error::custom(format!(
-            "Tendermint `decimals` must be 18 or lower, got {decimals}"
-        )));
-    }
-    Ok(decimals)
-}
-
+// Adjacent tagging omits `protocol_data` for a protocol without parameters (`{"type": "UTXO"}`). That is the form the
+// public docs show; the reference emits `"protocol_data": null` instead. Reloaded follows the docs, which are
+// explicit here (CRD ch.36 R36.0.3). This is the form every `error_data.protocol` member takes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "protocol_data")]
 pub enum CoinProtocol {
@@ -412,9 +400,10 @@ pub enum CoinProtocol {
         /// bank/HTLC/IBC messages against (R36.3.1). Required.
         denom: String,
         /// The number of decimal places between the base denom and one whole
-        /// coin, used to scale base-unit balances/amounts (R36.3.1). Required and
-        /// bounded at 18; a value above 18 fails protocol-data parsing.
-        #[serde(deserialize_with = "deserialize_tendermint_decimals")]
+        /// coin, used to scale base-unit balances/amounts (R36.3.1). Required. The
+        /// bound of 18 is enforced when the platform coin is built, not here, so
+        /// a larger value fails activation as `PlatformCoinCreationError`
+        /// (CRD R36.3.2).
         decimals: u8,
         /// The bech32 human-readable prefix (HRP) of the chain's account
         /// addresses (e.g. `cosmos`, `iaa`, `osmo`). Required.
@@ -712,14 +701,25 @@ mod coin_protocol_tests {
     }
 
     #[test]
-    fn tendermint_protocol_data_rejects_decimals_above_18() {
-        // decimals must be 18 or lower; a higher value fails protocol-data parsing
-        // as a bounded-input check (R36.3.1).
+    fn tendermint_protocol_data_leaves_the_decimals_bound_to_construction() {
+        // The bound of 18 is checked at platform-coin construction (R36.3.2), so
+        // protocol parsing accepts any value that fits the integer type.
         assert!(CoinProtocol::from_conf_json(json!({
             "type": "TENDERMINT",
             "protocol_data": {
                 "denom": "uatom",
                 "decimals": 19,
+                "account_prefix": "cosmos",
+                "chain_id": "cosmoshub-4"
+            }
+        }))
+        .is_ok());
+        // A value that does not fit the integer type is still a parse failure.
+        assert!(CoinProtocol::from_conf_json(json!({
+            "type": "TENDERMINT",
+            "protocol_data": {
+                "denom": "uatom",
+                "decimals": 256,
                 "account_prefix": "cosmos",
                 "chain_id": "cosmoshub-4"
             }

@@ -105,6 +105,11 @@ where
 {
     fn rpc_task_manager(activation_ctx: &CoinsActivationContext) -> &InitPlatformCoinWithTokensTaskManagerShared<Self>;
 
+    /// Whether the task also reports `RequestingWalletBalance` and `Finishing` besides the initial
+    /// `ActivatingCoin`. The platforms of ch. 35 do; the Tendermint task reports `ActivatingCoin` only
+    /// (CRD R36.6.4).
+    const REPORTS_BALANCE_AND_FINISHING_PROGRESS: bool = true;
+
     /// Build the platform coin during a task-driven activation, threading the
     /// task handle so an interactive signing policy can drive its device
     /// (surfacing connect / PIN / passphrase through the task's status /
@@ -165,9 +170,11 @@ where
         // shared token/balance/history/register tail (R48.2.3 / R48.6.2).
         let result = enable_platform_coin_with_tokens_for_task::<Platform>(self.ctx, task_handle, self.request).await?;
 
-        task_handle
-            .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::Finishing)
-            .mm_err(rpc_task_error)?;
+        if Platform::REPORTS_BALANCE_AND_FINISHING_PROGRESS {
+            task_handle
+                .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::Finishing)
+                .mm_err(rpc_task_error)?;
+        }
         log::debug!(
             "Platform coin activation task finished at block {}",
             result.current_block()
@@ -189,7 +196,9 @@ where
     EnablePlatformCoinWithTokensError: From<Platform::ActivationError>,
 {
     // The only synchronous check of `init` besides the task creation (CRD R48.5.4): everything else is
-    // reported by the task.
+    // reported by the task. The public Tendermint page draws its platform, protocol and token configuration errors
+    // as mmrpc-level answers but does not say which call returns them; the reference reports them in `status`, and
+    // Reloaded does the same (CRD ch.48 R48.5.4, ch.36 R36.6.3).
     if let Ok(Some(_)) = lp_coinfind(&ctx, &request.ticker).await {
         return MmError::err(EnablePlatformCoinWithTokensError::PlatformIsAlreadyActivated(
             request.ticker,
@@ -205,6 +214,10 @@ where
 }
 
 /// `task::enable_<platform>::status` — poll progress / terminal result (R48.1.3).
+///
+/// The terminal error is placed directly in `details`. The task page of the public docs describes a
+/// `details.result` wrapper and lists `CoinCreationError` and `HwError`; the reference has no wrapper, reports the
+/// platform discriminants, and never produces those two for this family, as Reloaded does (CRD ch.35 R35.3.5).
 ///
 /// The terminal error preserves the one-shot platform-activation discriminants
 /// (R48.5.1); `status` itself fails only with the task-framework discriminants

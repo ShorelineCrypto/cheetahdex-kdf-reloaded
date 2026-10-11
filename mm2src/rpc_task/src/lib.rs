@@ -78,6 +78,10 @@ impl From<TimeoutError> for RpcTaskError {
 /// clients expect: a finished task reports `{"status": "Ok", "details": <item>}` on success and
 /// `{"status": "Error", "details": <error>}` on failure. Collapsing both into a single terminal
 /// variant breaks clients that treat `Ok` as the completion signal.
+///
+/// The error object sits directly in `details`. Several task pages of the public docs describe a `details.result`
+/// wrapper, but every published example and the reference release have none, so Reloaded has none either
+/// (CRD ch.55 R55.1.6, ch.35 R35.3.5).
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", content = "details")]
 pub enum RpcTaskStatus<Item, Error, InProgressStatus, AwaitingStatus>

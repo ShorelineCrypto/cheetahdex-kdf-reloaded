@@ -19,8 +19,8 @@ pub trait TokenProtocolParams {
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-pub trait TokenActivationOps: Into<MmCoinEnum> {
-    type PlatformCoin: TryPlatformCoinFromMmCoinEnum;
+pub trait TokenActivationOps: Into<MmCoinEnum> + Clone {
+    type PlatformCoin: TryPlatformCoinFromMmCoinEnum + Clone;
     type ActivationParams;
     type ProtocolInfo: TokenProtocolParams + TryFromCoinProtocol;
     type ActivationResult;
@@ -32,6 +32,10 @@ pub trait TokenActivationOps: Into<MmCoinEnum> {
         activation_params: Self::ActivationParams,
         protocol_conf: Self::ProtocolInfo,
     ) -> Result<(Self, Self::ActivationResult), MmError<Self::ActivationError>>;
+
+    /// Records the token on its platform coin once the token is registered, so a failed activation leaves the
+    /// platform's token set unchanged (CRD R36.2.2).
+    fn on_token_registered(_platform_coin: &Self::PlatformCoin, _token: &Self) {}
 }
 
 /// What a single-token activation found wrong with the derivation method of the platform coin.
@@ -94,8 +98,6 @@ pub enum EnableTokenError {
     #[allow(dead_code)]
     #[display(fmt = "The token protocol names a platform other than the activated one")]
     PlatformCoinMismatch,
-    /// Reserved by the chapter: balance failures are reported as `Transport`.
-    #[allow(dead_code)]
     #[display(fmt = "Could not fetch the balance: {}", _0)]
     CouldNotFetchBalance(String),
     /// Reserved by the chapter: no failure maps here today.
@@ -165,15 +167,16 @@ where
     })?;
 
     let (token, activation_result) =
-        Token::enable_token(req.ticker, platform_coin, req.activation_params, token_protocol)
+        Token::enable_token(req.ticker, platform_coin.clone(), req.activation_params, token_protocol)
             .await
             .mm_err(Into::into)?;
 
     let coins_ctx = CoinsContext::from_ctx(&ctx).unwrap();
     coins_ctx
-        .add_coin(token.into())
+        .add_coin(token.clone().into())
         .await
         .mm_err(|e| EnableTokenError::TokenIsAlreadyActivated(e.ticker))?;
+    Token::on_token_registered(&platform_coin, &token);
 
     Ok(activation_result)
 }

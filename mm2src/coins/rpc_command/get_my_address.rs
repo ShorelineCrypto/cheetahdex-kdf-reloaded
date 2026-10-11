@@ -32,7 +32,9 @@ pub struct PathToAddress {
     /// BIP-44 account index.
     #[serde(default)]
     pub account_id: u32,
-    /// BIP-44 change-level branch selector (external vs internal).
+    /// BIP-44 change-level branch selector (external vs internal). The docs describe `chain` as an integer, but their
+    /// examples and the reference use the strings `"External"` and `"Internal"`, which is what is parsed (CRD
+    /// ch.35 R35.1.1).
     #[serde(default = "external_chain")]
     pub chain: Bip44Chain,
     /// BIP-44 address index.

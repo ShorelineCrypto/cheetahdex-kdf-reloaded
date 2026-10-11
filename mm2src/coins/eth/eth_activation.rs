@@ -108,6 +108,10 @@ impl EthCoinActivationParams {
     /// needs a non-zero v1 swap contract; a zero fallback or v2 contract is rejected.
     ///
     /// A wallet-only coin needs no swap contract at all.
+    ///
+    /// The reference `v2.6.0-beta` requires `swap_contract_address` for every coin at request-parse level;
+    /// `v3.0.0-beta` accepts its absence for a wallet-only coin and answers `InvalidPayload` for a trading-capable
+    /// one. Reloaded binds `v3.0.0-beta` (CRD ch.35 R35.1.1).
     pub fn validate_swap_contracts(&self, conf: &Json) -> Result<(), MmError<EthCoinBuildError>> {
         if is_wallet_only_conf(conf) {
             return Ok(());
@@ -374,6 +378,9 @@ async fn probe_eth_nodes(
         })
     }
 
+    // The docs document `Transport` for every node unresponsive (their example reads "Failed to get client version
+    // for all nodes"). The reference release no longer probes and answers `Internal` for the first failing read.
+    // Reloaded follows the docs, which are explicit (CRD ch.35 R35.1.6).
     if web3_instances.is_empty() {
         return MmError::err(EthCoinBuildError::Transport(
             "Failed to get client version for all nodes".to_owned(),
@@ -435,6 +442,8 @@ pub(crate) async fn build_eth_coin(
             contract_address,
         } => {
             let token_addr = valid_addr_from_str(&contract_address).map_to_mm(EthCoinBuildError::InvalidPayload)?;
+            // An on-chain decimals read that gets no usable answer is `Transport`: the reference `v3.0.0-beta`
+            // does the same, while `v2.6.0-beta` answers `Internal` (CRD ch.35 R35.1.6).
             let decimals = match conf["decimals"].as_u64() {
                 None | Some(0) => get_token_decimals(&web3, token_addr)
                     .await
@@ -446,7 +455,8 @@ pub(crate) async fn build_eth_coin(
         _ => return MmError::err(EthCoinBuildError::Internal("Expect ETH or ERC20 protocol".to_owned())),
     };
 
-    // param from request should override the config
+    // The request overrides the configuration; without either, 1. The docs state a default of 3, the reference does
+    // not (CRD ch.35 R35.1.1, erratum (g); open maintainer decision).
     let required_confirmations = params
         .required_confirmations
         .unwrap_or_else(|| conf["required_confirmations"].as_u64().unwrap_or(1))

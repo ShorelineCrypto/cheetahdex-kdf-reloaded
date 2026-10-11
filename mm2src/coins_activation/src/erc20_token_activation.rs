@@ -511,6 +511,8 @@ async fn enable_erc20_token(
     Ok(Erc20InitResult {
         balances,
         platform_coin: platform_coin.ticker().to_owned(),
+        // Lower-case hex, as in the public docs example and `v2.6.0-beta`. `v3.0.0-beta` renders the EIP-55
+        // checksummed form; the uncontradicted docs example governs (CRD ch.35 R35.2.3).
         token_contract_address: format!("{:#x}", token_addr),
         required_confirmations: token.required_confirmations(),
     })

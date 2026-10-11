@@ -53,6 +53,7 @@ pub trait InitL2ActivationOps: Into<MmCoinEnum> + Send + Sync + 'static {
     fn coin_conf_from_json(json: Json) -> Result<Self::CoinConf, MmError<Self::ActivationError>>;
 
     fn validate_platform_configuration(
+        ctx: &MmArc,
         platform_coin: &Self::PlatformCoin,
     ) -> Result<(), MmError<Self::ActivationError>>;
 
@@ -153,7 +154,7 @@ where
 {
     let ticker = req.ticker.clone();
     if let Ok(Some(_)) = lp_coinfind(&ctx, &ticker).await {
-        return MmError::err(L2ActivationError::AlreadyActivated(ticker));
+        return MmError::err(L2ActivationError::L2IsAlreadyActivated(ticker));
     }
 
     let (coin_conf_json, protocol_conf): (Json, L2::ProtocolInfo) =
@@ -162,15 +163,15 @@ where
 
     let platform_coin = lp_coinfind_or_err(&ctx, protocol_conf.platform_coin_ticker())
         .await
-        .mm_err(|_| L2ActivationError::PlatformNotActivated(ticker.clone()))?;
+        .mm_err(|_| L2ActivationError::PlatformCoinIsNotActivated(ticker.clone()))?;
 
     let platform_coin =
-        L2::PlatformCoin::try_from_mm_coin(platform_coin).or_mm_err(|| L2ActivationError::IncompatiblePlatform {
+        L2::PlatformCoin::try_from_mm_coin(platform_coin).or_mm_err(|| L2ActivationError::UnsupportedPlatformCoin {
             platform_coin_ticker: protocol_conf.platform_coin_ticker().into(),
             l2_ticker: ticker.clone(),
         })?;
 
-    L2::validate_platform_configuration(&platform_coin).mm_err(Into::into)?;
+    L2::validate_platform_configuration(&ctx, &platform_coin).mm_err(Into::into)?;
     let validated_params = L2::validate_activation_params(req.activation_params).mm_err(Into::into)?;
 
     let coins_act_ctx = CoinsActivationContext::from_ctx(&ctx)

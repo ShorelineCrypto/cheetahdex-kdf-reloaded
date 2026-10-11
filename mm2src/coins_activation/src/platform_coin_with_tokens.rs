@@ -284,6 +284,9 @@ pub enum EnablePlatformCoinWithTokensError {
         ticker: String,
         error: String,
     },
+    // The method tables of the public docs spell this `PrivKeyNotAllowed` and the internal failure `InternalError`;
+    // the error catalogue and the reference use `PrivKeyPolicyNotAllowed` and `Internal`, which are the wire names
+    // (CRD ch.36 R36.1.7, ch.35 erratum (f)).
     #[display(fmt = "Private key policy is not allowed: {}", _0)]
     PrivKeyPolicyNotAllowed(String),
     #[display(fmt = "Unexpected derivation method: {}", _0)]
@@ -536,9 +539,11 @@ where
     .await
     .mm_err(Into::into)?;
 
-    task_handle
-        .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::RequestingWalletBalance)
-        .mm_err(rpc_task_error)?;
+    if Platform::REPORTS_BALANCE_AND_FINISHING_PROGRESS {
+        task_handle
+            .update_in_progress_status(InitPlatformCoinWithTokensInProgressStatus::RequestingWalletBalance)
+            .mm_err(rpc_task_error)?;
+    }
 
     // The reader of the extended public keys of a hardware wallet account exists only when a device is
     // connected; a software wallet derives its keys from the seed.

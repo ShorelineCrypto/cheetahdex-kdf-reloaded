@@ -506,6 +506,27 @@ a hardware-policy request (Tendermint has none), so
 
 ## 36.7 Reloaded status (informative)
 
+> **Maintainer decision (binding, 2026-10-11).** This branch implements the
+> wire contract of this chapter: items 1-4, 7 and 10-15 below. Items 5, 6, 8 and
+> 9 are features (signing policies via `activation_params` in all three forms of
+> R36.1.3, HD `path_to_address`, custom tokens, transaction history) and are
+> deferred to `docs/plans/tendermint-activation-features.md`.
+>
+> **Deliberate divergence (binding, interim).** Until R36.1.3 is implemented, a
+> request that carries a non-null `activation_params` shall be rejected with
+> `PlatformCoinCreationError` (`{ticker, error}`, HTTP 500) -- the discriminant
+> the reference uses for an unsupported signing context (R36.1.4 step 3) --
+> rather than activated with the local context key. The reference accepts these
+> requests and honors them. The silent fallback to the local key is not kept,
+> because a caller that asked for a device-backed or watch-only activation must
+> not get a hot-key one without knowing. This overrides R36.1.3 and R36.1.7 for
+> `activation_params` only, and is removed when the plan's item 1 lands.
+
+> **Implemented on `fix/activation-api-parity`:** items 1-4, 7 and 10-15 below
+> and the interim rejection of `activation_params`. Remaining: items 5, 6, 8 and
+> 9 (deferred to the Tendermint plan). The list is kept as the record of what
+> changed.
+
 Current reloaded behaviour that deviates from the bound contract (behavioural
 terms; the clean implementer works from this list):
 

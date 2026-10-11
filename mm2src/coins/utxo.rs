@@ -1330,6 +1330,11 @@ impl SPVConf {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+// The public docs and the reference release disagree on which of these fields are required. Reloaded follows the
+// reference: `utxo_merge_params`, `gap_limit`, `min_addresses_number` and `scan_policy` are optional (the QTUM
+// page marks the last three required), `requires_notarization` defaults from the coin configuration (the docs
+// say `true`), and the duplicate `tx_history` rows of the docs resolve to `false` (CRD ch.55 R55.5.10, R55.7.1,
+// R55.8.3).
 pub struct UtxoActivationParams {
     pub mode: UtxoRpcMode,
     pub utxo_merge_params: Option<UtxoMergeParams>,
