@@ -71,6 +71,17 @@ The developer-facing rule (mandatory for AI assistants, strong recommendation fo
   `librustzcash` schema from GLEEC KDF's legacy schema. See
   [Shielded database isolation](#shielded-database-isolation) below.
 
+- **Additional activation method names.** Reloaded routes, besides the
+  reference method names, the flat `init_utxo*`, `init_qtum*`, `init_z_coin*`
+  and `init_trezor*` task aliases and the one-shot `enable_lightning` (all
+  inherited from the GPLv2 baseline), the flat `init_lightning*` /
+  `cancel_init_lightning` aliases (uniform with the other `init_<coin>*` names),
+  and its own Solana surface `enable_solana_with_tokens` / `enable_spl`. GLEEC
+  KDF (`v2.6.0-beta` and `v3.0.0-beta`) routes none of them; clients written for
+  GLEEC use the `task::` equivalents, which Reloaded also routes. The extra
+  names are additive and need no switch. See
+  `docs/reloaded-rewrite/rpc-method-census.md`.
+
 ### Behavioural divergences without a compatibility switch
 
 These are divergences from GLEEC KDF that are **not** operator-configurable in this release (no compat switch yet). They are logged here and in [`CHANGELOG.md`](CHANGELOG.md) per the convention; a per-feature switch may be added in a later release.

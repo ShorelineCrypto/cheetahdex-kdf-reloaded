@@ -65,10 +65,13 @@ aliases; neither form is part of the parity contract (see R41.2.2).
 
 R41.2.2 **Reloaded-only activation methods (informative).** Reloaded also routes
 the one-shot `enable_lightning` (inherited from the GPLv2 baseline) and the flat
-`init_lightning` quartet (a reloaded addition) as aliases of the same
-activation. They are not parity surfaces; whether they stay routed is an open
-maintainer decision (see the open decision at the end of §41.2). While routed
-they shall not be described to clients as KDF-compatible methods.
+`init_lightning` quartet (a reloaded addition that gives Lightning the same flat
+`init_<coin>*` names as the other task families) as aliases of the same
+activation. They are not parity surfaces. By maintainer decision
+(2026-10-11) they stay routed as documented Reloaded extensions (backward
+compatibility with baseline-era clients, uniform naming); see the census
+disposition note. They shall not be described to clients as KDF-compatible
+methods.
 
 R41.2.3 Activation shall bind the Lightning coin to its parent UTXO coin, load or
 create the node's persistent state, and start the background node event loop.
@@ -217,7 +220,8 @@ Current reloaded behaviour that deviates from §41.2:
 8. **`our_channels_configs`.** Reloaded reads `our_channels_config` only; bound:
    R41.2.11.
 9. **Extra methods.** `enable_lightning` and the flat `init_lightning` quartet
-   (R41.2.2).
+   (R41.2.2). Kept as documented extensions by maintainer decision; not a
+   deviation to fix.
 
 > **Code-quality finding (informative; trigger: apparent with little extra
 > effort).** When the platform coin is not active, the reference's
@@ -226,8 +230,8 @@ Current reloaded behaviour that deviates from §41.2:
 > R41.2.6 binds the reference behaviour for parity; a future deliberate
 > deviation could carry the platform ticker instead.
 
-> **Open decision (informative).** Retention or retirement of the
-> reloaded-only `enable_lightning` and `init_lightning` quartet (R41.2.2).
+> **Decision recorded (informative).** The reloaded-only `enable_lightning`
+> and `init_lightning` quartet stay routed as documented extensions (R41.2.2).
 
 ## 41.3 Peer & channel management
 
@@ -572,8 +576,8 @@ T41.7 *Activation parameters.* `color` absent yields colour `000000`;
 D41.1 Hardware-wallet Lightning activation (no `UserActionRequired` state
 exists today).
 
-D41.2 Disposition of the reloaded-only `enable_lightning` and `init_lightning`
-methods (R41.2.2).
+D41.2 *Closed (2026-10-11).* The reloaded-only `enable_lightning` and
+`init_lightning` methods stay routed as documented extensions (R41.2.2).
 
 ## 41.12 Baseline Verifications
 

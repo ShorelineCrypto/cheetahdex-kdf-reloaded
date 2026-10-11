@@ -391,6 +391,25 @@ a Reloaded extension (Chapter 55 R55.6.3 for the UTXO, QTUM and Trezor aliases;
 [Chapter 40](40-solana-coin.md) and [Chapter 41](41-lightning-network.md) for
 the Solana and Lightning names).
 
+**Disposition (maintainer decision, 2026-10-11).** Every Reloaded-only name in
+the table stays routed, as a documented Reloaded extension, because each one
+adds stability, backward compatibility or uniform naming:
+
+- `init_utxo*`, `init_qtum*`, `init_z_coin*`, `init_trezor*` and
+  `enable_lightning`: routed by the pinned baseline, so clients written against
+  baseline-era KDF keep working (backward compatibility).
+- `init_lightning*` and `cancel_init_lightning`: a Reloaded addition that gives
+  Lightning the same flat `init_<coin>*` names the other task families have
+  (uniform naming).
+- `enable_solana_with_tokens` and `enable_spl`: Reloaded's primary Solana
+  surface ([Chapter 40](40-solana-coin.md)).
+
+None of these names is routed by `v2.6.0-beta`, so keeping them is not required
+for compatibility with clients written for that tag, and does not conflict with
+it either: such clients use the `task::` equivalents, which Reloaded routes. An
+extension name shall behave exactly as its reference equivalent where one
+exists.
+
 ---
 
 ## Distinct method-string totals per surface

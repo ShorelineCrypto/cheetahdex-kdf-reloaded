@@ -817,8 +817,9 @@ of §55.5.
 
 **R55.6.3** The flat aliases `init_utxo`, `init_utxo_status` and
 `init_utxo_user_action` inherited from the baseline are not part of the
-reference surface. Reloaded may keep them; if kept they shall behave exactly as
-`task::enable_utxo::init`, `::status` and `::user_action`.
+reference surface. Reloaded keeps them as a documented extension (maintainer
+decision, 2026-10-11; see the census disposition note); they shall behave
+exactly as `task::enable_utxo::init`, `::status` and `::user_action`.
 
 *Public-docs erratum:* the reference's `task::enable_utxo` page shows an Iguana
 success example whose `balance` is ticker-keyed and an HD example; both agree
