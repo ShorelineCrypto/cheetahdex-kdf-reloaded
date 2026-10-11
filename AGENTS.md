@@ -275,9 +275,13 @@ For CRD edits:
   upstream expression.
 - Update a governing chapter in the same commit as the source behavior it
   describes.
-- Do not write `Forbidden corpus: not consulted` unless that statement is true
-  for the authoring context or the chapter has completed the documented
-  Spec Reader and Dirty Gate workflow.
+- The provenance footer's *Forbidden corpus* item is a statement about the
+  chapter's inputs, not about what an authoring context did. Write it in one of
+  the two forms CRD chapter 01 R20 binds — the blanket `not consulted` trailer,
+  or a scoped record naming what was taken, for which sections, and under which
+  reference versions — and only where the chapter contains no R8–R10 material.
+  Where forbidden-class input was taken, it must have been taken through the
+  two-team procedure of CRD §1.4A, which R38 requires.
 - Before finishing any edit to a CRD chapter — whether authored via `KDF
   Spec Reader` or edited directly in a session — identify every other
   chapter that references it, is referenced by it, or states a binding
