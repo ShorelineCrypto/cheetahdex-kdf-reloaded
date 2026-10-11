@@ -248,6 +248,22 @@ the signer can represent it.
   structured `hardware_wallet:unsupported_script_signing_mode` error and never
   falls back to host private keys.
 
+### Legacy `enable` for EVM coins under an HD wallet — **TODO**
+
+CRD reference: [`35-evm-v2-activation-rpcs.md`](./35-evm-v2-activation-rpcs.md),
+[`55-coin-activation-wire-contract.md`](./55-coin-activation-wire-contract.md) §55.4.
+
+Since `fix/activation-api-parity`, the mmrpc 2.0 EVM activation under an HD
+wallet uses the address at the coin's `derivation_path` plus `path_to_address`.
+Legacy `enable` for EVM coins under an HD wallet still binds the daemon's
+internal-path key, so the two activation paths report different addresses for
+the same seed phrase. Left unchanged by maintainer decision (2026-10-11).
+
+- [ ] Establish which key the reference binds on legacy EVM `enable` under an HD
+  wallet (Spec Reader question) and bind it in ch. 55 §55.4.
+- [ ] Align the legacy path, with an upgrade note like the one for the mmrpc 2.0
+  path in `CHANGELOG.md`.
+
 ### Solana / SPL swap and history surface — **TODO**
 
 CRD reference: [`40-solana-coin.md`](./40-solana-coin.md).

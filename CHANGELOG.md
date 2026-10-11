@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Upgrade note: EVM address under an HD wallet
+
+**If you use an HD wallet (`enable_hd: true`) and activated ETH, another EVM
+coin or ERC20 tokens with `enable_eth_with_tokens` or `task::enable_eth` on an
+earlier KDF Reloaded build, the activated address changes with this release.**
+
+Earlier builds activated EVM coins under an HD wallet at the address of the
+daemon's internal identity key instead of the address at the coin's
+`derivation_path` (`m/44'/60'/...`) plus `path_to_address`. GLEEC KDF and every
+BIP-44 wallet use the derivation-path address, so the same seed phrase showed a
+different EVM address in Reloaded than elsewhere. This release activates the
+derivation-path address (CRD ch.35).
+
+Funds received at the old address are not lost -- its key is still derived from
+your seed phrase -- but the wallet no longer shows them. To move them:
+
+1. Start KDF Reloaded in single-address mode: `enable_hd: false` in `MM2.json`,
+   with the **same seed phrase** as `passphrase`.
+2. Activate the EVM coin. The address it reports is the old address; check its
+   balance.
+3. Withdraw the funds to your HD address (the address the HD wallet now shows
+   for that coin), then restart in HD mode.
+
+Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
+
 ### Added
 
 - **Coin-activation wire contract, wave 1 (CRD chapter 55).** The task

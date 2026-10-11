@@ -153,6 +153,17 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
   (R53.3.1, ch.53 D53.1). Code: `coins/my_tx_history_v2.rs`,
   `coins/siacoin/siacoin_history.rs`.
 
+- **Removed divergence: EVM address under an HD wallet.** Earlier Reloaded
+  builds activated EVM coins (`enable_eth_with_tokens`, `task::enable_eth`)
+  under an HD wallet at the address of the daemon's internal identity key,
+  whereas GLEEC KDF uses the address at the coin's `derivation_path` plus
+  `path_to_address`. Reloaded now matches GLEEC. Users who received funds at
+  the old address can reach them by starting in single-address mode with the
+  same seed phrase; see the upgrade note in `CHANGELOG.md`. Legacy `enable`
+  for EVM coins under an HD wallet still binds a different key and is not
+  changed yet. Code: `coins/eth/eth_activation.rs`,
+  `coins_activation/src/eth_with_tokens_activation.rs`; CRD ch.35.
+
 ### Removed / disabled in KDF Reloaded
 
 - iOS build target removed from the alpha release matrix.
