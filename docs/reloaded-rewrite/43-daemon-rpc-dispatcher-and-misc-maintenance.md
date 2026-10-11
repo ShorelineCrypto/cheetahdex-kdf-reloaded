@@ -57,6 +57,13 @@ not processed under the fallback version.
 R43.1.4 A response shall carry the matching version and `id`, and either a result
 or a structured error object.
 
+> **Cross-reference (informative).** The coin-activation methods' error
+> envelope, the encoding of `error_data`, the two error placements
+> (mmrpc-level and task-status-level), the HTTP-status policy and the legacy
+> error body are bound in [Chapter 55](55-coin-activation-wire-contract.md)
+> §55.1, which also restates the dispatcher errors of this section that
+> activation callers observe.
+
 ## 43.2 Public vs protected method classification
 
 R43.2.1 A fixed set of **public** methods shall be callable without

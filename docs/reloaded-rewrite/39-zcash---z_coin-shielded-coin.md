@@ -15,8 +15,11 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
 
 - **§39.1--§39.5 (T-DOC, as-built):** verified present in reloaded -- native-only
   ZCoin type, dual activation modes (Native / Light), multi-lightwalletd light
-  mode, the `init_z_coin` task-RPC trio with its progress states, shielded HTLC
-  swap operations, and the activation result shape.
+  mode, the Z-coin activation task RPCs (`task::enable_z_coin::*`, plus the
+  baseline flat `init_z_coin*` aliases) with their progress states, shielded
+  HTLC swap operations, and the activation result shape. The full activation
+  wire contract (request schema, in-progress values, result, error mapping,
+  HTTP statuses) is bound in §39.10 (Part D).
 - **§39.6 (T-PORT, implemented):** WASM support, activation-time sync tuning /
   sync-from-date, Sapling parameter integrity verification, sourcing consensus
   parameters / checkpoint / HD path from `protocol_data`, and HD-derived
@@ -115,8 +118,11 @@ R39.6.4.
 
 ## 39.2 Activation modes
 
-R39.2.1 Activation is a long-running task exposed as the public RPC trio
-`init_z_coin` / `init_z_coin_status` / `init_z_coin_user_action`.
+R39.2.1 Activation is a long-running task exposed as the public task RPCs
+`task::enable_z_coin::{init,status,user_action,cancel}`; Reloaded also keeps the
+baseline flat aliases `init_z_coin` / `init_z_coin_status` /
+`init_z_coin_user_action`. Routing, request schema and error contract are bound
+in §39.10.
 
 R39.2.2 The activation request carries a `mode` object (a tagged union with tag
 field `rpc` and payload field `rpc_data`) selecting one of:
@@ -140,15 +146,16 @@ deployment can list several servers.
 
 R39.3.1 The activation task shall report progress through observable in-progress
 states covering at least: activating the coin, scanning the shielded chain,
-requesting the wallet balance, and finishing. On the dictated public task-status
-wire these serialize (at minimum) as `ActivatingCoin`, the two scan phases
-`UpdatingBlocksCache` and `BuildingWalletDb` (each carrying `current_scanned_block`
-and `latest_block` unsigned counters), `RequestingWalletBalance`, and
-`Finishing`; the hardware-wallet states of R39.3.2
-(`WaitingForTrezorToConnect`, `WaitingForUserToConfirmPubkey`) appear on the same
-status wire. These variant names are part of the externally observable task-RPC
-surface. (Verified identical between the `v2.6.0-beta` reference and the
-current upstream `dev` head.)
+and requesting the wallet balance. On the dictated public task-status wire these
+serialize as `ActivatingCoin`, the two scan phases `UpdatingBlocksCache` and
+`BuildingWalletDb` (each carrying `current_scanned_block` and `latest_block`
+unsigned counters), and `RequestingWalletBalance`, plus the retriable-failure
+value `TemporaryError` (R39.10.7). The further vocabulary names `Finishing` and
+the hardware-wallet states of R39.3.2 (`WaitingForTrezorToConnect`,
+`WaitingForUserToConfirmPubkey`) are never entered by a Z-coin activation
+(R39.10.8). These variant names are part of the externally observable task-RPC
+surface. (Verified identical between the `v2.6.0-beta` and `v3.0.0-beta`
+references.)
 
 > **Status update (reloaded).** Implemented (convergence item #1). Activation
 > reports the two dictated scan phases with live progress: `UpdatingBlocksCache`
@@ -157,9 +164,13 @@ current upstream `dev` head.)
 > `latest_block` unsigned counters. The wallet-DB scan runs in bounded batches
 > so `current_scanned_block` advances incrementally.
 
-R39.3.2 When the wallet is hardware-backed, the task shall additionally surface
-states asking the user to connect the device and to confirm the pubkey, and shall
-accept the confirmation via `init_z_coin_user_action`.
+R39.3.2 The hardware-wallet status names of R39.3.1
+(`WaitingForTrezorToConnect`, `WaitingForUserToConfirmPubkey`) are part of the
+status vocabulary, but the shielded coin does not support hardware-backed or
+WalletConnect key policies: a Z-coin activation never enters these states,
+never reports `UserActionRequired`, and a `user_action` sent to a live Z-coin
+task fails as bound in R39.10.8. The retriable-failure in-progress value
+`TemporaryError` and the remaining wire details are bound in R39.10.7.
 
 R39.3.3 On success the task result shall report `ticker`, `current_block`, and a
 `wallet_balance` carrying the shielded balance. (`ticker` and `current_block`
@@ -1782,11 +1793,345 @@ terminal activation state after wallet-db scanning shall not return
 opened, the activation path shall fail or the history path shall return a
 storage error that reflects the store failure.
 
+---
+
+## Part D -- Activation wire contract (T-PORT)
+
+## 39.10 `task::enable_z_coin` activation wire contract
+
+> **Sources and reference version.** The public KDF API reference (the
+> task-managed `enable_z_coin` page, the `ActivationRpcData` and
+> `ZcoinRpcModeEnum` common structures, and the error-type catalogue) governs
+> where it is explicit. Where it is silent, ambiguous, or self-contradictory, the
+> maintainer's decision is to match the GLEEC KDF release tag **`v3.0.0-beta`**
+> (the most recent release tag of that lineage). The activation wire surface
+> bound in this section -- method names, request schema, in-progress values,
+> result shape, error discriminants, error-data shapes and HTTP statuses -- is
+> identical at the netid-8762 legacy reference **`v2.6.0-beta`**, so no
+> per-reference split is needed.
+>
+> **Shared rules not restated here.** The mmrpc 2.0 envelope, the error
+> envelope (`error`, `error_path`, `error_trace`, `error_type`, `error_data`),
+> the HTTP-status policy, the task-status envelope
+> (`{"status": "Ok"|"InProgress"|"UserActionRequired"|"Error", "details": ...}`,
+> with an `Error` status carrying the full error object directly in `details`),
+> the `init` success shape `{"task_id": <integer>}`, the
+> `user_action`/`cancel` success shape `"success"`, the `forget_if_finished`
+> semantics, the request-parse failure `InvalidRequest`, and every
+> framework-level error of `status`, `user_action` and `cancel`
+> (`NoSuchTask`, `TaskFinished`, the "task is not awaiting a user action"
+> class, and their error-data shapes and HTTP statuses) are bound by
+> [Chapter 55](55-coin-activation-wire-contract.md) §55.1--§55.2. The
+> per-family unresponsive-backend summary is in §55.3; this section is the
+> authoritative Z-coin row of that table.
+
+### 39.10.1 Method strings and routing
+
+R39.10.1 The canonical activation methods are the four mmrpc 2.0 methods
+`task::enable_z_coin::init`, `task::enable_z_coin::status`,
+`task::enable_z_coin::user_action` and `task::enable_z_coin::cancel`. They
+shall be routed on **every build target on which the shielded coin can be
+activated** -- native and WASM (§39.6.1) -- not on native only.
+
+R39.10.2 The reference lineage routes **no** flat Z-coin activation aliases.
+Reloaded keeps the three flat names it inherits from the GPLv2 baseline anchor
+(`init_z_coin`, `init_z_coin_status`, `init_z_coin_user_action`) as a
+documented backward-compatibility extension. Each flat name shall behave
+exactly like its `task::enable_z_coin::*` counterpart (same request, same
+success and error shapes, same HTTP statuses, same task registry). There is no
+flat cancel alias. The flat names shall be reachable on the same targets as the
+canonical names.
+
+### 39.10.2 `init` request
+
+R39.10.3 `task::enable_z_coin::init` takes `params` with:
+
+| Field | Type | Required / default | Meaning |
+| --- | --- | --- | --- |
+| `ticker` | string | required | coin to activate; must have a ZHTLC entry in the coins config |
+| `activation_params` | object | required | the Z-coin activation parameters of R39.10.4 |
+
+R39.10.4 `activation_params` members (all at the top level of
+`activation_params` unless stated otherwise):
+
+| Field | Type | Required / default | Meaning |
+| --- | --- | --- | --- |
+| `mode` | object `{ "rpc": string, "rpc_data": object }` | **optional**; when absent it behaves as Light mode with empty server lists (which then fails at status level, R39.10.13) | backend selection (R39.2.2) |
+| `mode.rpc` | string: `"Native"` or `"Light"`; `"Electrum"` is accepted as a synonym of `"Light"` | required inside `mode` | `"Native"` exists only on native builds: on a WASM build it is an unknown variant and the request fails to parse (`InvalidRequest`, §55.1) |
+| `mode.rpc_data` | object | required for Light; absent for Native | Light-mode backend settings (rows below) |
+| `rpc_data.electrum_servers` | array of Electrum server objects (the same server object as the UTXO Electrum activation, §55.5 R55.5.10); `servers` is accepted as a synonym | required in Light | transparent-side backend |
+| `rpc_data.min_connected` | integer (unsigned) | optional; default 1 | minimum number of Electrum connections to keep |
+| `rpc_data.max_connected` | integer (unsigned) | optional; default = number of listed Electrum servers | maximum number of Electrum connections |
+| `rpc_data.light_wallet_d_servers` | array of strings (lightwalletd gRPC endpoint URLs) | required in Light | shielded-side backends (R39.2.4) |
+| `rpc_data.sync_params` | `{"height": u64}`, `{"date": u64}` or `"earliest"` | optional | sync start point (R39.6.2, R39.8.0g) |
+| `rpc_data.skip_sync_params` | boolean | optional; default false | resume from prior local sync state (R39.6.2) |
+| `required_confirmations` | integer (unsigned) | optional; coins-config default | swap confirmations |
+| `requires_notarization` | boolean | optional; coins-config default | dPoW notarization wait |
+| `zcash_params_path` | string | optional; platform default directory | Sapling parameter directory on native builds; ignored on WASM (parameter availability on WASM is governed by §39.6.1) |
+| `scan_blocks_per_iteration` | integer, unsigned 32-bit, **non-zero** | optional; default 1000 | blocks per scan batch; the value `0` is a request-parse failure (`InvalidRequest`), not a silent clamp |
+| `scan_interval_ms` | integer (unsigned 64-bit) | optional; default 0 | pause between scan batches |
+| `account` | integer (unsigned 32-bit) | optional; default 0 | HD shielded account index (R39.6.4 §2); ignored under the single-key policy |
+
+R39.10.5 Fields that the public `ActivationRpcData` table lists but that have
+no Z-coin meaning -- `tx_history`, `get_balances`, `gap_limit`,
+`scan_policy`, `path_to_address`, `min_addresses_number` -- and any other
+unknown member shall be **accepted and ignored** (no strict-field rejection).
+In particular `get_balances: false` does not remove `wallet_balance` from the
+result, and Z-coin activation never starts the generic transaction-history
+machinery (shielded history is served by `z_coin_tx_history`, §39.8). A
+`ws_url` member that some public-docs examples place on an Electrum server
+object is not a recognised member of that object and is ignored.
+
+R39.10.6 The signing key is never taken from the request: it comes from the
+wallet key context the daemon was started with -- the single-key ("Iguana")
+policy or the HD policy (R39.6.4 §2). Hardware-wallet and WalletConnect
+policies are not supported for the shielded coin (R39.10.11).
+
+> **Reloaded extension (informative).** Reloaded additionally accepts the
+> spellings `blocks_per_iteration` (for `scan_blocks_per_iteration`) and
+> `scan_interval` / `inter_iteration_interval_ms` (for `scan_interval_ms`), see
+> R39.6.2. These are a superset of the reference wire and stay permitted.
+
+### 39.10.3 `status` in-progress values
+
+R39.10.7 While the task runs, `status` returns `"status": "InProgress"` with
+`details` set to one of the following values. Unit values serialize as a bare
+JSON string; the data-carrying values serialize as a single-key JSON object
+keyed by the value name:
+
+| `details` value | JSON form | When |
+| --- | --- | --- |
+| `ActivatingCoin` | `"ActivatingCoin"` | initial state, coin construction |
+| `UpdatingBlocksCache` | `{"UpdatingBlocksCache": {"current_scanned_block": u64, "latest_block": u64}}` | compact-block download (R39.3.1) |
+| `BuildingWalletDb` | `{"BuildingWalletDb": {"current_scanned_block": u64, "latest_block": u64}}` | wallet-database scan (R39.3.1) |
+| `TemporaryError` | `{"TemporaryError": <string>}` | a retriable shielded-backend or scan failure during the initial sync (R39.10.14); the string is human-readable and not bound |
+| `RequestingWalletBalance` | `"RequestingWalletBalance"` | shielded sync finished; reading height and balance |
+
+R39.10.8 The names `Finishing`, `WaitingForTrezorToConnect` and
+`WaitingForUserToConfirmPubkey` belong to the Z-coin status vocabulary but a
+Z-coin activation never enters them; the awaiting-user-action values
+`EnterTrezorPin` / `EnterTrezorPassphrase` are likewise never entered, so
+`status` never reports `UserActionRequired` for a Z-coin task. A
+`user_action` sent to a live Z-coin task (in the shared hardware-wallet
+user-action shape of §55.2) therefore always fails with the framework's
+"task is not awaiting a user action" error of §55.2. The public-docs
+in-progress list for this method also names `FollowHwDeviceInstructions`; that
+value is not part of the Z-coin vocabulary and shall not be emitted.
+
+### 39.10.4 `status` success (`Ok`) shape
+
+R39.10.9 On success `status` returns `"status": "Ok"` with `details`:
+
+```json
+{
+  "ticker": "<string: the activated ticker>",
+  "current_block": <integer: transparent-backend chain height>,
+  "wallet_balance": {
+    "wallet_type": "Iguana",
+    "address": "<string: the wallet's Sapling payment address>",
+    "balance": { "spendable": "<decimal string>", "unspendable": "<decimal string>" }
+  },
+  "first_sync_block": { "requested": <integer>, "is_pre_sapling": <bool>, "actual": <integer> }
+}
+```
+
+- `wallet_balance` is **always** the single-address form with
+  `"wallet_type": "Iguana"`, also when the shielded key is HD-derived
+  (R39.6.4 §2); there is no per-account HD balance report and no ticker-keyed
+  balance map. Balances are decimal strings.
+- `first_sync_block` is **always** present (R39.8.0h). In Native mode the
+  reference reports `requested` = `actual` = the configured checkpoint height
+  (or the Sapling activation height when the coin config has no checkpoint) and
+  `is_pre_sapling: false`.
+
+### 39.10.5 Error contract
+
+R39.10.10 **`init` (mmrpc-level) errors.** `task::enable_z_coin::init`
+returns these synchronously as an mmrpc error response; everything else is
+reported later through `status`:
+
+| `error_type` | When | `error_data` | HTTP | Placement |
+| --- | --- | --- | --- | --- |
+| `CoinIsAlreadyActivated` | the ticker is already active when `init` is called | object `{"ticker": string}` | 400 | mmrpc |
+| `CoinConfigIsNotFound` | no coins-config entry for the ticker | string: the requested ticker | 400 | mmrpc |
+| `CoinProtocolParseError` | the coins-config `protocol` does not parse (including a ZHTLC entry without a valid `protocol_data`, R39.1.2) | object `{"ticker": string, "error": string}` | 400 | mmrpc |
+| `UnexpectedCoinProtocol` | the coins-config protocol is valid but not ZHTLC | object `{"ticker": string, "protocol": object}` where `protocol` is the coin's protocol object as written in the coins config | 400 | mmrpc |
+| `Internal` | the activation context or task registry cannot be used, or the task cannot be spawned | string | 500 | mmrpc |
+| `InvalidRequest` | `params` fail to deserialize (R39.10.3--R39.10.4) | per §55.1 | per §55.1 | mmrpc (dispatcher) |
+
+R39.10.11 **Task-level errors (`status` with `"status": "Error"`).** A failed
+activation is reported in the `details` of a `status` response, which itself
+is an HTTP **200** response (§55.1). The HTTP column below is the status the
+same discriminant carries if it is ever returned at mmrpc level; it never
+changes the 200 of the `status` call that reports a task error.
+
+| `error_type` | When (failure class) | `error_data` | HTTP if at mmrpc level |
+| --- | --- | --- | --- |
+| `CoinCreationError` | the coin could not be constructed: Sapling parameters missing, unreadable or failing their integrity digest (R39.6.3); local block-cache / wallet-database / locked-note storage cannot be opened; shielded key derivation fails (incl. HD policy without `z_derivation_path`); **no lightwalletd endpoint can be connected, or the initial chain-tip / tree-state query to the shielded backend fails**, or `light_wallet_d_servers` is empty; the requested sync date is in the future or cannot be resolved; the key policy is not supported for the shielded coin (hardware wallet, WalletConnect); any other build-time failure | object `{"ticker": string (the requested ticker), "error": string}` | 400 |
+| `Transport` | the coin was built and the shielded sync finished, but the transparent backend could not deliver the current block height, or the wallet balance could not be read (e.g. **all Electrum servers unreachable**, native daemon unreachable at the result step) | string | 500 |
+| `CoinIsAlreadyActivated` | while this task ran, a concurrent activation of the same ticker registered the coin first | object `{"ticker": string}` | 400 |
+| `TaskTimedOut` | only produced by a timed-out wait for a user action; a Z-coin task never waits for one (R39.10.8), so this is not reachable in practice | object `{"duration": {"secs": u64, "nanos": u32}}` | 408 |
+| `Internal` | the wallet key context is not initialised; the shielded sync process stopped before reporting completion; task-handle or registration failures; any otherwise unclassified failure | string | 500 |
+
+R39.10.12 For the "Sapling parameters not found" case the public-docs example
+binds the content of the object: `error_data.error` shall be the bare token
+`ZCashParamsNotFound` and `error_data.ticker` the requested ticker. For every
+other `CoinCreationError` cause the `error` string is human-readable and not
+bound.
+
+R39.10.13 Discriminants that shall **not** be observable from any
+`task::enable_z_coin::*` method: `HwError` (there is no hardware-wallet path),
+`PrivKeyNotAllowed`, `UnexpectedDerivationMethod`, and the activation-internal
+names that the public error catalogue lists for the Z-coin initialisation enum
+(`HardwareWalletsAreNotSupportedYet`, `CouldNotGetBalance`,
+`CouldNotGetBlockCount`) -- those are always translated into the discriminants
+of R39.10.11 before they reach the wire. A request whose `mode` is absent
+(R39.10.4) parses, starts a task, and ends with `CoinCreationError`.
+
+### 39.10.6 Unresponsive and failing backends (Z-coin row of §55.3)
+
+R39.10.14 The failure-to-discriminant mapping for unreachable or failing
+backends is:
+
+| Situation | Observable result |
+| --- | --- |
+| Light mode, **every** lightwalletd endpoint unreachable when the task starts (or the endpoint list is empty, or the first chain-tip / tree-state query fails) | terminal `status` `Error`, `CoinCreationError` `{ticker, error}` |
+| Light mode, lightwalletd fails **after** the shielded sync has started (download or scan error) | the task does **not** fail: `status` reports `InProgress` with `{"TemporaryError": <string>}`, the sync retries after a pause on the order of ten seconds, and progress values resume once the backend answers; the task ends only on success, on `cancel`, or on a non-transient failure |
+| Light mode, **every** Electrum server unreachable | not detected while the coin is built (Electrum connections are established lazily); after the shielded sync completes, the height/balance step fails: terminal `Error`, `Transport` (string) |
+| Native mode, full-node daemon unreachable | shielded sync reports `TemporaryError` and retries as above; if the height step fails: `Transport` (string) |
+| Shielded sync process stops without reporting completion | terminal `Error`, `Internal` (string) |
+
+No Z-coin backend failure is reported as an HTTP 5xx on the `status` call
+itself; the only 5xx responses come from `init` (R39.10.10) or from the
+framework errors of §55.2.
+
+> **Upstream divergence (informative) -- public docs vs reference.** The
+> public page shows the "no Zcash params" `CoinCreationError` once as a bare
+> error object without any envelope and once inside a `status` `Error`; the
+> reference only ever emits it inside a `status` `Error` (R39.10.11). The
+> public catalogue's Z-coin initialisation names (R39.10.13) are never on the
+> wire. The public in-progress list omits `UpdatingBlocksCache`,
+> `BuildingWalletDb` and `TemporaryError` (the examples show the first two as
+> object-valued `details`) and wrongly includes `FollowHwDeviceInstructions`.
+> The public `get_balances` remark ("structure may vary") does not apply:
+> the reference ignores `get_balances` for this coin.
+
+> **Upstream divergence (informative) -- start-point resolution.** When no
+> `sync_params` is given and no prior local state exists, the reference starts
+> roughly one day of blocks before the current tip, estimated from the coin
+> config's `avg_blocktime` (a missing `avg_blocktime` then fails activation with
+> `CoinCreationError`). It resolves a `{"date": T}` start by the same
+> block-time estimate rather than by looking up block timestamps. Reloaded
+> resolves dates against the backend's block timestamps (R39.8.0g); the
+> observable difference is limited to the value of
+> `first_sync_block.requested`. Wire shapes are unaffected.
+
+> **Code-quality finding (informative).** Trigger: a contradiction visible
+> between the reference's own description of `skip_sync_params` and its
+> effect, read side by side. The described intent is "resume from the last
+> synced block; consult `sync_params` only when nothing was synced yet". In
+> the reference, however, an explicit `sync_params` combined with
+> `skip_sync_params: true` and an existing local block cache still rewinds and
+> rescans from `sync_params`, i.e. the flag is effectively honoured only when
+> the local cache is empty. Reloaded implements the described intent
+> (R39.6.2) and shall not copy the reference's effective behaviour.
+> Proposed upstream fix: treat "skip requested and a prior synced height
+> exists" as the resume condition.
+
+> **Reloaded status (informative).** Deviations of the current Reloaded code
+> from §39.10, for the clean implementer:
+>
+> 1. `task::enable_z_coin::*` and the flat `init_z_coin*` aliases are routed on
+>    native builds only; R39.10.1--R39.10.2 require them on WASM as well.
+> 2. `activation_params.mode` is required (a missing `mode` is an
+>    `InvalidRequest`); R39.10.4 makes it optional.
+> 3. The `"Electrum"` synonym of `"Light"`, the `servers` synonym of
+>    `electrum_servers`, and `min_connected` / `max_connected` are not
+>    accepted (the connection bounds are fixed); R39.10.4 requires them.
+> 4. `scan_blocks_per_iteration: 0` is accepted and clamped to 1; R39.10.4
+>    requires a parse failure.
+> 5. `"Native"` deserializes on WASM; R39.10.4 requires it to be an unknown
+>    variant there.
+> 6. Failures to read the block height or the balance after the coin is built
+>    are reported as `Internal`; R39.10.11 requires `Transport` with a string.
+> 7. A sync-start date that cannot be resolved is reported as `Internal` and
+>    loses its ticker; R39.10.11 requires `CoinCreationError {ticker, error}`.
+> 8. Any lightwalletd download or wallet-scan failure during activation ends
+>    the task with `Internal` (ticker and activation tip are dropped from the
+>    wire). R39.10.14 requires: all endpoints unreachable at the start ->
+>    `CoinCreationError {ticker, error}`; failures after the sync started ->
+>    `InProgress` `{"TemporaryError": string}` with retry, task kept alive.
+>    There is no `TemporaryError` in-progress value today (R39.10.7).
+> 9. The hardware-wallet-not-supported class maps to `PrivKeyNotAllowed`
+>    (HTTP 400 at mmrpc level); R39.10.11/R39.10.13 require `CoinCreationError`
+>    for an unsupported key policy and `Internal` for the residual
+>    hardware-wallet class, and forbid `PrivKeyNotAllowed`.
+> 10. For missing Sapling parameters `error_data.error` is a descriptive
+>     sentence naming the path; R39.10.12 requires the bare token.
+> 11. A task that loses the registration race to a concurrent activation of
+>     the same ticker reports success instead of `CoinIsAlreadyActivated`
+>     (shared standalone-task behaviour, decided in §55.5).
+> 12. `cancel` errors use the standalone activation discriminant set rather
+>     than the framework cancel set of §55.2 (shared; decided there).
+
+### 39.10.7 Tests
+
+T39.10.1 Routing: on both the native and the WASM build, each of the four
+`task::enable_z_coin::*` names and each flat alias of R39.10.2 resolves to a
+handler (not "method not found").
+
+T39.10.2 Request parsing: (a) `activation_params` without `mode` parses;
+(b) `"rpc": "Electrum"` parses as Light; (c) `servers` parses as
+`electrum_servers`; (d) `min_connected` / `max_connected` parse;
+(e) `scan_blocks_per_iteration: 0` fails with `InvalidRequest`;
+(f) on WASM, `"rpc": "Native"` fails with `InvalidRequest`; (g) unknown
+members such as `get_balances`, `tx_history` and an Electrum `ws_url` are
+ignored.
+
+T39.10.3 In-progress serialization: `TemporaryError` serializes as
+`{"TemporaryError": "<text>"}`; the object-valued and unit values serialize as
+in R39.10.7 (extends the existing scan-progress wire test).
+
+T39.10.4 Task-error mapping, each asserting `error_type`, the exact
+`error_data` JSON type/fields, and that the carrying `status` response is
+HTTP 200: (a) height or balance failure -> `Transport` with a string;
+(b) unresolvable or future sync date -> `CoinCreationError` with
+`{ticker, error}` and `ticker` equal to the request ticker; (c) all
+lightwalletd endpoints unreachable at start -> `CoinCreationError`;
+(d) missing Sapling parameters -> `CoinCreationError` with
+`error_data.error == "ZCashParamsNotFound"`; (e) unsupported key policy ->
+`CoinCreationError`; (f) residual hardware-wallet class -> `Internal`
+string, never `PrivKeyNotAllowed`.
+
+T39.10.5 Mid-sync backend failure: with a lightwalletd stub that fails after
+the first successful batch, `status` reports `{"TemporaryError": ...}`, the
+task is not terminal, and it reaches `Ok` once the stub recovers.
+
+T39.10.6 `init` errors: `CoinIsAlreadyActivated` (object, 400),
+`CoinConfigIsNotFound` (string = ticker, 400), `CoinProtocolParseError`
+(object, 400), `UnexpectedCoinProtocol` (object with `protocol` object, 400),
+asserting the serialized `error_type`, `error_data` shape and HTTP status.
+
+T39.10.7 `user_action` on a live Z-coin task fails with the §55.2
+not-awaiting error; the flat aliases return byte-identical results to their
+canonical counterparts for the same task.
+
 ## 39.7 Acceptance criteria (chapter)
 
-- Baseline: a light-mode shielded coin activates via `init_z_coin`, advances
-  through the documented progress states, accepts multiple lightwalletd
-  endpoints, and returns `current_block` + `wallet_balance` (§39.2--§39.3).
+- Baseline: a light-mode shielded coin activates via `task::enable_z_coin::init`
+  (or its flat `init_z_coin` alias), advances through the documented progress
+  states, accepts multiple lightwalletd endpoints, and returns `current_block` +
+  `wallet_balance` (§39.2--§39.3).
+- Activation wire contract (§39.10): the four `task::enable_z_coin::*` methods
+  and the flat aliases are routed on native and WASM; the request schema of
+  R39.10.4 (optional `mode`, `"Electrum"`/`servers` synonyms, connection bounds,
+  non-zero `scan_blocks_per_iteration`) parses as bound; in-progress values
+  include `{"TemporaryError": string}`; task errors map exactly as R39.10.11 --
+  R39.10.14 (height/balance failure -> `Transport` string; unresolvable date
+  and start-of-task lightwalletd outage -> `CoinCreationError {ticker, error}`;
+  mid-sync backend failure -> `TemporaryError` with retry, not a terminal
+  error; missing parameters -> `error_data.error` `ZCashParamsNotFound`), and
+  none of the discriminants of R39.10.13 is observable (T39.10.1--T39.10.7).
 - A shielded HTLC swap completes maker and taker legs and a refund path (§39.5).
 - R39.6.3 is implemented with integrity-check behaviour enforced before prover
   initialization.
@@ -1871,4 +2216,14 @@ storage error that reflects the store failure.
   wire-and-API-bound reuse (R29/R31) for the dictated method strings, JSON
   field names, and error discriminants this chapter distills.
 - *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* consulted **only for §39.10** (and the matching
+  wording updates of §39.0, R39.2.1, R39.3.1 and R39.3.2), by the KDF Spec
+  Reader role under the two-team workflow, at the GLEEC KDF release tags
+  `v3.0.0-beta` (reference, per the maintainer's "match GLEEC where the public
+  docs are silent" decision) and `v2.6.0-beta` (legacy cross-check; identical
+  activation wire surface). Only the externally observable activation wire
+  contract was distilled (method routing, request field names/types/defaults,
+  in-progress values, result shape, error discriminants, error-data shapes,
+  HTTP statuses, failure-to-discriminant mapping); no implementation
+  expression was carried across. The section is subject to KDF Dirty Gate
+  clearance before use. §39.1--§39.9 are unchanged in provenance.

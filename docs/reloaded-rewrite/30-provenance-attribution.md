@@ -108,6 +108,7 @@ and a one-sentence capsule of what the chapter documents.
 | 52 | [Version-Two Atomic-Swap State Machine](52-swap-v2-state-machine.md) | V2 maker and taker state graphs, bidirectional refusal contract, reserved-amount ledger semantics | The V2 maker and taker state machines: states, events, resume mapping, the refusal and abort contract, message budgets, and reserved-funds rules. |
 | 53 | [Siacoin Transaction History](53-sia-transaction-history.md) | walletd address-event projection, coin-generic runtime history store, Sia transaction-type wire values | Sia transaction history as a projection of walletd's per-address event log into the shared transaction-details record, served through the framework's history RPC surface. |
 | 54 | [Siacoin Atomic-Swap Version-Two Path](54-sia-swap-v2-path.md) | Sia V2 swap path over the coin-generic V2 trait surface | DRAFT, not yet approved for implementation: binds the coin-generic V2 trait surface to Siacoin's V1 primitives and the shared V2 state-machine substrate; closes chapter 20 §20.10 D5. |
+| 55 | [Coin Activation Wire Contract](55-coin-activation-wire-contract.md) | coin-activation RPC error envelope, task-framework method errors, per-family unresponsive-backend outcomes, baseline activation families | The cross-family wire contract of coin activation, and the full contracts of the activation families that no other chapter owns. |
 
 ## 30.4 Aggregated Input Register
 
@@ -172,6 +173,9 @@ citation.
 - External DEX-aggregator API — cited in Chapter 23.
 - Hardware-wallet wire protocol and protobuf schemas — referenced from
   Chapter 05 and Chapter 27.
+- The public Komodo DeFi Framework API reference (coin-activation, task-managed
+  activation, common-structures and error-types pages) — cited in Chapters
+  35, 36, 39, 40, 41, 46, 48 and 55.
 
 ### 30.4.8 Sibling open-source repositories
 
@@ -236,7 +240,7 @@ subject, the citation is marked *(ref)*.
 | Tendermint coin substrate                                              | 18                                                  |
 | UTXO coin substrate                                                    | 15, 16                                              |
 | Zcash-family coin substrate                                            | 29                                                  |
-| coin-activation substrate                                              | 18 *(ref)*                                          |
+| coin-activation substrate                                              | 18 *(ref)*, 35, 36, 39, 40, 41, 46, 48, 55          |
 | shared-utility substrate (Chapter 27 §27.x)                            | 03 *(ref)*, 14, 26, 29                              |
 | ref-counter diagnostics substrate                                      | 27                                                  |
 | HD / mnemonic crypto substrate                                         | 05, 07                                              |
@@ -292,7 +296,7 @@ preserved-for-history substrate retained for git-archaeology continuity
 ## 30.6 Document-Set Composition (binding rules)
 
 **R1.** *Per-chapter self-containment.* Each substantive chapter (03
-through 28, 31 through 33, and 35 through 54) MUST
+through 28, 31 through 33, and 35 through 55) MUST
 satisfy the project's chapter-shape rules (Chapter 01 §6): executive
 summary, subsystem shape, the binding-rule sections appropriate to the
 chapter's substrate, tests / deferred work / external references /

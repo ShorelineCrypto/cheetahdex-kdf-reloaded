@@ -116,18 +116,24 @@ R50.2. Trezor-policy EVM activation shall require an initialized hardware-wallet
 context (a connected, unlocked device). Because establishing that context may
 require interactive user actions (device connect, PIN, passphrase, public-key
 confirmation), Trezor-policy activation shall run through the `task::enable_eth`
-task variant (R35.3.2), not the one-shot `enable_eth_with_tokens` call. If no
-hardware-wallet context is available at activation, activation shall fail with
-the platform-activation error contract of R35.1.5 (a hardware-context-not-
-initialized / unexpected-device-policy class discriminant), rather than falling
+task variant (R35.3.2), not the one-shot `enable_eth_with_tokens` call; the
+one-shot call rejects the Trezor policy with `UnexpectedDeviceActivationPolicy`
+(no `error_data`, HTTP 400, ch. 35 R35.1.5). If no hardware-wallet context is
+available when the task runs, the task shall end with the status-level terminal
+error `Internal` (string `error_data`) of ch. 35 R35.3.2, rather than falling
 back to a local key.
 
 R50.3. Trezor-policy EVM activation shall be gated on coin configuration
 declaring hardware-wallet support for the coin (the published per-coin
 hardware-support marker and the coin's BIP-44 coin-path). A coin whose
 configuration does not declare hardware-wallet support shall fail activation with
-the platform-activation error contract of R35.1.5 (a coin-does-not-support-
-hardware-wallet class discriminant) and shall not attempt any device exchange.
+the status-level terminal error `Internal` (string `error_data`, ch. 35 R35.3.2)
+and shall not attempt any device exchange; a coin-path (`derivation_path`)
+configuration that cannot be used fails with `InvalidPayload` (string). The
+in-progress and awaiting values the activation task reports while it talks to
+the device are those bound in ch. 35 R35.3.3 (`WaitingForTrezorToConnect`,
+`FollowHwDeviceInstructions`, `EnterTrezorPin`, `EnterTrezorPassphrase`); the
+withdrawal-task vocabulary of §50.4 applies to withdrawal only.
 
 R50.4. The enabled HD address determines the withdrawal sender and the signing
 derivation path. Unless activation selects a different enabled address, the
@@ -145,6 +151,14 @@ per R49.2; an unresolvable or foreign selector shall fail per R50.19.
 > no-local-key property parallels §47.5 (MetaMask), differing in that the key
 > lives on a **local USB/WebUSB device** driven by the Trezor protocol rather
 > than a browser wallet driven by EIP-1193.
+
+> **Reloaded status (informative).** The activation path deviates from R50.2 /
+> R50.3 as recorded in ch. 35 §35.3: a missing hardware-wallet context answers
+> `Transport` and device/coin failures `PlatformCoinCreationError` (both must be
+> `Internal`), the device-confirmation state uses a non-vocabulary value (must be
+> `FollowHwDeviceInstructions`), the one-shot call answers `Transport` instead of
+> `UnexpectedDeviceActivationPolicy`, and the terminal result is single-address
+> shaped instead of the HD shape of ch. 35 R35.1.3(b).
 
 ---
 
@@ -553,4 +567,9 @@ outside the signing-behaviour contract bound here.
   R47, [Chapter 35](35-evm-v2-activation-rpcs.md), [Chapter 47](47-metamask-integration.md)
   §47.5, [Chapter 48](48-platform-coin-task-activation.md) R48.6.2,
   [Chapter 49](49-withdrawal-task-path.md).
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* consulted by the KDF Spec Reader (reference version
+  `v3.0.0-beta`) only for the activation-time discriminants and
+  in-progress values now named in R50.2 / R50.3 (restating ch. 35 R35.3.2 /
+  R35.3.3), where the public reference is silent or self-contradictory; no
+  private implementation expression is normative in this chapter. The
+  remainder was not derived from it.

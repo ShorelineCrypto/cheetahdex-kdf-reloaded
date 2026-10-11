@@ -188,6 +188,13 @@ platform-enable RPC that exposes a `priv_key_policy` field shall accept the same
 tagged value with the same semantics. This policy value is defined and routed
 **only on the WASM target** (§47.7).
 
+R47.5.1a The same request shall also carry `"rpc_mode": "Metamask"` (ch. 35
+R35.1.4a): on WASM, `rpc_mode` and `priv_key_policy` must be **both** MetaMask
+or **neither**, and any other combination fails activation with
+`PlatformCoinCreationError` (object `{ticker, error}`, HTTP 500). The
+`Metamask` value of `rpc_mode`, like that of `priv_key_policy`, does not exist
+on native builds.
+
 R47.5.2 When the MetaMask policy is selected, activation shall consume the
 already-connected MetaMask session from the crypto context (established via
 §47.1). A MetaMask session **must already be connected** (the caller must have
@@ -442,11 +449,20 @@ mapping (the human-readable cause is not bound):
 | Active-account mismatch at activation | `enable_eth_with_tokens` aggregated activation error | `Transport` | 502 |
 | Per-operation active-account mismatch (R47.5.9) | the invoked operation's error envelope | account-mismatch / transport-class discriminant of that operation | 500 |
 | Unsupported operation under MetaMask -- atomic swap (R47.5.12), private-key export (R47.5.14), HD/derivation-path op (R47.5.15) | the invoked operation's error envelope | that operation's unsupported / not-supported discriminant | 400 |
-| MetaMask `priv_key_policy` requested on a native build | EVM activation rejects the value | invalid-policy / unsupported discriminant | 400 |
+| MetaMask `priv_key_policy` or `rpc_mode: "Metamask"` requested on a native build | request-parse failure at the dispatcher (the value does not exist on native) | `InvalidRequest` (string `error_data`) | 400 |
+| `rpc_mode` and `priv_key_policy` not both MetaMask (WASM, R47.5.1a) | `enable_eth_with_tokens` aggregated activation error | `PlatformCoinCreationError` (object `{ticker, error}`) | 500 |
+| MetaMask cannot select the coin's chain (chain not registered in the wallet, or another provider failure while switching) | `enable_eth_with_tokens` aggregated activation error | `PlatformCoinCreationError` (object `{ticker, error}`) | 500 |
+| MetaMask reports a chain id other than the coin's | `enable_eth_with_tokens` aggregated activation error | `Internal` (string) | 500 |
 
-The per-operation discriminant names are inherited from each operation's own
-ch. 35 error contract; this chapter binds only the **condition** and its HTTP
-status class, not new discriminants.
+The activation-time rows carry a string `error_data` unless stated otherwise
+(ch. 35 R35.1.5 is authoritative for shapes). The per-operation discriminant
+names are inherited from each operation's own error contract; this chapter
+binds only the **condition** and its HTTP status class, not new discriminants.
+
+> **Reloaded status (informative).** Reloaded selects the MetaMask signer from
+> `priv_key_policy` alone and does not parse `rpc_mode`; the both-or-neither
+> rule of R47.5.1a is not enforced, and `rpc_mode: "Metamask"` on a native
+> build is silently accepted instead of answering `InvalidRequest`.
 
 ---
 
@@ -794,4 +810,8 @@ must be revisited.
   the dictated method strings, JSON field names, and error discriminants
   this chapter distills.
 - *Sibling-allowlist consultations:* [Chapter 35](35-evm-v2-activation-rpcs.md).
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* consulted by the KDF Spec Reader (reference version
+  `v3.0.0-beta`) only for R47.5.1a and the activation-time rows added to
+  R47.6.7 (`rpc_mode` pairing and MetaMask chain-selection failure mapping),
+  where the public reference is silent; no private implementation expression
+  is normative in this chapter. The remainder was not derived from it.

@@ -11,7 +11,9 @@
 
 > **Treatment:** **T-DOC.** Reloaded ships a Lightning coin (`LightningCoin`)
 > with a complete node/channel/payment RPC surface, gated to the native target.
-> This chapter documents that shipped capability.
+> This chapter documents that shipped capability, except §41.2 (node
+> activation), which is **T-PORT**: it binds the activation wire contract of the
+> reference named in R41.2.0 and lists where reloaded still deviates.
 
 ## 41.0 Executive Summary
 
@@ -37,21 +39,195 @@ only. It shall be absent from the WASM build.
 
 ## 41.2 Node activation (task RPC)
 
-R41.2.1 Lightning node activation shall be a long-running task exposed as the
-public RPC quartet `init_lightning` / `init_lightning_status` /
-`init_lightning_user_action` / `cancel_init_lightning`. The same task, and the
-same activation routine, shall also be reachable through the namespaced
-`task::enable_lightning::{init,status,user_action,cancel}` method quartet; both
-forms drive the identical activation task and are interchangeable, native-only
-aliases of each other (see [Chapter 48](48-platform-coin-task-activation.md),
-which cites the Lightning task family as prior art for the shared task-lifecycle
-substrate).
+> **Source of truth (informative).** The method strings, request fields, result
+> fields, in-progress values and the init error examples of this section follow
+> the public Komodo DeFi Framework "Lightning Network Initialization Tasks" page
+> and the `LightningActivationParams` / error-type catalogue entries. Where they
+> are silent or contradict themselves (including every HTTP status), this
+> section binds the reference implementation of R41.2.0, by maintainer decision.
+> The mmrpc-2.0 envelope, the task-status object and the task-framework errors of
+> `status` / `user_action` / `cancel` (`NoSuchTask`, `TaskFinished`, ...) are
+> bound once by [Chapter 55](55-coin-activation-wire-contract.md) §55.1-§55.2
+> and are not restated here.
 
-R41.2.2 A simplified single-call enable path shall also be exposed as the public
-RPC `enable_lightning`.
+R41.2.0 **Reference version.** The reference implementation is the GLEEC KDF
+release tag **`v3.0.0-beta`**; the netid-8762 legacy reference `v2.6.0-beta`
+exposes an identical Lightning activation surface (methods, fields, errors,
+statuses), so no reference-version distinction applies.
+
+R41.2.1 **Methods.** Lightning node activation shall be the native-only
+task-managed family `task::enable_lightning::{init,status,user_action,cancel}`
+(the shared task-lifecycle substrate is described in
+[Chapter 48](48-platform-coin-task-activation.md)). The reference routes **no**
+one-shot `enable_lightning` method and **no** flat `init_lightning` /
+`init_lightning_status` / `init_lightning_user_action` / `cancel_init_lightning`
+aliases; neither form is part of the parity contract (see R41.2.2).
+
+R41.2.2 **Reloaded-only activation methods (informative).** Reloaded also routes
+the one-shot `enable_lightning` (inherited from the GPLv2 baseline) and the flat
+`init_lightning` quartet (a reloaded addition) as aliases of the same
+activation. They are not parity surfaces; whether they stay routed is an open
+maintainer decision (see the open decision at the end of §41.2). While routed
+they shall not be described to clients as KDF-compatible methods.
 
 R41.2.3 Activation shall bind the Lightning coin to its parent UTXO coin, load or
 create the node's persistent state, and start the background node event loop.
+
+### `task::enable_lightning::init`
+
+R41.2.4 **Request** (`params`):
+
+| Field | JSON type | Required / default | Effect |
+| --- | --- | --- | --- |
+| `ticker` | string | **required** | the Lightning coin ticker (a `LIGHTNING`-protocol coins-configuration entry) |
+| `activation_params` | object | **required** | node parameters below; unknown members ignored |
+| `activation_params.name` | string | **required** | node alias announced to the network; at most 32 bytes (UTF-8 length), space-padded to 32 bytes on the wire |
+| `activation_params.listening_port` | integer (0-65535) | optional, default `9735` | P2P listening port; a non-integer (e.g. a string) is a request-parse failure (`InvalidRequest`, ch. 55 §55.1) |
+| `activation_params.color` | string | optional, default `"000000"` | node RGB colour as exactly 6 hex digits |
+| `activation_params.payment_retries` | integer | optional, default `5` | payment retry attempts |
+| `activation_params.backup_path` | string | optional | directory for channel backups |
+
+> **Upstream divergence (informative).** The public `LightningActivationParams`
+> table states a colour default of `2b6680`; the reference defaults to
+> `000000`. The docs page also carries a second `LightningActivationParams`
+> definition (`backup_password`, `node_pubkey`) that is not part of the
+> activation request. Both points are resolved in favour of the reference.
+
+R41.2.5 **Success:** `{"task_id": <integer>}` (HTTP 200).
+
+R41.2.6 **`init` errors** (mmrpc-level; synchronous, before the task is
+spawned). The observable precedence is the row order:
+
+| # | `error_type` | Returned when | `error_data` | HTTP |
+| --- | --- | --- | --- | --- |
+| 1 | `L2IsAlreadyActivated` | a coin with `ticker` is already active | string: the Lightning ticker | 400 |
+| 2 | `L2ConfigIsNotFound` | no coins-configuration entry for `ticker` | string: the Lightning ticker | 400 |
+| 3 | `L2ProtocolParseError` | the entry's `protocol` does not parse | `{ticker: string, error: string}` | 500 |
+| 4 | `UnexpectedL2Protocol` | the protocol is not `LIGHTNING` | `{ticker: string, protocol: object}` (protocol in canonical coin-configuration form, ch. 36 R36.0.3) | 400 |
+| 5 | `L2ConfigParseError` | the rest of the Lightning coin entry does not parse (R41.2.11) | string | 500 |
+| 6 | `PlatformCoinIsNotActivated` | the `platform` named by the protocol is not active | string: the **Lightning** ticker (as in the public-docs example), not the platform ticker | 400 |
+| 7 | `UnsupportedPlatformCoin` | the platform is active but is not a standard UTXO coin | `{platform_coin_ticker: string, l2_ticker: string}` | 500 |
+| 8 | `Internal` | the platform is not activated in segwit address format | string | 500 |
+| 9 | `InvalidPlatformConfiguration` | the platform's coin configuration lacks `avg_blocktime` | `{platform_coin_ticker: string, err: string}` | 500 |
+| 10 | `Internal` | `name` longer than 32 bytes, or `color` not 6 hex digits | string | 500 |
+| 11 | `Internal` | the task could not be created | string | 500 |
+
+The full set of `error_type` values that `init` and the task status can carry is:
+`L2IsAlreadyActivated`, `L2ConfigIsNotFound`, `L2ProtocolParseError`,
+`UnexpectedL2Protocol`, `PlatformCoinIsNotActivated`, `UnsupportedPlatformCoin`,
+`InvalidPlatformConfiguration`, `L2ConfigParseError`, `TaskTimedOut` (object
+`{duration: {secs: integer, nanos: integer}}`, HTTP 408), `Transport` (string,
+500), `Internal` (string, 500). HTTP statuses: 400 for
+`L2IsAlreadyActivated`, `PlatformCoinIsNotActivated`, `L2ConfigIsNotFound`,
+`UnexpectedL2Protocol`; 408 for `TaskTimedOut`; 500 for all others.
+
+### `task::enable_lightning::status`
+
+R41.2.7 **Request:** `{task_id: integer, forget_if_finished: boolean (default
+true)}`. Responses are HTTP 200 task-status objects (ch. 55 §55.2):
+
+- **InProgress** -- `details` is one of the strings `ActivatingCoin` (initial),
+  `GettingFeesFromRPC`, `ReadingNetworkGraphFromFile`,
+  `InitializingChannelManager`, `InitializingPeerManager`,
+  `ReadingScorerFromFile`, `InitializingBackgroundProcessor`,
+  `ReadingChannelsAddressesFromFile` (the public-docs list), reported in that
+  order as the node starts; no other in-progress value is emitted.
+- **UserActionRequired** -- never reported (no hardware policy exists for
+  Lightning).
+- **Ok** -- `details` is `{platform_coin: string (the platform ticker), address:
+  string (the node public key, 33-byte compressed, hex), balance: {spendable:
+  string, unspendable: string}}`; `spendable` is normally `"0"` at activation
+  (channel balance becomes spendable once counterparties are online).
+- **Error** -- `details` is the error object with one of:
+
+| `error_type` | Returned when | `error_data` |
+| --- | --- | --- |
+| `Transport` | the platform coin's backend (electrum / native node) cannot be reached when fetching fee estimates at the `GettingFeesFromRPC` step, or a transport failure reading the final balance | string |
+| `Internal` | any other node-start failure: platform activated in HD-wallet mode, I/O error (e.g. listening port in use -- the public-docs example), persistence / database / backup-path errors, address or non-transport balance errors | string |
+| `L2IsAlreadyActivated` | the coin was registered by a concurrent activation before this task finished | string: the Lightning ticker |
+| `TaskTimedOut` | the task framework timed the task out | `{duration: {secs, nanos}}` |
+
+**Unresponsive platform backend.** A Lightning activation whose platform UTXO
+backend is unreachable shall end with a status-level `Error` carrying
+`Transport` (string); the `status` call itself returns HTTP 200.
+
+R41.2.8 **Completion delay (informative).** After the node has started, the
+reference waits roughly ten seconds before reading the address and balance and
+completing the task; clients must not assume a bound on activation time.
+
+### `task::enable_lightning::user_action` and `cancel`
+
+R41.2.9 `task::enable_lightning::user_action` is routed; its request carries the
+shared hardware user-action payload of ch. 55 §55.2. No Lightning task ever
+awaits an action, so a call yields the task-framework error of ch. 55 §55.2.
+
+R41.2.10 `task::enable_lightning::cancel` takes `{task_id: integer}` and returns
+`"success"`; cancelling a running activation stops it and, if the Lightning coin
+had already been registered, de-registers it. Task-framework errors
+(`NoSuchTask`, `TaskFinished` -- the public-docs example shows the latter at
+mmrpc level with an integer `error_data`) are bound by ch. 55 §55.2.
+
+### Lightning coin configuration (dictated config contract)
+
+R41.2.11 A Lightning coins-configuration entry carries `coin`, `decimals`,
+`protocol`, and optionally `accept_inbound_channels`,
+`accept_forwards_to_priv_channels`, `channel_options`, `our_channels_configs`,
+`counterparty_channel_config_limits` and `sign_message_prefix`. Its `protocol`
+is `{"type": "LIGHTNING", "protocol_data": {"platform": <platform ticker>,
+"network": "mainnet" | "testnet" | "regtest", "confirmation_targets":
+{"background": <integer>, "normal": <integer>, "high_priority": <integer>}}}`;
+the confirmation targets are block-count targets used to fetch fee estimates
+from the platform backend at activation (the `GettingFeesFromRPC` phase). A
+`protocol_data` without `confirmation_targets` is a protocol parse failure
+(`L2ProtocolParseError`).
+
+> **Upstream divergence (informative).** The public Lightning page spells the
+> per-channel defaults key both `our_channels_config` (table, first example) and
+> `our_channels_configs` (second example); the reference reads
+> `our_channels_configs`, which is bound. Accepting the other spelling as an
+> alias is permitted.
+
+### Reloaded status of §41.2 (informative)
+
+Current reloaded behaviour that deviates from §41.2:
+
+1. **Error names.** Reloaded's task errors are `AlreadyActivated`,
+   `ConfigNotFound`, `ProtocolParseError`, `UnexpectedProtocol`,
+   `PlatformNotActivated`, `IncompatiblePlatform`, `InvalidPlatformConfig`,
+   `ConfigParseError`; bound: `L2IsAlreadyActivated`, `L2ConfigIsNotFound`,
+   `L2ProtocolParseError`, `UnexpectedL2Protocol`, `PlatformCoinIsNotActivated`,
+   `UnsupportedPlatformCoin`, `InvalidPlatformConfiguration`,
+   `L2ConfigParseError` with the shapes and statuses of R41.2.6.
+2. **`UnexpectedL2Protocol` payload.** Reloaded omits the `protocol` member;
+   bound: `{ticker, protocol}`.
+3. **`avg_blocktime` check.** Reloaded does not check the platform's
+   `avg_blocktime` at `init`; bound: `InvalidPlatformConfiguration` (row 9).
+4. **Status-level mapping.** Reloaded maps every node-start failure (incl. an
+   unreachable platform backend) to `Internal`, every balance failure to
+   `Transport`, and a registration conflict to `Internal`; bound: R41.2.7.
+5. **In-progress values.** Reloaded reports its own value set (starting with an
+   initialising value) and never advances it; bound: the R41.2.7 sequence.
+6. **`user_action` payload.** Reloaded expects a placeholder confirmation
+   action; bound: the shared hardware user-action payload (R41.2.9).
+7. **Fee estimates.** Reloaded does not fetch fee estimates from the platform
+   backend at activation and reads per-priority default fees from a
+   `confirmations` protocol member; bound: `confirmation_targets` integers and
+   the `GettingFeesFromRPC` phase (R41.2.11). A coins file written for the
+   reference therefore fails reloaded's protocol parsing today.
+8. **`our_channels_configs`.** Reloaded reads `our_channels_config` only; bound:
+   R41.2.11.
+9. **Extra methods.** `enable_lightning` and the flat `init_lightning` quartet
+   (R41.2.2).
+
+> **Code-quality finding (informative; trigger: apparent with little extra
+> effort).** When the platform coin is not active, the reference's
+> `PlatformCoinIsNotActivated` names the *Lightning* ticker where the error's
+> meaning calls for the platform ticker (the public-docs example shows the same).
+> R41.2.6 binds the reference behaviour for parity; a future deliberate
+> deviation could carry the platform ticker instead.
+
+> **Open decision (informative).** Retention or retirement of the
+> reloaded-only `enable_lightning` and `init_lightning` quartet (R41.2.2).
 
 ## 41.3 Peer & channel management
 
@@ -341,7 +517,11 @@ R41.8.6 **Error conditions (public `error_type` discriminant + HTTP status).**
 ## 41.9 Acceptance criteria
 
 - Lightning is absent from the WASM build and present on native (R41.1).
-- A node activates via `init_lightning` and reaches a ready state (R41.2).
+- A node activates via `task::enable_lightning::init` and reaches the `Ok`
+  status with `{platform_coin, address, balance}`; every `init` failure class of
+  R41.2.6 and every status-level failure class of R41.2.7 yields the bound
+  `error_type`, `error_data` shape, HTTP status and placement; an unreachable
+  platform backend ends in a status-level `Transport` error (R41.2).
 - A channel can be opened to a peer, listed, its details fetched, and closed
   (R41.3).
 - A BOLT-11 invoice can be generated and paid; the payment is then listed and its
@@ -356,21 +536,81 @@ R41.8.6 **Error conditions (public `error_type` discriminant + HTTP status).**
   configuration is echoed back and persisted (R41.8), delivered by the bounded
   vendored-LDK runtime-config-mutation patch described in §41.8.
 
-## 41.10 Provenance Footer
+## 41.10 Tests
+
+T41.1 *Init error names and shapes.* For each of rows 1-7 and 9 of R41.2.6 a
+wire-shape test asserts the serialized `error_type`, the `error_data` type and
+member names, and the HTTP status; row 6 asserts that `error_data` is the
+Lightning ticker.
+
+T41.2 *`UnexpectedL2Protocol` payload.* A `ticker` whose protocol is `UTXO`
+yields HTTP 400 with `error_data` `{ticker, protocol: {"type": "UTXO"}}`.
+
+T41.3 *Missing `avg_blocktime`.* A segwit platform without `avg_blocktime`
+yields HTTP 500 `InvalidPlatformConfiguration` with
+`{platform_coin_ticker, err}`.
+
+T41.4 *Unreachable platform backend.* With the platform's electrum servers
+down, `init` returns a `task_id` and `status` eventually returns HTTP 200
+`{"status": "Error", "details": {..., "error_type": "Transport",
+"error_data": <string>}}`.
+
+T41.5 *In-progress values.* Every in-progress `details` observed during a
+successful activation is one of the strings of R41.2.7, starting with
+`ActivatingCoin`.
+
+T41.6 *Coin configuration.* A `LIGHTNING` entry with `confirmation_targets`
+integers and `our_channels_configs` parses; one with only the baseline-era
+`confirmations` member fails with `L2ProtocolParseError`.
+
+T41.7 *Activation parameters.* `color` absent yields colour `000000`;
+`listening_port` absent yields 9735; a 33-byte `name` yields HTTP 500
+`Internal` at `init`.
+
+## 41.11 Deferred Work
+
+D41.1 Hardware-wallet Lightning activation (no `UserActionRequired` state
+exists today).
+
+D41.2 Disposition of the reloaded-only `enable_lightning` and `init_lightning`
+methods (R41.2.2).
+
+## 41.12 Baseline Verifications
+
+V41.1 The GPLv2 baseline routes the one-shot `enable_lightning` and parses the
+`LIGHTNING` protocol with a `confirmations` member; §41.2's reloaded-status
+list records the resulting deviations.
+
+## 41.13 Provenance Footer
 
 - *Inputs:* the project's own revision history and current tree (the
   shipped `LightningCoin` node/channel/payment RPC surface this chapter
   documents as-built -- by public behaviour and wire-contract shape
-  only, no code transcribed); the published BOLT specifications
-  (BOLT-11 invoices, channel and HTLC semantics) and the vendored
-  LDK-style Lightning library's public network behaviour (both
-  explicitly named as this chapter's binding-scope source of truth);
-  [Chapter 48](48-platform-coin-task-activation.md) (the l2
-  task-activation family `task::enable_lightning` is delivered through,
-  and its flat-alias relationship this chapter's §41.2 cross-references).
+  only, no code transcribed); the GPLv2 baseline dispatcher and coin protocol;
+  the published Komodo DeFi Framework Lightning activation page, Lightning coin
+  configuration page and error-type catalogue; the published BOLT
+  specifications (BOLT-11 invoices, channel and HTLC semantics) and the vendored
+  LDK-style Lightning library's public network behaviour;
+  [Chapter 48](48-platform-coin-task-activation.md) (the task-lifecycle
+  substrate `task::enable_lightning` is delivered through);
+  [Chapter 55](55-coin-activation-wire-contract.md) (envelope and
+  task-framework errors).
 - *Permitted-input classes used:* baseline/as-built source (the shipped
   Lightning coin and its vendored LDK dependency); external public
-  specification (the BOLT specifications); cross-chapter contracts
-  (Chapter 48).
-- *Sibling-allowlist consultations:* [Chapter 48](48-platform-coin-task-activation.md).
-- *Forbidden corpus:* not consulted.
+  specification (the KDF API documentation, the BOLT specifications);
+  cross-chapter contracts (Chapters 36, 48, 55); interop / wire-and-API-bound
+  reuse (R29/R31) for the dictated method strings, field names,
+  coin-configuration keys and error discriminants.
+- *Sibling-allowlist consultations:* [Chapter 36](36-tendermint-v2-activation-rpcs.md),
+  [Chapter 48](48-platform-coin-task-activation.md),
+  [Chapter 55](55-coin-activation-wire-contract.md).
+- *Forbidden corpus:* consulted, under the chapter-01 two-team clean-room
+  workflow, at the GLEEC KDF tags `v3.0.0-beta` (reference) and `v2.6.0-beta`
+  (legacy comparison), for the node-activation contract of §41.2 only --
+  specifically the routed method set of R41.2.1, the activation-parameter
+  defaults of R41.2.4, the `init` error precedence, shapes and HTTP statuses of
+  R41.2.6, the in-progress values and status-level error mapping of R41.2.7,
+  the cancel side effect of R41.2.10 and the coin-configuration keys of
+  R41.2.11. The remaining sections were not derived from the corpus. No source
+  text, private identifier, internal decomposition, or error/log string literal
+  was carried into this chapter.
