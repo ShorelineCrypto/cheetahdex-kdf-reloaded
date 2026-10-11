@@ -501,6 +501,12 @@ is the externally tagged sub-error:
 | same contract already active | `{"TokenWithSameContractAlreadyActivated": {"ticker": string, "contract_address": string}}` |
 | unparseable contract address | `"InvalidTokenAddress"` |
 
+> **Reloaded status (informative).** Reloaded builds a custom token without
+> marking it wallet-only: the `wallet_only` check that gates order placement
+> reads the coins-file entry, which a custom token does not have, so a custom
+> token can currently be offered in swaps, contrary to this rule. Tracked in
+> kdf-reloaded/kdf#16.
+
 R35.2.8 **`enable_nft` failure mapping (G).** Against the single-token table:
 an NFT ticker with no config entry → `TokenConfigIsNotFound`; NFT pseudo-coin
 already active → `TokenIsAlreadyActivated` (string, the NFT ticker); backing
