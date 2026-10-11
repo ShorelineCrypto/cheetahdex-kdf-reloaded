@@ -1,6 +1,6 @@
 # Chapter 40 -- Solana Coin
 
-**Status:** driving-spec (activation wire contract bound to the reference of §40.0.1; the remaining sections document shipped reloaded behaviour).
+**Status:** driving-spec (reloaded's own activation surface is primary; the reference surface of §40.1-§40.3 is bound as an additional compatibility surface, deferred; the remaining sections document shipped reloaded behaviour).
 
 > **One-sentence claim:** the project shall support Solana as a platform coin and
 > SPL tokens as its child tokens, activating them through the
@@ -10,6 +10,21 @@
 > §40.0.1, querying balances and chain height over Solana's JSON-RPC, and
 > exposing address/withdraw/transaction operations against the Solana and
 > SPL-Token programs.
+
+> **Maintainer decision (binding, 2026-10-11).** Reloaded's own Solana
+> activation surface -- `enable_solana_with_tokens` and `enable_spl` with their
+> current request, result and coin-configuration shapes (§40.6) -- is the
+> **primary** contract of this project and stays routed. The reference
+> implementation marks its Solana activation as experimental and its key-policy
+> handling as not production-ready, so it is not adopted as the primary surface.
+> Because backward compatibility with clients and coins files written for the
+> reference matters, §40.1-§40.3 bind the reference's `experimental::` methods
+> and its `SOLANA` / `SOLANATOKEN` coin-configuration forms as an **additional
+> compatibility surface** to be added alongside the primary one, not instead of
+> it. That work, the formal binding of the primary surface's own wire shapes,
+> and the remaining Solana feature gaps are deferred to a dedicated session
+> (D40.3, `docs/plans/solana-support.md`). Until then the §40.6 deviations are
+> known gaps, not defects of this branch.
 
 > **Treatment:** **T-PORT** for the activation wire contract of §40.1-§40.3
 > (reloaded today ships a different, baseline-inherited Solana activation
@@ -249,12 +264,13 @@ Reloaded currently ships the baseline-era Solana surface, which differs from
 7. **Keys.** Reloaded's keypair derivation produces the same ed25519 key as
    R40.1.4 for the same 32-byte secret; no change needed.
 
-> **Open decision (informative).** Whether the baseline-inherited
-> `enable_solana_with_tokens` / `enable_spl` methods stay routed alongside the
-> bound methods (as a documented reloaded exception with their current shapes)
-> or are retired is a maintainer decision; this chapter binds neither their
-> retention nor their removal. Whether Solana is in scope for the current
-> release at all is tracked in `UPSTREAM-PARITY-GAPS.md`.
+> **Decision recorded (informative).** The baseline-inherited
+> `enable_solana_with_tokens` / `enable_spl` methods stay routed as the primary
+> surface (see the maintainer decision at the top of this chapter). Items 1-6
+> above are therefore read as "the compatibility surface is not yet added", not
+> as defects of the primary surface; item 6's error-mapping differences apply
+> to the compatibility surface and are re-evaluated for the primary surface in
+> the Solana plan. Release scope is tracked in `UPSTREAM-PARITY-GAPS.md`.
 
 > **Code-quality finding (informative; trigger: a code comment states the
 > problem).** The reference's Solana key-policy handling is acknowledged in the
@@ -305,7 +321,11 @@ D40.1 Solana transaction history.
 
 D40.2 HD-wallet, hardware-wallet and WalletConnect Solana policies.
 
-D40.3 Disposition of the baseline-era methods (§40.6 open decision).
+D40.3 Add the reference compatibility surface of §40.1-§40.3 (the two
+`experimental::` methods on all targets and the `SOLANA` / `SOLANATOKEN`
+coin-configuration forms) alongside reloaded's primary surface, and bind the
+primary surface's own wire shapes in this chapter. Deferred to a dedicated
+session; see `docs/plans/solana-support.md`.
 
 ## 40.9 Baseline Verifications
 
