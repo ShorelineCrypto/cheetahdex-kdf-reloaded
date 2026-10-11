@@ -342,6 +342,34 @@ residual-similarity gate of R35 — cannot be performed by a context
 that may not see both sides, so the comparison must be delegated to a
 role that may, and R39 is what makes that delegation safe.
 
+The third ground is worth stating at full strength, because it is
+less an argument for the procedure than an observation about the
+regime the procedure joins. R35's gate scores a file against the
+relicensed historical record, so it needs both operands: the file,
+and material of the R8 class. R8–R10 withhold the second operand
+from every contributor and from every implementation role this
+chapter otherwise contemplates. R35's gate has therefore never been
+executable by any role this chapter permitted — not because the rule
+is wrong, but because the chapter named no role that could hold both
+operands and bound nothing about what such a role might emit if it
+did. R39 is the first rule that does both. On this one point §1.4A is
+not an addition to the regime: it supplies the only role that can
+execute a gate this chapter has bound since R35 was written, and the
+only output contract under which that gate's result can cross back
+without carrying what it measured.
+
+That observation has a limit worth recording. R35 is conditional — it
+governs a measurement when one is taken, and its mechanical
+thresholds and tooling are deferred to chapter 30 D1 — so its
+unexecutability was never an unmet standing obligation, and no
+chapter is retrospectively defective for having been committed
+without a score. The gap was in executability, not in compliance.
+One thing does follow for R38, though: an optional procedure cannot
+be the means by which a bound gate becomes performable, because the
+gate would then be performable only at the discretion of the party
+being measured. R38 makes the route mandatory for that reason as much
+as for the unverifiability of a self-certification.
+
 Requiring the route costs the project nothing it was relying on. R43
 scopes the requirement forward, so no already-committed chapter
 becomes defective by its adoption; and because the dirty-side role is
