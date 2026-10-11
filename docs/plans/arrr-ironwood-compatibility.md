@@ -5,6 +5,10 @@
 > Written to be readable without knowledge of KDF Reloaded internals: the **Overview** is for
 > everyone; §1 lists verified facts with sources; §2–§5 are implementation detail for our
 > engineers; §6 is the timeline; §7 the open items for the Pirate team; §9 the decisions log.
+>
+> **Start at §10.** It carries the current plan as of 2026‑10‑11 — one backend
+> (`lightwalletd`), Electrum removed, and a bump to a stable v6 release — and says which of
+> the earlier sections it supersedes.
 
 ## Overview
 
@@ -332,6 +336,10 @@ the ARRR light path).
 
 ## 4. Step 2 — upgrade the Zcash library stack
 
+> **Superseded in part by §10.4 step B (2026‑10‑11).** The target versions and the ordering
+> here are out of date: v6 reading requires `zcash_primitives 0.30.1`, and the bump is now a
+> hard prerequisite rather than a parallel track. The factual content below stands.
+
 Target line (mutually compatible on crates.io; MSRV 1.88, our toolchain is pinned at 1.98.0):
 
 | Crate | From | To |
@@ -385,6 +393,10 @@ byte‑identical before and after (gate 4).
 ---
 
 ## 5. Step 3 — Problem B: Ironwood‑era transactions
+
+> **Superseded in part by §10.4 steps C–E (2026‑10‑11).** This section assumes Electrum
+> remains a backend; it is being removed for ZHTLC coins. §5A's open design decision is
+> resolved in favour of the Zcash parser (§10.4 step D).
 
 Definition: *every ARRR transaction KDF Reloaded builds for a height at or after Ironwood
 activation is a version‑6 transaction committing to branch ID `0x37a5165b`; before activation
@@ -820,6 +832,139 @@ Open items depending on Pirate's answers:
   Pirate‑specific vendored patch on `zcash_primitives`; q4 (no testnet) ⇒ regtest harness
   only, standardness unproven before mainnet.
 - q6 decides whether tip/broadcast/spend‑detection move from Electrum to `lightwalletd`.
+
+## 10. Revised plan (2026‑10‑11): one backend, stable v6
+
+**Sections 4 and 5 are superseded in part by this section.** Their step ordering and their
+assumption that Electrum remains a backend no longer hold; their factual content stands.
+
+### 10.1 Why the plan changed
+
+Three things arrived after activation, in this order:
+
+1. **The Electrum provider disappeared.** cipig's Pirate node never upgraded past Ironwood: on
+   2026‑10‑08 his `arrr.electrum1/2.cipig.net` ElectrumX *and* his
+   `electrum1/2.cipig.net:9447` lightwalletd all reported tip 4 161 184 with
+   `branchId=76b809bb`, against a real chain at ~4 167 700 and `37a5165b`. Both froze at the
+   first post‑activation block containing transactions. A probe of all ten Pirate‑official
+   hosts found **no ElectrumX anywhere**: they serve lightwalletd or HTTP only. So the
+   Electrum dependency has no healthy provider and nothing to wait for.
+2. **The chain's maintainer said the dependency is wrong in principle:** *"Pirate needs
+   lightwalletd not electrum, because of zk-snarks/zcash requires it."*
+3. **`lightwalletd` turns out to serve the transparent side too** — verified in §10.2, not
+   merely declared.
+
+### 10.2 Step A — the transparent surface, verified against the live network (done)
+
+Probed 2026‑10‑11. The method that distinguishes "works" from "always returns empty" is
+comparing an address with real history against a synthetic one: `RM6uyifBAuowR7LKyzkdSmsjzAUBvGTT1p`
+(the test chain's miner address, recovered from 300 input `scriptSig` pubkeys in the local
+fixture corpus) versus an unused address of the same form.
+
+| Function | RPC | Verdict |
+|---|---|---|
+| chain tip | `GetLatestBlock` | **works** |
+| compact blocks, block time | `GetBlock` / `GetBlockRange` | **works** |
+| raw transaction, mined height | `GetTransaction` (by `hash`) | **works** |
+| commitment‑tree anchor | `GetTreeState` | **works** |
+| mempool | `GetMempoolTx` | **works** |
+| consensus branch id | `GetLightdInfo` | **works** |
+| transparent history (spend detection) | `GetTaddressTxids` | **works** — streamed 8 661 transactions, ~1 MB, for the real address; empty for the control |
+| transparent UTXOs and balance | `GetAddressUtxos` | **works** — one UTXO returned for the real address; empty for the control |
+| broadcast | `SendTransaction` | **declared, untested** — needs a valid signed transaction |
+| transparent balance (direct) | `GetTaddressBalance` | **unusable** — returns the daemon's `-5: Invalid addresses` for *every* address, valid or not. Not needed: sum `GetAddressUtxos`. |
+| fee rate | — | not needed; ARRR declares a fixed per‑kB fee |
+
+Three operational findings that constrain the design:
+
+- **`GetTaddressTxids` can fail mid‑stream.** The real‑address call returned 8 661 messages and
+  *then* `-5: No information available about`. The implementation must tolerate a partial
+  stream and use bounded height ranges rather than assuming a clean one.
+- **`TxFilter{block, index}` is not served**; only `TxFilter{hash}`, and the txid must be in
+  **internal** (compact‑block) byte order — display order errors.
+- **P2SH is accepted but its history is unproven.** A syntactically valid Pirate P2SH address
+  (version byte 85) is accepted by both transparent RPCs — status 0, empty — rather than
+  rejected, so the format is supported. No P2SH address with history exists on the test chain
+  to prove the index covers it. **This is the one residual risk**, and it falls only on the
+  swap half: it will be settled the first time an HTLC is funded on a test chain. It does not
+  block the wallet half.
+
+### 10.3 Maintainer decisions (2026‑10‑11)
+
+- **Electrum support is removed for ZHTLC coins, not retained behind a switch.** There is no
+  need for it and no working provider. Recorded as a deliberate divergence from GLEEC KDF with
+  the documentation the compatibility rule requires (§10.5).
+- **The crate bump targets stable v6**, not a prerelease and not a git dependency.
+
+### 10.4 Steps
+
+**B — bump the Zcash stack to published stable releases.** A hard prerequisite for everything
+else, because v6 *reading* does not work today: in the pinned `zcash_primitives 0.28.0` the v6
+arm of `TxVersion::read` sits behind `#[cfg(zcash_unstable = "nu7")]`, a rustc cfg we do not
+set, so a v6 transaction is rejected as "Unknown transaction format". It is **unconditional in
+0.30.1**, which is published and stable.
+
+| Crate | Pinned now | Target | Note |
+|---|---|---|---|
+| `zcash_primitives` | 0.28.0 | **0.30.1** | v6 unconditional |
+| `zcash_client_backend` | 0.23.0 | 0.24.0 | keep `orchard` off |
+| `zcash_client_sqlite` | 0.21.1 | 0.22.0 | wallet‑DB migration |
+| `zcash_protocol` | 0.9.0 | 0.10.6 | carries `BranchId::Nu6_3` |
+| `sapling-crypto` | 0.7.0 | 0.9.0 | |
+
+These are **newer than the Pirate node's own stack**, which pins `zcash_primitives 0.29.0` plus
+two `-rc.1` prereleases via git. We take published releases and keep our own ZIP‑212 handling,
+which is narrower than the fork's: theirs patches `plaintext_version_is_valid` globally, so
+their builder also accepts both lead bytes, whereas R39.8.0am confines the behaviour to
+decryption with a test pinning that transaction construction still resolves to Sapling. Re‑check
+that the fix is still required after the bump; the upstream Canopy rule is unchanged, so expect
+it to be.
+
+**C — `lightwalletd` becomes the only backend.** Move every function in §10.2 off Electrum;
+make the Electrum server list unused for ZHTLC; give all shielded construction paths **one**
+height authority, which is what fixes the refund defect; add a `GetLightdInfo`
+consensus‑branch‑id check that **excludes** off‑branch servers rather than reporting them. With
+a single backend the two‑backend divergence tolerance largely dissolves and the branch‑id check
+replaces it — three of the eight published `light_wallet_d_servers` entries are cipig's and
+serve a different fork, and an off‑branch server above the wallet's anchor can otherwise make
+the wallet rewind and follow that server's chain.
+
+**D — route ARRR's transaction parsing to the Zcash parser.** The shared UTXO parser applies
+the v4 layout to any overwintered version ≥ 4 with double‑SHA256 txids, so it mis‑parses v6 and
+computes the wrong txid by construction. It cannot simply be deleted: `UtxoTx` is referenced in
+42 files and is the transaction type for every UTXO coin. `zcash_primitives::Transaction::read`
+handles Sprout, v3, v4, v5 and v6 in one parser, so routing ARRR to it removes the duplication
+*and* keeps the v4 history an old wallet still needs when restoring from a pre‑fork birthday.
+
+**E — v6 construction, then lift the gates.** Map `NetworkUpgrade::Nu6_3` to the Ironwood
+activation height so the builder selects v6; implement runtime activation‑height discovery,
+which is mandatory because the Pirate team will publish no height; correct the built‑in
+activation‑time guard, whose test/regtest withholding keys on address HRPs and therefore does
+not detect Pirate's test chain, which presents as mainnet; then set `IRONWOOD_V6_SUPPORTED`
+true, which makes R39.6.4b and R39.6.4c inert by their own terms.
+
+**F — verification.** The offline corpus first (`local/arrr-ironwood-fixtures`, 19 transactions
+covering v4, Sapling‑only v6, Ironwood‑only v6 and mixed), then the test chain while it lasts,
+then mainnet.
+
+### 10.5 Obligations this creates
+
+- **A documented divergence.** Removing Electrum changes behaviour relative to GLEEC KDF, so
+  `RELOADED_VS_GLEEC.md`, `docs/GLEEC_COMPATIBILITY.md` and the governing CRD chapter must be
+  updated in the same commit as the behaviour. Unlike the Ironwood gates there is no opt‑in to
+  offer, because the removed path has no working provider; the entry must say so plainly rather
+  than naming a switch that does not exist.
+- **CRD chapter 39 §39.11 reverses.** R39.11.5–R39.11.7 move from "a non‑empty Electrum server
+  list is mandatory and shielded‑backend‑only operation is unsupported" to the opposite;
+  R39.11.9–R39.11.12 simplify to a single authority; D39.11.a resolves; D39.11.b largely
+  dissolves in favour of the branch‑id check; D39.11.c resolves to the Zcash‑parser option.
+  This is a KDF Spec Reader pass plus a Dirty Gate round.
+- **Sequencing against other sessions.** `fix/activation-api-parity` holds chapter 39 Part D /
+  §39.10 and has deliberately held the "all Electrum servers unusable" behaviour pending this
+  decision; it should finish without implementing it, since the path is being removed.
+  `fix/zcoin-reorg-stale-anchor` does not conflict. §39.11 is amended after Part D merges.
+
+---
 
 ## Working rules and log
 
