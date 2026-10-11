@@ -2150,7 +2150,6 @@ pub(crate) fn orderbook_address(
         // withholds (CRD ch.32 R-F6b). Same fix, same reasoning as Sia above.
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::LIGHTNING { .. } => Ok(OrderbookAddress::Shielded),
-        #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC(_) => Ok(OrderbookAddress::Shielded),
         CoinProtocol::TENDERMINT { account_prefix, .. } => {
             coins::tendermint::account_id_from_pubkey_hex(&account_prefix, pubkey)

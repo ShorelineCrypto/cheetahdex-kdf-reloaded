@@ -1368,6 +1368,22 @@ fn test_negotiate_swap_contract_addr_no_fallback() {
 }
 
 #[test]
+fn test_negotiate_swap_contract_addr_refuses_a_coin_without_a_swap_contract() {
+    // A wallet-only coin is activated without a swap contract; it must never take part in a swap, not even
+    // against a peer that names the zero address.
+    let (_, coin) = eth_coin_for_test(EthCoinType::Eth, vec!["http://eth1.cipig.net:8555".into()], None);
+    let mut inner = Arc::try_unwrap(coin.0).unwrap_or_else(|_| panic!("a fresh coin has one owner"));
+    inner.swap_contract_address = Address::default();
+    let coin = EthCoin(Arc::new(inner));
+
+    let zero: &[u8] = &[0; 20];
+    for other_side in [None, Some(zero)] {
+        let error = coin.negotiate_swap_contract_addr(other_side).unwrap_err().into_inner();
+        assert_eq!(NegotiateSwapContractAddrErr::NoSwapContract, error);
+    }
+}
+
+#[test]
 fn test_negotiate_swap_contract_addr_has_fallback() {
     let fallback = Address::from_slice(&hex::decode("8500AFc0bc5214728082163326C2FF0C73f4a871").unwrap());
 

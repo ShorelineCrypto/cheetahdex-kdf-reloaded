@@ -71,6 +71,24 @@ The developer-facing rule (mandatory for AI assistants, strong recommendation fo
   `librustzcash` schema from GLEEC KDF's legacy schema. See
   [Shielded database isolation](#shielded-database-isolation) below.
 
+- **Additional activation method names.** Reloaded routes, besides the
+  reference method names, the flat `init_utxo*`, `init_qtum*`, `init_z_coin*`
+  and `init_trezor*` task aliases and the one-shot `enable_lightning` (all
+  inherited from the GPLv2 baseline), the flat `init_lightning*` /
+  `cancel_init_lightning` aliases (uniform with the other `init_<coin>*` names),
+  and its own Solana surface `enable_solana_with_tokens` / `enable_spl`. GLEEC
+  KDF (`v2.6.0-beta` and `v3.0.0-beta`) routes none of them; clients written for
+  GLEEC use the `task::` equivalents, which Reloaded also routes. The extra
+  names are additive and need no switch. See
+  `docs/reloaded-rewrite/rpc-method-census.md`.
+
+- **TRX and TRC20 through legacy `enable` / `electrum`.** GLEEC KDF
+  `v3.0.0-beta` rejects TRON coins on the legacy activation methods and
+  requires an mmrpc 2.0 activation. Reloaded has no mmrpc 2.0 TRON activation
+  and keeps activating them on the legacy methods (CRD ch.21, ch.55 D55.5). A
+  client written for GLEEC never sends such a request, so nothing breaks; no
+  switch is needed.
+
 ### Behavioural divergences without a compatibility switch
 
 These are divergences from GLEEC KDF that are **not** operator-configurable in this release (no compat switch yet). They are logged here and in [`CHANGELOG.md`](CHANGELOG.md) per the convention; a per-feature switch may be added in a later release.
@@ -153,6 +171,17 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
   (R53.3.1, ch.53 D53.1). Code: `coins/my_tx_history_v2.rs`,
   `coins/siacoin/siacoin_history.rs`.
 
+- **Removed divergence: EVM address under an HD wallet.** Earlier Reloaded
+  builds activated EVM coins (`enable_eth_with_tokens`, `task::enable_eth`)
+  under an HD wallet at the address of the daemon's internal identity key,
+  whereas GLEEC KDF uses the address at the coin's `derivation_path` plus
+  `path_to_address`. Reloaded now matches GLEEC. Users who received funds at
+  the old address can reach them by starting in single-address mode with the
+  same seed phrase; see the upgrade note in `CHANGELOG.md`. Legacy `enable`
+  for EVM coins under an HD wallet still binds a different key and is not
+  changed yet. Code: `coins/eth/eth_activation.rs`,
+  `coins_activation/src/eth_with_tokens_activation.rs`; CRD ch.35.
+
 ### Removed / disabled in KDF Reloaded
 
 - iOS build target removed from the alpha release matrix.
@@ -186,8 +215,8 @@ R39.6.4b/R39.6.4c); with the switch on, neither gate exists and behaviour matche
 GLEEC KDF exactly. The gates protect a counterparty whose HTLC would otherwise be
 left unspendable and unrefundable across Pirate Chain's Ironwood upgrade
 (3 Oct 2026 19:00 UTC), so turning them off on a coin that *does* upgrade accepts
-that risk knowingly. No other operator configuration is required to match GLEEC KDF
-behaviour.
+that risk knowingly. The two coin-activation switches below are the only other
+settings needed to match GLEEC KDF behaviour.
 
 **ARRR carries a built-in activation time, so omitting `ironwood_activation_time` is
 not an opt-out.** This reverses what an earlier release documented, and the reason is
@@ -208,6 +237,19 @@ a compiled-in date that could not be overridden would refuse every ARRR transact
 and freeze its market, until a new binary shipped. The built-in value is also withheld
 from test and regtest parameters, which activate Ironwood at a height with no timestamp
 at all. A coin whose ticker this build does not know is unaffected either way.
+
+Two coin-activation behaviours differ from GLEEC KDF by default (CRD ch.46
+R46.2.4, ch.55 R55.4.6):
+
+- Set `sia_activation_single_address_balance` to `true` to get GLEEC KDF's Sia
+  activation result under an HD wallet: `wallet_balance` always in the
+  single-address `"Iguana"` form. By default Reloaded reports the HD
+  per-account report there, like the other coins of an HD wallet.
+- Set `legacy_enable_keeps_coin_on_balance_failure` to `true` to get GLEEC
+  KDF's legacy `enable` behaviour: the coin stays registered when its first
+  balance read fails, so a retry fails as already active. By default Reloaded
+  deregisters it, as GLEEC KDF's own `electrum` does. This switch only exists
+  to reproduce that inconsistency and is not recommended.
 
 ## Detail sections
 

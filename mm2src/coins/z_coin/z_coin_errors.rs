@@ -160,6 +160,22 @@ impl From<SqliteError> for GetUnspentWitnessErr {
     fn from(err: SqliteError) -> GetUnspentWitnessErr { GetUnspentWitnessErr::StorageError(err.to_string()) }
 }
 
+/// Why a lightwalletd compact-block fetch failed, split by whether the shielded sync had started.
+///
+/// Activation maps the two differently (CRD ch.39 R39.10.14): a failure before the sync started
+/// (no endpoint can be connected, the endpoint list is empty, the initial chain-state query or the
+/// local wallet storage fails) ends the task, while a failure after it started is retried.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Display, PartialEq)]
+pub enum ShieldedFetchError {
+    /// Nothing was downloaded yet.
+    #[display(fmt = "{}", _0)]
+    BeforeSync(String),
+    /// The download or the scan had started.
+    #[display(fmt = "{}", _0)]
+    DuringSync(String),
+}
+
 #[derive(Debug, Display)]
 pub enum ZCoinBuildError {
     UtxoBuilderError(UtxoCoinBuildError),

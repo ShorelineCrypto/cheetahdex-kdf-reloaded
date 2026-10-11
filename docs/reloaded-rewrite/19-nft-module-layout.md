@@ -615,7 +615,9 @@ at least:
 - The resolved platform coin is not an EVM platform coin
   (unsupported-platform error).
 - Caller-supplied provider URL syntactically invalid, or the
-  provider discriminant unrecognised (client-input error).
+  provider discriminant unrecognised. The wire discriminant is
+  `Internal` (HTTP 500), not a request-parse failure, as Chapter 35
+  R35.2.8 binds.
 - The initial inventory fetch failed to reach the indexer, or the
   indexer returned a non-success status or an unparseable
   envelope (upstream-dependency error). This condition is
@@ -623,6 +625,37 @@ at least:
   tell a misconfigured request from a misbehaving indexer.
 - The NFT protocol's declared platform does not match the
   resolved platform coin (configuration consistency error).
+
+**Wire error contract (binding, cross-reference).** `enable_nft` is
+dispatched to the same single-token activation handler as
+`enable_erc20`, so its wire error contract -- the `error_type` set,
+the `error_data` shape and the HTTP status of each failure class
+listed above -- is the single-token contract of
+[Chapter 35](35-evm-v2-activation-rpcs.md) R35.2.5, with the
+NFT-specific failure mapping of R35.2.8 (for example: backing
+platform not active → `PlatformCoinIsNotActivated` with the platform
+ticker as a string; NFT already active → `TokenIsAlreadyActivated`
+with the NFT ticker as a string; provider unreachable → `Transport`,
+HTTP 500). Chapter 35 is authoritative for those wire values; this
+section remains authoritative for the request/response shapes, the
+activation scope and the graded failure semantics.
+
+**Inline activation (cross-reference).** The NFT pseudo-coin of an
+EVM platform can also be activated together with the platform, by
+supplying `nft_req` (an `NftProvider`, bare or wrapped in
+`provider`) to `enable_eth_with_tokens` or `task::enable_eth::init`
+([Chapter 35](35-evm-v2-activation-rpcs.md) R35.1.4b). Inline
+activation performs the same initial owned-inventory fetch for the
+platform's single address and reports the snapshot in the platform
+result's always-present `nfts_infos` map, keyed and shaped like the
+`nfts` member above. It is unavailable when the platform address is
+HD-derived; there, `enable_nft` is used after activation.
+
+> **Reloaded status (informative).** Since `fix/activation-api-parity`,
+> `enable_nft` is served by the single-token handler with the
+> discriminants and shapes of Chapter 35 R35.2.5 / R35.2.8, and inline
+> `nft_req` activation is supported; remaining deviations are listed in
+> the status notes of Chapter 35 §35.1 and §35.2.
 
 ## 19.7 EVM Withdrawal Path
 
@@ -1001,8 +1034,13 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
   specification documents; R4 counterparty-defined inter-operability
   shapes; R6 publicly observable endpoint behaviour; R7 independent
   work. Public ticker-symbol documentation under R3.
-- *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* not consulted.
+- *Sibling-allowlist consultations:* [Chapter 35](35-evm-v2-activation-rpcs.md)
+  (the shared single-token wire error contract and inline `nft_req`
+  activation cross-referenced from §19.6.2).
+- *Forbidden corpus:* not consulted for this chapter's own rules; the
+  two §19.6.2 cross-reference paragraphs restate Chapter 35, whose
+  wire values the KDF Spec Reader established from the upstream
+  reference version.
 
 ## 19.13 CoinProtocol::NFT Variant
 

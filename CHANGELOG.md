@@ -6,8 +6,130 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Upgrade note: EVM address under an HD wallet
+
+**If you use an HD wallet (`enable_hd: true`) and activated ETH, another EVM
+coin or ERC20 tokens with `enable_eth_with_tokens` or `task::enable_eth` on an
+earlier KDF Reloaded build, the activated address changes with this release.**
+
+Earlier builds activated EVM coins under an HD wallet at the address of the
+daemon's internal identity key instead of the address at the coin's
+`derivation_path` (`m/44'/60'/...`) plus `path_to_address`. GLEEC KDF and every
+BIP-44 wallet use the derivation-path address, so the same seed phrase showed a
+different EVM address in Reloaded than elsewhere. This release activates the
+derivation-path address (CRD ch.35).
+
+Funds received at the old address are not lost -- its key is still derived from
+your seed phrase -- but the wallet no longer shows them. To move them:
+
+1. Start KDF Reloaded in single-address mode: `enable_hd: false` in `MM2.json`,
+   with the **same seed phrase** as `passphrase`.
+2. Activate the EVM coin. The address it reports is the old address; check its
+   balance.
+3. Withdraw the funds to your HD address (the address the HD wallet now shows
+   for that coin), then restart in HD mode.
+
+Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
+
 ### Added
 
+- **Coin-activation wire contract, wave 1 (CRD chapter 55).** The task
+  activation families now answer with the bound wire shapes:
+  - `cancel` of every task family answers `NoSuchTask` (integer task id,
+    HTTP 404) for an unknown, forgotten or already cancelled task,
+    `TaskFinished` (integer task id, HTTP 409) for a finished task whose
+    result has not been forgotten, and `Internal` (string, HTTP 500)
+    otherwise; the Lightning task no longer maps every failure to `Internal`.
+    A cancelled activation deregisters a coin it had already registered, and
+    a cancelled task is no longer observable by `status`. Every `init`
+    accepts the optional `client_id` (accepted and ignored; streaming of task
+    events is deferred).
+  - `task::init_trezor::init` accepts no parameters, `null`, `{}`, a
+    `device_pubkey` and a `client_id`; its success details are the device
+    object (`type`, `model`, `device_name`, `device_id`, `device_pubkey`); its
+    errors are `HwContextInitializingAlready`, `HwError` (string vocabulary,
+    HTTP 410), `UnexpectedUserAction`, `Timeout` and `Internal`; and the new
+    `task::init_trezor::cancel` returns the hardware-wallet context to the
+    not-initialised state.
+  - `task::enable_utxo`, `task::enable_qtum` and the new
+    `task::enable_bch` share the bound standalone-coin error set (including
+    `HwError` and `Transport`, without the private-key and
+    derivation-method discriminants), report a lost registration race as
+    `CoinIsAlreadyActivated`, put `ticker` and ticker-keyed balances in the
+    success object, report `FollowHwDeviceInstructions`, accept
+    `priv_key_policy` as a string or as `{"type": ...}`, honor
+    `path_to_address` for a software HD account, accept a per-server
+    `timeout_sec` and default the WebAssembly Electrum protocol to `WSS`.
+    `task::enable_bch` activates the BCH coin only, for a single address.
+- **Tendermint and Lightning activation wire contract (CRD chapters 36, 41).**
+  Tendermint platform activation reports an empty node list, an unusable node
+  URL, `decimals` above 18 and unreachable nodes as `PlatformCoinCreationError`
+  (HTTP 500) instead of `AtLeastOneNodeRequired` / `Transport` (502);
+  `tokens_params` is required; a token naming another platform is
+  `PlatformCoinMismatch`; `enable_tendermint_token` answers
+  `CouldNotFetchBalance` for a balance failure. A request carrying
+  `activation_params` is now rejected with `PlatformCoinCreationError` instead
+  of silently activating with the local key, until public-key and WalletConnect
+  activation are implemented. The Lightning task uses the documented error names
+  (`L2IsAlreadyActivated`, `L2ConfigIsNotFound`, `UnexpectedL2Protocol` with its
+  `protocol`, `InvalidPlatformConfiguration`, ...), checks the platform's
+  `avg_blocktime` at `init`, and its default node colour is the documented
+  `2b6680`. A protocol without parameters is reported in `error_data` without a
+  `protocol_data` key.
+- **Z-coin, Sia, legacy and BCH/SLP activation wire contract (CRD chapters 39,
+  46, 55).** `task::enable_z_coin` accepts an optional `mode`, the `"Electrum"`
+  and `servers` synonyms and `min_connected` / `max_connected`, reports a
+  lightwalletd outage after the sync has started as the in-progress value
+  `{"TemporaryError": ...}` and keeps retrying, and reports post-build height
+  and balance failures as `Transport`; it is routed on WebAssembly but answers
+  `CoinCreationError` there (no shielded wallet database). Sia reports an
+  unsupported key policy as `CoinCreationError` and post-build failures as
+  `Transport`, and legacy `enable` activates Sia coins. Legacy `electrum` bounds
+  its balance read to 20 s, and both legacy methods deregister a coin whose
+  balance read failed. `enable_bch_with_tokens` honours `get_balances`, checks
+  the token platform and rejects a hardware key policy; `enable_slp` records the
+  token on its platform coin. The mmrpc 2.0 EVM activation defaults
+  `required_confirmations` to 3 when neither the request nor the coin config
+  sets it.
+- **Two compatibility switches** (see `docs/GLEEC_COMPATIBILITY.md`):
+  `sia_activation_single_address_balance` (Sia activation result under an HD
+  wallet) and `legacy_enable_keeps_coin_on_balance_failure` (legacy `enable`
+  after a failed balance read).
+- **EVM activation wire contract, wave 2 (CRD chapter 35).**
+  `enable_eth_with_tokens` and `task::enable_eth`:
+  - every request field of the chapter is honored: both forms of `nft_req`
+    (inline owned-inventory fetch, reported in the always-present
+    `nfts_infos`), `get_balances` (with `tickers` instead of balances),
+    `swap_v2_contracts`, `swap_gas_fee_policy`, the gas-station fields,
+    `rpc_mode` (WebAssembly only, paired with the MetaMask policy),
+    `priv_key_policy` as an object (`ContextPrivKey`, `Trezor`, `WalletConnect`
+    with `params.session_topic`, `Metamask` on WebAssembly), inline `protocol`
+    custom tokens, and a missing `swap_contract_address` for a wallet-only
+    coin;
+  - an HD daemon now activates the address at the coin's `derivation_path`
+    plus `path_to_address` (it used to bind the daemon's internal identity
+    key) and answers the HD shape (`ticker`, `wallet_balance`, `nfts_infos`);
+    the Trezor task answers the HD shape too; `pubkey` is the `04`-prefixed
+    uncompressed key without `0x`;
+  - every node unresponsive, or a failing chain-height, decimals or balance
+    read, is `Transport` (string, HTTP 502) instead of
+    `PlatformCoinCreationError`/`Internal`; invalid node URLs and swap
+    contracts are `InvalidPayload`; absent `nodes` is `AtLeastOneNodeRequired`
+    (string); the hardware policy on the one-shot call is
+    `UnexpectedDeviceActivationPolicy`; `PrivKeyNotAllowed` is now
+    `PrivKeyPolicyNotAllowed`; tokens are enabled in three passes
+    (resolution, platform consistency, construction), so the first failing
+    token of the earliest failing pass decides;
+  - `task::enable_eth::init` answers an already active ticker at mmrpc level;
+    the device confirmation is reported as `FollowHwDeviceInstructions`.
+
+  `enable_erc20` and `enable_nft` share one single-token handler with the
+  bound discriminants (`Transport` is HTTP 500 there), on-chain decimals,
+  EIP-55 contract validation, lower-case `token_contract_address`, token
+  confirmations from the token config, and custom tokens (`CustomTokenError`).
+  The new `task::enable_erc20::{init,status,user_action,cancel}` family runs on
+  a token task substrate with its own registry, answers the HD wallet report on
+  an HD platform, and deregisters a token on cancel.
 - **The Ironwood swap freeze and build refusal now actually engage — CRD ch.39 R39.6.4d.** Both gates read `ironwood_activation_time` from the coin configuration, and **no published coin configuration declares it** — the field is an extension introduced here, and in `GLEECBTC/coins` no coin mentions Ironwood at all. So as previously shipped the entire 3 Oct safety net was inert on every deployment but a developer's own, which the last release documented but did not fix. Pirate Chain's maintainer confirmed on 2026-09-28 that there will be **no standardness grace period** and recommended disabling ARRR swaps from 2 Oct, so the gates could not keep waiting on a third party's configuration change. This build therefore carries the activation time for ARRR (1 791 054 000 — 3 Oct 2026 19:00 UTC, read from the chain's own `KOMODO_IRONWOOD_ACTIVATION`) and applies it when the configuration supplies none. Consequently **ARRR stops accepting new swaps from 1 Oct 2026 22:28 UTC and stops building transactions from 3 Oct 19:00 UTC on a default installation**; receiving, balance, address derivation and history are unaffected, and swaps already under way are never interrupted. The earlier objection to a compiled-in date — that it could not follow a moved activation — is answered by precedence rather than abstention: a configured `ironwood_activation_time` still overrides the built-in value, so a moved date stays a data change and never needs a release; the built-in value is withheld from test and regtest parameters, which activate Ironwood at a height with no timestamp; and a coin whose ticker this build does not know is unaffected. **Compatibility note:** omitting `ironwood_activation_time` is no longer an opt-out — set `ironwood_gate_disabled: true` in `protocol.protocol_data.consensus_params` for GLEEC-equivalent behaviour. Four tests pin the resolution rules, each verified to fail against a deliberately broken implementation. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`.
 - **Version-two (V2) UTXO swap wire contract corrected to match deployed
   peers (issue #11 batch 2).** The version-two taker-payment-spend preimage

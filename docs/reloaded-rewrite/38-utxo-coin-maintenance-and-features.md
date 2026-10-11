@@ -433,6 +433,14 @@ value is a zero `CoinBalance`, not an untyped empty object. This preserves the
 wire shape consumed by wallet SDKs and keeps an intentionally empty HD wallet
 distinguishable from a malformed balance response.
 
+> **Cross-reference (informative).** The full wire contract of the UTXO-family
+> task activations (`task::enable_utxo`, `task::enable_qtum`,
+> `task::enable_bch`) -- request fields, success object including the Iguana
+> form, progress values, error set and failure mapping -- and of the legacy
+> `enable`/`electrum` methods is bound in
+> [Chapter 55](55-coin-activation-wire-contract.md) §55.4–§55.8; the HD
+> semantics above are what its success object reports.
+
 R38.8.6 **Tests (two-direction, observable).**
 - *Segwit (BIP-84) software-HD activation & advance.* A software-HD UTXO segwit
   coin configured with an `m/84'/<coin_type>'` `derivation_path` activates,

@@ -117,7 +117,11 @@ one retarget window in a single fetch.
 
 R37.2.3 The loop shall compute its starting block from stored state and the
 configured anchor, retry on transient backend failure, and surface its status
-(e.g. progress / temporary error) without aborting the coin.
+(e.g. progress / temporary error) without aborting the coin. During a task
+activation this status is reported through the in-progress values
+`SyncingBlockHeaders` and `TemporaryError` bound in
+[Chapter 55](55-coin-activation-wire-contract.md) R55.5.12; a permanent
+synchronisation failure ends the activation as bound in R55.5.14.
 
 ## 37.3 Header storage (native SQLite + WASM IndexedDB)
 

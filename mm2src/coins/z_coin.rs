@@ -127,6 +127,7 @@ macro_rules! try_ztx_s {
 
 mod z_coin_ops;
 #[cfg(not(target_arch = "wasm32"))] mod z_swap_ops;
+#[cfg(target_arch = "wasm32")] mod z_swap_ops_wasm;
 
 #[cfg(all(test, feature = "zhtlc-native-tests"))]
 mod z_coin_tests;
@@ -607,6 +608,16 @@ pub struct ZCoinFields {
     #[cfg(not(target_arch = "wasm32"))]
     shielded_sync_error: Mutex<Option<String>>,
     sapling_state_synced: AtomicBool,
+    /// Message from the most recent failure of the commitment-tree sync loop (the chain tip or a
+    /// block could not be read), cleared as soon as the loop reads from the backend again. It
+    /// lets activation report the failure as a retriable `TemporaryError` instead of silently
+    /// waiting (CRD ch.39 R39.10.14). Kept apart from `shielded_sync_error`, which describes the
+    /// wallet-database scan and drives the reported history-sync state.
+    sapling_loop_error: Mutex<Option<String>>,
+    /// Set once the commitment-tree sync loop has ended, whether it finished, bailed out on bad
+    /// data or panicked. A stopped loop that never reported completion is what activation reports
+    /// as an `Internal` error (CRD ch.39 R39.10.14, "shielded sync process stops").
+    sapling_loop_stopped: Arc<AtomicBool>,
     /// Platform-agnostic sapling state cache (SQLite on native, IndexedDB on WASM).
     sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync>,
     /// Native zcash_client_sqlite-compatible compact-block cache and wallet database.
@@ -1466,6 +1477,13 @@ mod hd_shielded_key_tests {
     }
 }
 
+/// Marks the commitment-tree sync loop as ended when dropped (normal return, early exit or panic).
+struct SaplingLoopStoppedGuard(Arc<AtomicBool>);
+
+impl Drop for SaplingLoopStoppedGuard {
+    fn drop(&mut self) { self.0.store(true, AtomicOrdering::SeqCst); }
+}
+
 async fn sapling_state_cache_loop(coin: ZCoin) {
     // Determine the starting height and tree state from the cache (R39.6.1).
     let query = coin.z_fields.sapling_cache.query_latest_block().await;
@@ -1528,10 +1546,12 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
             Ok(b) => b,
             Err(e) => {
                 log::error!("Error {} on getting block count", e);
+                coin.set_sapling_loop_error(format!("could not get the block count: {e}"));
                 Timer::sleep(10.).await;
                 continue;
             },
         };
+        coin.clear_sapling_loop_error();
 
         let native_client = match coin.rpc_client() {
             UtxoRpcClientEnum::Native(n) => n,
@@ -1559,10 +1579,12 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                     Ok(b) => b,
                     Err(e) => {
                         log::error!("Error {} on getting block", e);
+                        coin.set_sapling_loop_error(format!("could not get block {processed_height}: {e}"));
                         Timer::sleep(1.).await;
                         continue;
                     },
                 };
+                coin.clear_sapling_loop_error();
                 let root_bytes = current_tree.root().to_bytes();
 
                 let current_sapling_root = Some(H256::from(root_bytes).reversed().into());
@@ -1919,6 +1941,8 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             #[cfg(not(target_arch = "wasm32"))]
             shielded_sync_error: Mutex::new(None),
             sapling_state_synced: AtomicBool::new(false),
+            sapling_loop_error: Mutex::new(None),
+            sapling_loop_stopped: Arc::new(AtomicBool::new(false)),
             sapling_cache,
             #[cfg(not(target_arch = "wasm32"))]
             shielded_history,
@@ -1955,7 +1979,13 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
                     .mm_err(Into::into)?;
             }
         }
-        spawn(sapling_state_cache_loop(z_coin.clone()));
+        let loop_stopped = z_coin.z_fields.sapling_loop_stopped.clone();
+        let loop_coin = z_coin.clone();
+        spawn(async move {
+            // Drop guard: the flag is also set when the loop panics.
+            let _stopped = SaplingLoopStoppedGuard(loop_stopped);
+            sapling_state_cache_loop(loop_coin).await;
+        });
         Ok(z_coin)
     }
 }
@@ -2188,7 +2218,6 @@ impl InitWithdrawCoin for ZCoin {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl MmCoin for ZCoin {
     /// Reports the coin as non-tradeable while the Ironwood swap freeze is in
@@ -2200,6 +2229,11 @@ impl MmCoin for ZCoin {
     /// already in flight are untouched, because nothing re-checks this once a swap
     /// has begun.
     fn wallet_only(&self, ctx: &MmArc) -> bool {
+        // The WASM build can hold, sync and report the shielded coin but cannot build the
+        // shielded transactions a swap needs (CRD ch. 39 R39.6.1), so it is never tradeable there.
+        if cfg!(target_arch = "wasm32") {
+            return true;
+        }
         if self.ironwood_swap_freeze_active() {
             return true;
         }
@@ -2209,6 +2243,7 @@ impl MmCoin for ZCoin {
 
     fn is_asset_chain(&self) -> bool { self.utxo_arc.conf.asset_chain }
 
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         #[cfg(not(target_arch = "wasm32"))]
         {

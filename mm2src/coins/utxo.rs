@@ -110,6 +110,7 @@ use super::{big_decimal_from_sat_unsigned, BalanceError, BalanceFut, BalanceResu
 use crate::coin_balance::{EnableCoinScanPolicy, HDAddressBalanceScanner};
 use crate::hd_wallet::{HDAccountOps, HDAccountsMutex, HDAddress, HDWalletCoinOps, HDWalletOps, InvalidBip44ChainError};
 use crate::hd_wallet_storage::{HDAccountStorageItem, HDWalletCoinStorage, HDWalletStorageError, HDWalletStorageResult};
+use crate::rpc_command::get_my_address::PathToAddress;
 use crate::utxo::tx_cache::UtxoVerboseCacheShared;
 use crate::utxo::utxo_block_header_storage::BlockHeaderStorageError;
 use crate::TransactionErr;
@@ -1329,6 +1330,11 @@ impl SPVConf {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+// The public docs and the reference release disagree on which of these fields are required. Reloaded follows the
+// reference: `utxo_merge_params`, `gap_limit`, `min_addresses_number` and `scan_policy` are optional (the QTUM
+// page marks the last three required), `requires_notarization` defaults from the coin configuration (the docs
+// say `true`), and the duplicate `tx_history` rows of the docs resolve to `false` (CRD ch.55 R55.5.10, R55.7.1,
+// R55.8.3).
 pub struct UtxoActivationParams {
     pub mode: UtxoRpcMode,
     pub utxo_merge_params: Option<UtxoMergeParams>,
@@ -1348,6 +1354,9 @@ pub struct UtxoActivationParams {
     /// The flag determines whether to use mature unspent outputs *only* to generate transactions.
     /// https://github.com/KomodoPlatform/atomicDEX-API/issues/1181
     pub check_utxo_maturity: Option<bool>,
+    /// The HD address the coin uses for swaps. Defaults to account 0, the external chain and address 0.
+    #[serde(default)]
+    pub path_to_address: Option<PathToAddress>,
 }
 
 #[derive(Debug, Display)]
@@ -1410,6 +1419,7 @@ impl UtxoActivationParams {
             scan_policy,
             priv_key_policy,
             check_utxo_maturity,
+            path_to_address: None,
         })
     }
 }
@@ -1814,6 +1824,12 @@ fn map_trezor_error(trezor: TrezorError) -> String {
         TrezorError::Failure(OperationFailure::InvalidPin) => {
             "hardware_wallet:user_rejected_or_cancelled: Trezor PIN was rejected".to_owned()
         },
+        TrezorError::Failure(OperationFailure::Device(kind)) => {
+            format!(
+                "hardware_wallet:user_rejected_or_cancelled: Trezor operation failed: {}",
+                kind
+            )
+        },
         TrezorError::Failure(OperationFailure::Other(error)) => {
             format!(
                 "hardware_wallet:user_rejected_or_cancelled: Trezor operation failed: {}",
@@ -1865,6 +1881,7 @@ fn map_hw_error(hw: HwError) -> String {
             )
         },
         HwError::Failure(error) => format!("hardware_wallet:user_rejected_or_cancelled: {}", error),
+        HwError::DeviceFailure(kind) => format!("hardware_wallet:user_rejected_or_cancelled: {}", kind),
         HwError::ProtocolError(error) | HwError::Internal(error) => {
             format!("hardware_wallet:invalid_response: {}", error)
         },
@@ -2250,6 +2267,7 @@ pub fn address_by_conf_and_pubkey_str(
         scan_policy: EnableCoinScanPolicy::default(),
         priv_key_policy: PrivKeyActivationPolicy::IguanaPrivKey,
         check_utxo_maturity: None,
+        path_to_address: None,
     };
     let conf_builder = UtxoConfBuilder::new(conf, &params, coin);
     let utxo_conf = try_s!(conf_builder.build());

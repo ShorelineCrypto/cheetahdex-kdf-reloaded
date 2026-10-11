@@ -346,6 +346,8 @@ pub enum TendermintInitErrorKind {
     InvalidPrivKey(String),
     CouldNotGenerateAccountId(String),
     EmptyRpcUrls,
+    #[display(fmt = "Tendermint `decimals` must be 18 or lower, got {}", _0)]
+    DecimalsAboveMaximum(u8),
     RpcClientInitError(String),
     AvgBlockTimeMissing,
     AvgBlockTimeInvalid,

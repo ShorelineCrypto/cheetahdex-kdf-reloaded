@@ -1,5 +1,6 @@
 /// Contains token activation traits and their implementations for various coins
 ///
+use crate::platform_coin_with_tokens::CustomTokenError;
 use crate::prelude::*;
 use async_trait::async_trait;
 use coins::utxo::rpc_clients::UtxoRpcError;
@@ -18,8 +19,8 @@ pub trait TokenProtocolParams {
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-pub trait TokenActivationOps: Into<MmCoinEnum> {
-    type PlatformCoin: TryPlatformCoinFromMmCoinEnum;
+pub trait TokenActivationOps: Into<MmCoinEnum> + Clone {
+    type PlatformCoin: TryPlatformCoinFromMmCoinEnum + Clone;
     type ActivationParams;
     type ProtocolInfo: TokenProtocolParams + TryFromCoinProtocol;
     type ActivationResult;
@@ -31,6 +32,31 @@ pub trait TokenActivationOps: Into<MmCoinEnum> {
         activation_params: Self::ActivationParams,
         protocol_conf: Self::ProtocolInfo,
     ) -> Result<(Self, Self::ActivationResult), MmError<Self::ActivationError>>;
+
+    /// Records the token on its platform coin once the token is registered, so a failed activation leaves the
+    /// platform's token set unchanged (CRD R36.2.2).
+    fn on_token_registered(_platform_coin: &Self::PlatformCoin, _token: &Self) {}
+}
+
+/// What a single-token activation found wrong with the derivation method of the platform coin.
+#[derive(Debug, Display, PartialEq, Serialize)]
+pub enum TokenDerivationError {
+    #[display(fmt = "Iguana private key is unavailable")]
+    IguanaPrivKeyUnavailable,
+    #[display(fmt = "HD wallet is unavailable")]
+    HDWalletUnavailable,
+    /// The token needs a single address but the platform coin is HD-derived (CRD R35.2.5).
+    #[display(fmt = "A single-address wallet is expected")]
+    ExpectedSingleAddress,
+}
+
+impl From<UnexpectedDerivationMethod> for TokenDerivationError {
+    fn from(e: UnexpectedDerivationMethod) -> Self {
+        match e {
+            UnexpectedDerivationMethod::IguanaPrivKeyUnavailable => TokenDerivationError::IguanaPrivKeyUnavailable,
+            UnexpectedDerivationMethod::HDWalletUnavailable => TokenDerivationError::HDWalletUnavailable,
+        }
+    }
 }
 
 #[derive(Debug, Display, Serialize, SerializeErrorType)]
@@ -50,6 +76,8 @@ pub enum EnableTokenError {
         ticker: String,
         protocol: CoinProtocol,
     },
+    #[display(fmt = "Custom token rejected: {}", _0)]
+    CustomTokenError(CustomTokenError),
     #[display(fmt = "Platform coin {} is not activated", _0)]
     PlatformCoinIsNotActivated(String),
     #[display(fmt = "{} is not a platform coin for token {}", platform_coin_ticker, token_ticker)]
@@ -58,8 +86,24 @@ pub enum EnableTokenError {
         token_ticker: String,
     },
     #[display(fmt = "{}", _0)]
-    UnexpectedDerivationMethod(UnexpectedDerivationMethod),
+    UnexpectedDerivationMethod(TokenDerivationError),
     Transport(String),
+    #[display(fmt = "Invalid payload: {}", _0)]
+    InvalidPayload(String),
+    /// Reserved by the chapter: no failure maps here today.
+    #[allow(dead_code)]
+    #[display(fmt = "Private key policy is not allowed: {}", _0)]
+    PrivKeyPolicyNotAllowed(String),
+    /// Reserved by the chapter: the token protocol names another platform.
+    #[allow(dead_code)]
+    #[display(fmt = "The token protocol names a platform other than the activated one")]
+    PlatformCoinMismatch,
+    #[display(fmt = "Could not fetch the balance: {}", _0)]
+    CouldNotFetchBalance(String),
+    /// Reserved by the chapter: no failure maps here today.
+    #[allow(dead_code)]
+    #[display(fmt = "Invalid config: {}", _0)]
+    InvalidConfig(String),
     Internal(String),
 }
 
@@ -84,7 +128,7 @@ impl From<BalanceError> for EnableTokenError {
     fn from(e: BalanceError) -> Self {
         match e {
             BalanceError::Transport(e) | BalanceError::InvalidResponse(e) => EnableTokenError::Transport(e),
-            BalanceError::UnexpectedDerivationMethod(e) => EnableTokenError::UnexpectedDerivationMethod(e),
+            BalanceError::UnexpectedDerivationMethod(e) => EnableTokenError::UnexpectedDerivationMethod(e.into()),
             BalanceError::Internal(e) | BalanceError::WalletStorageError(e) => EnableTokenError::Internal(e),
         }
     }
@@ -123,15 +167,16 @@ where
     })?;
 
     let (token, activation_result) =
-        Token::enable_token(req.ticker, platform_coin, req.activation_params, token_protocol)
+        Token::enable_token(req.ticker, platform_coin.clone(), req.activation_params, token_protocol)
             .await
             .mm_err(Into::into)?;
 
     let coins_ctx = CoinsContext::from_ctx(&ctx).unwrap();
     coins_ctx
-        .add_coin(token.into())
+        .add_coin(token.clone().into())
         .await
         .mm_err(|e| EnableTokenError::TokenIsAlreadyActivated(e.ticker))?;
+    Token::on_token_registered(&platform_coin, &token);
 
     Ok(activation_result)
 }
@@ -154,11 +199,17 @@ impl HttpStatusCode for EnableTokenError {
             EnableTokenError::TokenIsAlreadyActivated(_)
             | EnableTokenError::PlatformCoinIsNotActivated(_)
             | EnableTokenError::TokenConfigIsNotFound { .. }
-            | EnableTokenError::UnexpectedTokenProtocol { .. } => StatusCode::BAD_REQUEST,
+            | EnableTokenError::UnexpectedTokenProtocol { .. }
+            | EnableTokenError::CustomTokenError(_)
+            | EnableTokenError::InvalidPayload(_)
+            | EnableTokenError::PlatformCoinMismatch => StatusCode::BAD_REQUEST,
             EnableTokenError::TokenProtocolParseError { .. }
             | EnableTokenError::UnsupportedPlatformCoin { .. }
             | EnableTokenError::UnexpectedDerivationMethod(_)
             | EnableTokenError::Transport(_)
+            | EnableTokenError::PrivKeyPolicyNotAllowed(_)
+            | EnableTokenError::CouldNotFetchBalance(_)
+            | EnableTokenError::InvalidConfig(_)
             | EnableTokenError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
