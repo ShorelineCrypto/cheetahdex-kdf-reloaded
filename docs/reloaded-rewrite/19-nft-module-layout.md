@@ -615,7 +615,9 @@ at least:
 - The resolved platform coin is not an EVM platform coin
   (unsupported-platform error).
 - Caller-supplied provider URL syntactically invalid, or the
-  provider discriminant unrecognised (client-input error).
+  provider discriminant unrecognised. The wire discriminant is
+  `Internal` (HTTP 500), not a request-parse failure, as Chapter 35
+  R35.2.8 binds.
 - The initial inventory fetch failed to reach the indexer, or the
   indexer returned a non-success status or an unparseable
   envelope (upstream-dependency error). This condition is
@@ -649,11 +651,11 @@ result's always-present `nfts_infos` map, keyed and shaped like the
 `nfts` member above. It is unavailable when the platform address is
 HD-derived; there, `enable_nft` is used after activation.
 
-> **Reloaded status (informative).** Reloaded serves `enable_nft`
-> from a dedicated handler whose error discriminants and shapes differ
-> from Chapter 35 R35.2.5 / R35.2.8, and does not support inline
-> `nft_req` activation; see the status notes of Chapter 35 §35.1 and
-> §35.2.
+> **Reloaded status (informative).** Since `fix/activation-api-parity`,
+> `enable_nft` is served by the single-token handler with the
+> discriminants and shapes of Chapter 35 R35.2.5 / R35.2.8, and inline
+> `nft_req` activation is supported; remaining deviations are listed in
+> the status notes of Chapter 35 §35.1 and §35.2.
 
 ## 19.7 EVM Withdrawal Path
 

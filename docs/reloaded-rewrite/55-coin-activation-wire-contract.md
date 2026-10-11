@@ -448,8 +448,9 @@ above; the owning chapter binds the precise failure points.
 
 **R55.3.2** Two rows are documented explicitly by the public reference and
 therefore governed by it: the EVM platform activation with unresponsive nodes
-(`Transport`, string `error_data`), which the reference release also produces;
-and the BCH platform activation with unresponsive Electrum servers
+(`Transport`, string `error_data`; the reference release instead answers
+`Internal` with HTTP 500, see Chapter 35 R35.1.6); and the BCH platform
+activation with unresponsive Electrum servers
 (`PlatformCoinCreationError`, object `{ticker, error}`, HTTP 500). For every
 other row the public reference is silent and the reference release decides.
 

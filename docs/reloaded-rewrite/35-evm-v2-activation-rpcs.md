@@ -375,14 +375,17 @@ version for all nodes" (public-docs citation; the message text is not bound).
 > WalletConnect policy as `{"type":"WalletConnect","data":"<topic>"}` and types
 > `data` as a list -- the reference version requires
 > `{"type":"WalletConnect","params":{"session_topic":"<topic>"}}`, which this
-> chapter binds; (f) spells `PrivKeyNotAllowed` and `InternalError` in the method
+> chapter binds (when EVM WalletConnect signing is implemented, the docs form
+> shall be accepted alongside it, as ch. 36 R36.1.3 does for Tendermint by
+> maintainer decision); (f) spells `PrivKeyNotAllowed` and `InternalError` in the method
 > table; (g) states a default of `3` for `required_confirmations`; the reference
 > version uses the coin config, else 1. By maintainer decision (2026-10-11) this
 > chapter binds the coin config, else 3 -- the rule the docs' own BCH page
 > states -- so a coin without a configured value waits for 3 confirmations, the
 > safer of the two documented numbers; (h) marks
 > `swap_contract_address` and `fallback_swap_contract` as required while the
-> reference version accepts their absence as described in R35.1.1; (i) shows the
+> reference version accepts their absence as described in R35.1.1 -- accepting
+> their absence is a superset that cannot break a client that sends them; (i) shows the
 > bare `NftProvider` for `nft_req` while the reference version requires the
 > `provider` wrapper -- both are accepted (R35.1.4b); (j) documents the
 > HD-only `chain` as an integer while its examples use strings.
