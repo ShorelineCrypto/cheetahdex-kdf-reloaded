@@ -165,7 +165,7 @@ separated roles:
 | Role                            | Bound mandate                                                                                                                                          | Bound prohibition                                                                                                                                     |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Dirty-side specification author | Takes forbidden-class input and writes clean-channel chapter text — behavioural requirements, public and dictated interface surface, and nothing else. | MUST NOT write or edit source code; MUST NOT carry forbidden-class expression into a chapter, a report, a verdict, or an instruction to another role. |
-| Clean-room gate                 | Compares a candidate chapter against the forbidden-class material and returns a sanitized verdict (R39).                                               | MUST NOT author or edit the candidate it clears; MUST NOT emit forbidden-class expression, nor the candidate text it flags.                           |
+| Clean-room gate                 | Compares a candidate chapter against the forbidden-class material and returns a sanitized verdict (R39).                                               | MUST NOT write or edit source code; MUST NOT author or edit the candidate it clears; MUST NOT emit forbidden-class expression, nor the candidate text it flags. |
 | Clean-side implementer          | Reads a cleared chapter and this repository, and writes the source that satisfies the chapter.                                                         | MUST NOT take forbidden-class input by any route, including an excerpt relayed by another role, a generated artefact, a cache, or a human.            |
 
 The dirty-side specification author is the only
@@ -180,9 +180,10 @@ read.
 
 The clean-room gate also takes forbidden-class input, because a
 comparison requires both sides. It is not an implementation-analysis
-role: it authors nothing, specifies nothing, and emits only the
-verdict R39 bounds. These two roles are exhaustive — no other role,
-context, or contributor takes forbidden-class input at all.
+role: it authors nothing, specifies nothing, writes no source, and
+emits only the output R39 bounds. These two roles are exhaustive — no
+other role, context, or contributor takes forbidden-class input at
+all.
 
 **R38.** *Bound mandatory route.* Where a chapter's content cannot be
 established from the permitted-input classes R1–R7 alone and
@@ -199,13 +200,22 @@ R11 was honoured, and therefore does not discharge the citation duty
 of R12. The procedure is checkable precisely because the role that
 took the input is not the role that cleared what came out.
 
-**R39.** *Bound sanitized verdict.* The gate's output MUST be limited
-to a verdict, a discretionary-similarity score measured per R35, and,
-on failure, a list whose entries name a candidate line location and a
-leak category and carry nothing else. The gate MUST NOT quote,
-paraphrase, transcribe, or otherwise reproduce forbidden-class
-material in its verdict, and MUST NOT quote the candidate text it
-flags.
+**R39.** *Bound sanitized verdict.* The gate's output MUST consist of
+the following parts and nothing else, each part separately labelled:
+
+1. a *leak report* — the pass-or-fail outcome; a
+   discretionary-similarity measure taken on R35's
+   discretionary-expression basis; and, on failure, a list whose
+   entries name a candidate line location, a leak category, and at
+   most one remedy class of R39's closed vocabulary, and carry nothing
+   else;
+2. a *scope attestation*, which every verdict MUST carry;
+3. optionally, a separately labelled *non-leak section*.
+
+The three parts are bound in detail by *The bound parts of the R39
+verdict* below. The gate MUST NOT quote, paraphrase, transcribe, or
+otherwise reproduce forbidden-class material in any part of its
+output, and MUST NOT quote the candidate text it flags.
 
 That limit is load-bearing rather than hygienic. The verdict crosses
 to the clean side; a verdict carrying the expression it objected to
@@ -241,13 +251,25 @@ combined in one context. Specifically:
 - a context that has taken forbidden-class input MUST NOT act as the
   clean-side implementer, and MUST NOT write or edit source code
   presented as clean-room-derived;
-- the gate MUST be a context other than the one that authored the
-  candidate it clears, because an author cannot independently verify
-  the boundary that author drew;
+- the gate MUST be a context other than any context that authored the
+  candidate it clears, and other than any context that commissioned or
+  specified that candidate, because none of those can independently
+  verify a boundary it drew or asked for;
 - an orchestrating context that has taken forbidden-class input MAY
   direct the work, but MUST NOT pass forbidden-class material into an
   instruction to the clean-side implementer, and MUST NOT substitute
   its own text for a cleared chapter's.
+
+The gate-independence requirement reaches the commissioning party and
+not the drafting party alone, because the boundary under examination is
+set as much by the instruction as by the drafting. A context that
+specified what the candidate should contain has the same interest in
+its clearance as the context that composed it; and where the
+commissioning context has itself taken forbidden-class input, what it
+specified may carry the very expression the gate exists to detect.
+Independence from the drafting party alone would leave that case
+unbound, which is why independence is required over all three
+relations — authored, commissioned, specified.
 
 Separation is a property of the context, not of an intention. A
 context cannot un-take input it has already taken, so each
@@ -322,6 +344,104 @@ legal-position evidentiary-citation carve-out; chapter 01 — this
 chapter — is the legal-position chapter on which that citation
 depends.
 
+### The bound parts of the R39 verdict
+
+**What R39 takes from R35.** The measure of the leak report is taken
+on R35's basis and not by R35's literal test. R35's test is stated for
+a file of source: it compares body lines after stripping comments and
+normalising whitespace, and passes a file whose discretionary-body
+similarity is materially below its whole-file figure. A chapter is
+prose and has no bodies to compare, so that test does not map onto it.
+What R39 borrows is the part of R35 that is general: the measured set
+excludes dictated-interop and pinned-interface content, which is
+required to match and whose matching supports no inference of copying,
+and admits discretionary expression only. R35's own test continues to
+govern a file of source measured for clean-room sufficiency, unchanged
+by this section.
+
+**The remedy-class vocabulary.** A finding is more useful when it says
+what kind of repair would answer it, and a gate permitted to say
+nothing beyond a location and a category cannot answer the question it
+is most often asked. The gate MAY therefore attach at most one remedy
+class to a finding, or one to the candidate as a whole, drawn from
+exactly this vocabulary:
+
+| Remedy class       | Bound meaning                                                                                                                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `remove`           | The flagged expression is deleted and nothing is substituted for it.                                                                                                                                          |
+| `re-establish`     | The requirement the flagged line carried is established afresh from the permitted-input classes and stated as behaviour, the flagged line having been removed first — rewording it is not remediation (R40).  |
+| `embed-as-interop` | The content is required for inter-operability and belongs in the chapter as a marked reuse fragment under R29–R31, with the citation those rules require, rather than as prose.                                |
+| `name-carve-out`   | The flagged identifier may stand only if the chapter names the R11 carve-out class that admits it.                                                                                                             |
+| `hold`             | The finding is not remediable within the candidate; the chapter is held under R21.                                                                                                                            |
+| `none`             | The gate offers no remedy class.                                                                                                                                                                              |
+
+The vocabulary is closed: a remedy class outside it MUST NOT be used,
+and free prose about a finding MUST NOT be offered in place of one. A
+class names a route and never a repair text — the gate MUST NOT supply
+replacement wording, because a gate that drafts the passage it would
+accept has authored the candidate it clears, which R37 and R41 forbid.
+A class is advisory: it does not bind the author, who remains bound by
+the leak report and by R40.
+
+**The scope attestation.** A verdict that states an outcome and
+nothing else would replace an unverifiable author certification with
+an unverifiable gate certification, and R38's case against
+self-certification would then apply to the gate in turn. Every verdict
+MUST therefore carry a scope attestation of exactly three elements:
+
+- *extent* — which part of the forbidden-class material was compared,
+  identified by the subject matter this document set names in its own
+  terms (a subsystem, a protocol surface, a chapter's scope) and by
+  reference version, together with a quantity of material examined
+  where one can be given without locating expression (a count of files
+  compared, for instance);
+- *method* — how the comparison was made: by reading, by a mechanical
+  comparison, by a named tool of this repository, or a stated
+  combination of those;
+- *measure* — the resulting discretionary-similarity measure, which is
+  the same figure the leak report carries and not a second one,
+  together with the threshold or judgement standard against which it
+  was read.
+
+The attestation is a statement about the comparison and never about
+what the material says. It MUST NOT name a path, a file, a module, an
+identifier, or any other location within the forbidden-class material;
+MUST NOT characterise that material's content beyond the leak
+categories of the leak report; and MUST stay at three elements rather
+than growing into a narrative. Its reference-version element is
+subject to R11 on the terms §1.7 states for R20's. Where an element
+cannot be given without breaching this paragraph, the attestation says
+so, which leaves the gap visible instead of papered over.
+
+The attestation is bound because it is what makes a clearance
+checkable rather than merely asserted. A reader who is told the
+extent, the method and the measure can tell a comparison of the right
+scope from one of the wrong scope; a reader given a bare outcome
+cannot, and is back to taking a certification on trust — the defect
+R38 identifies in self-certification, relocated one role along.
+
+**The non-leak section.** The leak report's limit exists to keep
+expression from crossing, not to put the gate under a general vow of
+silence. A gate MAY add a separately labelled non-leak section,
+bounded as follows:
+
+- its subject MUST be this document set's own text and rules, the
+  procedure of this section, or the candidate's conformance with the
+  shape rules of §1.7 — never the content of the forbidden-class
+  material;
+- a statement that cannot be made without reference to what the
+  forbidden-class material says belongs in the leak report, by
+  category, or nowhere;
+- it MUST NOT supply chapter text, for the reason a remedy class MUST
+  NOT (R37, R41);
+- it is advisory: nothing in it binds the author.
+
+This is what lets a gate answer a question about the rules that bind
+it — including a question about this section — without touching the
+limit that makes its verdict safe to read. The labelling is what keeps
+the two apart: a reader must be able to see which statements carry the
+strict limit of the leak report and which do not.
+
 ### Why the procedure is required and not merely recognised
 
 R38 makes the procedure the only permitted route rather than one
@@ -364,11 +484,39 @@ thresholds and tooling are deferred to chapter 30 D1 — so its
 unexecutability was never an unmet standing obligation, and no
 chapter is retrospectively defective for having been committed
 without a score. The gap was in executability, not in compliance.
-One thing does follow for R38, though: an optional procedure cannot
-be the means by which a bound gate becomes performable, because the
-gate would then be performable only at the discretion of the party
-being measured. R38 makes the route mandatory for that reason as much
-as for the unverifiability of a self-certification.
+
+One thing still follows for R38, and it is not a point about who
+decides to measure. Because R35 triggers conditionally, the party
+being measured already holds whatever discretion the trigger leaves;
+requiring the procedure neither creates that discretion nor removes
+it, so an argument resting on it proves less than it sounds. The
+argument that survives is about the measurement itself. Whenever a
+measurement is taken, exactly one role may lawfully hold both operands
+(R37), and exactly one output contract can carry the result back to a
+context that may not hold the second (R39). An optional route would
+therefore not be one lawful way of measuring among several: in every
+case where it was not used, the measurement could not lawfully have
+occurred at all. R38 makes the route mandatory for that reason, and
+for the unverifiability of a self-certification.
+
+The conditionality concession has to be read next to what the document
+set actually says, because several chapters put it under pressure. The
+provenance footers of chapters 20, 21, 23, 24, 32 and 53 each declare
+that any residual similarity of a conformant realisation to the
+historical lineage *is governed by* the R35 gate; chapter 34 records
+the shipped code's residual similarity as deferred to that gate and
+states that the gate enforces the position going forward. That is a
+standing-governance form rather than a conditional one: read plainly,
+six chapters and the provenance ledger declare themselves governed by
+a measurement that, until §1.4A, no role this chapter permitted could
+lawfully take. The tension is recorded rather than argued away. Those
+declarations are honest as to *content* — R8–R11 bound each of those
+chapters when it was written and bind it still, and R43 makes none of
+them defective for carrying no score — but as to *governance* they
+named a gate that was unperformable, and §1.4A is what turns them into
+declarations about something performable. What remains outstanding is
+the measurement itself, which still waits on chapter 30 D1 for its
+thresholds and tooling; D4 carries that forward.
 
 Requiring the route costs the project nothing it was relying on. R43
 scopes the requirement forward, so no already-committed chapter
@@ -535,6 +683,33 @@ make that assertion, and a chapter carries exactly one of them:
    consulted for …, except …"). It asserts the same thing about the
    chapter's content as the blanket trailer does; it adds the route
    and withholds nothing.
+
+The reference-version element of a scoped record is itself subject to
+R11, because a record precise enough to locate expression is a leak
+surface however briefly it is written. A publicly published release
+designation of the historical lineage — a release tag or version
+string its own public releases carry — is a public-release fact of the
+kind R6 admits, is what the project's compatibility policy already
+binds as the reference contract, and MAY be named. A post-anchor
+commit identifier, a branch state, or a location within
+forbidden-class material MUST NOT be named: paired with a section
+scope it points at the expression the record exists to keep out, and
+no carve-out class of R11 admits that pairing. Where a record cannot
+be made more precise without such an identifier, it names the public
+release designation or the reference epoch and says that this is as
+precise as the record goes.
+
+That constraint binds a scoped record written on or after the commit
+that adopts it. R26 permits a tightening to reach backwards but not to
+reach silently, so the existing records were re-checked against it as
+R25 requires: one pre-adoption derivation record — chapter 39's
+shielded-coin subsection — names post-anchor commit identifiers of
+exactly the kind this paragraph now withholds, paired with the
+subsection they scope, and no other record in the document set does.
+Such an identifier is a locator and not expression, so its presence
+breaches neither R8–R11 nor that chapter's content standard; what the
+constraint removes is a pointer the record does not need. Bringing
+that one record into line is D5.
 
 Either form is satisfied when the chapter's content rests on the
 permitted-input classes of §1.3 — including R3's published
@@ -806,13 +981,24 @@ records forbidden-class input taken under R38 on or after the adoption
 of §1.4A, a clearance statement exists: either the footer records that
 the gate cleared the consulted sections, or each consulted section
 carries the pending-clearance statement R40 requires. A chapter that
-records the input and carries neither statement fails T1.
+records the input and carries neither statement fails T1. A statement
+recording a completed clearance also carries, in corpus-free terms,
+the three elements of the R39 scope attestation — the extent compared,
+the method, and the measure — or states that those elements are not
+recorded in the document set; a statement reporting only that a gate
+passed, with neither the attestation nor that note, fails T1.
 
 **T2.** *Verdict sanitation.* No clearance statement, derivation
 record, or relayed verdict anywhere in the document set quotes the
 candidate text it concerns or any forbidden-class material. A record
-that identifies a finding by anything beyond its location and its
-category fails T2 (R39).
+that identifies a finding by anything beyond its location, its
+category, and at most one remedy class of R39's closed vocabulary
+fails T2; a remedy class accompanied by replacement wording or by
+prose describing the flagged content fails T2 on the same rule. A
+separately labelled non-leak statement permitted by R39, and a scope
+attestation, do not fail T2 provided each quotes neither the candidate
+nor forbidden-class material and neither names a location within that
+material (R39).
 
 **T3.** *Attribution hygiene.* No R20 *Forbidden corpus* item, no
 derivation record, and no clearance statement identifies the person,
@@ -841,6 +1027,34 @@ R8–R11, which this chapter leaves unchanged, and R26 bars curing a
 record gap by relaxing a rule. The work is therefore a record
 improvement rather than a remediation, and is taken chapter by
 chapter as each chapter is next revised.
+
+**D4.** Taking the R35 measurement for the chapters that declare their
+realisation governed by that gate — chapters 20, 21, 23, 24, 32 and
+53, together with the shipped-code position chapter 34 records — is
+deferred. §1.4A now supplies the one role that may hold both operands
+and the output contract under which a result may cross back, so the
+gate has become performable; chapter 30 D1 still owes the mechanical
+thresholds and the tool that applies them. Until that tooling exists,
+each such declaration is forward-looking governance and not a record
+that a measurement was taken, and no chapter may be read as asserting
+a measure it does not carry. When the tooling lands, each declaration is
+either backed by a measurement taken through §1.4A and recorded with
+the R39 scope attestation, or restated in the conditional form R35
+actually binds. This item is the record of the tension §1.4A's
+"Why the procedure is required" discussion states, and it is a record
+improvement for the same reason D3 is: R43 makes no affected chapter
+defective, and R26 bars curing a record gap by relaxing a rule.
+
+**D5.** Bringing the one pre-adoption scoped record that names
+post-anchor commit identifiers — the derivation record of chapter 39's
+shielded-coin subsection — into line with the reference-version
+constraint of §1.7 is deferred to that chapter's next revision. The
+identifiers are locators rather than expression, so the chapter's
+content standard under R8–R11 is unaffected and R21 does not attach;
+the revision replaces the pointer with the public release designation
+and the reference epoch, which is all the record needs. The R25
+re-check that accompanied the constraint found no other instance in
+the document set.
 
 ## 1.15 Baseline Verifications
 
@@ -877,11 +1091,25 @@ licenses).
   (`AGENTS.md` §2), read as the existing operational practice R37–R44
   now bind and R44 subordinates; and the provenance footers of the
   document set as they already stand, read to establish which bound
-  forms of the R20 item are in use.
+  forms of the R20 item are in use. For the R35-gate tension recorded
+  in §1.4A and in D4: chapters 20, 21, 23, 24, 32 and 53 (the
+  provenance footers and binding-scope notes that declare a conformant
+  realisation's residual similarity governed by the R35 gate) and
+  chapter 34 (the ledger-level form of the same declaration). For the
+  R25 re-check behind the §1.7 reference-version constraint and D5:
+  the document set's scoped records and derivation records as they
+  stand, read for the reference identifiers they name.
 - *Permitted-input classes used:* the document set as it stands; this
   repository's own instruction and role-definition files, cited as
   evidence under R11's legal-position evidentiary-citation carve-out
   (chapter 01 being the legal-position chapter that citation depends
   on).
 - *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* not consulted.
+- *Forbidden corpus:* not consulted. The forbidden-class material is
+  this chapter's subject matter, not an input to it: §1.4A, the R20
+  *Forbidden corpus* item, and the R39 verdict contract are bound from
+  this document set's own text and from this repository's own role
+  definitions and contributor instructions, which R44 subordinates to
+  this chapter. Because no forbidden-class input was taken, R38
+  required no clearance for this revision and the footer accordingly
+  records no scope attestation (T1).
