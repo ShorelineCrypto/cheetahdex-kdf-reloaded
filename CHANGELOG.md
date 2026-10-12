@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Custom ERC20 tokens are wallet-only.** A token activated from an inline
+  `protocol` (`enable_eth_with_tokens` / `enable_erc20`, a token absent from the
+  coins file) now reports itself wallet-only, so `buy`, `sell` and `setprice`
+  reject it. Previously the wallet-only check read the coins file, which has no
+  entry for such a token, so an unvetted token could be offered in swaps. This
+  matches the reference behavior bound in CRD ch.35 R35.2.7 (issue #16).
+
 ## [0.3.0-alpha.2] — development milestone, not released
 
 ### Upgrade note: EVM address under an HD wallet

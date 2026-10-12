@@ -66,6 +66,7 @@ fn dev_eth_coin(coin_type: EthCoinType, node: &GethDev, swap_contract: Address) 
         nft_swap_v2_contract: None,
         swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
         erc20_tokens_infos: Default::default(),
+        custom_token: false,
         chain_id: Some(node.chain_id),
         logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
         derivation_method: DerivationMethod::Iguana(my_addr),

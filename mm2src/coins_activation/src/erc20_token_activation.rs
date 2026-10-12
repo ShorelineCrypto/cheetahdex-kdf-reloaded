@@ -331,7 +331,7 @@ pub(crate) async fn build_erc20_token(
         .unwrap_or_else(|| platform_coin.required_confirmations());
 
     platform_coin
-        .erc20_token_from_conf_or_contract(ticker.to_owned(), token_addr, required_confirmations)
+        .erc20_token_from_conf_or_contract(ticker.to_owned(), token_addr, required_confirmations, protocol.custom)
         .await
         .mm_err(|e| match e {
             Erc20BuildError::Transport(e) => Erc20TokenError::Transport(e),

@@ -334,6 +334,33 @@ fn custom_tokens_serialize_each_rejection_as_tabled() {
     assert_eq!(failure(&ctx, not_erc20).0["error_type"], "UnexpectedTokenProtocol");
 }
 
+/// CRD ch.35 R35.2.7: a custom token activated through `enable_erc20` is a wallet-only coin although it has no
+/// coins-config entry; a coins-config token keeps the wallet-only setting of its entry.
+#[test]
+fn a_custom_token_of_enable_erc20_is_wallet_only_and_a_config_token_is_not() {
+    let node = node_with(Arc::default());
+    let ctx = ctx_with_platform(iguana_ctx(), &node);
+    let custom = token_request(json!({
+        "ticker": "MINE",
+        "protocol": {
+            "type": "ERC20",
+            "protocol_data": { "platform": PLATFORM, "contract_address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56" }
+        },
+        "activation_params": {},
+    }));
+    enable(&ctx, custom).unwrap_or_else(|e| panic!("the custom token must activate: {}", e));
+    enable(&ctx, erc20("USDT-ERC20")).unwrap_or_else(|e| panic!("the config token must activate: {}", e));
+
+    let wallet_only = |ticker: &str| {
+        block_on(coins::lp_coinfind(&ctx, ticker))
+            .unwrap()
+            .unwrap_or_else(|| panic!("{} is not active", ticker))
+            .wallet_only(&ctx)
+    };
+    assert!(wallet_only("MINE"), "a custom token is wallet-only");
+    assert!(!wallet_only("USDT-ERC20"), "a config token follows its config entry");
+}
+
 #[test]
 fn the_activation_params_are_required_and_an_nft_provider_does_not_fit_an_erc20() {
     assert!(serde_json::from_value::<EnableEvmTokenRequest>(json!({ "ticker": "USDT-ERC20" })).is_err());

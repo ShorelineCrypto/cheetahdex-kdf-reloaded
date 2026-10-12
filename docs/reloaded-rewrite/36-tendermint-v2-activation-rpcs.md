@@ -553,7 +553,9 @@ terms; the clean implementer works from this list):
    (unit, HTTP 400).
 8. **Custom tokens.** Reloaded accepts no `protocol` member on
    `tokens_params[]` or on `enable_tendermint_token`. Bound: custom-token
-   activation and `CustomTokenError` (R36.1.6, R36.2.4).
+   activation and `CustomTokenError` (R36.1.6, R36.2.4). When custom Tendermint
+   tokens are implemented, each shall be wallet-only, as a custom EVM token is
+   (ch. 35 R35.2.7); see `docs/plans/tendermint-activation-features.md` item 3.
 9. **`tx_history`.** Reloaded accepts `true` but starts no history fetching.
    Bound: background history fetching starts after activation.
 10. **`protocol` member of `UnexpectedPlatformProtocol` /
