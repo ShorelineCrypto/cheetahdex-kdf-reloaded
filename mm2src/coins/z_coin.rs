@@ -85,6 +85,8 @@ use zcash_client_sqlite::WalletDb;
 use zcash_proofs::prover::LocalTxProver;
 
 #[cfg(not(target_arch = "wasm32"))] mod z_htlc;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod z_htlc_live_probe;
 #[cfg(not(target_arch = "wasm32"))]
 use z_htlc::{z_p2sh_spend, z_send_dex_fee, z_send_htlc};
 
