@@ -953,11 +953,20 @@ set, so a v6 transaction is rejected as "Unknown transaction format". It is **un
 
 | Crate | Pinned now | Target | Note |
 |---|---|---|---|
-| `zcash_primitives` | 0.28.0 | **0.30.1** | v6 unconditional |
-| `zcash_client_backend` | 0.23.0 | 0.24.0 | keep `orchard` off |
+| `zcash_primitives` | 0.28.0 | **0.30.1** | v6 unconditional; **vendored and patched** |
+| `zcash_transparent` | 0.8.0 | **0.10.0** | **vendored and patched**; what 0.30.1 requires |
+| `zcash_client_backend` | 0.23.0 | 0.24.0 | keep `orchard` off; vendor copy droppable |
 | `zcash_client_sqlite` | 0.21.1 | 0.22.0 | wallet‑DB migration |
 | `zcash_protocol` | 0.9.0 | 0.10.6 | carries `BranchId::Nu6_3` |
-| `sapling-crypto` | 0.7.0 | 0.9.0 | |
+| `sapling-crypto` | 0.7.0 | **0.7.0 — unchanged** | the whole 0.30.1 stack needs `sapling-crypto 0.7` |
+
+> **This table was wrong in three ways, corrected 2026‑10‑12 from the implementation.**
+> Three of these crates are not version pins at all but **vendored source copies we patch**
+> under `vendor-patches/`, so this step is a re‑vendor onto pristine upstream sources with each
+> KDF extension re‑applied, not a version bump. `zcash_transparent` was **missing from the
+> table** although we vendor and patch it. And `sapling-crypto 0.9.0` **would not resolve** —
+> primitives 0.30.1, `zcash_client_backend` 0.24.0 and `zcash_client_sqlite` 0.22.0 all require
+> `sapling-crypto 0.7`.
 
 These are **newer than the Pirate node's own stack**, which pins `zcash_primitives 0.29.0` plus
 two `-rc.1` prereleases via git. We take published releases and keep our own ZIP‑212 handling,
@@ -1180,3 +1189,36 @@ then mainnet.
   ZIP‑212 divergence, which has no switch by design.
   **Still open for Plan A:** A5, the dead `cryptoforge` endpoints upstream in
   `GLEECBTC/coins`.
+- **2026‑10‑12 — Step B landed: the Zcash stack is re‑vendored on `zcash_primitives` 0.30.1,
+  and v6 now parses.** The reason for the step is confirmed rather than assumed: in the pinned
+  0.28.0 the v6 arm of `TxVersion::read` sits behind `cfg(zcash_unstable = "nu7")`, a rustc cfg
+  we do not set, so a v6 transaction was rejected as "Unknown transaction format"; it is
+  unconditional in 0.30.1. Proven by two new tests — one inlining the test‑chain transaction at
+  height 68373 (asserts `V6`, `BranchId::Nu6_3`, the indexed txid, exact byte round‑trip), and
+  one, opt‑in via `ARRR_IRONWOOD_FIXTURES`, parsing the whole offline corpus: all 19
+  transactions parse, every txid matches `tx_index.json`, and every one round‑trips byte for
+  byte. `zcash_transparent` went 0.8.0 → 0.10.0 and its patch applied cleanly; the
+  `zcash_primitives` builder had drifted ~450 lines because 0.30.1 adds Ironwood and padding
+  support, so nine of ten hunks applied with fuzz and `add_transparent_output_raw` /
+  `set_lock_time` were placed by hand — **the focused test's pinned wire bytes still match
+  exactly, which is the evidence that the deployed v4 swap transaction shape is unchanged**.
+  The `zcash_client_backend` vendor copy was **dropped**: its only delta was an exact
+  `time-core` pin that upstream has since removed, the condition its own patch note named.
+  `orchard` became a default feature of both `zcash_client_backend` 0.24.0 and
+  `zcash_client_sqlite` 0.22.0, so both now carry `default-features = false`. The ZIP‑212 fix is
+  still required and still confined to decryption — upstream `zip212_enforcement` is unchanged
+  and still returns `Off` without Canopy. `NetworkUpgrade::Nu6_3` returns `None` for now, which
+  keeps the builder on Sapling‑era versions; the real mapping is Step E.
+  **Open decision before this can ship to anyone with an existing ARRR wallet:**
+  `zcash_client_sqlite` 0.22.0 adds 23 unconditional migrations (71 total, up from 48; schema
+  fingerprint 467 → 727 records), creating Ironwood and Orchard tables even with the feature
+  off. `classify_wallet_db` accepts a wallet only if its fingerprint equals a freshly
+  initialised current schema, so an existing wallet now classifies as `Unknown` and activation
+  fails with "unrecognized shielded wallet schema; file was left unchanged". The chapter's
+  existing policy for a recognised older schema is **preserve‑and‑rebuild**
+  (`WalletDbGeneration::ReferenceLegacy` → back up, rebuild fresh, rescan), not in‑place
+  migration. Upstream `init_wallet_db` should apply the 23 missing migrations to such a DB, but
+  that is untested. Recommended shape: back up unconditionally, attempt the upstream migration,
+  verify the resulting fingerprint equals the current schema, and fall back to the existing
+  preserve‑and‑rebuild path on any failure — so the outcome degrades to today's behaviour rather
+  than to a half‑migrated wallet.
