@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use coins::coin_balance::{EnableCoinBalance, IguanaWalletBalance};
 use coins::utxo::rpc_clients::ElectrumRpcRequest;
 use coins::utxo::{UtxoActivationParams, UtxoRpcMode};
+use coins::z_coin::{z_coin_from_conf_and_params, ZCoin, ZCoinBuildError, ZcoinBackend, ZcoinProtocolInfo};
 #[cfg(not(target_arch = "wasm32"))]
-use coins::z_coin::ShieldedFetchError;
-use coins::z_coin::{z_coin_from_conf_and_params, ZCoin, ZCoinBuildError, ZcoinProtocolInfo};
+use coins::z_coin::{LightwalletdError, ShieldedFetchError};
 use coins::{BalanceError, CoinProtocol, MarketCoinOps, PrivKeyActivationPolicy, RegisterCoinError};
 use common::{executor::Timer, log};
 use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
@@ -42,6 +42,30 @@ fn shielded_unavailable_error(ticker: &str) -> ZcoinInitError {
         ticker: ticker.to_owned(),
         error: "Shielded activation is not available in the WebAssembly build: it has no shielded wallet database"
             .to_owned(),
+    }
+}
+
+/// The backend an activation request asks for. A Light-mode request with no lightwalletd endpoint is
+/// a configuration error naming the coin, reported before any shielded work begins -- not a
+/// transient backend failure (CRD ch.39 R39.11.5). `electrum_servers` and the Electrum connection
+/// counts are accepted on the wire and have no effect here (R39.11.5, R39.11.7).
+fn zcoin_backend(ticker: &str, mode: &ZcoinRpcMode) -> Result<ZcoinBackend, ZcoinInitError> {
+    match mode {
+        #[cfg(not(target_arch = "wasm32"))]
+        ZcoinRpcMode::Native => Ok(ZcoinBackend::Native),
+        ZcoinRpcMode::Light {
+            light_wallet_d_servers, ..
+        } => {
+            if light_wallet_d_servers.is_empty() {
+                return Err(ZcoinInitError::CoinCreationError {
+                    ticker: ticker.to_owned(),
+                    error: "`light_wallet_d_servers` must list at least one lightwalletd endpoint".to_owned(),
+                });
+            }
+            Ok(ZcoinBackend::Light {
+                light_wallet_d_servers: light_wallet_d_servers.clone(),
+            })
+        },
     }
 }
 
@@ -123,20 +147,26 @@ pub enum ZcoinRpcMode {
     /// the request fails to parse (CRD ch.39 R39.10.4).
     #[cfg(not(target_arch = "wasm32"))]
     Native,
-    /// Electrum plus lightwalletd backend. `"Electrum"` is accepted as a synonym of `"Light"`, as the
-    /// public `ZcoinRpcModeEnum` documents it (CRD ch.39 R39.10.4).
+    /// lightwalletd backend. `"Electrum"` is accepted as a synonym of `"Light"`, as the public
+    /// `ZcoinRpcModeEnum` documents it (CRD ch.39 R39.10.4).
+    ///
+    /// lightwalletd is the **sole** backend of a Light-mode coin (R39.11.1, R39.11.7): no Electrum
+    /// connection is opened, attempted, probed or reported on, and activation never fails for an
+    /// Electrum-related reason.
     #[serde(alias = "Electrum")]
     Light {
-        /// `servers` is accepted as a synonym (CRD ch.39 R39.10.4).
-        #[serde(alias = "servers")]
+        /// Accepted and ignored (R39.11.5): deployed KDF-family wallets send it unconditionally and a
+        /// parse rejection would break every one of them. It may be absent or empty. `servers` is
+        /// accepted as a synonym (CRD ch.39 R39.10.4).
+        #[serde(default, alias = "servers")]
         electrum_servers: Vec<ElectrumRpcRequest>,
-        /// Minimum Electrum connections to keep; the default 1 is applied by the Electrum builder.
+        /// Accepted and ignored, like `electrum_servers` (R39.11.5).
         #[serde(default)]
         min_connected: Option<usize>,
-        /// Maximum Electrum connections; the default (the number of listed servers) is applied by the
-        /// Electrum builder.
+        /// Accepted and ignored, like `electrum_servers` (R39.11.5).
         #[serde(default)]
         max_connected: Option<usize>,
+        /// Mandatory and non-empty (R39.11.5): the only backend of the coin.
         light_wallet_d_servers: Vec<String>,
         /// Optional shielded sync starting point (R39.6.2). Externally dictated
         /// wire location: nested inside the Light-mode `rpc_data` alongside the
@@ -355,10 +385,39 @@ pub enum ZcoinInitError {
         activation_tip: u64,
         error: String,
     },
+    /// Every configured lightwalletd endpoint failed the server-information read (R39.11.6).
+    #[display(fmt = "No lightwalletd endpoint of {} is reachable: {}", ticker, error)]
+    LightwalletdUnreachable {
+        ticker: String,
+        error: String,
+    },
+    /// Endpoints answered, and admission excluded every one of them as serving another chain or
+    /// branch (R39.11.6, R39.11.7a). Distinct from [`ZcoinInitError::LightwalletdUnreachable`].
+    #[display(fmt = "No lightwalletd endpoint of {} is on this coin's chain: {}", ticker, error)]
+    LightwalletdExcluded {
+        ticker: String,
+        error: String,
+    },
     Internal(String),
 }
 
 impl ZcoinInitError {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_lightwalletd(ticker: &str, error: LightwalletdError) -> Self {
+        let ticker = ticker.to_owned();
+        match error {
+            LightwalletdError::AllUnreachable(error) => ZcoinInitError::LightwalletdUnreachable { ticker, error },
+            LightwalletdError::AllExcluded(error) | LightwalletdError::NoBranchMajority(error) => {
+                ZcoinInitError::LightwalletdExcluded { ticker, error }
+            },
+            LightwalletdError::NoEndpoints => ZcoinInitError::CoinCreationError {
+                ticker,
+                error: "`light_wallet_d_servers` must list at least one lightwalletd endpoint".to_owned(),
+            },
+            other => ZcoinInitError::Internal(other.to_string()),
+        }
+    }
+
     /// Maps a coin-build failure to the task error.
     ///
     /// Docs vs reference (CRD ch.39 R39.10.12): the public page binds the content of the error object
@@ -413,7 +472,7 @@ impl From<CryptoCtxError> for ZcoinInitError {
 
 impl From<ZcoinInitError> for InitStandaloneCoinError {
     fn from(err: ZcoinInitError) -> Self {
-        match err {
+        match err.clone() {
             ZcoinInitError::CoinCreationError { ticker, error } => {
                 InitStandaloneCoinError::CoinCreationError { ticker, error }
             },
@@ -427,6 +486,11 @@ impl From<ZcoinInitError> for InitStandaloneCoinError {
                 }
             },
             ZcoinInitError::TaskTimedOut { duration } => InitStandaloneCoinError::TaskTimedOut { duration },
+            ZcoinInitError::LightwalletdUnreachable { .. } => InitStandaloneCoinError::Transport(err.to_string()),
+            ZcoinInitError::LightwalletdExcluded { ticker, error } => InitStandaloneCoinError::CoinCreationError {
+                ticker,
+                error: format!("No lightwalletd endpoint is on this coin's chain: {}", error),
+            },
             // The coin was built and the shielded sync finished, but the transparent backend could not
             // deliver the height or the balance (CRD ch.39 R39.10.11).
             ZcoinInitError::CouldNotGetBalance(e) | ZcoinInitError::CouldNotGetBlockCount(e) => {
@@ -575,22 +639,11 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         if SHIELDED_WALLET_UNAVAILABLE {
             return MmError::err(shielded_unavailable_error(&ticker));
         }
-        let utxo_mode = match &activation_request.mode {
-            #[cfg(not(target_arch = "wasm32"))]
-            ZcoinRpcMode::Native => UtxoRpcMode::Native,
-            ZcoinRpcMode::Light {
-                electrum_servers,
-                min_connected,
-                max_connected,
-                ..
-            } => UtxoRpcMode::Electrum {
-                servers: electrum_servers.clone(),
-                min_connected: *min_connected,
-                max_connected: *max_connected,
-            },
-        };
+        let backend = zcoin_backend(&ticker, &activation_request.mode)?;
         let utxo_params = UtxoActivationParams {
-            mode: utxo_mode,
+            // Not consulted: the RPC client of a shielded coin is chosen by `backend`, so no Electrum
+            // connection can be built from this value (R39.11.1, R39.11.5).
+            mode: UtxoRpcMode::Native,
             utxo_merge_params: None,
             tx_history: false,
             required_confirmations: activation_request.required_confirmations,
@@ -630,9 +683,19 @@ impl InitStandaloneCoinActivationOps for ZCoin {
                 .as_ref()
                 .map(std::path::PathBuf::from),
             protocol_info,
+            backend,
         )
         .await
         .mm_err(|e| ZcoinInitError::from_build_err(e, ticker.clone()))?;
+
+        // Admission before anything reads the chain (R39.11.6, R39.11.7a): an unreachable set and an
+        // excluded set are different failures and neither reports a placeholder tip.
+        #[cfg(not(target_arch = "wasm32"))]
+        if coin.is_light() {
+            coin.admitted_lightwalletd_servers()
+                .await
+                .map_to_mm(|e| ZcoinInitError::from_lightwalletd(&ticker, e))?;
+        }
 
         let requested_start_height =
             requested_shielded_scan_start_height(&coin, &ticker, activation_request.sync_params()).await?;
@@ -684,10 +747,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
         // database. The shielded wallet database exists on native builds only, so on WASM the
         // commitment-tree sync above is the whole shielded sync.
         #[cfg(not(target_arch = "wasm32"))]
-        if let ZcoinRpcMode::Light {
-            light_wallet_d_servers, ..
-        } = &activation_request.mode
-        {
+        if coin.is_light() {
             run_shielded_sync_with_retry(
                 &ticker,
                 || async {
@@ -700,7 +760,6 @@ impl InitStandaloneCoinActivationOps for ZCoin {
                         });
                     };
                     coin.fetch_lightwalletd_compact_blocks_to_height(
-                        light_wallet_d_servers,
                         activation_tip,
                         requested_start_height,
                         skip_sync_params,
@@ -732,7 +791,7 @@ impl InitStandaloneCoinActivationOps for ZCoin {
             // The scan above is a one-shot up to the activation tip. Light mode has no other component
             // advancing the wallet DB afterwards, so without this the balance would stay frozen at the
             // activation height until the coin is activated again.
-            coin.spawn_post_activation_shielded_sync(light_wallet_d_servers.clone());
+            coin.spawn_post_activation_shielded_sync();
         }
 
         Ok(coin)
@@ -976,16 +1035,82 @@ mod tests {
         }
     }
 
+    /// T39.11.b / R39.11.5: `light_wallet_d_servers` is mandatory and non-empty; `electrum_servers`
+    /// is neither. The retired form of this test required both lists.
     #[test]
-    fn light_mode_still_requires_both_server_lists() {
+    fn light_mode_requires_only_the_lightwalletd_list() {
+        // Absent: a parse failure, as before.
         let missing_lightd = json!({ "mode": { "rpc": "Light", "rpc_data": {
             "electrum_servers": [{ "url": "electrum1.example:10008" }]
         } } });
         assert!(serde_json::from_value::<ZcoinActivationParams>(missing_lightd).is_err());
-        let missing_electrum = json!({ "mode": { "rpc": "Light", "rpc_data": {
-            "light_wallet_d_servers": ["https://lightd1.example:443"]
-        } } });
-        assert!(serde_json::from_value::<ZcoinActivationParams>(missing_electrum).is_err());
+
+        // Empty: a configuration error that names the coin.
+        let empty_lightd = json!({ "mode": { "rpc": "Light", "rpc_data": { "light_wallet_d_servers": [] } } });
+        let params: ZcoinActivationParams = serde_json::from_value(empty_lightd).unwrap();
+        match zcoin_backend("ARRR", &params.mode) {
+            Err(ZcoinInitError::CoinCreationError { ticker, error }) => {
+                assert_eq!(ticker, "ARRR");
+                assert!(error.contains("light_wallet_d_servers"), "{error}");
+            },
+            _ => panic!("an empty lightwalletd list must be a configuration error"),
+        }
+    }
+
+    /// T39.11.b / R39.11.5, R39.11.7: absent, empty and populated (unreachable) `electrum_servers`
+    /// all activate identically, because the field is accepted and ignored.
+    #[test]
+    fn electrum_servers_are_accepted_and_have_no_effect() {
+        let lightd = json!(["https://lightd1.example:443", "https://lightd2.example:443"]);
+        let variants = [
+            json!({ "light_wallet_d_servers": lightd }),
+            json!({ "electrum_servers": [], "light_wallet_d_servers": lightd }),
+            json!({
+                "electrum_servers": [{ "url": "unreachable.invalid:10008" }, { "url": "also-unreachable.invalid:10008" }],
+                "min_connected": 3,
+                "max_connected": 9,
+                "light_wallet_d_servers": lightd
+            }),
+        ];
+        let mut backends = Vec::new();
+        for rpc_data in variants {
+            let params: ZcoinActivationParams =
+                serde_json::from_value(json!({ "mode": { "rpc": "Light", "rpc_data": rpc_data } })).unwrap();
+            match zcoin_backend("ARRR", &params.mode).ok().unwrap() {
+                ZcoinBackend::Light { light_wallet_d_servers } => backends.push(light_wallet_d_servers),
+                #[cfg(not(target_arch = "wasm32"))]
+                ZcoinBackend::Native => panic!("Light mode must select the lightwalletd backend"),
+            }
+        }
+        assert_eq!(backends[0], vec![
+            "https://lightd1.example:443",
+            "https://lightd2.example:443"
+        ]);
+        assert!(backends.iter().all(|servers| servers == &backends[0]));
+    }
+
+    /// T39.11.b / R39.11.6: an unreachable endpoint set and an excluded one are different failures.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn unreachable_and_excluded_endpoint_sets_are_distinguishable_activation_errors() {
+        let unreachable =
+            ZcoinInitError::from_lightwalletd("ARRR", LightwalletdError::AllUnreachable("a: refused".to_owned()));
+        let excluded =
+            ZcoinInitError::from_lightwalletd("ARRR", LightwalletdError::AllExcluded("a: other branch".to_owned()));
+        let no_majority =
+            ZcoinInitError::from_lightwalletd("ARRR", LightwalletdError::NoBranchMajority("37a5165b x1".to_owned()));
+        assert!(matches!(unreachable, ZcoinInitError::LightwalletdUnreachable { .. }));
+        assert!(matches!(excluded, ZcoinInitError::LightwalletdExcluded { .. }));
+        assert!(matches!(no_majority, ZcoinInitError::LightwalletdExcluded { .. }));
+        // Neither carries a tip.
+        assert!(matches!(
+            InitStandaloneCoinError::from(unreachable),
+            InitStandaloneCoinError::Transport(_)
+        ));
+        assert!(matches!(
+            InitStandaloneCoinError::from(excluded),
+            InitStandaloneCoinError::CoinCreationError { .. }
+        ));
     }
 
     #[test]
@@ -1079,7 +1204,7 @@ mod tests {
     fn height_and_balance_failures_are_transport_errors_with_a_string() {
         // T39.10.4 (a).
         for err in [
-            ZcoinInitError::CouldNotGetBlockCount("all Electrum servers are unreachable".to_owned()),
+            ZcoinInitError::CouldNotGetBlockCount("every lightwalletd endpoint is unreachable".to_owned()),
             ZcoinInitError::CouldNotGetBalance("balance read failed".to_owned()),
         ] {
             let (wire, status) = task_error(err);

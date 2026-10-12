@@ -953,11 +953,20 @@ set, so a v6 transaction is rejected as "Unknown transaction format". It is **un
 
 | Crate | Pinned now | Target | Note |
 |---|---|---|---|
-| `zcash_primitives` | 0.28.0 | **0.30.1** | v6 unconditional |
-| `zcash_client_backend` | 0.23.0 | 0.24.0 | keep `orchard` off |
+| `zcash_primitives` | 0.28.0 | **0.30.1** | v6 unconditional; **vendored and patched** |
+| `zcash_transparent` | 0.8.0 | **0.10.0** | **vendored and patched**; what 0.30.1 requires |
+| `zcash_client_backend` | 0.23.0 | 0.24.0 | keep `orchard` off; vendor copy droppable |
 | `zcash_client_sqlite` | 0.21.1 | 0.22.0 | wallet‑DB migration |
 | `zcash_protocol` | 0.9.0 | 0.10.6 | carries `BranchId::Nu6_3` |
-| `sapling-crypto` | 0.7.0 | 0.9.0 | |
+| `sapling-crypto` | 0.7.0 | **0.7.0 — unchanged** | the whole 0.30.1 stack needs `sapling-crypto 0.7` |
+
+> **This table was wrong in three ways, corrected 2026‑10‑12 from the implementation.**
+> Three of these crates are not version pins at all but **vendored source copies we patch**
+> under `vendor-patches/`, so this step is a re‑vendor onto pristine upstream sources with each
+> KDF extension re‑applied, not a version bump. `zcash_transparent` was **missing from the
+> table** although we vendor and patch it. And `sapling-crypto 0.9.0` **would not resolve** —
+> primitives 0.30.1, `zcash_client_backend` 0.24.0 and `zcash_client_sqlite` 0.22.0 all require
+> `sapling-crypto 0.7`.
 
 These are **newer than the Pirate node's own stack**, which pins `zcash_primitives 0.29.0` plus
 two `-rc.1` prereleases via git. We take published releases and keep our own ZIP‑212 handling,
@@ -1012,11 +1021,20 @@ the wallet rewind and follow that server's chain.
 > the methods actually needed. Recorded as CRD `D39.11.g`.
 
 **D — route ARRR's transaction parsing to the Zcash parser.** The shared UTXO parser applies
-the v4 layout to any overwintered version ≥ 4 with double‑SHA256 txids, so it mis‑parses v6 and
-computes the wrong txid by construction. It cannot simply be deleted: `UtxoTx` is referenced in
-42 files and is the transaction type for every UTXO coin. `zcash_primitives::Transaction::read`
+the v4 layout with double‑SHA256 txids. It cannot simply be deleted: `UtxoTx` is referenced in
+48 files and is the transaction type for every UTXO coin. `zcash_primitives::Transaction::read`
 handles Sprout, v3, v4, v5 and v6 in one parser, so routing ARRR to it removes the duplication
 *and* keeps the v4 history an old wallet still needs when restoring from a pre‑fork birthday.
+
+> **Corrected 2026‑10‑12 from the implementation.** This step was written on the belief that the
+> shared parser “mis‑parses v6 and computes the wrong txid by construction”. It does neither: it
+> **refuses** v6 outright. `deserialize::<UtxoTx>` returns `MalformedData` or `UnexpectedEnd` for
+> all 18 v6 transactions of the offline corpus and for a hand‑built v5, so no identifier is
+> produced at all. Separately its identifier *rule* is the wrong rule — on a v4 transaction it
+> yields the double‑SHA256 of the bytes, which is not a v6 transaction's ZIP‑244 digest. The
+> routing is therefore still required, but because the swap step **fails** rather than proceeding
+> on a wrong identifier. CRD R39.11.15 and R39.11.16a carried the same error and are corrected.
+> The file count was 42 here and is 48 as measured.
 
 **E — v6 construction, then lift the gates.** Map `NetworkUpgrade::Nu6_3` to the Ironwood
 activation height so the builder selects v6; implement runtime activation‑height discovery,
@@ -1180,3 +1198,74 @@ then mainnet.
   ZIP‑212 divergence, which has no switch by design.
   **Still open for Plan A:** A5, the dead `cryptoforge` endpoints upstream in
   `GLEECBTC/coins`.
+- **2026‑10‑12 — Step B landed: the Zcash stack is re‑vendored on `zcash_primitives` 0.30.1,
+  and v6 now parses.** The reason for the step is confirmed rather than assumed: in the pinned
+  0.28.0 the v6 arm of `TxVersion::read` sits behind `cfg(zcash_unstable = "nu7")`, a rustc cfg
+  we do not set, so a v6 transaction was rejected as "Unknown transaction format"; it is
+  unconditional in 0.30.1. Proven by two new tests — one inlining the test‑chain transaction at
+  height 68373 (asserts `V6`, `BranchId::Nu6_3`, the indexed txid, exact byte round‑trip), and
+  one, opt‑in via `ARRR_IRONWOOD_FIXTURES`, parsing the whole offline corpus: all 19
+  transactions parse, every txid matches `tx_index.json`, and every one round‑trips byte for
+  byte. `zcash_transparent` went 0.8.0 → 0.10.0 and its patch applied cleanly; the
+  `zcash_primitives` builder had drifted ~450 lines because 0.30.1 adds Ironwood and padding
+  support, so nine of ten hunks applied with fuzz and `add_transparent_output_raw` /
+  `set_lock_time` were placed by hand — **the focused test's pinned wire bytes still match
+  exactly, which is the evidence that the deployed v4 swap transaction shape is unchanged**.
+  The `zcash_client_backend` vendor copy was **dropped**: its only delta was an exact
+  `time-core` pin that upstream has since removed, the condition its own patch note named.
+  `orchard` became a default feature of both `zcash_client_backend` 0.24.0 and
+  `zcash_client_sqlite` 0.22.0, so both now carry `default-features = false`. The ZIP‑212 fix is
+  still required and still confined to decryption — upstream `zip212_enforcement` is unchanged
+  and still returns `Off` without Canopy. `NetworkUpgrade::Nu6_3` returns `None` for now, which
+  keeps the builder on Sapling‑era versions; the real mapping is Step E.
+  **Open decision before this can ship to anyone with an existing ARRR wallet:**
+  `zcash_client_sqlite` 0.22.0 adds 23 unconditional migrations (71 total, up from 48; schema
+  fingerprint 467 → 727 records), creating Ironwood and Orchard tables even with the feature
+  off. `classify_wallet_db` accepts a wallet only if its fingerprint equals a freshly
+  initialised current schema, so an existing wallet now classifies as `Unknown` and activation
+  fails with "unrecognized shielded wallet schema; file was left unchanged". The chapter's
+  existing policy for a recognised older schema is **preserve‑and‑rebuild**
+  (`WalletDbGeneration::ReferenceLegacy` → back up, rebuild fresh, rescan), not in‑place
+  migration. Upstream `init_wallet_db` should apply the 23 missing migrations to such a DB, but
+  that is untested. Recommended shape: back up unconditionally, attempt the upstream migration,
+  verify the resulting fingerprint equals the current schema, and fall back to the existing
+  preserve‑and‑rebuild path on any failure — so the outcome degrades to today's behaviour rather
+  than to a half‑migrated wallet.
+- **2026‑10‑12 — Step C, wallet half (branch `feat/arrr-lightwalletd-only`).** `lightwalletd` is now the
+  sole backend of a Light‑mode ZHTLC coin: the coin carries an explicit `ZcoinMode`, the RPC client is a
+  new `UtxoRpcClientEnum::LightWalletD` arm (a first‑class `UtxoRpcClientOps`), `electrum_servers` is
+  accepted and ignored, and `light_wallet_d_servers` must be non‑empty. Two defects are closed. **One
+  height authority:** the Light ordinary send path (wallet‑DB target height) and the HTLC spend/refund
+  path (Electrum block count) both read `ZCoin::builder_target_height`, the admitted lightwalletd tip + 1,
+  and refuse to build — with a typed error, no fallback — when the read fails or is more than the
+  builder's 40‑block expiry delta behind what the wallet has seen. **Endpoint admission:**
+  `GetLightdInfo` network, Sapling height and consensus branch exclude off‑branch endpoints; the local
+  branch expectation is applied only below the *horizon* (the last declared upgrade's height, while a
+  later known upgrade is undeclared), so at ARRR's real tip the partition rule decides — a wallet that has
+  scanned blocks stays on its recorded branch, a fresh one needs a strict majority of at least two
+  endpoints — and the inversion in the Step C warning cannot occur. **Deliberately not done:** swap‑path
+  spend and already‑sent detection (`find_output_spend`, `check_if_my_payment_sent`) fail with an explicit
+  error and a P2SH address is refused by balance/UTXO/history, because the R‑address workaround is still
+  unproved on a funded HTLC; parser routing (Step D); `Nu6_3` mapping and the gates (Step E). The
+  divergence from GLEEC KDF is recorded in `RELOADED_VS_GLEEC.md` and `docs/GLEEC_COMPATIBILITY.md`
+  (no opt‑in exists, and the entries say so). CRD ch.39 §39.11 status notes updated in the same commit.
+- **2026‑10‑12 — Step E (branch `feat/arrr-v6-construction`).** v6 construction exists and was moved
+  **ahead** of the swap half of Step C: a live `z_send_htlc` attempt was rejected with
+  `64: ironwood-version`, so nothing — including the P2SH index probe — can be transacted on a
+  post‑Ironwood chain until the builder emits v6. `Nu6_3` reports the configured
+  `ironwood_activation_height`, else a height discovered at runtime and held in a cell shared by every
+  copy of `ZcoinConsensusParams`; the builder then selects branch `0x37A5165B`/v6 by itself (Sapling
+  bundle, one `0x00` Orchard slot, empty Ironwood bundle). Discovery runs inside
+  `ZCoin::builder_target_height` (the single height authority): server branch at its tip +
+  first‑block‑over‑the‑activation‑time search + the 60‑block margin and 30‑block trust depth; a
+  disagreement or an unreadable answer **refuses the build** instead of choosing a version. The
+  built‑in activation time is now keyed on the ticker **and** the Sapling activation height (152 855),
+  because Pirate's test chain presents as mainnet. `IRONWOOD_V6_SUPPORTED` is true, so the swap freeze
+  and build refusal are inert. Verified offline: wrapper bytes, round trip, ZIP‑244 txid, v4 below the
+  height and without one, a Sapling spend + P2SH + change funding verifying under the v6 sighash, and a
+  real mined v6 transaction (1 spend, 2 outputs, 2 Ironwood actions) whose Sapling proofs and
+  signatures verify under the library's digest. **Still needs a broadcast:** network acceptance, and a
+  v6 shielded signature over a transaction with transparent inputs (digest commits to prevout data not
+  in the corpus). Not done: the pre‑activation quiet window, persistence of the discovered height,
+  native‑mode discovery. CRD ch.39 R39.6.4e added; `RELOADED_VS_GLEEC.md` and
+  `docs/GLEEC_COMPATIBILITY.md` updated (no opt‑back exists).

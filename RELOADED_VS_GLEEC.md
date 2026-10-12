@@ -94,6 +94,58 @@ The developer-facing rule (mandatory for AI assistants, strong recommendation fo
 These are divergences from GLEEC KDF that are **not** operator-configurable in this release (no compat switch yet). They are logged here and in [`CHANGELOG.md`](CHANGELOG.md) per the convention; a per-feature switch may be added in a later release.
 
 - **Withdraw with an omitted HD `from`.** For an HD-mode UTXO wallet, `task::withdraw` / `withdraw` with no `from` sender defaults to the wallet's enabled address (account 0, external chain, index 0) instead of failing. GLEEC KDF rejects an omitted `from` with `FromAddressNotFound`. This makes the shipped Komodo DeFi wallet's withdraw-preview flow (which omits `from`) work against a reloaded node. An explicit but invalid `from` is still rejected (`UnknownAccount` / `UnexpectedFromAddress`). Code: `coins/utxo/utxo_common/utxo_common_hd.rs` (`get_withdraw_hd_sender`), `utxo_common_helpers.rs` (`validate_task_withdraw_sender`).
+- **A Light-mode ZHTLC coin is served by `lightwalletd` alone; Electrum is
+  removed, and there is no switch to restore it.** GLEEC KDF requires a
+  non-empty `electrum_servers` list in the Light-mode activation payload and
+  serves the coin's whole transparent side (chain tip, raw transactions and
+  mined heights, balance, history, UTXOs, broadcast, block times) from it.
+  Reloaded takes every one of those from the configured `light_wallet_d_servers`
+  (`GetLatestBlock`, `GetTransaction`, `GetTaddressBalance`, `GetAddressUtxos`,
+  `GetTaddressTxids`, `SendTransaction`, `GetBlock`) and never opens an Electrum
+  connection for the coin. The activation payload still accepts
+  `electrum_servers`, `min_connected` and `max_connected`, and ignores them;
+  `light_wallet_d_servers` becomes mandatory and non-empty, and an empty list is
+  a configuration error naming the coin at activation. **No compat switch is
+  provided, and none could work:** as of 2026-10-11 no host published for Pirate
+  Chain runs an ElectrumX service at all (a port scan of all ten found none),
+  and the two that did stalled at the last block before the chain's first
+  post-Ironwood transaction. An opt-back would restore a path with no working
+  provider and would re-arm the defects the new design closes. Related, and
+  also without a switch: `txfee: 0` (fee estimation) is refused for the coin
+  (lightwalletd has no fee estimation; an absent `txfee` keeps the fixed default); `requires_notarization` is refused for
+  the coin (there is no notarized-depth field); and the swap-path HTLC spend
+  and already-sent detection run over the transparent address index with both
+  the P2SH form and the `R...` re-encoding of the redeem-script hash probed (the
+  serving node's index files every output under the pubkey-hash key type, proved
+  live on 2026-10-12), a returned row accepted only if its script is the expected
+  one, and a named error -- never "not spent" or "not sent" -- when the index
+  returns nothing for a funding transaction known to be mined, when a history
+  window skipped a height, or when a call failed (CRD ch.39 R39.11.4d). GLEEC
+  answered these from Electrum; **no opt-out exists**, because the alternative is
+  an empty answer read as "not spent". Code: `coins/z_coin/z_lightwalletd.rs`,
+  `coins/z_coin/z_lightwalletd/htlc_index.rs`, `coins/z_coin/z_tx_read.rs`,
+  `coins/z_coin.rs`, `coins_activation/src/z_coin_activation.rs`
+  (CRD ch.39 R39.11.1--R39.11.7).
+- **Endpoint admission and one builder height for a ZHTLC coin.** GLEEC KDF
+  performs no server-information check and uses every configured lightwalletd
+  endpoint, so an endpoint serving another fork of the chain (three of the eight
+  published ARRR endpoints did, after the Ironwood upgrade) above the wallet's
+  anchor makes the wallet rewind about 99 blocks and follow that endpoint's
+  chain. Reloaded reads `GetLightdInfo` first and excludes an endpoint whose
+  network, Sapling activation height or consensus branch does not belong to the
+  coin; a wallet that has scanned blocks stays on the branch recorded with them.
+  A fresh wallet whose configuration cannot name the active upgrade needs two
+  agreeing endpoints. Separately, GLEEC KDF's ordinary shielded send takes its
+  transaction target height from the wallet database while its HTLC spend and
+  refund take it from the transparent backend; with the transaction expiry delta
+  at 40 blocks, a disagreement makes every refund expired when it is broadcast.
+  Reloaded gives every shielded construction path one height authority -- the
+  admitted lightwalletd tip -- and refuses to build, with a typed error, when
+  that tip cannot be read or is more than 40 blocks behind what the wallet has
+  already seen. No compat switch: the alternative is a wallet captured by a
+  stale fork and refunds that cannot be broadcast. Code:
+  `coins/z_coin/z_lightwalletd.rs`, `coins/z_coin/z_coin_ops.rs`,
+  `coins/z_coin/z_htlc.rs` (CRD ch.39 R39.11.7a, R39.11.9--R39.11.12).
 - **Z-coin shielded database schema and names.** Reloaded uses the modern stable
   Zcash wallet schema under Reloaded-only filenames. GLEEC KDF continues to use
   the legacy filenames and schema. This is intentionally not configurable:
@@ -206,20 +258,30 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
 
 See [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md). To match GLEEC KDF's full key-export behaviour, set `allow_insecure_key_export` to `true` (default `false`).
 
-To match GLEEC KDF's behaviour around a shielded coin's network upgrade, set
-`ironwood_gate_disabled` to `true` in that coin's
-`protocol.protocol_data.consensus_params`. With the default `false`, Reloaded stops
-entering new swaps for a coin with a known Ironwood activation 160 300 s before it
-and refuses to build any of that coin's transactions from it onwards (CRD ch.39
-R39.6.4b/R39.6.4c); with the switch on, neither gate exists and behaviour matches
-GLEEC KDF exactly. The gates protect a counterparty whose HTLC would otherwise be
-left unspendable and unrefundable across Pirate Chain's Ironwood upgrade
-(3 Oct 2026 19:00 UTC), so turning them off on a coin that *does* upgrade accepts
-that risk knowingly. The two coin-activation switches below are the only other
-settings needed to match GLEEC KDF behaviour.
+**Reloaded constructs the transaction format Pirate Chain's Ironwood upgrade
+requires; GLEEC KDF cannot.** From the coin's Ironwood activation height Reloaded builds
+version-6 transactions (Sapling bundle, empty Orchard slot, empty Ironwood bundle), and
+below it version 4, so a Pirate Chain (ARRR) coin keeps sending, swapping and refunding
+after the upgrade, where GLEEC KDF's every transaction is rejected by the network. The
+activation height is configured (`ironwood_activation_height`) or, because the chain
+publishes none, discovered at runtime from the server's consensus branch and the
+activation time (CRD ch.39 R39.6.4e). If it cannot be established the build is refused
+with a typed error; it is never guessed. **No setting restores GLEEC's version-4-only
+behaviour**, and none is offered, because that behaviour produces nothing the chain
+accepts.
 
-**ARRR carries a built-in activation time, so omitting `ironwood_activation_time` is
-not an opt-out.** This reverses what an earlier release documented, and the reason is
+Because of that, the swap freeze and the build refusal below no longer engage in this
+build, and `ironwood_gate_disabled` has nothing left to switch off. It is still
+accepted, and still describes the older behaviour: for a build that cannot construct
+version 6, the default `false` stopped entering new swaps for a coin with a known
+Ironwood activation 160 300 s before it and refused to build any of that coin's
+transactions from it onwards (CRD ch.39 R39.6.4b/R39.6.4c). The gates protected a counterparty whose HTLC would otherwise be
+left unspendable and unrefundable across Pirate Chain's Ironwood upgrade
+(3 Oct 2026 19:00 UTC). The two coin-activation switches below are the only settings
+needed to match GLEEC KDF behaviour.
+
+**ARRR carries a built-in activation time, so omitting `ironwood_activation_time` does
+not remove it.** This reverses what an earlier release documented, and the reason is
 worth stating. Both `ironwood_activation_time` and `ironwood_activation_height` are an
 extension this project introduced: no published coin configuration declares either of
 them — verified against `GLEECBTC/coins` master, where ARRR is the only coin carrying
@@ -235,8 +297,11 @@ Configuration still wins where it is present: `ironwood_activation_time` overrid
 built-in value, so a moved activation time stays a data change rather than a release —
 a compiled-in date that could not be overridden would refuse every ARRR transaction,
 and freeze its market, until a new binary shipped. The built-in value is also withheld
-from test and regtest parameters, which activate Ironwood at a height with no timestamp
-at all. A coin whose ticker this build does not know is unaffected either way.
+unless the parameters describe the real ARRR chain (ticker and Sapling activation height
+152 855): the test and regtest networks activate Ironwood at a height with no timestamp
+at all, and Pirate's own Ironwood test chain carries mainnet address prefixes and reports
+`chainName` `main`, so address prefixes alone cannot tell it from the real chain. Today
+the built-in time only feeds the activation-height discovery above. A coin whose ticker this build does not know is unaffected either way.
 
 Two coin-activation behaviours differ from GLEEC KDF by default (CRD ch.46
 R46.2.4, ch.55 R55.4.6):

@@ -269,6 +269,10 @@ impl UtxoStandardCoin {
                 // The JSON-RPC hash bytes are already in display order.
                 Ok(H256::from(hash.0))
             },
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => Err(WalletConnectError::Relay(
+                "a lightwalletd-served coin has no genesis header source".to_owned(),
+            )),
             UtxoRpcClientEnum::Electrum(ref electrum) => {
                 let header_bytes = electrum
                     .blockchain_block_header(0)

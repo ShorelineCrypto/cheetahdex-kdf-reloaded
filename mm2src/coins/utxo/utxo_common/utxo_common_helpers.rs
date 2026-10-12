@@ -272,14 +272,40 @@ pub fn wait_for_output_spend(
 ) -> TransactionFut {
     let mut tx: UtxoTx = try_tx_fus!(deserialize(tx_bytes).map_err(|e| ERRL!("{:?}", e)));
     tx.tx_hash_algo = coin.tx_hash_algo;
+    let tx_hash = tx.hash();
+    let script_pubkey = tx.outputs[output_index].script_pubkey.clone();
+    let tx_debug = format!("{:?}", tx);
+    wait_for_output_spend_of(
+        coin,
+        tx_hash,
+        script_pubkey,
+        tx_debug,
+        output_index,
+        from_block,
+        wait_until,
+    )
+}
+
+/// The wait loop of [`wait_for_output_spend`] over the facts about the watched output alone, so a coin
+/// that reads its transactions with a different parser (ZHTLC, CRD ch.39 R39.11.16a) shares the loop.
+/// `tx_debug` is only the transaction's rendering for the timeout message.
+pub(crate) fn wait_for_output_spend_of(
+    coin: &UtxoCoinFields,
+    tx_hash: H256,
+    script_pubkey: Bytes,
+    tx_debug: String,
+    output_index: usize,
+    from_block: u64,
+    wait_until: u64,
+) -> TransactionFut {
     let client = coin.rpc_client.clone();
     let tx_hash_algo = coin.tx_hash_algo;
     let fut = async move {
         loop {
             match client
                 .find_output_spend(
-                    tx.hash(),
-                    &tx.outputs[output_index].script_pubkey,
+                    tx_hash,
+                    &script_pubkey,
                     output_index,
                     BlockHashOrHeight::Height(from_block as i64),
                 )
@@ -299,9 +325,9 @@ pub fn wait_for_output_spend(
 
             if now_ms() / 1000 > wait_until {
                 return TX_PLAIN_ERR!(
-                    "Waited too long until {} for transaction {:?} {} to be spent ",
+                    "Waited too long until {} for transaction {} {} to be spent ",
                     wait_until,
-                    tx,
+                    tx_debug,
                     output_index,
                 );
             }

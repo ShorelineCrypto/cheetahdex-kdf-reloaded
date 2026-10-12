@@ -668,6 +668,10 @@ impl BuildTransferHistory for UtxoRpcClientEnum {
         match self {
             UtxoRpcClientEnum::Native(native) => native.build(params).await,
             UtxoRpcClientEnum::Electrum(electrum) => electrum.build(params).await,
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => MmError::err(UtxoRpcError::Internal(
+                "QRC20 history is not supported over lightwalletd".to_owned(),
+            )),
         }
     }
 
@@ -678,6 +682,10 @@ impl BuildTransferHistory for UtxoRpcClientEnum {
         match self {
             UtxoRpcClientEnum::Native(native) => native.build_tx_idents(params).await,
             UtxoRpcClientEnum::Electrum(electrum) => electrum.build_tx_idents(params).await,
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => MmError::err(UtxoRpcError::Internal(
+                "QRC20 history is not supported over lightwalletd".to_owned(),
+            )),
         }
     }
 }

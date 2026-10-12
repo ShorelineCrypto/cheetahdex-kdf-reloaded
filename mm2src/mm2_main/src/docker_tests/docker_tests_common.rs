@@ -197,7 +197,7 @@ where
             let my_address = coin.my_address().unwrap();
             native.import_address(&my_address, &my_address, false).wait().unwrap()
         },
-        UtxoRpcClientEnum::Electrum(_) => panic!("Expected NativeClient"),
+        _ => panic!("Expected NativeClient"),
     }
 }
 
@@ -279,7 +279,7 @@ where
 {
     let native = match coin.as_ref().rpc_client {
         UtxoRpcClientEnum::Native(ref native) => native,
-        UtxoRpcClientEnum::Electrum(_) => panic!("NativeClient expected"),
+        _ => panic!("NativeClient expected"),
     };
     let mut addresses = native
         .get_addresses_by_label(label)
@@ -305,7 +305,7 @@ pub fn fill_qrc20_address(coin: &Qrc20Coin, amount: BigDecimal, timeout: u64) {
     let timeout = now_ms() / 1000 + timeout;
     let client = match coin.as_ref().rpc_client {
         UtxoRpcClientEnum::Native(ref client) => client,
-        UtxoRpcClientEnum::Electrum(_) => panic!("Expected NativeClient"),
+        _ => panic!("Expected NativeClient"),
     };
 
     let from_addr = get_address_by_label(coin, QTUM_ADDRESS_LABEL);
@@ -478,7 +478,7 @@ pub fn wait_for_estimate_smart_fee(timeout: u64) -> Result<(), String> {
     let timeout = now_ms() / 1000 + timeout;
     let client = match coin.as_ref().rpc_client {
         UtxoRpcClientEnum::Native(ref client) => client,
-        UtxoRpcClientEnum::Electrum(_) => panic!("Expected NativeClient"),
+        _ => panic!("Expected NativeClient"),
     };
     while now_ms() / 1000 < timeout {
         if let Ok(res) = client.estimate_smart_fee(&None, 1).wait() {

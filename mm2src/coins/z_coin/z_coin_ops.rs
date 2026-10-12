@@ -20,6 +20,129 @@ impl ZCoin {
     #[inline(always)]
     pub fn rpc_client(&self) -> &UtxoRpcClientEnum { &self.utxo_arc.rpc_client }
 
+    /// How this coin reaches the chain. Decided at construction and carried on the coin; every
+    /// mode-dependent branch reads it (R39.11.4g).
+    #[inline(always)]
+    pub fn mode(&self) -> ZcoinMode { self.z_fields.mode }
+
+    #[inline(always)]
+    pub fn is_light(&self) -> bool { self.z_fields.mode.is_light() }
+
+    /// The lightwalletd client of a Light-mode coin.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn lightwalletd(&self) -> Option<&LightwalletdClient> {
+        match self.rpc_client() {
+            UtxoRpcClientEnum::LightWalletD(client) => Some(client),
+            _ => None,
+        }
+    }
+
+    /// The lightwalletd endpoints admission lets this coin use right now (R39.11.7a). Fails with a
+    /// typed error that tells "every endpoint unreachable" from "every reachable endpoint excluded"
+    /// (R39.11.6).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn admitted_lightwalletd_servers(&self) -> Result<Vec<String>, LightwalletdError> {
+        let client = self.lightwalletd().ok_or(LightwalletdError::Unsupported {
+            op: "admission",
+            reason: "the coin is not in Light mode",
+        })?;
+        client.backend().admitted().await
+    }
+
+    /// The endpoints excluded by the latest admission decision, each with its reason (R39.11.7a(f)).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn excluded_lightwalletd_endpoints(&self) -> Vec<(String, String)> {
+        self.lightwalletd()
+            .map(|client| client.backend().excluded_endpoints())
+            .unwrap_or_default()
+    }
+
+    /// The raw bytes and mined height of a transaction by id (display order), from whichever backend
+    /// serves the coin. A Light coin takes both from `GetTransaction`; nothing is decoded server-side.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) async fn raw_transaction_with_height(
+        &self,
+        txid_display: &H256Json,
+    ) -> Result<(Vec<u8>, Option<u64>), String> {
+        match self.rpc_client() {
+            UtxoRpcClientEnum::LightWalletD(client) => client
+                .raw_transaction(txid_display)
+                .await
+                .map(|raw| (raw.data, raw.height))
+                .map_err(|e| e.to_string()),
+            other => other
+                .get_verbose_transaction(txid_display)
+                .compat()
+                .await
+                .map(|tx| (tx.hex.0, tx.height))
+                .map_err(|e| e.to_string()),
+        }
+    }
+
+    /// The one height every shielded construction path hands its transaction builder
+    /// (R39.11.9, R39.11.11).
+    ///
+    /// Light mode: the admitted lightwalletd endpoints' tip plus one, refused when it cannot be
+    /// corroborated and never replaced by the wallet database's own target height, a last known tip
+    /// or the scanned height. Native mode: the full node's block count, as before.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) async fn builder_target_height(&self) -> Result<u32, MmError<BuilderHeightError>> {
+        match self.rpc_client() {
+            UtxoRpcClientEnum::LightWalletD(client) => {
+                let tip = client
+                    .backend()
+                    .fresh_tip()
+                    .await
+                    .map_err(|e| MmError::new(BuilderHeightError::from(e)))?;
+                let scanned = self.z_fields.wallet_db_scanned_through.load(AtomicOrdering::Relaxed);
+                let target = z_lightwalletd::builder_target_height(tip, scanned)
+                    .map_err(|e| MmError::new(BuilderHeightError::from(e)))?;
+                // The version the builder will pick follows from the height it is given, so the
+                // activation height must be known before it is handed one (R39.6.4e).
+                self.ensure_ironwood_activation(client.backend()).await?;
+                Ok(target)
+            },
+            other => other
+                .get_block_count()
+                .compat()
+                .await
+                .map(|height| height as u32)
+                .map_err(|e| MmError::new(BuilderHeightError::TipUnavailable(e.to_string()))),
+        }
+    }
+
+    /// Makes sure the builder will see the coin's Ironwood activation height if it has one.
+    ///
+    /// Nothing is done when a height is already configured or discovered. Otherwise the server's
+    /// branch and the activation timestamp are read ([`z_ironwood::discover`]); a height found is
+    /// recorded in the coin's shared consensus parameters, and "not activated" records nothing, so
+    /// the coin keeps building pre-Ironwood transactions and asks again next time. If the answer
+    /// cannot be established the build is refused: the wrong transaction version is rejected by the
+    /// network, which reports it as an opaque failure after the fact.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn ensure_ironwood_activation(
+        &self,
+        backend: &z_lightwalletd::LightwalletdBackend,
+    ) -> Result<(), MmError<BuilderHeightError>> {
+        use super::z_ironwood::{discover, IronwoodStatus};
+        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+        let params = &self.z_fields.consensus_params;
+        if params.activation_height(NetworkUpgrade::Nu6_3).is_some() {
+            return Ok(());
+        }
+        let activation_time = super::configured_or_builtin_ironwood_time(params, self.ticker());
+        match discover(backend, activation_time).await {
+            Ok(IronwoodStatus::ActiveFrom(height)) => {
+                common::log::info!("{}: Ironwood is active from height {}", self.ticker(), height);
+                params.record_discovered_ironwood_height(height);
+                Ok(())
+            },
+            Ok(IronwoodStatus::NotActivated) => Ok(()),
+            Err(e) => MmError::err(BuilderHeightError::IronwoodActivation(e.to_string())),
+        }
+    }
+
     #[inline(always)]
     pub fn is_sapling_state_synced(&self) -> bool { self.z_fields.sapling_state_synced.load(AtomicOrdering::Relaxed) }
 
@@ -73,12 +196,18 @@ impl ZCoin {
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn fetch_lightwalletd_compact_blocks_to_height(
         &self,
-        servers: &[String],
         target_height: u64,
         requested_start_height: Option<u64>,
         skip_sync_params: bool,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
     ) -> Result<u64, ShieldedFetchError> {
+        // Only admitted endpoints: an off-branch endpoint above the wallet's anchor would otherwise
+        // make the wallet rewind and follow that endpoint's chain (R39.11.7a).
+        let admitted = self
+            .admitted_lightwalletd_servers()
+            .await
+            .map_err(|e| ShieldedFetchError::BeforeSync(e.to_string()))?;
+        let servers = admitted.as_slice();
         self.z_fields
             .shielded_history
             .fetch_compact_blocks_from_lightwalletd(
@@ -279,8 +408,11 @@ impl ZCoin {
         z_outputs: Vec<ZOutput>,
     ) -> Result<(ZTransaction, AdditionalTxData), MmError<GenTxError>> {
         let tx_fee = self.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
-        if matches!(self.rpc_client(), UtxoRpcClientEnum::Electrum(_)) {
-            return self.gen_tx_from_shielded_wallet_db(t_outputs, z_outputs, tx_fee);
+        // One height authority for every construction path (R39.11.11); the read fails the build
+        // rather than falling back to another source.
+        let builder_height = self.builder_target_height().await.mm_err(GenTxError::from)?;
+        if self.is_light() {
+            return self.gen_tx_from_shielded_wallet_db(t_outputs, z_outputs, tx_fee, builder_height);
         }
 
         let t_output_sat: u64 = t_outputs.iter().fold(0, |cur, out| cur + u64::from(out.value()));
@@ -314,13 +446,7 @@ impl ZCoin {
             });
         }
 
-        let current_block = self
-            .utxo_arc
-            .rpc_client
-            .get_block_count()
-            .compat()
-            .await
-            .mm_err(Into::into)? as u32;
+        let current_block = builder_height;
         let mut ext = HashMap::new();
         #[allow(deprecated)]
         let extfvk = self.z_fields.z_spending_key.to_extended_full_viewing_key();
@@ -378,6 +504,9 @@ impl ZCoin {
             BuildConfig::Standard {
                 sapling_anchor: Some(sapling_anchor),
                 orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
             },
         );
         let fvk = FullViewingKey::from_expanded_spending_key(&self.z_fields.z_spending_key.expsk);
@@ -455,6 +584,7 @@ impl ZCoin {
         t_outputs: Vec<TxOut>,
         z_outputs: Vec<ZOutput>,
         tx_fee: BigDecimal,
+        builder_height: u32,
     ) -> Result<(ZTransaction, AdditionalTxData), MmError<GenTxError>> {
         if !self.shielded_wallet_db_scan_complete() {
             return MmError::err(GenTxError::ShieldedWalletDb(
@@ -497,10 +627,12 @@ impl ZCoin {
             .select_spendable_notes(
                 account_id,
                 TargetValue::AtLeast(target_value),
-                &[ShieldedProtocol::Sapling],
+                &[ShieldedPool::Sapling],
                 height,
                 ConfirmationsPolicy::MIN,
                 &[],
+                // The wallet takes no shielded note locks, so lock state is ignored.
+                LockFilter::Unfiltered,
             )
             .map_to_mm(|e| GenTxError::ShieldedWalletDb(e.to_string()))?
             .take_sapling();
@@ -535,12 +667,18 @@ impl ZCoin {
             selected_notes_with_paths.push((selected.note().clone(), merkle_path));
         }
 
+        // `height` above only selects notes and picks the anchor from the wallet database. The builder
+        // takes the single height authority's value so this path and the HTLC spend/refund path can
+        // never disagree about a transaction's expiry (R39.11.11).
         let mut tx_builder = ZTxBuilder::new(
             self.z_fields.consensus_params.clone(),
-            height.into(),
+            builder_height.into(),
             BuildConfig::Standard {
                 sapling_anchor: Some(sapling_anchor.into()),
                 orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
             },
         );
         let fvk = FullViewingKey::from_expanded_spending_key(&self.z_fields.z_spending_key.expsk);
@@ -692,7 +830,7 @@ impl ZCoin {
     /// degrades to the previous behaviour, which the scan corrects once the block lands.
     #[cfg(not(target_arch = "wasm32"))]
     fn record_sent_shielded_tx(&self, tx: &ZTransaction, additional_data: &AdditionalTxData) {
-        if !matches!(self.rpc_client(), UtxoRpcClientEnum::Electrum(_)) {
+        if !self.is_light() {
             return;
         }
 

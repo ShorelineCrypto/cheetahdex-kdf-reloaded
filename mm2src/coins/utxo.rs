@@ -758,6 +758,10 @@ impl UtxoAddressScanner {
         match rpc_client {
             UtxoRpcClientEnum::Native(native) => UtxoAddressScanner::init_with_native_client(&native).await,
             UtxoRpcClientEnum::Electrum(electrum) => Ok(UtxoAddressScanner::Electrum(electrum)),
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => MmError::err(UtxoRpcError::Internal(
+                "address scanning is not supported over lightwalletd".to_owned(),
+            )),
         }
     }
 
@@ -2233,6 +2237,8 @@ pub(crate) async fn electrum_p2pk_unspents_for_address(
     let electrum = match &utxo.rpc_client {
         UtxoRpcClientEnum::Electrum(electrum) => electrum,
         UtxoRpcClientEnum::Native(_) => return Ok(vec![]),
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => return Ok(vec![]),
     };
 
     let p2pk_script = Builder::build_p2pk(key_pair.public());

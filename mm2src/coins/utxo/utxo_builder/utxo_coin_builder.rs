@@ -114,6 +114,22 @@ pub enum UtxoCoinBuildError {
         ticker: String,
     },
     ElectrumProtocolVersionCheckError(String),
+    /// A Light-mode shielded coin needs at least one lightwalletd endpoint (CRD ch.39 R39.11.5).
+    #[display(
+        fmt = "{}: `light_wallet_d_servers` must list at least one lightwalletd endpoint",
+        ticker
+    )]
+    NoLightwalletdServers {
+        ticker: String,
+    },
+    /// lightwalletd exposes no fee estimation, so `txfee: 0` (estimate) is refused (CRD ch.39 R39.11.1).
+    #[display(
+        fmt = "{}: `txfee: 0` requests fee estimation, which lightwalletd cannot do; declare a fixed `txfee` or omit it",
+        ticker
+    )]
+    NoFixedFeeDeclared {
+        ticker: String,
+    },
     #[display(fmt = "Can not detect the user home directory")]
     CantDetectUserHome,
     #[display(fmt = "Unexpected derivation method: {}", _0)]
@@ -556,11 +572,22 @@ pub trait UtxoCoinBuilderCommonOps {
     }
 
     async fn tx_fee(&self, rpc_client: &UtxoRpcClientEnum) -> UtxoCoinBuildResult<TxFee> {
+        // lightwalletd has no fee estimation: an explicit request for it (`txfee: 0`) is refused.
+        // An undeclared fee keeps the shared fixed default below, as the published ARRR entry relies
+        // on (CRD ch.39 R39.11.1).
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(rpc_client, UtxoRpcClientEnum::LightWalletD(_)) && self.conf()["txfee"].as_u64() == Some(0) {
+            return MmError::err(UtxoCoinBuildError::NoFixedFeeDeclared {
+                ticker: self.ticker().to_owned(),
+            });
+        }
         let tx_fee = match self.conf()["txfee"].as_u64() {
             None => TxFee::FixedPerKb(1000),
             Some(0) => {
                 let fee_method = match &rpc_client {
                     UtxoRpcClientEnum::Electrum(_) => EstimateFeeMethod::Standard,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    UtxoRpcClientEnum::LightWalletD(_) => EstimateFeeMethod::Standard,
                     UtxoRpcClientEnum::Native(client) => client
                         .detect_fee_method()
                         .compat()

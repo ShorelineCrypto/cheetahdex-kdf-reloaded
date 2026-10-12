@@ -85,7 +85,7 @@ impl QtumDockerOps {
                     .expect("!createcontract");
                 result.address.0.into()
             },
-            UtxoRpcClientEnum::Electrum(_) => panic!("Native client expected"),
+            _ => panic!("Native client expected"),
         }
     }
 }
