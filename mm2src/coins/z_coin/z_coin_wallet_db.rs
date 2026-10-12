@@ -1541,7 +1541,6 @@ fn decode_display_block_hash(name: &str, value: &str) -> Result<[u8; 32], String
 
 fn convert_compact_block(block: z_coin_grpc::CompactBlock) -> Result<zcash_compact::CompactBlock, String> {
     Ok(zcash_compact::CompactBlock {
-        proto_version: block.proto_version,
         height: block.height,
         hash: block.hash,
         prev_hash: block.prev_hash,
@@ -1560,6 +1559,7 @@ fn convert_compact_tx(tx: z_coin_grpc::CompactTx) -> zcash_compact::CompactTx {
         spends: tx.spends.into_iter().map(convert_compact_spend).collect(),
         outputs: tx.outputs.into_iter().map(convert_compact_output).collect(),
         actions: Vec::new(),
+        ironwood_actions: Vec::new(),
         vin: Vec::new(),
         vout: Vec::new(),
     }
@@ -2094,6 +2094,7 @@ impl BlockSource for PirateChainMetadataBlockSource<'_> {
                 block.chain_metadata = Some(zcash_compact::ChainMetadata {
                     sapling_commitment_tree_size,
                     orchard_commitment_tree_size: 0,
+                    ironwood_commitment_tree_size: 0,
                 });
             }
             with_block(block)
@@ -2494,7 +2495,6 @@ mod tests {
 
     fn empty_compact_block(height: u64, hash_byte: u8, prev_hash_byte: u8) -> zcash_compact::CompactBlock {
         zcash_compact::CompactBlock {
-            proto_version: 0,
             height,
             hash: vec![hash_byte; 32],
             prev_hash: vec![prev_hash_byte; 32],
@@ -2504,6 +2504,7 @@ mod tests {
             chain_metadata: Some(zcash_compact::ChainMetadata {
                 sapling_commitment_tree_size: 0,
                 orchard_commitment_tree_size: 0,
+                ironwood_commitment_tree_size: 0,
             }),
         }
     }
@@ -2540,7 +2541,6 @@ mod tests {
             ..Default::default()
         };
         zcash_compact::CompactBlock {
-            proto_version: 0,
             height,
             hash: vec![hash_byte; 32],
             prev_hash: vec![prev_hash_byte; 32],
@@ -2550,6 +2550,7 @@ mod tests {
             chain_metadata: Some(zcash_compact::ChainMetadata {
                 sapling_commitment_tree_size: 1,
                 orchard_commitment_tree_size: 0,
+                ironwood_commitment_tree_size: 0,
             }),
         }
     }
@@ -3681,7 +3682,6 @@ mod tests {
                     }
                 };
                 zcash_compact::CompactBlock {
-                    proto_version: 0,
                     height,
                     hash: deterministic_compact_hash(height),
                     prev_hash: deterministic_compact_hash(height - 1),
@@ -3771,7 +3771,6 @@ mod tests {
         );
         reopened
             .insert_compact_block(zcash_compact::CompactBlock {
-                proto_version: 0,
                 height: 8012,
                 hash: deterministic_compact_hash(8012),
                 prev_hash: deterministic_compact_hash(8011),
@@ -4271,6 +4270,9 @@ mod tests {
         assert_eq!(account_count, 0, "legacy account rows must not be migrated or reused");
     }
 
+    // Re-pinned for zcash_client_sqlite 0.22.0 (was 467 records / 48 migrations on 0.21.1).
+    // Wallet DBs created by the 0.21.1 schema no longer match this fingerprint; see the
+    // Step B report on the (undecided) upgrade path for them.
     #[test]
     fn selected_current_schema_identity_is_pinned() {
         use sha2::{Digest, Sha256};
@@ -4303,15 +4305,15 @@ mod tests {
             migration_hasher.update(b"\n");
         }
         assert_eq!(fingerprint.user_version, 8);
-        assert_eq!(fingerprint.records.len(), 467);
+        assert_eq!(fingerprint.records.len(), 727);
         assert_eq!(
             hex::encode(hasher.finalize()),
-            "dfba9135b6d5ae446e88d83d162e9458730b5b098051d8565fdd91fe6be5bea8"
+            "4ebc85f7ea3516d019b3d0d4680a6cb75ec980bfe81437abb4913d50b3407350"
         );
-        assert_eq!(migration_ids.len(), 48);
+        assert_eq!(migration_ids.len(), 71);
         assert_eq!(
             hex::encode(migration_hasher.finalize()),
-            "7b506df8a2b119fb143664a1c0b5eddfa7de5fe8458f07829818c59e5b39ddbb"
+            "1142e14a2d3103f1cabbbcbc2d686000e021bf88bcbcce2d34f7d0a040e2d08b"
         );
     }
 
@@ -4510,5 +4512,150 @@ impl ZCoinShieldedHistory {
             )
             .map_err(|e| e.to_string())?;
         Ok(count > 0)
+    }
+}
+
+/// Step B of the ARRR Ironwood plan: `zcash_primitives` 0.30.1 reads version-6
+/// transactions unconditionally. In 0.28.0 the v6 arm of `TxVersion::read` sat behind
+/// `cfg(zcash_unstable = "nu7")`, which this build does not set, so every v6
+/// transaction was rejected as "Unknown transaction format".
+#[cfg(test)]
+mod v6_transaction_parsing_tests {
+    use zcash_primitives::transaction::{Transaction, TxVersion};
+    use zcash_protocol::consensus::BranchId;
+
+    /// Raw bytes of the Pirate test-chain transaction at height 68373 (txid
+    /// `cdc4274f6c4a...` in internal byte order): a version-6 transaction, recorded from the
+    /// offline fixture corpus so the regression outlives that chain.
+    const V6_TX_68373_HEX: &str = concat!(
+        "0600008098b684d85b16a53700000000dd0b01000000018c9d97662739c35007da2a0e82df63dc1d",
+        "98f4d376127d7a46a6f5f51c1644ad08164481c8a82d474cf3ea3344d14f84303f84a62eafcdbc3d",
+        "0293f541e2fec5d11a2e89df9e32dbea9f3eaaa683db9b42161f6be5925a22f86dae754b23c35602",
+        "e29c9bb9f8a7f785ac6fcc8e20039df45c875a52fcd64fbd73b8338acb49b7c62c153c2857ee02e5",
+        "1262391d973a14cfc326ab0d06dd4f665efadf497e7a6741ccfe961355b697c8a7f3c4d846e97f9e",
+        "0c77de46a66be7b14421256fa8b5db273450893d0bbf3af5232d763b5c0b1a2e96d70baee0ab6ab8",
+        "f8f0ed9925069e3f325430b32d715e997a7c3b437ed50eddb3b6486c32ad4a869f13f175369a4769",
+        "ccef5b0b4e5f5f061c44966131b2ef6cc43884c65e7159a81b567e409145e0cf2eaa19a4a0589be7",
+        "3e31a3ecc24bfcb45093299134384ebda38d41092038fb320ce63264ad18086209305323aae2eedd",
+        "8b0dc2192d6c9fe25ae84487b446f6e79778fa710afc3fc2c6d761152398d57bd2b5f02bff164edb",
+        "e4430602f55b119571778f582c0c1128ec49f55fd108108075e3d2d0d4d425fa55ee14cbcf4b3fab",
+        "ddac4b15e3fe760a9a26d62f5abadc5ec4fd13d9c9a7d912b08581d5d5bd5fc0ef7d5527e7d5a8bf",
+        "4e2a03c6356c0bfabf6a93a13e1af98cbf547116764af592f51074cb14362e74e61c669e774ba40e",
+        "dc2c82003c6e11d5a9b96ae6b4efee2dc3c1b5625bd722ac535be1f9c6aed005ab7713fa558617af",
+        "af185ce498eceacaa79a30ff323ad1313c7addef522b3edeb6f04e4263cb0889fa4a21882f8b2435",
+        "7a025de15737c8a618a5c2b30078bae8e0ad54e723f4f705b7b95e3d759f5e573e15497fe97d8058",
+        "3857a3c527e421e796a7e933e11401614dc7a0e225e74cbee471f464f0764c1263cdc9791f709bb2",
+        "08d1b1c934e0b4851ccbd3a1cef480272eb3a07912f1096d76a3718edff250f2d819ecc82d1cd22c",
+        "85a0d33a71b4307ad3e21562de5a24005286387d18f4ea8ff6ef63b301297ce4d479d03403ef895c",
+        "0480aa5ec4aad867bdb3e2c0e51c2918e4ddce5073a7352cca41196e3bd47c18996908424c41182f",
+        "99a1c8dc3f690689bead535a4283f71caa86fc55447b63b7a09612009e7f993bd3c63129a86288c3",
+        "3c8de3f4c7217e2f676a23b3d4c4f6bc616ba7aeb5f0c58c965de94ee3b32b18f86b3a2f3bea5237",
+        "d69684dbf8b5d308d5ee3d6f6fa994421db220126df7c9b3298943ebf67ababe983795f799124c22",
+        "b23ee8d41937caa6d990407ff0059ca580aabf15f62a4196b81fa7750cb817f9c8d4126261d5b413",
+        "4dba1b8f0a6ec73c519569b68f1e9684182008820bd7c7502aaa185d016cea3f770e119ce76e6cd6",
+        "77ca553fb0116470478cecb6d3d20daa42f7b0af8433e93d6b3909511eefc8c62b3cd5c256289be9",
+        "ffec1464d6ba8e0713db617d3c074faaa3b0afaee2b8f5caf56bea218d8a91ade3603c945f367a14",
+        "0bc22f6e8521a0b31baef1f80a420f962c4f105da7c198a5161cd1093c5b57780e1b84dfb0044733",
+        "c30edf368e32f4bd10031d3e47089c6c6c2bed9fa1462285a544015c21603de539dcc9cd17654adf",
+        "29184662700e974261e3116fdb520bb957077185ed805800b157698e31bd51824e2f8eba6f57ab25",
+        "214a7be200b9dc64a780c185a0301a6f206a970da277e036a4c96f3d6f4ec6d5dd2bf64895610275",
+        "10d39250658a3f462ec02556bd8730ceb6a2f3a1f6f93431ba2c176d69297137160979b6e9ae725e",
+        "e3a9efdf1de6ba07184ca144f44fe5049af4fc72f3cad146c54149693e4989457f9a53f0ec4a3ae0",
+        "175df32fe7b41ed96a9488014ad8faf35864755f0a7f273774d8782c889b5c98994017ed07058e7c",
+        "75856089192889136715457a6f727db5058395f49552caeb49085750807ad1eb302aaf3d811ad5a4",
+        "75273965c9b6c05351f0f6d05e0087a3611d34593637d0acbeddbbc27b2eb372fbe4a30a4da48ce5",
+        "cb4b199beb4aae99152cff406a9e70f3c40bf8bda991c0646beaabc1b461ad72202f3debce368db4",
+        "a950837863dffc37a828e8cbc8262ba9c08b5a7dc7a260ce9b3765a4ad0ff96ae03c44b70b4df137",
+        "ebb8da51a6b048925b30826a037ea2bdbece598dcdc18fe99c114fa60354948bf1f373e6ecc3ff5d",
+        "3b634c4e64e9268543c4befc332248393ac1406e1ebd70a8d2b5ed094f081d4714b1f497ee8214be",
+        "84422062a915ccc70985860c19bab7145af3eb06c31a7ec007e97023a6f302fd1027000000000000",
+        "09076428c32f511cb5427f2c7a5e97195342a18c0692937420c8d1f048eb9529acb5870af996dbf9",
+        "984f82fcba49a233d9dfc66f4a522682347ed1a35bfe6959e24eb502186cd0501ea478ea3d519495",
+        "a7419df8319044b6773ba1ffc0c3f96316d8e6da4ef3cbe31843e428bf87d3121460478659eb4a55",
+        "dd06a7017a2995290464652a97253ca3674810fc448d6b56cff602928ef3d9f31cfc716a68704ef4",
+        "e309a7381b6263d9e113146e9f41ec52a71f14aaf61745fd4da8865caa69c445db684e457ff98fbc",
+        "623039fa555b5c927da7b657bb2915afbb7a9cb5b44b55327efe3fd4841f396f12b512d8390702a0",
+        "742ee5ed0e162132f61d5e88be490f8a31f554bee15d8e20c070d2e268987c29e815de89f497fe66",
+        "b6eaad61079fcf0aae6f52541922b8f707e58d4b32f05525b8f351b3c410d4892c48acbda160e1ac",
+        "d647ae18fd86ec73ce35b43832a8ef76b34b41faecb4a6e7b1c6a567f15d005c5557b4bc1cc005b5",
+        "c87cd389669001cbf42d428b2f28d334c757801bcd418e0502071f0243941652c7ec0f8b9a714715",
+        "1b57d89bb79c808daa6caaab932c4e8f2db7b9cfe5cf440b77f394f79ae51586825cc0e5ddb2861d",
+        "73de07ba29fb90d40af05c96a8c9e60ce9b66170c95d58d3ddb82ff768d3f48de63b44efebb30a42",
+        "a7b8aa2073aa1df99a1ce6ff26a2d8a29372c9d007a6f2f75bcd663252c26d22a72b5c97004e5a36",
+        "4bea7bf8031a3cdcafa19a3fef9a43c16dbb0bb1745615ffb1a271df8ffce05f09f80bb294b03ad2",
+        "2f5d7ac0b9d80688d2b638b2501c8d4d16e770c160698270fd8a7bdf59d9ef19fc04317d6c3f0523",
+        "929bc544c811d32ff7b33ed26e9ec173fbe4eda27aadda94b1c7b6f7988b603445b7a13e95b3568d",
+        "592ddd415157d1ad4992cefb5dc3641a5d97ed20295963f307ddac4767da1cc7e5f045eb18d1efe9",
+        "74fe2b9b0cd9efc0474244e0a334e1b7435631b85937350f4d1fba590afdee6f064e4df691dabf19",
+        "ce177d4b1407e48e09274cd18504ad060000",
+    );
+    const V6_TX_68373_TXID_INTERNAL_PREFIX: &str = "cdc4274f6c4a";
+
+    fn parse(raw: &[u8]) -> std::io::Result<Transaction> {
+        // The branch id argument only matters for pre-v5 layouts; v5/v6 carry their own.
+        Transaction::read(raw, BranchId::Sapling)
+    }
+
+    #[test]
+    fn a_v6_transaction_parses_with_the_expected_version_and_txid() {
+        let raw = hex::decode(V6_TX_68373_HEX).unwrap();
+        let tx = parse(&raw).unwrap();
+        assert_eq!(tx.version(), TxVersion::V6);
+        assert_eq!(tx.consensus_branch_id(), BranchId::Nu6_3);
+        assert!(
+            hex::encode(tx.txid().as_ref()).starts_with(V6_TX_68373_TXID_INTERNAL_PREFIX),
+            "txid must be the v6 digest, not a double-SHA256 of the wire bytes"
+        );
+        // Round trip: the parser must consume and re-emit exactly the same bytes.
+        let mut out = Vec::new();
+        tx.write(&mut out).unwrap();
+        assert_eq!(out, raw);
+    }
+
+    /// Parses every transaction of the offline corpus (`local/arrr-ironwood-fixtures`,
+    /// untracked third-party chain data) when `ARRR_IRONWOOD_FIXTURES` points at it, and
+    /// checks each parsed txid against the corpus index. Without the variable it is a no-op.
+    #[test]
+    fn the_offline_ironwood_corpus_parses_and_txids_match() {
+        let Some(dir) = std::env::var_os("ARRR_IRONWOOD_FIXTURES") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        let index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("tx_index.json")).unwrap()).unwrap();
+        let mut v6 = 0usize;
+        let mut v4 = 0usize;
+        for entry in index.as_array().unwrap() {
+            let txid_internal = entry["txid_internal"].as_str().unwrap();
+            let height = entry["height"].as_u64().unwrap();
+            let file = std::fs::read_dir(dir.join("raw"))
+                .unwrap()
+                .map(|e| e.unwrap().file_name().into_string().unwrap())
+                .find(|n| n.starts_with(&format!("h{height}_")) && n.contains(&txid_internal[..12]))
+                .unwrap();
+            let raw = hex::decode(std::fs::read_to_string(dir.join("raw").join(file)).unwrap().trim()).unwrap();
+            let tx = parse(&raw).unwrap_or_else(|e| panic!("height {height}: {e}"));
+            assert_eq!(hex::encode(tx.txid().as_ref()), txid_internal, "height {height}");
+            match tx.version() {
+                TxVersion::V6 => v6 += 1,
+                TxVersion::V4 => v4 += 1,
+                other => panic!("height {height}: unexpected version {other:?}"),
+            }
+            let sapling = tx.sapling_bundle();
+            assert_eq!(
+                sapling.map_or(0, |b| b.shielded_spends().len() as u64),
+                entry["spends"].as_u64().unwrap(),
+                "height {height} spends"
+            );
+            assert_eq!(
+                sapling.map_or(0, |b| b.shielded_outputs().len() as u64),
+                entry["outputs"].as_u64().unwrap(),
+                "height {height} outputs"
+            );
+            let mut out = Vec::new();
+            tx.write(&mut out).unwrap();
+            assert_eq!(out, raw, "height {height} round trip");
+        }
+        assert_eq!((v4, v6), (1, 18));
     }
 }

@@ -50,15 +50,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, InputSource, SentTransaction, TargetValue,
-                                     WalletCommitmentTrees, WalletRead, WalletWrite};
+use zcash_client_backend::data_api::{wallet::{input_selection::LockFilter, ConfirmationsPolicy},
+                                     InputSource, SentTransaction, TargetValue, WalletCommitmentTrees, WalletRead,
+                                     WalletWrite};
 use zcash_client_backend::decrypt_transaction;
 use zcash_keys::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::merkle_tree::read_commitment_tree;
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_primitives::transaction::builder::{BuildConfig, Builder as ZTxBuilder};
+use zcash_primitives::transaction::builder::{BuildConfig, Builder as ZTxBuilder, BundlePadding};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_primitives::transaction::fees::fixed::FeeRule as FixedFeeRule;
 use zcash_primitives::transaction::Transaction as ZTransaction;
@@ -67,7 +68,7 @@ use zcash_protocol::constants::mainnet as z_mainnet_constants;
 use zcash_protocol::memo::MemoBytes;
 use zcash_protocol::value::Zatoshis as Amount;
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_protocol::ShieldedProtocol;
+use zcash_protocol::ShieldedPool;
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_transparent::builder::TransparentSigningSet;
 use zcash_transparent::bundle::TxOut;
@@ -393,7 +394,13 @@ impl consensus::Parameters for ZcoinConsensusParams {
             NetworkUpgrade::Blossom => self.blossom_activation_height.map(BlockHeight::from_u32),
             NetworkUpgrade::Heartwood => self.heartwood_activation_height.map(BlockHeight::from_u32),
             NetworkUpgrade::Canopy => self.canopy_activation_height.map(BlockHeight::from_u32),
-            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu6_2 => None,
+            NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
+            // Ironwood (NU6.3) is not mapped to an activation height yet; that is ARRR
+            // Ironwood plan Step E. `None` keeps the builder on the Sapling-era versions.
+            | NetworkUpgrade::Nu6_3 => None,
         }
     }
 }

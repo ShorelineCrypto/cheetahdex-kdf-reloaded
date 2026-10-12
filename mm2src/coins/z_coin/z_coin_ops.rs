@@ -378,6 +378,9 @@ impl ZCoin {
             BuildConfig::Standard {
                 sapling_anchor: Some(sapling_anchor),
                 orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
             },
         );
         let fvk = FullViewingKey::from_expanded_spending_key(&self.z_fields.z_spending_key.expsk);
@@ -497,10 +500,12 @@ impl ZCoin {
             .select_spendable_notes(
                 account_id,
                 TargetValue::AtLeast(target_value),
-                &[ShieldedProtocol::Sapling],
+                &[ShieldedPool::Sapling],
                 height,
                 ConfirmationsPolicy::MIN,
                 &[],
+                // The wallet takes no shielded note locks, so lock state is ignored.
+                LockFilter::Unfiltered,
             )
             .map_to_mm(|e| GenTxError::ShieldedWalletDb(e.to_string()))?
             .take_sapling();
@@ -541,6 +546,9 @@ impl ZCoin {
             BuildConfig::Standard {
                 sapling_anchor: Some(sapling_anchor.into()),
                 orchard_anchor: None,
+                ironwood_anchor: None,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
             },
         );
         let fvk = FullViewingKey::from_expanded_spending_key(&self.z_fields.z_spending_key.expsk);

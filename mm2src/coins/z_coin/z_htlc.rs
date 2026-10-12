@@ -22,7 +22,7 @@ use script::{Builder as ScriptBuilder, Opcode, Script};
 use secp256k1::SecretKey;
 use serialization::deserialize;
 use std::convert::Infallible;
-use zcash_primitives::transaction::builder::{BuildConfig, Builder as ZTxBuilder};
+use zcash_primitives::transaction::builder::{BuildConfig, Builder as ZTxBuilder, BundlePadding};
 use zcash_primitives::transaction::fees::fixed::FeeRule as FixedFeeRule;
 use zcash_primitives::transaction::Transaction as ZTransaction;
 use zcash_protocol::consensus;
@@ -154,6 +154,9 @@ pub async fn z_p2sh_spend(
         BuildConfig::Standard {
             sapling_anchor: Some(sapling::Anchor::empty_tree()),
             orchard_anchor: None,
+            ironwood_anchor: None,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     tx_builder.set_lock_time(tx_locktime);
