@@ -1,6 +1,7 @@
 //! Acceptance tests for CRD ch.39 §39.11 (T39.11.a, c, d, f, h, i, j and the byte-order pinning of
 //! R39.11.4c). Everything runs against a scripted in-process transport: no network.
 
+use super::super::z_ironwood::{discover, IronwoodDiscoveryError, IronwoodStatus};
 use super::*;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -141,16 +142,39 @@ fn an_undeclared_upgrade_does_not_make_the_stale_fork_the_expected_chain() {
     assert_eq!(outcome.branch_to_record, Some(IRONWOOD_BRANCH));
 }
 
-/// Declaring the Ironwood height does not (yet) change the branch the build derives (Step E), so
-/// the configuration must keep declining to judge: otherwise merely carrying the height would turn
-/// the inversion back on.
+/// Declaring the Ironwood height binds `Nu6_3` (Step E), so the configuration now determines the
+/// branch at every height -- and determines it correctly on both sides of the height: Sapling's below,
+/// Ironwood's from it. The inversion this guards against is a determination that is right below the
+/// height and wrong above it; a configuration that declares *no* height must still decline to judge.
 #[test]
-fn carrying_the_ironwood_height_does_not_re_arm_the_local_expectation() {
+fn carrying_the_ironwood_height_makes_the_expectation_follow_it_on_both_sides() {
     let mut params = serde_json::to_value(arrr_params()).unwrap();
     params["ironwood_activation_height"] = json!(4_161_185);
     let params: ZcoinConsensusParams = serde_json::from_value(params).unwrap();
     assert_eq!(params.ironwood_activation_height(), Some(4_161_185));
     let policy = AdmissionPolicy::from_params(&params);
+    assert_eq!(policy.schedule.expected_at(4_161_184), Some(SAPLING_BRANCH));
+    assert_eq!(policy.schedule.expected_at(4_161_185), Some(IRONWOOD_BRANCH));
+    assert_eq!(policy.schedule.expected_at(ARRR_TIP), Some(IRONWOOD_BRANCH));
+
+    // Without a declared height nothing is judged at the tip.
+    let undeclared = AdmissionPolicy::from_params(&arrr_params());
+    assert_eq!(undeclared.schedule.expected_at(ARRR_TIP), None);
+}
+
+/// A height *discovered* after the policy was built reaches the build through the shared parameters
+/// but cannot re-arm the policy: its horizon was fixed when the upgrade was undeclared, so it keeps
+/// declining to judge. That is the safe direction -- a late-learned height must never be able to
+/// exclude the healthy endpoints it was learned from.
+#[test]
+fn a_discovered_height_does_not_re_arm_a_policy_built_before_it() {
+    let params = arrr_params();
+    let policy = AdmissionPolicy::from_params(&params);
+    params.record_discovered_ironwood_height(4_161_185);
+    assert_eq!(
+        params.activation_height(NetworkUpgrade::Nu6_3),
+        Some(BlockHeight::from_u32(4_161_185))
+    );
     assert_eq!(policy.schedule.expected_at(ARRR_TIP), None);
 }
 
@@ -1049,4 +1073,79 @@ async fn median_time_past_is_computed_locally_from_compact_block_times() {
         backend.median_time_past(100, MEDIAN_TIME_WINDOW_MAX + 1).await,
         Err(LightwalletdError::InvalidRequest(_))
     ));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ironwood activation discovery (R39.6.4e) against the scripted transport, whose block at height
+// `h` carries time `1000 + h`.
+// ---------------------------------------------------------------------------------------------
+
+/// The activation time under which block `transition` is the first one over it.
+fn time_of_transition(transition: u64) -> u32 { 1_000 + transition as u32 - 1 }
+
+async fn discovered(
+    branch: u32,
+    tip: u64,
+    activation_time: Option<u32>,
+) -> Result<IronwoodStatus, IronwoodDiscoveryError> {
+    let transport = Arc::new(FakeTransport::default());
+    for server in ["a", "b"] {
+        transport.serve(server, Script {
+            info: Some(Ok(info(branch, tip))),
+            ..Script::default()
+        });
+    }
+    discover(&backend_over(&transport, &["a", "b"]), activation_time).await
+}
+
+#[tokio::test]
+async fn a_server_on_ironwood_with_a_known_time_gives_the_derived_height() {
+    // Transition at 4_000_000, tip far beyond: height is the transition plus the settling margin.
+    let status = discovered(IRONWOOD_BRANCH, ARRR_TIP, Some(time_of_transition(4_000_000))).await;
+    assert_eq!(status, Ok(IronwoodStatus::ActiveFrom(4_000_060)));
+}
+
+#[tokio::test]
+async fn a_server_on_ironwood_without_a_time_is_taken_at_its_word() {
+    // The test chain's case: no built-in time applies, the server says Ironwood is active.
+    assert_eq!(
+        discovered(IRONWOOD_BRANCH, ARRR_TIP, None).await,
+        Ok(IronwoodStatus::ActiveFrom(ARRR_TIP as u32))
+    );
+}
+
+#[tokio::test]
+async fn a_server_before_ironwood_stays_not_activated_until_the_height_is_known() {
+    let t = time_of_transition(4_167_000);
+    // The tip has not reached the activation time at all.
+    assert_eq!(
+        discovered(SAPLING_BRANCH, 4_166_999, Some(t)).await,
+        Ok(IronwoodStatus::NotActivated)
+    );
+    // The transition block exists but is not yet 30 deep: the chain itself does not know the height.
+    assert_eq!(
+        discovered(SAPLING_BRANCH, 4_167_020, Some(t)).await,
+        Ok(IronwoodStatus::NotActivated)
+    );
+    // Buried: the upcoming height is known, and the tip is still below it.
+    assert_eq!(
+        discovered(SAPLING_BRANCH, 4_167_030, Some(t)).await,
+        Ok(IronwoodStatus::ActiveFrom(4_167_060))
+    );
+}
+
+#[tokio::test]
+async fn a_server_that_disagrees_with_the_timestamp_rule_is_refused() {
+    let t = time_of_transition(4_167_000);
+    let err = discovered(SAPLING_BRANCH, ARRR_TIP, Some(t)).await.unwrap_err();
+    assert!(matches!(err, IronwoodDiscoveryError::Inconsistent(_)), "{err}");
+}
+
+#[tokio::test]
+async fn an_unreachable_server_is_an_error_and_not_a_default() {
+    let transport = Arc::new(FakeTransport::default());
+    let err = discover(&backend_over(&transport, &["a", "b"]), Some(1))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, IronwoodDiscoveryError::Unavailable(_)), "{err}");
 }

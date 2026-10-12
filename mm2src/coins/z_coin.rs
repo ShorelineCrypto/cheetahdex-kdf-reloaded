@@ -47,7 +47,7 @@ use script::{Builder as ScriptBuilder, Opcode, Script, TransactionInputSigner};
 use serde_json::{json, Value as Json};
 use serialization::{deserialize, CoinVariant};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_client_backend::data_api::{wallet::{input_selection::LockFilter, ConfirmationsPolicy},
@@ -133,11 +133,14 @@ macro_rules! try_ztx_s {
 }
 
 mod z_coin_ops;
+#[cfg(not(target_arch = "wasm32"))] mod z_ironwood;
 #[cfg(not(target_arch = "wasm32"))] mod z_swap_ops;
 #[cfg(target_arch = "wasm32")] mod z_swap_ops_wasm;
 #[cfg(not(target_arch = "wasm32"))] mod z_tx_read;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod z_tx_read_fixtures;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod z_v6_construction_tests;
 
 #[cfg(all(test, feature = "zhtlc-native-tests"))]
 mod z_coin_tests;
@@ -145,12 +148,13 @@ mod z_coin_tests;
 /// Whether this build can construct the transaction format the Ironwood network
 /// upgrade requires.
 ///
-/// `false` until the shielded transaction builder is able to emit version-6
-/// transactions. While it is `false`, a coin that declares an Ironwood upgrade
-/// stops accepting *new* swaps ahead of activation and stops building
-/// transactions once activation passes; receiving, balance and history are
-/// unaffected, and swaps already under way are never interrupted.
-const IRONWOOD_V6_SUPPORTED: bool = false;
+/// `true`: the shielded transaction builder emits version-6 transactions from the Ironwood
+/// activation height on (R39.6.4e) and the swap-path parsers read them (R39.11.16), so the swap
+/// freeze (R39.6.4b) and the build refusal (R39.6.4c) are inert. The gates and their rules are
+/// kept, and tested with this flag modelled as `false`, because they are the behaviour of a build
+/// that cannot construct the format. Do not set this back without also leaving the builder able to
+/// emit version 4 before activation.
+const IRONWOOD_V6_SUPPORTED: bool = true;
 
 /// Pirate Chain mainnet Ironwood activation: Sat 3 Oct 2026 19:00:00 UTC.
 ///
@@ -159,6 +163,10 @@ const IRONWOOD_V6_SUPPORTED: bool = false;
 /// activation *height* will be published ahead of the upgrade and that there will
 /// be no standardness grace period.
 const ARRR_IRONWOOD_ACTIVATION_TIME: u32 = 1_791_054_000;
+
+/// Sapling activation height of the real ARRR chain, which identifies it among chains that present
+/// the same address prefixes (see [`builtin_ironwood_activation_time`]).
+const ARRR_SAPLING_ACTIVATION_HEIGHT: u32 = 152_855;
 
 /// The Ironwood activation time this build knows for a coin, used when the coin
 /// configuration does not supply one.
@@ -170,12 +178,17 @@ const ARRR_IRONWOOD_ACTIVATION_TIME: u32 = 1_791_054_000;
 /// than an operator preference, so the value is carried here and a configuration
 /// entry overrides it (R39.6.4d).
 ///
-/// Keyed on ticker rather than on the consensus parameters because the parameters
-/// of an Ironwood chain are indistinguishable from those of a chain that will
-/// never upgrade.
-fn builtin_ironwood_activation_time(ticker: &str) -> Option<u32> {
+/// Keyed on ticker **and on the chain's identity** (R39.6.4d). A ticker alone is not enough, and
+/// neither are the address prefixes: Pirate's own Ironwood test chain presents exactly as mainnet
+/// (mainnet prefixes `zs` and `pirate`, `chainName` `main`) while running a different history, so
+/// "mainnet-shaped parameters" does not mean "the real ARRR chain". What does differ, and cannot be
+/// shared by two chains that diverge from genesis, is the Sapling activation height, so that is part
+/// of the key.
+fn builtin_ironwood_activation_time(ticker: &str, params: &ZcoinConsensusParams) -> Option<u32> {
     match ticker {
-        "ARRR" => Some(ARRR_IRONWOOD_ACTIVATION_TIME),
+        "ARRR" if params.sapling_activation_height == ARRR_SAPLING_ACTIVATION_HEIGHT => {
+            Some(ARRR_IRONWOOD_ACTIVATION_TIME)
+        },
         _ => None,
     }
 }
@@ -188,18 +201,26 @@ fn builtin_ironwood_activation_time(ticker: &str) -> Option<u32> {
 /// compiled-in date that could not be overridden would refuse every transaction of
 /// the coin, and freeze its market, until a new binary shipped.
 ///
-/// The built-in value is withheld from test and regtest parameters: those networks
-/// activate Ironwood at a *height* with no timestamp at all (Pirate testnet at
-/// height 297), so applying a mainnet timestamp there would gate a chain whose
-/// activation it does not describe.
+/// The built-in value is withheld unless the parameters describe the chain it was read from
+/// ([`builtin_ironwood_activation_time`]). That covers the test and regtest networks, which
+/// activate Ironwood at a *height* with no timestamp at all, and also Pirate's own test chain, which
+/// carries mainnet address prefixes and so cannot be told from the real chain by them.
 fn effective_ironwood_activation_time(params: &ZcoinConsensusParams, ticker: &str) -> Option<u32> {
     if params.ironwood_gate_disabled() {
         return None;
     }
+    configured_or_builtin_ironwood_time(params, ticker)
+}
 
+/// The Ironwood activation time used to *discover* the activation height: the configured value,
+/// else the built-in one for the real chain, regardless of `ironwood_gate_disabled`. That switch
+/// opts a coin out of the swap freeze and the build refusal; with v6 construction supported neither
+/// exists, and a coin that opts out must still be able to build the transaction format its network
+/// requires.
+fn configured_or_builtin_ironwood_time(params: &ZcoinConsensusParams, ticker: &str) -> Option<u32> {
     params.ironwood_activation_time().or_else(|| {
         if matches!(params.network_type_hint(), NetworkType::Main) {
-            builtin_ironwood_activation_time(ticker)
+            builtin_ironwood_activation_time(ticker, params)
         } else {
             None
         }
@@ -334,6 +355,12 @@ pub struct ZcoinConsensusParams {
     /// wallet shipping an older coin configuration will not carry it at all.
     #[serde(default)]
     ironwood_activation_height: Option<u32>,
+    /// The Ironwood activation height learned at runtime (0 = not known), shared by every copy of
+    /// these parameters so a height discovered after the coin was built reaches the transaction
+    /// builder and the wallet database alike. Never serialized: it is a fact about the live chain,
+    /// not configuration (R39.6.4e).
+    #[serde(skip)]
+    ironwood_discovered_height: Arc<AtomicU32>,
     /// SLIP-44 coin type used in shielded HD derivation.
     coin_type: u32,
     /// Bech32 human-readable prefix for extended spending keys.
@@ -379,6 +406,25 @@ impl ZcoinConsensusParams {
     #[allow(dead_code)] // Consumed by the Ironwood build guard and swap freeze.
     pub(crate) fn ironwood_activation_height(&self) -> Option<u32> { self.ironwood_activation_height }
 
+    /// The Ironwood activation height in force: the configured one, else the one discovered at
+    /// runtime. `None` means the upgrade is not known to have a height yet, so the builder stays on
+    /// the pre-Ironwood transaction version.
+    pub(crate) fn effective_ironwood_activation_height(&self) -> Option<u32> {
+        self.ironwood_activation_height
+            .or_else(|| match self.ironwood_discovered_height.load(AtomicOrdering::SeqCst) {
+                0 => None,
+                discovered => Some(discovered),
+            })
+    }
+
+    /// Records a height discovered at runtime. A configured height always wins, and zero is not a
+    /// height the chain can activate at.
+    pub(crate) fn record_discovered_ironwood_height(&self, height: u32) {
+        if height != 0 {
+            self.ironwood_discovered_height.store(height, AtomicOrdering::SeqCst);
+        }
+    }
+
     /// Whether this coin opts out of Ironwood gating altogether.
     pub(crate) fn ironwood_gate_disabled(&self) -> bool { self.ironwood_gate_disabled }
 
@@ -403,13 +449,11 @@ impl consensus::Parameters for ZcoinConsensusParams {
             NetworkUpgrade::Blossom => self.blossom_activation_height.map(BlockHeight::from_u32),
             NetworkUpgrade::Heartwood => self.heartwood_activation_height.map(BlockHeight::from_u32),
             NetworkUpgrade::Canopy => self.canopy_activation_height.map(BlockHeight::from_u32),
-            NetworkUpgrade::Nu5
-            | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu6_2
-            // Ironwood (NU6.3) is not mapped to an activation height yet; that is ARRR
-            // Ironwood plan Step E. `None` keeps the builder on the Sapling-era versions.
-            | NetworkUpgrade::Nu6_3 => None,
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu6_2 => None,
+            // Ironwood (NU6.3) is the one post-Sapling upgrade a Pirate chain has. Until its height
+            // is configured or discovered it reports `None`, which keeps the builder on the
+            // Sapling-era versions; from the height on, the builder selects version 6 (R39.6.4e).
+            NetworkUpgrade::Nu6_3 => self.effective_ironwood_activation_height().map(BlockHeight::from_u32),
         }
     }
 }
@@ -937,6 +981,11 @@ mod zip212_decryption_tests {
 mod ironwood_swap_freeze_tests {
     use super::*;
 
+    /// What the gate functions are given to model a build that cannot construct version 6. The
+    /// production build can, so the gates never engage in it (`IRONWOOD_V6_SUPPORTED`); these tests
+    /// pin the rules for the build the gates exist for.
+    const BUILD_WITHOUT_V6: bool = false;
+
     /// Pirate mainnet Ironwood activation: Sat 3 Oct 2026 19:00:00 UTC.
     ///
     /// Aliases the production constant so the two cannot drift.
@@ -947,7 +996,7 @@ mod ironwood_swap_freeze_tests {
     fn frozen_at(now_sec: u64) -> bool {
         ironwood_swap_freeze_active_at(
             Some(ARRR_IRONWOOD_ACTIVATION),
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
             now_sec,
         )
@@ -960,7 +1009,7 @@ mod ironwood_swap_freeze_tests {
         for now in [0, ARRR_FREEZE_START, u64::MAX] {
             assert!(!ironwood_swap_freeze_active_at(
                 None,
-                IRONWOOD_V6_SUPPORTED,
+                BUILD_WITHOUT_V6,
                 IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
                 now
             ));
@@ -1034,7 +1083,7 @@ mod ironwood_swap_freeze_tests {
     /// build without it must refuse rather than emit something unspendable.
     #[test]
     fn building_is_refused_from_activation_onwards() {
-        let refused = |now| ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), IRONWOOD_V6_SUPPORTED, now);
+        let refused = |now| ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), BUILD_WITHOUT_V6, now);
         assert!(
             !refused(ARRR_IRONWOOD_ACTIVATION as u64 - 1),
             "a second before activation must still build"
@@ -1052,7 +1101,7 @@ mod ironwood_swap_freeze_tests {
     #[test]
     fn building_is_never_refused_without_an_upgrade_or_with_v6_support() {
         for now in [0, ARRR_IRONWOOD_ACTIVATION as u64, u64::MAX] {
-            assert!(!ironwood_build_refused_at(None, IRONWOOD_V6_SUPPORTED, now));
+            assert!(!ironwood_build_refused_at(None, BUILD_WITHOUT_V6, now));
             assert!(!ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), true, now));
         }
     }
@@ -1072,12 +1121,12 @@ mod ironwood_swap_freeze_tests {
         let midpoint = freeze_start + (build_stop - freeze_start) / 2;
         assert!(ironwood_swap_freeze_active_at(
             Some(ARRR_IRONWOOD_ACTIVATION),
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
             midpoint
         ));
         assert!(
-            !ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), IRONWOOD_V6_SUPPORTED, midpoint),
+            !ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), BUILD_WITHOUT_V6, midpoint),
             "an in-flight swap must still be able to spend or refund during the freeze window"
         );
         // And the window is wide enough for the longest payment lock to expire.
@@ -1093,7 +1142,7 @@ mod ironwood_swap_freeze_tests {
     fn an_activation_time_inside_the_margin_clamps_instead_of_wrapping() {
         for now in [0, 1, ARRR_FREEZE_START] {
             assert!(
-                ironwood_swap_freeze_active_at(Some(10), IRONWOOD_V6_SUPPORTED, IRONWOOD_SWAP_FREEZE_MARGIN_SECS, now),
+                ironwood_swap_freeze_active_at(Some(10), BUILD_WITHOUT_V6, IRONWOOD_SWAP_FREEZE_MARGIN_SECS, now),
                 "an activation already in the past must freeze, not wrap (now={})",
                 now
             );
@@ -1104,6 +1153,9 @@ mod ironwood_swap_freeze_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod ironwood_consensus_param_tests {
     use super::*;
+
+    /// See `ironwood_swap_freeze_tests::BUILD_WITHOUT_V6`.
+    const BUILD_WITHOUT_V6: bool = false;
 
     /// The ARRR mainnet `consensus_params` as published in `GLEECBTC/coins`, which
     /// carries no Ironwood keys. It must keep parsing, with both fields absent.
@@ -1169,24 +1221,24 @@ mod ironwood_consensus_param_tests {
         let freeze_start = ARRR_IRONWOOD_ACTIVATION_TIME as u64 - IRONWOOD_SWAP_FREEZE_MARGIN_SECS;
         assert!(!ironwood_swap_freeze_active_at(
             effective,
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
             freeze_start - 1,
         ));
         assert!(ironwood_swap_freeze_active_at(
             effective,
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
             freeze_start,
         ));
         assert!(!ironwood_build_refused_at(
             effective,
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             ARRR_IRONWOOD_ACTIVATION_TIME as u64 - 1
         ));
         assert!(ironwood_build_refused_at(
             effective,
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             ARRR_IRONWOOD_ACTIVATION_TIME as u64
         ));
     }
@@ -1316,12 +1368,12 @@ mod ironwood_consensus_param_tests {
         assert!(reported.contains(&message), "{reported}");
     }
 
-    /// A2 only carries the data. Until Step 3 maps it, no post-Sapling upgrade may
-    /// report an activation height, because the transaction builder derives the
-    /// consensus branch ID from exactly these lookups: a premature mapping would
-    /// change the transactions this build signs.
+    /// Step E binds `Nu6_3` to the Ironwood height, and only that upgrade: the unused Zcash
+    /// upgrades (Nu5 .. Nu6_2) stay unmapped, because the builder derives the consensus branch ID
+    /// from exactly these lookups and Pirate has none of them. Below the height the branch is
+    /// Sapling's, from it Ironwood's.
     #[test]
-    fn carrying_the_ironwood_height_does_not_yet_move_the_branch_id() {
+    fn the_ironwood_height_moves_the_branch_id_and_nothing_else_does() {
         let mut with_height = arrr_params_without_ironwood();
         with_height["ironwood_activation_time"] = json!(1_791_054_000u32);
         with_height["ironwood_activation_height"] = json!(4_141_710u32);
@@ -1339,9 +1391,26 @@ mod ironwood_consensus_param_tests {
             params.activation_height(NetworkUpgrade::Sapling),
             Some(BlockHeight::from_u32(152_855))
         );
-        // Far above the declared Ironwood height, the branch in force is still Sapling.
         assert_eq!(
-            BranchId::for_height(&params, BlockHeight::from_u32(4_200_000)),
+            params.activation_height(NetworkUpgrade::Nu6_3),
+            Some(BlockHeight::from_u32(4_141_710))
+        );
+        assert_eq!(
+            BranchId::for_height(&params, BlockHeight::from_u32(4_141_709)),
+            BranchId::Sapling
+        );
+        assert_eq!(
+            BranchId::for_height(&params, BlockHeight::from_u32(4_141_710)),
+            BranchId::Nu6_3
+        );
+
+        // The activation *time* alone moves nothing: it is data for discovery, not a height.
+        let mut time_only = arrr_params_without_ironwood();
+        time_only["ironwood_activation_time"] = json!(1_791_054_000u32);
+        let time_only: ZcoinConsensusParams = serde_json::from_value(time_only).unwrap();
+        assert_eq!(time_only.activation_height(NetworkUpgrade::Nu6_3), None);
+        assert_eq!(
+            BranchId::for_height(&time_only, BlockHeight::from_u32(4_200_000)),
             BranchId::Sapling
         );
     }

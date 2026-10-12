@@ -1266,6 +1266,15 @@ impl LightwalletdBackend {
         self.fresh_tip().await.map(|tip| tip.monotonic())
     }
 
+    /// What `GetLightdInfo` reports, from the first admitted endpoint that answers.
+    pub(crate) async fn server_info(&self) -> Result<ServerInfo, LightwalletdError> {
+        self.call("GetLightdInfo", |t, s| async move { t.light_info(&s).await }.boxed())
+            .await
+    }
+
+    /// The Sapling activation height admission holds every endpoint to: the floor of any block read.
+    pub(crate) fn sapling_activation_height(&self) -> u64 { self.policy.sapling_activation_height }
+
     pub(crate) async fn block_time(&self, height: u64) -> Result<u32, LightwalletdError> {
         self.call("GetBlock", move |t, s| {
             async move { t.block_time(&s, height).await }.boxed()

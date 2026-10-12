@@ -1249,3 +1249,23 @@ then mainnet.
   unproved on a funded HTLC; parser routing (Step D); `Nu6_3` mapping and the gates (Step E). The
   divergence from GLEEC KDF is recorded in `RELOADED_VS_GLEEC.md` and `docs/GLEEC_COMPATIBILITY.md`
   (no opt‑in exists, and the entries say so). CRD ch.39 §39.11 status notes updated in the same commit.
+- **2026‑10‑12 — Step E (branch `feat/arrr-v6-construction`).** v6 construction exists and was moved
+  **ahead** of the swap half of Step C: a live `z_send_htlc` attempt was rejected with
+  `64: ironwood-version`, so nothing — including the P2SH index probe — can be transacted on a
+  post‑Ironwood chain until the builder emits v6. `Nu6_3` reports the configured
+  `ironwood_activation_height`, else a height discovered at runtime and held in a cell shared by every
+  copy of `ZcoinConsensusParams`; the builder then selects branch `0x37A5165B`/v6 by itself (Sapling
+  bundle, one `0x00` Orchard slot, empty Ironwood bundle). Discovery runs inside
+  `ZCoin::builder_target_height` (the single height authority): server branch at its tip +
+  first‑block‑over‑the‑activation‑time search + the 60‑block margin and 30‑block trust depth; a
+  disagreement or an unreadable answer **refuses the build** instead of choosing a version. The
+  built‑in activation time is now keyed on the ticker **and** the Sapling activation height (152 855),
+  because Pirate's test chain presents as mainnet. `IRONWOOD_V6_SUPPORTED` is true, so the swap freeze
+  and build refusal are inert. Verified offline: wrapper bytes, round trip, ZIP‑244 txid, v4 below the
+  height and without one, a Sapling spend + P2SH + change funding verifying under the v6 sighash, and a
+  real mined v6 transaction (1 spend, 2 outputs, 2 Ironwood actions) whose Sapling proofs and
+  signatures verify under the library's digest. **Still needs a broadcast:** network acceptance, and a
+  v6 shielded signature over a transaction with transparent inputs (digest commits to prevout data not
+  in the corpus). Not done: the pre‑activation quiet window, persistence of the discovered height,
+  native‑mode discovery. CRD ch.39 R39.6.4e added; `RELOADED_VS_GLEEC.md` and
+  `docs/GLEEC_COMPATIBILITY.md` updated (no opt‑back exists).

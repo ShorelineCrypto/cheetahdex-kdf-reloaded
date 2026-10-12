@@ -65,6 +65,10 @@ pub enum BuilderHeightError {
     TipUnavailable(String),
     #[display(fmt = "{}", _0)]
     StaleTip(String),
+    /// The Ironwood activation could not be established, so the transaction version is unknown
+    /// (R39.6.4e). Refused rather than guessed: the wrong version is rejected by the network.
+    #[display(fmt = "the transaction version could not be chosen: {}", _0)]
+    IronwoodActivation(String),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -112,6 +116,9 @@ impl From<GenTxError> for WithdrawError {
             },
             GenTxError::Rpc(e) => WithdrawError::Transport(e.to_string()),
             GenTxError::BuilderHeight(BuilderHeightError::TipUnavailable(e)) => WithdrawError::Transport(e),
+            GenTxError::BuilderHeight(BuilderHeightError::IronwoodActivation(_)) => {
+                WithdrawError::InternalError(gen_tx.to_string())
+            },
             GenTxError::BuilderHeight(BuilderHeightError::StaleTip(_)) => {
                 WithdrawError::InternalError(gen_tx.to_string())
             },

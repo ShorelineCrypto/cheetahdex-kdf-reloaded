@@ -30,6 +30,12 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
   `LocalTxProver` parameter files; §39.6.1). The transparent UTXO side of a
   shielded coin is iguana-derived even under an HD wallet; only the shielded
   Sapling key is HD-derived, per R39.6.4 §2.
+- **§39.6.4 Ironwood (plan Step E, implemented):** the builder constructs the
+  version-6 transaction format the Ironwood upgrade requires, selected by the
+  coin's Ironwood activation height, which is configured or discovered at runtime
+  (R39.6.4e). The swap freeze (R39.6.4b) and the build refusal (R39.6.4c) are
+  therefore inert in this build. What remains unverified without a broadcast is
+  stated in R39.6.4e's status note.
 - **§39.11 (Part E -- implemented in part):** `lightwalletd` as the **sole**
   backend of a Light-mode shielded coin, with Electrum support for ZHTLC removed.
   **Implemented (ARRR Ironwood plan Step C, the wallet half):** the function table
@@ -397,6 +403,10 @@ the freeze would strand exactly the swaps the freeze exists to protect.
 Receiving, balance, address derivation and history shall remain unaffected in
 both windows.
 
+> **Status update (reloaded, Step E).** This build can construct Ironwood-era
+> transactions (R39.6.4e), so this refusal never engages in it. The rule and its
+> tests are kept for a build that cannot.
+
 R39.6.4b A shielded coin that declares `ironwood_activation_time` and is built
 without the ability to construct Ironwood-era transactions shall refuse to enter
 **new** swaps from a cut-off preceding that activation, and shall report itself
@@ -450,6 +460,13 @@ on a build that does not (this payload is deliberately not
 > to prevent -- a counterparty's HTLC left neither spendable nor refundable
 > across the upgrade.
 >
+> **Status update (reloaded, Step E).** With version-6 construction supported
+> (R39.6.4e) the gates never engage, so `ironwood_gate_disabled` no longer changes
+> any behaviour of the gates. It keeps its meaning for a build that cannot construct
+> the format, and is still accepted. It does **not** disable version-6 construction
+> or activation-height discovery: GLEEC KDF cannot build for a post-Ironwood chain at
+> all, so there is no GLEEC behaviour on that side for the switch to reproduce.
+>
 > **Omitting `ironwood_activation_time` is not an opt-out**, because a built-in
 > activation time applies where the configuration supplies none (R39.6.4d).
 
@@ -479,9 +496,16 @@ The original concern is answered by precedence rather than by abstention:
 
 - A configured `ironwood_activation_time` shall override the built-in value, so a
   moved activation remains a data change and never requires a release.
-- The built-in value shall be withheld from test and regtest parameters, which
-  activate Ironwood at a height with no timestamp at all, so a mainnet timestamp
-  describes neither.
+- The built-in value shall be withheld unless the parameters describe the chain it
+  was read from. That covers the test and regtest networks, which activate Ironwood
+  at a height with no timestamp at all, so a mainnet timestamp describes neither --
+  **and Pirate's own Ironwood test chain, which cannot be recognised by its address
+  prefixes**: it carries the mainnet prefixes (`zs`, `pirate`) and reports
+  `chainName` `main`, so a rule keyed on the prefixes treats it as the real chain.
+  The built-in value is therefore keyed on the ticker **and** the chain's Sapling
+  activation height (for ARRR, 152 855), which a chain that diverges from genesis
+  does not share. A configured `ironwood_activation_time` still applies to any
+  chain: the withholding is of the default, not of the feature.
 - A coin whose ticker the build does not know shall be unaffected.
 
 A build that gains v6 transaction support (R39.6.4c) makes both gates inert
@@ -493,12 +517,85 @@ first block whose time exceeds the timestamp, plus a settling margin, so only
 the timestamp can be published ahead of the upgrade and only the height is
 usable as a consensus-parameter lookup.
 
-Carrying these members shall not by itself change any network-upgrade
-activation lookup. Until the Ironwood upgrade is bound to
-`NetworkUpgrade::Nu6_3`, every post-Sapling upgrade shall continue to report no
-activation height, because the shielded transaction builder derives the
-consensus branch ID -- and therefore the transaction version it signs -- from
-exactly those lookups.
+Carrying `ironwood_activation_time` shall not by itself change any
+network-upgrade activation lookup: it is data for discovery, not a height. The
+Ironwood upgrade is bound to `NetworkUpgrade::Nu6_3` by R39.6.4e; every other
+post-Sapling upgrade (Nu5 .. Nu6_2) shall continue to report no activation height,
+because the shielded transaction builder derives the consensus branch ID -- and
+therefore the transaction version it signs -- from exactly those lookups.
+
+R39.6.4e **Version-6 construction and activation-height discovery.** A shielded
+coin whose Ironwood activation height is known shall construct version-6
+transactions from that height on, and version-4 transactions below it; a coin with
+no Ironwood height anywhere shall keep constructing version 4 at every height.
+
+- (a) **Binding.** `NetworkUpgrade::Nu6_3` reports the configured
+  `ironwood_activation_height` when present, otherwise the height discovered at
+  runtime, otherwise none. The discovered height lives in a cell shared by every copy
+  of the consensus parameters (the coin, the transaction builder and the wallet
+  database each hold a copy), is never serialized, and a configured height always
+  wins. With the height reported the builder selects consensus branch `0x37A5165B`
+  and version 6; without it, the Sapling branch and version 4.
+- (b) **Shape.** The format is the one the dictated chain mines: header
+  `0x80000006`, version-group id `0xD884B698`, branch id `0x37A5165B`, `nLockTime`,
+  `nExpiryHeight`, the transparent inputs and outputs, the Sapling bundle, **a single
+  `0x00` for the Orchard slot, and an empty Ironwood bundle**. Sapling survives inside
+  version 6; this project builds neither an Orchard nor an Ironwood bundle, so the build
+  configuration carries no Orchard or Ironwood anchor. The transaction identifier is the
+  ZIP-244 digest, not a double-SHA256 of the bytes; a Sapling signature is made over the
+  shielded signature hash (equal to the identifier for a transaction with no transparent
+  inputs).
+- (c) **Discovery.** The dictated chain publishes no activation height; each node
+  derives it as the height of the first block whose time exceeds the activation time,
+  plus 60, and trusts it only once that block is 30 deep. Before a transaction is built
+  (the single height authority of R39.11.8 is the one place this happens), a coin that
+  has neither a configured nor a discovered height shall read the server's consensus
+  branch at its tip and, when the coin has an activation time (configured, or built-in
+  under R39.6.4d), search the compact blocks' times for that first block, and decide:
+  the server on Ironwood's branch means Ironwood is active, from the derived height when
+  one exists at or below the tip and otherwise from the tip; the server not on Ironwood's
+  branch means not yet active, unless the derived height lies ahead of the tip, in which
+  case that height is recorded as upcoming. A discovered height is recorded and not
+  searched for again.
+- (d) **Refusal, never a guess.** If the server and the timestamp rule disagree -- the
+  rule puts Ironwood at or below the tip and the server is not on Ironwood's branch -- or
+  a read needed to decide fails, the build shall be refused with a typed error
+  (`BuilderHeightError::IronwoodActivation`) rather than choose a version: the wrong
+  version is rejected by the network as an opaque failure after the fact. The one
+  exception is a failed timestamp search once the server has itself reported Ironwood:
+  the exact height then refines only *past* heights, and costs nothing about a new
+  transaction's version.
+- (e) **Native mode** has no lightwalletd and therefore no discovery; it builds version 6
+  only from a configured height.
+- (f) **Build capability.** With (a)-(d) in place `IRONWOOD_V6_SUPPORTED` is true, which
+  makes R39.6.4b and R39.6.4c inert by their own terms.
+
+> **Status update (reloaded, Step E).** Implemented: `z_coin.rs`
+> (`ZcoinConsensusParams::activation_height`, `effective_ironwood_activation_height`,
+> the chain-identity guard `builtin_ironwood_activation_time`), `z_coin/z_ironwood.rs`
+> (the decision `decide`, the search `first_block_after`, `discover`),
+> `ZCoin::ensure_ironwood_activation` called from `builder_target_height`, and
+> `z_coin/z_v6_construction_tests.rs`. Tested without a broadcast: the header, version
+> group, branch id, the empty Orchard slot and Ironwood bundle, the round trip through the
+> Zcash reader the swap path uses, the ZIP-244 identifier, version 4 below the height and
+> for a coin without one, a Sapling spend + transparent P2SH output + Sapling change
+> funding verifying under the version-6 sighash, and -- the strongest check -- a real
+> mined version-6 transaction (one Sapling spend, two outputs, two Ironwood actions, no
+> transparent inputs) whose Sapling proofs, spend-authorization and binding signatures
+> verify under the signature hash this library computes. **Not verified without a
+> broadcast:** acceptance by the live network (policy, `IsStandardTx`, the HTLC
+> `ac_private` exemption, fee policy); a version-6 shielded signature over a transaction
+> *with transparent inputs*, whose digest also commits to the spent outputs' amounts and
+> scripts (those are not in the recorded corpus; this is upstream's ZIP-244 code,
+> unchanged for version 6); discovery against a mainnet server, in particular that
+> Pirate's "first block with time over the threshold" agrees with the search's
+> jitter window (16 blocks); and the 24-hour look-back Pirate's own derivation applies.
+> **Known limits:** the discovered height is not persisted (it is re-derived after a
+> restart, about thirty block reads); the pre-activation quiet window of the plan (refuse to
+> build within three blocks of the boundary) is not implemented, so a transaction built
+> in that window is rejected by the network rather than refused locally; on Pirate's test
+> chain, whose activation does not follow the timestamp, the derived height for *past*
+> blocks is not the chain's, which affects no new transaction.
 
 R39.6.4 The shielded-coin builder shall source **all** of its Zcash
 network parameters, its shielded HD derivation path, and its sync checkpoint
@@ -2948,9 +3045,13 @@ precise opposite of the intent. The rule shall therefore be:
 > (T39.11.f). (a), (b), (d) and (e) are as written. The configuration determines the
 > expected branch only below the *horizon* -- the activation height of the last
 > declared upgrade, when any later upgrade this build knows of is undeclared -- so
-> for ARRR (no published configuration declares an upgrade after Sapling, and the
-> build maps no Ironwood height yet) the local expectation is never applied at a
-> real tip height and (e) decides. The recorded branch identifier is a sidecar file
+> for ARRR (no published configuration declares an upgrade after Sapling) the local
+> expectation is never applied at a real tip height and (e) decides. Since Step E
+> `Nu6_3` is bound to the Ironwood height (R39.6.4e): a configuration that *declares* the
+> height determines Sapling's branch below it and Ironwood's from it, and an Ironwood
+> height *discovered* after the policy was built does not re-arm the expectation (its
+> horizon was fixed while the upgrade was undeclared), so it can never exclude the
+> endpoints it was learned from. The recorded branch identifier is a sidecar file
 > of the wallet database (`<wallet db>.lightwalletd-branch`): the wallet database's
 > schema is fingerprinted and cannot carry it. A wallet that has scanned blocks but
 > has no recorded identifier (it predates the binding) is decided like a fresh one,

@@ -95,8 +95,12 @@ impl ZCoin {
                     .await
                     .map_err(|e| MmError::new(BuilderHeightError::from(e)))?;
                 let scanned = self.z_fields.wallet_db_scanned_through.load(AtomicOrdering::Relaxed);
-                z_lightwalletd::builder_target_height(tip, scanned)
-                    .map_err(|e| MmError::new(BuilderHeightError::from(e)))
+                let target = z_lightwalletd::builder_target_height(tip, scanned)
+                    .map_err(|e| MmError::new(BuilderHeightError::from(e)))?;
+                // The version the builder will pick follows from the height it is given, so the
+                // activation height must be known before it is handed one (R39.6.4e).
+                self.ensure_ironwood_activation(client.backend()).await?;
+                Ok(target)
             },
             other => other
                 .get_block_count()
@@ -104,6 +108,38 @@ impl ZCoin {
                 .await
                 .map(|height| height as u32)
                 .map_err(|e| MmError::new(BuilderHeightError::TipUnavailable(e.to_string()))),
+        }
+    }
+
+    /// Makes sure the builder will see the coin's Ironwood activation height if it has one.
+    ///
+    /// Nothing is done when a height is already configured or discovered. Otherwise the server's
+    /// branch and the activation timestamp are read ([`z_ironwood::discover`]); a height found is
+    /// recorded in the coin's shared consensus parameters, and "not activated" records nothing, so
+    /// the coin keeps building pre-Ironwood transactions and asks again next time. If the answer
+    /// cannot be established the build is refused: the wrong transaction version is rejected by the
+    /// network, which reports it as an opaque failure after the fact.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn ensure_ironwood_activation(
+        &self,
+        backend: &z_lightwalletd::LightwalletdBackend,
+    ) -> Result<(), MmError<BuilderHeightError>> {
+        use super::z_ironwood::{discover, IronwoodStatus};
+        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+        let params = &self.z_fields.consensus_params;
+        if params.activation_height(NetworkUpgrade::Nu6_3).is_some() {
+            return Ok(());
+        }
+        let activation_time = super::configured_or_builtin_ironwood_time(params, self.ticker());
+        match discover(backend, activation_time).await {
+            Ok(IronwoodStatus::ActiveFrom(height)) => {
+                common::log::info!("{}: Ironwood is active from height {}", self.ticker(), height);
+                params.record_discovered_ironwood_height(height);
+                Ok(())
+            },
+            Ok(IronwoodStatus::NotActivated) => Ok(()),
+            Err(e) => MmError::err(BuilderHeightError::IronwoodActivation(e.to_string())),
         }
     }
 
