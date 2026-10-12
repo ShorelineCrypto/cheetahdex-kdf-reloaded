@@ -304,10 +304,17 @@ impl SwapOps for ZCoin {
         my_pub: &[u8],
         other_pub: &[u8],
         secret_hash: &[u8],
-        _search_from_block: u64,
+        search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Box<dyn Future<Item = Option<TransactionEnum>, Error = String> + Send> {
-        z_tx_read::check_if_my_payment_sent(self.clone(), time_lock, my_pub, other_pub, secret_hash)
+        z_tx_read::check_if_my_payment_sent(
+            self.clone(),
+            time_lock,
+            my_pub,
+            other_pub,
+            secret_hash,
+            search_from_block,
+        )
     }
 
     async fn search_for_swap_tx_spend_my(

@@ -64,9 +64,18 @@ What an integrator observes:
   fixed default and activates as before.
 - `requires_notarization` cannot be satisfied for a ZHTLC coin: `lightwalletd` has no
   notarized-depth field, and plain confirmation depth is not substituted for it.
-- Swap-path HTLC spend detection and "payment already sent" detection over
-  `lightwalletd` are **not implemented yet** and fail with an explicit error rather than
-  answering "not spent" (CRD ch.39 R39.11.4d). Wallet functions -- balance, history,
+- Swap-path HTLC spend detection and "payment already sent" detection run over
+  `lightwalletd`'s transparent address index (CRD ch.39 R39.11.4d). The serving node files
+  every output under the pubkey-hash key type, so a `b...` (P2SH) query is empty forever;
+  Reloaded queries **both** the P2SH form and the `R...` re-encoding of the same twenty bytes
+  and accepts a row only when its script is the expected P2SH script. These two decisions
+  answer "not spent" / "not sent" **only** on positive or well-founded evidence (the index
+  lists the output as unspent, or the funding transaction is not mined and a healthy endpoint
+  returned nothing) and otherwise fail with a named error: an index-coverage failure, a
+  skipped history height, a transport failure, or a spend the index did not deliver. GLEEC KDF
+  answered these from Electrum. A swap that GLEEC would have continued on an empty answer
+  therefore waits, or stops with an explicit error, instead. No opt-out exists, because the
+  alternative is a "not spent" that can be wrong. Wallet functions -- balance, history,
   receiving, sending, withdrawing -- are unaffected.
 
 **Compatibility:** GLEEC KDF has no equivalent of the endpoint admission check or of

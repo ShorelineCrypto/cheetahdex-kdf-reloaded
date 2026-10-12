@@ -16,10 +16,16 @@
 //! * [`LightwalletdClient`] -- the first-class implementation of [`UtxoRpcClientOps`]
 //!   (R39.11.4g) that the shared UTXO swap helpers reach through the trait.
 //!
-//! What this module deliberately does **not** do: the swap-path HTLC spend detection. P2SH queries
-//! are refused with a typed error rather than answered, because the serving node's address index
-//! returns an empty success for a script-hash address forever (R39.11.4d) and an empty result there
-//! would read as "not spent".
+//! The generic address methods still refuse a P2SH query with a typed error, because the serving
+//! node's address index returns an empty success for a script-hash address forever (R39.11.4d) and an
+//! empty result there would read as "not spent". Swap-path HTLC spend and already-sent detection
+//! live in the `htlc_index` child module, which probes both address forms and decides from what they
+//! return.
+
+mod htlc_index;
+
+pub(crate) use htlc_index::{FundingFound, HtlcAddressing, HtlcIndexError, IndexEncoding, OutputRef, SentOutcome,
+                            SpendOutcome};
 
 use super::z_coin_wallet_db::ZCoinShieldedHistory;
 use super::z_rpc::z_coin_grpc;
@@ -43,7 +49,7 @@ use mm2_err_handle::prelude::*;
 use parking_lot::Mutex;
 use prost::Message as _;
 use rpc::v1::types::{Bytes as BytesJson, Transaction as RpcTransaction, H256 as H256Json};
-use serialization::{serialize, CoinVariant};
+use serialization::{deserialize, serialize, CoinVariant};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -589,6 +595,9 @@ pub(crate) struct TransparentUtxo {
     pub index: u32,
     pub value_zat: i64,
     pub height: u64,
+    /// The output's script-pubkey as the index returned it. The pubkey-hash key type is keyed by
+    /// twenty bytes alone, so a row is only the HTLC's once this matches (R39.11.4d(c)).
+    pub script: Vec<u8>,
 }
 
 /// What one transparent-history window request delivered. A stream that fails part-way still
@@ -891,6 +900,7 @@ impl LightwalletdTransport for GrpcTransport {
                             index,
                             value_zat: utxo.value_zat,
                             height: utxo.height,
+                            script: utxo.script,
                         })
                     })
                     .collect::<Result<Vec<_>, EndpointError>>()
@@ -1094,8 +1104,12 @@ pub(crate) struct LightwalletdBackend {
     transport: Arc<dyn LightwalletdTransport>,
     servers: Vec<String>,
     policy: AdmissionPolicy,
-    /// Version byte of the coin's script-hash addresses; queries for them are refused (R39.11.4d).
-    p2sh_prefix: u8,
+    /// How the coin encodes the two address forms of an HTLC; script-hash queries from the generic
+    /// address methods are refused, the HTLC probe is the only caller that issues them (R39.11.4d).
+    addressing: HtlcAddressing,
+    /// Which address form last returned the HTLC's rows, per endpoint (R39.11.4d(b)). Informative:
+    /// both forms are probed on every query.
+    index_encodings: Mutex<HashMap<String, htlc_index::IndexEncoding>>,
     wallet: Mutex<Option<Arc<dyn WalletBranchStore>>>,
     cached: Mutex<Option<CachedAdmission>>,
     evaluating: AsyncMutex<()>,
@@ -1115,13 +1129,14 @@ impl LightwalletdBackend {
         transport: Arc<dyn LightwalletdTransport>,
         servers: Vec<String>,
         policy: AdmissionPolicy,
-        p2sh_prefix: u8,
+        addressing: HtlcAddressing,
     ) -> Self {
         LightwalletdBackend {
             transport,
             servers,
             policy,
-            p2sh_prefix,
+            addressing,
+            index_encodings: Mutex::new(HashMap::new()),
             wallet: Mutex::new(None),
             cached: Mutex::new(None),
             evaluating: AsyncMutex::new(()),
@@ -1314,7 +1329,7 @@ impl LightwalletdBackend {
     }
 
     fn refuse_script_hash(&self, address: &Address, op: &'static str) -> Result<(), LightwalletdError> {
-        if address.prefix == self.p2sh_prefix {
+        if address.prefix == self.addressing.p2sh_prefix {
             return Err(LightwalletdError::Unsupported {
                 op,
                 reason: "the serving node's address index files every output under the pubkey-hash key type, so a \
@@ -1346,40 +1361,6 @@ impl LightwalletdBackend {
         })
         .await
     }
-
-    /// Transparent history of one address over `from..=to`, read in bounded windows (R39.11.4b).
-    /// Each window is served by the first admitted endpoint that answers it.
-    #[allow(dead_code)] // The consumers are the swap-path spend detection, which this change leaves alone.
-    pub(crate) async fn transparent_history(
-        &self,
-        address: &Address,
-        from: u64,
-        to: u64,
-    ) -> Result<HistoryRead, LightwalletdError> {
-        self.refuse_script_hash(address, "GetTaddressTxids")?;
-        let address = address.to_string();
-        let admitted = self.admitted().await?;
-        read_history(from, to, TADDR_HISTORY_WINDOW_BLOCKS, |start, end| {
-            let transport = self.transport.clone();
-            let address = address.clone();
-            let admitted = admitted.clone();
-            async move {
-                let mut last = WindowRead::default();
-                for server in admitted {
-                    let read = transport.taddr_txids(&server, &address, start, end).await;
-                    match read.error {
-                        // A serve failure is a property of the node behind the endpoint, not of the
-                        // endpoint; the bisection handles it.
-                        None => return read,
-                        Some(ref error) if error.serve_failure => return read,
-                        Some(_) => last = read,
-                    }
-                }
-                last
-            }
-        })
-        .await
-    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1395,18 +1376,18 @@ impl LightwalletdClient {
         transport: Arc<dyn LightwalletdTransport>,
         servers: Vec<String>,
         params: &ZcoinConsensusParams,
-        p2sh_prefix: u8,
+        addressing: HtlcAddressing,
     ) -> Self {
         LightwalletdClient(Arc::new(LightwalletdBackend::new(
             transport,
             servers,
             AdmissionPolicy::from_params(params),
-            p2sh_prefix,
+            addressing,
         )))
     }
 
-    pub(crate) fn connect(servers: Vec<String>, params: &ZcoinConsensusParams, p2sh_prefix: u8) -> Self {
-        Self::new(Arc::new(GrpcTransport::default()), servers, params, p2sh_prefix)
+    pub(crate) fn connect(servers: Vec<String>, params: &ZcoinConsensusParams, addressing: HtlcAddressing) -> Self {
+        Self::new(Arc::new(GrpcTransport::default()), servers, params, addressing)
     }
 
     pub(crate) fn backend(&self) -> &Arc<LightwalletdBackend> { &self.0 }
@@ -1670,22 +1651,49 @@ impl UtxoRpcClientOps for LightwalletdClient {
 
     fn find_output_spend(
         &self,
-        _tx_hash: H256,
-        _script_pubkey: &[u8],
-        _vout: usize,
-        _from_block: BlockHashOrHeight,
+        tx_hash: H256,
+        script_pubkey: &[u8],
+        vout: usize,
+        from_block: BlockHashOrHeight,
     ) -> Box<dyn futures01::Future<Item = Option<SpentOutputInfo>, Error = String> + Send> {
-        // Swap-path HTLC spend detection rests on an address-index workaround that is derived from the
-        // node's source and not yet proved on a funded HTLC (R39.11.4d, D39.11.d). Until it is, this
-        // fails loudly: an empty answer here would read as "not spent".
-        Box::new(
-            futures::future::ready(Err(
-                "HTLC spend detection over lightwalletd is not implemented: the address-index workaround it needs \
-             (R39.11.4d) has not been proved on a funded HTLC"
-                    .to_owned(),
-            ))
-            .compat(),
-        )
+        let this = self.clone();
+        let output = OutputRef {
+            txid: tx_hash.take(),
+            vout: vout as u32,
+            script_pubkey: script_pubkey.to_vec(),
+        };
+        let fut = async move {
+            let from = match from_block {
+                BlockHashOrHeight::Height(height) => u64::try_from(height).unwrap_or(0),
+                BlockHashOrHeight::Hash(_) => {
+                    return ERR!("HTLC spend detection over lightwalletd searches from a height, not a block hash")
+                },
+            };
+            match this.0.detect_output_spend(&output, from).await {
+                Ok(SpendOutcome::NotSpent(_)) => Ok(None),
+                Ok(SpendOutcome::Spent(spend)) => {
+                    // The shared UTXO transaction type cannot read version 5 or 6, so a ZHTLC coin's
+                    // swap path does not come through here (z_tx_read); this trait form is for the
+                    // shared callers and fails loudly rather than guessing at a transaction it cannot read.
+                    let spending_tx: UtxoTx = deserialize(spend.tx.as_slice()).map_err(|e| {
+                        format!(
+                            "the spend of the HTLC output was found, but the shared UTXO parser cannot read it ({:?})",
+                            e
+                        )
+                    })?;
+                    let height = spend
+                        .height
+                        .ok_or_else(|| "the spending transaction has no mined height".to_owned())?;
+                    Ok(Some(SpentOutputInfo {
+                        spending_tx,
+                        input_index: spend.input_index,
+                        spent_in_block: BlockHashOrHeight::Height(height as i64),
+                    }))
+                },
+                Err(e) => Err(e.to_string()),
+            }
+        };
+        Box::new(fut.boxed().compat())
     }
 
     fn get_median_time_past(

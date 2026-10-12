@@ -45,6 +45,16 @@ fn canopy_params() -> ZcoinConsensusParams {
     .unwrap()
 }
 
+fn test_addressing() -> HtlcAddressing {
+    HtlcAddressing {
+        p2sh_prefix: 0xbd,
+        p2sh_t_prefix: 0,
+        pubkey_prefix: 0xb8,
+        pubkey_t_prefix: 0,
+        checksum_type: kdf_crypto::ChecksumType::DSHA256,
+    }
+}
+
 fn info(branch: u32, height: u64) -> ServerInfo {
     ServerInfo {
         chain_name: "main".to_owned(),
@@ -454,7 +464,7 @@ fn backend_over(transport: &Arc<FakeTransport>, servers: &[&str]) -> Lightwallet
         transport.clone(),
         servers.iter().map(|s| (*s).to_owned()).collect(),
         AdmissionPolicy::from_params(&arrr_params()),
-        0xbd,
+        test_addressing(),
     )
 }
 
@@ -690,7 +700,12 @@ async fn an_unfetchable_transaction_past_its_expiry_is_not_declared_expired() {
     let mut failing = healthy(&[ARRR_TIP]);
     failing.transaction = Some(Err(EndpointError::Service("502".to_owned())));
     transport.serve("a", failing);
-    let client = LightwalletdClient::new(transport.clone(), vec!["a".to_owned()], &arrr_params(), 0xbd);
+    let client = LightwalletdClient::new(
+        transport.clone(),
+        vec!["a".to_owned()],
+        &arrr_params(),
+        test_addressing(),
+    );
     client.0.bind_wallet(Arc::new(Bound));
     let err = client
         .wait_for_confirmations(txid, (ARRR_TIP - 10) as u32, 1, false, u64::MAX, 1)
@@ -704,7 +719,12 @@ async fn an_unfetchable_transaction_past_its_expiry_is_not_declared_expired() {
     let mut missing = healthy(&[ARRR_TIP]);
     missing.transaction = Some(Err(EndpointError::NotFound("unknown txid".to_owned())));
     transport.serve("a", missing);
-    let client = LightwalletdClient::new(transport.clone(), vec!["a".to_owned()], &arrr_params(), 0xbd);
+    let client = LightwalletdClient::new(
+        transport.clone(),
+        vec!["a".to_owned()],
+        &arrr_params(),
+        test_addressing(),
+    );
     client.0.bind_wallet(Arc::new(Bound));
     let err = client
         .wait_for_confirmations(txid, (ARRR_TIP - 10) as u32, 1, false, u64::MAX, 1)
@@ -728,7 +748,7 @@ async fn a_confirmed_transaction_satisfies_the_wait_without_any_server_side_deco
         height: Some(ARRR_TIP - 2),
     }));
     transport.serve("a", script);
-    let client = LightwalletdClient::new(transport, vec!["a".to_owned()], &arrr_params(), 0xbd);
+    let client = LightwalletdClient::new(transport, vec!["a".to_owned()], &arrr_params(), test_addressing());
     client.0.bind_wallet(Arc::new(Bound));
     client
         .wait_for_confirmations(H256Json::from([9u8; 32]), 0, 3, false, u64::MAX, 1)
@@ -739,7 +759,7 @@ async fn a_confirmed_transaction_satisfies_the_wait_without_any_server_side_deco
 #[tokio::test]
 async fn notarized_depth_is_refused_and_not_substituted() {
     let transport = Arc::new(FakeTransport::default());
-    let client = LightwalletdClient::new(transport, vec!["a".to_owned()], &arrr_params(), 0xbd);
+    let client = LightwalletdClient::new(transport, vec!["a".to_owned()], &arrr_params(), test_addressing());
     let err = client
         .wait_for_confirmations(H256Json::from([9u8; 32]), 0, 1, true, u64::MAX, 1)
         .await
@@ -780,7 +800,12 @@ async fn the_lookup_sends_the_internal_byte_order() {
         height: None,
     }));
     transport.serve("a", script);
-    let client = LightwalletdClient::new(transport.clone(), vec!["a".to_owned()], &arrr_params(), 0xbd);
+    let client = LightwalletdClient::new(
+        transport.clone(),
+        vec!["a".to_owned()],
+        &arrr_params(),
+        test_addressing(),
+    );
     client.0.bind_wallet(Arc::new(Bound));
 
     let mut display_bytes = [0u8; 32];

@@ -1111,17 +1111,39 @@ pub(crate) struct PaymentOutputs {
     pub(crate) spent_script_pubkey: Bytes,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn search_for_swap_output_spend_of(
-    coin: &UtxoCoinFields,
+/// How an HTLC output was spent, read from the spend's input script.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SwapSpendKind {
+    Spent,
+    Refunded,
+}
+
+/// Classifies a spend of the swap output by its input script: `OP_0` third means the secret path
+/// (spent), `OP_1` second means the timelock path (refunded). Shared so that a coin which reads its
+/// transactions differently makes the same decision.
+pub(crate) fn classify_swap_spend(script: &Script) -> Option<SwapSpendKind> {
+    if let Some(Ok(ref i)) = script.iter().nth(2) {
+        if i.opcode == Opcode::OP_0 {
+            return Some(SwapSpendKind::Spent);
+        }
+    }
+    if let Some(Ok(ref i)) = script.iter().nth(1) {
+        if i.opcode == Opcode::OP_1 {
+            return Some(SwapSpendKind::Refunded);
+        }
+    }
+    None
+}
+
+/// The check that a payment transaction's output 0 pays the HTLC script this swap negotiated. A
+/// mismatch is a hard stop, not something to retry: see the message.
+pub(crate) fn ensure_payment_pays_htlc(
     time_lock: u32,
     first_pub: &Public,
     second_pub: &Public,
     secret_hash: &[u8],
-    payment: PaymentOutputs,
-    output_index: usize,
-    search_from_block: u64,
-) -> Result<Option<FoundSwapTxSpend>, String> {
+    payment: &PaymentOutputs,
+) -> Result<(), String> {
     let script = payment_script(time_lock, secret_hash, first_pub, second_pub);
     let expected_script_pubkey = Builder::build_p2sh(&dhash160(&script).into()).to_bytes();
     if payment.output0_script_pubkey != expected_script_pubkey {
@@ -1146,6 +1168,27 @@ pub(crate) async fn search_for_swap_output_spend_of(
             expected_script_pubkey
         );
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn search_for_swap_output_spend_of(
+    coin: &UtxoCoinFields,
+    time_lock: u32,
+    first_pub: &Public,
+    second_pub: &Public,
+    secret_hash: &[u8],
+    payment: PaymentOutputs,
+    output_index: usize,
+    search_from_block: u64,
+) -> Result<Option<FoundSwapTxSpend>, String> {
+    try_s!(ensure_payment_pays_htlc(
+        time_lock,
+        first_pub,
+        second_pub,
+        secret_hash,
+        &payment
+    ));
 
     let spend = try_s!(
         coin.rpc_client
@@ -1163,22 +1206,14 @@ pub(crate) async fn search_for_swap_output_spend_of(
             let mut tx = spent_output_info.spending_tx;
             tx.tx_hash_algo = coin.tx_hash_algo;
             let script: Script = tx.inputs[0].script_sig.clone().into();
-            if let Some(Ok(ref i)) = script.iter().nth(2) {
-                if i.opcode == Opcode::OP_0 {
-                    return Ok(Some(FoundSwapTxSpend::Spent(tx.into())));
-                }
+            match classify_swap_spend(&script) {
+                Some(SwapSpendKind::Spent) => Ok(Some(FoundSwapTxSpend::Spent(tx.into()))),
+                Some(SwapSpendKind::Refunded) => Ok(Some(FoundSwapTxSpend::Refunded(tx.into()))),
+                None => ERR!(
+                    "Couldn't find required instruction in script_sig of input 0 of tx {:?}",
+                    tx
+                ),
             }
-
-            if let Some(Ok(ref i)) = script.iter().nth(1) {
-                if i.opcode == Opcode::OP_1 {
-                    return Ok(Some(FoundSwapTxSpend::Refunded(tx.into())));
-                }
-            }
-
-            ERR!(
-                "Couldn't find required instruction in script_sig of input 0 of tx {:?}",
-                tx
-            )
         },
         None => Ok(None),
     }

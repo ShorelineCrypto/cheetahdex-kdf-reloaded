@@ -114,9 +114,16 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
   also without a switch: `txfee: 0` (fee estimation) is refused for the coin
   (lightwalletd has no fee estimation; an absent `txfee` keeps the fixed default); `requires_notarization` is refused for
   the coin (there is no notarized-depth field); and the swap-path HTLC spend
-  and already-sent detection fail with an explicit error until the address-index
-  workaround they need is proved on a funded HTLC (CRD ch.39 R39.11.4d), instead
-  of reporting "not spent". Code: `coins/z_coin/z_lightwalletd.rs`,
+  and already-sent detection run over the transparent address index with both
+  the P2SH form and the `R...` re-encoding of the redeem-script hash probed (the
+  serving node's index files every output under the pubkey-hash key type, proved
+  live on 2026-10-12), a returned row accepted only if its script is the expected
+  one, and a named error -- never "not spent" or "not sent" -- when the index
+  returns nothing for a funding transaction known to be mined, when a history
+  window skipped a height, or when a call failed (CRD ch.39 R39.11.4d). GLEEC
+  answered these from Electrum; **no opt-out exists**, because the alternative is
+  an empty answer read as "not spent". Code: `coins/z_coin/z_lightwalletd.rs`,
+  `coins/z_coin/z_lightwalletd/htlc_index.rs`, `coins/z_coin/z_tx_read.rs`,
   `coins/z_coin.rs`, `coins_activation/src/z_coin_activation.rs`
   (CRD ch.39 R39.11.1--R39.11.7).
 - **Endpoint admission and one builder height for a ZHTLC coin.** GLEEC KDF

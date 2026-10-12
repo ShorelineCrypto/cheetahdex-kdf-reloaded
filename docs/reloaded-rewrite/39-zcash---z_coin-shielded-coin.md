@@ -45,10 +45,11 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
   T39.11.h--T39.11.j (T39.11.a--T39.11.d in part; each test's note says what it
   does not cover). **Implemented (plan Step D):** the swap-path parser routing
   (R39.11.16--R39.11.16a, with the carve-outs its status note names) and
-  T39.11.e. **Not implemented:** the swap-path HTLC spend and
-  already-sent detection (R39.11.4d, the swap consumer of R39.11.4b(f), and the
-  named conditions of R39.11.17), which fail with an explicit error rather than
-  answer "not spent"; T39.11.g. Three kinds of statement in that Part are **not**
+  T39.11.e. **Implemented (plan Step C, the swap half):** the swap-path HTLC
+  spend and already-sent detection (R39.11.4d, the swap consumer of R39.11.4b(f),
+  and the named conditions of R39.11.17) and T39.11.g, in part -- each status
+  note says what it does not cover; the address-index workaround of R39.11.4d is
+  proved on a funded HTLC (D39.11.d). Three kinds of statement in that Part are **not**
   required changes and are marked as such where they appear: R39.11.13--R39.11.15
   describe the as-built parsing contract and the pinned dependencies' published
   version coverage; several requirements record verified facts about the
@@ -1433,11 +1434,16 @@ the case this rule exists to make visible.
 > background pass is reported as the error state with a message and the height
 > scanned so far, cleared by the next successful pass. A failed chain-tip read, and
 > an admission failure (whose message lists every excluded endpoint with its
-> reason, R39.11.7a(f)), now populate it. **Not implemented:** the three swap-path
-> conditions of the last paragraph (a history window that failed part-way, a
-> backend whose index returns neither P2SH encoding, a backend that cannot serve a
-> transaction with no transparent output) -- their consumer, the swap-path spend
-> detection, is not built (R39.11.4b(f), R39.11.4d, R39.11.17). Endpoints excluded
+> reason, R39.11.7a(f)), now populate it. **Swap half implemented:** the three
+> swap-path conditions of the last paragraph -- a history window that failed
+> part-way or skipped a height, a backend whose index returns neither encoding of
+> the P2SH output being watched, and a backend that cannot serve a transaction with
+> no transparent output -- are written to the channel by the swap-path detection
+> when it cannot answer (R39.11.4b(f), R39.11.4d, R39.11.17). The last of them is
+> not distinguishable from the first: a node without its transaction index
+> surfaces as skipped heights, and the message says so. They share the channel's
+> one message slot with background sync failures, and the next successful
+> background pass clears them. Endpoints excluded
 > by an admission that still succeeded are logged and available through
 > `ZCoin::excluded_lightwalletd_endpoints`, but are not written into the sync-state
 > channel unless a later pass fails.
@@ -2475,8 +2481,8 @@ canonical counterparts for the same task.
 ## 39.11 The Light-mode backend
 
 > **Status update (reloaded, Step C) -- how to read §39.11's implementation
-> status.** The wallet half of §39.11 is implemented; the swap-path half is not.
-> The subsection carries three kinds of statement, and a reader shall be able to
+> status.** The wallet half of §39.11 is implemented, and (plan Step C, swap half) so is
+> the swap-path half. The subsection carries three kinds of statement, and a reader shall be able to
 > tell them apart:
 >
 > 1. **Verified facts about the external backend and the chain.** Where a
@@ -2495,15 +2501,18 @@ canonical counterparts for the same task.
 >    implemented -- one backend, the function table, the activation requirements,
 >    endpoint admission, the single height authority, `UtxoRpcClientOps` over
 >    lightwalletd, and (Step D) the parser routing (R39.11.16/R39.11.16a);
->    **not implemented** -- the swap-path spend detection and its P2SH workaround
->    (R39.11.4d) and the named conditions of R39.11.17.
+>    and (Step C, swap half) the swap-path spend and already-sent detection with the
+>    P2SH workaround (R39.11.4d) and the named conditions of R39.11.17. Open: a live
+>    run that detects a *spend* (R39.11.4d's status note).
 >
 > **Where it lives.** `mm2src/coins/z_coin/z_lightwalletd.rs` (admission, the
 > failover client, the height authority, the windowed history reader, the
-> `UtxoRpcClientOps` implementation), carried on the coin as
+> `UtxoRpcClientOps` implementation), `z_coin/z_lightwalletd/htlc_index.rs` (the HTLC
+> address-index probe and its decisions), carried on the coin as
 > `UtxoRpcClientEnum::LightWalletD`; `ZCoin::builder_target_height` is the one
 > height every construction path reads. The tests are in
-> `z_coin/z_lightwalletd/tests.rs`, `z_coin.rs` (`light_backend_tests`) and
+> `z_coin/z_lightwalletd/tests.rs`, `z_coin/z_lightwalletd/htlc_index/tests.rs`,
+> `z_coin.rs` (`light_backend_tests`) and
 > `coins_activation/src/z_coin_activation.rs`.
 
 ### 39.11.1 Division of work: `lightwalletd` serves the whole coin
@@ -2536,8 +2545,8 @@ definition -- and are fixed by that specification, not by this project.
 | Fee rate | coin configuration | the coin's fixed per-kilobyte fee (an undeclared fee keeps the shared fixed default, as the published ARRR entry relies on); this service exposes no fee-estimation method, so a Light-mode shielded coin that explicitly requests estimation (`txfee: 0`) shall be refused |
 | Shielded balance, spendable note selection, shielded transaction history | the local shielded wallet database (§39.8.0.2) | -- |
 
-> **Status update (reloaded, Step C).** Implemented for every row except the
-> three that the swap path owns. Chain tip (`GetLatestBlock`), block time and median
+> **Status update (reloaded, Step C).** Implemented for every row; the three that the
+> swap path owns were completed in its swap half (R39.11.4d). Chain tip (`GetLatestBlock`), block time and median
 > time past (`GetBlock`), raw transaction and mined height (`GetTransaction`),
 > confirmations (derived locally), broadcast (`SendTransaction`), transparent
 > balance (`GetTaddressBalance`), UTXO listing (`GetAddressUtxos`, one call per
@@ -2545,12 +2554,12 @@ definition -- and are fixed by that specification, not by this project.
 > the admitted endpoints; the compact blocks, tree state and mempool rows were
 > already. The fee-rate refusal is implemented at build time (a Light coin with
 > `txfee: 0` is not built; an absent `txfee` keeps the shared fixed default). The two prohibitions hold structurally: the
-> Light build constructs no Electrum client. **Not implemented:** the transparent
-> history reader (`read_history`) has no production consumer, because its consumers
-> are the swap-path spend and already-sent detection; `find_output_spend` and
-> `check_if_my_payment_sent` over lightwalletd fail with an explicit error, and a
-> script-hash (P2SH) address is refused by balance, UTXO and history with a typed
-> error instead of an empty success (R39.11.4d). `get_verbose_transaction(s)`
+> Light build constructs no Electrum client. The transparent
+> history reader (`read_history`) is consumed by the swap-path detection, which also
+> serves `find_output_spend` and `check_if_my_payment_sent`; the generic balance, UTXO
+> and history methods still refuse a script-hash (P2SH) address with a typed error
+> instead of an empty success, and only the detection's dual-form probe issues
+> script-hash queries (R39.11.4d). `get_verbose_transaction(s)`
 > return a typed unsupported error: nothing here decodes a transaction, and the
 > one caller that needs bytes and height (`validate_fee`) reads them from
 > `GetTransaction`. Notarized depth: see R39.11.4e.
@@ -2718,9 +2727,17 @@ See D39.11.g.
 > window that also contains a later group. Two residues cannot be repaired from the
 > client and are documented on the function: the newest height group of the whole
 > range, and a group isolated from any later group by more than the widest window.
-> (f) is implemented as `HistoryRead::is_clean()`; **its consumer is not built**:
-> the swap-path negative answers do not exist yet, so nothing yet reads a gap as
-> "undetermined" and nothing writes the gap condition to the sync-error channel.
+> (f) is implemented as `HistoryRead::is_clean()` and **its consumer is built**: the
+> swap-path detection reads every history window through `read_history` (one
+> endpoint at a time, both address forms), treats a gap, a stream that ended in
+> failure or an undecodable delivered transaction as leaving the decision
+> undetermined, and writes the condition to the sync-error channel. A skipped
+> height does not stop the read from delivering the transactions around it, and a
+> delivered spend is reported as a spend even when another window skipped a height.
+> **One consequence the live probe has not yet measured:** the newest height group of a
+> stream is the one the service drops, and an HTLC's spend is always the newest group
+> of its address. The detection therefore never reads "the history shows the funding and
+> no spender" as "not spent" (R39.11.4d).
 
 R39.11.4c **The transaction lookup accepts only the hash selector, in internal
 byte order.** The dictated transaction filter offers a block-and-index selector
@@ -2821,14 +2838,70 @@ that cannot see it waits out the lock and refunds a swap it had already won.
 > **shape cannot drift**, because a transaction carrying any other shape is
 > invalid on that chain. This is dictated interop, not a convention.
 
-> **Status update (reloaded, Step C).** **Not implemented, deliberately.** The
-> workaround is source-derived and has not been proved on a funded HTLC (D39.11.d),
-> so no dual-encoding probe, per-endpoint memory, script validation or
-> funding-transaction proof exists (T39.11.g). What does exist is the loud-failure
-> half of the discipline: a script-hash address is refused by balance, UTXO and
-> history with a typed `Unsupported` error, and `find_output_spend` and
-> `check_if_my_payment_sent` fail with an explicit error, so no empty result can
-> be read as "not spent" or "not sent".
+> **Status update (reloaded, Step C, swap half).** **Implemented, and the workaround is
+> proved.** A real version-6 HTLC (100000 zat, mined at height 71535 on the test
+> chain) was queried on both test endpoints on 2026-10-12 with identical results:
+> under the `b...` script-hash form `GetTaddressTxids`, `GetAddressUtxos` and
+> `GetTaddressBalance` each answered OK and empty (0 transactions, 0 UTXOs, 0 zat); under
+> the `R...` pubkey-hash re-encoding of the same twenty bytes each answered OK with the
+> row (1 transaction with the matching identifier, 1 UTXO, 100000 zat). The
+> defect is therefore confirmed and the workaround resolves it, and the redeem-script
+> block-scanning fallback is not needed. What is built, in
+> `coins/z_coin/z_lightwalletd/htlc_index.rs`:
+>
+> - (b) **Both forms, always.** Every detection queries, on each endpoint it tries, the
+>   unspent listing and the windowed history of both forms, pubkey-hash first. Which
+>   form last returned rows is remembered per endpoint (and logged when it changes) but
+>   never narrows the next probe.
+> - (c) **Row validation.** A listing row counts only when its script equals the
+>   expected pay-to-script-hash script. A delivered transaction counts as the funding
+>   only when the watched output of that identifier carries the expected script, and as
+>   the spend only when one of its transparent inputs names the watched output.
+> - (d) **The decision.** A spend is returned whenever a delivered transaction spends
+>   the output, whatever else failed. Otherwise the only negative answers are: the
+>   unspent listing, under either form, names the output with the expected script; or
+>   the funding transaction is reported unmined by the endpoint and a healthy endpoint
+>   (every read answered, every window complete) returned nothing. Every other case is an
+>   error and none is "not spent": a failed read or a stream that ended in failure, a
+>   skipped height, an undecodable delivered transaction, an index that returned
+>   neither form of a funding transaction that is mined or whose state could not be
+>   read (the index-coverage failure), and an output the index knows but no longer
+>   lists whose spender was not delivered. **This departs from the first form of (d)**,
+>   which let "the funding transaction returned, no spender" answer "not spent": the
+>   service drops the newest height group of a stream (R39.11.4b) and a spend is the
+>   newest group of its address, so that reading is wrong exactly when it matters. The
+>   unspent listing is not subject to the drop and is the corroboration R39.11.4b's
+>   residue note asks for.
+> - **Already-sent detection** has no known funding transaction to prove coverage
+>   against. It returns the payment when a delivered transaction has a transparent
+>   output of exactly the HTLC script, or the listing names one; it returns "not sent"
+>   only from a healthy endpoint; it errors otherwise. The residual risk is
+>   stated rather than closed: a payment that is broadcast and not yet mined is not in
+>   the index, and a healthy empty index is not proof of coverage.
+> - **Search window.** From the caller's start height (floored at the Sapling
+>   activation height, below which no block is read), widened to take in the funding
+>   height the endpoint reports, to the tip.
+> - **Endpoints.** Tried in configured order; an endpoint that fails a needed method
+>   contributes failure evidence and the next is tried; the first conclusive answer
+>   is returned.
+>
+> The generic address methods still refuse a script-hash address (they have no
+> corroboration to apply); only this probe issues script-hash queries.
+>
+> **Routing.** `ZCoin`'s `search_for_swap_tx_spend_*`, `wait_for_tx_spend` and
+> `check_if_my_payment_sent` call the detection directly over lightwalletd and keep the
+> spend as the Zcash transaction it is, because the shared UTXO transaction type cannot
+> read version 5 or 6; the spend is classified by the same rule as the shared search
+> (`classify_swap_spend`, extracted), applied to the input that spends the output. The
+> `find_output_spend` trait method over lightwalletd runs the same detection and returns a
+> loud error if the spend it found cannot be read by the shared parser.
+>
+> **Not covered.** A spend on a node without its transaction index (D39.11.g)
+> surfaces as skipped heights; whether the test endpoints serve it is measured by the
+> opt-in live test `live_spend_detection_of_a_redeemed_htlc` (`ARRR_TESTCHAIN_LIVE_DIR`),
+> which funds a fresh HTLC, redeems it in the same run and asserts the detection and
+> `extract_secret`. Until that has been run, detection of a *spend* on a live chain is
+> unverified; detection of an *unspent* HTLC and the P2SH defect are proved.
 
 R39.11.4e **Confirmation depth shall be derived locally; notarized depth is not
 obtainable and shall not be silently substituted.** The lookup method returns the
@@ -2971,7 +3044,7 @@ Compatibility note at the end of §39.11.3 for what this means against GLEEC KDF
 > coin: there is no code path, configuration value or build feature by which a
 > ZHTLC coin is served by an Electrum server. The spend-detection capability the
 > requirement lists as present in the service is present in the service, not yet
-> in this project's code (R39.11.4d). The Compatibility note at the end of §39.11.3
+> in this project's code at Step C's wallet half, and is since (R39.11.4d). The Compatibility note at the end of §39.11.3
 > is now the description of a real divergence and is recorded in
 > `docs/GLEEC_COMPATIBILITY.md` and `RELOADED_VS_GLEEC.md`.
 
@@ -3105,8 +3178,8 @@ evaluated against every entry.
 > reads the single lightwalletd tip (the activation result, the activation and
 > background scan targets, the "nothing to do" short-circuit, the builder target
 > height of every construction path, confirmations, the date resolution and the
-> median time past). (g): the give-up condition follows R39.11.12. (j) has no
-> consumer yet (see R39.11.4b).
+> median time past). (g): the give-up condition follows R39.11.12. (j): the consumer
+> is the swap-path detection (R39.11.4b, R39.11.4d).
 
 R39.11.9 **One height authority, and no second height source.** *(This replaces
 the first form's rule that the shielded scan target be taken from a different
@@ -3479,14 +3552,16 @@ Three constraints bind the routing:
 > **Carve-outs, not covered by this change.** (1) A spend found by a *Native-mode*
 > node client still arrives as the shared UTXO transaction type, because that
 > client belongs to every UTXO coin; it is read by the shared parser inside the
-> client and is therefore not routed, and the spend-detection tail is the swap half
-> of plan Step C. Over lightwalletd that tail still fails loudly (R39.11.4d), and
-> this change leaves it so. (2) `sign_raw_tx` on a ZHTLC coin deserializes a
+> client and is therefore not routed. Over lightwalletd the spend-detection tail, the
+> swap half of plan Step C, has since been built and is routed too (R39.11.4d): the
+> spend stays the Zcash transaction it is. (2) `sign_raw_tx` on a ZHTLC coin deserializes a
 > caller-supplied transparent transaction with the shared parser; it is not a swap
 > step, and a version-5 or version-6 input is refused there. (3) The WASM build
 > keeps its own stub file, which does not parse shielded-coin swap transactions
 > here. (4) Over lightwalletd the wait loop of `wait_for_tx_spend` still retries
-> until its deadline rather than failing at once, as before.
+> until its deadline rather than failing at once, as before; each undetermined
+> round is logged with its reason and the named conditions are written to the
+> sync-error channel.
 >
 > **Observed defect, corrected from the earlier description.** R39.11.15 and
 > R39.11.16a say the shared parser "mis-parses" a version-6 transaction. On every
@@ -3537,25 +3612,31 @@ conditions, distinct from an unreachable endpoint and from a transaction that
 does not exist, and shall be surfaced through the sync-error channel of R39.8.0au
 rather than as a generic RPC failure.
 
-> **Status update (reloaded).** **The preconditions are established external
-> facts; the reporting requirement is not implemented.** All four bullets state
-> properties of third-party components -- the chain's node, its transparent
-> address index, an operator's configuration, a node's relay and mempool policy
-> -- and the observation that at least one live endpoint lacked a transaction
-> index was made on 2026-10-11. What this subsection requires of *our* code is
-> the final paragraph: that each remaining condition be a distinct, named,
-> reportable condition surfaced through R39.8.0au rather than a generic RPC
-> failure. None of those named conditions exists today; each would surface as a
-> generic failure of the shared UTXO path. One correction for the reader: the
-> first bullet's "removed by the reversal" describes the specified design, not
-> present behaviour -- today this coin still depends on a transparent server that
-> can decode a transaction, which is the dependency the reversal removes.
+> **Status update (reloaded, Step C swap half).** **The preconditions are established
+> external facts; the reporting requirement is implemented for the swap path.** All four
+> bullets state properties of third-party components -- the chain's node, its
+> transparent address index, an operator's configuration, a node's relay and mempool
+> policy -- and the observation that at least one live endpoint lacked a transaction
+> index was made on 2026-10-11. The final paragraph's reporting is built for the
+> swap-path detection as follows, each as a distinct error of
+> `HtlcIndexError` that is written to the sync-error channel (R39.8.0au) and is never an
+> answer: the **address index** condition is the index-coverage failure (neither form
+> returned a funding transaction known or presumed mined) and, when the index lists
+> nothing for an output it knows, the spender-not-delivered error; the **transaction
+> index** condition (D39.11.g) cannot be read from the server and is detected from the
+> failure, where it surfaces as skipped heights in the incomplete-read error, whose
+> message names the cause; the **broadcast** condition was already reported
+> distinguishably by R39.11.4 and is unchanged. A lookup failure of the detection itself
+> (no admitted endpoint, no tip) is a plain failed call and is not written to the
+> channel. The first bullet's "removed by the reversal" now describes present
+> behaviour for the transparent side: nothing on this coin's path asks the backend to
+> decode a transaction.
 
 #### Tests
 
 > **Status update (reloaded, Step C).** T39.11.a--T39.11.d, T39.11.f and
-> T39.11.e (Step D) and T39.11.h--T39.11.j exist, in part; **T39.11.g does not
-> exist** (the P2SH workaround is not implemented). They run against a
+> T39.11.e (Step D), T39.11.g (Step C swap half) and T39.11.h--T39.11.j exist, in part.
+> They run against a
 > scripted in-process transport, with no network:
 > `z_coin/z_lightwalletd/tests.rs` (admission, failover, monotonic height, builder
 > height, confirmation wait, byte order, balance request bytes, history reader),
@@ -3565,6 +3646,31 @@ rather than as a generic RPC failure.
 > activation becomes visible" and "every function answered from the fixture" are
 > covered per function, not by one end-to-end run, and the two full transaction
 > builders are not driven from one injected tip (T39.11.c).
+>
+> **T39.11.g** is `z_coin/z_lightwalletd/htlc_index/tests.rs`. Decisions, from
+> hand-assembled version-4 transactions: a spend under the pubkey-hash form, and under
+> the script-hash form (an older build), is found and its matching input (not input 0)
+> is reported; a transaction spending another output or vout is not the spend; the
+> unspent listing under either form is the negative answer; a row with the right key
+> and the wrong script is discarded; **a healthy empty index for a mined or unknown
+> funding is an index-coverage failure and not a negative**; an unmined funding with a
+> clean empty index is not spent; a failed call, a skipped height, a stream failure
+> and an undecodable delivered transaction each leave the decision undetermined and
+> differ from the empty success, including for an unmined funding; a spend is still
+> found when the stream that delivered it failed afterwards or another form failed; a
+> history showing the funding and no spender is **not** "not spent"; a healthy endpoint
+> answers for a failing one; already-sent detection separates found (history and
+> listing), not sent, and could-not-tell; the P2SH script shape check; and the two
+> forms of the 2026-10-12 live fixture encode to the observed `R...` and `b...`
+> strings. Orchestration, over a scripted transport: both forms and the unspent listing
+> are requested with no bound below 1, the answering form is remembered per endpoint, an
+> endpoint that passes admission and then fails the index is skipped, total failure is an
+> error, an unservable height is the gap condition, and the search window floors at the
+> Sapling height and takes in the funding height. **Not covered offline:** the live
+> chain's index with a spend in it. The opt-in `live_spend_detection_of_a_redeemed_htlc`
+> in `z_coin/z_htlc_live_probe.rs` (inert unless `ARRR_TESTCHAIN_LIVE_DIR` is set) funds
+> a fresh HTLC, redeems it in the same run, and asserts the routed detection and
+> `extract_secret`; it has to be run by someone who may broadcast.
 >
 > **T39.11.e** is `z_coin/z_tx_read.rs` (`tests`): inline recordings of one version-4
 > and one version-6 transaction (fixtures in `z_coin/z_tx_read_fixtures.rs`), plus
@@ -3701,28 +3807,24 @@ implementation of R39.11.16/R39.11.16a is done (plan Step D; see the status note
 after R39.11.16a for its carve-outs); R39.11.17's remaining dictated preconditions are
 outside this project's control and are tracked separately.
 
-D39.11.d **The P2SH index workaround is derived from source and unverified at
-runtime; it is the largest residual risk of the reversal.** *(This item replaces
-an earlier form that recorded P2SH coverage as merely unproven. The investigation
-it awaited has completed: coverage is not unproven but defective, and the defect
-and the workaround are now normative in R39.11.4d.)* What remains open is
-narrower and sharper:
+D39.11.d **The P2SH index workaround is proved for an unspent HTLC; detection of a
+spend is not yet observed live.** *(This item replaces the earlier form that recorded the
+workaround as source-derived and unverified.)* On 2026-10-12 a funded HTLC existed on the
+test chain and was probed on both test endpoints: the `b...` form answered empty on all
+three transparent methods, the `R...` form answered with the row, the UTXO and the
+balance (R39.11.4d's status note has the figures). What stays open:
 
-- the pubkey-hash re-encoding has not been observed to return rows, because no
-  P2SH on this chain with known activity was reachable. It is a source-level
-  inference until an HTLC is funded on a test chain;
-- which key type an endpoint's rows actually carry depends on the binary that
-  indexed them, so the answer can differ per endpoint and can change under an
-  operator's upgrade. R39.11.4d(b) requires probing both rather than discovering
-  this in production;
-- the risk falls only on the swap half. The wallet half -- balance, receive,
-  history, withdraw -- uses the wallet's own pubkey-hash addresses and is
-  unaffected.
+- a spend of an HTLC has not yet been seen through the index; the shape of that
+  transaction (transparent input, no transparent output) is the one a node without its
+  transaction index cannot serve (D39.11.g), and the opt-in live test is what settles
+  it for the test endpoints;
+- which key type an endpoint's rows carry still depends on the binary that indexed
+  them, which is why both forms are probed on every detection rather than the
+  workaround being hard-coded;
+- the risk falls only on the swap half; the wallet half is unaffected.
 
-R39.11.4d is written so that a failure is loud and non-negative rather than a
-silent "not spent", so this item is a verification obligation rather than a gap
-in the contract. The durable fix is a node-side correction, after which the
-workaround should be removed, not kept.
+The durable fix is a node-side correction, after which the workaround should be removed,
+not kept.
 
 D39.11.e **Transaction submission is declared but not yet observed.** The
 service's submission method is specified as the broadcast route (R39.11.4) and is

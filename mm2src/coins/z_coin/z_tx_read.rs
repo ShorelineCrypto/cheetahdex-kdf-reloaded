@@ -12,9 +12,11 @@
 //! helper's rule has a part that does not depend on the parser (secret extraction, the spend search,
 //! the wait loop) that part is the shared one, called with the facts this module read.
 
+use super::z_lightwalletd::{FundingFound, HtlcIndexError, LightwalletdClient, OutputRef, SentOutcome, SpendOutcome};
 use super::ZCoin;
 use crate::utxo::rpc_clients::{UtxoRpcClientEnum, UtxoRpcClientOps};
-use crate::utxo::utxo_common::{self, payment_script, PaymentOutputs, DEFAULT_SWAP_VOUT};
+use crate::utxo::utxo_common::{self, classify_swap_spend, ensure_payment_pays_htlc, payment_script, PaymentOutputs,
+                               SwapSpendKind, DEFAULT_SWAP_VOUT};
 use crate::utxo::{sat_from_big_decimal, UtxoCommonOps};
 use crate::{FoundSwapTxSpend, TransactionEnum, TransactionFut, ValidatePaymentInput};
 use common::executor::Timer;
@@ -168,9 +170,69 @@ pub(crate) fn wait_for_confirmations(
     )
 }
 
+/// Turns an undetermined detection into the message the caller sees, and records the named conditions
+/// on the sync-error channel (R39.8.0au, R39.11.17): they leave a swap decision short of an answer
+/// while nothing has strictly failed.
+fn report_undetermined(coin: &ZCoin, error: HtlcIndexError) -> String {
+    let message = error.to_string();
+    if error.is_named_condition() {
+        coin.set_shielded_sync_error(&message);
+    }
+    message
+}
+
+/// The funding output of a swap payment, for the lightwalletd detection.
+fn watched_output(tx: &ZTransaction, vout: usize) -> Result<OutputRef, String> {
+    Ok(OutputRef {
+        txid: *tx.txid().as_ref(),
+        vout: vout as u32,
+        script_pubkey: script_pubkey_at(tx, vout)?,
+    })
+}
+
+/// Looks for the spend of `output` over lightwalletd and returns it as the Zcash transaction it is.
+/// `None` is the index's own positive statement that the output is unspent; anything it could not
+/// determine is an error.
+async fn find_spend_over_lightwalletd(
+    coin: &ZCoin,
+    client: &LightwalletdClient,
+    output: &OutputRef,
+    from_block: u64,
+) -> Result<Option<(ZTransaction, usize)>, String> {
+    match client.0.detect_output_spend(output, from_block).await {
+        Ok(SpendOutcome::NotSpent(_)) => Ok(None),
+        Ok(SpendOutcome::Spent(spend)) => Ok(Some((read_tx(&spend.tx)?, spend.input_index))),
+        Err(e) => Err(report_undetermined(coin, e)),
+    }
+}
+
 /// `wait_for_tx_spend` for a ZHTLC coin.
 pub(crate) fn wait_for_tx_spend(coin: &ZCoin, tx_bytes: &[u8], from_block: u64, wait_until: u64) -> TransactionFut {
     let tx = try_tx_fus!(read_tx(tx_bytes));
+    if let UtxoRpcClientEnum::LightWalletD(client) = &coin.as_ref().rpc_client {
+        let output = try_tx_fus!(watched_output(&tx, DEFAULT_SWAP_VOUT));
+        let (coin, client, tx_debug) = (coin.clone(), client.clone(), format!("{:?}", tx));
+        let fut = async move {
+            loop {
+                match find_spend_over_lightwalletd(&coin, &client, &output, from_block).await {
+                    Ok(Some((spend, _))) => return Ok(TransactionEnum::from(spend)),
+                    Ok(None) => (),
+                    // Undetermined is not a spend and not an answer: keep waiting, say why.
+                    Err(e) => log::error!("HTLC spend detection of tx {} could not tell: {}", tx_debug, e),
+                }
+                if common::now_ms() / 1000 > wait_until {
+                    return TX_PLAIN_ERR!(
+                        "Waited too long until {} for transaction {} {} to be spent ",
+                        wait_until,
+                        tx_debug,
+                        DEFAULT_SWAP_VOUT,
+                    );
+                }
+                Timer::sleep(10.).await;
+            }
+        };
+        return Box::new(fut.boxed().compat());
+    }
     let script_pubkey = try_tx_fus!(script_pubkey_at(&tx, DEFAULT_SWAP_VOUT));
     utxo_common::wait_for_output_spend_of(
         coin.as_ref(),
@@ -192,8 +254,8 @@ pub(crate) fn extract_secret(secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<
 /// `search_for_swap_tx_spend_my` / `_other` for a ZHTLC coin.
 ///
 /// The payment is read with the Zcash reader and checked against the HTLC script exactly as the shared
-/// search does; the search itself is then the shared one. Over lightwalletd it fails loudly at
-/// `find_output_spend` (R39.11.4d), which this routing deliberately leaves as it is.
+/// search does. Over lightwalletd the search is the dual-encoding index probe (R39.11.4d) and the spend
+/// is classified by the shared rule; elsewhere the search itself is the shared one.
 pub(crate) async fn search_for_swap_tx_spend(
     coin: &ZCoin,
     time_lock: u32,
@@ -206,21 +268,47 @@ pub(crate) async fn search_for_swap_tx_spend(
     let tx = read_tx(tx)?;
     let output0_script_pubkey = script_pubkey_at(&tx, 0)?;
     let spent_script_pubkey = script_pubkey_at(&tx, DEFAULT_SWAP_VOUT)?;
+    let payment = PaymentOutputs {
+        tx_hash: txid_internal(&tx),
+        output0_script_pubkey: output0_script_pubkey.into(),
+        spent_script_pubkey: spent_script_pubkey.into(),
+    };
+    if let UtxoRpcClientEnum::LightWalletD(client) = &coin.as_ref().rpc_client {
+        ensure_payment_pays_htlc(time_lock, first_pub, second_pub, secret_hash, &payment)?;
+        let output = watched_output(&tx, DEFAULT_SWAP_VOUT)?;
+        return match find_spend_over_lightwalletd(coin, client, &output, search_from_block).await? {
+            None => Ok(None),
+            Some((spend, input_index)) => classify_spend(spend, input_index).map(Some),
+        };
+    }
     utxo_common::search_for_swap_output_spend_of(
         coin.as_ref(),
         time_lock,
         first_pub,
         second_pub,
         secret_hash,
-        PaymentOutputs {
-            tx_hash: txid_internal(&tx),
-            output0_script_pubkey: output0_script_pubkey.into(),
-            spent_script_pubkey: spent_script_pubkey.into(),
-        },
+        payment,
         DEFAULT_SWAP_VOUT,
         search_from_block,
     )
     .await
+}
+
+/// Classifies a found spend by the script of the input that spends the HTLC output, by the shared rule.
+fn classify_spend(spend: ZTransaction, input_index: usize) -> Result<FoundSwapTxSpend, String> {
+    let script = script_sigs(&spend)
+        .into_iter()
+        .nth(input_index)
+        .ok_or_else(|| format!("the spending transaction has no transparent input {}", input_index))?;
+    match classify_swap_spend(&script) {
+        Some(SwapSpendKind::Spent) => Ok(FoundSwapTxSpend::Spent(spend.into())),
+        Some(SwapSpendKind::Refunded) => Ok(FoundSwapTxSpend::Refunded(spend.into())),
+        None => ERR!(
+            "Couldn't find required instruction in script_sig of input {} of tx {:?}",
+            input_index,
+            spend.txid()
+        ),
+    }
 }
 
 /// `check_if_my_payment_sent` for a ZHTLC coin. Yields the Zcash-transaction arm.
@@ -230,6 +318,7 @@ pub(crate) fn check_if_my_payment_sent(
     my_pub: &[u8],
     other_pub: &[u8],
     secret_hash: &[u8],
+    search_from_block: u64,
 ) -> Box<dyn Future<Item = Option<TransactionEnum>, Error = String> + Send> {
     let my_public = try_fus!(Public::from_slice(my_pub));
     let script = payment_script(
@@ -241,13 +330,29 @@ pub(crate) fn check_if_my_payment_sent(
     let hash = dhash160(&script);
     let fut = async move {
         match &coin.as_ref().rpc_client {
-            // Already-sent detection over lightwalletd rests on the address-index workaround that is
-            // not yet proved on a funded HTLC (CRD ch.39 R39.11.4d): fail loudly, because an empty
-            // answer here would read as "not sent" and double-fund the payment.
-            UtxoRpcClientEnum::LightWalletD(_) => ERR!(
-                "check_if_my_payment_sent is not implemented over lightwalletd: the address-index workaround it \
-                 needs (R39.11.4d) has not been proved on a funded HTLC"
-            ),
+            // Over lightwalletd the answer comes from the dual-encoding index probe. "Not sent" is only
+            // returned when a healthy endpoint answered every read over a gap-free window; anything
+            // less is an error, because an empty answer here would double-fund the payment.
+            UtxoRpcClientEnum::LightWalletD(client) => {
+                let script_pubkey = Builder::build_p2sh(&hash.into()).to_bytes();
+                let outcome = client
+                    .0
+                    .detect_funding(&script_pubkey, search_from_block)
+                    .await
+                    .map_err(|e| report_undetermined(&coin, e))?;
+                match outcome {
+                    SentOutcome::NotSent => Ok(None),
+                    SentOutcome::Sent(FundingFound::Transaction { tx, .. }) => {
+                        Ok(Some(TransactionEnum::from(read_tx(&tx)?)))
+                    },
+                    SentOutcome::Sent(FundingFound::Listed { txid }) => {
+                        let raw = client.0.transaction(txid).await.map_err(|e| {
+                            format!("the payment was found but its transaction could not be fetched: {}", e)
+                        })?;
+                        Ok(Some(TransactionEnum::from(read_tx(&raw.data)?)))
+                    },
+                }
+            },
             UtxoRpcClientEnum::Native(client) => {
                 let target_addr = keys::Address {
                     t_addr_prefix: coin.as_ref().conf.p2sh_t_addr_prefix,
