@@ -777,10 +777,10 @@ start height used.
 > - A requested start **beyond the current tip** is clamped to the tip; if that
 >   still differs from the anchor it rebuilds and scans the (empty) tip window,
 >   matching "sync from a future point".
->   For a start given as a **date** in the future this is superseded by
->   R39.10.11 (maintainer decision, 2026-10-11: such a date is rejected with
->   `CoinCreationError`, as in the reference); that is a required change, not
->   implemented (§39.10 Reloaded status, item 2).
+>   This applies to a start given as a **height**. A start given as a **date**
+>   in the future is rejected instead (R39.10.11, maintainer decision
+>   2026-10-11), before any wallet state is touched; this is implemented (§39.10
+>   Reloaded status, item 2).
 >
 > Because the wallet is re-seeded at `requested_start - 1` on rebuild, the anchor
 > afterwards equals the requested start, so the next unchanged activation matches
@@ -2298,7 +2298,7 @@ changes the 200 of the `status` call that reports a task error.
 
 | `error_type` | When (failure class) | `error_data` | HTTP if at mmrpc level |
 | --- | --- | --- | --- |
-| `CoinCreationError` | the coin could not be constructed: Sapling parameters missing, unreadable or failing their integrity digest (R39.6.3); local block-cache / wallet-database / locked-note storage cannot be opened; shielded key derivation fails (incl. HD policy without `z_derivation_path`); **no lightwalletd endpoint can be connected, or the initial chain-tip / tree-state query to the shielded backend fails**, or `light_wallet_d_servers` is empty; the requested sync date is in the future or cannot be resolved; the key policy is not supported for the shielded coin (hardware wallet, WalletConnect); any other build-time failure | object `{"ticker": string (the requested ticker), "error": string}` | 400 |
+| `CoinCreationError` | the coin could not be constructed: Sapling parameters missing, unreadable or failing their integrity digest (R39.6.3); local block-cache / wallet-database / locked-note storage cannot be opened; shielded key derivation fails (incl. HD policy without `z_derivation_path`); **no lightwalletd endpoint can be connected, or the initial chain-tip / tree-state query to the shielded backend fails**, or `light_wallet_d_servers` is empty; the requested sync date (a `date` start) is in the future -- later than both the wall clock and the tip block time -- or cannot be resolved; the key policy is not supported for the shielded coin (hardware wallet, WalletConnect); any other build-time failure | object `{"ticker": string (the requested ticker), "error": string}` | 400 |
 | `Transport` | the coin was built and the shielded sync finished, but the transparent backend could not deliver the current block height, or the wallet balance could not be read (e.g. **every admitted lightwalletd endpoint unreachable** at the height read -- Electrum no longer exists for a shielded coin, §39.11 --, native daemon unreachable at the result step) | string | 500 |
 | `CoinIsAlreadyActivated` | while this task ran, a concurrent activation of the same ticker registered the coin first | object `{"ticker": string}` | 400 |
 | `TaskTimedOut` | only produced by a timed-out wait for a user action; a Z-coin task never waits for one (R39.10.8), so this is not reachable in practice | object `{"duration": {"secs": u64, "nanos": u32}}` | 408 |
@@ -2326,7 +2326,9 @@ backends is:
 
 | Situation | Observable result |
 | --- | --- |
-| Light mode, **every** lightwalletd endpoint unreachable when the task starts (or the endpoint list is empty, or the first chain-tip / tree-state query fails) | terminal `status` `Error`, `CoinCreationError` `{ticker, error}` |
+| Light mode, **every** lightwalletd endpoint unreachable at admission, before anything is read (row superseded and implemented, §39.11, R39.11.6) | terminal `status` `Error`, `Transport` (string); an admission-excluded set or a fresh wallet with no strict-majority branch is `CoinCreationError` `{ticker, error}` instead |
+| Light mode, the `light_wallet_d_servers` list is empty | terminal `status` `Error`, `CoinCreationError` `{ticker, error}`, raised before the coin is built (R39.11.5) |
+| Light mode, the sync cannot start although an endpoint was admitted (connecting to it, the local resets, or the first chain-state / tree-state query fails, or local storage cannot be read) | terminal `status` `Error`, `CoinCreationError` `{ticker, error}` |
 | Light mode, lightwalletd fails **after** the shielded sync has started (download or scan error) | the task does **not** fail: `status` reports `InProgress` with `{"TemporaryError": <string>}`, the sync retries after a pause on the order of ten seconds, and progress values resume once the backend answers; the task ends only on success, on `cancel`, or on a non-transient failure |
 | Light mode, **every** Electrum server unreachable (row superseded and implemented, §39.11: the state cannot occur for a shielded coin; its lightwalletd analogue is R39.11.6) | not applicable |
 | Native mode, full-node daemon unreachable | shielded sync reports `TemporaryError` and retries as above; if the height step fails: `Transport` (string) |
@@ -2395,12 +2397,13 @@ framework errors of §55.2.
 >    is not available in the WebAssembly build. The WASM build has no shielded
 >    wallet database, so it cannot compute a balance, and reporting a zero
 >    balance instead would misstate the user's funds.
-> 2. **Future sync date.** The reference rejects a sync date in the future
->    with `CoinCreationError` (R39.10.11). By maintainer decision (2026-10-11)
->    Reloaded follows the reference; the code still clamps a start beyond the
->    current tip to the tip (R39.8.0h status note). The change is a required
->    change, not implemented, and is carried out together with §39.11, where
->    the date resolution moves to the shielded backend.
+> 2. **Future sync date.** Implemented. The reference rejects a sync date in
+>    the future with `CoinCreationError` (R39.10.11) and Reloaded does the same;
+>    this is no longer a deviation. A date is "in the future" when it is later
+>    than both the wall clock and the block time of the current tip; a date
+>    after the tip's time but not after the clock resolves to the tip (the chain
+>    simply has no later block yet). A start given as a height beyond the tip is
+>    unaffected and still clamps to the tip (R39.8.0h).
 > 3. **Electrum in Light mode.** Removed (§39.11, Step C): Light mode is served by
 >    lightwalletd alone, and the build-time Electrum `CoinCreationError` no longer
 >    exists. A Light coin with no usable lightwalletd endpoint ends the task as

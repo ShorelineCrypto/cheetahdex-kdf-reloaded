@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **A shielded-coin sync date in the future is rejected instead of clamped.** A
+  `sync_params` `date` later than **both** the wall clock and the chain tip's block time
+  now ends activation with `CoinCreationError`, matching the reference. The two
+  reference points are both needed: a date minutes after the tip is ordinary on a chain
+  that has not mined since, so the tip's time alone would reject it, while block times
+  can run ahead of the clock, so the clock alone would reject a date a real block
+  already covers. A date between the two resolves to the tip. A start given as a
+  **height** beyond the tip is unaffected and still clamps to the tip (CRD ch.39
+  R39.10.11, R39.8.0h).
+- **A shielded-coin sync date before the genesis block no longer hangs activation.** The
+  binary search that resolves a date to a height could not terminate when the target
+  preceded block 0's timestamp: the window stayed pinned at `0..=0` and the search
+  re-fetched block 0 over the network indefinitely. Such a date now resolves to height 0.
+
 ## [0.3.0-alpha.2] — development milestone, not released
 
 ### Upgrade note: EVM address under an HD wallet
