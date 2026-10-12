@@ -1958,6 +1958,31 @@ Where the server also populates a Sapling frontier field, a value differing
 from the tree field shall be recorded as a warning and the tree field shall
 remain authoritative.
 
+**The substituted root is told apart by the Sapling frontier field, not by
+length.** The server's protocol definition says the frontier field exists to
+cross-check the tree field. Measured on mainnet (Sapling activation 152855) and
+on the Pirate test chain (activation 61), the frontier is **empty exactly when
+the tree field is the substituted root** and populated whenever the tree is
+genuine: at `activation - 1` the tree is 64 hex characters and the frontier is
+empty; at the activation height the tree is `000000` and the frontier is
+`000000` (a real empty tree); at height 4 100 000 both are the same 1028
+characters. A 32-byte tree with an empty frontier is therefore the
+substitution, and a short tree with a matching frontier is a legitimate empty
+tree. A server that sends no frontier at all but a tree of a length other than
+32 bytes is still validated on the tree alone, as above.
+
+The anchor for a scan starting at the Sapling activation height (which is where
+`"earliest"`, a `date` before activation, and a `height` below activation all
+land; R39.8.0g) is the tree at `activation - 1`. No Sapling commitment exists
+below activation, so that tree is the empty tree by definition; the server
+returns the substituted root there on mainnet and on the test chain. A
+substituted root at a height **below** Sapling activation shall therefore be
+read as the empty tree, only its block hash being used. A substituted root at
+or above activation cannot be resolved the same way and shall be rejected; the
+error shall say that the server substituted the root, and shall tell the
+operator to use `"earliest"` (naming the activation height), a height at or
+above it, or another server.
+
 R39.8.7a `tx_hash` shall be rendered in the **big-endian display byte order** used
 by block explorers, by the transparent-coin history of `my_tx_history`, and by
 this coin's own `withdraw` and `send_raw_transaction` responses -- **not** in the

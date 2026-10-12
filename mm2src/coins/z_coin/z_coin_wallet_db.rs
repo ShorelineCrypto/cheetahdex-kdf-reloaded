@@ -850,8 +850,12 @@ impl ZCoinShieldedHistory {
         let sapling_activation = consensus_params
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap_or(BlockHeight::from_u32(0));
-        let commitment_tree: sapling::CommitmentTree =
-            parse_checkpoint_commitment_tree(&sapling_tree, checkpoint_height, sapling_activation)?;
+        let commitment_tree: sapling::CommitmentTree = parse_checkpoint_commitment_tree(
+            &sapling_tree,
+            tree_state.sapling_frontier.is_empty(),
+            checkpoint_height,
+            sapling_activation,
+        )?;
         let chain_state = ChainState::new(checkpoint_height, BlockHash(hash), commitment_tree.to_frontier());
         let mut wallet_db = open_wallet_db(&self.wallet_db_path, consensus_params)?;
         if wallet_db.get_account_ids().map_err(|e| e.to_string())?.is_empty() {
@@ -1451,6 +1455,28 @@ fn decode_32_byte_hex(name: &str, value: &str) -> Result<[u8; 32], String> {
         .map_err(|bytes: Vec<u8>| format!("Invalid {} length: expected 32 bytes, got {}", name, bytes.len()))
 }
 
+/// Whether a tree-state's `tree` field is the substituted bare commitment root.
+///
+/// The discriminator is `saplingFrontier` (field 6, which Pirate added "to
+/// cross-check the value in field 5"): it is empty exactly when the server
+/// substituted `finalRoot` for `finalState`, and populated whenever the tree is
+/// genuine. Length alone is not the test -- a 3-byte tree with a 3-byte frontier
+/// is a real empty tree, a 32-byte tree with an empty frontier is the
+/// substitution.
+fn is_substituted_commitment_root(sapling_tree: &[u8], sapling_frontier_is_empty: bool) -> bool {
+    sapling_tree.len() == SAPLING_COMMITMENT_ROOT_LEN && sapling_frontier_is_empty
+}
+
+fn substituted_root_error(checkpoint_height: BlockHeight, sapling_activation: BlockHeight) -> String {
+    format!(
+        "lightwalletd tree-state sapling tree at height {} is a bare {}-byte commitment root, not a \
+         serialized commitment tree; the server substituted finalRoot for finalState and the wallet \
+         must not anchor on it. Use sync_params \"earliest\" (Sapling activation height {}), a height \
+         at or above it, or a different lightwalletd server",
+        checkpoint_height, SAPLING_COMMITMENT_ROOT_LEN, sapling_activation
+    )
+}
+
 /// Parses the Sapling commitment tree a lightwalletd `TreeState` carries, refusing
 /// the shapes that would otherwise be accepted as a silently wrong anchor.
 ///
@@ -1470,6 +1496,7 @@ fn decode_32_byte_hex(name: &str, value: &str) -> Result<[u8; 32], String> {
 ///    the fetch plan floors every request at that height.
 fn parse_checkpoint_commitment_tree(
     sapling_tree: &[u8],
+    sapling_frontier_is_empty: bool,
     checkpoint_height: BlockHeight,
     sapling_activation: BlockHeight,
 ) -> Result<sapling::CommitmentTree, String> {
@@ -1483,13 +1510,28 @@ fn parse_checkpoint_commitment_tree(
         ));
     }
 
+    if is_substituted_commitment_root(sapling_tree, sapling_frontier_is_empty) {
+        // Below Sapling activation no Sapling commitment exists, so the tree is
+        // empty by consensus rule whatever the server put in the field. The
+        // substituted root carries no information we need: only the block hash
+        // beside it is used, and that is unaffected. This is the anchor
+        // `sync_params: "earliest"` needs, one block under the activation height.
+        if checkpoint_height < sapling_activation {
+            log::info!(
+                "lightwalletd tree-state at height {} (below Sapling activation {}) carries a substituted \
+                 commitment root; using the empty tree that holds there by definition",
+                checkpoint_height,
+                sapling_activation
+            );
+            return Ok(sapling::CommitmentTree::empty());
+        }
+        return Err(substituted_root_error(checkpoint_height, sapling_activation));
+    }
+
     if sapling_tree.len() == SAPLING_COMMITMENT_ROOT_LEN {
-        return Err(format!(
-            "lightwalletd tree-state sapling tree at height {} is a bare {}-byte commitment root, not a \
-             serialized commitment tree; the server substituted finalRoot for finalState and the wallet \
-             must not anchor on it",
-            checkpoint_height, SAPLING_COMMITMENT_ROOT_LEN
-        ));
+        // 32 bytes beside a populated frontier: not the known substitution shape,
+        // and still not a serialized tree.
+        return Err(substituted_root_error(checkpoint_height, sapling_activation));
     }
 
     let mut cursor = std::io::Cursor::new(sapling_tree);
@@ -3498,6 +3540,120 @@ mod tests {
             "the wallet must re-anchor once it has rewound past the divergence"
         );
         assert!(reopened.initial_chain_state.lock().is_some());
+    }
+
+    // Shapes measured against Pirate lightwalletd servers (mainnet activation
+    // 152855, test chain activation 61), inlined.
+    //   activation - 1: tree 64 hex chars, saplingFrontier empty  (substituted root)
+    //   activation:     tree "000000",     saplingFrontier "000000" (real empty tree)
+    //   deep height:    tree == saplingFrontier, 1028 hex chars     (real tree)
+
+    #[test]
+    fn substitution_discriminator_uses_the_frontier_not_the_length() {
+        let root = [0x5cu8; 32];
+        // 64-char tree, empty frontier: the substitution.
+        assert!(is_substituted_commitment_root(&root, true));
+        // A 32-byte tree beside a populated frontier is not the substitution shape.
+        assert!(!is_substituted_commitment_root(&root, false));
+        // The legitimate empty tree is short, whatever its frontier.
+        let empty = empty_sapling_tree_bytes();
+        assert!(!is_substituted_commitment_root(&empty, false));
+        assert!(!is_substituted_commitment_root(&empty, true));
+    }
+
+    #[test]
+    fn parse_checkpoint_tree_accepts_legitimate_empty_tree_with_matching_frontier() {
+        let empty = empty_sapling_tree_bytes();
+        let tree = parse_checkpoint_commitment_tree(
+            &empty,
+            false,
+            BlockHeight::from_u32(152_855),
+            BlockHeight::from_u32(152_855),
+        )
+        .unwrap();
+        assert_eq!(tree.size(), 0);
+    }
+
+    #[test]
+    fn parse_checkpoint_tree_accepts_a_real_tree_with_matching_frontier() {
+        let mut tree = sapling::CommitmentTree::empty();
+        tree.append(sapling::Node::from_scalar(bls12_381::Scalar::from(7u64)))
+            .unwrap();
+        let mut bytes = Vec::new();
+        zcash_primitives::merkle_tree::write_commitment_tree(&tree, &mut bytes).unwrap();
+        let parsed = parse_checkpoint_commitment_tree(
+            &bytes,
+            false,
+            BlockHeight::from_u32(4_100_000),
+            BlockHeight::from_u32(152_855),
+        )
+        .unwrap();
+        assert_eq!(parsed.size(), 1);
+    }
+
+    #[test]
+    fn parse_checkpoint_tree_rejects_substituted_root_above_activation_with_actionable_message() {
+        let error = parse_checkpoint_commitment_tree(
+            &[0x5cu8; 32],
+            true,
+            BlockHeight::from_u32(4_100_000),
+            BlockHeight::from_u32(152_855),
+        )
+        .unwrap_err();
+        assert!(error.contains("bare 32-byte commitment root"), "{}", error);
+        assert!(error.contains("\"earliest\""), "{}", error);
+        assert!(error.contains("152855"), "{}", error);
+    }
+
+    /// The `sync_params: "earliest"` defect: the anchor one block under Sapling
+    /// activation comes back as a substituted root. Nothing exists in the Sapling
+    /// tree before activation, so the empty tree is the correct anchor.
+    #[test]
+    fn parse_checkpoint_tree_below_activation_treats_substituted_root_as_empty_tree() {
+        let tree = parse_checkpoint_commitment_tree(
+            &[0x5cu8; 32],
+            true,
+            BlockHeight::from_u32(152_854),
+            BlockHeight::from_u32(152_855),
+        )
+        .unwrap();
+        assert_eq!(tree.size(), 0);
+        // A 32-byte tree with a populated frontier below activation is not the
+        // known substitution and stays refused.
+        assert!(parse_checkpoint_commitment_tree(
+            &[0x5cu8; 32],
+            false,
+            BlockHeight::from_u32(152_854),
+            BlockHeight::from_u32(152_855),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn tree_state_substituted_root_below_activation_is_accepted_as_anchor() {
+        let history = open_test_history();
+        let mut state = tree_state_with_tree(&hex::encode([0x5cu8; 32]));
+        state.height = 1; // test_params() activates Sapling at 2
+        assert!(state.sapling_frontier.is_empty());
+        history
+            .init_wallet_checkpoint_from_tree_state(test_params(), state)
+            .unwrap();
+        assert!(history.initial_chain_state.lock().is_some());
+    }
+
+    /// `earliest` resolves to the Sapling activation height, and any lower request
+    /// (explicit height, or a date before activation) is floored to the same start,
+    /// so all of them reach the same, now-accepted, anchor.
+    #[test]
+    fn earliest_and_pre_activation_requests_all_start_at_sapling_activation() {
+        let history = open_test_history();
+        for requested in [0u64, 1, 2] {
+            let plan = history
+                .lightwalletd_fetch_plan(&test_params(), 100, Some(requested), false)
+                .unwrap()
+                .unwrap();
+            assert_eq!(plan.start_height, 2, "requested {}", requested);
+        }
     }
 
     #[test]
