@@ -933,7 +933,8 @@ It shall distinguish the following classes without mutating the database:
 |---|---|
 | absent/empty wallet | file absent, or valid SQLite with `user_version = 0` and no user-defined tables, indexes, views, or triggers |
 | reference legacy wallet | valid SQLite; `user_version = 0`; no migration/version table; exactly the six tables, ordered columns, declared types/nullability, primary keys, uniqueness constraints, foreign keys, and permitted SQLite automatic indexes of R39.8.0s |
-| selected current wallet generation | valid SQLite produced by stable `zcash_client_sqlite 0.21.1`; `user_version = 8`; `schemer_migrations` having the single ordered column `id BLOB PRIMARY KEY`; exactly 48 ordered migration IDs whose canonical digest is `7b506df8a2b119fb143664a1c0b5eddfa7de5fe8458f07829818c59e5b39ddbb`; and exactly 467 canonical semantic records whose version-prefixed digest is `dfba9135b6d5ae446e88d83d162e9458730b5b098051d8565fdd91fe6be5bea8` |
+| selected current wallet generation | valid SQLite produced by `zcash_client_sqlite 0.22.0`; `user_version = 8`; `schemer_migrations` having the single ordered column `id BLOB PRIMARY KEY`; exactly 71 ordered migration IDs whose canonical digest is `1142e14a2d3103f1cabbbcbc2d686000e021bf88bcbcce2d34f7d0a040e2d08b`; and exactly 727 canonical semantic records whose version-prefixed digest is `4ebc85f7ea3516d019b3d0d4680a6cb75ec980bfe81437abb4913d50b3407350` |
+| previous Reloaded wallet generation (upgradeable) | valid SQLite produced by `zcash_client_sqlite 0.21.1`, the schema of the previous Reloaded build; `user_version = 8`; `schemer_migrations` with exactly 48 migration IDs whose canonical digest is `7b506df8a2b119fb143664a1c0b5eddfa7de5fe8458f07829818c59e5b39ddbb`; and exactly 467 canonical semantic records whose version-prefixed digest is `dfba9135b6d5ae446e88d83d162e9458730b5b098051d8565fdd91fe6be5bea8`. Handled by R39.8.0ba |
 | recognized compact cache | valid SQLite; `user_version = 0`; exactly the `compactblocks` table of R39.8.0u and no other user-defined schema objects |
 | unknown wallet/cache | a readable SQLite schema that does not match one of the positive fingerprints above, including an exact legacy-looking schema with a nonzero `user_version`, extra user objects, altered constraints, or only a partial table set |
 | corrupt/unreadable | SQLite open, integrity validation, or schema introspection fails |
@@ -987,6 +988,7 @@ allowed to modify the file. The observable policy is:
   tree, transaction-row identifier, or scan-tip state is reused;
 - a positively recognized current wallet opens normally under the selected
   coherent release line;
+- a positively recognized previous Reloaded wallet is upgraded under R39.8.0ba;
 - an unknown or corrupt file is preserved and produces a typed activation
   failure; it is not deleted, overwritten, or silently treated as empty.
 
@@ -998,13 +1000,45 @@ wallet database is current. The rebuild shall report the existing
 `UpdatingBlocksCache` and `BuildingWalletDb` phases according to the work
 actually performed.
 
+R39.8.0ba **Upgrade of a previous Reloaded wallet.** A wallet database that
+classifies as the previous Reloaded generation of R39.8.0w (it was created by an
+earlier Reloaded build on an older `zcash_client_sqlite` that applied fewer
+migrations) shall be brought to the current schema by the dependency's own
+migrator, under these steps, all inside the wallet-database serialization of
+R39.8.0ad:
+
+1. **Back up first.** A byte-for-byte copy of the database (after folding its WAL
+   into the main file) is written to a fresh `.pre-upgrade.<ms>.bak` name before
+   any other step. If the copy cannot be made, activation fails with the typed
+   schema error and the file is left unchanged.
+2. **Migrate a working copy.** The migrator runs on a private working copy, never
+   on the original.
+3. **Verify.** The migrated copy shall classify as the selected current
+   generation of R39.8.0w. Only then does it replace the original (atomic
+   rename), with the original's sidecars removed so they cannot be replayed into
+   it. The account and scan state carried by the wallet are kept.
+4. **Fall back.** On any failure at any step -- working-copy creation, migration
+   error, post-migration classification other than selected current, or the
+   final replacement -- the working copy is discarded, the original is moved
+   aside as `.upgrade-failed.<ms>.bak` exactly as the rebuild path of R39.8.0x
+   does, a fresh wallet is created, and the wallet is rescanned. The outcome is
+   therefore never a half-migrated wallet; it degrades to the rebuild behaviour.
+
+An unknown or corrupt file is not covered by this rule and keeps the typed
+failure of R39.8.0x. This rule does not extend to wallets older than the
+previous Reloaded generation; the reference legacy generation still follows the
+never-migrated rule of R39.8.0x.
+
 R39.8.0y The public modern candidates form two coherent, non-interchangeable
 dependency generations as of the reference date:
 
 | Candidate line | Backend | SQLite | Primitives | Proofs | Note encryption | Distribution |
 |---|---:|---:|---:|---:|---:|---|
-| stable | `0.23.0` | `0.21.1` | `0.28.0` | `0.28.0` | compatible `0.4.1` requirement (resolving to `0.4.2` in a fresh lock) | published crates.io releases |
-| newer release candidate | `0.24.0-rc.7` | `0.22.0-rc.7` | `0.30.0` | `0.30.0` | compatible `0.4.1` requirement | published RCs / matching upstream release tag |
+| stable (superseded 2026-10-12; see the selection record below) | `0.23.0` | `0.21.1` | `0.28.0` | `0.28.0` | compatible `0.4.1` requirement (resolving to `0.4.2` in a fresh lock) | published crates.io releases |
+| newer release candidate (closed 2026-10-12: not a live option) | `0.24.0-rc.7` | `0.22.0-rc.7` | `0.30.0` | `0.30.0` | compatible `0.4.1` requirement | published RCs / matching upstream release tag |
+
+Both rows are the 2026-08-04 evaluation, kept as history. Neither is the stack
+now in use; the current stack is the 2026-10-12 selection record below.
 
 The stable client pair requires its coherent `0.28` primitives/proofs types;
 substituting the separately newer `0.30` primitives/proofs line would create a
@@ -1017,14 +1051,37 @@ migration. R39.8.0x therefore requires the KDF classifier to intercept that
 database first. Nothing in either authorized KDF reference requires an RC-only
 wallet, pool, or transaction-generation feature.
 
-> **Selection record (2026-08-04).** The operator selected the stable line:
+> **Selection record, current (2026-10-12).** The maintainer's decision is
+> published stable releases only: no prerelease crate and no git dependency is
+> selected. The stack in use since the re-vendoring is `zcash_primitives 0.30.1`
+> (vendored and patched), `zcash_transparent 0.10.0` (vendored and patched),
+> `zcash_client_backend 0.24.0` (consumed unpatched from crates.io; its vendor
+> copy is dropped), `zcash_client_sqlite 0.22.0`, `zcash_proofs 0.30.0`,
+> `zcash_protocol 0.10.6`, and `sapling-crypto 0.7.0` (unchanged). This is the
+> published-stable successor of the `-rc.7` candidates of the table above, which
+> are therefore no longer evaluated as an option: the `0.24.0-rc.7` /
+> `0.22.0-rc.7` row is closed. The patches retained are the narrow ones of the
+> earlier record (the minimum transparent/builder hooks that preserve KDF P2SH
+> input and raw-output transaction bytes). One upstream wrinkle is unavoidable:
+> `zcash_primitives 0.30.1` itself declares exact version pins on two prerelease
+> crates, `block-buffer` and `crypto-common` release candidates. That is
+> upstream's choice for this release; it resolves, and KDF selects no prerelease
+> crate of its own, but the resolved tree is not free of prerelease packages. The
+> `zcash_client_sqlite 0.22.0` migrator applies 71 migrations (23 more than
+> 0.21.1) and creates Ironwood/Orchard tables unconditionally, which is why the
+> wallet-schema identity of R39.8.0w changed and R39.8.0ba exists.
+
+> **Selection record, superseded (2026-08-04; superseded 2026-10-12 by the record
+> above).** Kept as the record of why the stable line was chosen at the time.
+> The operator selected the stable line:
 > `zcash_client_backend 0.23.0`, `zcash_client_sqlite 0.21.1`, and
 > `zcash_primitives`/`zcash_proofs 0.28.0`. KDF consumes exact crates.io
 > versions and retains only narrow, documented patches: removal of backend
 > 0.23.0's obsolete exact `time-core 0.1.2` resolver pin, plus the minimum
 > transparent/builder hooks required to preserve KDF P2SH input and raw-output
 > transaction bytes. The old broad `librustzcash-patched/` dependency is not
-> part of the selected graph.
+> part of the selected graph. (Under the current record `zcash_client_backend`
+> is no longer vendored or patched, and the primitives line is `0.30.x`.)
 
 R39.8.0z The reference scan/store generation and both modern candidates differ
 at their public behavioral boundary. The reference generation resumes scanning
@@ -1087,9 +1144,20 @@ continue scanning. A pacing fixture shall configure a one-block wallet scan
 batch and a nonzero inter-batch interval, prove incremental progress at every
 batch boundary, and prove the scanned height remains durable after reopen.
 
+T39.8.0f A wallet database captured from the previous Reloaded build (a real
+`zcash_client_sqlite 0.21.1` file with one imported account, not a DDL
+reconstruction) shall classify as the previous Reloaded generation without being
+modified, and opening it shall run the dependency's migrator over it, leave a
+byte-identical `.pre-upgrade` backup, and yield a database that classifies as the
+selected current generation with 71 applied migrations and its account intact. A
+second test shall force the migration attempt to fail and prove the original is
+preserved byte-identically, a `.pre-upgrade` backup also exists, and a fresh empty
+current-generation wallet is created. The post-migration verification-failure
+branch is not separately exercised.
+
 #### Deferred Work
 
-D39.8.0a *(Resolved 2026-08-04.)* The operator selected the stable line and the
+D39.8.0a *(Resolved 2026-08-04; the pinned identities re-pinned 2026-10-12 for the current stack.)* The operator selected the stable line and the
 selected-current row of R39.8.0w now binds its exact migration and semantic
 schema identities. The implementation still must not classify a database as
 current from `user_version = 8` or the migration-table name alone.
@@ -1132,11 +1200,19 @@ versions, before the current-generation fingerprint of D39.8.0a is closed.
 - KomodoPlatform `librustzcash`, public tag `k-1.4.2`, revision
   `4e030a0f44cc17f100bf5f019563be25c5b8755f` (MIT OR Apache-2.0 package
   licensing): <https://github.com/KomodoPlatform/librustzcash/tree/4e030a0f44cc17f100bf5f019563be25c5b8755f>.
-- Published stable package manifests for `zcash_client_backend` `0.23.0` and
-  `zcash_client_sqlite` `0.21.1`: <https://crates.io/crates/zcash_client_backend/0.23.0>
-  and <https://crates.io/crates/zcash_client_sqlite/0.21.1>.
-- Published release-candidate package manifests for `zcash_client_backend`
-  `0.24.0-rc.7` and `zcash_client_sqlite` `0.22.0-rc.7`:
+- Published stable package manifests for the stack in use (selection record of
+  2026-10-12): <https://crates.io/crates/zcash_client_backend/0.24.0>,
+  <https://crates.io/crates/zcash_client_sqlite/0.22.0>,
+  <https://crates.io/crates/zcash_primitives/0.30.1>,
+  <https://crates.io/crates/zcash_transparent/0.10.0>,
+  <https://crates.io/crates/zcash_protocol/0.10.6>, and
+  <https://crates.io/crates/sapling-crypto/0.7.0>.
+- Historical (superseded 2026-08-04 selection): `zcash_client_backend` `0.23.0`
+  and `zcash_client_sqlite` `0.21.1`:
+  <https://crates.io/crates/zcash_client_backend/0.23.0> and
+  <https://crates.io/crates/zcash_client_sqlite/0.21.1>.
+- Historical (closed release-candidate row): `zcash_client_backend` `0.24.0-rc.7`
+  and `zcash_client_sqlite` `0.22.0-rc.7`:
   <https://crates.io/crates/zcash_client_backend/0.24.0-rc.7> and
   <https://crates.io/crates/zcash_client_sqlite/0.22.0-rc.7>.
 - SQLite schema-table and application-version interfaces:

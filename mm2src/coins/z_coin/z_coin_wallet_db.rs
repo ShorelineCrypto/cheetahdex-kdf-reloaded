@@ -177,6 +177,18 @@ impl ZCoinShieldedHistory {
 
         match classify_wallet_db(&paths.wallet_db_path, consensus_params.clone()) {
             WalletDbGeneration::AbsentOrEmpty | WalletDbGeneration::SelectedCurrent => {},
+            WalletDbGeneration::UpgradeablePreviousReloaded => {
+                let mutation_lock = wallet_db_mutation_lock(&paths.wallet_db_path);
+                let _guard = mutation_lock.lock();
+                upgrade_previous_reloaded_wallet(&paths.wallet_db_path, consensus_params.clone()).map_err(
+                    |reason| {
+                        MmError::new(ZCoinBuildError::ShieldedDbSchema {
+                            path: paths.wallet_db_path.display().to_string(),
+                            reason,
+                        })
+                    },
+                )?;
+            },
             WalletDbGeneration::ReferenceLegacy => {
                 // Renaming the wallet database aside is a rebuild path (R39.8.0ad).
                 // This runs during activation, so it is exactly the party that can
@@ -1581,6 +1593,9 @@ fn convert_compact_output(output: z_coin_grpc::CompactOutput) -> zcash_compact::
 enum WalletDbGeneration {
     AbsentOrEmpty,
     ReferenceLegacy,
+    /// A wallet created by the previous Reloaded build (`zcash_client_sqlite 0.21.1`,
+    /// 48 migrations). The current migrator can bring it forward (R39.8.0ba).
+    UpgradeablePreviousReloaded,
     SelectedCurrent,
     Unknown,
     Corrupt,
@@ -1662,6 +1677,14 @@ CREATE TABLE sent_notes (
 );
 "#;
 
+/// Identity of the wallet schema produced by the previous Reloaded build
+/// (`zcash_client_sqlite 0.21.1`): `user_version = 8`, 467 canonical records, pinned by
+/// the digest of [`schema_fingerprint_digest`]. It cannot be rebuilt from DDL because the
+/// upstream migrator keys off its own migration table, so it is pinned by digest only.
+const PREVIOUS_RELOADED_WALLET_USER_VERSION: i64 = 8;
+const PREVIOUS_RELOADED_WALLET_RECORD_COUNT: usize = 467;
+const PREVIOUS_RELOADED_WALLET_DIGEST: &str = "dfba9135b6d5ae446e88d83d162e9458730b5b098051d8565fdd91fe6be5bea8";
+
 const RECOGNIZED_COMPACT_CACHE_SCHEMA: &str = r#"
 CREATE TABLE compactblocks (
     height INTEGER PRIMARY KEY,
@@ -1689,9 +1712,155 @@ fn classify_wallet_db(path: &Path, consensus_params: ZcoinConsensusParams) -> Wa
     }
     match selected_current_wallet_fingerprint(consensus_params) {
         Ok(reference) if actual == reference => WalletDbGeneration::SelectedCurrent,
+        Ok(_) if is_previous_reloaded_wallet_fingerprint(&actual) => WalletDbGeneration::UpgradeablePreviousReloaded,
         Ok(_) => WalletDbGeneration::Unknown,
         Err(_) => WalletDbGeneration::Corrupt,
     }
+}
+
+/// SHA-256 over `user_version:<n>\n` followed by every canonical record and `\n`.
+fn schema_fingerprint_digest(fingerprint: &SchemaFingerprint) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(format!("user_version:{}\n", fingerprint.user_version));
+    for record in &fingerprint.records {
+        hasher.update(record.as_bytes());
+        hasher.update(b"\n");
+    }
+    hex::encode(hasher.finalize())
+}
+
+fn is_previous_reloaded_wallet_fingerprint(actual: &SchemaFingerprint) -> bool {
+    actual.user_version == PREVIOUS_RELOADED_WALLET_USER_VERSION
+        && actual.records.len() == PREVIOUS_RELOADED_WALLET_RECORD_COUNT
+        && schema_fingerprint_digest(actual) == PREVIOUS_RELOADED_WALLET_DIGEST
+}
+
+/// R39.8.0ba: back up, migrate a working copy, verify, fall back to preserve-and-rebuild.
+///
+/// The caller holds the wallet-database mutation lock. The original file is never
+/// modified by the migration: it runs on a private working copy that replaces the
+/// original only after it classifies as [`WalletDbGeneration::SelectedCurrent`]. On any
+/// failure the original is moved aside (the rebuild path of R39.8.0x) and activation
+/// proceeds with a fresh wallet. Only a failure to create the backup is returned as an
+/// error, with the original untouched.
+fn upgrade_previous_reloaded_wallet(path: &Path, consensus_params: ZcoinConsensusParams) -> Result<(), String> {
+    let backup_path = copy_database_as_backup(path, "pre-upgrade")?;
+    log::info!(
+        "Backed up shielded wallet database {} as {} before upgrading its schema",
+        path.display(),
+        backup_path.display()
+    );
+
+    let work_path = path_with_suffix(path, ".upgrade-work");
+    match migrate_wallet_copy(path, &work_path, consensus_params) {
+        Ok(()) => {
+            // The original was checkpointed when it was backed up; drop any sidecar so it
+            // cannot be replayed into the upgraded file.
+            for suffix in DATABASE_SIDECAR_SUFFIXES {
+                let _ = std::fs::remove_file(path_with_suffix(path, suffix));
+            }
+            match std::fs::rename(&work_path, path) {
+                Ok(()) => {
+                    log::info!(
+                        "Upgraded shielded wallet database {} to the current schema; backup kept at {}",
+                        path.display(),
+                        backup_path.display()
+                    );
+                    return Ok(());
+                },
+                Err(e) => log::warn!(
+                    "Upgraded shielded wallet copy could not replace {}: {}; rebuilding instead",
+                    path.display(),
+                    e
+                ),
+            }
+        },
+        Err(reason) => log::warn!(
+            "Upgrading shielded wallet database {} failed: {}; rebuilding instead",
+            path.display(),
+            reason
+        ),
+    }
+
+    remove_database_files(&work_path);
+    let rebuilt_from = preserve_database_for_rebuild(path, "upgrade-failed")?
+        .ok_or_else(|| "recognized previous wallet disappeared before it could be preserved".to_owned())?;
+    log::info!(
+        "Preserved shielded wallet database {} as {} (backup also at {}); a fresh wallet will be rebuilt and rescanned",
+        path.display(),
+        rebuilt_from.display(),
+        backup_path.display()
+    );
+    Ok(())
+}
+
+fn migrate_wallet_copy(source: &Path, work_path: &Path, consensus_params: ZcoinConsensusParams) -> Result<(), String> {
+    remove_database_files(work_path);
+    std::fs::copy(source, work_path).map_err(|e| format!("failed to create working copy: {}", e))?;
+    {
+        let mut wallet_db = open_wallet_db(work_path, consensus_params.clone())?;
+        init_wallet_db(&mut wallet_db, None).map_err(|e| format!("schema migration failed: {}", e))?;
+    }
+    // Fold the WAL into the main file so the file alone carries the upgraded database.
+    Connection::open(work_path)
+        .and_then(|conn| conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);"))
+        .map_err(|e| format!("failed to checkpoint upgraded copy: {}", e))?;
+    for suffix in DATABASE_SIDECAR_SUFFIXES {
+        let _ = std::fs::remove_file(path_with_suffix(work_path, suffix));
+    }
+    match classify_wallet_db(work_path, consensus_params) {
+        WalletDbGeneration::SelectedCurrent => Ok(()),
+        other => Err(format!(
+            "upgraded schema classified as {:?}, not the current schema",
+            other
+        )),
+    }
+}
+
+fn remove_database_files(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    for suffix in DATABASE_SIDECAR_SUFFIXES {
+        let _ = std::fs::remove_file(path_with_suffix(path, suffix));
+    }
+}
+
+/// Copies `path` (after folding its WAL into the main file) to a fresh `.bak` name
+/// without disturbing the original.
+fn copy_database_as_backup(path: &Path, reason: &str) -> Result<PathBuf, String> {
+    let conn = Connection::open(path)
+        .map_err(|e| format!("Failed to open shielded database {} for backup: {}", path.display(), e))?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .map_err(|e| format!("Failed to checkpoint shielded database {}: {}", path.display(), e))?;
+    drop(conn);
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("Invalid shielded database path {}", path.display()))?;
+    let timestamp = common::now_ms();
+    for sequence in 0..1_000u32 {
+        let name = if sequence == 0 {
+            format!("{}.{}.{}.bak", file_name, reason, timestamp)
+        } else {
+            format!("{}.{}.{}.{}.bak", file_name, reason, timestamp, sequence)
+        };
+        let candidate = path.with_file_name(name);
+        if candidate.exists() {
+            continue;
+        }
+        std::fs::copy(path, &candidate).map_err(|e| {
+            format!(
+                "Failed to back up shielded database {} as {}: {}",
+                path.display(),
+                candidate.display(),
+                e
+            )
+        })?;
+        return Ok(candidate);
+    }
+    Err("Too many shielded database backup-name collisions".to_owned())
 }
 
 fn classify_compact_db(path: &Path) -> CompactDbGeneration {
@@ -4270,9 +4439,111 @@ mod tests {
         assert_eq!(account_count, 0, "legacy account rows must not be migrated or reused");
     }
 
+    /// A real wallet created by the previous Reloaded build (`zcash_client_sqlite 0.21.1`,
+    /// one account imported from `test_extfvk(8)` at a checkpoint), captured by running that
+    /// build's normal initialisation path. It is tracked because it is small and is the only
+    /// way to exercise the upstream migrator against a faithful old schema.
+    const PREVIOUS_RELOADED_WALLET_FIXTURE: &[u8] =
+        include_bytes!("test-fixtures/wallet-zcsqlite-0.21.1-checkpointed.db");
+
+    fn place_previous_reloaded_wallet(db_dir: &Path) -> ZCoinShieldedHistoryPaths {
+        let paths = ZCoinShieldedHistoryPaths::new("ARRR", db_dir.to_path_buf());
+        std::fs::write(&paths.wallet_db_path, PREVIOUS_RELOADED_WALLET_FIXTURE).unwrap();
+        paths
+    }
+
+    fn backups_with_prefix(db_dir: &Path, prefix: &str) -> Vec<PathBuf> {
+        std::fs::read_dir(db_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(prefix) && name.ends_with(".bak"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn previous_reloaded_wallet_fixture_is_recognized_as_upgradeable() {
+        let db_dir = test_db_dir("schema-previous-recognized");
+        let paths = place_previous_reloaded_wallet(&db_dir);
+        let before = std::fs::read(&paths.wallet_db_path).unwrap();
+        assert_eq!(
+            classify_wallet_db(&paths.wallet_db_path, test_params()),
+            WalletDbGeneration::UpgradeablePreviousReloaded
+        );
+        // Classification is read-only.
+        assert_eq!(std::fs::read(&paths.wallet_db_path).unwrap(), before);
+    }
+
+    /// Runs the real upstream migrator (`init_wallet_db`, 23 migrations) over a wallet
+    /// captured from the previous build, not a DDL reconstruction.
+    #[test]
+    fn previous_reloaded_wallet_is_backed_up_and_migrated_in_place() {
+        let db_dir = test_db_dir("schema-previous-migrate");
+        let paths = place_previous_reloaded_wallet(&db_dir);
+
+        // `test_extfvk(8)` owns the fixture's account; open_or_create rejects a wallet whose
+        // account does not match, so success also proves the account survived migration.
+        let history =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), test_params(), &test_extfvk(8), None).unwrap();
+
+        assert_eq!(
+            classify_wallet_db(history.wallet_db_path(), test_params()),
+            WalletDbGeneration::SelectedCurrent
+        );
+        let conn = Connection::open(history.wallet_db_path()).unwrap();
+        let migrations: u32 = conn
+            .query_row("SELECT COUNT(*) FROM schemer_migrations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(migrations, 71, "48 previous + 23 new migrations");
+        let accounts: u32 = conn
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(accounts, 1, "the migrated wallet keeps its account");
+
+        let backups = backups_with_prefix(&db_dir, "ARRR_RELOADED_WALLET.db.pre-upgrade.");
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), PREVIOUS_RELOADED_WALLET_FIXTURE);
+        assert!(backups_with_prefix(&db_dir, "ARRR_RELOADED_WALLET.db.upgrade-failed.").is_empty());
+        assert!(!path_with_suffix(&paths.wallet_db_path, ".upgrade-work").exists());
+    }
+
+    /// Forces the migration attempt to fail before it starts (the working-copy path is
+    /// occupied by a directory) and proves the outcome degrades to preserve-and-rebuild.
+    /// The post-migration verification failure branch is not separately exercised.
+    #[test]
+    fn failed_previous_wallet_upgrade_falls_back_to_preserve_and_rebuild() {
+        let db_dir = test_db_dir("schema-previous-fallback");
+        let paths = place_previous_reloaded_wallet(&db_dir);
+        std::fs::create_dir(path_with_suffix(&paths.wallet_db_path, ".upgrade-work")).unwrap();
+
+        let history =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), test_params(), &test_extfvk(8), None).unwrap();
+
+        assert_eq!(
+            classify_wallet_db(history.wallet_db_path(), test_params()),
+            WalletDbGeneration::SelectedCurrent
+        );
+        let conn = Connection::open(history.wallet_db_path()).unwrap();
+        let accounts: u32 = conn
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(accounts, 0, "the rebuilt wallet starts empty and is rescanned");
+        for prefix in [
+            "ARRR_RELOADED_WALLET.db.pre-upgrade.",
+            "ARRR_RELOADED_WALLET.db.upgrade-failed.",
+        ] {
+            let backups = backups_with_prefix(&db_dir, prefix);
+            assert_eq!(backups.len(), 1, "{prefix}");
+            assert_eq!(std::fs::read(&backups[0]).unwrap(), PREVIOUS_RELOADED_WALLET_FIXTURE);
+        }
+    }
+
     // Re-pinned for zcash_client_sqlite 0.22.0 (was 467 records / 48 migrations on 0.21.1).
-    // Wallet DBs created by the 0.21.1 schema no longer match this fingerprint; see the
-    // Step B report on the (undecided) upgrade path for them.
+    // Wallet DBs created by the 0.21.1 schema no longer match this fingerprint; they are
+    // upgraded by R39.8.0ba (see previous_reloaded_wallet_is_backed_up_and_migrated_in_place).
     #[test]
     fn selected_current_schema_identity_is_pinned() {
         use sha2::{Digest, Sha256};
