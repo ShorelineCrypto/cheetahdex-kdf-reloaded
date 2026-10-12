@@ -1,4 +1,5 @@
 use super::*;
+use crate::z_coin::z_tx_read;
 
 #[async_trait]
 impl SwapOps for ZCoin {
@@ -288,11 +289,13 @@ impl SwapOps for ZCoin {
     }
 
     fn validate_maker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        utxo_common::validate_maker_payment(self, input)
+        let (first_pub, second_pub) = (input.maker_pub.clone(), input.taker_pub.clone());
+        z_tx_read::validate_payment(self, input, first_pub, second_pub)
     }
 
     fn validate_taker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        utxo_common::validate_taker_payment(self, input)
+        let (first_pub, second_pub) = (input.taker_pub.clone(), input.maker_pub.clone());
+        z_tx_read::validate_payment(self, input, first_pub, second_pub)
     }
 
     fn check_if_my_payment_sent(
@@ -304,7 +307,7 @@ impl SwapOps for ZCoin {
         _search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Box<dyn Future<Item = Option<TransactionEnum>, Error = String> + Send> {
-        utxo_common::check_if_my_payment_sent(self.clone(), time_lock, my_pub, other_pub, secret_hash)
+        z_tx_read::check_if_my_payment_sent(self.clone(), time_lock, my_pub, other_pub, secret_hash)
     }
 
     async fn search_for_swap_tx_spend_my(
@@ -316,13 +319,14 @@ impl SwapOps for ZCoin {
         search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        utxo_common::search_for_swap_tx_spend_my(
-            self.as_ref(),
+        let my_public = *try_s!(self.as_ref().priv_key_policy.key_pair_or_err()).public();
+        z_tx_read::search_for_swap_tx_spend(
+            self,
             time_lock,
-            other_pub,
+            &my_public,
+            &try_s!(Public::from_slice(other_pub)),
             secret_hash,
             tx,
-            utxo_common::DEFAULT_SWAP_VOUT,
             search_from_block,
         )
         .await
@@ -337,20 +341,21 @@ impl SwapOps for ZCoin {
         search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        utxo_common::search_for_swap_tx_spend_other(
-            self.as_ref(),
+        let my_public = *try_s!(self.as_ref().priv_key_policy.key_pair_or_err()).public();
+        z_tx_read::search_for_swap_tx_spend(
+            self,
             time_lock,
-            other_pub,
+            &try_s!(Public::from_slice(other_pub)),
+            &my_public,
             secret_hash,
             tx,
-            utxo_common::DEFAULT_SWAP_VOUT,
             search_from_block,
         )
         .await
     }
 
     fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
-        utxo_common::extract_secret(secret_hash, spend_tx)
+        z_tx_read::extract_secret(secret_hash, spend_tx)
     }
 
     fn negotiate_swap_contract_addr(

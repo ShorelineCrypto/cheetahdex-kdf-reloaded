@@ -1021,11 +1021,20 @@ the wallet rewind and follow that server's chain.
 > the methods actually needed. Recorded as CRD `D39.11.g`.
 
 **D — route ARRR's transaction parsing to the Zcash parser.** The shared UTXO parser applies
-the v4 layout to any overwintered version ≥ 4 with double‑SHA256 txids, so it mis‑parses v6 and
-computes the wrong txid by construction. It cannot simply be deleted: `UtxoTx` is referenced in
-42 files and is the transaction type for every UTXO coin. `zcash_primitives::Transaction::read`
+the v4 layout with double‑SHA256 txids. It cannot simply be deleted: `UtxoTx` is referenced in
+48 files and is the transaction type for every UTXO coin. `zcash_primitives::Transaction::read`
 handles Sprout, v3, v4, v5 and v6 in one parser, so routing ARRR to it removes the duplication
 *and* keeps the v4 history an old wallet still needs when restoring from a pre‑fork birthday.
+
+> **Corrected 2026‑10‑12 from the implementation.** This step was written on the belief that the
+> shared parser “mis‑parses v6 and computes the wrong txid by construction”. It does neither: it
+> **refuses** v6 outright. `deserialize::<UtxoTx>` returns `MalformedData` or `UnexpectedEnd` for
+> all 18 v6 transactions of the offline corpus and for a hand‑built v5, so no identifier is
+> produced at all. Separately its identifier *rule* is the wrong rule — on a v4 transaction it
+> yields the double‑SHA256 of the bytes, which is not a v6 transaction's ZIP‑244 digest. The
+> routing is therefore still required, but because the swap step **fails** rather than proceeding
+> on a wrong identifier. CRD R39.11.15 and R39.11.16a carried the same error and are corrected.
+> The file count was 42 here and is 48 as measured.
 
 **E — v6 construction, then lift the gates.** Map `NetworkUpgrade::Nu6_3` to the Ironwood
 activation height so the builder selects v6; implement runtime activation‑height discovery,

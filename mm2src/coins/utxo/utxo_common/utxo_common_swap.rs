@@ -913,8 +913,19 @@ pub async fn search_for_swap_tx_spend_other(
 /// Note spender could generate the spend with several inputs where the only one input is the p2sh script.
 pub fn extract_secret(secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
     let spend_tx: UtxoTx = try_s!(deserialize(spend_tx).map_err(|e| ERRL!("{:?}", e)));
-    for (input_idx, input) in spend_tx.inputs.into_iter().enumerate() {
-        let script: Script = input.script_sig.clone().into();
+    extract_secret_from_script_sigs(
+        secret_hash,
+        spend_tx.inputs.into_iter().map(|input| input.script_sig.into()),
+    )
+}
+
+/// The secret-extraction rule of [`extract_secret`], over the input scripts alone, so a coin that reads
+/// its transactions with a different parser (ZHTLC, CRD ch.39 R39.11.16a) applies the identical rule.
+pub(crate) fn extract_secret_from_script_sigs(
+    secret_hash: &[u8],
+    script_sigs: impl IntoIterator<Item = Script>,
+) -> Result<Vec<u8>, String> {
+    for (input_idx, script) in script_sigs.into_iter().enumerate() {
         let instruction = match script.get_instruction(1) {
             Some(Ok(instr)) => instr,
             Some(Err(e)) => {
@@ -1071,9 +1082,49 @@ async fn search_for_swap_output_spend(
 ) -> Result<Option<FoundSwapTxSpend>, String> {
     let mut tx: UtxoTx = try_s!(deserialize(tx).map_err(|e| ERRL!("{:?}", e)));
     tx.tx_hash_algo = coin.tx_hash_algo;
+    let tx_hash = tx.hash();
+    let output0_script_pubkey = tx.outputs[0].script_pubkey.clone();
+    let spent_script_pubkey = tx.outputs[output_index].script_pubkey.clone();
+    search_for_swap_output_spend_of(
+        coin,
+        time_lock,
+        first_pub,
+        second_pub,
+        secret_hash,
+        PaymentOutputs {
+            tx_hash,
+            output0_script_pubkey,
+            spent_script_pubkey,
+        },
+        output_index,
+        search_from_block,
+    )
+    .await
+}
+
+/// What the spend search needs to know about the payment transaction, independent of which parser
+/// read it.
+pub(crate) struct PaymentOutputs {
+    /// Internal-order transaction hash, as `find_output_spend` takes it.
+    pub(crate) tx_hash: H256,
+    pub(crate) output0_script_pubkey: Bytes,
+    pub(crate) spent_script_pubkey: Bytes,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn search_for_swap_output_spend_of(
+    coin: &UtxoCoinFields,
+    time_lock: u32,
+    first_pub: &Public,
+    second_pub: &Public,
+    secret_hash: &[u8],
+    payment: PaymentOutputs,
+    output_index: usize,
+    search_from_block: u64,
+) -> Result<Option<FoundSwapTxSpend>, String> {
     let script = payment_script(time_lock, secret_hash, first_pub, second_pub);
     let expected_script_pubkey = Builder::build_p2sh(&dhash160(&script).into()).to_bytes();
-    if tx.outputs[0].script_pubkey != expected_script_pubkey {
+    if payment.output0_script_pubkey != expected_script_pubkey {
         // Reached from `recover_funds`: the pubkeys/secret_hash/locktime this
         // recovery attempt reconstructed from the swap's own saved record
         // don't reproduce the HTLC script that's actually on chain in this
@@ -1090,8 +1141,8 @@ async fn search_for_swap_output_spend(
             "Payment tx {:?} output 0 does not pay the HTLC script this swap negotiated \
              (found script_pubkey {:?}, expected {:?} from the swap's saved pubkeys/secret_hash/locktime) \
              -- this payment cannot be recovered automatically",
-            tx.hash(),
-            tx.outputs[0].script_pubkey,
+            payment.tx_hash,
+            payment.output0_script_pubkey,
             expected_script_pubkey
         );
     }
@@ -1099,8 +1150,8 @@ async fn search_for_swap_output_spend(
     let spend = try_s!(
         coin.rpc_client
             .find_output_spend(
-                tx.hash(),
-                &tx.outputs[output_index].script_pubkey,
+                payment.tx_hash,
+                &payment.spent_script_pubkey,
                 output_index,
                 BlockHashOrHeight::Height(search_from_block as i64)
             )

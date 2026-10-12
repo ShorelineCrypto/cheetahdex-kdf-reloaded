@@ -133,6 +133,9 @@ macro_rules! try_ztx_s {
 mod z_coin_ops;
 #[cfg(not(target_arch = "wasm32"))] mod z_swap_ops;
 #[cfg(target_arch = "wasm32")] mod z_swap_ops_wasm;
+#[cfg(not(target_arch = "wasm32"))] mod z_tx_read;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod z_tx_read_fixtures;
 
 #[cfg(all(test, feature = "zhtlc-native-tests"))]
 mod z_coin_tests;
@@ -1784,9 +1787,22 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                             .compat()
                             .await
                             .expect("Panic here to avoid storing invalid tree state to the DB");
-                        let tx: UtxoTx = deserialize(tx.as_slice()).expect("Panic here to avoid invalid tree state");
-                        for output in tx.shielded_outputs {
-                            let node = match Option::from(Node::from_bytes(output.cmu.take())) {
+                        // The Zcash reader, not the shared UTXO parser: the latter misreads version 5 and 6,
+                        // and a misread here would corrupt the commitment tree (R39.11.16a).
+                        let tx = ZTransaction::read(tx.as_slice(), BranchId::Sapling)
+                            .expect("Panic here to avoid invalid tree state");
+                        let cmus_of_tx = tx
+                            .sapling_bundle()
+                            .map(|bundle| {
+                                bundle
+                                    .shielded_outputs()
+                                    .iter()
+                                    .map(|output| output.cmu().to_bytes())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        for cmu in cmus_of_tx {
+                            let node = match Option::from(Node::from_bytes(cmu)) {
                                 Some(node) => node,
                                 None => {
                                     log::error!(
@@ -1805,7 +1821,7 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                                 );
                                 return;
                             }
-                            cmus.push(output.cmu);
+                            cmus.push(H256::from(cmu));
                         }
                     }
 
@@ -2389,7 +2405,23 @@ impl MarketCoinOps for ZCoin {
         wait_until: u64,
         check_every: u64,
     ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        utxo_common::wait_for_confirmations(self.as_ref(), tx, confirmations, requires_nota, wait_until, check_every)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Read through the Zcash reader: the shared UTXO parser misreads version 5 and 6
+            // (R39.11.16a).
+            z_tx_read::wait_for_confirmations(self, tx, confirmations, requires_nota, wait_until, check_every)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            utxo_common::wait_for_confirmations(
+                self.as_ref(),
+                tx,
+                confirmations,
+                requires_nota,
+                wait_until,
+                check_every,
+            )
+        }
     }
 
     fn wait_for_tx_spend(
@@ -2399,13 +2431,20 @@ impl MarketCoinOps for ZCoin {
         from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        utxo_common::wait_for_output_spend(
-            self.as_ref(),
-            transaction,
-            utxo_common::DEFAULT_SWAP_VOUT,
-            from_block,
-            wait_until,
-        )
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            z_tx_read::wait_for_tx_spend(self, transaction, from_block, wait_until)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            utxo_common::wait_for_output_spend(
+                self.as_ref(),
+                transaction,
+                utxo_common::DEFAULT_SWAP_VOUT,
+                from_block,
+                wait_until,
+            )
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]

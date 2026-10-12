@@ -37,11 +37,12 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
   requirements (R39.11.5--R39.11.7a), the single height authority
   (R39.11.8--R39.11.12), and the tests T39.11.a--T39.11.d and T39.11.f,
   T39.11.h--T39.11.j (T39.11.a--T39.11.d in part; each test's note says what it
-  does not cover). **Not implemented:** the swap-path HTLC spend and
+  does not cover). **Implemented (plan Step D):** the swap-path parser routing
+  (R39.11.16--R39.11.16a, with the carve-outs its status note names) and
+  T39.11.e. **Not implemented:** the swap-path HTLC spend and
   already-sent detection (R39.11.4d, the swap consumer of R39.11.4b(f), and the
   named conditions of R39.11.17), which fail with an explicit error rather than
-  answer "not spent"; the swap-path parser routing (R39.11.16--R39.11.16a, plan
-  Step D) and T39.11.e, T39.11.g. Three kinds of statement in that Part are **not**
+  answer "not spent"; T39.11.g. Three kinds of statement in that Part are **not**
   required changes and are marked as such where they appear: R39.11.13--R39.11.15
   describe the as-built parsing contract and the pinned dependencies' published
   version coverage; several requirements record verified facts about the
@@ -2389,15 +2390,16 @@ canonical counterparts for the same task.
 >    the requirement says which observation it rests on. These are **not** claims
 >    about this project's code.
 > 2. **Descriptions of the present as-built contract.** R39.11.13--R39.11.15
->    describe what this repository does today and say so in their own text. They
->    are T-DOC, as-built, and are unchanged by Step C: the parser routing that would
->    change them (R39.11.16/R39.11.16a) is plan Step D.
+>    describe what this repository did **before Step D**, and say so in their own
+>    text. They are T-DOC, as-built, and were unchanged by Step C. Step D (the parser
+>    routing of R39.11.16/R39.11.16a) has since changed the parser-per-call-path
+>    split they record; the status note after R39.11.16a states what it is now.
 > 3. **Requirements on this project's code.** Each carries a status note. In short:
 >    implemented -- one backend, the function table, the activation requirements,
->    endpoint admission, the single height authority, and `UtxoRpcClientOps` over
->    lightwalletd; **not implemented** -- the swap-path spend detection and its
->    P2SH workaround (R39.11.4d), the named conditions of R39.11.17, and the
->    parser routing (R39.11.16/R39.11.16a).
+>    endpoint admission, the single height authority, `UtxoRpcClientOps` over
+>    lightwalletd, and (Step D) the parser routing (R39.11.16/R39.11.16a);
+>    **not implemented** -- the swap-path spend detection and its P2SH workaround
+>    (R39.11.4d) and the named conditions of R39.11.17.
 >
 > **Where it lives.** `mm2src/coins/z_coin/z_lightwalletd.rs` (admission, the
 > failover client, the height authority, the windowed history reader, the
@@ -3274,7 +3276,8 @@ R39.11.15 **Version coverage of the two parsers (public facts, for planning).**
   stable release named by the plan's crate-bump step the version-6 arm is
   unconditional. It computes the identifier by the rule each version dictates.
 
-> **Status update (reloaded).** **As-built (T-DOC) for R39.11.13 and R39.11.14;
+> **Status update (reloaded; describes the state before Step D -- see the status note
+> after R39.11.16a for what the routing changed).** **As-built (T-DOC) for R39.11.13 and R39.11.14;
 > R39.11.15 is a pair of published-dependency facts.** The parser-per-call-path
 > split, the non-uniform carrier type and each parser's version coverage were
 > read off this repository's own current code and its pinned dependencies. They
@@ -3345,17 +3348,56 @@ Three constraints bind the routing:
   on the lookup method (R39.11.4c). The routing change shall pin all three with a
   fixture whose identifier is not byte-order symmetric.
 
-> **Status update (reloaded).** **R39.11.16 and R39.11.16a are required changes,
-> neither implemented.** Every swap step named in R39.11.13 still reads a ZHTLC
-> coin's bytes exactly as that requirement describes: no read has been routed to
-> the Zcash library reader, the carrier non-uniformity of R39.11.14 is still in
-> place, no version-4 equivalence fixtures exist for (a), and no
-> identifier-byte-order fixture pins the three boundaries of (c). The
-> unstable-configuration and published-stable-release properties these
-> requirements rest on are R39.11.15's dependency facts, not a claim about which
-> is selected in this repository's build today. The freeze and build-refusal
-> contract R39.11.16 defers to is R39.6.4b/R39.6.4c and carries its own status
-> there. T39.11.e does not exist.
+> **Status update (reloaded, Step D).** **R39.11.16 and R39.11.16a are implemented
+> for every swap step of R39.11.13, with the carve-outs below.** Every read of a
+> ZHTLC coin's transaction bytes on the swap path goes through one module,
+> `z_coin/z_tx_read.rs`, which holds the only parse of those bytes: the Zcash
+> library reader, called with a fixed consensus-branch argument that matters only
+> to the pre-version-5 layouts (versions 5 and 6 carry their own). It serves
+> `validate_maker_payment`/`validate_taker_payment` (same P2SH script-pubkey and
+> output-value decisions, plus a byte-for-byte comparison of the supplied payment
+> with the backend's bytes; there is no SPV step, because the shared validator does
+> none for a node-served or lightwalletd-served coin either),
+> `check_if_my_payment_sent`, `search_for_swap_tx_spend_my`/`_other`,
+> `extract_secret`, `wait_for_confirmations` (expiry height from the routed
+> reader) and `wait_for_tx_spend`. The decisions that do not depend on the parser
+> are the shared ones, reached through three small shared helpers that take the
+> facts the routed reader produced (the secret-extraction rule over input scripts,
+> the spend search over the payment's identifier and output scripts, and the
+> output-spend wait loop); the shared UTXO parser's own entry points call the same
+> helpers, so other coins are unchanged. The shielded commitment-tree loop of a
+> Native-mode coin, which parsed each block transaction with the shared parser to
+> read its Sapling output commitments, reads them from the Zcash reader as well.
+> Constraint (b): the HTLC spend/refund builder returns the transaction it built
+> as the Zcash-transaction arm instead of re-reading its bytes through the shared
+> parser, and `check_if_my_payment_sent` yields that arm too. Constraint (c): the
+> internal-order identifier is what the spend search and the lightwalletd lookup
+> take, display order is the caller-facing form, and one reversal converts between
+> them, pinned on a recorded identifier that is not byte-order symmetric.
+>
+> **Carve-outs, not covered by this change.** (1) A spend found by a *Native-mode*
+> node client still arrives as the shared UTXO transaction type, because that
+> client belongs to every UTXO coin; it is read by the shared parser inside the
+> client and is therefore not routed, and the spend-detection tail is the swap half
+> of plan Step C. Over lightwalletd that tail still fails loudly (R39.11.4d), and
+> this change leaves it so. (2) `sign_raw_tx` on a ZHTLC coin deserializes a
+> caller-supplied transparent transaction with the shared parser; it is not a swap
+> step, and a version-5 or version-6 input is refused there. (3) The WASM build
+> keeps its own stub file, which does not parse shielded-coin swap transactions
+> here. (4) Over lightwalletd the wait loop of `wait_for_tx_spend` still retries
+> until its deadline rather than failing at once, as before.
+>
+> **Observed defect, corrected from the earlier description.** R39.11.15 and
+> R39.11.16a say the shared parser "mis-parses" a version-6 transaction. On every
+> one of 18 recorded version-6 transactions (all bundle shapes) it does not
+> mis-parse but **refuses the bytes** (a malformed-data or unexpected-end error),
+> so there is no wrong identifier to compare and the swap step fails rather than
+> proceeding on a wrong one. The identifier rule it owns, double-SHA256 of the
+> bytes, is still demonstrably not the version-6 identifier (T39.11.e asserts both).
+> The routing is required either way. The unstable-configuration and
+> published-stable-release properties R39.11.15 records are dependency facts, not a
+> claim about this build's selection; the vendored reader in this build reads
+> version 6.
 
 R39.11.17 **Dictated external preconditions that no change on this side can
 satisfy.** *(Restated: the backend reversal removes the largest of the three and
@@ -3411,8 +3453,8 @@ rather than as a generic RPC failure.
 #### Tests
 
 > **Status update (reloaded, Step C).** T39.11.a--T39.11.d, T39.11.f and
-> T39.11.h--T39.11.j exist, in part; **T39.11.e and T39.11.g do not exist** (parser
-> routing and the P2SH workaround are not implemented). They run against a
+> T39.11.e (Step D) and T39.11.h--T39.11.j exist, in part; **T39.11.g does not
+> exist** (the P2SH workaround is not implemented). They run against a
 > scripted in-process transport, with no network:
 > `z_coin/z_lightwalletd/tests.rs` (admission, failover, monotonic height, builder
 > height, confirmation wait, byte order, balance request bytes, history reader),
@@ -3422,6 +3464,22 @@ rather than as a generic RPC failure.
 > activation becomes visible" and "every function answered from the fixture" are
 > covered per function, not by one end-to-end run, and the two full transaction
 > builders are not driven from one injected tip (T39.11.c).
+>
+> **T39.11.e** is `z_coin/z_tx_read.rs` (`tests`): inline recordings of one version-4
+> and one version-6 transaction (fixtures in `z_coin/z_tx_read_fixtures.rs`), plus
+> hand-assembled version-4 and version-5 transparent transactions for the HTLC
+> decisions. It pins that the shared parser refuses the version-6 recording while the
+> routed reader returns the chain's identifier and not a double-SHA256 digest; that
+> a version-4 recording reads identically (identifier, expiry, outputs, round trip)
+> under both parsers; that the payment-output and secret-extraction decisions agree
+> across both parsers on version 4 and the routed reader also reads version 5; the
+> three identifier byte-order boundaries on a non-symmetric identifier; and, by
+> source inspection of the swap-operations file, the HTLC builder and the coin's
+> market operations, that no swap step names a shared parser-bound helper. An opt-in
+> run over the offline corpus (`ARRR_IRONWOOD_FIXTURES` pointing at the untracked
+> `local/arrr-ironwood-fixtures`) checks all 19 recorded transactions. Not covered:
+> the asynchronous wrappers are not driven end to end (no scripted `ZCoin`
+> exists); the pure decisions they make are.
 >
 > **Retired:** `light_mode_still_requires_both_server_lists`
 > (`z_coin_activation.rs`) asserted that an absent `electrum_servers` fails Light
@@ -3538,8 +3596,8 @@ influencing chain selection.
 D39.11.c **Resolved 2026-10-11** in favour of routing a ZHTLC coin's swap-path
 reads to the Zcash library parser rather than extending the shared UTXO parser;
 the decision and its three constraints are now normative as R39.11.16a. The
-implementation of R39.11.16/R39.11.16a is not yet done and remains tracked by the
-plan's parser-routing step; R39.11.17's remaining dictated preconditions are
+implementation of R39.11.16/R39.11.16a is done (plan Step D; see the status note
+after R39.11.16a for its carve-outs); R39.11.17's remaining dictated preconditions are
 outside this project's control and are tracked separately.
 
 D39.11.d **The P2SH index workaround is derived from source and unverified at
