@@ -59,8 +59,9 @@ What an integrator observes:
   reachable endpoints** to activate; a wallet that has scanned blocks needs only one.
   Activation fails with a typed error that distinguishes "every endpoint unreachable"
   from "every reachable endpoint excluded".
-- The coin must declare a fixed `txfee`: `lightwalletd` has no fee estimation, and a
-  coin without one is refused at build time instead of being given a default.
+- `txfee: 0` (fee estimation) is refused for a ZHTLC coin: `lightwalletd` has no fee
+  estimation. A coin with no `txfee` key, like the published ARRR entry, keeps the shared
+  fixed default and activates as before.
 - `requires_notarization` cannot be satisfied for a ZHTLC coin: `lightwalletd` has no
   notarized-depth field, and plain confirmation depth is not substituted for it.
 - Swap-path HTLC spend detection and "payment already sent" detection over

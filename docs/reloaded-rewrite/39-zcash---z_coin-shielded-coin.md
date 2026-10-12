@@ -2434,7 +2434,7 @@ definition -- and are fixed by that specification, not by this project.
 | Transparent UTXO listing for one address | `GetAddressUtxos` | one address per call; the service definition carries no multi-address form, so a multi-address listing is a loop over single-address calls. R39.11.4d binds the P2SH case |
 | Transparent address balance | `GetTaddressBalance` | several addresses in one call, summed by the server; the reply carries a single value amount and no breakdown. The request encoding is load-bearing (R39.11.4a), and R39.11.4d binds the P2SH case |
 | Notarized-confirmation depth | none | not obtainable (R39.11.4e) |
-| Fee rate | coin configuration | ARRR declares a fixed per-kilobyte fee; this service exposes no fee-estimation method, so a Light-mode shielded coin that does not declare a fixed fee shall be refused rather than given a default |
+| Fee rate | coin configuration | the coin's fixed per-kilobyte fee (an undeclared fee keeps the shared fixed default, as the published ARRR entry relies on); this service exposes no fee-estimation method, so a Light-mode shielded coin that explicitly requests estimation (`txfee: 0`) shall be refused |
 | Shielded balance, spendable note selection, shielded transaction history | the local shielded wallet database (§39.8.0.2) | -- |
 
 > **Status update (reloaded, Step C).** Implemented for every row except the
@@ -2444,8 +2444,8 @@ definition -- and are fixed by that specification, not by this project.
 > balance (`GetTaddressBalance`), UTXO listing (`GetAddressUtxos`, one call per
 > address) and transparent history (`GetTaddressTxids`, R39.11.4b) are served by
 > the admitted endpoints; the compact blocks, tree state and mempool rows were
-> already. The fee-rate refusal is implemented at build time (a Light coin without
-> a non-zero `txfee` is not built). The two prohibitions hold structurally: the
+> already. The fee-rate refusal is implemented at build time (a Light coin with
+> `txfee: 0` is not built; an absent `txfee` keeps the shared fixed default). The two prohibitions hold structurally: the
 > Light build constructs no Electrum client. **Not implemented:** the transparent
 > history reader (`read_history`) has no production consumer, because its consumers
 > are the swap-path spend and already-sent detection; `find_output_spend` and

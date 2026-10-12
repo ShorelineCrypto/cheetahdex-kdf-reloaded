@@ -1486,13 +1486,28 @@ mod light_backend_tests {
         assert!(matches!(fee, crate::utxo::TxFee::FixedPerKb(10000)));
     }
 
-    /// lightwalletd has no fee estimation: a coin that does not declare a fixed fee is refused
-    /// rather than given a default (R39.11.1).
+    /// The published mainnet ARRR entry has no `txfee`: it must build and keep the shared fixed
+    /// default (no estimation is involved).
     #[test]
-    fn a_light_coin_without_a_declared_fixed_fee_is_refused() {
+    fn a_light_coin_with_no_txfee_key_keeps_the_fixed_default() {
         let ctx = MmCtxBuilder::default().into_mm_arc();
         let params = UtxoActivationParams::from_legacy_req(&json!({ "method": "enable" })).unwrap();
-        for conf in [json!({ "coin": "ARRR" }), json!({ "coin": "ARRR", "txfee": 0 })] {
+        let conf = json!({ "coin": "ARRR" });
+        let backend = ZcoinBackend::Light {
+            light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()],
+        };
+        let builder = builder_for(&ctx, &conf, &params, backend);
+        let client = block_on(builder.rpc_client()).unwrap();
+        let fee = block_on(builder.tx_fee(&client)).unwrap();
+        assert!(matches!(fee, crate::utxo::TxFee::FixedPerKb(1000)));
+    }
+
+    /// lightwalletd has no fee estimation: an explicit request for it (`txfee: 0`) is refused.
+    #[test]
+    fn a_light_coin_requesting_fee_estimation_is_refused() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let params = UtxoActivationParams::from_legacy_req(&json!({ "method": "enable" })).unwrap();
+        for conf in [json!({ "coin": "ARRR", "txfee": 0 })] {
             let backend = ZcoinBackend::Light {
                 light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()],
             };
