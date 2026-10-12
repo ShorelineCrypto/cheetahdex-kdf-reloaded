@@ -2,8 +2,8 @@
 use crate::rpc_command::init_withdraw::{InitWithdrawCoin, WithdrawInProgressStatus, WithdrawTaskHandle};
 use crate::utxo::rpc_clients::{UnspentInfo, UtxoRpcClientEnum, UtxoRpcClientOps, UtxoRpcError, UtxoRpcFut,
                                UtxoRpcResult};
-use crate::utxo::utxo_builder::{UtxoCoinBuilderCommonOps, UtxoCoinWithIguanaPrivKeyBuilder,
-                                UtxoFieldsWithIguanaPrivKeyBuilder};
+use crate::utxo::utxo_builder::{UtxoCoinBuildError, UtxoCoinBuildResult, UtxoCoinBuilderCommonOps,
+                                UtxoCoinWithIguanaPrivKeyBuilder, UtxoFieldsWithIguanaPrivKeyBuilder};
 use crate::utxo::utxo_common::{big_decimal_from_sat_unsigned, payment_script};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::utxo::zcash_params_path;
@@ -105,6 +105,10 @@ use z_coin_sapling_cache::{SaplingBlockState, SaplingStateCacheOps, ZCoinSapling
 pub(crate) mod z_coin_wallet_db;
 #[cfg(not(target_arch = "wasm32"))]
 use z_coin_wallet_db::ZCoinShieldedHistory;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod z_lightwalletd;
+#[cfg(not(target_arch = "wasm32"))]
+pub use z_lightwalletd::{LightwalletdClient, LightwalletdError};
 
 /// `ZP2SHSpendError` compatible `TransactionErr` handling macro.
 #[cfg(not(target_arch = "wasm32"))]
@@ -587,7 +591,48 @@ fn verify_zcash_params_integrity(params_dir: &Path) -> MmResult<(), ZCoinBuildEr
     Ok(())
 }
 
+/// Which backend serves a shielded coin (CRD ch.39 R39.11.4g).
+///
+/// The coin carries this explicitly. Every Light-only behaviour (the shielded balance source, the
+/// background sync task, the pending-receipt surface, skipping the native commitment-tree
+/// maintenance) is selected by it, never by which arm of the UTXO RPC client enumeration the coin
+/// happens to hold: a discriminator that silently stops matching would select the Native path for a
+/// Light coin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZcoinMode {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Native,
+    Light,
+}
+
+impl ZcoinMode {
+    pub fn is_light(self) -> bool { self == ZcoinMode::Light }
+}
+
+/// How a shielded coin is to reach the chain, as requested at activation.
+#[derive(Clone, Debug)]
+pub enum ZcoinBackend {
+    /// A full node reached through its RPC. Native builds only.
+    #[cfg(not(target_arch = "wasm32"))]
+    Native,
+    /// The configured `light_wallet_d_servers` and nothing else. `electrum_servers` is accepted on
+    /// the activation wire and ignored: no Electrum connection is opened for a ZHTLC coin
+    /// (R39.11.5, R39.11.7).
+    Light { light_wallet_d_servers: Vec<String> },
+}
+
+impl ZcoinBackend {
+    fn mode(&self) -> ZcoinMode {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            ZcoinBackend::Native => ZcoinMode::Native,
+            ZcoinBackend::Light { .. } => ZcoinMode::Light,
+        }
+    }
+}
+
 pub struct ZCoinFields {
+    mode: ZcoinMode,
     dex_fee_addr: PaymentAddress,
     my_z_addr: PaymentAddress,
     my_z_addr_encoded: String,
@@ -1366,6 +1411,128 @@ mod shielded_history_status_tests {
     }
 }
 
+/// CRD ch.39 §39.11: a Light-mode coin is built with lightwalletd as its only backend (T39.11.a,
+/// T39.11.b, R39.11.4g).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod light_backend_tests {
+    use super::*;
+    use common::block_on;
+    use mm2_core::mm_ctx::MmCtxBuilder;
+
+    fn arrr_protocol_info() -> ZcoinProtocolInfo {
+        serde_json::from_value(json!({
+            "consensus_params": {
+                "overwinter_activation_height": 152855,
+                "sapling_activation_height": 152855,
+                "blossom_activation_height": null,
+                "heartwood_activation_height": null,
+                "canopy_activation_height": null,
+                "coin_type": 133,
+                "hrp_sapling_extended_spending_key": "secret-extended-key-main",
+                "hrp_sapling_extended_full_viewing_key": "zxviews",
+                "hrp_sapling_payment_address": "zs",
+                "b58_pubkey_address_prefix": [0x1c, 0xb8],
+                "b58_script_address_prefix": [0x1c, 0xbd]
+            },
+            "z_derivation_path": "m/32'/133'"
+        }))
+        .unwrap()
+    }
+
+    fn builder_for<'a>(
+        ctx: &'a MmArc,
+        conf: &'a Json,
+        params: &'a UtxoActivationParams,
+        backend: ZcoinBackend,
+    ) -> ZCoinBuilder<'a> {
+        ZCoinBuilder::new(
+            ctx,
+            "ARRR",
+            conf,
+            params,
+            &[1; 32],
+            PathBuf::from("./for_tests"),
+            None,
+            ExtendedSpendingKey::master(&[7; 32]),
+            arrr_protocol_info(),
+            backend,
+        )
+    }
+
+    /// The request still carries Electrum servers (deployed wallets send them unconditionally), but
+    /// the client built for the coin is the lightwalletd one: nothing in the build path can open an
+    /// Electrum connection for a ZHTLC coin.
+    #[test]
+    fn a_light_coin_is_built_on_lightwalletd_whatever_the_request_says_about_electrum() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let conf = json!({ "coin": "ARRR", "txfee": 10000 });
+        let params = UtxoActivationParams::from_legacy_req(&json!({
+            "method": "electrum",
+            "servers": [{ "url": "unreachable.invalid:10008" }]
+        }))
+        .unwrap();
+        assert!(matches!(params.mode, crate::utxo::UtxoRpcMode::Electrum { .. }));
+
+        let backend = ZcoinBackend::Light {
+            light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()],
+        };
+        assert!(backend.mode().is_light());
+        let builder = builder_for(&ctx, &conf, &params, backend);
+        let client = block_on(builder.rpc_client()).unwrap();
+        assert!(matches!(client, UtxoRpcClientEnum::LightWalletD(_)), "{client:?}");
+
+        // A fixed fee is declared, so it is kept.
+        let fee = block_on(builder.tx_fee(&client)).unwrap();
+        assert!(matches!(fee, crate::utxo::TxFee::FixedPerKb(10000)));
+    }
+
+    /// lightwalletd has no fee estimation: a coin that does not declare a fixed fee is refused
+    /// rather than given a default (R39.11.1).
+    #[test]
+    fn a_light_coin_without_a_declared_fixed_fee_is_refused() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let params = UtxoActivationParams::from_legacy_req(&json!({ "method": "enable" })).unwrap();
+        for conf in [json!({ "coin": "ARRR" }), json!({ "coin": "ARRR", "txfee": 0 })] {
+            let backend = ZcoinBackend::Light {
+                light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()],
+            };
+            let builder = builder_for(&ctx, &conf, &params, backend);
+            let client = block_on(builder.rpc_client()).unwrap();
+            let err = block_on(builder.tx_fee(&client)).unwrap_err();
+            assert!(
+                matches!(err.get_inner(), UtxoCoinBuildError::NoFixedFeeDeclared { .. }),
+                "{err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_light_coin_without_a_lightwalletd_endpoint_is_not_built() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let conf = json!({ "coin": "ARRR", "txfee": 10000 });
+        let params = UtxoActivationParams::from_legacy_req(&json!({ "method": "enable" })).unwrap();
+        let builder = builder_for(&ctx, &conf, &params, ZcoinBackend::Light {
+            light_wallet_d_servers: Vec::new(),
+        });
+        let err = block_on(builder.rpc_client()).unwrap_err();
+        assert!(
+            matches!(err.get_inner(), UtxoCoinBuildError::NoLightwalletdServers { .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn the_mode_is_carried_by_the_backend_and_not_inferred_from_the_client() {
+        assert_eq!(ZcoinBackend::Native.mode(), ZcoinMode::Native);
+        assert!(!ZcoinBackend::Native.mode().is_light());
+        assert!(ZcoinBackend::Light {
+            light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()]
+        }
+        .mode()
+        .is_light());
+    }
+}
+
 impl AsRef<UtxoCoinFields> for ZCoin {
     fn as_ref(&self) -> &UtxoCoinFields { &self.utxo_arc }
 }
@@ -1379,6 +1546,7 @@ pub async fn z_coin_from_conf_and_params(
     account: u32,
     #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
     protocol_info: ZcoinProtocolInfo,
+    backend: ZcoinBackend,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
     let z_key = shielded_spending_key_for_policy(ctx, secp_priv_key, account, &protocol_info)?;
     z_coin_from_conf_and_params_with_z_key(
@@ -1393,6 +1561,7 @@ pub async fn z_coin_from_conf_and_params(
         zcash_params_path,
         z_key,
         protocol_info,
+        backend,
     )
     .await
 }
@@ -1492,6 +1661,18 @@ impl Drop for SaplingLoopStoppedGuard {
 }
 
 async fn sapling_state_cache_loop(coin: ZCoin) {
+    // A Light coin has no commitment-tree cache to maintain: its tree comes from lightwalletd and
+    // its notes from the shielded wallet database. Decided by the coin's explicit mode, not by the
+    // identity of its RPC client (R39.11.4g).
+    if coin.is_light() {
+        log::debug!(
+            "Light-mode ZCoin legacy commitment-tree cache loop skipped for {}; \
+             wallet-history scanning is handled by the modern lightwalletd wallet scanner",
+            coin.ticker()
+        );
+        coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
+        return;
+    }
     // Determine the starting height and tree state from the cache (R39.6.1).
     let query = coin.z_fields.sapling_cache.query_latest_block().await;
     let (mut processed_height, mut current_tree) = match query {
@@ -1521,7 +1702,7 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
         //
         // Light mode seeds the modern shielded wallet scanner directly from
         // `check_point_block`; this legacy commitment-tree cache loop exits for
-        // Electrum-backed activations and is not the lightwalletd scan path.
+        // Light-mode activations and is not the lightwalletd scan path.
         Ok(None) | Err(_) => match coin.z_fields.check_point_block.as_ref() {
             Some(check_point) => match read_commitment_tree(check_point.sapling_tree.0.as_slice()) {
                 Ok(tree) => (check_point.height + 1, tree),
@@ -1562,13 +1743,12 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
 
         let native_client = match coin.rpc_client() {
             UtxoRpcClientEnum::Native(n) => n,
-            UtxoRpcClientEnum::Electrum(_) => {
-                log::debug!(
-                    "Light-mode ZCoin legacy commitment-tree cache loop skipped for {}; \
-                     wallet-history scanning is handled by the modern lightwalletd wallet scanner",
-                    coin.ticker()
+            other => {
+                log::error!(
+                    "ZCoin {} is in Native mode but holds a {:?} RPC client; the commitment-tree loop cannot run",
+                    coin.ticker(),
+                    other
                 );
-                coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
                 return;
             },
         };
@@ -1672,14 +1852,14 @@ const SHIELDED_SYNC_POLL_PERIOD_SECS: f64 = 30.;
 /// the database stays anchored at that height for the rest of the session and
 /// incoming shielded transactions stay invisible until the coin is activated
 /// again. Native mode is served by its own commitment-tree task, which returns
-/// early for Electrum-backed activations.
+/// early for Light-mode activations.
 ///
 /// Each pass resumes from the wallet's own local sync state
 /// (`requested_start_height: None` plus `skip_sync_params: true`), so it tops up
 /// from the last scanned height and never re-anchors the wallet — anchor changes
 /// remain activation-only per R39.8.0g/h.
 #[cfg(not(target_arch = "wasm32"))]
-async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<String>) {
+async fn post_activation_shielded_sync(coin: ZCoin) {
     let ticker = coin.ticker().to_owned();
     let (utxo_weak, z_fields_weak) = coin.into_weak_parts();
 
@@ -1707,7 +1887,7 @@ async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<
 
         let no_progress = |_: u64, _: u64| {};
         if let Err(e) = coin
-            .fetch_lightwalletd_compact_blocks_to_height(&light_wallet_d_servers, tip, None, true, &no_progress)
+            .fetch_lightwalletd_compact_blocks_to_height(tip, None, true, &no_progress)
             .await
         {
             log::warn!("ZCoin periodic sync for {ticker}: compact block fetch to height {tip} failed: {e}");
@@ -1722,7 +1902,7 @@ async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<
                 // two reads is then already excluded by the scanned-state
                 // check below, so its value can never be counted from both the
                 // wallet database and the pending set (R39.8.0ah).
-                coin.refresh_pending_receipts(&light_wallet_d_servers, tip).await;
+                coin.refresh_pending_receipts(tip).await;
             },
             // `scan_shielded_wallet_db_to_height` clears the scan-complete flag on
             // failure, which blocks spending until a later pass succeeds. That is
@@ -1772,9 +1952,7 @@ impl ZCoin {
     /// Starts the periodic light-mode shielded wallet sync described on
     /// [`post_activation_shielded_sync`]. Call once, after the activation scan has
     /// completed, for Light-mode activations only.
-    pub fn spawn_post_activation_shielded_sync(&self, light_wallet_d_servers: Vec<String>) {
-        spawn(post_activation_shielded_sync(self.clone(), light_wallet_d_servers));
-    }
+    pub fn spawn_post_activation_shielded_sync(&self) { spawn(post_activation_shielded_sync(self.clone())); }
 
     /// Re-derive the pending-receipt set from the backend's current mempool.
     ///
@@ -1783,11 +1961,20 @@ impl ZCoin {
     /// or expired simply does not reappear (R39.8.0ah). Receipts whose
     /// transaction the wallet database has already scanned are excluded here so
     /// their value is never counted from both sources.
-    async fn refresh_pending_receipts(&self, light_wallet_d_servers: &[String], tip: u64) {
+    async fn refresh_pending_receipts(&self, tip: u64) {
+        // The pending view is advisory and degrades to zero (R39.8.0ai): with no admitted endpoint
+        // there is nothing to poll.
+        let servers = match self.admitted_lightwalletd_servers().await {
+            Ok(servers) => servers,
+            Err(e) => {
+                log::debug!("ZCoin pending receipts for {}: {e}", self.ticker());
+                Vec::new()
+            },
+        };
         let observed = self
             .z_fields
             .shielded_history
-            .fetch_pending_receipts(light_wallet_d_servers, tip)
+            .fetch_pending_receipts(&servers, tip)
             .await;
 
         let mut rebuilt = HashMap::with_capacity(observed.len());
@@ -1839,8 +2026,10 @@ pub struct ZCoinBuilder<'a> {
     zcash_params_path: Option<PathBuf>,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
+    backend: ZcoinBackend,
 }
 
+#[async_trait]
 impl<'a> UtxoCoinBuilderCommonOps for ZCoinBuilder<'a> {
     fn ctx(&self) -> &MmArc { self.ctx }
 
@@ -1849,6 +2038,36 @@ impl<'a> UtxoCoinBuilderCommonOps for ZCoinBuilder<'a> {
     fn activation_params(&self) -> &UtxoActivationParams { self.params }
 
     fn ticker(&self) -> &str { self.ticker }
+
+    /// The RPC client is selected by the requested backend, never by `activation_params().mode`: a
+    /// Light-mode coin is served by lightwalletd alone and no Electrum connection is built for it
+    /// (R39.11.1, R39.11.5).
+    async fn rpc_client(&self) -> UtxoCoinBuildResult<UtxoRpcClientEnum> {
+        match &self.backend {
+            #[cfg(not(target_arch = "wasm32"))]
+            ZcoinBackend::Native => Ok(UtxoRpcClientEnum::Native(self.native_client()?)),
+            ZcoinBackend::Light { light_wallet_d_servers } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = light_wallet_d_servers;
+                    MmError::err(UtxoCoinBuildError::NativeRpcNotSupportedInWasm)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if light_wallet_d_servers.is_empty() {
+                        return MmError::err(UtxoCoinBuildError::NoLightwalletdServers {
+                            ticker: self.ticker.to_owned(),
+                        });
+                    }
+                    Ok(UtxoRpcClientEnum::LightWalletD(LightwalletdClient::connect(
+                        light_wallet_d_servers.clone(),
+                        &self.protocol_info.consensus_params,
+                        self.p2sh_address_prefix(),
+                    )))
+                }
+            },
+        }
+    }
 }
 
 #[async_trait]
@@ -1936,6 +2155,7 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
         );
 
         let z_fields = ZCoinFields {
+            mode: self.backend.mode(),
             dex_fee_addr,
             my_z_addr,
             my_z_addr_encoded,
@@ -1986,6 +2206,16 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
                     .mm_err(Into::into)?;
             }
         }
+        // The Light backend decides which endpoints may be used from the chain the wallet already
+        // follows, so it needs the wallet database (R39.11.7a).
+        #[cfg(not(target_arch = "wasm32"))]
+        if let UtxoRpcClientEnum::LightWalletD(client) = z_coin.rpc_client() {
+            client
+                .backend()
+                .bind_wallet(Arc::new(z_lightwalletd::FileBranchStore::new(
+                    (*z_coin.z_fields.shielded_history).clone(),
+                )));
+        }
         let loop_stopped = z_coin.z_fields.sapling_loop_stopped.clone();
         let loop_coin = z_coin.clone();
         spawn(async move {
@@ -2008,6 +2238,7 @@ impl<'a> ZCoinBuilder<'a> {
         #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
         z_spending_key: ExtendedSpendingKey,
         protocol_info: ZcoinProtocolInfo,
+        backend: ZcoinBackend,
     ) -> ZCoinBuilder<'a> {
         ZCoinBuilder {
             ctx,
@@ -2021,6 +2252,7 @@ impl<'a> ZCoinBuilder<'a> {
             zcash_params_path,
             z_spending_key,
             protocol_info,
+            backend,
         }
     }
 }
@@ -2035,6 +2267,7 @@ async fn z_coin_from_conf_and_params_with_z_key(
     #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
+    backend: ZcoinBackend,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
     let builder = ZCoinBuilder::new(
         ctx,
@@ -2048,6 +2281,7 @@ async fn z_coin_from_conf_and_params_with_z_key(
         zcash_params_path,
         z_spending_key,
         protocol_info,
+        backend,
     );
     builder.build().await
 }
@@ -2081,7 +2315,7 @@ impl MarketCoinOps for ZCoin {
         {
             let coin = self.clone();
             let fut = async move {
-                if let UtxoRpcClientEnum::Electrum(_) = coin.rpc_client() {
+                if coin.is_light() {
                     if !coin.shielded_wallet_db_scan_complete() {
                         log::warn!(
                             "ZCoin light-mode balance requested before shielded wallet DB scan completed for {}",

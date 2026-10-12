@@ -412,6 +412,23 @@ impl Qrc20RpcOps for UtxoRpcClientEnum {
         match self {
             UtxoRpcClientEnum::Electrum(electrum) => electrum.blockchain_transaction_get_receipt(tx_hash),
             UtxoRpcClientEnum::Native(native) => native.get_transaction_receipt(tx_hash),
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => {
+                Box::new(futures01::future::err(common::jsonrpc_client::JsonRpcError {
+                    client_info: "lightwalletd".to_owned(),
+                    request: common::jsonrpc_client::JsonRpcRequestEnum::Single(
+                        common::jsonrpc_client::JsonRpcRequest {
+                            jsonrpc: "2.0".to_owned(),
+                            id: "0".to_owned(),
+                            method: "gettransactionreceipt".to_owned(),
+                            params: Vec::new(),
+                        },
+                    ),
+                    error: common::jsonrpc_client::JsonRpcErrorType::InvalidRequest(
+                        "QRC20 is not supported over lightwalletd".to_owned(),
+                    ),
+                }))
+            },
         }
     }
 
@@ -431,6 +448,12 @@ impl Qrc20RpcOps for UtxoRpcClientEnum {
                 UtxoRpcClientEnum::Native(native) => native.call_contract(&contract_addr, params.into()),
                 UtxoRpcClientEnum::Electrum(electrum) => {
                     electrum.blockchain_contract_call(&contract_addr, params.into())
+                },
+                #[cfg(not(target_arch = "wasm32"))]
+                UtxoRpcClientEnum::LightWalletD(_) => {
+                    return MmError::err(UtxoRpcError::Internal(
+                        "QRC20 is not supported over lightwalletd".to_owned(),
+                    ))
                 },
             };
             let result = fut.compat().await?;

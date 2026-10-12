@@ -30,24 +30,25 @@ required-but-unimplemented extensions). Mixed treatment -- see §39.0.
   `LocalTxProver` parameter files; §39.6.1). The transparent UTXO side of a
   shielded coin is iguana-derived even under an HD wallet; only the shielded
   Sapling key is HD-derived, per R39.6.4 §2.
-- **§39.11 (required change -- Part E):** `lightwalletd` as the **sole** backend
-  of a Light-mode shielded coin, with Electrum support for ZHTLC removed. **Not
-  one of §39.11's required changes is implemented** -- the function table
-  (R39.11.1--R39.11.4g), the activation requirements (R39.11.5--R39.11.7a), the
-  single height authority (R39.11.8--R39.11.12), the swap-path parser routing
-  (R39.11.16--R39.11.16a), and the tests T39.11.a--T39.11.j, which do not exist.
-  Three kinds of statement in that Part are **not** required changes and are
-  marked as such where they appear: R39.11.13--R39.11.15 describe the present
-  as-built parsing contract and the pinned dependencies' published version
-  coverage; several requirements record verified facts about the deployed
-  backend, the serving node and the chain's consensus rules rather than claims
-  about this project's code; and a few are partly satisfied today by machinery
-  built for the two-backend arrangement they replace. §39.11 carries a
-  per-requirement status note drawing that boundary -- read it before treating
-  any statement there as current behaviour. The as-built behaviour it replaces is
-  recorded in the code-quality findings of §39.11.3 and in the subsection's
-  dirty-side derivation record, which also states what reversed from the first
-  form of this Part and why.
+- **§39.11 (Part E -- implemented in part):** `lightwalletd` as the **sole**
+  backend of a Light-mode shielded coin, with Electrum support for ZHTLC removed.
+  **Implemented (ARRR Ironwood plan Step C, the wallet half):** the function table
+  (R39.11.1--R39.11.4g) except the swap-path consumers named below, the activation
+  requirements (R39.11.5--R39.11.7a), the single height authority
+  (R39.11.8--R39.11.12), and the tests T39.11.a--T39.11.d and T39.11.f,
+  T39.11.h--T39.11.j (T39.11.a--T39.11.d in part; each test's note says what it
+  does not cover). **Not implemented:** the swap-path HTLC spend and
+  already-sent detection (R39.11.4d, the swap consumer of R39.11.4b(f), and the
+  named conditions of R39.11.17), which fail with an explicit error rather than
+  answer "not spent"; the swap-path parser routing (R39.11.16--R39.11.16a, plan
+  Step D) and T39.11.e, T39.11.g. Three kinds of statement in that Part are **not**
+  required changes and are marked as such where they appear: R39.11.13--R39.11.15
+  describe the as-built parsing contract and the pinned dependencies' published
+  version coverage; several requirements record verified facts about the
+  deployed backend, the serving node and the chain's consensus rules rather than
+  claims about this project's code. §39.11 carries a per-requirement status note
+  drawing that boundary -- read it before treating any statement there as current
+  behaviour.
 
 > **Binding scope (R36).** Requirements bind observable behaviour, the public
 > activation/task RPC surface and its JSON field names, and externally *dictated*
@@ -161,13 +162,11 @@ field `rpc` and payload field `rpc_data`) selecting one of:
   Electrum support for a ZHTLC coin is removed. See §39.11.2 for what activation
   requires of the backend, and §39.11.1 for the functions it serves.
 
-> **Status update (reloaded).** The dictated `rpc_data` shape above, including
-> both server lists, is as-built. The sentence beginning
-> "`light_wallet_d_servers` is **mandatory and non-empty**" states §39.11's
-> required change and is **not implemented**: today `electrum_servers` is
-> load-bearing, an empty Electrum list fails Light-mode activation, and an empty
-> `light_wallet_d_servers` is accepted at parse time and fails later as a scan
-> failure. See the status notes at R39.11.5 and R39.11.7.
+> **Status update (reloaded, Step C).** Implemented. `light_wallet_d_servers` is
+> mandatory and non-empty (an empty list fails activation as a
+> `CoinCreationError` naming the coin, before any shielded work), and
+> `electrum_servers`, `min_connected` and `max_connected` are accepted, may be
+> absent or empty, and are ignored. See R39.11.5 and R39.11.7.
 
 R39.2.3 The request also carries optional `required_confirmations` and
 `requires_notarization` fields (top-level on the activation params). Sync-tuning
@@ -1300,14 +1299,11 @@ activation and therefore inherits the sequential-height and hash-link validation
 and the rewind/refetch-on-discontinuity behaviour of R39.8.0n, including the
 handling of a reorg that invalidates already-cached blocks.
 
-> **Status update (reloaded).** The in-turn failover over the configured
-> lightwalletd endpoints, and the inherited R39.8.0n continuity behaviour, are
-> as-built. The three §39.11 qualifications in this requirement are **not
-> implemented**: there is no admission step, so no endpoint is excluded or
-> skipped (R39.11.7a); the height a pass scans towards is the shared UTXO
-> client's block count, not a single lightwalletd authority (R39.11.9); and no
-> monotonicity floor is applied to it (R39.11.10). See the status notes on those
-> requirements.
+> **Status update (reloaded, Step C).** Implemented. The background pass and
+> activation fetch only the endpoints admission lets through (R39.11.7a), in
+> configured order; the height a pass scans towards is the single authority of
+> R39.11.9 with the monotonic floor of R39.11.10. The inherited R39.8.0n
+> continuity behaviour is unchanged.
 
 R39.8.0au **A failed sync shall be reported as failed, not as progress.** When a
 background pass fails — the chain tip cannot be reached, every configured
@@ -1335,15 +1331,18 @@ transparent output (R39.11.4b, D39.11.g). Each leaves the wallet or a swap
 decision short of an answer while nothing has strictly "failed", which is exactly
 the case this rule exists to make visible.
 
-> **Status update (reloaded).** The channel itself is implemented: a failed
+> **Status update (reloaded, Step C).** The channel is implemented: a failed
 > background pass is reported as the error state with a message and the height
-> scanned so far, cleared by the next successful pass. The **four further
-> conditions** in the last paragraph are **not implemented** -- all four are
-> §39.11 required changes (R39.11.7a(f), R39.11.4b, R39.11.4d, D39.11.g) whose
-> underlying surfaces this repository does not use yet, so there is nothing to
-> report through the channel for any of them. A failed chain-tip read is named in
-> this requirement's own first sentence but does not populate the channel today
-> either (R39.11.12).
+> scanned so far, cleared by the next successful pass. A failed chain-tip read, and
+> an admission failure (whose message lists every excluded endpoint with its
+> reason, R39.11.7a(f)), now populate it. **Not implemented:** the three swap-path
+> conditions of the last paragraph (a history window that failed part-way, a
+> backend whose index returns neither P2SH encoding, a backend that cannot serve a
+> transaction with no transparent output) -- their consumer, the swap-path spend
+> detection, is not built (R39.11.4b(f), R39.11.4d, R39.11.17). Endpoints excluded
+> by an admission that still succeeded are logged and available through
+> `ZCoin::excluded_lightwalletd_endpoints`, but are not written into the sync-state
+> channel unless a later pass fails.
 
 ### 39.8.0.6 Pending (unconfirmed) shielded receipts
 
@@ -1944,10 +1943,9 @@ R39.8.9e `transaction_fee` shall be computed from the transparent input value,
 transparent output value, and the Sapling value balance of the full transaction.
 `confirmations` shall be zero when the transaction height is above the backend
 tip; otherwise it is `current_block + 1 - block_height`. The `current_block`
-used here is the transparent backend's tip (R39.11.8(f)), so an entry scanned
-from a shielded backend that is ahead of the transparent one legitimately
-reports zero confirmations until the transparent side catches up; that is a
-reportable divergence under R39.11.10, not a history defect.
+used here is the single lightwalletd tip (R39.11.8(f), R39.11.9), which is also the
+source of the scanned blocks, so an entry cannot be ahead of the height used to
+count its confirmations.
 
 ### 39.8.6 Relationship to the generic `my_tx_history` v2 method
 
@@ -2069,12 +2067,12 @@ R39.10.4 `activation_params` members (all at the top level of
 | `scan_interval_ms` | integer (unsigned 64-bit) | optional; default 0 | pause between scan batches |
 | `account` | integer (unsigned 32-bit) | optional; default 0 | HD shielded account index (R39.6.4 §2); ignored under the single-key policy |
 
-> **Supersession (informative, 2026-10-11).** The `rpc_data.electrum_servers`
-> row and the `rpc_data.min_connected` / `rpc_data.max_connected` rows are
-> superseded by §39.11, a required change, not implemented; until it lands this row describes the code as built (Electrum mandatory and load-bearing in Light mode). The maintainer removed Electrum for shielded (ZHTLC) coins
-> (§39.11; `docs/plans/arrr-ironwood-compatibility.md` §10): once implemented,
-> these members are parsed and ignored, as are the `"Electrum"` / `servers`
-> synonyms, so the request stays wire compatible.
+> **Supersession (implemented, Step C).** The `rpc_data.electrum_servers` row
+> and the `rpc_data.min_connected` / `rpc_data.max_connected` rows are superseded
+> by §39.11: the members are parsed and ignored, as are the `"Electrum"` /
+> `servers` synonyms, so the request stays wire compatible. `electrum_servers`
+> may be absent.
+
 
 R39.10.5 Fields that the public `ActivationRpcData` table lists but that have
 no Z-coin meaning -- `tx_history`, `get_balances`, `gap_limit`,
@@ -2172,7 +2170,7 @@ changes the 200 of the `status` call that reports a task error.
 | `error_type` | When (failure class) | `error_data` | HTTP if at mmrpc level |
 | --- | --- | --- | --- |
 | `CoinCreationError` | the coin could not be constructed: Sapling parameters missing, unreadable or failing their integrity digest (R39.6.3); local block-cache / wallet-database / locked-note storage cannot be opened; shielded key derivation fails (incl. HD policy without `z_derivation_path`); **no lightwalletd endpoint can be connected, or the initial chain-tip / tree-state query to the shielded backend fails**, or `light_wallet_d_servers` is empty; the requested sync date is in the future or cannot be resolved; the key policy is not supported for the shielded coin (hardware wallet, WalletConnect); any other build-time failure | object `{"ticker": string (the requested ticker), "error": string}` | 400 |
-| `Transport` | the coin was built and the shielded sync finished, but the transparent backend could not deliver the current block height, or the wallet balance could not be read (e.g. **all Electrum servers unreachable** -- superseded by §39.11, a required change, not implemented; until it lands this row describes the code as built (Electrum mandatory and load-bearing in Light mode) --, native daemon unreachable at the result step) | string | 500 |
+| `Transport` | the coin was built and the shielded sync finished, but the transparent backend could not deliver the current block height, or the wallet balance could not be read (e.g. **every admitted lightwalletd endpoint unreachable** at the height read -- Electrum no longer exists for a shielded coin, §39.11 --, native daemon unreachable at the result step) | string | 500 |
 | `CoinIsAlreadyActivated` | while this task ran, a concurrent activation of the same ticker registered the coin first | object `{"ticker": string}` | 400 |
 | `TaskTimedOut` | only produced by a timed-out wait for a user action; a Z-coin task never waits for one (R39.10.8), so this is not reachable in practice | object `{"duration": {"secs": u64, "nanos": u32}}` | 408 |
 | `Internal` | the wallet key context is not initialised; the shielded sync process stopped before reporting completion; task-handle or registration failures; any otherwise unclassified failure | string | 500 |
@@ -2201,18 +2199,18 @@ backends is:
 | --- | --- |
 | Light mode, **every** lightwalletd endpoint unreachable when the task starts (or the endpoint list is empty, or the first chain-tip / tree-state query fails) | terminal `status` `Error`, `CoinCreationError` `{ticker, error}` |
 | Light mode, lightwalletd fails **after** the shielded sync has started (download or scan error) | the task does **not** fail: `status` reports `InProgress` with `{"TemporaryError": <string>}`, the sync retries after a pause on the order of ten seconds, and progress values resume once the backend answers; the task ends only on success, on `cancel`, or on a non-transient failure |
-| Light mode, **every** Electrum server unreachable (row superseded by §39.11, a required change, not implemented; until it lands this row describes the code as built (Electrum mandatory and load-bearing in Light mode); once §39.11 is implemented the state cannot occur for a shielded coin) | not detected while the coin is built (Electrum connections are established lazily); after the shielded sync completes, the height/balance step fails: terminal `Error`, `Transport` (string) |
+| Light mode, **every** Electrum server unreachable (row superseded and implemented, §39.11: the state cannot occur for a shielded coin; its lightwalletd analogue is R39.11.6) | not applicable |
 | Native mode, full-node daemon unreachable | shielded sync reports `TemporaryError` and retries as above; if the height step fails: `Transport` (string) |
 | Shielded sync process stops without reporting completion | terminal `Error`, `Internal` (string) |
 
-> **Resolved (maintainer decision, 2026-10-11).** Electrum is removed for
-> shielded (ZHTLC) coins entirely; the transparent side is served by
-> lightwalletd and `electrum_servers` becomes accepted and ignored (§39.11;
-> `docs/plans/arrr-ironwood-compatibility.md` §10). That is a required change,
-> not implemented. Until it lands, Reloaded keeps its current behavior: Light
-> mode requires Electrum, unreachable Electrum servers are detected while the
-> coin is built and end the task with `CoinCreationError`, and the reference's
-> lazy-Electrum row above is not implemented.
+> **Resolved and implemented (maintainer decision, 2026-10-11; Step C).**
+> Electrum is removed for shielded (ZHTLC) coins entirely; the transparent side
+> is served by lightwalletd and `electrum_servers` is accepted and ignored
+> (§39.11; `docs/plans/arrr-ironwood-compatibility.md` §10). Light mode no longer
+> builds any Electrum connection, so the "every Electrum server unreachable"
+> state cannot occur; an unreachable lightwalletd endpoint set and an
+> admission-excluded one end the task with distinct typed errors (R39.11.6).
+
 
 No Z-coin backend failure is reported as an HTTP 5xx on the `status` call
 itself; the only 5xx responses come from `init` (R39.10.10) or from the
@@ -2274,10 +2272,10 @@ framework errors of §55.2.
 >    current tip to the tip (R39.8.0h status note). The change is a required
 >    change, not implemented, and is carried out together with §39.11, where
 >    the date resolution moves to the shielded backend.
-> 3. **Electrum in Light mode.** Light mode with every Electrum server
->    unreachable keeps the build-time `CoinCreationError`; Electrum's removal
->    is §39.11's required change, not implemented (see the resolved note under
->    the backend table).
+> 3. **Electrum in Light mode.** Removed (§39.11, Step C): Light mode is served by
+>    lightwalletd alone, and the build-time Electrum `CoinCreationError` no longer
+>    exists. A Light coin with no usable lightwalletd endpoint ends the task as
+>    R39.11.6 specifies.
 > 4. A retry after `TemporaryError` re-runs the fetch with the original
 >    `sync_params`, so a re-anchored wallet can rescan once per retry.
 > 5. In Native mode a local wallet-database scan failure still ends the task
@@ -2378,37 +2376,36 @@ canonical counterparts for the same task.
 
 ## 39.11 The Light-mode backend
 
-> **Status update (reloaded, 2026-10-11) -- how to read §39.11's implementation
-> status.** **Not one of §39.11's required changes is implemented in this
-> repository.** The subsection carries three different kinds of statement, and a
-> reader shall be able to tell them apart:
+> **Status update (reloaded, Step C) -- how to read §39.11's implementation
+> status.** The wallet half of §39.11 is implemented; the swap-path half is not.
+> The subsection carries three kinds of statement, and a reader shall be able to
+> tell them apart:
 >
 > 1. **Verified facts about the external backend and the chain.** Where a
 >    requirement records what the deployed `lightwalletd` service, the serving
 >    node, the chain's consensus rules, or a pinned dependency crate actually do
 >    -- the live probes dated 2026-10-08 and 2026-10-11, the node-source-derived
->    index defect, the dictated gRPC method surface this repository already
->    carries as a generated service definition -- the fact is established, and the
->    requirement says which observation it rests on. These are **not** claims
+>    index defect, the dictated gRPC method surface -- the fact is established, and
+>    the requirement says which observation it rests on. These are **not** claims
 >    about this project's code.
 > 2. **Descriptions of the present as-built contract.** R39.11.13--R39.11.15
 >    describe what this repository does today and say so in their own text. They
->    are T-DOC, as-built, and are stated here because R39.11.16/R39.11.16a change
->    them.
-> 3. **Requirements on this project's code.** Everything else is a **required
->    change, not implemented.** The per-requirement notes below say which parts of
->    the surrounding behaviour already exist and which do not, because several
->    requirements are partly satisfied today by machinery built for the
->    two-backend arrangement they replace.
+>    are T-DOC, as-built, and are unchanged by Step C: the parser routing that would
+>    change them (R39.11.16/R39.11.16a) is plan Step D.
+> 3. **Requirements on this project's code.** Each carries a status note. In short:
+>    implemented -- one backend, the function table, the activation requirements,
+>    endpoint admission, the single height authority, and `UtxoRpcClientOps` over
+>    lightwalletd; **not implemented** -- the swap-path spend detection and its
+>    P2SH workaround (R39.11.4d), the named conditions of R39.11.17, and the
+>    parser routing (R39.11.16/R39.11.16a).
 >
-> **The as-built arrangement, for contrast.** A Light-mode shielded coin is
-> served today by **two** backends: the configured lightwalletd endpoints serve
-> compact blocks, the commitment-tree anchor and the shielded mempool, while the
-> coin's shared UTXO RPC client -- its Electrum arm in Light mode -- serves
-> everything else, the chain height included. A non-empty `electrum_servers` list
-> is mandatory and load-bearing. The whole of §39.11 specifies replacing that
-> with one backend; none of the replacement exists, and the tests
-> T39.11.a--T39.11.j that would accept it do not exist either.
+> **Where it lives.** `mm2src/coins/z_coin/z_lightwalletd.rs` (admission, the
+> failover client, the height authority, the windowed history reader, the
+> `UtxoRpcClientOps` implementation), carried on the coin as
+> `UtxoRpcClientEnum::LightWalletD`; `ZCoin::builder_target_height` is the one
+> height every construction path reads. The tests are in
+> `z_coin/z_lightwalletd/tests.rs`, `z_coin.rs` (`light_backend_tests`) and
+> `coins_activation/src/z_coin_activation.rs`.
 
 ### 39.11.1 Division of work: `lightwalletd` serves the whole coin
 
@@ -2440,25 +2437,24 @@ definition -- and are fixed by that specification, not by this project.
 | Fee rate | coin configuration | ARRR declares a fixed per-kilobyte fee; this service exposes no fee-estimation method, so a Light-mode shielded coin that does not declare a fixed fee shall be refused rather than given a default |
 | Shielded balance, spendable note selection, shielded transaction history | the local shielded wallet database (§39.8.0.2) | -- |
 
-> **Status update (reloaded).** **Required change, not implemented; four rows of
-> the table are as-built.** Already obtained from the configured lightwalletd
-> endpoints today: compact blocks carrying shielded note data, the
-> commitment-tree anchor, and shielded mempool membership with the pending
-> shielded receipts derived from it. Already served by the local shielded wallet
-> database today: shielded balance, spendable note selection and shielded
-> transaction history. **Every other row is not implemented.** The chain tip,
-> block timestamps, median time past, raw-transaction and mined-height lookup,
-> confirmation count, transaction broadcast, transparent address history,
-> transparent UTXO listing, transparent balance and notarized depth are all taken
-> today from the coin's shared UTXO RPC client, which in Light mode is its
-> Electrum arm; the fee-rate refusal is not implemented either. The two
-> prohibitions in this requirement -- that no function of a ZHTLC coin is served
-> by an Electrum server, and that no Electrum connection is opened on its behalf
-> -- are therefore the reverse of the present behaviour, not a description of it.
-> The dictated method names in the second column are established facts of the
-> service contract, not a claim that this project calls them: of the methods
-> named there, only the compact-block range, tree-state and mempool-stream
-> methods are reached by this repository today.
+> **Status update (reloaded, Step C).** Implemented for every row except the
+> three that the swap path owns. Chain tip (`GetLatestBlock`), block time and median
+> time past (`GetBlock`), raw transaction and mined height (`GetTransaction`),
+> confirmations (derived locally), broadcast (`SendTransaction`), transparent
+> balance (`GetTaddressBalance`), UTXO listing (`GetAddressUtxos`, one call per
+> address) and transparent history (`GetTaddressTxids`, R39.11.4b) are served by
+> the admitted endpoints; the compact blocks, tree state and mempool rows were
+> already. The fee-rate refusal is implemented at build time (a Light coin without
+> a non-zero `txfee` is not built). The two prohibitions hold structurally: the
+> Light build constructs no Electrum client. **Not implemented:** the transparent
+> history reader (`read_history`) has no production consumer, because its consumers
+> are the swap-path spend and already-sent detection; `find_output_spend` and
+> `check_if_my_payment_sent` over lightwalletd fail with an explicit error, and a
+> script-hash (P2SH) address is refused by balance, UTXO and history with a typed
+> error instead of an empty success (R39.11.4d). `get_verbose_transaction(s)`
+> return a typed unsupported error: nothing here decodes a transaction, and the
+> one caller that needs bytes and height (`validate_fee`) reads them from
+> `GetTransaction`. Notarized depth: see R39.11.4e.
 
 R39.11.2 **Unconfirmed evidence remains asymmetric, and shall stay so even
 though one service now answers both sides.** The *only* source of mempool
@@ -2469,15 +2465,10 @@ the UTXO listing -- is consumed only as "not yet mined" by the confirmation
 wait, and shall never be treated as evidence that a shielded note exists, is
 spendable, or has been received. R39.8.0q continues to govern.
 
-> **Status update (reloaded).** **Satisfied in substance today; its new subject
-> is not yet present.** The only source of shielded mempool membership today is
-> already the streaming mempool method, and shielded balance and spendability are
-> already read only from the scanned wallet database, so in the present code no
-> transparent-side answer feeds shielded note state either. What does not exist
-> yet is the surface this requirement constrains: the transparent-side answers it
-> speaks of do not come from this backend today, so the rule becomes newly
-> load-bearing only once R39.11.1 is implemented and shall be re-established
-> against that surface rather than assumed to carry over.
+> **Status update (reloaded, Step C).** Holds. Shielded mempool membership still
+> comes only from `GetMempoolTx`; a transparent-side answer feeds no shielded note
+> state, and a zero or absent mined height is read only as "not yet mined" by the
+> confirmation arithmetic.
 
 R39.11.3 **Endpoint multiplicity is a plain ordered list, admitted before use.**
 The configured endpoints shall be tried in configured order per operation, and an
@@ -2491,16 +2482,12 @@ and ceiling of [chapter 38](38-utxo-coin-maintenance-and-features.md) §38.6.4
 no longer bind it, and a requirement elsewhere that speaks of "all endpoints
 failed" for a shielded coin means all admitted lightwalletd endpoints.
 
-> **Status update (reloaded).** **Partly as-built.** The ordered-list failover
-> half is implemented: the configured lightwalletd endpoints are tried in
-> configured order for the compact-block fetch, and the operation is declared
-> failed only after every configured endpoint has failed (R39.8.0ae).
-> **Admission is not implemented** -- there is no admission step of any kind, so
-> "admitted" currently means "configured", and the exclusion R39.11.7a specifies
-> does not happen. The second paragraph is **not implemented**: a Light-mode
-> ZHTLC coin does have an Electrum connection pool today, and
-> [chapter 38](38-utxo-coin-maintenance-and-features.md) §38.6.4 does still bind
-> it.
+> **Status update (reloaded, Step C).** Implemented. Every operation tries the
+> admitted endpoints in configured order and fails only after all have failed; an
+> endpoint that passes admission and then fails a method (a 502 on the method
+> actually needed, D39.11.g) is skipped for that call, and a total failure forces
+> admission to be re-evaluated on the next call. A Light coin has no Electrum
+> connection pool, so chapter 38 §38.6.4 does not bind it.
 
 R39.11.4 **Broadcast is served by the same backend**, which removes the
 single-point dependency the first form of this subsection recorded: a deployment
@@ -2512,13 +2499,12 @@ against further endpoints as though it were a transport failure -- a
 consensus-level rejection will be reproduced by every honest endpoint, and
 retrying it hides the reason.
 
-> **Status update (reloaded).** **Required change, not implemented.** Every
-> shielded transaction is broadcast today through the shared UTXO send path --
-> the Electrum arm in Light mode -- and nothing in this repository reaches the
-> service's submission method, so the distinguishable-rejection reporting this
-> requirement specifies has no implementation. That the method is the dictated
-> broadcast route is a fact of the service contract; it has not been exercised
-> against the deployed node either (D39.11.e).
+> **Status update (reloaded, Step C).** Implemented, unverified against the
+> deployed node (D39.11.e). A service-level rejection (`SendResponse.errorCode`
+> non-zero) is reported as `BroadcastRejected` with the backend's code and message
+> and is not retried on further endpoints; a transport failure moves on. The
+> transaction identifier is computed locally from the bytes (the response carries
+> none), with the Zcash reader.
 
 R39.11.4a **Transparent balance is served by the dedicated balance method, and
 its request encoding is load-bearing.** The method works against the deployed
@@ -2553,17 +2539,14 @@ still used where the individual outputs are themselves needed.)*
 For a P2SH address this method is subject to R39.11.4d exactly like the other two
 transparent address methods: it is the index, not the method, that fails there.
 
-> **Status update (reloaded).** **Service fact verified 2026-10-11; the
-> requirement on our code is not implemented.** Verified live against the
-> deployed node: that the method accepts several addresses in one call, that its
-> reply carries one summed value with no breakdown, and that a request whose
-> address list is encoded as a nested submessage rather than the dictated flat
-> repeated field is rejected as an invalid address list for every address. This
-> repository does not call the transparent-balance method at all, so there is no
-> request encoding to pin, no byte-level request test (T39.11.j does not exist),
-> and no rejection-classification behaviour to inspect. The withdrawn
-> UTXO-listing workaround named in the parenthetical was never implemented
-> either.
+> **Status update (reloaded, Step C).** Implemented. `GetTaddressBalance` is called
+> with the flat repeated address field, several addresses in one call; the
+> byte-level test (T39.11.j) pins the encoding. A per-address result
+> (`display_balances`) takes one call per address, because the reply has no
+> breakdown. Not implemented: the "invalid address list" rejection is surfaced as
+> an ordinary endpoint failure carrying the node's text; it is not reclassified as a
+> request-or-index condition, and nothing treats it as "these addresses are
+> invalid". A P2SH address is refused before any request (R39.11.4d).
 
 R39.11.4b **The transparent history stream aborts on the first transaction the
 node cannot serve, and drops its last buffered height group. The implementation
@@ -2627,21 +2610,18 @@ named, reportable condition rather than as absence of a spend, and the serving
 node's transaction index is a dictated operational precondition (R39.11.17).
 See D39.11.g.
 
-> **Status update (reloaded).** **Stream behaviour verified; every requirement on
-> our code is not implemented.** The abort was observed live on 2026-10-11, and
-> its two causes -- the node's inability to serve the raw bytes of a fully spent
-> or transparent-output-less transaction without its transaction index, and the
-> server's dropping of each stream's last buffered height group -- are
-> established from those components' published behaviour rather than inferred.
-> None of (a)--(f) exists: this repository does not use the transparent
-> address-history stream at all, so there is no windowing, no bisection, no gap
-> record, no resumption rule, and -- the funds-affecting part -- no distinction
-> between "the window completed clean and matched nothing" and "the window failed
-> or carried a gap" on the swap path. Spend detection today reaches Electrum
-> through the shared UTXO path, which is what R39.11.1 replaces, so the
-> HTLC-spend-shape argument describes a hazard of the specified design rather
-> than a defect presently reachable through this surface. T39.11.h does not
-> exist.
+> **Status update (reloaded, Step C).** (a)--(e) are implemented in `read_history`
+> and tested (T39.11.h): bounded windows, both bounds at least 1, bisection down to
+> a single height recorded as a gap, resumption from the last received height with
+> deduplication, retention of what a failing stream delivered. A window that
+> delivers nothing beyond what the read holds is widened (up to 16 times the base
+> window) from the same cursor, because the dropped group can only be delivered by a
+> window that also contains a later group. Two residues cannot be repaired from the
+> client and are documented on the function: the newest height group of the whole
+> range, and a group isolated from any later group by more than the widest window.
+> (f) is implemented as `HistoryRead::is_clean()`; **its consumer is not built**:
+> the swap-path negative answers do not exist yet, so nothing yet reads a gap as
+> "undetermined" and nothing writes the gap condition to the sync-error channel.
 
 R39.11.4c **The transaction lookup accepts only the hash selector, in internal
 byte order.** The dictated transaction filter offers a block-and-index selector
@@ -2659,13 +2639,12 @@ output cannot be served unless the node's transaction index is enabled
 (R39.11.4b). A failure of this method shall therefore not be reported as "no such
 transaction" (R39.11.12).
 
-> **Status update (reloaded).** **Service fact verified 2026-10-11; the
-> requirement on our code is not implemented.** That the deployed node serves
-> only the hash selector, and only in internal byte order, was observed live.
-> This repository does not call the transaction-lookup method, so neither the
-> byte-order conversion point this requirement makes explicit nor its
-> both-directions test exists; the display-order caller-facing surface of
-> R39.8.7a is implemented independently of it.
+> **Status update (reloaded, Step C).** Implemented. `GetTransaction` is called with
+> the hash selector only; the display-to-internal and internal-to-display
+> conversions are the two functions `txid_display_to_internal` /
+> `txid_internal_to_display`, and both directions are tested with a non-symmetric
+> value. A failed lookup is reported as a failure; only an explicit gRPC `NotFound`
+> is reported as "no such transaction" (R39.11.12).
 
 R39.11.4d **A P2SH address query never matches this chain's transparent address
 index, by a defect in the serving node. The implementation shall query the
@@ -2743,17 +2722,14 @@ that cannot see it waits out the lock and refunds a swap it had already won.
 > **shape cannot drift**, because a transaction carrying any other shape is
 > invalid on that chain. This is dictated interop, not a convention.
 
-> **Status update (reloaded).** **The defect is established from the chain
-> node's published source and is unverified at runtime (D39.11.d); none of
-> (a)--(d) is implemented.** This repository issues no transparent address query
-> against this backend at all, so there is no dual-encoding probe, no
-> per-endpoint memory of which encoding answered, no validation of a returned
-> output's script, and no funding-transaction proof obligation. What follows from
-> that, and is the reason this gap is worth stating rather than deferring
-> silently: the loud-failure discipline this requirement exists to impose is
-> absent, not merely unexercised. The dictated consensus fact in the informative
-> note above is a property of the chain's own transaction check. T39.11.g does
-> not exist.
+> **Status update (reloaded, Step C).** **Not implemented, deliberately.** The
+> workaround is source-derived and has not been proved on a funded HTLC (D39.11.d),
+> so no dual-encoding probe, per-endpoint memory, script validation or
+> funding-transaction proof exists (T39.11.g). What does exist is the loud-failure
+> half of the discipline: a script-hash address is refused by balance, UTXO and
+> history with a typed `Unsupported` error, and `find_output_spend` and
+> `check_if_my_payment_sent` fail with an explicit error, so no empty result can
+> be read as "not spent" or "not sent".
 
 R39.11.4e **Confirmation depth shall be derived locally; notarized depth is not
 obtainable and shall not be silently substituted.** The lookup method returns the
@@ -2775,17 +2751,14 @@ form available. Two consequences bind:
   asserting it for a ZHTLC coin shall be refused as unsupported for the coin
   type, with the refusal naming the coin. See D39.11.f.
 
-> **Status update (reloaded).** **Partly as-built.** The local arithmetic is
-> implemented for shielded history entries: `z_coin_tx_history` already derives
-> `confirmations` as the tip plus one minus the mined height and already yields
-> zero both for an unmined entry and for an entry whose height exceeds the tip
-> (R39.8.9e). **Not implemented:** that the two inputs to that arithmetic come
-> from this backend's transaction-lookup and tip methods -- the confirmation wait
-> takes both through the shared UTXO path today, including a server-side verbose
-> decode -- and the notarization prohibition. A ZHTLC coin currently inherits the
-> shared UTXO implementation of `requires_notarization` with no coin-type
-> refusal, so asserting it is accepted rather than refused as unsupported. The
-> open policy question about the refusal's observable form is D39.11.f.
+> **Status update (reloaded, Step C).** Implemented. The confirmation wait fetches
+> the bytes and mined height with `GetTransaction` and the tip with `GetLatestBlock`
+> and computes `tip + 1 - mined height` locally (zero when unmined or above the tip);
+> no server-side decode is asked for. The notarization prohibition is implemented
+> at the point of use (D39.11.f, second form): a wait that requires notarization
+> fails with an error saying notarized depth is not obtainable, and plain depth is
+> not substituted. Asserting `requires_notarization` at activation is still accepted;
+> the maintainer decision on its observable form (D39.11.f) is open.
 
 R39.11.4f **Block timestamps and median time past shall be read from the compact
 block's block-time field.** The compact-block message carries the block time, so
@@ -2802,16 +2775,10 @@ per-height compact-block reads. Two constraints follow:
   parsed: the time is a field of the dictated compact-block message. Chapter 37
   §37.5 continues to bind every Electrum-backed UTXO coin.
 
-> **Status update (reloaded).** **Required change, not implemented.** Both
-> resolutions take their time values elsewhere today: a `{"date": T}` sync start
-> is resolved by reading per-height block timestamps through the coin's shared
-> UTXO RPC client, and the median-time-past-derived locktime comes from the
-> shared UTXO path. That the compact-block message carries a block-time field is
-> a fact of the dictated message definition this repository already carries.
-> Consequently the release of
-> [chapter 37](37-utxo-spv-and-block-header-validation.md) §37.5 R37.5.1a stated
-> in the second bullet takes effect only when this requirement is implemented;
-> until then that rule still binds this resolution for a ZHTLC coin too.
+> **Status update (reloaded, Step C).** Implemented. The `{"date": T}` resolution
+> and the median time past read the compact block's time field per height; the
+> median window is bounded (`MEDIAN_TIME_WINDOW_MAX`, 64). Chapter 37 §37.5
+> R37.5.1a no longer binds a ZHTLC coin.
 
 R39.11.4g **The Light-versus-Native discriminator shall not be the identity of
 the UTXO RPC client.** In this repository a ZHTLC coin's mode is currently decided
@@ -2835,16 +2802,14 @@ first-class implementation of that trait, rather than a set of special cases
 scattered through the shielded coin, is a requirement, because the shared UTXO
 swap helpers reach it through the trait.
 
-> **Status update (reloaded).** **Required change, not implemented, and it is the
-> prerequisite for the rest of §39.11.** The as-built state is the second
-> code-quality finding at the end of §39.11.3: every Light-mode-only behaviour of
-> the shielded coin is selected today by matching on which arm of the shared UTXO
-> RPC client enumeration the coin holds. No activation mode is carried on the
-> coin, and no lightwalletd-backed implementation of `UtxoRpcClientOps` exists in
-> this repository. Because the Electrum arm is still present, the discriminator
-> still matches and nothing is currently broken by it; the requirement exists
-> because implementing R39.11.1 without it would silently select the Native path
-> for a Light coin.
+> **Status update (reloaded, Step C).** Implemented. The coin carries `ZcoinMode`
+> (`Native` / `Light`), set at construction from the requested backend; the shielded
+> balance source, the background sync task, the pending-receipt surface, the
+> in-flight spend recording and the skipping of the commitment-tree loop are selected
+> by it. `LightwalletdClient` is a first-class `UtxoRpcClientOps`; the methods this
+> chapter assigns it are served, and the rest (`get_verbose_transaction(s)`,
+> `estimate_fee_sat`, `get_relay_fee`, `find_output_spend`) return an explicit typed
+> unsupported error, never a zero or empty stand-in.
 
 ### 39.11.2 What activation requires of the backend
 
@@ -2867,18 +2832,10 @@ which made the Electrum list mandatory.)*
   connection for a ZHTLC coin, and shall not fail for any Electrum-related
   reason.
 
-> **Status update (reloaded).** **Required change, not implemented, and the
-> present behaviour is the reverse of it on both halves.** A Light-mode coin's
-> `electrum_servers` are mapped straight into the shared UTXO Electrum client
-> today, so the field is load-bearing rather than ignored, an empty list fails
-> activation, and activation does open Electrum connections and can fail for
-> Electrum reasons. `light_wallet_d_servers` has no construction-time emptiness
-> check: an empty array parses, is accepted, and fails later during the
-> compact-block fetch as a scan failure rather than as a configuration error
-> named at coin construction before any shielded work begins -- so even the half
-> of this requirement that points the same way as the present code is not
-> satisfied in the form specified. The accepted wire shape itself is unchanged by
-> this requirement and is already accepted. T39.11.b does not exist.
+> **Status update (reloaded, Step C).** Implemented and tested (T39.11.b): an empty
+> `light_wallet_d_servers` is a `CoinCreationError` naming the coin, raised before
+> the coin is built; `electrum_servers` and the connection counts are accepted, may
+> be absent or empty, and are ignored; activation never opens an Electrum connection.
 
 R39.11.6 **Activation does not require a live connection at construction time,
 but it does require a usable admitted endpoint before it can return a result.**
@@ -2891,15 +2848,12 @@ R39.11.7a, shall each fail activation with a typed error, and the two causes
 shall be distinguishable. Neither shall report a terminal success carrying a
 placeholder, zero, or last-known tip.
 
-> **Status update (reloaded).** **Partly as-built.** Activation already reads the
-> chain tip as a hard requirement and already refuses to proceed on a failed read
-> rather than substituting a placeholder, zero, or last-known value: the read
-> feeds both the shielded scan bound and the activation result's `current_block`,
-> and a failure surfaces as a typed activation error. **Not implemented:** that
-> the tip comes from an admitted lightwalletd endpoint rather than from the
-> coin's shared UTXO client, and the distinguishability of "every configured
-> endpoint unreachable" from "every configured endpoint excluded by admission",
-> which cannot exist while R39.11.7a does not.
+> **Status update (reloaded, Step C).** Implemented. Activation runs admission
+> before it reads anything: an unreachable endpoint set ends the task with
+> `LightwalletdUnreachable` (wire: `Transport`), an excluded set or a fresh wallet
+> with no strict-majority branch with `LightwalletdExcluded` (wire:
+> `CoinCreationError`), and neither reports a tip. The tip is read from the admitted
+> endpoints and a failed read is an error.
 
 R39.11.7 **Light-mode operation on the shielded backend alone is the supported
 design, and the only one.** *(This is the reverse of its first form, which
@@ -2914,16 +2868,13 @@ behind a compatibility switch. There shall be no code path, configuration value,
 or build feature by which a ZHTLC coin is served by an Electrum server. See the
 Compatibility note at the end of §39.11.3 for what this means against GLEEC KDF.
 
-> **Status update (reloaded).** **Required change, not implemented.** Electrum
-> support for a ZHTLC coin is present and mandatory in this repository today;
-> none of the removal has happened, and the configuration this requirement
-> declares supported cannot be activated. The three capabilities the requirement
-> says are present are present **in the service**, as recorded and dated in
-> R39.11.1, R39.11.4 and R39.11.4d -- not in this project's code. The
-> Compatibility note at the end of §39.11.3 accordingly describes a divergence
-> from GLEEC KDF that does not exist yet, and the `docs/GLEEC_COMPATIBILITY.md`
-> and `RELOADED_VS_GLEEC.md` entries it calls for land with the behaviour, not
-> before it.
+> **Status update (reloaded, Step C).** Implemented. Electrum is removed for a ZHTLC
+> coin: there is no code path, configuration value or build feature by which a
+> ZHTLC coin is served by an Electrum server. The spend-detection capability the
+> requirement lists as present in the service is present in the service, not yet
+> in this project's code (R39.11.4d). The Compatibility note at the end of §39.11.3
+> is now the description of a real divergence and is recorded in
+> `docs/GLEEC_COMPATIBILITY.md` and `RELOADED_VS_GLEEC.md`.
 
 R39.11.7a **Endpoint admission: an off-branch endpoint shall be excluded from
 use, not merely reported.** *(New requirement.)* Before any endpoint is used for
@@ -2991,18 +2942,25 @@ precise opposite of the intent. The rule shall therefore be:
   scanned state carries an identifier, only that partition is ever admitted until
   the configuration gains the upgrade height that makes (d) decidable again.
 
-> **Status update (reloaded).** **New requirement, wholly unimplemented.** This
-> repository performs no server-information read and no admission check of any
-> kind; every configured endpoint is used for every operation. The live
-> conditions that motivate the requirement are observations, not code: on
-> 2026-10-11 three of the eight published endpoints for this chain reported the
-> pre-upgrade consensus branch identifier against a chain that had activated a
-> new one, and the rewind-and-follow capture described here was observed against
-> the present code. No consensus branch identifier is persisted alongside the
-> wallet's sync state today, so the (e) binding has no storage yet and adding it
-> is part of implementing this requirement; likewise no re-evaluation interval
-> constant exists for (g), and the excluded-endpoint reporting of (f) has a
-> channel (R39.8.0au) but nothing to put in it. T39.11.f does not exist.
+> **Status update (reloaded, Step C).** Implemented in `decide_admission` and tested
+> (T39.11.f). (a), (b), (d) and (e) are as written. The configuration determines the
+> expected branch only below the *horizon* -- the activation height of the last
+> declared upgrade, when any later upgrade this build knows of is undeclared -- so
+> for ARRR (no published configuration declares an upgrade after Sapling, and the
+> build maps no Ironwood height yet) the local expectation is never applied at a
+> real tip height and (e) decides. The recorded branch identifier is a sidecar file
+> of the wallet database (`<wallet db>.lightwalletd-branch`): the wallet database's
+> schema is fingerprinted and cannot carry it. A wallet that has scanned blocks but
+> has no recorded identifier (it predates the binding) is decided like a fresh one,
+> by strict majority, and the winner is recorded. A fresh wallet needs at least two
+> agreeing endpoints; a single reachable endpoint fails with the observed
+> identifiers. (g) is implemented with `ADMISSION_REEVALUATION_INTERVAL` (300 s); the
+> recorded binding is never rewritten while it is in force, so a legitimate network
+> upgrade the configuration does not declare stops a bound wallet with
+> `AllExcluded` until the configuration gains the upgrade height. (f) is partial:
+> the exclusions are logged, listed in the message of an admission failure and
+> available from `ZCoin::excluded_lightwalletd_endpoints`, but a successful
+> admission does not write them into the sync-state channel.
 
 ### 39.11.3 Chain-height authority
 
@@ -3040,18 +2998,12 @@ evaluated against every entry.
   shared UTXO path, likewise computed per R39.11.4f.
 - (j) **Height-range bounds for the transparent history stream** (R39.11.4b).
 
-> **Status update (reloaded).** **The consumer list is as-built except (j); the
-> authority sentence is not.** Entries (a)--(i) all exist in this repository today
-> and all consume a chain height; (j) does not exist, because the transparent
-> history stream of R39.11.4b is not used. What is **not implemented** is this
-> requirement's opening sentence. The height those consumers read is not an
-> admitted lightwalletd endpoint's tip but the coin's shared UTXO client's block
-> count, and -- per the first code-quality finding at the end of this subsection
-> -- (e) does not even take it consistently: the ordinary Light-mode shielded
-> send path takes its builder target height from the shielded wallet database's
-> own target height while the HTLC spend/refund path takes it from the shared
-> UTXO client. The expiry delta named in (e) is a published fact of the pinned
-> dependency crate, not a project choice.
+> **Status update (reloaded, Step C).** Implemented for (a)--(f), (h) and (i): each
+> reads the single lightwalletd tip (the activation result, the activation and
+> background scan targets, the "nothing to do" short-circuit, the builder target
+> height of every construction path, confirmations, the date resolution and the
+> median time past). (g): the give-up condition follows R39.11.12. (j) has no
+> consumer yet (see R39.11.4b).
 
 R39.11.9 **One height authority, and no second height source.** *(This replaces
 the first form's rule that the shielded scan target be taken from a different
@@ -3066,14 +3018,13 @@ and shall not let any consumer of R39.11.8 take its height from anywhere else.
 The two defects the first form existed to describe were both consequences of
 there being two authorities; the requirement that survives is that there be one.
 
-> **Status update (reloaded).** **Required change, not implemented.** There are
-> two height sources inside the coin today -- the shared UTXO client's block
-> count and the shielded wallet database's own target height -- which is exactly
-> the condition this requirement forbids. The prohibition on deriving a height
-> from a cached or configured value on a failed read is unimplemented in a
-> narrower sense than it sounds: the Light-mode send path never reads a tip at
-> all, so there is nothing yet that could refuse on a failed read, and the
-> requirement first has to give that path a tip to read.
+> **Status update (reloaded, Step C).** Implemented. `GetLatestBlock` on the admitted
+> endpoints is the only height source of a Light coin. The Light-mode ordinary send
+> path no longer takes its target from the wallet database (the database's height
+> still selects notes and the anchor), and the HTLC spend and refund path no longer
+> takes it from the UTXO client; both call `ZCoin::builder_target_height`. A failed
+> read returns an error and never a cached, configured or scanned height. Native
+> mode keeps its full-node block count as its authority.
 
 R39.11.10 **Admitted endpoints can still lag one another, and the height the
 coin uses shall not go backwards.** *(This is the residual of the withdrawn
@@ -3103,14 +3054,12 @@ a lower tip from an honest endpoint. Therefore:
   named constant whose stated purpose is endpoint selection, never chain
   selection, which R39.11.7a owns.
 
-> **Status update (reloaded).** **Required change, not implemented.** No
-> monotonic floor exists on the coin's reported or scanned height today; each tip
-> read stands alone. The rule this requirement defers to for genuine
-> discontinuity -- the sequential-height and hash-link validation of R39.8.0n --
-> **is** implemented, and is the only rewind trigger the scanner has. The
-> endpoint-selection permission in the last bullet is a permission rather than a
-> required change: no such constant exists today and none is required.
-> T39.11.i does not exist.
+> **Status update (reloaded, Step C).** Implemented and tested (T39.11.i, in part).
+> The reported height is `max(read, highest observed)`; a lower read neither lowers
+> it nor is reported as it. A tip below the scanned height triggers no rewind (the
+> scanner's only rewind trigger remains the hash-link rule of R39.8.0n). No lag
+> threshold constant exists. The test covers the monotonic floor; the hash-link
+> half is covered by the existing R39.8.0n tests.
 
 R39.11.11 **Every shielded transaction construction path shall take its builder
 target height from the one authority of R39.11.9.** *(Retained unchanged in
@@ -3141,16 +3090,14 @@ a height it cannot currently corroborate: if the tip read fails, the path shall
 return a typed error, and shall not fall back to the wallet database's own target
 height, to the last known tip, or to the scanned height.
 
-> **Status update (reloaded).** **Required change, not implemented, and the
-> defect it fixes is present.** The two builder height authorities this
-> requirement forbids are both in this repository today: the Light-mode ordinary
-> shielded send path takes its target height from the shielded wallet database's
-> own target height, while the HTLC spend and refund construction path takes it
-> from the shared UTXO client's block count (see the first code-quality finding
-> at the end of this subsection). The refuse-rather-than-fall-back clause is
-> unimplemented on both paths. The 2026-10-08 figures in this requirement are an
-> observation of the present behaviour, not a claim about a fix. T39.11.c does
-> not exist.
+> **Status update (reloaded, Step C).** Implemented and tested (T39.11.c, in part).
+> `builder_target_height` is `tip + 1` from a fresh read and refuses with
+> `StaleTip` when the read is more than the builder's expiry delta (40,
+> `DEFAULT_TX_EXPIRY_DELTA`) behind the highest tip seen or the wallet's scanned
+> height; a failing read is `TipUnavailable`. Neither falls back. The test pins the
+> shared arithmetic and the refusals; it does not drive the two full builders from
+> one injected tip, because those need the Sapling parameters and a scanned wallet
+> database.
 
 R39.11.12 **A stale or unreachable tip shall not be allowed to fabricate a
 terminal outcome.** *(Retained; restated for one backend.)* Specifically:
@@ -3168,16 +3115,12 @@ terminal outcome.** *(Retained; restated for one backend.)* Specifically:
   state of R39.8.0au, carrying the height scanned so far, rather than leaving the
   previous state in place.
 
-> **Status update (reloaded).** **Required change, not implemented; one clause
-> already has its channel.** The sync-error channel this requirement reports
-> through (R39.8.0au) is implemented and already carries a failed background pass
-> with the height scanned so far, so the third bullet's destination exists -- but
-> a failed *tip* read does not populate it today. The first two bullets are
-> unimplemented: the confirmation wait is the shared UTXO one, which does not
-> distinguish an uncorroborated expiry from a genuine one, and the "no such
-> transaction" versus "the backend failed" distinction has no subject yet because
-> the methods it concerns are not called from this repository. T39.11.d does not
-> exist.
+> **Status update (reloaded, Step C).** Implemented and tested (T39.11.d, in part).
+> A transaction that cannot be fetched while the tip is past its expiry height is
+> declared expired only when the service answered an explicit `NotFound`; otherwise
+> the error says the expiry is not proved. "No such transaction" is distinguished
+> from "the backend failed" in the same way. A failed tip read in the background
+> pass populates the sync-error channel with the height scanned so far.
 
 > **Compatibility.** Two distinct divergences from GLEEC KDF are recorded here.
 >
@@ -3467,13 +3410,22 @@ rather than as a generic RPC failure.
 
 #### Tests
 
-> **Status update (reloaded).** **None of T39.11.a--T39.11.j exists.** No test in
-> this repository references these identifiers, and each asserts behaviour that
-> §39.11's required changes introduce, so none of them can be written against the
-> present code. They are the acceptance set for the implementation, not a record
-> of coverage. The existing shielded-coin tests cover the scan, wallet database,
-> tree-state validation and history surfaces of §39.8 and are untouched by this
-> list.
+> **Status update (reloaded, Step C).** T39.11.a--T39.11.d, T39.11.f and
+> T39.11.h--T39.11.j exist, in part; **T39.11.e and T39.11.g do not exist** (parser
+> routing and the P2SH workaround are not implemented). They run against a
+> scripted in-process transport, with no network:
+> `z_coin/z_lightwalletd/tests.rs` (admission, failover, monotonic height, builder
+> height, confirmation wait, byte order, balance request bytes, history reader),
+> `z_coin.rs` `light_backend_tests` (the Light build is lightwalletd whatever the
+> request says about Electrum; fixed-fee refusal) and `z_coin_activation.rs`
+> (the activation wire). Not covered: T39.11.a's "a shielded receipt mined after
+> activation becomes visible" and "every function answered from the fixture" are
+> covered per function, not by one end-to-end run, and the two full transaction
+> builders are not driven from one injected tip (T39.11.c).
+>
+> **Retired:** `light_mode_still_requires_both_server_lists`
+> (`z_coin_activation.rs`) asserted that an absent `electrum_servers` fails Light
+> activation; it is replaced by `light_mode_requires_only_the_lightwalletd_list`.
 
 T39.11.a A single-backend test shall drive a Light-mode shielded coin against a
 lightwalletd fixture only, with no Electrum server reachable or configured, and

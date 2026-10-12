@@ -306,6 +306,12 @@ where
     };
 
     let tx_ids = match &coin.as_ref().rpc_client {
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => {
+            return RequestTxHistoryResult::CriticalError(
+                "transparent transaction history is not supported over lightwalletd".to_owned(),
+            )
+        },
         UtxoRpcClientEnum::Native(client) => {
             let mut from = 0;
             let mut all_transactions = vec![];

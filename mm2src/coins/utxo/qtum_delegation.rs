@@ -145,6 +145,10 @@ impl QtumCoin {
                 return MmError::err(StakingInfosError::Internal("Native not supported".to_string()))
             },
             UtxoRpcClientEnum::Electrum(electrum) => electrum,
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => {
+                return MmError::err(StakingInfosError::Internal("lightwalletd not supported".to_string()))
+            },
         };
         let address = self.my_addr_as_contract_addr().mm_err(Into::into)?;
         let address_rpc = contract_addr_into_rpc_format(&address);

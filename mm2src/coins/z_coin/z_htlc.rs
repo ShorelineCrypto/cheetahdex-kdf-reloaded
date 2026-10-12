@@ -9,7 +9,7 @@ use super::ZCoin;
 use crate::utxo::rpc_clients::{UtxoRpcClientEnum, UtxoRpcError};
 use crate::utxo::utxo_common::payment_script;
 use crate::utxo::{sat_from_big_decimal, UtxoAddressFormat};
-use crate::z_coin::{SendOutputsErr, ZOutput, DEX_FEE_OVK};
+use crate::z_coin::{BuilderHeightError, SendOutputsErr, ZOutput, DEX_FEE_OVK};
 use crate::{NumConversError, PrivKeyNotAllowed, TransactionEnum};
 use bigdecimal::BigDecimal;
 use chain::Transaction as UtxoTx;
@@ -103,6 +103,8 @@ pub enum ZP2SHSpendError {
     ZTxBuilderError(ZTxBuilderError),
     PrivKeyNotAllowed(PrivKeyNotAllowed),
     Rpc(UtxoRpcError),
+    #[display(fmt = "{}", _0)]
+    BuilderHeight(BuilderHeightError),
     #[display(fmt = "Invalid ZCash HTLC payment transaction: {}", _0)]
     InvalidPaymentTx(String),
     #[display(fmt = "{:?} {}", _0, _1)]
@@ -115,6 +117,10 @@ impl From<ZTxBuilderError> for ZP2SHSpendError {
 
 impl From<PrivKeyNotAllowed> for ZP2SHSpendError {
     fn from(err: PrivKeyNotAllowed) -> Self { ZP2SHSpendError::PrivKeyNotAllowed(err) }
+}
+
+impl From<BuilderHeightError> for ZP2SHSpendError {
+    fn from(err: BuilderHeightError) -> ZP2SHSpendError { ZP2SHSpendError::BuilderHeight(err) }
 }
 
 impl From<UtxoRpcError> for ZP2SHSpendError {
@@ -141,16 +147,15 @@ pub async fn z_p2sh_spend(
     script_data: Script,
     htlc_privkey: &[u8],
 ) -> Result<UtxoTx, MmError<ZP2SHSpendError>> {
-    let current_block = coin
-        .utxo_arc
-        .rpc_client
-        .get_block_count()
-        .compat()
+    // The same single height authority the ordinary shielded send path uses, so a spend or refund
+    // can never be born expired because its height came from a different source (R39.11.11).
+    let target_height = coin
+        .builder_target_height()
         .await
-        .mm_err(Into::into)? as u32;
+        .mm_err(ZP2SHSpendError::BuilderHeight)?;
     let mut tx_builder = ZTxBuilder::new(
         coin.z_fields.consensus_params.clone(),
-        current_block.into(),
+        target_height.into(),
         BuildConfig::Standard {
             sapling_anchor: Some(sapling::Anchor::empty_tree()),
             orchard_anchor: None,

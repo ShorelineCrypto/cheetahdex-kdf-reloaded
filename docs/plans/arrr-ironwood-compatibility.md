@@ -1222,3 +1222,21 @@ then mainnet.
   verify the resulting fingerprint equals the current schema, and fall back to the existing
   preserve‑and‑rebuild path on any failure — so the outcome degrades to today's behaviour rather
   than to a half‑migrated wallet.
+- **2026‑10‑12 — Step C, wallet half (branch `feat/arrr-lightwalletd-only`).** `lightwalletd` is now the
+  sole backend of a Light‑mode ZHTLC coin: the coin carries an explicit `ZcoinMode`, the RPC client is a
+  new `UtxoRpcClientEnum::LightWalletD` arm (a first‑class `UtxoRpcClientOps`), `electrum_servers` is
+  accepted and ignored, and `light_wallet_d_servers` must be non‑empty. Two defects are closed. **One
+  height authority:** the Light ordinary send path (wallet‑DB target height) and the HTLC spend/refund
+  path (Electrum block count) both read `ZCoin::builder_target_height`, the admitted lightwalletd tip + 1,
+  and refuse to build — with a typed error, no fallback — when the read fails or is more than the
+  builder's 40‑block expiry delta behind what the wallet has seen. **Endpoint admission:**
+  `GetLightdInfo` network, Sapling height and consensus branch exclude off‑branch endpoints; the local
+  branch expectation is applied only below the *horizon* (the last declared upgrade's height, while a
+  later known upgrade is undeclared), so at ARRR's real tip the partition rule decides — a wallet that has
+  scanned blocks stays on its recorded branch, a fresh one needs a strict majority of at least two
+  endpoints — and the inversion in the Step C warning cannot occur. **Deliberately not done:** swap‑path
+  spend and already‑sent detection (`find_output_spend`, `check_if_my_payment_sent`) fail with an explicit
+  error and a P2SH address is refused by balance/UTXO/history, because the R‑address workaround is still
+  unproved on a funded HTLC; parser routing (Step D); `Nu6_3` mapping and the gates (Step E). The
+  divergence from GLEEC KDF is recorded in `RELOADED_VS_GLEEC.md` and `docs/GLEEC_COMPATIBILITY.md`
+  (no opt‑in exists, and the entries say so). CRD ch.39 §39.11 status notes updated in the same commit.

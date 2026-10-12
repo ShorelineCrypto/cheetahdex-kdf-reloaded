@@ -112,6 +112,10 @@ impl rustls::client::ServerCertVerifier for NoCertificateVerification {
 pub enum UtxoRpcClientEnum {
     Native(NativeClient),
     Electrum(ElectrumClient),
+    /// The sole backend of a Light-mode ZHTLC coin (CRD ch.39 R39.11.1, R39.11.4g). Native builds only:
+    /// the shielded wallet database it serves does not exist on WASM.
+    #[cfg(not(target_arch = "wasm32"))]
+    LightWalletD(crate::z_coin::LightwalletdClient),
 }
 
 impl From<ElectrumClient> for UtxoRpcClientEnum {
@@ -128,6 +132,8 @@ impl Deref for UtxoRpcClientEnum {
         match self {
             UtxoRpcClientEnum::Native(ref c) => c,
             UtxoRpcClientEnum::Electrum(ref c) => c,
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(ref c) => c,
         }
     }
 }
@@ -137,6 +143,8 @@ impl Clone for UtxoRpcClientEnum {
         match self {
             UtxoRpcClientEnum::Native(c) => UtxoRpcClientEnum::Native(c.clone()),
             UtxoRpcClientEnum::Electrum(c) => UtxoRpcClientEnum::Electrum(c.clone()),
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(c) => UtxoRpcClientEnum::LightWalletD(c.clone()),
         }
     }
 }
@@ -151,6 +159,25 @@ impl UtxoRpcClientEnum {
         wait_until: u64,
         check_every: u64,
     ) -> Box<dyn Future<Item = (), Error = String> + Send> {
+        // The lightwalletd backend derives confirmations locally from the mined height and the tip
+        // and treats an uncorroborated expiry differently (CRD ch.39 R39.11.4e, R39.11.12).
+        #[cfg(not(target_arch = "wasm32"))]
+        if let UtxoRpcClientEnum::LightWalletD(client) = self {
+            let client = client.clone();
+            let fut = async move {
+                client
+                    .wait_for_confirmations(
+                        tx_hash,
+                        expiry_height,
+                        confirmations,
+                        requires_notarization,
+                        wait_until,
+                        check_every,
+                    )
+                    .await
+            };
+            return Box::new(fut.boxed().compat());
+        }
         let selfi = self.clone();
         let fut = async move {
             loop {
@@ -212,6 +239,8 @@ impl UtxoRpcClientEnum {
         match self {
             UtxoRpcClientEnum::Native(_) => true,
             UtxoRpcClientEnum::Electrum(_) => false,
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => false,
         }
     }
 }

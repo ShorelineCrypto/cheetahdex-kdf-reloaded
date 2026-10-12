@@ -176,6 +176,8 @@ where
     ));
     let send_fut = match &coin.as_ref().rpc_client {
         UtxoRpcClientEnum::Electrum(_) => Either::A(send_outputs_from_my_address(coin, outputs)),
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => Either::A(send_outputs_from_my_address(coin, outputs)),
         UtxoRpcClientEnum::Native(client) => {
             let addr_string = try_tx_fus!(payment_address.display_address());
             Either::B(
@@ -214,6 +216,8 @@ where
 
     let send_fut = match &coin.as_ref().rpc_client {
         UtxoRpcClientEnum::Electrum(_) => Either::A(send_outputs_from_my_address(coin, outputs)),
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => Either::A(send_outputs_from_my_address(coin, outputs)),
         UtxoRpcClientEnum::Native(client) => {
             let addr_string = try_tx_fus!(payment_address.display_address());
             Either::B(
@@ -821,6 +825,14 @@ pub fn check_if_my_payment_sent<T: UtxoCommonOps>(
                     None => Ok(None),
                 }
             },
+            // Already-sent detection over lightwalletd rests on the address-index workaround that is
+            // not yet proved on a funded HTLC (CRD ch.39 R39.11.4d): fail loudly, because an empty
+            // answer here would read as "not sent" and double-fund the payment.
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => ERR!(
+                "check_if_my_payment_sent is not implemented over lightwalletd: the address-index workaround it \
+                 needs (R39.11.4d) has not been proved on a funded HTLC"
+            ),
             UtxoRpcClientEnum::Native(client) => {
                 let target_addr = Address {
                     t_addr_prefix: coin.as_ref().conf.p2sh_t_addr_prefix,

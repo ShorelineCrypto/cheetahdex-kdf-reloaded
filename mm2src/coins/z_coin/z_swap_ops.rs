@@ -212,23 +212,20 @@ impl SwapOps for ZCoin {
         let coin = self.clone();
         let fut = async move {
             let tx_hash = H256::from(*z_tx.txid().as_ref()).reversed();
-            let tx_from_rpc = try_s!(
-                coin.rpc_client()
-                    .get_verbose_transaction(&tx_hash.into())
-                    .compat()
-                    .await
-            );
+            // Bytes and mined height only: a Light coin's backend decodes nothing (R39.11.4e).
+            let (rpc_bytes, rpc_height) = try_s!(coin.raw_transaction_with_height(&tx_hash.into()).await);
             let mut encoded = Vec::with_capacity(1024);
             z_tx.write(&mut encoded).expect("Writing should not fail");
-            if encoded != tx_from_rpc.hex.0 {
+            if encoded != rpc_bytes {
                 return ERR!(
-                    "Encoded transaction {:?} does not match the tx {:?} from RPC",
+                    "Encoded transaction {:?} does not match the tx {:?} from RPC (height {:?})",
                     encoded,
-                    tx_from_rpc
+                    rpc_bytes,
+                    rpc_height
                 );
             }
 
-            let block_height = match tx_from_rpc.height {
+            let block_height = match rpc_height {
                 Some(h) => {
                     if h < min_block_number {
                         return ERR!("Dex fee tx {:?} confirmed before min block {}", z_tx, min_block_number);

@@ -114,6 +114,22 @@ pub enum UtxoCoinBuildError {
         ticker: String,
     },
     ElectrumProtocolVersionCheckError(String),
+    /// A Light-mode shielded coin needs at least one lightwalletd endpoint (CRD ch.39 R39.11.5).
+    #[display(
+        fmt = "{}: `light_wallet_d_servers` must list at least one lightwalletd endpoint",
+        ticker
+    )]
+    NoLightwalletdServers {
+        ticker: String,
+    },
+    /// lightwalletd exposes no fee estimation, so the coin must declare its fee (CRD ch.39 R39.11.1).
+    #[display(
+        fmt = "{}: a Light-mode shielded coin must declare a non-zero fixed `txfee`; lightwalletd cannot estimate one",
+        ticker
+    )]
+    NoFixedFeeDeclared {
+        ticker: String,
+    },
     #[display(fmt = "Can not detect the user home directory")]
     CantDetectUserHome,
     #[display(fmt = "Unexpected derivation method: {}", _0)]
@@ -556,11 +572,23 @@ pub trait UtxoCoinBuilderCommonOps {
     }
 
     async fn tx_fee(&self, rpc_client: &UtxoRpcClientEnum) -> UtxoCoinBuildResult<TxFee> {
+        // lightwalletd has no fee estimation: a coin served by it must declare its fee, and is refused
+        // rather than given a default (CRD ch.39 R39.11.1).
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(rpc_client, UtxoRpcClientEnum::LightWalletD(_))
+            && !matches!(self.conf()["txfee"].as_u64(), Some(fee) if fee > 0)
+        {
+            return MmError::err(UtxoCoinBuildError::NoFixedFeeDeclared {
+                ticker: self.ticker().to_owned(),
+            });
+        }
         let tx_fee = match self.conf()["txfee"].as_u64() {
             None => TxFee::FixedPerKb(1000),
             Some(0) => {
                 let fee_method = match &rpc_client {
                     UtxoRpcClientEnum::Electrum(_) => EstimateFeeMethod::Standard,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    UtxoRpcClientEnum::LightWalletD(_) => EstimateFeeMethod::Standard,
                     UtxoRpcClientEnum::Native(client) => client
                         .detect_fee_method()
                         .compat()

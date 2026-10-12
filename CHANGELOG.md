@@ -31,6 +31,20 @@ your seed phrase -- but the wallet no longer shows them. To move them:
 
 Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
 
+### Changed
+
+- **A Light-mode ZHTLC (shielded) coin is served by `lightwalletd` alone.** Electrum
+  support for the coin is removed; there is no switch to restore it (see
+  `RELOADED_VS_GLEEC.md` and `docs/GLEEC_COMPATIBILITY.md`). `light_wallet_d_servers` is
+  now mandatory and non-empty; `electrum_servers` is accepted and ignored. Configured
+  endpoints are admitted by `GetLightdInfo` (network, Sapling height, consensus branch)
+  before use, so an endpoint on another fork can no longer pull the wallet onto its
+  chain. Every shielded construction path -- including HTLC spend and refund, which
+  previously took their height from the Electrum client -- now takes its builder target
+  height from the one lightwalletd tip and refuses to build when it cannot be
+  corroborated. Swap-path HTLC spend detection over lightwalletd is not implemented yet
+  and fails explicitly (CRD ch.39 §39.11, ARRR Ironwood plan Step C, wallet half).
+
 ### Added
 
 - **Coin-activation wire contract, wave 1 (CRD chapter 55).** The task

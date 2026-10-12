@@ -56,7 +56,7 @@ const ZCOIN_MAX_REORG_REWINDS: u32 = 3;
 /// [`parse_checkpoint_commitment_tree`].
 const SAPLING_COMMITMENT_ROOT_LEN: usize = 32;
 
-type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
+pub(crate) type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
 type ReloadedWalletDb = WalletDb<Connection, ZcoinConsensusParams, SystemClock, OsRng>;
 
 // Serializes wallet-database mutation per database file, across coin instances.
@@ -671,7 +671,7 @@ impl ZCoinShieldedHistory {
         initialize_wallet_db(&self.wallet_db_path, self.consensus_params.clone())
     }
 
-    async fn connect_lightwalletd(server: &str) -> Result<LightwalletdClient, String> {
+    pub(crate) async fn connect_lightwalletd(server: &str) -> Result<LightwalletdClient, String> {
         let endpoint_url = lightwalletd_endpoint(server);
         let endpoint = Endpoint::from_shared(endpoint_url.clone())
             .map_err(|e| lightwalletd_error_with_sources(&e))?
@@ -1068,6 +1068,12 @@ impl ZCoinShieldedHistory {
             .get_wallet_birthday()
             .map(|height| height.map(|height| u64::from(u32::from(height).saturating_sub(1))))
             .map_err(|e| e.to_string())
+    }
+
+    /// Whether the wallet database holds scanned blocks (as opposed to only an imported account
+    /// birthday). A wallet that does is bound to the chain those blocks belong to (R39.11.7a(e)).
+    pub(crate) fn has_scanned_blocks(&self) -> Result<bool, String> {
+        self.scanned_block_height().map(|height| height.is_some())
     }
 
     fn scanned_block_height(&self) -> Result<Option<u64>, String> {
