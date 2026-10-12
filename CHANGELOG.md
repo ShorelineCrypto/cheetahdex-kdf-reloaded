@@ -42,8 +42,15 @@ Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
   chain. Every shielded construction path -- including HTLC spend and refund, which
   previously took their height from the Electrum client -- now takes its builder target
   height from the one lightwalletd tip and refuses to build when it cannot be
-  corroborated. Swap-path HTLC spend detection over lightwalletd is not implemented yet
-  and fails explicitly (CRD ch.39 §39.11, ARRR Ironwood plan Step C, wallet half).
+  corroborated. **A fresh wallet whose configuration cannot name the active network
+  upgrade needs two agreeing reachable endpoints**: the branch is decided by strict
+  majority and recorded with the sync state, so a single reachable endpoint cannot
+  establish it. A wallet that has already scanned blocks needs only one, and stays on
+  the branch recorded with them. Swap-path HTLC spend detection over lightwalletd is
+  implemented: the transparent index is queried under both address encodings, because
+  Pirate files a pay-to-script-hash row under the pubkey-hash key type, and a negative
+  answer requires a demonstrably healthy endpoint -- "not spent" is never reported when
+  the truth is "could not tell" (CRD ch.39 §39.11, ARRR Ironwood plan Step C).
 
 ### Added
 
