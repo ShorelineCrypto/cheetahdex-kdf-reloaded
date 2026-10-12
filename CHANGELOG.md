@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0-alpha.2] — development milestone, not released
+
 ### Upgrade note: EVM address under an HD wallet
 
 **If you use an HD wallet (`enable_hd: true`) and activated ETH, another EVM
@@ -51,6 +53,22 @@ Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
   Pirate files a pay-to-script-hash row under the pubkey-hash key type, and a negative
   answer requires a demonstrably healthy endpoint -- "not spent" is never reported when
   the truth is "could not tell" (CRD ch.39 §39.11, ARRR Ironwood plan Step C).
+- **ARRR transaction parsing is routed to the Zcash reader.** The shared UTXO parser
+  applies the version-4 layout with double-SHA256 identifiers and **refuses** a
+  version-6 transaction outright, so the swap step failed rather than proceeding on a
+  wrong identifier. Every ZHTLC swap-path parse now goes through
+  `zcash_primitives::Transaction::read`, which keeps the version-4 history an old wallet
+  still needs when restoring from a pre-fork birthday (CRD ch.39 §39.11 R39.11.16,
+  ARRR Ironwood plan Step D).
+- **The Zcash crate stack is re-vendored on `zcash_primitives` 0.30.1** (with
+  `zcash_transparent` 0.10.0, `zcash_client_backend` 0.24.0, `zcash_client_sqlite`
+  0.22.0 and `zcash_protocol` 0.10.6), because version-6 reading was behind the
+  `zcash_unstable = "nu7"` rustc cfg in 0.28.0 and is unconditional in 0.30.1. The
+  `zcash_client_backend` vendor copy is dropped: its only patch was an exact `time-core`
+  pin that upstream has since removed. `orchard` is a default feature of the new
+  `zcash_client_backend` and `zcash_client_sqlite`, so both are taken with
+  `default-features = false` -- no Orchard or Ironwood bundle is built
+  (ARRR Ironwood plan Step B).
 
 ### Added
 
@@ -152,6 +170,43 @@ Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
   a token task substrate with its own registry, answers the HD wallet report on
   an HD platform, and deregisters a token on cancel.
 - **The Ironwood swap freeze and build refusal now actually engage — CRD ch.39 R39.6.4d.** Both gates read `ironwood_activation_time` from the coin configuration, and **no published coin configuration declares it** — the field is an extension introduced here, and in `GLEECBTC/coins` no coin mentions Ironwood at all. So as previously shipped the entire 3 Oct safety net was inert on every deployment but a developer's own, which the last release documented but did not fix. Pirate Chain's maintainer confirmed on 2026-09-28 that there will be **no standardness grace period** and recommended disabling ARRR swaps from 2 Oct, so the gates could not keep waiting on a third party's configuration change. This build therefore carries the activation time for ARRR (1 791 054 000 — 3 Oct 2026 19:00 UTC, read from the chain's own `KOMODO_IRONWOOD_ACTIVATION`) and applies it when the configuration supplies none. Consequently **ARRR stops accepting new swaps from 1 Oct 2026 22:28 UTC and stops building transactions from 3 Oct 19:00 UTC on a default installation**; receiving, balance, address derivation and history are unaffected, and swaps already under way are never interrupted. The earlier objection to a compiled-in date — that it could not follow a moved activation — is answered by precedence rather than abstention: a configured `ironwood_activation_time` still overrides the built-in value, so a moved date stays a data change and never needs a release; the built-in value is withheld from test and regtest parameters, which activate Ironwood at a height with no timestamp; and a coin whose ticker this build does not know is unaffected. **Compatibility note:** omitting `ironwood_activation_time` is no longer an opt-out — set `ironwood_gate_disabled: true` in `protocol.protocol_data.consensus_params` for GLEEC-equivalent behaviour. Four tests pin the resolution rules, each verified to fail against a deliberately broken implementation. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`.
+- **ARRR version-6 (Ironwood) transaction construction.** `NetworkUpgrade::Nu6_3` maps
+  to the Ironwood activation height, taken from the coin configuration or discovered at
+  runtime, and the builder then selects version 6 and consensus branch `0x37A5165B`
+  itself. Runtime discovery is required rather than convenient, because the Pirate team
+  publishes no activation height: `GetLightdInfo` supplies the branch and tip and, where
+  an activation time is known, the first block past it is found by bisection, with a
+  30-block depth requirement before an upcoming transition is trusted. A disagreement
+  between the server and the timestamp rule refuses the build rather than defaulting.
+  `IRONWOOD_V6_SUPPORTED` is now true, which makes the R39.6.4b and R39.6.4c gates inert
+  by their own terms (CRD ch.39 R39.6.4e, ARRR Ironwood plan Step E).
+
+### Fixed
+
+- **An existing ARRR shielded wallet is migrated instead of being refused.**
+  `zcash_client_sqlite` 0.22.0 adds 23 unconditional migrations, so a wallet created by
+  an earlier build no longer matched the current schema and activation failed with
+  "unrecognized shielded wallet schema". The wallet is now copied to
+  `<wallet db>.pre-upgrade.<ms>.bak`, migrated and verified **on a working copy**, and
+  only then renamed over the original, so no half-migrated wallet can exist at the real
+  path; any failure after the backup falls back to preserving the file and rebuilding
+  fresh. Note that an earlier build cannot read the migrated schema afterwards -- the
+  backup is the way back (CRD ch.39 R39.8.0ba).
+- **`sync_params: "earliest"` could not activate a shielded coin.** A scan from the
+  Sapling activation height asks the server for the commitment tree one block below it,
+  and there `lightwalletd` substitutes a bare 32-byte commitment root for the serialized
+  tree. The wallet refused to anchor on it, which was right in itself but made an
+  ordinary request fail. The substitution is now recognised by its empty
+  `saplingFrontier` -- not by the tree's length, since a legitimately empty tree is also
+  short -- and below the activation height it is read as the empty tree, which is correct
+  by consensus rule, since no Sapling commitment can exist there. At or above activation
+  it is still refused, and the message now names the height to use
+  (CRD ch.39 R39.8.0ak).
+
+## [0.3.0-alpha.1] — development milestone, not released
+
+### Added
+
 - **Version-two (V2) UTXO swap wire contract corrected to match deployed
   peers (issue #11 batch 2).** The version-two taker-payment-spend preimage
   now matches the reference `v2.6.0-beta`/v3-lineage contract instead of an
@@ -511,6 +566,12 @@ Highlights:
 - EVM ABI encoding/decoding migrated from `ethabi` to `alloy` (`alloy-dyn-abi` / `alloy-json-abi` / `alloy-primitives`), guarded by a byte-identity golden regression suite.
 - Tag-driven, GPG-signed release pipeline: signed `SHA256SUMS` manifest and drafted GitHub Releases — pre-releases from `staging` (`-alpha/-beta/-rc` tags), finals from `main`. Linux binaries build inside a Debian 11 container (glibc 2.31) for broad backwards-compatibility; unsigned all-platform snapshots via manual `dev-build.yml` and automatic `staging-build.yml`.
 
-[Unreleased]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.2...HEAD
+Tag `v0.2.0-beta.1` (2026-08-05) was cut from `staging`, which has since diverged from the
+development line; it has no section in this file, and neither `0.3.0-alpha` milestone descends
+from it.
+
+[Unreleased]: https://github.com/kdf-reloaded/kdf/compare/49a46bc54fc16761796ed0bad53a472b8183ed9b...HEAD
+[0.3.0-alpha.2]: https://github.com/kdf-reloaded/kdf/compare/7a18f94b2f5de1ff7ba2ae69c4b445132d305a3f...49a46bc54fc16761796ed0bad53a472b8183ed9b
+[0.3.0-alpha.1]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.2...7a18f94b2f5de1ff7ba2ae69c4b445132d305a3f
 [0.1.0-beta.2]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/kdf-reloaded/kdf/releases/tag/v0.1.0-beta.1
