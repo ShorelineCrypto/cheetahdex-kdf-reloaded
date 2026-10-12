@@ -122,9 +122,9 @@ pub enum UtxoCoinBuildError {
     NoLightwalletdServers {
         ticker: String,
     },
-    /// lightwalletd exposes no fee estimation, so the coin must declare its fee (CRD ch.39 R39.11.1).
+    /// lightwalletd exposes no fee estimation, so `txfee: 0` (estimate) is refused (CRD ch.39 R39.11.1).
     #[display(
-        fmt = "{}: a Light-mode shielded coin must declare a non-zero fixed `txfee`; lightwalletd cannot estimate one",
+        fmt = "{}: `txfee: 0` requests fee estimation, which lightwalletd cannot do; declare a fixed `txfee` or omit it",
         ticker
     )]
     NoFixedFeeDeclared {
@@ -572,12 +572,11 @@ pub trait UtxoCoinBuilderCommonOps {
     }
 
     async fn tx_fee(&self, rpc_client: &UtxoRpcClientEnum) -> UtxoCoinBuildResult<TxFee> {
-        // lightwalletd has no fee estimation: a coin served by it must declare its fee, and is refused
-        // rather than given a default (CRD ch.39 R39.11.1).
+        // lightwalletd has no fee estimation: an explicit request for it (`txfee: 0`) is refused.
+        // An undeclared fee keeps the shared fixed default below, as the published ARRR entry relies
+        // on (CRD ch.39 R39.11.1).
         #[cfg(not(target_arch = "wasm32"))]
-        if matches!(rpc_client, UtxoRpcClientEnum::LightWalletD(_))
-            && !matches!(self.conf()["txfee"].as_u64(), Some(fee) if fee > 0)
-        {
+        if matches!(rpc_client, UtxoRpcClientEnum::LightWalletD(_)) && self.conf()["txfee"].as_u64() == Some(0) {
             return MmError::err(UtxoCoinBuildError::NoFixedFeeDeclared {
                 ticker: self.ticker().to_owned(),
             });

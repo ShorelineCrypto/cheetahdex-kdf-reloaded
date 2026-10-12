@@ -111,8 +111,8 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
   and the two that did stalled at the last block before the chain's first
   post-Ironwood transaction. An opt-back would restore a path with no working
   provider and would re-arm the defects the new design closes. Related, and
-  also without a switch: the coin must declare a non-zero fixed `txfee`
-  (lightwalletd has no fee estimation); `requires_notarization` is refused for
+  also without a switch: `txfee: 0` (fee estimation) is refused for the coin
+  (lightwalletd has no fee estimation; an absent `txfee` keeps the fixed default); `requires_notarization` is refused for
   the coin (there is no notarized-depth field); and the swap-path HTLC spend
   and already-sent detection fail with an explicit error until the address-index
   workaround they need is proved on a funded HTLC (CRD ch.39 R39.11.4d), instead
