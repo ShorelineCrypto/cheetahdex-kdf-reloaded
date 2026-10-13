@@ -30,7 +30,7 @@ fn check_sum(addr: &str, expected: &str) {
     assert_eq!(expected, actual);
 }
 
-fn eth_coin_for_test(
+pub(super) fn eth_coin_for_test(
     coin_type: EthCoinType,
     urls: Vec<String>,
     fallback_swap_contract: Option<Address>,
@@ -1899,23 +1899,16 @@ fn typed_envelope(type_byte: u8) -> Vec<u8> {
 }
 
 #[test]
-fn test_signed_eth_tx_from_bytes_typed_eip2930() {
-    let bytes = typed_envelope(0x01);
-    let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
-    assert!(err.contains("type 0x01"), "{err}");
-    assert!(err.contains("EIP-2930"), "{err}");
-    assert!(err.contains("only legacy EIP-155"), "{err}");
-    assert!(err.contains(&format!("payload length {} bytes", bytes.len())), "{err}");
-    assert!(!err.contains('\n'));
-}
-
-#[test]
-fn test_signed_eth_tx_from_bytes_typed_eip1559() {
-    let bytes = typed_envelope(0x02);
-    let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
-    assert!(err.contains("type 0x02"), "{err}");
-    assert!(err.contains("EIP-1559"), "{err}");
-    assert!(err.contains("only legacy EIP-155"), "{err}");
+fn test_signed_eth_tx_from_bytes_typed_eip4844_and_eip7702_rejected() {
+    for (type_byte, name) in [(0x03u8, "EIP-4844"), (0x04, "EIP-7702")] {
+        let bytes = typed_envelope(type_byte);
+        let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
+        assert!(err.contains(&format!("type 0x{type_byte:02x}")), "{err}");
+        assert!(err.contains(name), "{err}");
+        assert!(err.contains("only legacy, EIP-2930 and EIP-1559"), "{err}");
+        assert!(err.contains(&format!("payload length {} bytes", bytes.len())), "{err}");
+        assert!(!err.contains('\n'));
+    }
 }
 
 #[test]
@@ -1924,7 +1917,17 @@ fn test_signed_eth_tx_from_bytes_typed_unknown() {
     let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
     assert!(err.contains("type 0x7f"), "{err}");
     assert!(err.contains("unknown type"), "{err}");
-    assert!(err.contains("only legacy EIP-155"), "{err}");
+    assert!(err.contains("only legacy, EIP-2930 and EIP-1559"), "{err}");
+}
+
+#[test]
+fn test_signed_eth_tx_from_bytes_malformed_supported_typed_reports_length_and_prefix() {
+    for type_byte in [0x01u8, 0x02] {
+        let bytes = typed_envelope(type_byte);
+        let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
+        assert!(err.contains(&format!("payload length {} bytes", bytes.len())), "{err}");
+        assert!(err.contains(&format!("0x{type_byte:02x}")), "{err}");
+    }
 }
 
 #[test]

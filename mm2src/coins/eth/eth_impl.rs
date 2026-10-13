@@ -1029,17 +1029,18 @@ fn eip2718_type_name(type_byte: u8) -> &'static str {
     }
 }
 
-/// Decodes a legacy (EIP-155) signed transaction.
+/// Decodes a signed transaction: legacy (EIP-155), EIP-2930 or EIP-1559.
 ///
-/// Typed (EIP-2718) transactions are not supported; they are recognised only to produce a precise
-/// error. Such an envelope is `type_byte || rlp(payload)`, i.e. an RLP *string*, which the legacy
-/// decoder can only reject as "unexpected string". A payload that is not a transaction at all fails
-/// the same way, so the error carries the length and a short prefix to tell the two apart.
+/// Other EIP-2718 types (EIP-4844, EIP-7702, unknown) are rejected with an error naming the type.
+/// A payload that is not a transaction at all fails with its length and a short prefix, so the two
+/// cases are distinguishable on sight.
 pub fn signed_eth_tx_from_bytes(bytes: &[u8]) -> Result<SignedEthTx, String> {
     const PREFIX_LEN: usize = 10;
-    if let Some(&type_byte) = bytes.first().filter(|b| (0x01..=0x7f).contains(*b)) {
+    // Types 1 (EIP-2930) and 2 (EIP-1559) are decoded; every other EIP-2718 type is rejected with a
+    // precise error rather than a bare RLP failure.
+    if let Some(&type_byte) = bytes.first().filter(|b| (0x03..=0x7f).contains(*b)) {
         return ERR!(
-            "typed EIP-2718 transaction (type 0x{:02x}, {}) is not supported, only legacy EIP-155 transactions can be decoded; payload length {} bytes",
+            "typed EIP-2718 transaction (type 0x{:02x}, {}) is not supported, only legacy, EIP-2930 and EIP-1559 transactions can be decoded; payload length {} bytes",
             type_byte,
             eip2718_type_name(type_byte),
             bytes.len()
@@ -1048,7 +1049,7 @@ pub fn signed_eth_tx_from_bytes(bytes: &[u8]) -> Result<SignedEthTx, String> {
     let tx: UnverifiedTransaction = rlp::decode(bytes).map_err(|e| {
         let prefix = &bytes[..bytes.len().min(PREFIX_LEN)];
         format!(
-            "cannot decode payload as a legacy EIP-155 transaction: {}; payload length {} bytes, first {} bytes 0x{}",
+            "cannot decode payload as a legacy, EIP-2930 or EIP-1559 transaction: {}; payload length {} bytes, first {} bytes 0x{}",
             e,
             bytes.len(),
             prefix.len(),
@@ -1574,7 +1575,12 @@ impl EthCoin {
                     EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details: Option<EthTxFeeDetails> = match receipt {
-                    Some(r) => Some(EthTxFeeDetails::new(U256::from(r.gas_used), raw.gas_price, fee_coin).unwrap()),
+                    Some(r) => {
+                        // EIP-1559 transactions carry only fee caps, not a price; the receipt's effective
+                        // gas price is what was actually paid. Legacy/EIP-2930 keep their own gas price.
+                        let paid_price = raw.gas_price().unwrap_or_else(|| U256::from(r.effective_gas_price));
+                        Some(EthTxFeeDetails::new(U256::from(r.gas_used), paid_price, fee_coin).unwrap())
+                    },
                     None => None,
                 };
 
@@ -1986,7 +1992,12 @@ impl EthCoin {
                     EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details = match receipt {
-                    Some(r) => Some(EthTxFeeDetails::new(U256::from(r.gas_used), raw.gas_price, fee_coin).unwrap()),
+                    Some(r) => {
+                        // EIP-1559 transactions carry only fee caps, not a price; the receipt's effective
+                        // gas price is what was actually paid. Legacy/EIP-2930 keep their own gas price.
+                        let paid_price = raw.gas_price().unwrap_or_else(|| U256::from(r.effective_gas_price));
+                        Some(EthTxFeeDetails::new(U256::from(r.gas_used), paid_price, fee_coin).unwrap())
+                    },
                     None => None,
                 };
                 let block_number = event.block_number.unwrap();
@@ -3174,16 +3185,29 @@ impl Transaction for SignedEthTx {
 ///   the `v` field.
 /// - `hash`: alloy `B256` is bit-for-bit `H256`; copied via
 ///   `H256::from_slice(...)`.
-/// - `gas_price`: alloy returns `Option<u128>` (None for type-2 / 1559
-///   txs). The legacy struct expects `U256`; we coerce via
-///   `unwrap_or(0)`. Type-2 txs would not survive RLP-decoding through
-///   this struct anyway — the existing code path is legacy-only.
+/// - `gas_price`: legacy envelopes only (typed envelopes are handled before this point by decoding
+///   their EIP-2718 bytes, so the `unwrap_or(0)` below never stands in for a missing price).
 /// - `gas`, `nonce`: alloy `u64` → `U256`.
 /// - `value`, `data`, `to`: direct mapping.
 pub fn signed_tx_from_alloy_tx(transaction: alloy::rpc::types::eth::Transaction) -> Result<SignedEthTx, String> {
     use alloy::consensus::Transaction as _;
 
     let envelope = transaction.into_inner();
+    if !matches!(envelope, alloy::consensus::TxEnvelope::Legacy(_)) {
+        // Typed transactions are re-decoded from their EIP-2718 encoding so the id, signing hash and
+        // sender recovery follow the typed rules; the id must match the one the node reported.
+        use alloy::eips::eip2718::Encodable2718;
+        let alloy_hash = *envelope.tx_hash();
+        let signed = signed_eth_tx_from_bytes(&envelope.encoded_2718())?;
+        if signed.tx_hash().as_bytes() != alloy_hash.as_slice() {
+            return ERR!(
+                "typed transaction id mismatch: node reported 0x{}, decoded envelope hashes to {:?}",
+                hex::encode(alloy_hash.as_slice()),
+                signed.tx_hash()
+            );
+        }
+        return Ok(signed);
+    }
     let signature = envelope.signature();
     let alloy_hash = *envelope.tx_hash();
 
@@ -3218,13 +3242,15 @@ pub fn signed_tx_from_alloy_tx(transaction: alloy::rpc::types::eth::Transaction)
         s: s_legacy,
         v: v_legacy,
         hash: H256::from_slice(alloy_hash.as_slice()),
-        unsigned: UnSignedEthTx {
+        body: TxBody {
             data: envelope.input().to_vec(),
-            gas_price: U256::from_big_endian(&gas_price_bytes),
             gas: U256::from(envelope.gas_limit()),
             value: value_legacy,
             nonce: U256::from(envelope.nonce()),
             action,
+        },
+        kind: TxKind::Legacy {
+            gas_price: U256::from_big_endian(&gas_price_bytes),
         },
     };
 
