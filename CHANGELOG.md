@@ -6,8 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [0.3.0-alpha.3] — development milestone, not released
-
 ### Fixed
 
 - **An undecodable EVM transaction now says what it is.** Decoding a swap transaction that is
@@ -16,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   are supported, instead of the opaque `unexpected string`; a payload that is not a
   transaction at all reports its length and a short prefix. Diagnostic only: typed
   transactions are still not decoded, and legacy decoding is unchanged (issue #14).
+
+## [0.3.0-alpha.3] — development milestone, not released
+
+### Fixed
+
 - **A shielded wallet no longer binds to a lightwalletd endpoint that never followed the
   Ironwood upgrade.** Once the Ironwood activation time has passed, an endpoint still
   reporting the pre-Ironwood consensus branch is excluded outright, however many endpoints
