@@ -69,6 +69,11 @@ impl MmCoin for EthCoin {
         if matches!(self.signer, EthSigner::Metamask(_)) {
             return true;
         }
+        // CRD ch.35 R35.2.7 -- a custom token (inline `protocol`, no coins-config entry) is always
+        // wallet-only; a config token follows its config entry.
+        if self.custom_token {
+            return true;
+        }
         let coin_conf = crate::coin_conf(ctx, self.ticker());
         coin_conf["wallet_only"].as_bool().unwrap_or(false)
     }

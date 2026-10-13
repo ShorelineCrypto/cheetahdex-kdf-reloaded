@@ -557,6 +557,35 @@ fn a_custom_token_activates_and_a_second_one_with_the_same_contract_is_rejected(
     );
 }
 
+/// CRD ch.35 R35.2.7: a custom token activated through `enable_eth_with_tokens` is a wallet-only coin although
+/// it has no coins-config entry; a coins-config token keeps the wallet-only setting of its entry.
+#[test]
+fn a_custom_token_of_the_platform_activation_is_wallet_only_and_a_config_token_is_not() {
+    let ctx = iguana_ctx();
+    let node = healthy_node();
+    let custom = json!({
+        "ticker": "CUSTOM-ERC20",
+        "protocol": { "type": "ERC20", "protocol_data": { "platform": PLATFORM, "contract_address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56" } },
+    });
+    activate(
+        &ctx,
+        request(
+            std::slice::from_ref(&node.url),
+            json!({ "erc20_tokens_requests": [custom, { "ticker": "USDT-ERC20" }] }),
+        ),
+    )
+    .unwrap_or_else(|e| panic!("the activation failed: {}", e));
+
+    let wallet_only = |ticker: &str| {
+        block_on(lp_coinfind(&ctx, ticker))
+            .unwrap()
+            .unwrap_or_else(|| panic!("{} is not active", ticker))
+            .wallet_only(&ctx)
+    };
+    assert!(wallet_only("CUSTOM-ERC20"), "a custom token is wallet-only");
+    assert!(!wallet_only("USDT-ERC20"), "a config token follows its config entry");
+}
+
 fn find_error_for_second_custom_token(ctx: &MmArc, node: &MockEvmNode) -> Json {
     let mut req = request_json(
         std::slice::from_ref(&node.url),

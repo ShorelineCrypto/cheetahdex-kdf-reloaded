@@ -508,11 +508,15 @@ is the externally tagged sub-error:
 | same contract already active | `{"TokenWithSameContractAlreadyActivated": {"ticker": string, "contract_address": string}}` |
 | unparseable contract address | `"InvalidTokenAddress"` |
 
-> **Reloaded status (informative).** Reloaded builds a custom token without
-> marking it wallet-only: the `wallet_only` check that gates order placement
-> reads the coins-file entry, which a custom token does not have, so a custom
-> token can currently be offered in swaps, contrary to this rule. Tracked in
-> kdf-reloaded/kdf#16.
+> **Reloaded status (informative).** Implemented (kdf-reloaded/kdf#16): a
+> custom token reports itself wallet-only on both activation routes, so order
+> placement (`buy`, `sell`, `setprice`) rejects it like any other wallet-only
+> coin. Tests assert that a custom token is wallet-only and a configured token
+> is not, and that order placement rejects a wallet-only coin. Remaining: a few
+> order-book read paths (trade preimage, best orders, order book and its depth
+> and events) test wallet-only status by looking the ticker up in the coins
+> configuration, which a custom token does not have; they do not place orders,
+> so no swap can start, but they can list or price a custom-token pair.
 
 R35.2.8 **`enable_nft` failure mapping (G).** Against the single-token table:
 an NFT ticker with no config entry → `TokenConfigIsNotFound`; NFT pseudo-coin
@@ -529,9 +533,9 @@ rejected the request → `InvalidPayload`.
 > custom tokens, the token-construction mapping, lower-case
 > `token_contract_address`, the token-config confirmation fallback, token
 > registration on the platform only after success, the full error set, and
-> `enable_nft` served by the single-token handler. Remaining: a custom token is
-> not marked wallet-only (kdf-reloaded/kdf#16); a provider rejection maps to
-> `InvalidPayload` only for an indexer HTTP 400.
+> `enable_nft` served by the single-token handler; custom tokens are wallet-only
+> (R35.2.7). Remaining: a provider rejection maps to `InvalidPayload` only for an
+> indexer HTTP 400.
 
 ---
 

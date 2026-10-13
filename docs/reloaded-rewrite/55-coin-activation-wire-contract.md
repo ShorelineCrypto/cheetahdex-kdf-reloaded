@@ -446,9 +446,10 @@ gives the status the discriminant would carry if it were mmrpc-level.
 | `enable_nft` | NFT indexer or provider unreachable | `Transport` | string | 500 | mmrpc | [Ch. 19](19-nft-module-layout.md), Ch. 35 |
 | `enable_tendermint_with_assets`, `task::enable_tendermint` | block-height or balance query (building the coin contacts no node) | `PlatformCoinCreationError` | object `{ticker, error}` | 500 | mmrpc / status | [Ch. 36](36-tendermint-v2-activation-rpcs.md) |
 | `enable_tendermint_token` | balance query | `CouldNotFetchBalance` | string | 500 | mmrpc | Ch. 36 |
-| `task::enable_z_coin` | the coin cannot be built (for example no light-wallet server can be connected when the task starts) | `CoinCreationError` | object `{ticker, error}` | 400 | status | [Ch. 39](39-zcash---z_coin-shielded-coin.md) |
+| `task::enable_z_coin` | every configured light-wallet (lightwalletd) endpoint unreachable at activation (`LightwalletdUnreachable`) | `Transport` | string | 500 | status | [Ch. 39](39-zcash---z_coin-shielded-coin.md) R39.11.6 |
+| `task::enable_z_coin` | every configured light-wallet endpoint fails admission, or a fresh wallet finds no strict-majority branch (`LightwalletdExcluded`); an empty `light_wallet_d_servers` list; the first chain-state or tree-state query to the admitted endpoints fails, before the sync starts; or the coin cannot be built for another reason | `CoinCreationError` | object `{ticker, error}` | 400 | status | Ch. 39 R39.11.5, R39.11.6 |
 | `task::enable_z_coin` | light-wallet server unreachable during block-cache sync | none: the task stays `InProgress` with `TemporaryError` (string) while it retries | -- | 200 | status (in progress) | Ch. 39 |
-| `task::enable_z_coin` | block-height or balance query after sync (including every Electrum server unreachable) | `Transport` | string | 500 | status | Ch. 39 |
+| `task::enable_z_coin` | block-height or balance query after sync fails (the height comes from the admitted light-wallet endpoints; Electrum is not used for a shielded coin, and `electrum_servers` is accepted and ignored, R39.11.5) | `Transport` | string | 500 | status | Ch. 39 |
 | `task::enable_sia` | wallet daemon unreachable at build | `CoinCreationError` | object `{ticker, error}` | 400 | status | [Ch. 46](46-sia-v2-activation-rpcs.md) |
 | `task::enable_sia` | block-height or balance query after build | `Transport` | string | 500 | status | Ch. 46 |
 | Solana platform activation | block-height or balance read | `PlatformCoinCreationError` | object `{ticker, error}` | 500 | mmrpc | [Ch. 40](40-solana-coin.md) |
@@ -486,10 +487,12 @@ other row the public reference is silent and the reference release decides.
 > NFT provider (Chapters 35, 19), Tendermint platform and token (Chapter 36),
 > Z-coin and Sia (`Transport` after the build; Z-coin `TemporaryError` while the
 > sync runs; Chapters 39, 46), the Lightning task (Chapter 41) and the legacy
-> methods (§55.4). Remaining deviations: the Solana platform reports `Internal`
-> (Chapter 40, deferred); Z-coin Light mode with every Electrum server
-> unreachable keeps the build-time `CoinCreationError` while a maintainer
-> decision is pending (Chapter 39).
+> methods (§55.4). Z-coin matches as rebuilt by the Light-mode backend work
+> (Chapter 39 §39.11): lightwalletd is the sole backend, a non-empty
+> `light_wallet_d_servers` list is mandatory, `electrum_servers` is accepted and
+> ignored, and the backend failures are `LightwalletdUnreachable` (`Transport`)
+> and `LightwalletdExcluded` (`CoinCreationError`). Remaining deviation: the
+> Solana platform reports `Internal` (Chapter 40, deferred).
 
 ---
 

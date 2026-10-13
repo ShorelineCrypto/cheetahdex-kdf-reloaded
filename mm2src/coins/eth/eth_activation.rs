@@ -522,6 +522,7 @@ pub(crate) async fn build_eth_coin(
         nft_swap_v2_contract,
         swap_gas_fee_policy: Mutex::new(params.swap_gas_fee_policy.unwrap_or_default()),
         erc20_tokens_infos: Default::default(),
+        custom_token: false,
     };
     Ok(EthCoin(Arc::new(coin)))
 }

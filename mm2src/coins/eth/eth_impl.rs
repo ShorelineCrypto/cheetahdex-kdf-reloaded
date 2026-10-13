@@ -1199,6 +1199,7 @@ impl EthCoin {
         ticker: String,
         token_addr: Address,
         required_confirmations: u64,
+        custom_token: bool,
     ) -> Result<EthCoin, MmError<Erc20BuildError>> {
         let ctx = MmArc::from_weak(&self.ctx)
             .or_mm_err(|| Erc20BuildError::Internal("MM context has been dropped".to_owned()))?;
@@ -1215,7 +1216,7 @@ impl EthCoin {
                 )))
             },
         };
-        Ok(self.erc20_token_from_decimals(ticker, token_addr, required_confirmations, decimals))
+        Ok(self.erc20_token_from_decimals(ticker, token_addr, required_confirmations, decimals, custom_token))
     }
 
     fn erc20_token_from_decimals(
@@ -1224,6 +1225,7 @@ impl EthCoin {
         token_addr: Address,
         required_confirmations: u64,
         decimals: u8,
+        custom_token: bool,
     ) -> EthCoin {
         let token_impl = EthCoinImpl {
             signer: self.signer.clone(),
@@ -1254,6 +1256,7 @@ impl EthCoin {
             nft_swap_v2_contract: self.nft_swap_v2_contract,
             swap_gas_fee_policy: Mutex::new(self.swap_gas_fee_policy()),
             erc20_tokens_infos: Default::default(),
+            custom_token,
         };
         EthCoin(Arc::new(token_impl))
     }
