@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A shielded wallet no longer binds to a lightwalletd endpoint that never followed the
+  Ironwood upgrade.** Once the Ironwood activation time has passed, an endpoint still
+  reporting the pre-Ironwood consensus branch is excluded outright, however many endpoints
+  share that view; if no current endpoint is reachable the wallet fails closed instead of
+  building against a frozen tip and broadcasting a v6 transaction to a node that cannot
+  decode it (`TX decode failed`, code -22). A wallet whose recorded branch is the
+  pre-Ironwood one (every wallet that synced before the upgrade) is released from that
+  binding after activation, which previously excluded every current endpoint and left only
+  the stale ones (CRD ch.39 R39.11.7a(h)).
+- **Endpoint admission is now logged.** Each evaluation logs the endpoints probed with
+  their reported chain, branch and height, every exclusion with its reason, unreachable
+  endpoints and the admitted set (R39.11.7a(i)).
 - **A shielded-coin sync date in the future is rejected instead of clamped.** A
   `sync_params` `date` later than **both** the wall clock and the chain tip's block time
   now ends activation with `CoinCreationError`, matching the reference. The two

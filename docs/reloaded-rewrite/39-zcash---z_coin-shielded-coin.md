@@ -3141,6 +3141,34 @@ precise opposite of the intent. The rule shall therefore be:
   value. Re-evaluation shall never *widen* the binding of (e): once a wallet's
   scanned state carries an identifier, only that partition is ever admitted until
   the configuration gains the upgrade height that makes (d) decidable again.
+- (h) **A pre-upgrade endpoint is stale once the upgrade's activation time has
+  passed, and is excluded regardless of any majority.** When the coin has an
+  Ironwood activation *time* -- the configured `ironwood_activation_time`, else the
+  built-in time of the real ARRR chain (R39.6.4d), irrespective of
+  `ironwood_gate_disabled` -- and the wall clock is at or past it, an endpoint
+  reporting the branch identifier in force immediately before Ironwood (that of the
+  last declared pre-Ironwood upgrade) shall be excluded before (d) and (e) are
+  applied, with a reason that names the activation time. This is positive
+  information, not a vote: the stale endpoints neither count in the majority of (e)
+  nor can they form one. Before the activation time the pre-upgrade identifier is the
+  correct answer and shall not be excluded. The time is the only authority: a reported
+  *height* cannot serve, because a frozen node's tip lies below the activation
+  height. Where no activation time is known (a coin without a configured or built-in
+  one, a test chain) the rule is silent and (e) alone decides. If every reachable
+  endpoint is stale, admission fails (all excluded) and the wallet shall not
+  transact. **Release of a superseded binding:** a wallet whose recorded identifier is
+  that same pre-Ironwood identifier is not bound by it once the activation time has
+  passed -- every wallet that scanned before activation carries it, and honouring it
+  would exclude every current endpoint (the exception to the last sentence of (g)).
+  The wallet is decided like one with no recorded identifier (strict majority of the
+  endpoints remaining after the exclusion) and the winner is recorded. A window of
+  the order of the chain's median-time-past lag follows the activation time during
+  which current endpoints still report the old identifier and are excluded too; the
+  wallet fails closed for it.
+- (i) **Admission shall be logged.** Every evaluation shall log, at a level a
+  deployment captures by default, each endpoint probed with the chain, branch
+  identifier and height it reported or the reason it was unreachable, each exclusion
+  with its reason, and the admitted set; a failed evaluation shall log its error.
 
 > **Status update (reloaded, Step C).** Implemented in `decide_admission` and tested
 > (T39.11.f). (a), (b), (d) and (e) are as written. The configuration determines the

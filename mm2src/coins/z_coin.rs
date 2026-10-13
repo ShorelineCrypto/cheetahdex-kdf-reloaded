@@ -2164,6 +2164,7 @@ impl<'a> UtxoCoinBuilderCommonOps for ZCoinBuilder<'a> {
                     Ok(UtxoRpcClientEnum::LightWalletD(LightwalletdClient::connect(
                         light_wallet_d_servers.clone(),
                         &self.protocol_info.consensus_params,
+                        configured_or_builtin_ironwood_time(&self.protocol_info.consensus_params, self.ticker),
                         z_lightwalletd::HtlcAddressing {
                             p2sh_prefix: self.p2sh_address_prefix(),
                             p2sh_t_prefix: self.conf()["taddr"].as_u64().unwrap_or(0) as u8,
