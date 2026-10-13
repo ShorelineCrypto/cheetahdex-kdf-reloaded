@@ -872,41 +872,76 @@ read as a consequence, are bound in §35.6A (R35.6A.17, R35.6A.2).
 > expression. **It passed the KDF Dirty Gate before clean-side implementation**,
 > together with the §35.6 finding, the §35.7 paragraph, the acceptance criteria,
 > §35.8B, §35.8C and this chapter's footer, and with the matching §17.5.1
-> paragraph and footer item of [Chapter 17](17-swap-v2-evm-path.md).
+> paragraph and footer item of [Chapter 17](17-swap-v2-evm-path.md). The edits
+> made after that clearance were re-gated in a second pass, which is the one the
+> *Clearance record* below carries.
 
-> **Clearance record (chapter 01 T1).** The verdict's three scope-attestation
-> elements, carried forward in corpus-free terms:
+> **Clearance record (chapter 01 T1).** This material was gated **twice**. The
+> first pass cleared the three CRD files this work touches. The second re-gated
+> the edits made after that clearance rather than accepting the assessment that
+> they were mechanical, and in doing so covered five files -- the three CRD
+> files plus the two operator-facing documents (`RELOADED_VS_GLEEC.md` and
+> `docs/GLEEC_COMPATIBILITY.md`) that the first pass had not seen -- and closed
+> the gap the first pass had declared, by opening material that run could not.
+> The second pass is therefore the one that describes the text as it now stands,
+> and its three scope-attestation elements are the ones recorded here, carried
+> forward in corpus-free terms. Two contributions of the first pass are recorded
+> alongside them and attributed to it, and they are opposites: one positive
+> finding the second pass did not repeat, which **stands**, and one declared
+> limit the second pass **retired**.
 >
-> - *Extent.* The comparison covered the subject matter this section's scope
->   names in this document set's own terms: the EVM coin layer's decoding of a
->   serialized transaction the project did not construct; its reconstruction of
->   a transaction from a node's reply; its transaction-type model; the
->   application of the per-coin swap gas-fee policy; the derivation of fee
->   details in transaction history; and the swap-step paths that read a
->   counterparty's serialized transaction. It was made against the v3
->   development lineage of the reference as held locally, plus confirmation that
->   the four published release designations named in this chapter exist as
->   release tags of that lineage. The named releases were **not** each compared
->   separately, so the extent is the development lineage plus that
->   tag-existence confirmation, and not a per-release comparison. Quantity: one
->   principal coin-layer source file read in the relevant regions and five
->   further files searched for the same subject matter, six in total.
->   *Declared gap:* a third-party dependency outside the compared material
->   carries part of the behaviour two of the informative findings below
->   describe, and could not be opened in that run because a tool permission was
->   refused; those two findings were judged on this section's own form rather
->   than by comparison against that dependency.
+> - *Extent.* It compared the subject matter this document set names in its own
+>   terms: the EVM coin layer's decoding of a serialized transaction the project
+>   did not construct, its transaction-type model, its reconstruction of a
+>   transaction from a node's reply, the application of the per-coin swap
+>   gas-fee policy, the derivation of fee details in transaction history, and
+>   the swap-step paths that read a counterparty's serialized transaction.
+>   Reference: the v3 development lineage as held locally, with the published
+>   release designations `v3.0.0-beta` and `v2.6.0-beta` as the named reference
+>   points; the named releases were **not** each compared separately.
+>   Additionally, and unlike the first pass, the third-party dependency outside
+>   the principal material that carries the transaction-type model and the two
+>   behaviours the informative findings below describe was compared. Quantity:
+>   three files of the principal implementation set -- one read in the relevant
+>   regions, two consulted only for the dependency declaration -- and four files
+>   of that dependency read in the regions carrying type dispatch, identifier
+>   derivation and the unsigned-signature convention; seven in total.
+>   *Standing finding of the first pass.* That pass additionally confirmed that
+>   the four published release designations this chapter names exist as release
+>   tags of that lineage. The second pass neither repeated that confirmation nor
+>   disturbed it: it **stands as established**, and it is what R35.6A.18's
+>   version boundary, D35.3's peer floor and this chapter's footer locator rest
+>   on. The extent is therefore the lineage comparison above plus this
+>   tag-existence confirmation, and not a per-release comparison.
 > - *Method.* By reading, combined with mechanical token extraction over the
->   added lines only -- bracketed tokens, quoted literals, fenced blocks and
->   code-shaped bare words -- and targeted search over the compared material.
->   The repository's `tools/clean_room_gate.py` was not used: it measures source
->   files, and this candidate embeds no fenced code block.
-> - *Measure.* 0.02 on the discretionary-expression basis, read against the
->   standard that dictated-interop and pinned-interface matches are excluded
->   from the measured set however dense they are, and that any genuine
->   discretionary expression fails regardless of surrounding dictated content.
->   The non-nil figure records three near-edge behavioural or meta statements,
->   each examined individually and found to carry no expression.
+>   added lines only -- bracketed tokens, quoted literals, fenced blocks,
+>   code-shaped bare words -- each extracted token put individually to the
+>   forced-versus-free test, and targeted search over the compared material.
+>   Every token the extraction returned resolved to dictated or public contract:
+>   EIP-2718 type bytes and RLP leading-byte markers, mmrpc error-envelope field
+>   names, public RPC method strings and their serialized policy values, one
+>   trait method on the relicensed base's own public surface, published release
+>   designations, and paths inside this repository. The RPC method strings and
+>   policy values were confirmed against this repository's own source rather
+>   than assumed. The repository's `tools/clean_room_gate.py` was not used: it
+>   measures source files and the candidate embeds no fenced code block.
+> - *Measure.* 0.02 on the discretionary-expression basis, derived independently
+>   in that pass and not inherited. Read against the standard that
+>   dictated-interop and pinned-interface matches are excluded from the measured
+>   set however dense they are, and that genuine discretionary expression fails
+>   regardless of how much surrounding content is legitimately dictated. The
+>   non-nil figure records the near-edge behavioural statements in the
+>   informative notes below and their two operator-facing restatements; each was
+>   examined individually and found to carry behaviour and consequence rather
+>   than expression.
+>
+> *Limit of the first pass, retired.* The first pass declared a gap: a
+> third-party dependency outside the material it compared carries part of the
+> behaviour two of the informative findings below describe, and that run could
+> not open it, so those two findings were judged on this section's own form
+> rather than by comparison. That was a true limit of that run only. The second
+> pass compared the dependency, which is what retired the gap; it is **not** a
+> live limitation of this record.
 
 > **Why the chapter carries it.** §35.6 lets an operator put a coin on any of
 > three EIP-1559 priority tiers. A peer that has done so signs its swap
@@ -1152,11 +1187,11 @@ present from `v2.1.0-beta` onwards and unchanged at `v2.6.0-beta` and
 > trailing suffix.** In the reference lineage the identifier of a decoded
 > transaction is taken over the whole input presented to the decoder, while the
 > decoded fields are taken only from the extent the transaction's own length
-> header declares. A caller
-> that appends bytes therefore obtains a decoded transaction with unchanged
-> fields and a changed identifier, and nothing refuses the input. The repair is
-> the pair of rules this section already states: bound the digest to the declared
-> extent of the one transaction, and refuse input longer than that.
+> header declares. A caller that appends bytes therefore obtains a decoded
+> transaction with unchanged fields and a changed identifier, and nothing
+> refuses the input. The repair is the pair of rules this section already
+> states: bound the digest to the declared extent of the one transaction, and
+> refuse input longer than that.
 > *(Trigger: apparent with little extra effort -- the identifier and the decoded
 > fields of one and the same transaction are observably taken over different
 > extents of the input.)*
@@ -1481,7 +1516,7 @@ no such claims. Confirming that is a separate pass over §§35.1--35.4.
   layout, identifier, signing-message and signature-parity rules of §35.6A rest
   on the public specifications listed under *Inputs*. No private implementation
   expression is normative in this chapter. §35.6A and the sections cleared with
-  it have **passed the KDF Dirty Gate**; the verdict's extent, method and
-  measure are recorded in §35.6A's *Clearance record*, as chapter 01 T1
-  requires. Every other section of this chapter rests on the inputs listed
-  above.
+  it have **passed the KDF Dirty Gate**, in two passes; the extent, method and
+  measure recorded in §35.6A's *Clearance record* are the second pass's, as
+  chapter 01 T1 requires. Every other section of this chapter rests on the
+  inputs listed above.

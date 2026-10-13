@@ -854,8 +854,9 @@ The chapter relies on one baseline-state claim:
   counterparty's serialized transaction, cited from §17.5.1).
 - *Forbidden corpus:* consulted by the KDF Spec Reader for
   upstream-compatible behaviour; no private implementation
-  expression is normative in this chapter. The §17.5.1 statement
-  about which serialized transaction form a peer emits is bound by
-  chapter 35 §35.6A; it was cleared by the KDF Dirty Gate in the
-  same verdict as that section, whose extent, method and measure
-  are recorded in chapter 35 §35.6A's *Clearance record*.
+  expression is normative in this chapter. The §17.5.1 paragraph on
+  reading a counterparty's serialized transaction through chapter 35
+  §35.6A, and this footer item, were cleared by the KDF Dirty Gate
+  together with that section. Chapter 35 §35.6A's *Clearance record*
+  is the single authority for that clearance's extent, method and
+  measure; this chapter does not restate them.
