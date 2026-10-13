@@ -120,6 +120,19 @@ impl EthCoinImpl {
         }
     }
 
+    /// Signs an EIP-1559 swap transaction (CRD R35.6A.17) with the same local key and the same
+    /// policy gate as [`Self::sign_tx_for_send`]: MetaMask and Trezor reject swap sends in this form
+    /// exactly as they do in the legacy form.
+    pub(crate) fn sign_eip1559_tx_for_send(&self, tx: Eip1559Transaction) -> Result<SignedEthTx, String> {
+        match &self.signer {
+            EthSigner::Local(key_pair) => tx.sign(key_pair.secret()),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(_) => Err(EthSignerError::SwapSendUnsupported.to_string()),
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(_) => Err(EthSignerError::SwapSendUnsupported.to_string()),
+        }
+    }
+
     /// Produces an offline-signed raw transaction (no broadcast). Unavailable
     /// under the MetaMask policy (CRD R47.5.7 / R47.5.12): the wallet never
     /// yields a detached, re-broadcastable signed raw transaction. For the
@@ -1068,6 +1081,87 @@ lazy_static! {
     pub(crate) static ref NONCE_LOCK: TimedAsyncMutex<()> = TimedAsyncMutex::new(());
 }
 
+/// Resolved pricing of a swap transaction; the variant fixes the serialized form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SwapFee {
+    /// A single gas price: the untyped EIP-155 legacy form.
+    Legacy { gas_price: U256 },
+    /// An EIP-1559 fee pair in wei: the type `0x02` form.
+    Eip1559 {
+        chain_id: u64,
+        max_fee_per_gas: U256,
+        max_priority_fee_per_gas: U256,
+    },
+}
+
+/// A swap transaction in the serialized form chosen by the swap gas-fee policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SwapTx {
+    /// Untyped EIP-155 legacy transaction with a single gas price (`SwapGasFeePolicy::Legacy`).
+    Legacy(UnSignedEthTx),
+    /// EIP-1559 (type `0x02`) transaction (`Low` / `Medium` / `High`).
+    Eip1559(Eip1559Transaction),
+}
+
+impl SwapTx {
+    pub(crate) fn new(fee: SwapFee, nonce: U256, gas: U256, action: Action, value: U256, data: Vec<u8>) -> SwapTx {
+        match fee {
+            SwapFee::Legacy { gas_price } => SwapTx::Legacy(UnSignedEthTx {
+                nonce,
+                gas_price,
+                gas,
+                action,
+                value,
+                data,
+            }),
+            SwapFee::Eip1559 {
+                chain_id,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+            } => SwapTx::Eip1559(Eip1559Transaction {
+                chain_id,
+                nonce,
+                max_priority_fee_per_gas,
+                max_fee_per_gas,
+                gas,
+                action,
+                value,
+                data,
+            }),
+        }
+    }
+}
+
+/// The EIP-1559 fee pair of the policy's tier taken from an EIP-1559 fee estimate -- the same
+/// estimate the fee-estimation RPC and streamer expose, so there is one tier definition
+/// (`Low` -> `estimate.low`, `Medium` -> `estimate.medium`, `High` -> `estimate.high`). `Legacy` has
+/// no tier and is rejected: it is priced by `get_gas_price`.
+pub(crate) fn eip1559_swap_fee(
+    policy: SwapGasFeePolicy,
+    chain_id: u64,
+    estimate: &fee_estimation::eip1559::FeePerGasEstimated,
+) -> Result<SwapFee, String> {
+    let level = match policy {
+        SwapGasFeePolicy::Legacy => return ERR!("The Legacy swap gas-fee policy has no EIP-1559 tier"),
+        SwapGasFeePolicy::Low => &estimate.low,
+        SwapGasFeePolicy::Medium => &estimate.medium,
+        SwapGasFeePolicy::High => &estimate.high,
+    };
+    if level.max_fee_per_gas < level.max_priority_fee_per_gas {
+        return ERR!(
+            "Fee estimate for {:?} is inconsistent: max_fee_per_gas {} < max_priority_fee_per_gas {}",
+            policy,
+            level.max_fee_per_gas,
+            level.max_priority_fee_per_gas
+        );
+    }
+    Ok(SwapFee::Eip1559 {
+        chain_id,
+        max_fee_per_gas: level.max_fee_per_gas,
+        max_priority_fee_per_gas: level.max_priority_fee_per_gas,
+    })
+}
+
 pub type EthTxFut = Box<dyn Future<Item = SignedEthTx, Error = TransactionErr> + Send + 'static>;
 
 pub async fn sign_and_send_transaction_impl(
@@ -1101,17 +1195,26 @@ pub async fn sign_and_send_transaction_impl(
             .compat()
             .await
     );
-    status.status(tags!(), "get_gas_price…");
-    let gas_price = try_tx_s!(coin.get_gas_price().compat().await);
-    let tx = UnSignedEthTx {
-        nonce,
-        gas_price,
-        gas,
-        action,
-        value,
-        data,
+    // CRD R35.6.6 / R35.6A.17: the stored policy decides both the pricing and the serialized form.
+    let policy = coin.swap_gas_fee_policy();
+    let fee = if policy == SwapGasFeePolicy::Legacy {
+        status.status(tags!(), "get_gas_price…");
+        SwapFee::Legacy {
+            gas_price: try_tx_s!(coin.get_gas_price().compat().await),
+        }
+    } else {
+        status.status(tags!(), "get_eip1559_gas_fee…");
+        let chain_id = try_tx_s!(coin
+            .chain_id
+            .ok_or_else(|| ERRL!("An EIP-1559 swap transaction requires a chain id")));
+        let estimate = try_tx_s!(coin.get_eip1559_gas_fee(false).await.map_err(|e| ERRL!("{}", e)));
+        try_tx_s!(eip1559_swap_fee(policy, chain_id, &estimate))
     };
-    let signed = try_tx_s!(coin.sign_tx_for_send(tx));
+    let tx = SwapTx::new(fee, nonce, gas, action, value, data);
+    let signed = match tx {
+        SwapTx::Legacy(tx) => try_tx_s!(coin.sign_tx_for_send(tx)),
+        SwapTx::Eip1559(tx) => try_tx_s!(coin.sign_eip1559_tx_for_send(tx)),
+    };
     let bytes = rlp::encode(&signed).to_vec();
     status.status(tags!(), "send_raw_transaction…");
 
