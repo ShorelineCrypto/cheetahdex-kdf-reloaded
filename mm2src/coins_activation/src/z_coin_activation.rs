@@ -11,7 +11,7 @@ use coins::z_coin::{z_coin_from_conf_and_params, ZCoin, ZCoinBuildError, ZcoinBa
 #[cfg(not(target_arch = "wasm32"))]
 use coins::z_coin::{LightwalletdError, ShieldedFetchError};
 use coins::{BalanceError, CoinProtocol, MarketCoinOps, PrivKeyActivationPolicy, RegisterCoinError};
-use common::{executor::Timer, log};
+use common::{executor::Timer, log, now_ms};
 use crypto::hw_rpc_task::{HwRpcTaskAwaitingStatus, HwRpcTaskUserAction};
 use crypto::{CryptoCtx, CryptoCtxError, CryptoInitError};
 use derive_more::Display;
@@ -271,15 +271,31 @@ impl TxHistory for ZcoinActivationParams {
     fn tx_history(&self) -> bool { false }
 }
 
+/// Resolves a requested sync date to the last block at or before it (CRD ch.39 R39.8.0h, R39.10.11).
+///
+/// A date in the future is an error. "Future" means later than both the wall clock (`now`) and the
+/// tip's own block time: a date after the tip but not after `now` is the ordinary case of a chain
+/// that has not produced a block since that moment, and resolves to the tip; a date after `now` that
+/// is covered by a tip block time ahead of the clock (block times may run ahead of it) resolves to a
+/// real block. Only a date beyond both is rejected. A start given as a height is not handled here and
+/// keeps clamping to the tip.
 async fn resolve_requested_shielded_scan_start_height<F, Fut>(
     target_timestamp: u64,
     tip_height: u64,
+    now: u64,
     mut get_block_timestamp: F,
 ) -> Result<u64, String>
 where
     F: FnMut(u64) -> Fut,
     Fut: Future<Output = Result<u64, String>>,
 {
+    let tip_timestamp = get_block_timestamp(tip_height).await?;
+    if target_timestamp > now.max(tip_timestamp) {
+        return Err(format!(
+            "the sync start date {target_timestamp} is in the future (current time {now}, chain tip block time {tip_timestamp})"
+        ));
+    }
+
     let mut low = 0u64;
     let mut high = tip_height;
     let mut resolved_height = 0u64;
@@ -290,8 +306,11 @@ where
         if block_timestamp <= target_timestamp {
             resolved_height = mid;
             low = mid + 1;
+        } else if mid == 0 {
+            // A date before block 0: `saturating_sub` would leave the window at 0..=0 forever.
+            break;
         } else {
-            high = mid.saturating_sub(1);
+            high = mid - 1;
         }
     }
 
@@ -313,24 +332,29 @@ async fn requested_shielded_scan_start_height(
         Some(ZcoinSyncParams::Height(height)) => Ok(Some(*height)),
         Some(ZcoinSyncParams::Earliest) => Ok(Some(coin.sapling_activation_height())),
         Some(ZcoinSyncParams::Date(target_timestamp)) => {
+            // R39.10.11: a date in the future ends activation with `CoinCreationError`.
             let tip_height = coin
                 .current_block()
                 .compat()
                 .await
                 .map_err(ZcoinInitError::CouldNotGetBlockCount)?;
-            let resolved_height =
-                resolve_requested_shielded_scan_start_height(*target_timestamp, tip_height, |height| async move {
+            let resolved_height = resolve_requested_shielded_scan_start_height(
+                *target_timestamp,
+                tip_height,
+                now_ms() / 1_000,
+                |height| async move {
                     coin.rpc_client()
                         .get_block_timestamp(height)
                         .await
                         .map_err(|error| error.to_string())
-                })
-                .await
-                .map_err(|error| ZcoinInitError::CouldNotResolveSyncStartDate {
-                    ticker: ticker.to_owned(),
-                    sync_start: target_timestamp.to_string(),
-                    error,
-                })?;
+                },
+            )
+            .await
+            .map_err(|error| ZcoinInitError::CouldNotResolveSyncStartDate {
+                ticker: ticker.to_owned(),
+                sync_start: target_timestamp.to_string(),
+                error,
+            })?;
             Ok(Some(resolved_height))
         },
     }
@@ -916,6 +940,7 @@ mod tests {
         let resolved = futures::executor::block_on(resolve_requested_shielded_scan_start_height(
             350,
             3,
+            1_000,
             |height| async move {
                 let timestamps = [100u64, 200u64, 300u64, 400u64];
                 Ok::<u64, String>(timestamps[height as usize])
@@ -924,6 +949,46 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved, 2);
+    }
+
+    fn resolve_date(target: u64, now: u64) -> Result<u64, String> {
+        futures::executor::block_on(resolve_requested_shielded_scan_start_height(
+            target,
+            3,
+            now,
+            |height| async move {
+                let timestamps = [100u64, 200u64, 300u64, 400u64];
+                Ok::<u64, String>(timestamps[height as usize])
+            },
+        ))
+    }
+
+    #[test]
+    fn sync_date_beyond_the_clock_and_the_tip_is_rejected_not_clamped() {
+        // R39.10.11: tip time 400, clock 1_000, date 1_001.
+        let error = resolve_date(1_001, 1_000).unwrap_err();
+        assert!(error.contains("in the future"), "{error}");
+    }
+
+    #[test]
+    fn sync_date_between_the_tip_time_and_the_clock_resolves_to_the_tip() {
+        // Deliberate window: later than the tip block (400) but not later than now (1_000).
+        assert_eq!(resolve_date(700, 1_000), Ok(3));
+        assert_eq!(resolve_date(1_000, 1_000), Ok(3));
+    }
+
+    #[test]
+    fn sync_date_ahead_of_a_lagging_clock_but_covered_by_the_tip_block_resolves() {
+        // Clock 300 is behind the tip block time 400; a date of 350 is not in the future.
+        assert_eq!(resolve_date(350, 300), Ok(2));
+        assert_eq!(resolve_date(400, 300), Ok(3));
+        assert!(resolve_date(401, 300).is_err());
+    }
+
+    #[test]
+    fn sync_date_at_the_tip_time_and_before_genesis_still_resolve() {
+        assert_eq!(resolve_date(400, 1_000), Ok(3));
+        assert_eq!(resolve_date(50, 1_000), Ok(0));
     }
 
     #[test]

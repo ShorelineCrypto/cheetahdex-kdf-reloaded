@@ -276,12 +276,30 @@ impl BranchSchedule {
     }
 }
 
+/// The branch identifier of the last declared upgrade before Ironwood, or `None` when the
+/// configuration declares no upgrade at all.
+fn pre_ironwood_branch(params: &ZcoinConsensusParams) -> Option<u32> {
+    let height = KNOWN_UPGRADES
+        .iter()
+        .filter(|nu| **nu != NetworkUpgrade::Nu6_3)
+        .filter_map(|nu| params.activation_height(*nu))
+        .max()?;
+    Some(u32::from(BranchId::for_height(params, height)))
+}
+
 /// What the coin expects of an endpoint, from its own configuration.
 #[derive(Clone, Debug)]
 pub(crate) struct AdmissionPolicy {
     pub network: &'static str,
     pub sapling_activation_height: u64,
     pub schedule: BranchSchedule,
+    /// The wall-clock time from which the Ironwood upgrade is in force, when this build or the
+    /// coin configuration knows one. The authority for "an endpoint still on the pre-upgrade branch
+    /// is stale" (R39.11.7a(h)); `None` means no such judgement can be made.
+    pub ironwood_activation_time: Option<u32>,
+    /// The branch identifier in force just before Ironwood: the one the last declared pre-Ironwood
+    /// upgrade determines.
+    pub pre_ironwood_branch: Option<u32>,
 }
 
 impl AdmissionPolicy {
@@ -295,7 +313,20 @@ impl AdmissionPolicy {
             network,
             sapling_activation_height: u64::from(params.sapling_activation_height),
             schedule: BranchSchedule::from_params(params),
+            ironwood_activation_time: None,
+            pre_ironwood_branch: pre_ironwood_branch(params),
         }
+    }
+
+    pub(crate) fn with_ironwood_activation_time(mut self, time: Option<u32>) -> Self {
+        self.ironwood_activation_time = time;
+        self
+    }
+
+    /// Whether the Ironwood activation time is known and has passed at `now_sec`.
+    fn ironwood_active_at(&self, now_sec: u64) -> bool {
+        self.ironwood_activation_time
+            .is_some_and(|time| now_sec >= u64::from(time))
     }
 
     fn network_matches(&self, reported: &str) -> bool {
@@ -343,6 +374,12 @@ pub(crate) enum ExclusionReason {
     )]
     OutsideWalletBranch { reported: u32, bound: u32 },
     #[display(
+        fmt = "reports the pre-Ironwood branch {:08x} although Ironwood activated at {} (it has not followed the upgrade)",
+        reported,
+        activation_time
+    )]
+    StalePreActivationBranch { reported: u32, activation_time: u32 },
+    #[display(
         fmt = "reports branch {:08x}, outvoted by branch {:08x} reported by a strict majority of the endpoints",
         reported,
         majority
@@ -369,20 +406,47 @@ fn describe_excluded(excluded: &[(String, ExclusionReason)]) -> String {
         .join("; ")
 }
 
+fn describe_probes(probes: &[(String, Result<ServerInfo, String>)]) -> String {
+    probes
+        .iter()
+        .map(|(server, probe)| match probe {
+            Ok(info) => format!(
+                "{} [chain {}, branch {}, height {}]",
+                server, info.chain_name, info.consensus_branch_id, info.block_height
+            ),
+            Err(e) => format!("{} [unreachable: {}]", server, e),
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// Decides which endpoints may be used (R39.11.7a). `probes` holds, per configured endpoint and in
 /// configured order, what its server-information read returned.
 ///
 /// 1. An endpoint on another network, or with another Sapling activation height, is excluded.
 /// 2. Where the coin configuration *determines* the branch at the endpoint's reported height, a
 ///    mismatch excludes it ((d)).
+/// 2a. Once the Ironwood activation time has passed, an endpoint reporting the pre-Ironwood branch
+///    is excluded outright ((h)), before any vote, and a wallet binding to that branch is released.
 /// 3. Where it does not ((e)) the local expectation is **not** consulted. A wallet carrying scanned
 ///    state with a recorded identifier admits only that partition; any other wallet admits the
 ///    partition a strict majority of at least two endpoints reports, and fails with every observed
 ///    identifier when there is none -- including the single-endpoint case.
+#[cfg(test)]
 pub(crate) fn decide_admission(
     probes: Vec<(String, Result<ServerInfo, String>)>,
     policy: &AdmissionPolicy,
     wallet: &WalletBranchState,
+) -> Result<AdmissionOutcome, LightwalletdError> {
+    decide_admission_at(probes, policy, wallet, 0)
+}
+
+/// [`decide_admission`] at the wall-clock time `now_sec`, which only the stale-fork rule (h) reads.
+pub(crate) fn decide_admission_at(
+    probes: Vec<(String, Result<ServerInfo, String>)>,
+    policy: &AdmissionPolicy,
+    wallet: &WalletBranchState,
+    now_sec: u64,
 ) -> Result<AdmissionOutcome, LightwalletdError> {
     if probes.is_empty() {
         return Err(LightwalletdError::NoEndpoints);
@@ -427,6 +491,19 @@ pub(crate) fn decide_admission(
             continue;
         };
 
+        // (h) Positive information, not a vote: once the Ironwood activation time has passed, an
+        // endpoint reporting the pre-Ironwood branch has not followed the chain, whatever the other
+        // endpoints say and however many of them there are.
+        if let (Some(time), Some(pre)) = (policy.ironwood_activation_time, policy.pre_ironwood_branch) {
+            if policy.ironwood_active_at(now_sec) && reported_branch == pre {
+                excluded.push((server.clone(), ExclusionReason::StalePreActivationBranch {
+                    reported: reported_branch,
+                    activation_time: time,
+                }));
+                continue;
+            }
+        }
+
         match policy.schedule.expected_at(info.block_height) {
             Some(expected) if expected != reported_branch => {
                 excluded.push((server.clone(), ExclusionReason::ConfigBranchMismatch {
@@ -445,10 +522,15 @@ pub(crate) fn decide_admission(
     let mut branch_to_record = None;
     if !undetermined.is_empty() {
         let bound = match wallet {
+            // A binding to the pre-Ironwood branch is superseded once Ironwood is in force: that
+            // chain is a prefix of the current one, and keeping the binding would lock the wallet
+            // out of every current endpoint (R39.11.7a(h)).
             WalletBranchState {
                 has_scanned_state: true,
                 recorded: Some(recorded),
-            } => Some(*recorded),
+            } if !(policy.ironwood_active_at(now_sec) && Some(*recorded) == policy.pre_ironwood_branch) => {
+                Some(*recorded)
+            },
             _ => None,
         };
         match bound {
@@ -1189,12 +1271,26 @@ impl LightwalletdBackend {
             None => WalletBranchState::default(),
         };
 
-        let outcome = decide_admission(probes, &self.policy, &wallet_state);
+        common::log::info!(
+            "lightwalletd admission: probed {} endpoint(s): {}",
+            probes.len(),
+            describe_probes(&probes)
+        );
+        let outcome = decide_admission_at(probes, &self.policy, &wallet_state, common::now_ms() / 1000);
         match outcome {
             Ok(outcome) => {
                 for (server, reason) in &outcome.excluded {
                     common::log::warn!("lightwalletd endpoint {} excluded: {}", server, reason);
                 }
+                for (server, error) in &outcome.unreachable {
+                    common::log::warn!("lightwalletd endpoint {} unreachable: {}", server, error);
+                }
+                common::log::info!(
+                    "lightwalletd admission: admitted {} of {} endpoint(s): {}",
+                    outcome.admitted.len(),
+                    self.servers.len(),
+                    outcome.admitted.join(", ")
+                );
                 if let (Some(branch), Some(store)) = (outcome.branch_to_record, &store) {
                     if let Err(e) = store.record(branch) {
                         common::log::warn!("could not record consensus branch {:08x}: {}", branch, e);
@@ -1208,6 +1304,7 @@ impl LightwalletdBackend {
                 Ok(admitted)
             },
             Err(e) => {
+                common::log::error!("lightwalletd admission failed, no endpoint is usable: {}", e);
                 *self.cached.lock() = None;
                 Err(e)
             },
@@ -1386,8 +1483,18 @@ impl LightwalletdClient {
         )))
     }
 
-    pub(crate) fn connect(servers: Vec<String>, params: &ZcoinConsensusParams, addressing: HtlcAddressing) -> Self {
-        Self::new(Arc::new(GrpcTransport::default()), servers, params, addressing)
+    pub(crate) fn connect(
+        servers: Vec<String>,
+        params: &ZcoinConsensusParams,
+        ironwood_activation_time: Option<u32>,
+        addressing: HtlcAddressing,
+    ) -> Self {
+        LightwalletdClient(Arc::new(LightwalletdBackend::new(
+            Arc::new(GrpcTransport::default()),
+            servers,
+            AdmissionPolicy::from_params(params).with_ironwood_activation_time(ironwood_activation_time),
+            addressing,
+        )))
     }
 
     pub(crate) fn backend(&self) -> &Arc<LightwalletdBackend> { &self.0 }
