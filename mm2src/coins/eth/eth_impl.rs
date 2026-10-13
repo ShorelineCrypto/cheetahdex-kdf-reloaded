@@ -1018,8 +1018,43 @@ pub async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest
     })
 }
 
+/// Names an EIP-2718 transaction type byte for diagnostics.
+fn eip2718_type_name(type_byte: u8) -> &'static str {
+    match type_byte {
+        0x01 => "EIP-2930",
+        0x02 => "EIP-1559",
+        0x03 => "EIP-4844",
+        0x04 => "EIP-7702",
+        _ => "unknown type",
+    }
+}
+
+/// Decodes a legacy (EIP-155) signed transaction.
+///
+/// Typed (EIP-2718) transactions are not supported; they are recognised only to produce a precise
+/// error. Such an envelope is `type_byte || rlp(payload)`, i.e. an RLP *string*, which the legacy
+/// decoder can only reject as "unexpected string". A payload that is not a transaction at all fails
+/// the same way, so the error carries the length and a short prefix to tell the two apart.
 pub fn signed_eth_tx_from_bytes(bytes: &[u8]) -> Result<SignedEthTx, String> {
-    let tx: UnverifiedTransaction = try_s!(rlp::decode(bytes));
+    const PREFIX_LEN: usize = 10;
+    if let Some(&type_byte) = bytes.first().filter(|b| (0x01..=0x7f).contains(*b)) {
+        return ERR!(
+            "typed EIP-2718 transaction (type 0x{:02x}, {}) is not supported, only legacy EIP-155 transactions can be decoded; payload length {} bytes",
+            type_byte,
+            eip2718_type_name(type_byte),
+            bytes.len()
+        );
+    }
+    let tx: UnverifiedTransaction = rlp::decode(bytes).map_err(|e| {
+        let prefix = &bytes[..bytes.len().min(PREFIX_LEN)];
+        format!(
+            "cannot decode payload as a legacy EIP-155 transaction: {}; payload length {} bytes, first {} bytes 0x{}",
+            e,
+            bytes.len(),
+            prefix.len(),
+            hex::encode(prefix)
+        )
+    })?;
     let signed = try_s!(SignedEthTx::new(tx));
     Ok(signed)
 }

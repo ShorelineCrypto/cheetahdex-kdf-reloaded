@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **An undecodable EVM transaction now says what it is.** Decoding a swap transaction that is
+  an EIP-2718 typed envelope (EIP-2930, EIP-1559, EIP-4844, EIP-7702 or an unknown type) now
+  fails with an error naming the type byte and stating that only legacy EIP-155 transactions
+  are supported, instead of the opaque `unexpected string`; a payload that is not a
+  transaction at all reports its length and a short prefix. Diagnostic only: typed
+  transactions are still not decoded, and legacy decoding is unchanged (issue #14).
 - **A shielded wallet no longer binds to a lightwalletd endpoint that never followed the
   Ironwood upgrade.** Once the Ironwood activation time has passed, an endpoint still
   reporting the pre-Ironwood consensus branch is excluded outright, however many endpoints
