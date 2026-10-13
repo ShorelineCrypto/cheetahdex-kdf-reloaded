@@ -1174,3 +1174,156 @@ async fn an_unreachable_server_is_an_error_and_not_a_default() {
         .unwrap_err();
     assert!(matches!(err, IronwoodDiscoveryError::Unavailable(_)), "{err}");
 }
+
+// ---------------------------------------------------------------------------------------------
+// R39.11.7a(h): a pre-Ironwood endpoint is stale once the activation time has passed
+// ---------------------------------------------------------------------------------------------
+
+const ARRR_ACTIVATION_TIME: u32 = 1_791_054_000;
+const AFTER_ACTIVATION: u64 = ARRR_ACTIVATION_TIME as u64 + 86_400;
+const STALE_TIP: u64 = 4_161_184;
+
+fn timed_policy() -> AdmissionPolicy {
+    AdmissionPolicy::from_params(&arrr_params()).with_ironwood_activation_time(Some(ARRR_ACTIVATION_TIME))
+}
+
+fn stale_three_with_healthy_unreachable() -> Vec<(String, Result<ServerInfo, String>)> {
+    probes(vec![
+        ("lightd1", Err("timed out")),
+        ("piratelightd1", Err("timed out")),
+        ("piratelightd2", Err("timed out")),
+        ("piratelightd3", Err("timed out")),
+        ("piratelightd4", Err("timed out")),
+        ("cipig1", Ok(info(SAPLING_BRANCH, STALE_TIP))),
+        ("cipig2", Ok(info(SAPLING_BRANCH, STALE_TIP))),
+        ("cipig3", Ok(info(SAPLING_BRANCH, STALE_TIP))),
+    ])
+}
+
+#[test]
+fn the_pre_ironwood_branch_is_derived_from_the_configuration() {
+    assert_eq!(timed_policy().pre_ironwood_branch, Some(SAPLING_BRANCH));
+}
+
+/// The live scenario: only the stale operator's three endpoints answer, all on the pre-upgrade
+/// branch, after activation. They form a majority, and must still not be admitted.
+#[test]
+fn three_stale_endpoints_are_not_admitted_after_activation_even_as_the_only_ones_reachable() {
+    let err = decide_admission_at(
+        stale_three_with_healthy_unreachable(),
+        &timed_policy(),
+        &fresh_wallet(),
+        AFTER_ACTIVATION,
+    )
+    .unwrap_err();
+    match err {
+        LightwalletdError::AllExcluded(text) => {
+            assert!(text.contains("cipig1") && text.contains("pre-Ironwood"), "{text}")
+        },
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Before the activation time the pre-upgrade branch is the correct answer, and the boundary is the
+/// activation second itself.
+#[test]
+fn the_same_three_endpoints_are_admitted_before_activation() {
+    for now in [0, ARRR_ACTIVATION_TIME as u64 - 1] {
+        let outcome = decide_admission_at(
+            stale_three_with_healthy_unreachable(),
+            &timed_policy(),
+            &fresh_wallet(),
+            now,
+        )
+        .unwrap();
+        assert_eq!(outcome.admitted, vec!["cipig1", "cipig2", "cipig3"]);
+        assert_eq!(outcome.branch_to_record, Some(SAPLING_BRANCH));
+    }
+    assert!(decide_admission_at(
+        stale_three_with_healthy_unreachable(),
+        &timed_policy(),
+        &fresh_wallet(),
+        ARRR_ACTIVATION_TIME as u64
+    )
+    .is_err());
+}
+
+/// Exclusion is information, not a vote: three stale endpoints outnumbering two healthy ones lose.
+#[test]
+fn a_stale_majority_cannot_outvote_the_current_chain() {
+    let entries = || {
+        probes(vec![
+            ("a", Ok(info(SAPLING_BRANCH, STALE_TIP))),
+            ("b", Ok(info(SAPLING_BRANCH, STALE_TIP))),
+            ("c", Ok(info(SAPLING_BRANCH, STALE_TIP))),
+            ("d", Ok(info(IRONWOOD_BRANCH, ARRR_TIP))),
+            ("e", Ok(info(IRONWOOD_BRANCH, ARRR_TIP))),
+        ])
+    };
+    let outcome = decide_admission_at(entries(), &timed_policy(), &fresh_wallet(), AFTER_ACTIVATION).unwrap();
+    assert_eq!(outcome.admitted, vec!["d", "e"]);
+    assert_eq!(outcome.excluded.len(), 3);
+    assert_eq!(outcome.branch_to_record, Some(IRONWOOD_BRANCH));
+
+    // Without a known activation time the earlier behaviour is unchanged: the stale three win.
+    let untimed = AdmissionPolicy::from_params(&arrr_params());
+    let outcome = decide_admission_at(entries(), &untimed, &fresh_wallet(), AFTER_ACTIVATION).unwrap();
+    assert_eq!(outcome.admitted, vec!["a", "b", "c"]);
+}
+
+/// A wallet bound to the pre-upgrade branch by an earlier run (every wallet that synced before
+/// activation is) must not stay bound once activation has passed: the binding would exclude every
+/// current endpoint and leave only the stale fork.
+#[test]
+fn a_wallet_bound_to_the_pre_ironwood_branch_is_released_after_activation() {
+    let entries = || {
+        probes(vec![
+            ("healthy1", Ok(info(IRONWOOD_BRANCH, ARRR_TIP))),
+            ("healthy2", Ok(info(IRONWOOD_BRANCH, ARRR_TIP))),
+            ("cipig1", Ok(info(SAPLING_BRANCH, STALE_TIP))),
+        ])
+    };
+    let bound = scanned_wallet(SAPLING_BRANCH);
+
+    let after = decide_admission_at(entries(), &timed_policy(), &bound, AFTER_ACTIVATION).unwrap();
+    assert_eq!(after.admitted, vec!["healthy1", "healthy2"]);
+    assert_eq!(after.branch_to_record, Some(IRONWOOD_BRANCH));
+
+    // Before activation the binding holds exactly as before.
+    let before = decide_admission_at(entries(), &timed_policy(), &bound, ARRR_ACTIVATION_TIME as u64 - 1).unwrap();
+    assert_eq!(before.admitted, vec!["cipig1"]);
+
+    // A binding to any other branch is never released by this rule.
+    let other = scanned_wallet(IRONWOOD_BRANCH);
+    let outcome = decide_admission_at(entries(), &timed_policy(), &other, AFTER_ACTIVATION).unwrap();
+    assert_eq!(outcome.admitted, vec!["healthy1", "healthy2"]);
+    assert_eq!(outcome.branch_to_record, None);
+}
+
+/// Through the backend, which reads the clock itself: a stale-only set fails closed and the
+/// failure is not cached as an admission.
+#[tokio::test]
+async fn the_backend_fails_closed_when_only_stale_endpoints_answer() {
+    let transport = Arc::new(FakeTransport::default());
+    for name in ["cipig1", "cipig2", "cipig3"] {
+        transport.serve(name, stale_fork());
+    }
+    let backend = LightwalletdBackend::new(
+        transport.clone(),
+        ["lightd1", "cipig1", "cipig2", "cipig3"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
+        AdmissionPolicy::from_params(&arrr_params()).with_ironwood_activation_time(Some(1)),
+        test_addressing(),
+    );
+    assert!(matches!(
+        backend.admitted().await.unwrap_err(),
+        LightwalletdError::AllExcluded(_)
+    ));
+    for name in ["cipig1", "cipig2", "cipig3"] {
+        assert_eq!(transport.called(name, "tip"), 0);
+    }
+    // Every configured endpoint is probed, including the unreachable one.
+    assert_eq!(transport.called("lightd1", "info"), 1);
+}
