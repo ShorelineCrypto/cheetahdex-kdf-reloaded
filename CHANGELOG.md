@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0-alpha.3] — development milestone, not released
+
 ### Fixed
 
 - **An undecodable EVM transaction now says what it is.** Decoding a swap transaction that is
@@ -610,7 +612,8 @@ Tag `v0.2.0-beta.1` (2026-08-05) was cut from `staging`, which has since diverge
 development line; it has no section in this file, and neither `0.3.0-alpha` milestone descends
 from it.
 
-[Unreleased]: https://github.com/kdf-reloaded/kdf/compare/49a46bc54fc16761796ed0bad53a472b8183ed9b...HEAD
+[Unreleased]: https://github.com/kdf-reloaded/kdf/compare/ddb87a4849f91400b1b4aa120090f1acb12aa7bf...HEAD
+[0.3.0-alpha.3]: https://github.com/kdf-reloaded/kdf/compare/49a46bc54fc16761796ed0bad53a472b8183ed9b...ddb87a4849f91400b1b4aa120090f1acb12aa7bf
 [0.3.0-alpha.2]: https://github.com/kdf-reloaded/kdf/compare/7a18f94b2f5de1ff7ba2ae69c4b445132d305a3f...49a46bc54fc16761796ed0bad53a472b8183ed9b
 [0.3.0-alpha.1]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.2...7a18f94b2f5de1ff7ba2ae69c4b445132d305a3f
 [0.1.0-beta.2]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.1...v0.1.0-beta.2
