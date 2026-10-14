@@ -15,7 +15,11 @@ Hierarchy: `main` ← `staging` ← `dev` ← feature branches.
 
 `reloaded-gplv2-base` is a historical branch. It stopped receiving work in
 June 2026 and is far behind `dev`, so do not branch from it or compare
-against it.
+against it. It is kept deliberately rather than pruned: it records the
+GPL-2.0-only base that the project's distribution rights rest on (see
+[`LEGAL/LICENSING-POLICY.md`](../LEGAL/LICENSING-POLICY.md)), so it remains
+available for provenance and review even though no further work will land on
+it.
 
 Promotion is one-way and explicit:
 1. Feature branch → `dev` after PR review + green CI.
