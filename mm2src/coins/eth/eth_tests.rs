@@ -30,7 +30,7 @@ fn check_sum(addr: &str, expected: &str) {
     assert_eq!(expected, actual);
 }
 
-fn eth_coin_for_test(
+pub(super) fn eth_coin_for_test(
     coin_type: EthCoinType,
     urls: Vec<String>,
     fallback_swap_contract: Option<Address>,
@@ -1871,4 +1871,76 @@ fn tron_v1_wait_for_tx_spend_returns_error_without_decoding() {
         .wait()
         .unwrap_err();
     assert!(matches!(err, TransactionErr::Plain(msg) if msg.contains("TRON V1 swap spend watchers")));
+}
+
+fn legacy_eip155_vector_bytes() -> Vec<u8> {
+    hex::decode(
+        "f86c098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83",
+    )
+    .unwrap()
+}
+
+#[test]
+fn test_signed_eth_tx_from_bytes_legacy_unchanged() {
+    let bytes = legacy_eip155_vector_bytes();
+    let signed = signed_eth_tx_from_bytes(&bytes).unwrap();
+    assert_eq!(alloy::rlp::encode(&*signed), bytes);
+    assert_eq!(
+        format!("{:x}", signed.tx_hash()),
+        "33469b22e9f636356c4160a87eb19df52b7412e8eac32a4a55ffe88ea8350788"
+    );
+}
+
+fn typed_envelope(type_byte: u8) -> Vec<u8> {
+    // `type_byte || rlp(list of a few plausible fields)`; need not be a valid typed transaction.
+    let mut bytes = vec![type_byte];
+    bytes.extend_from_slice(&alloy::rlp::encode(&vec![1u64, 2, 3]));
+    bytes
+}
+
+#[test]
+fn test_signed_eth_tx_from_bytes_typed_eip4844_and_eip7702_rejected() {
+    for (type_byte, name) in [(0x03u8, "EIP-4844"), (0x04, "EIP-7702")] {
+        let bytes = typed_envelope(type_byte);
+        let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
+        assert!(err.contains(&format!("type 0x{type_byte:02x}")), "{err}");
+        assert!(err.contains(name), "{err}");
+        assert!(err.contains("only legacy, EIP-2930 and EIP-1559"), "{err}");
+        assert!(err.contains(&format!("payload length {} bytes", bytes.len())), "{err}");
+        assert!(!err.contains('\n'));
+    }
+}
+
+#[test]
+fn test_signed_eth_tx_from_bytes_typed_unknown() {
+    let bytes = typed_envelope(0x7f);
+    let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
+    assert!(err.contains("type 0x7f"), "{err}");
+    assert!(err.contains("unknown type"), "{err}");
+    assert!(err.contains("only legacy, EIP-2930 and EIP-1559"), "{err}");
+}
+
+#[test]
+fn test_signed_eth_tx_from_bytes_malformed_supported_typed_reports_length_and_prefix() {
+    for type_byte in [0x01u8, 0x02] {
+        let bytes = typed_envelope(type_byte);
+        let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
+        assert!(err.contains(&format!("payload length {} bytes", bytes.len())), "{err}");
+        assert!(err.contains(&format!("0x{type_byte:02x}")), "{err}");
+    }
+}
+
+#[test]
+fn test_signed_eth_tx_from_bytes_non_transaction_payload() {
+    // A bare RLP-encoded 32-byte string (e.g. a hash): 0xa0 || 32 bytes.
+    let bytes = alloy::rlp::encode(&[0xabu8; 32][..]);
+    assert_eq!(bytes.len(), 33);
+    let err = signed_eth_tx_from_bytes(&bytes).unwrap_err();
+    assert!(err.contains("payload length 33 bytes"), "{err}");
+    assert!(err.contains(&format!("first 10 bytes 0xa0{}", "ab".repeat(9))), "{err}");
+    assert!(!err.contains("typed EIP-2718"), "{err}");
+    assert!(!err.contains('\n'));
+
+    let err = signed_eth_tx_from_bytes(&[]).unwrap_err();
+    assert!(err.contains("payload length 0 bytes"), "{err}");
 }

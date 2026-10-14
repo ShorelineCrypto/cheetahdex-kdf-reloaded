@@ -146,7 +146,16 @@ impl Transaction {
         let s = U256::from_big_endian(sig.s());
         let v = add_chain_replay_protection(sig.v() as u64, chain_id);
         UnverifiedTransaction {
-            unsigned: self,
+            body: TxBody {
+                nonce: self.nonce,
+                gas: self.gas,
+                action: self.action,
+                value: self.value,
+                data: self.data,
+            },
+            kind: TxKind::Legacy {
+                gas_price: self.gas_price,
+            },
             r,
             s,
             v,
@@ -156,11 +165,58 @@ impl Transaction {
     }
 }
 
+/// Fields shared by every supported transaction type. These are the only fields that can be read
+/// through `Deref` on a decoded transaction; the fee fields differ per type and are reached through
+/// [`UnverifiedTransaction::gas_price`] / [`UnverifiedTransaction::kind`].
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TxBody {
+    pub nonce: U256,
+    pub gas: U256,
+    pub action: Action,
+    pub value: U256,
+    pub data: Bytes,
+}
+
+/// Fee fields and signing data that depend on the transaction type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TxKind {
+    /// Legacy (type 0) transaction: `v` carries EIP-155 replay protection.
+    Legacy { gas_price: U256 },
+    /// EIP-2718 typed transaction (EIP-2930 or EIP-1559).
+    Typed(TypedTx),
+}
+
+/// A decoded EIP-2718 typed transaction (type 1 or 2).
+///
+/// The identifier of a typed transaction is `keccak256(type_byte || rlp(payload))`, i.e. the hash of
+/// the whole envelope, and the same bytes are what gets re-encoded; `envelope` therefore keeps the
+/// exact bytes that were decoded so neither can drift from the wire form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedTx {
+    pub tx_type: u8,
+    pub chain_id: u64,
+    /// `keccak256(type_byte || rlp(unsigned payload))`, the hash that was signed.
+    pub signing_hash: H256,
+    /// y-parity of the signature (0 or 1); typed transactions have no EIP-155 `v`.
+    pub y_parity: u8,
+    /// `Some` for EIP-2930 (a genuine `gasPrice`), `None` for EIP-1559 which has no single gas price.
+    pub gas_price: Option<U256>,
+    /// EIP-1559 only: the fee cap, NOT the price paid.
+    pub max_fee_per_gas: Option<U256>,
+    /// EIP-1559 only: the priority fee cap.
+    pub max_priority_fee_per_gas: Option<U256>,
+    /// The complete EIP-2718 envelope, exactly as decoded.
+    pub envelope: Vec<u8>,
+}
+
 /// Signed transaction whose signature has not yet been verified
 /// (no public key recovered).
+///
+/// For a typed transaction `v` holds the y-parity (0 or 1), never an EIP-155 value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnverifiedTransaction {
-    pub unsigned: Transaction,
+    pub body: TxBody,
+    pub kind: TxKind,
     pub v: u64,
     pub r: U256,
     pub s: U256,
@@ -168,14 +224,25 @@ pub struct UnverifiedTransaction {
 }
 
 impl Deref for UnverifiedTransaction {
-    type Target = Transaction;
-    fn deref(&self) -> &Self::Target { &self.unsigned }
+    type Target = TxBody;
+    fn deref(&self) -> &Self::Target { &self.body }
 }
 
 impl Encodable for UnverifiedTransaction {
-    fn encode(&self, out: &mut dyn BufMut) { self.rlp_append_sealed(out); }
+    /// Legacy: the RLP list. Typed: the EIP-2718 envelope bytes exactly as decoded (the form
+    /// `Decodable` accepts), never a legacy re-encode.
+    fn encode(&self, out: &mut dyn BufMut) {
+        match &self.kind {
+            TxKind::Legacy { gas_price } => self.rlp_append_sealed(gas_price, out),
+            TxKind::Typed(t) => out.put_slice(&t.envelope),
+        }
+    }
     fn length(&self) -> usize {
-        let payload_len = self.sealed_payload_len();
+        let gas_price = match &self.kind {
+            TxKind::Typed(t) => return t.envelope.len(),
+            TxKind::Legacy { gas_price } => gas_price,
+        };
+        let payload_len = self.sealed_payload_len(gas_price);
         Header {
             list: true,
             payload_length: payload_len,
@@ -187,6 +254,11 @@ impl Encodable for UnverifiedTransaction {
 
 impl Decodable for UnverifiedTransaction {
     fn decode(buf: &mut &[u8]) -> alloy::rlp::Result<Self> {
+        if let Some(&first) = buf.first() {
+            if (0x01..=0x7f).contains(&first) {
+                return Self::decode_typed(buf);
+            }
+        }
         let raw = *buf;
         let header = Header::decode(buf)?;
         if !header.list {
@@ -214,14 +286,14 @@ impl Decodable for UnverifiedTransaction {
 
         let hash = keccak256_h256(raw_tx);
         Ok(UnverifiedTransaction {
-            unsigned: Transaction {
+            body: TxBody {
                 nonce,
-                gas_price,
                 gas,
                 action,
                 value,
                 data: data.to_vec(),
             },
+            kind: TxKind::Legacy { gas_price },
             v,
             r,
             s,
@@ -231,15 +303,116 @@ impl Decodable for UnverifiedTransaction {
 }
 
 impl UnverifiedTransaction {
+    /// Decodes an EIP-2718 envelope (`type_byte || rlp(payload)`) of type 1 (EIP-2930) or 2
+    /// (EIP-1559). Other types, including EIP-4844 and EIP-7702, are rejected deliberately.
+    fn decode_typed(buf: &mut &[u8]) -> alloy::rlp::Result<Self> {
+        use alloy::consensus::{SignableTransaction, TxEnvelope};
+        use alloy::eips::eip2718::Decodable2718;
+
+        let raw = *buf;
+        match raw.first() {
+            Some(1) | Some(2) => (),
+            Some(3) => return Err(alloy::rlp::Error::Custom("unsupported typed transaction: EIP-4844")),
+            Some(4) => return Err(alloy::rlp::Error::Custom("unsupported typed transaction: EIP-7702")),
+            _ => return Err(alloy::rlp::Error::Custom("unsupported typed transaction: unknown type")),
+        }
+        let mut cursor = raw;
+        let envelope = TxEnvelope::decode_2718(&mut cursor)
+            .map_err(|_| alloy::rlp::Error::Custom("malformed EIP-2718 typed transaction"))?;
+        if !cursor.is_empty() {
+            return Err(alloy::rlp::Error::Custom("trailing bytes in typed transaction"));
+        }
+        *buf = cursor;
+
+        let (tx_type, chain_id, nonce, gas, to, value, input, signature, signing_hash, gas_price, max_fee, max_prio) =
+            match &envelope {
+                TxEnvelope::Eip2930(signed) => {
+                    let t = signed.tx();
+                    (
+                        1u8,
+                        t.chain_id,
+                        t.nonce,
+                        t.gas_limit,
+                        t.to,
+                        t.value,
+                        t.input.clone(),
+                        signed.signature(),
+                        signed.signature_hash(),
+                        Some(U256::from(t.gas_price)),
+                        None,
+                        None,
+                    )
+                },
+                TxEnvelope::Eip1559(signed) => {
+                    let t = signed.tx();
+                    (
+                        2u8,
+                        t.chain_id,
+                        t.nonce,
+                        t.gas_limit,
+                        t.to,
+                        t.value,
+                        t.input.clone(),
+                        signed.signature(),
+                        signed.signature_hash(),
+                        None,
+                        Some(U256::from(t.max_fee_per_gas)),
+                        Some(U256::from(t.max_priority_fee_per_gas)),
+                    )
+                },
+                _ => return Err(alloy::rlp::Error::Custom("unsupported typed transaction")),
+            };
+
+        let action = match to {
+            alloy::primitives::TxKind::Call(addr) => Action::Call(Address::from_slice(addr.as_slice())),
+            alloy::primitives::TxKind::Create => Action::Create,
+        };
+        let y_parity = u8::from(signature.v());
+        Ok(UnverifiedTransaction {
+            body: TxBody {
+                nonce: U256::from(nonce),
+                gas: U256::from(gas),
+                action,
+                value: u256_from_alloy(&value),
+                data: input.to_vec(),
+            },
+            kind: TxKind::Typed(TypedTx {
+                tx_type,
+                chain_id,
+                signing_hash: H256::from_slice(signing_hash.as_slice()),
+                y_parity,
+                gas_price,
+                max_fee_per_gas: max_fee,
+                max_priority_fee_per_gas: max_prio,
+                envelope: raw.to_vec(),
+            }),
+            v: u64::from(y_parity),
+            r: u256_from_alloy(&signature.r()),
+            s: u256_from_alloy(&signature.s()),
+            // The id of a typed transaction is the hash of the whole envelope.
+            hash: keccak256_h256(raw),
+        })
+    }
+
+    /// The gas price a legacy or EIP-2930 transaction carries. `None` for EIP-1559, which has only a
+    /// fee cap (`max_fee_per_gas`) and a priority cap, neither of which is a price paid; callers
+    /// must not substitute one for the other.
+    pub fn gas_price(&self) -> Option<U256> {
+        match &self.kind {
+            TxKind::Legacy { gas_price } => Some(*gas_price),
+            TxKind::Typed(t) => t.gas_price,
+        }
+    }
+
     fn compute_hash(mut self) -> Self {
         let bytes = alloy::rlp::encode(&self);
         self.hash = keccak256_h256(&bytes);
         self
     }
 
-    fn sealed_payload_len(&self) -> usize {
+    fn sealed_payload_len(&self, gas_price: &U256) -> usize {
         u256_to_alloy(&self.nonce).length()
-            + u256_to_alloy(&self.gas_price).length()
+            + u256_to_alloy(gas_price).length()
             + u256_to_alloy(&self.gas).length()
             + self.action.length()
             + u256_to_alloy(&self.value).length()
@@ -249,15 +422,15 @@ impl UnverifiedTransaction {
             + u256_to_alloy(&self.s).length()
     }
 
-    fn rlp_append_sealed(&self, out: &mut dyn BufMut) {
-        let payload_len = self.sealed_payload_len();
+    fn rlp_append_sealed(&self, gas_price: &U256, out: &mut dyn BufMut) {
+        let payload_len = self.sealed_payload_len(gas_price);
         Header {
             list: true,
             payload_length: payload_len,
         }
         .encode(out);
         u256_to_alloy(&self.nonce).encode(out);
-        u256_to_alloy(&self.gas_price).encode(out);
+        u256_to_alloy(gas_price).encode(out);
         u256_to_alloy(&self.gas).encode(out);
         self.action.encode(out);
         u256_to_alloy(&self.value).encode(out);
@@ -268,13 +441,25 @@ impl UnverifiedTransaction {
     }
 
     /// `r == 0 && s == 0` (EIP-86 unsigned).
-    pub fn is_unsigned(&self) -> bool { self.r.is_zero() && self.s.is_zero() }
+    /// Never true for a typed transaction: a typed transaction with an empty signature is invalid,
+    /// not "unsigned".
+    pub fn is_unsigned(&self) -> bool {
+        matches!(self.kind, TxKind::Legacy { .. }) && self.r.is_zero() && self.s.is_zero()
+    }
 
     /// Recovery id `v` mapped to its standard form (`0` or `1`).
-    pub fn standard_v(&self) -> u8 { check_replay_protection(self.v) }
+    pub fn standard_v(&self) -> u8 {
+        match &self.kind {
+            TxKind::Typed(t) => t.y_parity,
+            TxKind::Legacy { .. } => check_replay_protection(self.v),
+        }
+    }
 
     /// EIP-155 chain id encoded in `v`, or `None` for pre-EIP-155.
     pub fn chain_id(&self) -> Option<u64> {
+        if let TxKind::Typed(t) = &self.kind {
+            return Some(t.chain_id);
+        }
         match self.v {
             v if self.is_unsigned() => Some(v),
             v if v > 36 => Some((v - 35) / 2),
@@ -295,8 +480,19 @@ impl UnverifiedTransaction {
 
     /// Recover the secp256k1 public key from the signature.
     pub fn recover_public(&self) -> Result<Public, EthKeyError> {
-        let pubkey_h520: H520 =
-            recover_public_key(self.unsigned.hash(self.chain_id()), self.signature()).map_err(|e| e.into_inner())?;
+        let signing_hash = match &self.kind {
+            TxKind::Typed(t) => t.signing_hash,
+            TxKind::Legacy { gas_price } => Transaction {
+                nonce: self.body.nonce,
+                gas_price: *gas_price,
+                gas: self.body.gas,
+                action: self.body.action.clone(),
+                value: self.body.value,
+                data: self.body.data.clone(),
+            }
+            .hash(self.chain_id()),
+        };
+        let pubkey_h520: H520 = recover_public_key(signing_hash, self.signature()).map_err(|e| e.into_inner())?;
         // mm2_eth::keys returns the 65-byte SEC1-prefixed pubkey; the
         // legacy `Public` (H512) is the 64 bytes following the 0x04 prefix.
         let mut public = Public::default();
@@ -429,6 +625,8 @@ fn u256_to_alloy(v: &U256) -> alloy::primitives::U256 {
     v.to_big_endian(&mut buf);
     alloy::primitives::U256::from_be_bytes(buf)
 }
+
+fn u256_from_alloy(v: &alloy::primitives::U256) -> U256 { U256::from_big_endian(&v.to_be_bytes::<32>()) }
 
 fn decode_u256(buf: &mut &[u8]) -> alloy::rlp::Result<U256> {
     let v = alloy::primitives::U256::decode(buf)?;

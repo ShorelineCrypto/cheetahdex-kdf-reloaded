@@ -38,7 +38,7 @@ pub(crate) use futures::future::{join_all, select, Either, FutureExt, TryFutureE
 pub(crate) use futures01::Future;
 pub(crate) use http::StatusCode;
 pub(crate) use kdf_crypto::{keccak256, sha256};
-pub(crate) use legacy_tx::{Action, Transaction as UnSignedEthTx, UnverifiedTransaction};
+pub(crate) use legacy_tx::{Action, Transaction as UnSignedEthTx, TxBody, TxKind, UnverifiedTransaction};
 pub(crate) use mm2_core::mm_ctx::{MmArc, MmWeak};
 pub(crate) use mm2_err_handle::prelude::*;
 pub(crate) use mm2_eth::keys::{public_to_address, KeyPair, Public, Signature};
@@ -137,6 +137,7 @@ pub(crate) use abi::{AbiError, Contract, Function, Token};
 
 #[cfg(test)] mod abi_golden_tests;
 #[cfg(test)] mod eth_tests;
+#[cfg(test)] mod typed_tx_vector_tests;
 // Local `geth --dev` integration tests for the v1 ETH/ERC20 HTLC payment +
 // refund path. Native only; they skip themselves when `geth` is not on PATH.
 #[cfg(all(test, not(target_arch = "wasm32")))]

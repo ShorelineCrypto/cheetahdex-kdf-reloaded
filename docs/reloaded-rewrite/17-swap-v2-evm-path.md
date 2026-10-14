@@ -281,6 +281,17 @@ skip-payment-spend-preimage trait method returning `true`) to skip
 the preimage round entirely. This is the correct behaviour for
 EVM and is intentional, not a stub.
 
+Those stand-in preimage bytes are a *serialized counterparty
+transaction*, so the receiving side reads them through the
+foreign-transaction decoding contract of
+[Chapter 35](35-evm-v2-activation-rpcs.md) §35.6A, not through a
+legacy-only reader. Which serialized form arrives is decided by the
+sender's swap gas-fee policy (ch. 35 R35.6.3): a peer on any
+non-legacy tier produces an EIP-2718 typed envelope rather than an
+untyped legacy transaction. The same applies to every other step of
+this chapter that reads a counterparty's serialized transaction
+rather than its decoded calldata.
+
 ### 17.5.2 The `takerPaymentApprove` step (ERC-20 only)
 
 For ERC-20 tokens, `erc20TakerPayment` deposits funds into the
@@ -837,7 +848,15 @@ The chapter relies on one baseline-state claim:
   (the coin-trait dispatch surface shared with the UTXO V2 path,
   §17.10); [Chapter 29](29-license-conditions-e-f.md) (the
   UTXO-side dex-fee-address resolution finding contrasted in
-  §17.7).
+  §17.7); [Chapter 35](35-evm-v2-activation-rpcs.md) §35.6 and
+  §35.6A (the swap gas-fee policy that decides which serialized
+  transaction form a peer emits, and the contract for reading a
+  counterparty's serialized transaction, cited from §17.5.1).
 - *Forbidden corpus:* consulted by the KDF Spec Reader for
   upstream-compatible behaviour; no private implementation
-  expression is normative in this chapter.
+  expression is normative in this chapter. The §17.5.1 paragraph on
+  reading a counterparty's serialized transaction through chapter 35
+  §35.6A, and this footer item, were cleared by the KDF Dirty Gate
+  together with that section. Chapter 35 §35.6A's *Clearance record*
+  is the single authority for that clearance's extent, method and
+  measure; this chapter does not restate them.

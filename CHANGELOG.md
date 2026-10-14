@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **A counterparty's EIP-1559 (type 2) and EIP-2930 (type 1) transaction can now be read.**
+  Swap transactions (such as the taker's dex-fee payment) were decoded only as legacy
+  9-field EIP-155 transactions, so a typed transaction failed with `unexpected string` and
+  the swap with it (issue #14); most Polygon traffic is type 2. A typed transaction is now
+  decoded through the EIP-2718 envelope: its id is the keccak-256 of the whole envelope, the
+  sender is recovered from the signature over the typed signing hash using the y-parity (not an
+  EIP-155 `v`), and re-encoding yields the original envelope bytes. A typed transaction taken
+  from a node's RPC (transaction history, spend search) goes through the same path, where it
+  previously recovered a wrong sender and reported a zero gas price. EIP-1559 has no single
+  gas price, so a decoded EIP-1559 transaction exposes none (`gas_price()` is `None`) rather
+  than its fee cap; transaction history now reports the fee actually paid from the receipt
+  for it. EIP-4844 and EIP-7702 are rejected deliberately with an error naming the type.
+  Legacy decoding, encoding and ids are unchanged. Verified against real Polygon and Ethereum
+  mainnet transactions (legacy, type 1 with an access list, type 2 with and without one).
+- **An undecodable EVM transaction now says what it is.** A transaction of an unsupported
+  type fails with an error naming the type byte and the supported types, and a payload that
+  is not a transaction at all reports its length and a short prefix, instead of the opaque
+  `unexpected string`.
+
 ## [0.3.0-alpha.3] — development milestone, not released
 
 ### Fixed

@@ -234,6 +234,24 @@ These are divergences from GLEEC KDF that are **not** operator-configurable in t
   changed yet. Code: `coins/eth/eth_activation.rs`,
   `coins_activation/src/eth_with_tokens_activation.rs`; CRD ch.35.
 
+- **Two stricter refusals when decoding a counterparty's EVM transaction, with no
+  switch to relax them.** Reloaded refuses a payload carrying trailing bytes after a
+  complete transaction, and refuses a typed (EIP-2718) envelope whose signature is
+  all zeros. The reference accepts both: it folds trailing bytes into the identifier
+  it reports, and it applies its pre-EIP-155 unsigned-transaction convention to typed
+  forms, reporting a placeholder sender. Neither input can be a confirmed on-chain
+  transaction, so no honest counterparty's bytes decode differently -- but accepting
+  either would let a counterparty choose a value Reloaded then reports as fact: the
+  transaction identifier in the first case, the sender in the second. **No opt-back is
+  offered**, because an opt-back exists to recover a reference behaviour that is merely
+  different, not one that is worse, and a switch here would be an opt-in to weaken
+  validation, which `AGENTS.md` §5 bars. Everything else about typed-transaction
+  decoding is *parity*, not divergence: Reloaded accepts EIP-2930 and EIP-1559 exactly
+  as the reference does, derives the same identifier and recovers the same sender, and
+  refuses EIP-4844 and EIP-7702 as the reference does. Contract:
+  [CRD ch.35 §35.6A](docs/reloaded-rewrite/35-evm-v2-activation-rpcs.md); decision
+  recorded as D35.1.
+
 ### Removed / disabled in KDF Reloaded
 
 - iOS build target removed from the alpha release matrix.

@@ -25,10 +25,16 @@ introduce a new coin.
 > the `error_type` discriminants, the JSON shape of each `error_data`, the HTTP
 > status of each mmrpc-level error, and externally *dictated* interop (EVM
 > JSON-RPC, EIP-1559 fee semantics, EIP-55 address checksums, ERC-20 contract ABI
-> calls, CAIP-style chain identification). The human-readable `error` text,
-> `error_path` and `error_trace` are **not** bound. Private Rust types, helper
-> decomposition, and internal module structure are informative and are **not**
-> bound by this chapter.
+> calls, CAIP-style chain identification). The chapter also binds the two
+> non-activation EVM coin-layer contracts that the activation surface selects or
+> presupposes: the per-coin swap gas-fee policy (§35.6) and the byte-level
+> contract for reading a serialized EVM transaction the project did not build
+> (§35.6A), whose dictated interop is EIP-2718 envelope framing, EIP-2930 and
+> EIP-1559 payload layout, EIP-155 replay protection, keccak-256 and secp256k1
+> public-key recovery. The human-readable `error` text, `error_path` and
+> `error_trace` are **not** bound. Private Rust types, helper decomposition, and
+> internal module structure are informative and are **not** bound by this
+> chapter.
 
 > **Sources of truth (binding order).**
 > 1. The public Komodo DeFi Framework API reference
@@ -75,6 +81,14 @@ here is:
 | `get_token_info` | mmrpc 2.0 | all | read an ERC-20 contract's on-chain info (symbol, decimals) |
 | `get_swap_gas_fee_policy` | mmrpc 2.0 | all | read the per-coin swap gas-fee policy |
 | `set_swap_gas_fee_policy` | mmrpc 2.0 | all | set the per-coin swap gas-fee policy |
+
+Two sections of this chapter are not activation RPCs. §35.6 binds the per-coin
+swap gas-fee policy, which decides which EIP-2718 transaction form the coin
+*emits*; §35.6A binds the contract for *reading* a serialized EVM transaction the
+project did not build -- the counterparty-facing side of the same choice, because
+a peer whose policy is any non-legacy tier hands us a typed envelope. They sit
+here because no other chapter owns the EVM coin layer as a whole, and because the
+second is a direct consequence of the first.
 
 **Shared conventions (binding).**
 
@@ -818,7 +832,393 @@ R35.6.5 `error_type` discriminants and HTTP status shall include at least:
 R35.6.6 The selected policy governs how the EVM coin prices gas for subsequent
 swap transactions (legacy gas price vs. an EIP-1559 max-fee / max-priority-fee
 pair at the chosen tier). The mapping from tier to concrete fee values is dictated
-by EIP-1559 fee-history semantics, not by this chapter.
+by EIP-1559 fee-history semantics, not by this chapter. Which serialized
+transaction form each policy value produces, and which forms the project must
+read as a consequence, are bound in §35.6A (R35.6A.17, R35.6A.2).
+
+> **Code-quality finding (informative) -- the policy is stored but not
+> applied.** In this repository the policy is accepted by
+> `set_swap_gas_fee_policy`, held per coin, and echoed by
+> `get_swap_gas_fee_policy`, but no transaction-construction path reads it: the
+> swap signing path resolves a single gas price and builds the untyped legacy
+> form unconditionally. R35.6.6 therefore has no implementation, and an operator
+> who sets `High` gets exactly the pricing and the transaction form of `Legacy`
+> while both RPCs report `High`. The RPC round-trip tests pass because they
+> exercise only the store-and-echo behaviour. The repair is to make the fee
+> resolution and the emitted transaction form follow the stored policy; it is
+> tracked as D35.4, and it is the reason the §35.6A *Reloaded status* note can
+> state that the project currently emits only one of the two forms.
+> *(Trigger: a contradiction between two things read side by side while
+> establishing §35.6A -- a stored policy with no reader in the path the rule
+> says it governs. Finding is in this repository's own code, not in any
+> reference material.)*
+
+---
+
+## 35.6A Foreign-transaction byte-decoding contract (EIP-2718 dictated)
+
+> **Dirty-side derivation record (sanitized).** This section was authored by the
+> KDF Spec Reader under the chapter-01 two-team workflow. The transaction
+> framing, payload layout, signing-hash construction, identifier construction and
+> signature-parity rules it states are dictated by the public EIP-2718, EIP-2930,
+> EIP-1559 and EIP-155 specifications and by keccak-256 / secp256k1 recovery; what
+> was established through the workflow is the *acceptance set* the reference
+> lineage applies to those forms, the error class a rejection takes, and the
+> release designations at which the acceptance set changed. Reference versions:
+> the GLEEC KDF release tags `v3.0.0-beta` (reference) and `v2.6.0-beta` (legacy
+> cross-check), with earlier public release designations named in R35.6A.18 only
+> as the version boundary. It carries only observable behaviour, the dictated
+> wire forms, and behavioural findings; it carries no private implementation
+> expression. **It passed the KDF Dirty Gate before clean-side implementation**,
+> together with the §35.6 finding, the §35.7 paragraph, the acceptance criteria,
+> §35.8B, §35.8C and this chapter's footer, and with the matching §17.5.1
+> paragraph and footer item of [Chapter 17](17-swap-v2-evm-path.md). The edits
+> made after that clearance were re-gated in a second pass, which is the one the
+> *Clearance record* below carries.
+
+> **Clearance record (chapter 01 T1).** This material was gated **twice**. The
+> first pass cleared the three CRD files this work touches. The second re-gated
+> the edits made after that clearance rather than accepting the assessment that
+> they were mechanical, and in doing so covered five files -- the three CRD
+> files plus the two operator-facing documents (`RELOADED_VS_GLEEC.md` and
+> `docs/GLEEC_COMPATIBILITY.md`) that the first pass had not seen -- and closed
+> the gap the first pass had declared, by opening material that run could not.
+> The second pass is therefore the one that describes the text as it now stands,
+> and its three scope-attestation elements are the ones recorded here, carried
+> forward in corpus-free terms. Two contributions of the first pass are recorded
+> alongside them and attributed to it, and they are opposites: one positive
+> finding the second pass did not repeat, which **stands**, and one declared
+> limit the second pass **retired**.
+>
+> - *Extent.* It compared the subject matter this document set names in its own
+>   terms: the EVM coin layer's decoding of a serialized transaction the project
+>   did not construct, its transaction-type model, its reconstruction of a
+>   transaction from a node's reply, the application of the per-coin swap
+>   gas-fee policy, the derivation of fee details in transaction history, and
+>   the swap-step paths that read a counterparty's serialized transaction.
+>   Reference: the v3 development lineage as held locally, with the published
+>   release designations `v3.0.0-beta` and `v2.6.0-beta` as the named reference
+>   points; the named releases were **not** each compared separately.
+>   Additionally, and unlike the first pass, the third-party dependency outside
+>   the principal material that carries the transaction-type model and the two
+>   behaviours the informative findings below describe was compared. Quantity:
+>   three files of the principal implementation set -- one read in the relevant
+>   regions, two consulted only for the dependency declaration -- and four files
+>   of that dependency read in the regions carrying type dispatch, identifier
+>   derivation and the unsigned-signature convention; seven in total.
+>   *Standing finding of the first pass.* That pass additionally confirmed that
+>   the four published release designations this chapter names exist as release
+>   tags of that lineage. The second pass neither repeated that confirmation nor
+>   disturbed it: it **stands as established**, and it is what R35.6A.18's
+>   version boundary, D35.3's peer floor and this chapter's footer locator rest
+>   on. The extent is therefore the lineage comparison above plus this
+>   tag-existence confirmation, and not a per-release comparison.
+> - *Method.* By reading, combined with mechanical token extraction over the
+>   added lines only -- bracketed tokens, quoted literals, fenced blocks,
+>   code-shaped bare words -- each extracted token put individually to the
+>   forced-versus-free test, and targeted search over the compared material.
+>   Every token the extraction returned resolved to dictated or public contract:
+>   EIP-2718 type bytes and RLP leading-byte markers, mmrpc error-envelope field
+>   names, public RPC method strings and their serialized policy values, one
+>   trait method on the relicensed base's own public surface, published release
+>   designations, and paths inside this repository. The RPC method strings and
+>   policy values were confirmed against this repository's own source rather
+>   than assumed. The repository's `tools/clean_room_gate.py` was not used: it
+>   measures source files and the candidate embeds no fenced code block.
+> - *Measure.* 0.02 on the discretionary-expression basis, derived independently
+>   in that pass and not inherited. Read against the standard that
+>   dictated-interop and pinned-interface matches are excluded from the measured
+>   set however dense they are, and that genuine discretionary expression fails
+>   regardless of how much surrounding content is legitimately dictated. The
+>   non-nil figure records the near-edge behavioural statements in the
+>   informative notes below and their two operator-facing restatements; each was
+>   examined individually and found to carry behaviour and consequence rather
+>   than expression.
+>
+> *Limit of the first pass, retired.* The first pass declared a gap: a
+> third-party dependency outside the material it compared carries part of the
+> behaviour two of the informative findings below describe, and that run could
+> not open it, so those two findings were judged on this section's own form
+> rather than by comparison. That was a true limit of that run only. The second
+> pass compared the dependency, which is what retired the gap; it is **not** a
+> live limitation of this record.
+
+> **Why the chapter carries it.** §35.6 lets an operator put a coin on any of
+> three EIP-1559 priority tiers. A peer that has done so signs its swap
+> transactions as EIP-1559 envelopes, and every swap step in which we read that
+> peer's bytes then depends on decoding one. A reader that handles only the
+> untyped legacy form cannot complete a swap with such a peer at all, and the
+> failure surfaces as an unreadable payload rather than as anything that names
+> the cause. The contract below is therefore an interoperability requirement of
+> the policy §35.6 already binds, not a separate feature.
+
+### Where the contract applies
+
+R35.6A.1 The contract binds **every** path that reads a serialized EVM
+transaction the project did not itself construct. At minimum:
+
+- the coin-layer byte-decode entry (`MarketCoinOps::tx_enum_from_bytes`);
+- the V2 swap protocol's transaction parser and its preimage parser, including
+  the EVM stand-in preimage that carries a serialized funding transaction
+  ([Chapter 17](17-swap-v2-evm-path.md) §17.5.1);
+- every V1 and V2 swap step that reads a counterparty's serialized dex-fee,
+  payment, funding, spend or refund transaction before validating it, spending
+  from it, refunding it, or searching for its spend -- including the watcher
+  paths, which read the same bytes on behalf of a third party;
+- the raw-transaction read RPC and the transaction-history fee computation,
+  which reconstruct a transaction a node reported.
+
+A decoder that serves one of these and not the others is not conformant: the
+bytes reaching them come from the same counterparty.
+
+### Accepted and rejected transaction forms
+
+R35.6A.2 The following three forms MUST decode successfully:
+
+| Form | Leading byte | Dictating specification |
+| --- | --- | --- |
+| Untyped legacy transaction | an RLP list header (`0xc0` or above) | EIP-155 (and pre-EIP-155 without the chain-id triplet) |
+| Typed, access-list transaction | `0x01` | EIP-2930 |
+| Typed, priority-fee transaction | `0x02` | EIP-1559 |
+
+R35.6A.3 Every other value in the EIP-2718 reserved type range -- explicitly
+including `0x03` (EIP-4844 blob transactions) and `0x04` (EIP-7702
+authorization-list transactions), and also `0x00` and every unassigned value up
+to `0x7f` -- MUST be rejected.
+
+Rejecting `0x03` and `0x04` is **parity, not divergence.** The reference lineage
+has no representation for a blob transaction or an authorization-list
+transaction at either reference version named in the derivation record: its
+transaction model admits exactly the three forms of R35.6A.2, and any other type
+value is an input-decode failure. The refusal there is **explicit rather than
+incidental** -- the lineage recognises an unsupported-type outcome as such,
+rather than leaving the payload to fail some later check for an unrelated
+reason -- so the behaviour is a decision in the reference and not an artefact of
+one. Because both sides refuse, no opt-in compatibility switch is required for
+these two types (contrast `docs/COMPAT_SWITCHES.md`, which governs behaviour
+that departs from an applicable reference contract).
+
+R35.6A.4 **Framing.** A typed transaction is the concatenation of a single type
+byte and the RLP-encoded, signature-bearing payload for that type; it is
+therefore *not* an RLP list at its outermost level, which is what distinguishes
+it from a legacy transaction on the first byte alone. A decoder MUST dispatch on
+that first byte before attempting any RLP list decode, and MUST NOT treat a
+typed envelope's failure to be a list as a diagnosis of the payload.
+
+### Identifier, serialization fidelity and sender
+
+R35.6A.5 **Identifier.** The transaction identifier is the keccak-256 digest of
+the complete serialized form as presented: for a typed transaction the whole
+envelope *including* the type byte, for a legacy transaction the RLP list. The
+digest MUST NOT be taken over the payload with the type byte stripped. This is
+the identifier the chain, the counterparty and the reference lineage all use, so
+it is the only value for which our swap state, our history records and our
+reported `tx_hex` can agree with a peer's.
+
+R35.6A.6 **Serialization fidelity.** Re-serializing a decoded foreign
+transaction MUST reproduce, byte for byte, the bytes that were decoded. The
+requirement is unconditional, and it is stronger than reassembling the fields in
+the canonical order: a reassembly agrees with the input only when the input was
+itself canonically encoded, and the one case where they diverge is exactly the
+case in which a reported identifier would stop matching the reported bytes.
+
+R35.6A.7 **Signed message and sender.** For a typed transaction the signed
+message is the keccak-256 digest of the type byte followed by the RLP encoding
+of the *unsigned* payload for that type -- the payload that carries the chain id
+as its first element and the access list as its last, and that omits the three
+signature elements. The signature's y-parity is the secp256k1 recovery
+parameter, and the sender is the address derived from the recovered public key.
+The EIP-155 transformation of the legacy signature's recovery byte MUST NOT be
+applied to a typed transaction, and a legacy signing payload MUST NOT be
+substituted for the typed one: either substitution yields a different digest and
+therefore recovers a *different, wrong* sender while still succeeding, which is
+the failure mode this rule exists to exclude.
+
+R35.6A.8 A typed transaction whose signature parity is any value other than the
+two the specification admits MUST be rejected at decode.
+
+R35.6A.9 **Chain-id of a typed envelope.** A typed envelope carries its chain id
+inside the signed payload, and a conformant decoder MAY expose it. Decoding MUST
+NOT be conditioned on that chain id matching the active coin's chain: the
+reference lineage applies no such check on this path, so rejecting a mismatch at
+decode time would refuse input the reference accepts. Whether a chain-binding
+check belongs at a swap-validation site is D35.2.
+
+### Strictness required beyond the reference
+
+The two rules in this subsection reject input the reference lineage accepts.
+Both concern input that no chain can produce, and both exist because accepting
+it would let a counterparty control a value we report as fact. They are
+deliberate divergences carrying no opt-in switch (D35.1).
+
+R35.6A.10 **Trailing bytes.** Input carrying any byte beyond the end of the one
+transaction it encodes MUST be rejected, for both the legacy and the typed form.
+An accepted suffix changes the identifier the project reports while leaving every
+decoded field identical, which makes the identifier of a counterparty's
+transaction malleable by that counterparty.
+
+R35.6A.11 **All-zero signature on a typed transaction.** A typed transaction
+whose two signature scalars are both zero MUST be rejected. It MUST NOT be
+treated as an unsigned transaction and MUST NOT be attributed to the
+all-ones placeholder sender that the pre-EIP-155 unsigned-transaction convention
+defines. No typed transaction format has an unsigned on-the-wire form, so the
+convention does not reach them; and a decode that *succeeds* and reports a
+deterministic placeholder address as the sender is worse than one that fails,
+because a caller comparing senders receives an answer rather than an error.
+
+### Fee fields of a decoded foreign transaction
+
+R35.6A.12 An EIP-1559 envelope carries **no gas price** -- it carries a maximum
+fee per gas and a maximum priority fee per gas, both of which are caps and
+neither of which is an amount paid. Both values MUST NOT be substituted for a
+price anywhere in the project: neither may be reported as one, and neither may be
+compared against one. An EIP-2930 envelope and a legacy transaction do each
+carry a genuine gas price.
+
+R35.6A.13 Where a price actually paid is needed for a decoded foreign
+transaction -- the fee details of a transaction-history record are the case that
+exists -- it MUST be taken from the chain: the receipt's effective gas price, or
+the price the node reports for the transaction. It MUST NOT be taken from the
+envelope's caps, and a missing value MUST NOT be reported as zero. Reporting a
+cap as a fee overstates it; reporting zero understates it; both are wrong in a
+field an operator reads as an amount.
+
+### Transactions reconstructed from a node's reply
+
+R35.6A.14 Where a transaction is reconstructed from a node's JSON-RPC
+transaction object rather than from raw bytes, a typed transaction MUST be
+reconstructed under its own type's rules -- the typed signing message of
+R35.6A.7, the parity recovery parameter, that type's fee fields and its access
+list -- and never through the legacy rules. Routing a typed transaction through
+the legacy reconstruction produces a usable object with a wrong sender, and the
+paths that consume it (transaction history, spend search, payment checks) have
+no way to notice. A node-reported transaction type outside the accepted set of
+R35.6A.2 MUST be rejected.
+
+R35.6A.15 The identifier recomputed from the reconstructed envelope MUST be
+compared against the identifier the node reported, and a disagreement MUST be
+rejected rather than resolved in favour of either value. (The reference lineage
+adopts the node-reported identifier without recomputing it; see the divergence
+note below.)
+
+### Error surface
+
+R35.6A.16 A rejection under any rule of this section is an **input-decode
+failure of the coin layer's existing byte-decode error class**. This section
+introduces no new mmrpc `error_type` discriminant, no new `error_data` shape and
+no new HTTP status, and the discriminant a caller observes MUST NOT depend on
+*why* the payload was refused: an unsupported type, a malformed payload, a
+trailing suffix and an unrecoverable signature all surface in the same class.
+That matches the reference lineage, where an unsupported type byte and a
+payload that is not a transaction at all reach the caller as the same decode
+failure.
+
+The human-readable text is not bound by this chapter (the *Binding scope (R36)*
+note at the head of the chapter). Distinguishing the cases in that text is
+therefore permitted, and is worth doing -- an unsupported-type refusal and a
+corrupt-payload refusal are diagnosed very differently by an operator -- but it
+carries no wire meaning and no caller may branch on it.
+
+### Which form the project emits, and the peer-version floor
+
+R35.6A.17 On the sending side the form follows the policy of R35.6.3: the
+`Legacy` policy emits an untyped EIP-155 legacy transaction, and the `Low`,
+`Medium` and `High` tiers emit an EIP-1559 (type `0x02`) transaction. The
+project emits no EIP-2930 transaction; it must nevertheless *read* one
+(R35.6A.2), because the reference lineage reads one and a third-party signer may
+produce one.
+
+> **Reloaded status.** The *reading* side of this section is implemented. The
+> emitting side is **not**: every locally signed EVM transaction is built in the
+> untyped legacy form with a single gas price, whichever policy the coin
+> carries, so R35.6A.17 and R35.6.6 describe the required contract rather than
+> the present behaviour. The only typed transaction the project can currently
+> produce is one a remote wallet signs on its behalf through the
+> WalletConnect path ([Chapter 22](22-walletconnect-v2.md)), where the form is
+> the wallet's choice and not the policy's. This is D35.4 and is independent of
+> the decoding work: reading a peer's typed transaction is what unblocks a swap,
+> and emitting one is a separate, lower-urgency parity item that also carries
+> the peer floor of R35.6A.18.
+
+R35.6A.18 **Version boundary (recorded).** Typed-transaction decoding entered
+the reference lineage within its public release history rather than being present
+throughout it: a build at or before the public release designation `v2.0.0-beta`
+reads the untyped legacy form only, and decoding of types `0x01` and `0x02` is
+present from `v2.1.0-beta` onwards and unchanged at `v2.6.0-beta` and
+`v3.0.0-beta`. Two consequences bind:
+
+1. Accepting types `0x01` and `0x02` on the reading side restores parity with
+   every reference build from `v2.1.0-beta` onwards. It does not add a
+   capability the lineage lacks, and it needs no divergence entry.
+2. A peer on a build at or before `v2.0.0-beta` cannot read a typed transaction
+   we emit. This is a reason to keep `Legacy` as the default policy
+   (R35.6.2) rather than a reason to restrict what we read; the reading and
+   emitting sides have different compatibility floors and MUST NOT be collapsed
+   into one decision. See D35.3.
+
+> **Upstream divergence (informative) -- strictness on input no chain can
+> produce.** R35.6A.10 and R35.6A.11 each reject a payload the reference lineage
+> accepts: a transaction followed by trailing bytes (which the reference folds
+> into the identifier it reports), and a typed transaction with an all-zero
+> signature (which the reference reports under the pre-EIP-155 placeholder
+> sender). Neither payload can be a confirmed chain transaction, so no honest
+> counterparty's bytes decode differently on the two sides, and no swap outcome
+> changes for traffic that exists. Both ship as documented divergences with
+> **no opt-in switch**, for the reasons recorded in D35.1; the operator-facing
+> compatibility documents carry the entries, sourced from this section.
+
+> **Upstream divergence (informative) -- identifier cross-check.** R35.6A.15
+> requires a reconstructed typed transaction's recomputed identifier to agree
+> with the node-reported one. The reference lineage carries the node-reported
+> identifier through without recomputation, so a node reporting an identifier
+> that does not match the bytes it also reported is detected here and not there.
+> The check can only fire on an inconsistent or hostile node, and its effect is
+> a refusal rather than a different value.
+
+> **Upstream divergence (informative) -- chain id of a typed envelope.** The
+> reference lineage's chain-id accessor derives the value from the legacy
+> signature convention, and therefore reports *no chain id* for a typed
+> transaction even though the envelope carries one; nothing on the
+> foreign-transaction path consumes that accessor there. Exposing the envelope's
+> chain id (R35.6A.9) is a superset with no wire effect, and R35.6A.9 forbids
+> acting on it at decode time.
+
+> **Code-quality finding (informative) -- identifier malleability from a
+> trailing suffix.** In the reference lineage the identifier of a decoded
+> transaction is taken over the whole input presented to the decoder, while the
+> decoded fields are taken only from the extent the transaction's own length
+> header declares. A caller that appends bytes therefore obtains a decoded
+> transaction with unchanged fields and a changed identifier, and nothing
+> refuses the input. The repair is the pair of rules this section already
+> states: bound the digest to the declared extent of the one transaction, and
+> refuse input longer than that.
+> *(Trigger: apparent with little extra effort -- the identifier and the decoded
+> fields of one and the same transaction are observably taken over different
+> extents of the input.)*
+
+> **Code-quality finding (informative) -- unsigned-transaction convention
+> applied to typed forms.** In the reference lineage the condition that treats a
+> transaction as unsigned, and so attributes it to the placeholder sender,
+> depends on the two signature scalars alone. It therefore holds for every
+> transaction form rather than only for the untyped one, although only the
+> untyped form has an unsigned on-the-wire representation for the convention to
+> describe. The repair is to restrict the convention to the untyped form, which
+> is R35.6A.11.
+> *(Trigger: apparent with little extra effort -- a pre-EIP-155 convention
+> observably reaching transaction forms that postdate it and define no such
+> state.)*
+
+> **Code-quality finding (informative) -- zero substituted for a missing
+> price in reported fees.** In the reference lineage the fee details of a
+> transaction-history record take the node-reported price and substitute zero
+> when the node does not report one, which is precisely the case a typed
+> transaction can present. The record then states a fee of zero for a
+> transaction that paid a fee. The repair is R35.6A.13: take the receipt's
+> effective gas price, which is the amount actually paid and is reported for
+> every transaction form.
+> *(Trigger: apparent with little extra effort -- a zero stand-in for a value
+> the source of the data does not always supply, in a field reported to an
+> operator as an amount.)*
 
 ---
 
@@ -837,6 +1237,18 @@ This note orients the implementer; it is not normative.
   `set_swap_gas_fee_policy`, and `task::enable_eth::*`, routed on native and
   WASM, with the deviations recorded in the `Reloaded status` notes of §35.1,
   §35.2, §35.3 and §35.3A.
+
+**Already present in reloaded, for §35.6A:** the vendored EVM transaction
+module that the EVM coin decodes foreign transaction bytes through is the single
+decoder every path of R35.6A.1 reaches, so the contract has one implementation
+site rather than one per path. The untyped legacy form, and decoding of the two
+accepted typed forms with the identifier, serialization-fidelity, signing-message
+and refusal rules of §35.6A, are implemented there; the node-reply
+reconstruction path of R35.6A.14 and the fee-source rule of R35.6A.13 are
+implemented in the EVM coin itself. The provenance of that module is recorded in
+[Chapter 34](34-provenance-ledger.md) §34.2 and is unaffected by the typed-form
+work, which rests on the public specifications named in the footer and on a
+dependency the project already carries.
 
 **What must be added or changed:** the wire contract of §§35.1--35.3A where the
 status notes record a deviation, the `task::enable_erc20::*` family, and the
@@ -872,10 +1284,20 @@ decomposition is the implementer's choice.
 - `get_swap_gas_fee_policy` / `set_swap_gas_fee_policy` round-trip a policy in the
   set `{Legacy, Low, Medium, High}` for an EVM coin, use exactly those method
   strings and the `swap_gas_fee_policy` field, and reject unsupported coins
-  (R35.6).
+  (R35.6). A round-trip alone does **not** satisfy R35.6.6: the stored policy
+  must also change how a subsequent swap transaction is priced and which
+  serialized form it takes (R35.6A.17). That part is open -- D35.4.
 - The entire surface builds and is routed on native **and** WASM targets, with
   the MetaMask policy and `rpc_mode: "Metamask"` available only on WASM
   (R35.1.4, R35.1.4a).
+- A counterparty's serialized transaction decodes on every path of R35.6A.1 when
+  it is an untyped legacy, an EIP-2930 or an EIP-1559 transaction, and is
+  refused when it is any other EIP-2718 type, with the identifier, the recovered
+  sender and the re-serialized bytes all equal to what the chain reports
+  (§35.6A).
+- A swap completes against a peer whose swap gas-fee policy is a non-legacy tier
+  (R35.6.3) -- the case that fails outright when only the untyped legacy form can
+  be read.
 
 ## 35.8A Wire-shape tests (binding)
 
@@ -928,15 +1350,142 @@ that only checks an internal variant does not satisfy these rules.
   single-address platform; terminal `Transport` / `CouldNotFetchBalance` per
   R35.3A.6.
 
+## 35.8B Foreign-transaction decoding tests (binding)
+
+The tests below are binding on §35.6A. Each one asserts against a value the
+**chain** reports, never against a value this project computed: the vectors are
+signed transactions fetched from a public chain by identifier, so the bytes, the
+identifier and the sender correspond by construction and cannot all be wrong
+together. A test that round-trips our own encoder against our own decoder proves
+nothing about any of these rules and does not satisfy them.
+
+- **T35.17** *Real-chain vectors.* For each of: an untyped legacy transaction, an
+  EIP-2930 transaction with a non-empty access list, an EIP-1559 transaction with
+  no access list, and an EIP-1559 transaction with a non-empty access list --
+  assert that the decoded identifier equals the chain-reported identifier
+  (R35.6A.5), that the recovered sender equals the chain-reported sender
+  (R35.6A.7), and that re-serializing the decoded transaction yields the original
+  bytes exactly (R35.6A.6). Use more than one chain, so that a chain-id-dependent
+  mistake cannot pass.
+- **T35.18** *The digest covers the envelope.* Assert that the digest taken over
+  the typed payload with the type byte stripped differs from the chain-reported
+  identifier. Without this, a decoder that happens to hash the right bytes is
+  indistinguishable from one that is pinned to (R35.6A.5).
+- **T35.19** *Refusal set.* Type bytes `0x00`, `0x03`, `0x04` and at least one
+  unassigned value below `0x80` are each refused; a payload that is not a
+  transaction at all is refused; each refusal surfaces in the single error class
+  of R35.6A.16 and none of them is distinguishable from the others by any
+  machine-readable field.
+- **T35.20** *Refusals that protect attribution.* A vector with one byte of its
+  signature altered does not recover the chain-reported sender; a typed envelope
+  whose two signature scalars are zero is refused rather than attributed to the
+  placeholder sender (R35.6A.11); a valid envelope with one byte appended is
+  refused (R35.6A.10); a typed envelope with an out-of-range signature parity is
+  refused (R35.6A.8).
+- **T35.21** *Both production entry points.* The coin-layer byte-decode entry and
+  the V2 swap-protocol transaction parser each accept an EIP-2930 and an
+  EIP-1559 vector and yield the identifier and sender T35.17 asserts. Testing
+  the decoder in isolation does not satisfy this: R35.6A.1 is a statement about
+  call paths.
+- **T35.22** *Node-reply reconstruction.* A node-reported EIP-2930 and
+  EIP-1559 transaction object yields the same sender and identifier as decoding
+  the same transaction's raw bytes (R35.6A.14); an object whose reported
+  identifier disagrees with the recomputed envelope is refused (R35.6A.15); a
+  node-reported type outside the accepted set is refused; the legacy branch's
+  results are unchanged.
+- **T35.23** *Fee reporting.* For an EIP-1559 transaction the history record's
+  fee is computed from the receipt's effective gas price and is non-zero, and
+  neither the maximum-fee nor the maximum-priority-fee value appears as the price
+  (R35.6A.12, R35.6A.13). For a legacy transaction the reported fee is unchanged
+  from the pre-typed behaviour.
+
+## 35.8C Deferred Work
+
+**D35.1** *Decision taken -- the two stricter refusals ship as documented
+divergences with no opt-in switch.* R35.6A.10 (trailing bytes) and R35.6A.11
+(all-zero typed signature) refuse input the applicable reference contract
+accepts, which on its face engages this repository's rule that a deliberate
+divergence ships with a scoped opt-back mechanism and its documentation in the
+same change. The decision is that **no switch is offered**, on three grounds:
+
+1. Neither input can be a confirmed chain transaction, so no honest
+   counterparty's bytes decode differently on the two sides and no swap outcome
+   changes for traffic that exists.
+2. Accepting either lets a counterparty choose a value the project then reports
+   as fact -- the transaction identifier in the first case, the sender in the
+   second.
+3. A switch here would be an opt-in to *weaken* validation, which this
+   repository's contributor rules bar outright. An opt-back exists to let an
+   operator recover a reference behaviour that is merely different; it is not a
+   mechanism for restoring a reference behaviour that is worse.
+
+This follows the precedent of the Electrum-dependency removal, which shipped as
+a divergence stated plainly rather than as a switch that would not have been
+safe to flip. The divergence is recorded in the operator-facing compatibility
+documents; §35.6A is the source for those entries.
+
+The decision remains the maintainer's to revisit: electing a switch would change
+nothing in §35.6A except the addition of the opt-back and its entries in the
+divergence documentation. Nothing else in this chapter depends on the outcome.
+
+**D35.2** *Maintainer decision -- chain binding of a counterparty's
+transaction.* R35.6A.9 keeps decoding chain-agnostic because the reference
+lineage does. Whether a swap-validation site should additionally require a typed
+envelope's chain id to equal the active coin's chain is open. It would be a
+divergence in the direction of more validation, and it interacts with coins that
+share an address space across chains; it is not settled by this chapter and MUST
+NOT be added as a side effect of decoding work.
+
+**D35.3** *Outgoing typed emission and the peer floor.* R35.6A.18 records that a
+peer on a reference build at or before `v2.0.0-beta` cannot read a typed
+transaction. Nothing today makes the project emit one by default, because
+R35.6.3's default is the legacy policy. If a future change makes a non-legacy
+tier the default, or sets one per chain, the peer floor becomes load-bearing and
+the question of gating the emitted form on a negotiated peer capability must be
+answered first.
+
+**D35.4** *The swap gas-fee policy has no effect on a transaction.* R35.6.6
+requires the stored policy to govern how the coin prices gas, and R35.6A.17
+requires it to decide which serialized form the coin emits. Neither holds in
+this repository today: the policy is stored and echoed, and every locally signed
+transaction is an untyped legacy one priced from a single gas price. Closing
+this needs (a) a fee resolution per policy tier against EIP-1559 fee-history
+semantics -- the estimate the project already computes for the EIP-1559
+fee-per-gas surface of [Chapter 10](10-sse-streaming.md) is the natural source,
+and reusing it avoids two tier definitions -- (b) construction and signing of a
+type-`0x02` transaction, and
+(c) the peer-floor decision of D35.3, because emitting a typed transaction is
+exactly what a peer at or before `v2.0.0-beta` cannot read. It is deliberately
+**not** a prerequisite for the decoding contract of §35.6A: a peer's typed
+transaction must be readable whether or not we can produce one. Until this
+closes, the policy RPCs are honest about what was *set* and silent about the
+fact that nothing acts on it, and the acceptance criterion for §35.6 is
+satisfied only in its round-trip part.
+
+**D35.5** *Chapter shape.* This chapter's canonical sections were, before this
+pass, an *Acceptance criteria* section and a *Wire-shape tests* section with no
+*Deferred Work* section at all, which chapter 01 R19 requires. This section
+closes that gap for the deferrals above; the chapter still carries no
+*Baseline Verifications* section, which R19 permits only when the chapter binds
+no such claims. Confirming that is a separate pass over §§35.1--35.4.
+
 ## 35.9 Provenance Footer
 
 - *Inputs:* the published Komodo DeFi Framework API reference (the
   `enable_eth_with_tokens`, `enable_erc20`, `task_managed/enable_eth`,
   `enable_nft` pages, `common_structures/{activation,wallet,nfts,enums,error_types}`
   and the v20 index) -- governing where explicit; the EVM JSON-RPC, EIP-55,
-  EIP-1559, ERC-20 ABI and CAIP-style chain identification specifications;
+  EIP-1559, ERC-20 ABI and CAIP-style chain identification specifications; for
+  §35.6A additionally EIP-2718 (typed-transaction envelope framing and the
+  reserved type range), EIP-2930 (access-list transaction payload), EIP-1559
+  (priority-fee transaction payload), EIP-155 (legacy replay protection), and the
+  keccak-256 and secp256k1 public-key-recovery specifications;
   reloaded's existing EVM coin type, activation entrypoints and task substrate
-  (§35.7); [Chapter 17](17-swap-v2-evm-path.md) (V2 swap contracts);
+  (§35.7); signed transactions fetched from public EVM chains by identifier,
+  with the identifier and sender those chains report, as the vectors §35.8B
+  binds; [Chapter 10](10-sse-streaming.md) (the EIP-1559 fee-per-gas estimate
+  named as the natural fee source in D35.4);
+  [Chapter 17](17-swap-v2-evm-path.md) (V2 swap contracts);
   [Chapter 19](19-nft-module-layout.md) (NFT activation and pseudo-coin);
   [Chapter 21](21-tron-integration.md) (TRON platform specifics);
   [Chapter 22](22-walletconnect-v2.md) (WalletConnect sessions);
@@ -948,12 +1497,26 @@ that only checks an internal variant does not satisfy these rules.
   framework, backend-failure table).
 - *Permitted-input classes used:* external public specification (the published
   KDF API reference; EVM/EIP/ERC/CAIP specifications); baseline source;
+  behavioural observation of public networks (the chain-fetched transaction
+  vectors of §35.8B, and the identifier and sender those chains report);
   cross-chapter contracts; Interop / wire-and-API-bound reuse (R29/R31) for the
-  dictated method strings, JSON field names, serialized discriminants and
-  `error_data` shapes.
+  dictated method strings, JSON field names, serialized discriminants,
+  `error_data` shapes, and the EIP-2718 envelope framing and payload layouts of
+  §35.6A.
 - *Sibling-allowlist consultations:* the chapters listed under *Inputs*.
 - *Forbidden corpus:* consulted by the KDF Spec Reader (reference versions
   `v3.0.0-beta` and `v2.6.0-beta`) solely to decide behaviour where the public
   reference is silent, ambiguous or self-contradictory (marked **G**), including
-  every HTTP status; no private implementation expression is normative in this
-  chapter.
+  every HTTP status; and, for §35.6A, to establish which EIP-2718 transaction
+  types the reference lineage accepts and refuses when reading a transaction it
+  did not build, the error class a refusal takes, and the public release
+  designations at which that acceptance set changed (named in R35.6A.18; those
+  designations are the reference lineage's own public release tags and are the
+  most precise locator this record gives). The transaction framing, payload
+  layout, identifier, signing-message and signature-parity rules of §35.6A rest
+  on the public specifications listed under *Inputs*. No private implementation
+  expression is normative in this chapter. §35.6A and the sections cleared with
+  it have **passed the KDF Dirty Gate**, in two passes; the extent, method and
+  measure recorded in §35.6A's *Clearance record* are the second pass's, as
+  chapter 01 T1 requires. Every other section of this chapter rests on the
+  inputs listed above.
