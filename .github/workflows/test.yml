@@ -68,6 +68,86 @@ jobs:
           for p in $pkgs; do args+=(-p "$p"); done
           cargo +nightly-2026-05-08 fmt "${args[@]}" -- --check
 
+  clippy:
+    # Cheap fast-feedback lint job, kept separate from unit-tests (same
+    # rationale as `fmt`): a clippy-only failure must not force a full
+    # unit-test rebuild on "Re-run failed jobs". It is NOT a prerequisite of
+    # unit-tests for that reason — it compiles --all-targets, which is not
+    # cheap, so gating the test jobs behind it would delay them.
+    #
+    # Invocation — we run, per first-party package, with DEFAULT features:
+    #     cargo clippy -p <pkg>... --all-targets --no-deps -- -D warnings
+    # and deliberately NOT the `--workspace --all-features` form that
+    # docs/CODING_STANDARDS.md's hard rule used to spell out. Both deviations
+    # are required and are documented in AGENTS.md §6:
+    #   * `--workspace` fails outright: the vendored, patched
+    #     rust-lightning-patched/lightning crate trips 13 deny-level clippy
+    #     lints against its own source, so a bare workspace sweep never reaches
+    #     our code. Selecting first-party packages with -p + `--no-deps` lints
+    #     our own code and never clippy-invokes `lightning` as a primary target.
+    #   * `--all-features` would turn on features that never ship in the `kdf`
+    #     binary (mm2_main `regtest-netid`,
+    #     `unsafe-rpc-wire-dump-release-override`, `custom-swap-locktime`) plus
+    #     test-only Trezor-emulator / Foundry scaffolding, i.e. it would enforce
+    #     -D warnings over code that never ships. Default features are what the
+    #     `kdf` binary builds, so that is what we lint.
+    # docs/CODING_STANDARDS.md has been reconciled to this invocation in the
+    # same change that introduced this job.
+    #
+    # COVERAGE / honesty: package selection mirrors the `fmt` job (cargo
+    # metadata + jq, excluding the vendored `*-patched/` trees) with two
+    # ADDITIONAL exclusions — `lightning_persister` and
+    # `lightning_background_processor`. Those are LDK (rust-lightning) companion
+    # crates that live under mm2src/coins/ rather than under
+    # rust-lightning-patched/ like their three siblings (`lightning`,
+    # `lightning-invoice`, `lightning-net-tokio`), so the `-patched/` filter
+    # misses them by location alone. They are vendored/adapted upstream code and
+    # AGENTS.md §6 says not to turn clippy warnings in vendored trees into edits,
+    # so they are out of scope for this gate. Their current (unenforced)
+    # findings: lightning_persister — iter_overeager_cloned, unnecessary_sort_by,
+    # permissions_set_readonly_false (all in test code); lightning_background_processor
+    # — type_complexity. The location/filter inconsistency is tracked as a
+    # follow-up (see docs/plans/clippy-ci-gate.md).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Check Rust toolchain
+        # First cargo/clippy call makes rustup install the pinned toolchain from
+        # rust-toolchain.toml, which declares the `clippy` component, so no
+        # explicit `rustup component add clippy` is needed.
+        run: rustc --version && cargo --version && cargo clippy --version
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            clippy-
+
+      - name: cargo clippy (first-party, default features, -D warnings)
+        shell: bash
+        run: |
+          # First-party packages, excluding the vendored *-patched/ trees and
+          # the two LDK companion crates under coins/ (see job comment).
+          pkgs=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[]
+                | select(.manifest_path | test("-patched/") | not)
+                | select(.manifest_path | test("/lightning_persister/|/lightning_background_processor/") | not)
+                | .name')
+          args=()
+          for p in $pkgs; do args+=(-p "$p"); done
+          cargo clippy "${args[@]}" --all-targets --no-deps -- -D warnings
+
   unit-tests:
     # One matrix cell per cargo invocation so "Re-run failed jobs" only
     # re-queues the cells that actually failed. Each cell is a fresh

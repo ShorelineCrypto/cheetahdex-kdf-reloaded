@@ -88,17 +88,22 @@ jobs:
   # The real WASM artifact. `wasm-pack build` was present until 4a54d4415
   # (2026-08-05, "ci: replace wasm-pack with wasm build check"), which removed it
   # and left only the `cargo check` steps above - so the umbrella "all platforms"
-  # builds that call this workflow have produced no WASM bundle since. The commit
-  # recorded no reason, so whether the build still succeeds is unknown.
+  # builds that call this workflow produced no WASM bundle between 2026-08-05 and
+  # its restoration in #26, while still reporting success.
   #
-  # It is therefore `continue-on-error` for now: a failure is visible as a red job
-  # without breaking `staging-build.yml`, `dev-build*.yml` or `release.yml`, which
-  # all call this workflow. Remove `continue-on-error` once the build is known
-  # green - that is a deliberate follow-up, not an oversight.
+  # The restored job ran `continue-on-error` while it was unproven. It is now
+  # proven: `wasm-pack build mm2src/mm2_main --target web --dev` builds the
+  # kdflib_bg.wasm bundle + JS bindings cleanly on the pinned stable 1.98.0
+  # toolchain (the historical getrandom-0.3 wasm breakage is already handled by
+  # .cargo/config.toml's `getrandom_backend="wasm_js"` cfg; only unused-import
+  # warnings remain, which do not fail the build). `continue-on-error` has
+  # therefore been removed so this job actually guards the WASM leg of
+  # staging-build.yml, dev-build*.yml and release.yml instead of letting a broken
+  # WASM build report success. build-wasm.yml has no PR trigger, so the first
+  # clean-runner confirmation is a `workflow_dispatch`.
   build:
     needs: check
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 45
 
     steps:

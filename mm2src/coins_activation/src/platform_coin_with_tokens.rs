@@ -73,6 +73,12 @@ pub trait TokenAsMmCoinInitializer: Send + Sync {
     ) -> Result<Vec<MmCoinEnum>, MmError<InitTokensAsMmCoinsError>>;
 }
 
+// `UnexpectedTokenProtocol` carries a `CoinProtocol` by value for diagnostics on
+// a cold error path. Boxing it (clippy's suggestion) would force `Box::new` at
+// every construction site in this compatibility-sensitive activation code for a
+// negligible size win on a rarely built error enum. The per-item allow is the
+// established precedent for this lint across coins_activation.
+#[allow(clippy::large_enum_variant)]
 pub enum InitTokensAsMmCoinsError {
     TokenConfigIsNotFound(String),
     InvalidPubkey(String),

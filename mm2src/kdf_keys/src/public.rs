@@ -79,7 +79,7 @@ impl ops::Deref for Public {
 }
 
 impl AsRef<[u8]> for Public {
-    fn as_ref(&self) -> &[u8] { &**self }
+    fn as_ref(&self) -> &[u8] { self }
 }
 
 impl PartialEq for Public {

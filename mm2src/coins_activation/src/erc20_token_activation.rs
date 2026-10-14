@@ -89,6 +89,12 @@ impl TokenProtocolParams for Erc20Protocol {
 }
 
 /// Why the protocol of a token could not be resolved.
+// `UnexpectedProtocol` carries a `CoinProtocol` by value for diagnostics on a
+// cold error path. Boxing it (clippy's suggestion) would force `Box::new` at
+// every construction site in this compatibility-sensitive activation code for a
+// negligible size win on a rarely built error enum. The per-item allow is the
+// established precedent for this lint across coins_activation.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ProtocolResolveError {
     ConfigIsNotFound(String),
     ProtocolParseError { ticker: String, error: String },
