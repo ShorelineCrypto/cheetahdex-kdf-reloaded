@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The swap gas-fee policy now takes effect.** `set_swap_gas_fee_policy` stored a policy and
+  `get_swap_gas_fee_policy` echoed it, but nothing read it: every swap transaction was priced from
+  one gas price and signed in the legacy form, so `High` behaved exactly like `Legacy`. The EVM
+  swap signing path now follows the policy. `Legacy` (the default) is unchanged: an untyped
+  EIP-155 transaction priced by the existing gas-price resolution. `Low`, `Medium` and `High`
+  emit an EIP-1559 (type 2) transaction whose `max_fee_per_gas` / `max_priority_fee_per_gas` are
+  the matching tier of the same fee estimate the fee-estimation RPC and stream report (the
+  configured gas API when present, otherwise the internal fee-history estimator). If the estimate
+  cannot be obtained the send fails rather than silently falling back to the legacy form. Note
+  that a peer running a reference build at or before `v2.0.0-beta` cannot read a typed
+  transaction, which is why `Legacy` remains the default. Not yet verified against a live
+  network send.
 - **A counterparty's EIP-1559 (type 2) and EIP-2930 (type 1) transaction can now be read.**
   Swap transactions (such as the taker's dex-fee payment) were decoded only as legacy
   9-field EIP-155 transactions, so a typed transaction failed with `unexpected string` and

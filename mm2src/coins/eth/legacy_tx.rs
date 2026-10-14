@@ -165,6 +165,88 @@ impl Transaction {
     }
 }
 
+/// Unsigned EIP-1559 (type `0x02`) transaction with an empty access list. This is the form the
+/// `Low` / `Medium` / `High` swap gas-fee policies emit (CRD R35.6A.17). The project never emits an
+/// EIP-2930 transaction.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Eip1559Transaction {
+    pub chain_id: u64,
+    pub nonce: U256,
+    pub max_priority_fee_per_gas: U256,
+    pub max_fee_per_gas: U256,
+    pub gas: U256,
+    pub action: Action,
+    pub value: U256,
+    pub data: Bytes,
+}
+
+impl Eip1559Transaction {
+    fn to_alloy(&self) -> Result<alloy::consensus::TxEip1559, String> {
+        let narrow_u64 = |v: &U256, name: &str| -> Result<u64, String> {
+            if v.bits() > 64 {
+                return Err(format!("{} does not fit in 64 bits", name));
+            }
+            Ok(v.low_u64())
+        };
+        let narrow_u128 = |v: &U256, name: &str| -> Result<u128, String> {
+            if v.bits() > 128 {
+                return Err(format!("{} does not fit in 128 bits", name));
+            }
+            Ok(v.low_u128())
+        };
+        let to = match &self.action {
+            Action::Create => alloy::primitives::TxKind::Create,
+            Action::Call(addr) => alloy::primitives::TxKind::Call(alloy::primitives::Address::from_slice(&addr.0)),
+        };
+        Ok(alloy::consensus::TxEip1559 {
+            chain_id: self.chain_id,
+            nonce: narrow_u64(&self.nonce, "nonce")?,
+            gas_limit: narrow_u64(&self.gas, "gas")?,
+            max_fee_per_gas: narrow_u128(&self.max_fee_per_gas, "max_fee_per_gas")?,
+            max_priority_fee_per_gas: narrow_u128(&self.max_priority_fee_per_gas, "max_priority_fee_per_gas")?,
+            to,
+            value: u256_to_alloy(&self.value),
+            access_list: Default::default(),
+            input: self.data.clone().into(),
+        })
+    }
+
+    /// `keccak256(0x02 || rlp([chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit,
+    /// to, value, data, access_list]))` -- the message the signature covers (EIP-1559).
+    pub fn signing_hash(&self) -> Result<H256, String> {
+        use alloy::consensus::SignableTransaction;
+        let hash = self.to_alloy()?.signature_hash();
+        Ok(H256::from_slice(hash.as_slice()))
+    }
+
+    /// Signs with `secret` (y-parity signature, no EIP-155 `v`) and returns the signed transaction
+    /// built by decoding the produced envelope with the project's own typed-transaction decoder, so
+    /// the identifier is `keccak256` of the whole envelope and the sender is the recovered one.
+    pub fn sign(self, secret: &Secret) -> Result<SignedTransaction, String> {
+        use alloy::consensus::SignableTransaction;
+        use alloy::eips::eip2718::Encodable2718;
+
+        let tx = self.to_alloy()?;
+        let signing_hash = H256::from_slice(tx.signature_hash().as_slice());
+        let sig = eth_sign(secret, &signing_hash).map_err(|e| format!("{:?}", e))?;
+        let parity = match sig.v() {
+            0 => false,
+            1 => true,
+            other => return Err(format!("unexpected recovery id {}", other)),
+        };
+        let alloy_sig = alloy::primitives::Signature::new(
+            alloy::primitives::U256::from_be_slice(sig.r()),
+            alloy::primitives::U256::from_be_slice(sig.s()),
+            parity,
+        );
+        let envelope = alloy::consensus::TxEnvelope::Eip1559(tx.into_signed(alloy_sig));
+        let bytes = envelope.encoded_2718();
+        let mut slice = bytes.as_slice();
+        let unverified = UnverifiedTransaction::decode_typed(&mut slice).map_err(|e| e.to_string())?;
+        SignedTransaction::new(unverified).map_err(|e| format!("{:?}", e))
+    }
+}
+
 /// Fields shared by every supported transaction type. These are the only fields that can be read
 /// through `Deref` on a decoded transaction; the fee fields differ per type and are reached through
 /// [`UnverifiedTransaction::gas_price`] / [`UnverifiedTransaction::kind`].

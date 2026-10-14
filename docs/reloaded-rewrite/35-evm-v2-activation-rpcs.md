@@ -836,18 +836,24 @@ by EIP-1559 fee-history semantics, not by this chapter. Which serialized
 transaction form each policy value produces, and which forms the project must
 read as a consequence, are bound in §35.6A (R35.6A.17, R35.6A.2).
 
-> **Code-quality finding (informative) -- the policy is stored but not
-> applied.** In this repository the policy is accepted by
+> **Code-quality finding (informative) -- the policy was stored but not
+> applied; now implemented.** The policy is accepted by
 > `set_swap_gas_fee_policy`, held per coin, and echoed by
-> `get_swap_gas_fee_policy`, but no transaction-construction path reads it: the
-> swap signing path resolves a single gas price and builds the untyped legacy
-> form unconditionally. R35.6.6 therefore has no implementation, and an operator
-> who sets `High` gets exactly the pricing and the transaction form of `Legacy`
-> while both RPCs report `High`. The RPC round-trip tests pass because they
-> exercise only the store-and-echo behaviour. The repair is to make the fee
-> resolution and the emitted transaction form follow the stored policy; it is
-> tracked as D35.4, and it is the reason the §35.6A *Reloaded status* note can
-> state that the project currently emits only one of the two forms.
+> `get_swap_gas_fee_policy`. It used to be that no transaction-construction path
+> read it: the swap signing path resolved a single gas price and built the
+> untyped legacy form unconditionally, so an operator who set `High` got exactly
+> the pricing and the transaction form of `Legacy` while both RPCs reported
+> `High`, and the RPC round-trip tests passed because they exercised only the
+> store-and-echo behaviour. The swap signing path now reads the stored policy:
+> `Legacy` keeps the single-gas-price legacy form (byte-identical to before);
+> `Low`, `Medium` and `High` emit an EIP-1559 (type `0x02`) transaction whose
+> `max_fee_per_gas` / `max_priority_fee_per_gas` are the matching tier of the
+> EIP-1559 fee estimate of [Chapter 10](10-sse-streaming.md) (one tier
+> definition shared with the fee-estimation RPC and stream). A failed estimate
+> fails the send; it does not fall back to the legacy form. Tests construct and
+> sign the transaction for each policy and assert the emitted form, the tier's
+> fee fields, and a round trip through the project's own typed decoder. Resolved
+> as D35.4. Not verified against a live network send.
 > *(Trigger: a contradiction between two things read side by side while
 > establishing §35.6A -- a stored policy with no reader in the path the rule
 > says it governs. Finding is in this repository's own code, not in any
@@ -1128,17 +1134,17 @@ project emits no EIP-2930 transaction; it must nevertheless *read* one
 (R35.6A.2), because the reference lineage reads one and a third-party signer may
 produce one.
 
-> **Reloaded status.** The *reading* side of this section is implemented. The
-> emitting side is **not**: every locally signed EVM transaction is built in the
-> untyped legacy form with a single gas price, whichever policy the coin
-> carries, so R35.6A.17 and R35.6.6 describe the required contract rather than
-> the present behaviour. The only typed transaction the project can currently
-> produce is one a remote wallet signs on its behalf through the
-> WalletConnect path ([Chapter 22](22-walletconnect-v2.md)), where the form is
-> the wallet's choice and not the policy's. This is D35.4 and is independent of
-> the decoding work: reading a peer's typed transaction is what unblocks a swap,
-> and emitting one is a separate, lower-urgency parity item that also carries
-> the peer floor of R35.6A.18.
+> **Reloaded status.** Both sides are implemented. The *reading* side is
+> described above. On the *emitting* side the swap signing path follows the
+> policy: `Legacy` builds the untyped legacy form with a single gas price, and
+> `Low` / `Medium` / `High` build and sign an EIP-1559 (type `0x02`) transaction
+> with no access list (signing message `keccak256(0x02 || rlp(unsigned
+> fields))`, y-parity signature, identifier = hash of the whole envelope). A
+> typed transaction a remote wallet signs through the WalletConnect path
+> ([Chapter 22](22-walletconnect-v2.md)) remains the wallet's choice and not the
+> policy's. Emitting a typed transaction carries the peer floor of R35.6A.18.
+> Verified by construction, signing and decoder round-trip tests; network
+> acceptance of an emitted typed swap transaction is not yet verified.
 
 R35.6A.18 **Version boundary (recorded).** Typed-transaction decoding entered
 the reference lineage within its public release history rather than being present
@@ -1286,7 +1292,7 @@ decomposition is the implementer's choice.
   strings and the `swap_gas_fee_policy` field, and reject unsupported coins
   (R35.6). A round-trip alone does **not** satisfy R35.6.6: the stored policy
   must also change how a subsequent swap transaction is priced and which
-  serialized form it takes (R35.6A.17). That part is open -- D35.4.
+  serialized form it takes (R35.6A.17). That part is implemented -- D35.4.
 - The entire surface builds and is routed on native **and** WASM targets, with
   the MetaMask policy and `rpc_mode: "Metamask"` available only on WASM
   (R35.1.4, R35.1.4a).
@@ -1444,23 +1450,20 @@ tier the default, or sets one per chain, the peer floor becomes load-bearing and
 the question of gating the emitted form on a negotiated peer capability must be
 answered first.
 
-**D35.4** *The swap gas-fee policy has no effect on a transaction.* R35.6.6
-requires the stored policy to govern how the coin prices gas, and R35.6A.17
-requires it to decide which serialized form the coin emits. Neither holds in
-this repository today: the policy is stored and echoed, and every locally signed
-transaction is an untyped legacy one priced from a single gas price. Closing
-this needs (a) a fee resolution per policy tier against EIP-1559 fee-history
-semantics -- the estimate the project already computes for the EIP-1559
-fee-per-gas surface of [Chapter 10](10-sse-streaming.md) is the natural source,
-and reusing it avoids two tier definitions -- (b) construction and signing of a
-type-`0x02` transaction, and
-(c) the peer-floor decision of D35.3, because emitting a typed transaction is
-exactly what a peer at or before `v2.0.0-beta` cannot read. It is deliberately
-**not** a prerequisite for the decoding contract of §35.6A: a peer's typed
-transaction must be readable whether or not we can produce one. Until this
-closes, the policy RPCs are honest about what was *set* and silent about the
-fact that nothing acts on it, and the acceptance criterion for §35.6 is
-satisfied only in its round-trip part.
+**D35.4** *(Resolved.)* *The swap gas-fee policy had no effect on a transaction.*
+R35.6.6 requires the stored policy to govern how the coin prices gas, and
+R35.6A.17 requires it to decide which serialized form the coin emits; before
+this resolution the policy was stored and echoed while every locally signed swap
+transaction was an untyped legacy one priced from a single gas price. Resolved:
+(a) the fee per non-legacy tier is the matching tier of the EIP-1559 estimate
+that [Chapter 10](10-sse-streaming.md) exposes (configured gas API when present,
+otherwise the internal fee-history estimator), so there is one tier definition;
+(b) a type-`0x02` transaction is constructed and signed, and decodes back
+through the §35.6A decoder with the same sender and identifier; (c) the
+peer-floor decision of D35.3 is unchanged: `Legacy` stays the default, so the
+floor is not load-bearing. Remaining: network acceptance of an emitted typed
+swap transaction and the suitability of the tier values under real congestion
+have not been exercised against a live chain.
 
 **D35.5** *Chapter shape.* This chapter's canonical sections were, before this
 pass, an *Acceptance criteria* section and a *Wire-shape tests* section with no

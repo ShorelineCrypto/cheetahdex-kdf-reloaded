@@ -1944,3 +1944,229 @@ fn test_signed_eth_tx_from_bytes_non_transaction_payload() {
     let err = signed_eth_tx_from_bytes(&[]).unwrap_err();
     assert!(err.contains("payload length 0 bytes"), "{err}");
 }
+
+mod swap_gas_fee_policy_tx_form {
+    //! CRD R35.6.6 / R35.6A.17: the stored swap gas-fee policy decides the pricing and the
+    //! serialized form of a swap transaction. These tests exercise the construction and signing
+    //! path, not the store-and-echo behaviour of the policy RPCs.
+    use super::*;
+    use crate::eth::fee_estimation::eip1559::{EstimationSource, FeePerGasEstimated, FeePerGasLevel};
+    use mm2_eth::keys::{public_to_address, Secret};
+    use std::str::FromStr;
+
+    const SECRET: &str = "4646464646464646464646464646464646464646464646464646464646464646";
+    const CHAIN_ID: u64 = 1;
+
+    fn secret() -> Secret { Secret::from_str(SECRET).unwrap() }
+
+    fn sender() -> Address {
+        let pair = mm2_eth::keys::KeyPair::from_secret(secret()).unwrap();
+        public_to_address(&pair.public())
+    }
+
+    fn level(prio: u64, max_fee: u64) -> FeePerGasLevel {
+        FeePerGasLevel {
+            max_priority_fee_per_gas: U256::from(prio),
+            max_fee_per_gas: U256::from(max_fee),
+            min_wait_time: None,
+            max_wait_time: None,
+        }
+    }
+
+    /// Three distinguishable tiers, none equal to the legacy gas price used below.
+    fn estimate() -> FeePerGasEstimated {
+        FeePerGasEstimated {
+            base_fee: U256::from(10_000_000_000u64),
+            source: EstimationSource::Simple,
+            base_fee_trend: String::new(),
+            priority_fee_trend: String::new(),
+            low: level(1_000_000_000, 12_000_000_000),
+            medium: level(2_000_000_000, 14_000_000_000),
+            high: level(3_000_000_000, 17_000_000_000),
+        }
+    }
+
+    fn swap_tx(fee: SwapFee) -> SwapTx {
+        SwapTx::new(
+            fee,
+            U256::from(9u64),
+            U256::from(21000u64),
+            Action::Call(Address::from_str("3535353535353535353535353535353535353535").unwrap()),
+            U256::from(1_000_000_000_000_000_000u64),
+            vec![0xde, 0xad, 0xbe, 0xef],
+        )
+    }
+
+    fn sign_legacy(tx: SwapTx) -> SignedEthTx {
+        match tx {
+            SwapTx::Legacy(tx) => tx.sign(&secret(), Some(CHAIN_ID)),
+            SwapTx::Eip1559(_) => panic!("expected the legacy form"),
+        }
+    }
+
+    fn sign_typed(tx: SwapTx) -> SignedEthTx {
+        match tx {
+            SwapTx::Eip1559(tx) => tx.sign(&secret()).unwrap(),
+            SwapTx::Legacy(_) => panic!("expected the EIP-1559 form"),
+        }
+    }
+
+    #[test]
+    fn non_legacy_tiers_produce_type_2_with_the_tiers_fee_fields() {
+        let est = estimate();
+        for (policy, expect) in [
+            (SwapGasFeePolicy::Low, &est.low),
+            (SwapGasFeePolicy::Medium, &est.medium),
+            (SwapGasFeePolicy::High, &est.high),
+        ] {
+            let fee = eip1559_swap_fee(policy, CHAIN_ID, &est).unwrap();
+            let signed = sign_typed(swap_tx(fee));
+            let bytes = alloy::rlp::encode(&signed);
+            assert_eq!(bytes[0], 0x02, "{:?} must emit a type-2 envelope", policy);
+            match &signed.kind {
+                TxKind::Typed(t) => {
+                    assert_eq!(t.tx_type, 2);
+                    assert_eq!(t.chain_id, CHAIN_ID);
+                    assert_eq!(t.max_fee_per_gas, Some(expect.max_fee_per_gas), "{:?}", policy);
+                    assert_eq!(
+                        t.max_priority_fee_per_gas,
+                        Some(expect.max_priority_fee_per_gas),
+                        "{:?}",
+                        policy
+                    );
+                    assert_eq!(t.gas_price, None, "a type-2 transaction carries no legacy gas_price");
+                },
+                TxKind::Legacy { .. } => panic!("{:?} emitted the legacy form", policy),
+            }
+        }
+    }
+
+    #[test]
+    fn tiers_are_distinct_and_ordered() {
+        let est = estimate();
+        let fee = |p| match eip1559_swap_fee(p, CHAIN_ID, &est).unwrap() {
+            SwapFee::Eip1559 {
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                ..
+            } => (max_fee_per_gas, max_priority_fee_per_gas),
+            SwapFee::Legacy { .. } => panic!("unexpected legacy fee"),
+        };
+        let (low, medium, high) = (
+            fee(SwapGasFeePolicy::Low),
+            fee(SwapGasFeePolicy::Medium),
+            fee(SwapGasFeePolicy::High),
+        );
+        assert!(low < medium && medium < high);
+    }
+
+    #[test]
+    fn legacy_policy_has_no_eip1559_tier() {
+        assert!(eip1559_swap_fee(SwapGasFeePolicy::Legacy, CHAIN_ID, &estimate()).is_err());
+    }
+
+    #[test]
+    fn inconsistent_estimate_is_rejected_not_clamped() {
+        let mut est = estimate();
+        est.high = level(5_000_000_000, 1_000_000_000);
+        assert!(eip1559_swap_fee(SwapGasFeePolicy::High, CHAIN_ID, &est).is_err());
+    }
+
+    #[test]
+    fn typed_signed_transaction_round_trips_through_our_decoder() {
+        let est = estimate();
+        for policy in [SwapGasFeePolicy::Low, SwapGasFeePolicy::Medium, SwapGasFeePolicy::High] {
+            let fee = eip1559_swap_fee(policy, CHAIN_ID, &est).unwrap();
+            let signed = sign_typed(swap_tx(fee));
+            assert_eq!(signed.sender(), sender(), "sender recovered at signing time");
+
+            let bytes = alloy::rlp::encode(&signed);
+            // Decode the emitted bytes the way a counterparty's bytes are decoded.
+            let decoded = signed_eth_tx_from_bytes(&bytes).unwrap();
+            assert_eq!(decoded.sender(), sender());
+            assert_eq!(decoded.tx_hash(), signed.tx_hash());
+            // The identifier is the hash of the whole envelope.
+            assert_eq!(decoded.tx_hash(), H256::from_slice(keccak256(&bytes).as_slice()));
+            assert_eq!(alloy::rlp::encode(&decoded), bytes);
+            assert_eq!(decoded.nonce, U256::from(9u64));
+            assert_eq!(decoded.gas, U256::from(21000u64));
+            assert_eq!(decoded.value, U256::from(1_000_000_000_000_000_000u64));
+            assert_eq!(decoded.data, vec![0xde, 0xad, 0xbe, 0xef]);
+        }
+    }
+
+    #[test]
+    fn typed_signing_message_is_keccak_of_type_byte_and_unsigned_payload() {
+        use alloy::rlp::{Encodable, Header};
+        let fee = eip1559_swap_fee(SwapGasFeePolicy::Medium, CHAIN_ID, &estimate()).unwrap();
+        let SwapTx::Eip1559(tx) = swap_tx(fee) else {
+            panic!("expected the EIP-1559 form")
+        };
+        // Independent construction of 0x02 || rlp([chain_id, nonce, prio, max_fee, gas, to, value,
+        // data, access_list]) straight from the EIP, not through alloy's transaction type.
+        let to = Address::from_str("3535353535353535353535353535353535353535").unwrap();
+        let mut payload = Vec::new();
+        CHAIN_ID.encode(&mut payload);
+        9u64.encode(&mut payload);
+        2_000_000_000u64.encode(&mut payload);
+        14_000_000_000u64.encode(&mut payload);
+        21000u64.encode(&mut payload);
+        to.0[..].encode(&mut payload);
+        1_000_000_000_000_000_000u64.encode(&mut payload);
+        [0xdeu8, 0xad, 0xbe, 0xef][..].encode(&mut payload);
+        Header {
+            list: true,
+            payload_length: 0,
+        }
+        .encode(&mut payload); // empty access list
+        let mut msg = vec![0x02];
+        Header {
+            list: true,
+            payload_length: payload.len(),
+        }
+        .encode(&mut msg);
+        msg.extend_from_slice(&payload);
+        assert_eq!(tx.signing_hash().unwrap(), H256::from_slice(keccak256(&msg).as_slice()));
+    }
+
+    #[test]
+    fn legacy_form_is_unchanged_and_pinned() {
+        let fee = SwapFee::Legacy {
+            gas_price: U256::from(20_000_000_000u64),
+        };
+        // EIP-155 specification vector (empty data) to pin the bytes of the legacy form.
+        let tx = SwapTx::new(
+            fee,
+            U256::from(9u64),
+            U256::from(21000u64),
+            Action::Call(Address::from_str("3535353535353535353535353535353535353535").unwrap()),
+            U256::from(1_000_000_000_000_000_000u64),
+            Vec::new(),
+        );
+        let signed = sign_legacy(tx);
+        let expected = hex::decode(
+            "f86c098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83",
+        )
+        .unwrap();
+        assert_eq!(alloy::rlp::encode(&signed), expected);
+        assert_eq!(signed.gas_price(), Some(U256::from(20_000_000_000u64)));
+        assert!(matches!(signed.kind, TxKind::Legacy { .. }));
+    }
+
+    #[test]
+    fn legacy_form_with_data_round_trips_and_is_untyped() {
+        let signed = sign_legacy(swap_tx(SwapFee::Legacy {
+            gas_price: U256::from(7u64),
+        }));
+        let bytes = alloy::rlp::encode(&signed);
+        assert!(bytes[0] >= 0xc0, "legacy form leads with an RLP list header");
+        let decoded = signed_eth_tx_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.sender(), sender());
+        assert_eq!(decoded.tx_hash(), signed.tx_hash());
+    }
+
+    #[test]
+    fn default_policy_is_legacy() {
+        assert_eq!(SwapGasFeePolicy::default(), SwapGasFeePolicy::Legacy);
+    }
+}
