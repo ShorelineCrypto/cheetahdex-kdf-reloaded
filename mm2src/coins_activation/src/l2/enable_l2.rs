@@ -47,6 +47,12 @@ pub trait L2ActivationOps: Into<MmCoinEnum> {
 
 #[derive(Debug, Display, Serialize, SerializeErrorType)]
 #[serde(tag = "error_type", content = "error_data")]
+// `UnexpectedL2Protocol` carries a `CoinProtocol` by value for diagnostics on a
+// cold error path. Boxing it (clippy's suggestion) would force `Box::new` at
+// every construction site in this compatibility-sensitive activation code for a
+// negligible size win on a rarely built RPC error enum. The per-item allow is
+// the established precedent for this lint across coins_activation.
+#[allow(clippy::large_enum_variant)]
 pub enum EnableL2Error {
     #[display(fmt = "Layer 2 {} is already activated", _0)]
     L2IsAlreadyActivated(String),
