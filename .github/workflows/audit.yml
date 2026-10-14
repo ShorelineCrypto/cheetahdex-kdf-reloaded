@@ -2,14 +2,14 @@ name: Security Audit
 
 on:
   push:
-    branches: [ reloaded-gplv2-base, dev ]
+    branches: [ reloaded-gplv2-base, dev, staging, main ]
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'deny.toml'
       - '.github/workflows/audit.yml'
   pull_request:
-    branches: [ reloaded-gplv2-base, dev ]
+    branches: [ reloaded-gplv2-base, dev, staging, main ]
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'

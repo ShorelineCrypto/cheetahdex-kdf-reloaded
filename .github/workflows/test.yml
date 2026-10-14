@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [ reloaded-gplv2-base, dev ]
+    branches: [ reloaded-gplv2-base, dev, staging, main ]
   pull_request:
-    branches: [ reloaded-gplv2-base, dev ]
+    branches: [ reloaded-gplv2-base, dev, staging, main ]
 
 # Supersede in-flight runs of the same workflow on the same ref so a fast
 # follow-up push cancels the now-stale run instead of queuing behind it.
@@ -121,6 +121,49 @@ jobs:
 
       - name: ${{ matrix.name }}
         run: ${{ matrix.cmd }}
+
+  # The wasm32 target is not reachable from `cargo check --workspace`, and the
+  # crates below carry `#[cfg(target_arch = "wasm32")]` branches that nothing
+  # else compiles. This is a compile check, not an artifact build: the
+  # artifact-producing path lives in build-wasm.yml, which is dispatch- and
+  # workflow_call-only.
+  wasm32-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Add wasm32 target
+        shell: bash
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm32-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: cargo check -p coins (wasm32)
+        shell: bash
+        run: cargo check --target wasm32-unknown-unknown -p coins
+
+      - name: cargo check -p coins_activation (wasm32)
+        shell: bash
+        run: cargo check --target wasm32-unknown-unknown -p coins_activation
+
+      - name: cargo check -p mm2_db (wasm32)
+        shell: bash
+        run: cargo check --target wasm32-unknown-unknown -p mm2_db
+
+      - name: cargo check -p mm2_main (wasm32)
+        shell: bash
+        run: cargo check --target wasm32-unknown-unknown -p mm2_main
 
   docker-tests:
     # GitHub-hosted Ubuntu runners ship Docker, so the integration suite
