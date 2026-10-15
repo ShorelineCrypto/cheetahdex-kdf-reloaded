@@ -2170,3 +2170,273 @@ mod swap_gas_fee_policy_tx_form {
         assert_eq!(SwapGasFeePolicy::default(), SwapGasFeePolicy::Legacy);
     }
 }
+
+/// The serialized form of what the swap send path really broadcasts is pinned against the swap
+/// gas-fee policy: the whole path (`SwapOps` entry point, `sign_and_send_transaction_impl`, signing,
+/// `eth_sendRawTransaction`) runs against a scripted node on a local socket and the assertion reads
+/// the first byte of the broadcast bytes -- the EIP-2718 envelope byte a counterparty parses.
+mod swap_send_path_wire_form {
+    use super::*;
+    use mm2_eth::keys::{public_to_address, KeyPair as EthKeyPair, Secret};
+    use serde_json::{json, Value as Json};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    const POLYGON_CHAIN_ID: u64 = 137;
+
+    /// A scripted EVM node: serves the nonce, price and fee-history reads the send path makes and
+    /// records every `eth_sendRawTransaction` payload. Its thread stops on drop.
+    struct ScriptedNode {
+        url: String,
+        sent: Arc<Mutex<Vec<Vec<u8>>>>,
+        stop: Arc<AtomicBool>,
+    }
+
+    impl Drop for ScriptedNode {
+        fn drop(&mut self) { self.stop.store(true, Ordering::SeqCst); }
+    }
+
+    fn answer(method: &str, params: &Json, sent: &Mutex<Vec<Vec<u8>>>) -> Json {
+        match method {
+            "parity_nextNonce" | "eth_getTransactionCount" => {
+                // The send path polls until the node reports the nonce moved past the used one.
+                json!(if sent.lock().unwrap().is_empty() { "0x0" } else { "0x1" })
+            },
+            "eth_gasPrice" => json!("0x3b9aca00"),
+            "eth_feeHistory" => {
+                let count = match &params[0] {
+                    Json::String(s) => u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap(),
+                    other => other.as_u64().unwrap(),
+                } as usize;
+                let percentiles = params[2].as_array().map(|p| p.len()).unwrap_or(0);
+                json!({
+                    "oldestBlock": "0x1",
+                    "baseFeePerGas": vec!["0x2540be400"; count + 1],
+                    "gasUsedRatio": vec![0.5; count],
+                    "reward": vec![vec!["0x3b9aca00"; percentiles]; count],
+                })
+            },
+            "eth_sendRawTransaction" => {
+                let raw = params[0].as_str().unwrap().trim_start_matches("0x");
+                sent.lock().unwrap().push(hex::decode(raw).unwrap());
+                json!(format!("0x{}", "11".repeat(32)))
+            },
+            other => panic!("the scripted node does not serve `{}`", other),
+        }
+    }
+
+    fn serve(mut stream: std::net::TcpStream, sent: &Mutex<Vec<Vec<u8>>>) {
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        let body_at = loop {
+            let n = match stream.read(&mut buf) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => n,
+            };
+            raw.extend_from_slice(&buf[..n]);
+            if let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&raw[..end]).to_lowercase();
+                let len = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if raw.len() >= end + 4 + len {
+                    break end + 4;
+                }
+            }
+        };
+        let request: Json = serde_json::from_slice(&raw[body_at..]).unwrap();
+        let reply = |req: &Json| {
+            json!({"jsonrpc": "2.0", "id": req["id"],
+                   "result": answer(req["method"].as_str().unwrap(), &req["params"], sent)})
+        };
+        let body = match request.as_array() {
+            Some(batch) => Json::Array(batch.iter().map(reply).collect()),
+            None => reply(&request),
+        }
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).ok();
+    }
+
+    fn spawn_node() -> ScriptedNode {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (sent_t, stop_t) = (sent.clone(), stop.clone());
+        std::thread::spawn(move || {
+            while !stop_t.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let sent = sent_t.clone();
+                        std::thread::spawn(move || serve(stream, &sent));
+                    },
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                }
+            }
+        });
+        ScriptedNode { url, sent, stop }
+    }
+
+    /// An ERC-20 token coin on a chain-137 platform with `policy` as its stored swap gas-fee policy.
+    fn polygon_token(url: &str, policy: SwapGasFeePolicy, token_addr: Address) -> (MmArc, EthCoin) {
+        let key_pair = EthKeyPair::from_secret_slice(
+            &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
+        )
+        .unwrap();
+        let web3 = crate::eth::alloy_compat::build_provider(vec![url.to_owned()], vec![]).unwrap();
+        let conf = json!({
+            "netid": mm2_net_config::SUPPORTED_NETIDS[0],
+            "coins": [{"coin": "USDC-PLG20", "protocol": {"type": "ERC20", "protocol_data":
+                {"platform": "MATIC", "contract_address": format!("{:#x}", token_addr)}}}],
+        });
+        let ctx = MmCtxBuilder::new().with_conf(conf).into_mm_arc();
+        let my_address = public_to_address(&key_pair.public());
+        let coin = EthCoin(Arc::new(EthCoinImpl {
+            coin_type: EthCoinType::Erc20 {
+                platform: "MATIC".to_owned(),
+                token_addr,
+            },
+            decimals: 6,
+            gas_station_url: None,
+            gas_station_decimals: ETH_GAS_STATION_DECIMALS,
+            history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
+            gas_station_policy: GasStationPricePolicy::MeanAverageFast,
+            my_address,
+            sign_message_prefix: None,
+            signer: EthSigner::Local(key_pair),
+            swap_contract_address: Address::from_str("9130b257d37a52e52f21054c4da3450c72f595ce").unwrap(),
+            fallback_swap_contract: None,
+            ticker: "USDC-PLG20".to_owned(),
+            web3_instances: vec![Web3Instance {
+                web3: web3.clone(),
+                is_parity: true,
+            }],
+            web3,
+            ctx: ctx.weak(),
+            required_confirmations: 1.into(),
+            tron_api: None,
+            nft_swap_v2_contract: None,
+            swap_gas_fee_policy: Mutex::new(policy),
+            erc20_tokens_infos: Default::default(),
+            custom_token: false,
+            chain_id: Some(POLYGON_CHAIN_ID),
+            logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+            derivation_method: DerivationMethod::Iguana(my_address),
+            swap_v2_contracts: None,
+            gas_limit_v2: EthGasLimitV2::default(),
+        }));
+        (ctx, coin)
+    }
+
+    /// The counterparty's `erc20Payment` transaction (legacy form) that the spend refers to.
+    fn counterparty_payment(coin: &EthCoin, token_addr: Address) -> Vec<u8> {
+        let function = SWAP_CONTRACT.function("erc20Payment").unwrap();
+        let data = function
+            .encode_input(&[
+                Token::FixedBytes(vec![7u8; 32]),
+                Token::Uint(U256::from(1_000_000u64)),
+                Token::Address(token_addr),
+                Token::Address(coin.my_address),
+                Token::FixedBytes(vec![9u8; 20]),
+                Token::Uint(U256::from(1_800_000_000u64)),
+            ])
+            .unwrap();
+        let unsigned = UnSignedEthTx {
+            nonce: U256::from(3u64),
+            gas_price: U256::from(1_000_000_000u64),
+            gas: U256::from(150_000u64),
+            action: Action::Call(coin.swap_contract_address),
+            value: U256::zero(),
+            data,
+        };
+        let counterparty =
+            Secret::from_str("4646464646464646464646464646464646464646464646464646464646464646").unwrap();
+        rlp::encode(&unsigned.sign(&counterparty, Some(POLYGON_CHAIN_ID))).to_vec()
+    }
+
+    /// Drives one swap send and returns the bytes the node received.
+    fn broadcast(policy: SwapGasFeePolicy, send: impl Fn(&EthCoin, &[u8]) -> TransactionFut) -> Vec<u8> {
+        EthCoin::payment_status
+            .mock_safe(|_, _, _| MockResult::Return(Box::new(futures01::future::ok(PAYMENT_STATE_SENT.into()))));
+        let node = spawn_node();
+        let token_addr = Address::from_str("3c499c542cef5e3811e1192ce70d8cc03d5c3359").unwrap();
+        let (_ctx, coin) = polygon_token(&node.url, policy, token_addr);
+        let payment = counterparty_payment(&coin, token_addr);
+        block_on(send(&coin, &payment).compat()).expect("the swap send succeeds");
+        let sent = node.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1, "exactly one transaction is broadcast");
+        sent[0].clone()
+    }
+
+    fn spend_maker_payment(coin: &EthCoin, payment: &[u8]) -> TransactionFut {
+        coin.send_taker_spends_maker_payment(
+            payment,
+            0,
+            &[],
+            &[5u8; 32],
+            &[],
+            &Some(BytesJson::from(coin.swap_contract_address.as_bytes().to_vec())),
+        )
+    }
+
+    fn refund_own_payment(coin: &EthCoin, payment: &[u8]) -> TransactionFut {
+        coin.send_taker_refunds_payment(
+            payment,
+            0,
+            &[],
+            &[],
+            &[],
+            &Some(BytesJson::from(coin.swap_contract_address.as_bytes().to_vec())),
+        )
+    }
+
+    fn assert_untyped_legacy(raw: &[u8]) {
+        assert!(
+            raw[0] >= 0xc0,
+            "legacy form leads with an RLP list header, got 0x{:02x}",
+            raw[0]
+        );
+        let decoded = signed_eth_tx_from_bytes(raw).unwrap();
+        assert!(matches!(decoded.kind, TxKind::Legacy { .. }));
+    }
+
+    fn assert_type_2(raw: &[u8]) {
+        assert_eq!(raw[0], 0x02, "a tier must emit the EIP-1559 envelope byte");
+        let decoded = signed_eth_tx_from_bytes(raw).unwrap();
+        match &decoded.kind {
+            TxKind::Typed(t) => {
+                assert_eq!(t.tx_type, 2);
+                assert_eq!(t.chain_id, POLYGON_CHAIN_ID);
+            },
+            TxKind::Legacy { .. } => panic!("decoded as legacy"),
+        }
+    }
+
+    #[test]
+    fn legacy_policy_spend_of_the_counterpartys_payment_is_untyped() {
+        assert_untyped_legacy(&broadcast(SwapGasFeePolicy::Legacy, spend_maker_payment));
+    }
+
+    #[test]
+    fn every_tier_spend_of_the_counterpartys_payment_is_type_2() {
+        for policy in [SwapGasFeePolicy::Low, SwapGasFeePolicy::Medium, SwapGasFeePolicy::High] {
+            assert_type_2(&broadcast(policy, spend_maker_payment));
+        }
+    }
+
+    #[test]
+    fn refund_follows_the_policy_form() {
+        assert_untyped_legacy(&broadcast(SwapGasFeePolicy::Legacy, refund_own_payment));
+        assert_type_2(&broadcast(SwapGasFeePolicy::Medium, refund_own_payment));
+    }
+}

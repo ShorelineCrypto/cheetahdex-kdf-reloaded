@@ -1271,3 +1271,31 @@ fn cancel_of_an_unknown_task_is_no_such_task_404() {
     );
     assert_eq!(error.get_inner().status_code(), StatusCode::NOT_FOUND);
 }
+
+/// The initial swap gas-fee policy of a coin comes from the activation request, else from the
+/// platform coin's configuration entry, else it is left unset (the coin then starts as `Legacy`).
+/// A coins file that sets `swap_gas_fee_policy` therefore changes the transaction form of every
+/// swap send of that platform and its tokens without any RPC parameter naming it (CRD R35.1.1).
+#[test]
+fn initial_swap_gas_fee_policy_precedence_is_request_then_coin_config() {
+    use coins::eth::SwapGasFeePolicy;
+    let ctx = MmCtxBuilder::new().into_mm_arc();
+    let policy_of = |conf: Json, extra: Json| {
+        let req = request(&[], extra).request;
+        activation_params(&ctx, &conf, &req)
+            .unwrap_or_else(|e| panic!("activation_params: {}", e))
+            .swap_gas_fee_policy
+    };
+    assert_eq!(policy_of(json!({}), json!({})), None);
+    assert_eq!(
+        policy_of(json!({ "swap_gas_fee_policy": "Medium" }), json!({})),
+        Some(SwapGasFeePolicy::Medium)
+    );
+    assert_eq!(
+        policy_of(
+            json!({ "swap_gas_fee_policy": "Medium" }),
+            json!({ "swap_gas_fee_policy": "Legacy" })
+        ),
+        Some(SwapGasFeePolicy::Legacy)
+    );
+}
