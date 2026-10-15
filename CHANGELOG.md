@@ -8,6 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`enable_erc20` now works on an HD wallet.** The one-shot `enable_erc20` refused every
+  HD-derived EVM platform with `UnexpectedDerivationMethod` (`"ExpectedSingleAddress"`),
+  while `task::enable_erc20` supported HD fully. The refusal's stated reason did not hold: a
+  token is enabled on the enabled address of its platform, and `path_to_address` is only
+  validated against that address, never used to pick another, so the one-shot call had
+  nothing to disambiguate. A client that only knows the one-shot call could therefore not add
+  an EVM token after startup in HD mode (one wallet's GUI was refused 63 times out of 68
+  calls). On an HD platform the call now reads the token balance of every known address and
+  returns them in `balances`, one entry per address; a `path_to_address` that selects another
+  address than the enabled one is still refused. It registers exactly the coin the task
+  variant registers. The response shape does not change: `balances` was already an
+  address-to-balance map, and on a single-address platform the response is byte-identical to
+  before. The call reports no progress, so on a wallet with many addresses the caller waits
+  for all balance reads; `task::enable_erc20` remains the variant that reports it. `enable_nft`
+  still refuses an HD platform, and so does `enable_erc20` for a hardware-backed platform: the
+  device confirms through the `user_action` channel of the task variant, which the one-shot
+  call does not have, so only a software HD wallet (HD mode) is admitted. The MM2.json boolean `erc20_hd_activation` (default `true`)
+  set to `false` restores the former refusal exactly (CRD ch.35 R35.2.5; listed in
+  `docs/GLEEC_COMPATIBILITY.md`).
 - **The swap gas-fee policy now takes effect.** `set_swap_gas_fee_policy` stored a policy and
   `get_swap_gas_fee_policy` echoed it, but nothing read it: every swap transaction was priced from
   one gas price and signed in the legacy form, so `High` behaved exactly like `Legacy`. The EVM

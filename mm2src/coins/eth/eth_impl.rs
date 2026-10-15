@@ -68,6 +68,15 @@ impl EthCoinImpl {
         false
     }
 
+    /// Whether this coin is derived from a software HD wallet: an HD wallet whose keys the node itself holds.
+    /// A hardware-backed coin is never software HD, however it derives its enabled address, because every
+    /// signature and address confirmation needs the device.
+    pub fn uses_software_hd_wallet(&self) -> bool {
+        matches!(self.derivation_method, DerivationMethod::HDWallet(_))
+            && !self.uses_hardware_signer()
+            && self.hardware_derivation_path().is_none()
+    }
+
     /// The derivation path of the enabled address of a hardware-wallet coin.
     pub fn hardware_derivation_path(&self) -> Option<crypto::DerivationPath> {
         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]

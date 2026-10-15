@@ -1822,6 +1822,35 @@ fn trezor_eth_coin_for_test(coin_type: EthCoinType) -> (MmArc, EthCoin) {
     (ctx, eth_coin)
 }
 
+/// A hardware-backed coin is never a software HD wallet, so the one-shot `enable_erc20` keeps refusing it: that
+/// call has no `user_action` channel for the device to confirm through (CRD R35.2.5). The coin under test keeps
+/// its `HDWallet` derivation and differs from the software one only by its signer, so the hardware clauses of the
+/// predicate are the ones being exercised.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[test]
+fn a_trezor_signed_hd_coin_is_not_a_software_hd_wallet() {
+    let (_ctx, software, address) = eth_hd_coin_for_test(EthCoinType::Eth);
+    assert!(matches!(software.derivation_method, DerivationMethod::HDWallet(_)));
+    assert!(software.uses_software_hd_wallet(), "the control: a software HD coin");
+
+    let key_pair = KeyPair::from_secret_slice(
+        &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
+    )
+    .unwrap();
+    let mut inner = Arc::try_unwrap(software.0).unwrap_or_else(|_| panic!("a sole owner of the fixture"));
+    inner.signer = EthSigner::Trezor(EthTrezorSigner {
+        derivation_path: DerivationPath::from_str("m/44'/60'/0'/0/0").unwrap(),
+        address,
+        public: *key_pair.public(),
+    });
+    let hardware = EthCoin(Arc::new(inner));
+
+    assert!(matches!(hardware.derivation_method, DerivationMethod::HDWallet(_)));
+    assert!(hardware.uses_hardware_signer());
+    assert!(hardware.hardware_derivation_path().is_some());
+    assert!(!hardware.uses_software_hd_wallet());
+}
+
 /// R50.24 / R49.6: the direct legacy `withdraw` method rejects a Trezor-policy
 /// coin, steering clients to the `task::withdraw` API. No device interaction.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
