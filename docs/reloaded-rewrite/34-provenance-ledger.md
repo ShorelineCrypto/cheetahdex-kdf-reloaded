@@ -282,6 +282,9 @@ Two provenance statements were tightened after an external audit:
   (`LICENSE-MIT`) for the MIT option it is used under; `mm2src/mm2_net/src/grpc_web.rs`
   gained a per-file header and an adapted-source row, with the tonic MIT notice
   reproduced in `THIRDPARTY-LICENSES`.
+- `cargo deny check licenses` now runs in CI (`deny.toml` `[licenses]`), so a
+  dependency with an incompatible or missing license fails the build unless it
+  is an existing, listed exception.
 
 ## 34.3 Entries
 

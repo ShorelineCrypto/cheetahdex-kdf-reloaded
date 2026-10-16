@@ -45,6 +45,10 @@ and we use [rustfmt](https://github.com/rust-lang/rustfmt) to make our code clea
    ```shell
    cargo deny check advisories
    ```
+5. Make sure that new dependencies are licensed compatibly with the GPL-2.0-only combined work (see `LEGAL/LICENSING-POLICY.md`).
+   ```shell
+   cargo deny check licenses
+   ```
 
 ### Run WASM tests
 
