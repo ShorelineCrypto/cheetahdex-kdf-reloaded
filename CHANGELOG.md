@@ -16,9 +16,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   emit an EIP-1559 (type 2) transaction whose `max_fee_per_gas` / `max_priority_fee_per_gas` are
   the matching tier of the same fee estimate the fee-estimation RPC and stream report (the
   configured gas API when present, otherwise the internal fee-history estimator). If the estimate
-  cannot be obtained the send fails rather than silently falling back to the legacy form. Note
-  that a peer running a reference build at or before `v2.0.0-beta` cannot read a typed
-  transaction, which is why `Legacy` remains the default. Not yet verified against a live
+  cannot be obtained the send fails rather than silently falling back to the legacy form.
+  `Legacy` is the built-in default, and it exists for peers on a reference build at or before
+  `v2.0.0-beta`, which cannot read a typed transaction. It is not what most EVM swaps use: the
+  initial policy of a platform coin activated through `enable_eth_with_tokens` (or its task form)
+  is the `swap_gas_fee_policy` activation parameter, else the `swap_gas_fee_policy` key of the
+  coin's entry in the coins file, else `Legacy`, and the coins file ships `"Medium"` for ETH
+  (chain 1), MATIC (137), AVAX (43114), ETH-ARB20 (42161), ETH-BASE (8453) and MOVR (1285). Swaps
+  of those coins and of their tokens therefore emit type 2 unless the operator overrides the
+  policy at activation or with `set_swap_gas_fee_policy`; BNB Chain, for instance, has no such
+  key and stays untyped. The legacy `enable` method does not read the key and starts as `Legacy`.
+  Activation now logs the effective policy and which route set it at INFO, for example
+  `MATIC: swap gas-fee policy Medium (source: coin config)`. Not yet verified against a live
   network send.
 - **A counterparty's EIP-1559 (type 2) and EIP-2930 (type 1) transaction can now be read.**
   Swap transactions (such as the taker's dex-fee payment) were decoded only as legacy

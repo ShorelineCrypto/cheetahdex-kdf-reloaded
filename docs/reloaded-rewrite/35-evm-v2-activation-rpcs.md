@@ -810,13 +810,28 @@ for a coin. Its `params` carry `coin` (string, required) and `swap_gas_fee_polic
 > `swap_gas_fee_policy`. These are **not** `*_swap_transaction_fee_policy`.
 
 R35.6.3 The policy is a published string enum over exactly four variants:
-- `Legacy` -- pre-EIP-1559 single gas-price pricing (the default);
+- `Legacy` -- pre-EIP-1559 single gas-price pricing (the built-in default, used when neither
+  the activation parameter nor the coin configuration names a policy);
 - `Low` -- low EIP-1559 priority-fee tier;
 - `Medium` -- medium EIP-1559 priority-fee tier;
 - `High` -- high EIP-1559 priority-fee tier.
 
 The same enum is accepted as the optional `swap_gas_fee_policy` field of
 `enable_eth_with_tokens` (R35.1.1), where it sets the coin's initial policy.
+
+> **Initial policy and shipped configuration (informative).** A platform coin's
+> initial policy is, in order: the `swap_gas_fee_policy` activation parameter, the
+> `swap_gas_fee_policy` key of its coin-configuration entry, else `Legacy`; a
+> token starts with its platform's policy. The legacy `enable` method does not
+> read the coin-configuration key and starts as `Legacy`. The coins file the
+> project ships sets `"Medium"` for ETH (chain 1), MATIC (137), AVAX (43114),
+> ETH-ARB20 (42161), ETH-BASE (8453) and MOVR (1285), so on those coins, and on
+> their tokens, swap transactions are EIP-1559 (type `0x02`) unless the operator
+> overrides the policy at activation or with `set_swap_gas_fee_policy`; a coin
+> without the key, such as BNB, stays untyped. `Legacy` being the default is
+> therefore not a statement about what most EVM swaps emit. Platform activation
+> logs one INFO line naming the effective policy and which of the three routes
+> set it, e.g. `MATIC: swap gas-fee policy Medium (source: coin config)`.
 
 R35.6.4 These RPCs apply only to EVM-family coins (coins whose swaps price gas via
 the EIP-1559 / legacy gas model). A request for a coin that does not support the
@@ -1157,8 +1172,9 @@ present from `v2.1.0-beta` onwards and unchanged at `v2.6.0-beta` and
    every reference build from `v2.1.0-beta` onwards. It does not add a
    capability the lineage lacks, and it needs no divergence entry.
 2. A peer on a build at or before `v2.0.0-beta` cannot read a typed transaction
-   we emit. This is a reason to keep `Legacy` as the default policy
-   (R35.6.2) rather than a reason to restrict what we read; the reading and
+   we emit. This is a reason to keep `Legacy` as the built-in default policy
+   (R35.6.3), and to be aware that the shipped coin configuration overrides it
+   on several chains (see the note after R35.6.3), rather than a reason to restrict what we read; the reading and
    emitting sides have different compatibility floors and MUST NOT be collapsed
    into one decision. See D35.3.
 
