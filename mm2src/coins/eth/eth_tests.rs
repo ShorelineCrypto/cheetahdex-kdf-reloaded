@@ -2365,16 +2365,35 @@ mod swap_send_path_wire_form {
 
     /// An ERC-20 token coin on a chain-137 platform with `policy` as its stored swap gas-fee policy.
     fn polygon_token(url: &str, policy: SwapGasFeePolicy, token_addr: Address) -> (MmArc, EthCoin) {
+        polygon_token_with_conf(url, policy, token_addr, json!([]), json!({}))
+    }
+
+    /// As [`polygon_token`], with `extra_coins` appended to the coins file and `node_conf` merged into the
+    /// node configuration (compatibility switches).
+    fn polygon_token_with_conf(
+        url: &str,
+        policy: SwapGasFeePolicy,
+        token_addr: Address,
+        extra_coins: Json,
+        node_conf: Json,
+    ) -> (MmArc, EthCoin) {
         let key_pair = EthKeyPair::from_secret_slice(
             &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
         )
         .unwrap();
         let web3 = crate::eth::alloy_compat::build_provider(vec![url.to_owned()], vec![]).unwrap();
-        let conf = json!({
+        let mut coins = vec![
+            json!({"coin": "USDC-PLG20", "protocol": {"type": "ERC20", "protocol_data":
+                {"platform": "MATIC", "contract_address": format!("{:#x}", token_addr)}}}),
+        ];
+        coins.extend(extra_coins.as_array().unwrap().iter().cloned());
+        let mut conf = json!({
             "netid": mm2_net_config::SUPPORTED_NETIDS[0],
-            "coins": [{"coin": "USDC-PLG20", "protocol": {"type": "ERC20", "protocol_data":
-                {"platform": "MATIC", "contract_address": format!("{:#x}", token_addr)}}}],
+            "coins": coins,
         });
+        for (k, v) in node_conf.as_object().unwrap() {
+            conf[k] = v.clone();
+        }
         let ctx = MmCtxBuilder::new().with_conf(conf).into_mm_arc();
         let my_address = public_to_address(&key_pair.public());
         let coin = EthCoin(Arc::new(EthCoinImpl {
@@ -2514,5 +2533,132 @@ mod swap_send_path_wire_form {
     fn refund_follows_the_policy_form() {
         assert_untyped_legacy(&broadcast(SwapGasFeePolicy::Legacy, refund_own_payment));
         assert_type_2(&broadcast(SwapGasFeePolicy::Medium, refund_own_payment));
+    }
+
+    // ── CRD D35.7: the per-coin cap on the emitted transaction type ─────────────────────────────
+
+    /// Drives one swap send and returns its outcome with every transaction the node received.
+    fn try_broadcast(
+        policy: SwapGasFeePolicy,
+        extra_coins: Json,
+        node_conf: Json,
+    ) -> (Result<(), String>, Vec<Vec<u8>>) {
+        EthCoin::payment_status
+            .mock_safe(|_, _, _| MockResult::Return(Box::new(futures01::future::ok(PAYMENT_STATE_SENT.into()))));
+        let (node, sent) = spawn_send_node();
+        let token_addr = Address::from_str("3c499c542cef5e3811e1192ce70d8cc03d5c3359").unwrap();
+        let (_ctx, coin) = polygon_token_with_conf(&node.url, policy, token_addr, extra_coins, node_conf);
+        let payment = counterparty_payment(&coin, token_addr);
+        let result = block_on(spend_maker_payment(&coin, &payment).compat())
+            .map(|_| ())
+            .map_err(|e| format!("{:?}", e));
+        let sent = sent.lock().unwrap().clone();
+        (result, sent)
+    }
+
+    fn platform_with_cap(cap: Json) -> Json { json!([{"coin": "MATIC", "max_eth_tx_type": cap}]) }
+
+    fn assert_refused_without_broadcast(outcome: (Result<(), String>, Vec<Vec<u8>>)) -> String {
+        let (result, sent) = outcome;
+        let err = result.expect_err("a type above the coin's maximum must be refused at signing");
+        assert!(err.contains("refusing to sign a type-2 transaction"), "{err}");
+        assert!(
+            sent.is_empty(),
+            "nothing is broadcast, and in particular no lower type is substituted"
+        );
+        err
+    }
+
+    #[test]
+    fn a_sufficient_cap_lets_the_typed_send_proceed() {
+        for cap in [2, 3] {
+            let (result, sent) = try_broadcast(SwapGasFeePolicy::Medium, platform_with_cap(json!(cap)), json!({}));
+            result.expect("the send succeeds");
+            assert_eq!(sent.len(), 1);
+            assert_type_2(&sent[0]);
+        }
+    }
+
+    #[test]
+    fn an_insufficient_cap_refuses_the_typed_send_at_signing() {
+        for cap in [0, 1] {
+            let err = assert_refused_without_broadcast(try_broadcast(
+                SwapGasFeePolicy::Medium,
+                platform_with_cap(json!(cap)),
+                json!({}),
+            ));
+            assert!(err.contains(&format!("is {}", cap)), "{err}");
+        }
+    }
+
+    #[test]
+    fn the_cap_does_not_affect_an_untyped_send() {
+        let (result, sent) = try_broadcast(SwapGasFeePolicy::Legacy, platform_with_cap(json!(0)), json!({}));
+        result.expect("the send succeeds");
+        assert_untyped_legacy(&sent[0]);
+    }
+
+    #[test]
+    fn an_absent_cap_is_unrestricted() {
+        // The token and its platform are both silent: our deliberate divergence from the reference,
+        // which would treat the absent key as 0.
+        let (result, sent) = try_broadcast(SwapGasFeePolicy::Medium, json!([{"coin": "MATIC"}]), json!({}));
+        result.expect("the send succeeds");
+        assert_type_2(&sent[0]);
+    }
+
+    #[test]
+    fn the_switch_makes_an_absent_cap_mean_untyped_only() {
+        let switch = json!({ "max_eth_tx_type_absent_means_untyped": true });
+        let absent = assert_refused_without_broadcast(try_broadcast(
+            SwapGasFeePolicy::Medium,
+            json!([{"coin": "MATIC"}]),
+            switch.clone(),
+        ));
+        // The refusal is the one an explicit cap of 0 gets, down to the stated maximum.
+        let explicit_zero = assert_refused_without_broadcast(try_broadcast(
+            SwapGasFeePolicy::Medium,
+            platform_with_cap(json!(0)),
+            json!({}),
+        ));
+        assert!(
+            absent.contains("is 0 ") && explicit_zero.contains("is 0 "),
+            "{absent} / {explicit_zero}"
+        );
+        // An untyped send is unaffected by the switch.
+        let (result, sent) = try_broadcast(SwapGasFeePolicy::Legacy, json!([]), switch.clone());
+        result.expect("the send succeeds");
+        assert_untyped_legacy(&sent[0]);
+        // The switch never overrides a key that is present.
+        let (result, sent) = try_broadcast(SwapGasFeePolicy::Medium, platform_with_cap(json!(2)), switch);
+        result.expect("the send succeeds");
+        assert_type_2(&sent[0]);
+    }
+
+    #[test]
+    fn anything_but_the_boolean_true_leaves_the_switch_off() {
+        for off in [json!("true"), json!(1), json!(false)] {
+            let (result, sent) = try_broadcast(
+                SwapGasFeePolicy::Medium,
+                json!([]),
+                json!({ "max_eth_tx_type_absent_means_untyped": off }),
+            );
+            result.expect("an unrecognised switch value leaves the default behavior");
+            assert_type_2(&sent[0]);
+        }
+    }
+
+    /// The token coin (USDC-PLG20) has no `max_eth_tx_type` of its own; its platform (MATIC) does. The
+    /// precedence of a token's own entry over the platform's is pinned by `resolve_max_eth_tx_type`.
+    #[test]
+    fn a_token_inherits_its_platforms_cap() {
+        assert_refused_without_broadcast(try_broadcast(
+            SwapGasFeePolicy::High,
+            platform_with_cap(json!(0)),
+            json!({}),
+        ));
+        let (result, sent) = try_broadcast(SwapGasFeePolicy::High, platform_with_cap(json!(2)), json!({}));
+        result.expect("the send succeeds");
+        assert_type_2(&sent[0]);
     }
 }

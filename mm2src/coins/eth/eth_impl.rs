@@ -120,10 +120,33 @@ impl EthCoinImpl {
         }
     }
 
+    /// Refuses a transaction of EIP-2718 type `tx_type` when the coin's `max_eth_tx_type` cap is lower
+    /// (CRD D35.7). The send fails; it is not rebuilt in a lower type. Legacy (type `0`) can never exceed a cap.
+    fn ensure_tx_type_within_cap(&self, tx_type: u64) -> Result<(), String> {
+        let ctx = MmArc::from_weak(&self.ctx).ok_or_else(|| "The MM context is gone".to_owned())?;
+        match self.max_eth_tx_type(&ctx) {
+            (Some(max), source) if tx_type > max => ERR!(
+                "{}: refusing to sign a type-{} transaction: the maximum transaction type for this coin is {} ({})",
+                self.ticker,
+                tx_type,
+                max,
+                match source {
+                    TxTypeCapSource::CoinConfig => "max_eth_tx_type of the coin configuration",
+                    TxTypeCapSource::AbsentKeyIsZero => {
+                        "no max_eth_tx_type key and max_eth_tx_type_absent_means_untyped is set"
+                    },
+                    TxTypeCapSource::Unrestricted => "unrestricted",
+                }
+            ),
+            _ => Ok(()),
+        }
+    }
+
     /// Signs an EIP-1559 swap transaction (CRD R35.6A.17) with the same local key and the same
     /// policy gate as [`Self::sign_tx_for_send`]: MetaMask and Trezor reject swap sends in this form
     /// exactly as they do in the legacy form.
     pub(crate) fn sign_eip1559_tx_for_send(&self, tx: Eip1559Transaction) -> Result<SignedEthTx, String> {
+        self.ensure_tx_type_within_cap(EIP1559_TX_TYPE)?;
         match &self.signer {
             EthSigner::Local(key_pair) => tx.sign(key_pair.secret()),
             #[cfg(target_arch = "wasm32")]
@@ -1093,6 +1116,9 @@ pub(crate) enum SwapFee {
         max_priority_fee_per_gas: U256,
     },
 }
+
+/// The EIP-2718 type byte of an EIP-1559 transaction.
+const EIP1559_TX_TYPE: u64 = 2;
 
 /// A swap transaction in the serialized form chosen by the swap gas-fee policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3485,7 +3511,7 @@ pub async fn eth_coin_from_conf_and_request(
     priv_key: &[u8],
     protocol: CoinProtocol,
 ) -> Result<EthCoin, String> {
-    let params = try_s!(EthCoinActivationParams::from_legacy_request(req));
+    let params = try_s!(EthCoinActivationParams::from_legacy_request(req, conf));
     eth_coin_from_params_with_priv_key(ctx, ticker, conf, &params, priv_key, protocol)
         .await
         .map_err(|e| e.to_string())
@@ -3505,7 +3531,7 @@ pub async fn eth_coin_from_conf_and_request_with_metamask(
     metamask_arc: crypto::MetamaskArc,
     protocol: CoinProtocol,
 ) -> Result<EthCoin, String> {
-    let params = try_s!(EthCoinActivationParams::from_legacy_request(req));
+    let params = try_s!(EthCoinActivationParams::from_legacy_request(req, conf));
     eth_coin_from_params_with_metamask(ctx, ticker, conf, &params, metamask_arc, protocol)
         .await
         .map_err(|e| e.to_string())

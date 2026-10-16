@@ -121,19 +121,103 @@ pub fn resolve_swap_gas_fee_policy(
     }
 }
 
+/// The `MM2.json` key of the compatibility switch for a coin whose configuration has no `max_eth_tx_type`.
+pub const MAX_ETH_TX_TYPE_ABSENT_MEANS_UNTYPED_KEY: &str = "max_eth_tx_type_absent_means_untyped";
+
+/// Whether an absent `max_eth_tx_type` coin-configuration key means `0` (untyped transactions only), CRD D35.7.
+///
+/// Reloaded treats an absent key as unrestricted, so a coin whose configuration is silent about the cap can
+/// still send an EIP-1559 swap transaction. The reference lineage treats an absent key as `0`. Setting this
+/// switch to the boolean `true` restores that reference behavior; any other value, including the string
+/// `"true"`, leaves the default.
+pub fn max_eth_tx_type_absent_means_untyped(ctx: &MmArc) -> bool {
+    ctx.conf[MAX_ETH_TX_TYPE_ABSENT_MEANS_UNTYPED_KEY].as_bool() == Some(true)
+}
+
+/// Where the effective cap on the emitted transaction type of a coin came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TxTypeCapSource {
+    /// The `max_eth_tx_type` key of the coin's own configuration entry, or of its platform coin's entry.
+    CoinConfig,
+    /// No key anywhere: no cap applies.
+    Unrestricted,
+    /// No key anywhere, and the compatibility switch makes the absent key mean `0`.
+    AbsentKeyIsZero,
+}
+
+impl TxTypeCapSource {
+    fn describe(self) -> &'static str {
+        match self {
+            TxTypeCapSource::CoinConfig => "coin config",
+            TxTypeCapSource::Unrestricted => "no max_eth_tx_type key, unrestricted",
+            TxTypeCapSource::AbsentKeyIsZero => {
+                "no max_eth_tx_type key, treated as 0 by max_eth_tx_type_absent_means_untyped"
+            },
+        }
+    }
+}
+
+/// The highest EIP-2718 transaction type `confs` allow a coin to send (CRD D35.7), and where that came from.
+///
+/// `confs` lists the coin's own configuration entry first and, for a token, its platform coin's entry second;
+/// the first entry holding a non-negative integer `max_eth_tx_type` decides. A value that is not a
+/// non-negative integer counts as absent. `None` means unrestricted.
+pub fn resolve_max_eth_tx_type(confs: &[&Json], absent_means_untyped: bool) -> (Option<u64>, TxTypeCapSource) {
+    if let Some(max) = confs.iter().find_map(|conf| conf["max_eth_tx_type"].as_u64()) {
+        return (Some(max), TxTypeCapSource::CoinConfig);
+    }
+    if absent_means_untyped {
+        (Some(0), TxTypeCapSource::AbsentKeyIsZero)
+    } else {
+        (None, TxTypeCapSource::Unrestricted)
+    }
+}
+
+impl EthCoinImpl {
+    /// The effective cap on the transaction type this coin may send, and its source. A token falls back to
+    /// its platform coin's configuration entry.
+    pub(crate) fn max_eth_tx_type(&self, ctx: &MmArc) -> (Option<u64>, TxTypeCapSource) {
+        let own = crate::coin_conf(ctx, &self.ticker);
+        let platform = match &self.coin_type {
+            EthCoinType::Erc20 { platform, .. } | EthCoinType::Trc20 { platform, .. } => {
+                crate::coin_conf(ctx, platform)
+            },
+            _ => Json::Null,
+        };
+        resolve_max_eth_tx_type(&[&own, &platform], max_eth_tx_type_absent_means_untyped(ctx))
+    }
+}
+
 /// The one-line INFO message logged when an EVM platform coin is built.
-fn swap_gas_fee_policy_log_line(ticker: &str, policy: SwapGasFeePolicy, source: SwapGasFeePolicySource) -> String {
+fn swap_gas_fee_policy_log_line(
+    ticker: &str,
+    policy: SwapGasFeePolicy,
+    source: SwapGasFeePolicySource,
+    max_tx_type: (Option<u64>, TxTypeCapSource),
+) -> String {
+    let cap = match max_tx_type.0 {
+        Some(max) => max.to_string(),
+        None => "none".to_owned(),
+    };
     format!(
-        "{}: swap gas-fee policy {:?} (source: {})",
+        "{}: swap gas-fee policy {:?} (source: {}); max tx type {} (source: {})",
         ticker,
         policy,
-        source.describe()
+        source.describe(),
+        cap,
+        max_tx_type.1.describe()
     )
 }
 
 impl EthCoinActivationParams {
     /// Parses the stringly typed request of the legacy `enable` method.
-    pub fn from_legacy_request(req: &Json) -> Result<Self, String> {
+    ///
+    /// `conf` is the coin's own configuration entry. The initial swap gas-fee policy is resolved exactly as on
+    /// the v2 and task routes (CRD R35.6.7, D35.6): the `swap_gas_fee_policy` request field, else the
+    /// coin-configuration key, else the built-in `Legacy`. Unlike those routes, an unrecognised value in the
+    /// request field is **ignored** in favour of the configured or default policy rather than rejected
+    /// (CRD R55.4.4); the two parses are deliberately not shared.
+    pub fn from_legacy_request(req: &Json, conf: &Json) -> Result<Self, String> {
         let urls: Vec<String> = try_s!(json::from_value(req["urls"].clone()));
         let swap_contract_address: Option<Address> = try_s!(json::from_value(req["swap_contract_address"].clone()));
         let fallback_swap_contract: Option<Address> = try_s!(json::from_value(req["fallback_swap_contract"].clone()));
@@ -144,6 +228,8 @@ impl EthCoinActivationParams {
         if req["requires_notarization"].as_bool().is_some() {
             log!("Warning: requires_notarization doesn't take any effect on ETH/ERC20 coins");
         }
+        let requested_policy: Option<SwapGasFeePolicy> = json::from_value(req["swap_gas_fee_policy"].clone()).ok();
+        let (swap_gas_fee_policy, swap_gas_fee_policy_source) = resolve_swap_gas_fee_policy(requested_policy, conf);
         Ok(EthCoinActivationParams {
             urls,
             swap_contract_address,
@@ -156,8 +242,8 @@ impl EthCoinActivationParams {
             gas_station_url,
             gas_station_decimals,
             gas_station_policy,
-            swap_gas_fee_policy: None,
-            swap_gas_fee_policy_source: SwapGasFeePolicySource::BuiltInDefault,
+            swap_gas_fee_policy,
+            swap_gas_fee_policy_source,
         })
     }
 
@@ -582,7 +668,8 @@ pub(crate) async fn build_eth_coin(
             swap_gas_fee_policy_log_line(
                 ticker,
                 params.swap_gas_fee_policy.unwrap_or_default(),
-                params.swap_gas_fee_policy_source
+                params.swap_gas_fee_policy_source,
+                coin.max_eth_tx_type(ctx)
             )
         );
     }
@@ -665,13 +752,156 @@ mod tests {
     #[test]
     fn swap_gas_fee_policy_log_line_names_value_and_source() {
         assert_eq!(
-            swap_gas_fee_policy_log_line("MATIC", SwapGasFeePolicy::Medium, SwapGasFeePolicySource::CoinConfig),
-            "MATIC: swap gas-fee policy Medium (source: coin config)"
+            swap_gas_fee_policy_log_line(
+                "MATIC",
+                SwapGasFeePolicy::Medium,
+                SwapGasFeePolicySource::CoinConfig,
+                (Some(2), TxTypeCapSource::CoinConfig)
+            ),
+            "MATIC: swap gas-fee policy Medium (source: coin config); max tx type 2 (source: coin config)"
         );
         assert_eq!(
-            swap_gas_fee_policy_log_line("BNB", SwapGasFeePolicy::Legacy, SwapGasFeePolicySource::BuiltInDefault),
-            "BNB: swap gas-fee policy Legacy (source: built-in default)"
+            swap_gas_fee_policy_log_line(
+                "BNB",
+                SwapGasFeePolicy::Legacy,
+                SwapGasFeePolicySource::BuiltInDefault,
+                (None, TxTypeCapSource::Unrestricted)
+            ),
+            "BNB: swap gas-fee policy Legacy (source: built-in default); max tx type none \
+             (source: no max_eth_tx_type key, unrestricted)"
         );
+        let line = swap_gas_fee_policy_log_line(
+            "ETH",
+            SwapGasFeePolicy::Legacy,
+            SwapGasFeePolicySource::BuiltInDefault,
+            (Some(0), TxTypeCapSource::AbsentKeyIsZero),
+        );
+        assert!(line.contains("max tx type 0"), "{line}");
+        assert!(line.contains("max_eth_tx_type_absent_means_untyped"), "{line}");
+    }
+
+    #[test]
+    fn max_eth_tx_type_is_own_entry_then_platform_entry_then_unrestricted() {
+        let own = json!({ "max_eth_tx_type": 1 });
+        let platform = json!({ "max_eth_tx_type": 2 });
+        let silent = json!({ "coin": "X" });
+        assert_eq!(
+            resolve_max_eth_tx_type(&[&own, &platform], false),
+            (Some(1), TxTypeCapSource::CoinConfig)
+        );
+        // A token whose own entry is silent inherits the platform's cap.
+        assert_eq!(
+            resolve_max_eth_tx_type(&[&silent, &platform], false),
+            (Some(2), TxTypeCapSource::CoinConfig)
+        );
+        // An explicit 0 is a cap, not an absence, with or without the switch.
+        let zero = json!({ "max_eth_tx_type": 0 });
+        assert_eq!(
+            resolve_max_eth_tx_type(&[&zero, &platform], false),
+            (Some(0), TxTypeCapSource::CoinConfig)
+        );
+        assert_eq!(
+            resolve_max_eth_tx_type(&[&silent, &silent], false),
+            (None, TxTypeCapSource::Unrestricted)
+        );
+        assert_eq!(
+            resolve_max_eth_tx_type(&[&silent, &silent], true),
+            (Some(0), TxTypeCapSource::AbsentKeyIsZero)
+        );
+        // The switch never overrides a key that is present.
+        assert_eq!(
+            resolve_max_eth_tx_type(&[&platform], true),
+            (Some(2), TxTypeCapSource::CoinConfig)
+        );
+        // A value that is not a non-negative integer counts as absent.
+        for bad in [json!("2"), json!(-1), json!(1.5), json!(null), json!(true)] {
+            let conf = json!({ "max_eth_tx_type": bad });
+            assert_eq!(
+                resolve_max_eth_tx_type(&[&conf], false),
+                (None, TxTypeCapSource::Unrestricted),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_cap_switch_is_on_only_for_the_boolean_true() {
+        use mm2_core::mm_ctx::MmCtxBuilder;
+        let switch = |value: Json| {
+            let ctx = MmCtxBuilder::new()
+                .with_conf(json!({ MAX_ETH_TX_TYPE_ABSENT_MEANS_UNTYPED_KEY: value }))
+                .into_mm_arc();
+            max_eth_tx_type_absent_means_untyped(&ctx)
+        };
+        assert!(switch(json!(true)));
+        for off in [json!(false), json!("true"), json!(1), json!("yes"), json!(null)] {
+            assert!(!switch(off.clone()), "{off}");
+        }
+        assert!(!max_eth_tx_type_absent_means_untyped(
+            &MmCtxBuilder::new().into_mm_arc()
+        ));
+    }
+
+    fn legacy_params(req_extra: Json, conf: Json) -> EthCoinActivationParams {
+        let mut req = json!({ "urls": ["http://localhost:8545"] });
+        for (k, v) in req_extra.as_object().unwrap() {
+            req[k] = v.clone();
+        }
+        EthCoinActivationParams::from_legacy_request(&req, &conf).unwrap()
+    }
+
+    #[test]
+    fn the_legacy_route_resolves_the_initial_policy_from_the_coin_configuration() {
+        let params = legacy_params(json!({}), json!({ "swap_gas_fee_policy": "Medium" }));
+        assert_eq!(params.swap_gas_fee_policy, Some(SwapGasFeePolicy::Medium));
+        assert_eq!(params.swap_gas_fee_policy_source, SwapGasFeePolicySource::CoinConfig);
+        let params = legacy_params(json!({}), json!({}));
+        assert_eq!(params.swap_gas_fee_policy, None);
+        assert_eq!(
+            params.swap_gas_fee_policy_source,
+            SwapGasFeePolicySource::BuiltInDefault
+        );
+    }
+
+    #[test]
+    fn the_legacy_route_honours_the_request_field_over_the_configuration() {
+        let params = legacy_params(
+            json!({ "swap_gas_fee_policy": "High" }),
+            json!({ "swap_gas_fee_policy": "Medium" }),
+        );
+        assert_eq!(params.swap_gas_fee_policy, Some(SwapGasFeePolicy::High));
+        assert_eq!(
+            params.swap_gas_fee_policy_source,
+            SwapGasFeePolicySource::RequestParameter
+        );
+        let params = legacy_params(
+            json!({ "swap_gas_fee_policy": "Legacy" }),
+            json!({ "swap_gas_fee_policy": "Medium" }),
+        );
+        assert_eq!(params.swap_gas_fee_policy, Some(SwapGasFeePolicy::Legacy));
+    }
+
+    /// CRD R55.4.4: on the legacy route an unrecognised value is ignored, not rejected -- the v2 and
+    /// task routes reject it (their request types fail to parse; see the `coins_activation` tests).
+    #[test]
+    fn the_legacy_route_ignores_an_unrecognised_policy_value() {
+        for bad in [json!("Ludicrous"), json!("medium"), json!(5), json!(null), json!({})] {
+            let configured = legacy_params(
+                json!({ "swap_gas_fee_policy": bad.clone() }),
+                json!({ "swap_gas_fee_policy": "Medium" }),
+            );
+            assert_eq!(configured.swap_gas_fee_policy, Some(SwapGasFeePolicy::Medium), "{bad}");
+            assert_eq!(
+                configured.swap_gas_fee_policy_source,
+                SwapGasFeePolicySource::CoinConfig
+            );
+            let defaulted = legacy_params(json!({ "swap_gas_fee_policy": bad.clone() }), json!({}));
+            assert_eq!(defaulted.swap_gas_fee_policy, None, "{bad}");
+            assert_eq!(
+                defaulted.swap_gas_fee_policy_source,
+                SwapGasFeePolicySource::BuiltInDefault
+            );
+        }
     }
 
     #[test]
@@ -697,7 +927,7 @@ mod tests {
     #[test]
     fn legacy_request_keeps_the_default_of_one_confirmation() {
         let req = json!({ "urls": ["http://localhost:8545"] });
-        let params = EthCoinActivationParams::from_legacy_request(&req).unwrap();
+        let params = EthCoinActivationParams::from_legacy_request(&req, &json!({})).unwrap();
         assert_eq!(params.default_required_confirmations, 1);
         assert_eq!(
             platform_required_confirmations(
@@ -745,17 +975,18 @@ mod tests {
             "tx_history": true,
             "gas_station_decimals": 9,
         });
-        let params = EthCoinActivationParams::from_legacy_request(&req).unwrap();
+        let params = EthCoinActivationParams::from_legacy_request(&req, &json!({})).unwrap();
         assert_eq!(params.urls, vec!["http://node.example".to_owned()]);
         assert_eq!(params.swap_contract_address, Some(SWAP_CONTRACT.parse().unwrap()));
         assert_eq!(params.required_confirmations, Some(3));
         assert!(params.tx_history);
         assert_eq!(params.gas_station_decimals, Some(9));
         // A swap contract that is not an address is still refused.
-        assert!(
-            EthCoinActivationParams::from_legacy_request(&json!({ "urls": [], "swap_contract_address": "nope" }))
-                .is_err()
-        );
+        assert!(EthCoinActivationParams::from_legacy_request(
+            &json!({ "urls": [], "swap_contract_address": "nope" }),
+            &json!({})
+        )
+        .is_err());
     }
 
     #[test]

@@ -1299,3 +1299,23 @@ fn initial_swap_gas_fee_policy_precedence_is_request_then_coin_config() {
         Some(SwapGasFeePolicy::Legacy)
     );
 }
+
+/// CRD R35.1.1 against R55.4.4: the v2 one-shot and the task route share one request type and **reject**
+/// an unrecognised `swap_gas_fee_policy`, where the legacy `enable` route ignores it. The difference is the
+/// specified behavior, so the two parses must stay separate.
+#[test]
+fn the_v2_and_task_routes_reject_an_unrecognised_swap_gas_fee_policy() {
+    for bad in [json!("Ludicrous"), json!("medium"), json!(5)] {
+        let raw = request_json(&[], json!({ "swap_gas_fee_policy": bad.clone() }));
+        assert!(
+            serde_json::from_value::<Req>(raw.clone()).is_err(),
+            "{bad} must fail to parse on the v2 and task routes"
+        );
+        let task: serde_json::Result<EnablePlatformCoinWithTokensReq<EthWithTokensActivationRequest>> =
+            serde_json::from_value(raw);
+        assert!(task.is_err());
+    }
+    for good in ["Legacy", "Low", "Medium", "High"] {
+        assert!(serde_json::from_value::<Req>(request_json(&[], json!({ "swap_gas_fee_policy": good }))).is_ok());
+    }
+}
