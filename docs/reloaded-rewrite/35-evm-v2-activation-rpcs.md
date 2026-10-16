@@ -822,16 +822,18 @@ The same enum is accepted as the optional `swap_gas_fee_policy` field of
 > **Initial policy and shipped configuration (informative).** A platform coin's
 > initial policy is, in order: the `swap_gas_fee_policy` activation parameter, the
 > `swap_gas_fee_policy` key of its coin-configuration entry, else `Legacy`; a
-> token starts with its platform's policy. The legacy `enable` method does not
-> read the coin-configuration key and starts as `Legacy`. The coins file the
+> token starts with its platform's policy. The legacy `enable` / `electrum` route
+> resolves the policy the same way (R35.6.7, D35.6). The coins file the
 > project ships sets `"Medium"` for ETH (chain 1), MATIC (137), AVAX (43114),
 > ETH-ARB20 (42161), ETH-BASE (8453) and MOVR (1285), so on those coins, and on
 > their tokens, swap transactions are EIP-1559 (type `0x02`) unless the operator
 > overrides the policy at activation or with `set_swap_gas_fee_policy`; a coin
 > without the key, such as BNB, stays untyped. `Legacy` being the default is
 > therefore not a statement about what most EVM swaps emit. Platform activation
-> logs one INFO line naming the effective policy and which of the three routes
-> set it, e.g. `MATIC: swap gas-fee policy Medium (source: coin config)`.
+> logs one INFO line naming the effective policy and which of the three sources
+> set it, and the effective cap on the emitted transaction type (D35.7) and its
+> source, e.g. `MATIC: swap gas-fee policy Medium (source: coin config); max tx
+> type 2 (source: coin config)`.
 
 R35.6.4 These RPCs apply only to EVM-family coins (coins whose swaps price gas via
 the EIP-1559 / legacy gas model). A request for a coin that does not support the
@@ -863,20 +865,23 @@ configuration emit the same serialized swap-transaction form. The request
 parameter exists on the legacy route too; its wire placement there is
 [Chapter 55](55-coin-activation-wire-contract.md) R55.4.4.
 
-> **Upstream divergence (informative) -- the policy is not read on Reloaded's
-> legacy activation route.** Both reference versions named in §35.6A's
+> **Upstream divergence (informative) -- the policy request field is parsed
+> leniently on the legacy route.** Both reference versions named in §35.6A's
 > derivation record resolve the initial policy with the single precedence
 > R35.6.7 states, applied identically on the legacy route and on the v2 and task
 > routes; the reference shows **no split** by activation method. Reloaded
-> currently resolves the policy only on the v2 and task routes -- on the legacy
-> route it reads neither the configuration key nor the request field -- so a
-> coin the shipped configuration puts on a non-legacy tier starts as `Legacy`
-> when it is activated through `enable` / `electrum` and on the configured tier
-> otherwise -- the same coin, the same configuration, two different emitted
-> transaction forms. The divergence is confined to the *emitting* side: what a
-> build will read is fixed independently of its policy and of the route that
-> activated the coin (R35.6A.19), so no counterparty's transaction becomes
-> unreadable and no swap fails for this reason on either side. Open as D35.6.
+> resolves it the same way on every route (decision D35.6): a coin the shipped
+> configuration puts on a non-legacy tier starts on that tier however it was
+> activated, so the same coin activated through `enable` / `electrum` and through
+> the v2 or task routes emits the same serialized swap-transaction form. The one
+> remaining difference between the routes is how a *request-parameter* value that
+> names none of the four variants is treated, and it is the specified behaviour
+> on both sides: the v2 and task routes reject it as `InvalidRequest` (R35.1.1),
+> while the legacy route ignores it and falls through to the configured or
+> built-in policy (ch. 55 R55.4.4). The two parses are deliberately separate and
+> MUST NOT be unified. The divergence history is confined to the *emitting*
+> side: what a build will read is fixed independently of its policy and of the
+> route that activated the coin (R35.6A.19).
 
 > **Code-quality finding (informative) -- the policy was stored but not
 > applied; now implemented.** The policy is accepted by
@@ -1299,10 +1304,28 @@ forms of R35.6A.2 for every build from the public release designation
 > `swap_gas_fee_policy`, and sets it explicitly to `0` on BNB (chain 56), which
 > is how the reference keeps that chain on the untyped form. The cap applies
 > only to transactions the project itself builds; it never reaches decoding
-> (R35.6A.19). Reloaded implements no equivalent key and no such cap, so an
-> operator who moves a coin to a non-legacy tier with `set_swap_gas_fee_policy`
-> obtains a type-`0x02` transaction here where a reference build on the same
-> configuration would refuse to sign one. Open as D35.7.
+> (R35.6A.19).
+>
+> Reloaded honours the key (decision D35.7) with **one deliberate divergence:
+> an absent key means unrestricted, not `0`.** Everything else is as the
+> reference: the integer key is read from the coin's own entry and, for a token
+> that has none, from its platform coin's entry; a transaction whose type exceeds
+> the maximum is refused at signing and is neither rebuilt in a lower type nor
+> broadcast. The reason for the divergence is that adopting `0` would silently
+> disable typed transactions on every coin whose configuration is silent about
+> the cap, a large behavior change for chains nobody has expressed an intent
+> about; the shipped configuration sets the key on exactly the coins it means to
+> speak about. An operator who needs the reference's absent-key behavior sets the
+> node-level boolean `max_eth_tx_type_absent_means_untyped` (default `false`) to
+> `true`: an absent key then means `0`, and the refusal is the same as for an
+> explicit `0`. Only the boolean `true` turns it on, so a typo or another value
+> leaves the default. The switch never overrides a key that is present. A value
+> of the key that is not a non-negative integer is treated as absent. The
+> switch is listed in `GLEEC_COMPATIBILITY.md`.
+>
+> **Compatibility:** for behaviour matching the reference lineage (and GLEEC
+> KDF), set `max_eth_tx_type_absent_means_untyped` to `true`. GLEEC KDF has no
+> equivalent switch; its absent-key behavior is fixed.
 >
 > A further shipped key, `use_access_list`, appears on many EVM entries,
 > including three of the six policy coins (AVAX, MATIC, MOVR, but not ETH,
@@ -1606,7 +1629,7 @@ chains, not hypothetical: a peer on a build at or before `v2.0.0-beta` cannot
 read what we send them on ETH, MATIC, AVAX, ETH-ARB20, ETH-BASE or MOVR. The
 open question is whether the emitted form should be gated on a negotiated peer
 capability; it was not answered when the policy was made effective (D35.4), and
-it is unaffected by which way D35.6 and D35.7 go.
+it is unaffected by the resolutions of D35.6 and D35.7.
 
 **D35.4** *(Resolved.)* *The swap gas-fee policy had no effect on a transaction.*
 R35.6.6 requires the stored policy to govern how the coin prices gas, and
@@ -1631,46 +1654,43 @@ closes that gap for the deferrals above; the chapter still carries no
 *Baseline Verifications* section, which R19 permits only when the chapter binds
 no such claims. Confirming that is a separate pass over §§35.1--35.4.
 
-**D35.6** *Maintainer decision -- the policy on the legacy activation route.*
-R35.6.7 states the reference's single precedence, applied on every activation
-route. Reloaded resolves the policy only on the v2 and task routes -- on the
-legacy route it reads neither the coin-configuration key nor the request field
-(ch. 55 R55.4.4) -- so a coin on one of the six chains the shipped configuration
-puts on `Medium`
-emits type-`0x02` swap transactions when activated through v2 or the task family
-and untyped legacy ones when activated through `enable` / `electrum`. Three
-directions are open: (a) resolve the policy on the legacy route too, which
-restores parity and makes the emitted form a property of the coin rather than of
-the caller's choice of activation method; (b) keep the split as a deliberate
-divergence, which leaves the legacy route as the conservative route for an
-operator trading against old peers, and which needs an entry in the
-operator-facing compatibility documents and the scoped opt-back those documents
-require, or an explicit finding that the exception is project-wide; (c) accept
-the request field on the legacy route (restoring the reference's wire surface,
-ch. 55 R55.4.4) while leaving the configuration key unread there, so an operator
-can opt in per activation without the configuration deciding for them. Note that
-the divergence is emission-only (R35.6A.19) and therefore cannot make a
-counterparty's transaction unreadable; its cost is a surprise, not a failed
-swap. Whichever is chosen, the informative note after R35.6.3 and this entry
-must end up agreeing with the code.
+**D35.6** *(Resolved -- maintainer decision, 2026-10-16.)* *The policy on the legacy
+activation route.* R35.6.7 states the reference's single precedence, applied on
+every activation route. Reloaded used to resolve the policy only on the v2 and
+task routes, so a coin on one of the six chains the shipped configuration puts on
+`Medium` emitted type-`0x02` swap transactions when activated through v2 or the
+task family and untyped legacy ones when activated through `enable` /
+`electrum`. Three directions had been open: (a) resolve the policy on the legacy
+route too; (b) keep the split as a deliberate divergence; (c) accept the request
+field on the legacy route but leave the configuration key unread there. The
+maintainer chose (a), deliberately, paired with D35.7. The legacy route now
+resolves request parameter, else configuration key, else built-in `Legacy`, with
+the same resolver as the other routes, so the emitted form is a property of the
+coin and not of the caller's choice of activation method. It also accepts the
+`swap_gas_fee_policy` request field (ch. 55 R55.4.4) and parses it leniently: an
+unrecognised value is ignored, not rejected, whereas the v2 and task routes
+reject it (R35.1.1). The leniency is the specified behavior on that route and the
+two parses are not unified. The divergence was emission-only (R35.6A.19) and
+could not make a counterparty's transaction unreadable.
 
-**D35.7** *Maintainer decision -- the per-coin cap on the emitted transaction
-type.* The reference's second emission gate, the `max_eth_tx_type`
-coin-configuration key described in the divergence note after R35.6A.19, has no
-counterpart in Reloaded. Consequences of adopting it: a chain the shipped
-configuration pins at `0` (BNB today) stays on the untyped form even if an
-operator sets a non-legacy tier, which is what the reference does and what the
-shipped configuration evidently intends; a coin with no key at all would stop
-emitting typed transactions unless the project overrides the absent-key default,
-so adopting the reference's absent-key value of `0` interacts with the choice in
-D35.6. Consequences of not adopting it: Reloaded can emit a type-`0x02`
-transaction on a chain whose configuration says the project should not, and the
-first way an operator learns this is a rejected or unmined send. A third
-position is to honour the key where present and treat its absence as
-unrestricted, which keeps every chain the shipped configuration speaks about in
-parity while not regressing chains it is silent on. The decision is not settled
-by this chapter, and R35.6A.19 holds in every case: nothing here may narrow what
-the project reads.
+**D35.7** *(Resolved -- maintainer decision, 2026-10-16.)* *The per-coin cap on the
+emitted transaction type.* The reference's second emission gate, the
+`max_eth_tx_type` coin-configuration key described in the divergence note after
+R35.6A.19, is honoured where the configuration sets it and ignored where it does
+not. Three positions had been open: adopt the reference exactly (an absent key
+means `0`), do not adopt it at all, or honour the key where present and treat its
+absence as unrestricted. The maintainer chose the third. A chain the shipped
+configuration pins at `0` (BNB today) therefore stays on the untyped form even if
+an operator sets a non-legacy tier, and a coin whose configuration is silent
+about the cap keeps emitting typed transactions as before. A send whose type
+exceeds the cap is refused at signing, in the signer, so every typed construction
+path is covered; the send fails and no lower type is substituted. Because an
+operator migrating from a reference build could be surprised by the absent-key
+difference, the project's compatibility rule requires an opt-back: the
+node-level boolean `max_eth_tx_type_absent_means_untyped`, default `false`, which
+when `true` makes an absent key mean `0`. Activation logs the effective cap and
+its source next to the policy. R35.6A.19 holds throughout: nothing here narrows
+what the project reads.
 
 ## 35.9 Provenance Footer
 
@@ -1754,3 +1774,15 @@ the project reads.
   coins. The *Forbidden corpus* entry above does not apply to these lines, and
   they rely on none of the clearances recorded in §35.6A; the third pass read
   them only within its skim of the rest of the chapter.
+- *Clean-context additions, second batch (forbidden corpus not consulted):* the
+  resolutions of D35.6 and D35.7, the rewritten divergence note after R35.6.7,
+  the second paragraph of the divergence note after R35.6A.19 (Reloaded's
+  handling of the cap, its absent-key divergence and the compatibility switch),
+  and the updates to the informative note after R35.6.3 were written on
+  2026-10-16 by a context that never read the forbidden corpus. They state
+  Reloaded's own decided behavior and rest on this repository's source and the
+  public coins configuration. The reference facts they refer to (the single
+  precedence, the absent-key value of `0`, refusal rather than downgrade) are
+  those already cleared in the third pass and are not restated with new content.
+  The Dirty Gate clearance recorded above covers neither the new paragraph nor
+  the resolutions.

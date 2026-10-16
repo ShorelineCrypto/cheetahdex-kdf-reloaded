@@ -544,16 +544,16 @@ routes (ch. 35 R35.6.7). Absent it, the coin's configuration entry and then the
 built-in default decide, again as on the other routes. EVM activation semantics
 are governed by [Chapter 35](35-evm-v2-activation-rpcs.md).
 
-> **Upstream divergence (informative) -- EVM swap gas-fee policy on this
-> route.** Two differences from the reference, both recorded in ch. 35 D35.6.
-> Reloaded does not resolve the policy on this route at all: it reads neither
-> the request field nor the coin configuration, so the coin starts on the
-> built-in default however it is configured. The reference reads both, with the
-> precedence of ch. 35 R35.6.7; it also parses this field *leniently* here --
-> an unrecognised value is ignored in favour of the configured or default
-> policy rather than rejected, where the v2 and task routes reject it
-> (ch. 35 R35.1.1). Whichever direction ch. 35 D35.6 settles on, the field
-> belongs in this table because the reference accepts it here.
+> **EVM swap gas-fee policy on this route (informative; no remaining
+> divergence from the reference).** Reloaded reads both the request field and
+> the coin configuration on this route, with the precedence of ch. 35 R35.6.7
+> (request field, else the coin-configuration key, else the built-in `Legacy`),
+> exactly as the v2 and task routes do (ch. 35 D35.6, resolved). It also parses
+> the field *leniently* here: an unrecognised value is ignored in favour of the
+> configured or default policy rather than rejected, where the v2 and task
+> routes reject it (ch. 35 R35.1.1). This leniency is the specified behavior of
+> this route and the two parses are deliberately not unified. The field belongs
+> in this table because the reference accepts it here and Reloaded now does too.
 
 > **Upstream divergence (informative).** The public reference documents the
 > three gas-station fields for legacy `enable`; the reference release no longer
@@ -1378,7 +1378,12 @@ R55.4.5 and the error body of R55.1.10.
   same two reference tags, added the EVM `swap_gas_fee_policy` request field to
   R55.4.4 and the divergence note after it (the field's acceptance on this
   route, its precedence relative to the coin configuration, and the lenient
-  parsing of an unrecognised value here). The chapter as a whole, that addition
+  parsing of an unrecognised value here). On 2026-10-16, after that pass, the
+  divergence note after R55.4.4 was rewritten by a context that never read the
+  forbidden corpus to record that Reloaded now implements the behavior the
+  earlier note described as missing (ch. 35 D35.6); it states Reloaded's own
+  decided behavior and adds no reference content, and the clearance recorded
+  below does not cover that rewrite. The chapter as a whole, that addition
   included, **passed the KDF Dirty Gate** on 2026-10-16 (PASS, 0.02, no
   findings); [Chapter 35](35-evm-v2-activation-rpcs.md)'s record of the same
   Spec Reader pass does not cover this chapter, which carries its own record:

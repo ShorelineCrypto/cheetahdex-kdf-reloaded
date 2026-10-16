@@ -287,9 +287,10 @@ foreign-transaction decoding contract of
 [Chapter 35](35-evm-v2-activation-rpcs.md) §35.6A, not through a
 legacy-only reader. Which serialized form arrives is decided by the
 sender's swap gas-fee policy (ch. 35 R35.6.3), by how that peer
-activated the coin, and on a reference peer by its per-coin cap on
-the emitted transaction type (ch. 35 R35.6.7 and the note after
-R35.6A.19): a peer on any non-legacy tier produces an EIP-2718 typed
+activated the coin, and by that peer's per-coin cap on the emitted
+transaction type (ch. 35 R35.6.7, D35.7 and the note after
+R35.6A.19; a reference build and Reloaded both honour the cap and
+differ only in what an absent key means): a peer on any non-legacy tier produces an EIP-2718 typed
 envelope rather than an untyped legacy transaction. None of that may
 narrow what the receiving side accepts (ch. 35 R35.6A.19). The same
 applies to every other step of this chapter that reads a
@@ -882,7 +883,14 @@ The chapter relies on one baseline-state claim:
   that paragraph on 2026-10-16, naming the activation route and the
   reference's per-coin cap on the emitted transaction type as further
   influences on the form that arrives, comes from the later Spec
-  Reader pass chapter 35's footer records. That authority does not
+  Reader pass chapter 35's footer records. (Later the same day the
+  words "on a reference peer" were dropped from that clause and the
+  parenthesis after "R35.6A.19" was added, by a context that never read
+  the forbidden corpus, once Reloaded implemented the cap itself; the
+  added words state Reloaded's own decided behavior from ch. 35 D35.7
+  and carry no reference content beyond what that clause already
+  cited. The Dirty Gate clearance below does not cover that wording.)
+  That authority does not
   extend to it: the clause **passed the KDF Dirty Gate** on 2026-10-16
   (PASS, 0.00, no findings) in a pass of this chapter's own, whose
   subject was which serialized forms a counterparty may send and

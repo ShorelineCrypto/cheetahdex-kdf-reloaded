@@ -706,7 +706,14 @@ The flow is:
    path.
 6. Build and sign with the keypair-derived signing path
    appropriate to the platform coin's fee policy (legacy or
-   EIP-1559).
+   EIP-1559). Whichever form is built, it is checked against the
+   coin's maximum transaction type (the `max_eth_tx_type` coin
+   configuration key, [Chapter 35](35-evm-v2-activation-rpcs.md)
+   D35.7) at signing: a form above that maximum is refused, the
+   withdrawal fails, and it is not rebuilt in a lower type. This
+   implementation currently builds the NFT withdrawal in the untyped
+   legacy form only, which no maximum can exceed, so the check is
+   not reached today; the signer enforces it for any typed form.
 7. Return transaction details with fee values denominated in
    the platform coin (`ETH`, `BNB`, `MATIC`, `AVAX`, `FTM`).
 
@@ -1041,6 +1048,15 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
   two §19.6.2 cross-reference paragraphs restate Chapter 35, whose
   wire values the KDF Spec Reader established from the upstream
   reference version.
+- *Clean-context additions (forbidden corpus not consulted):* the
+  sentence at the end of step 6 of §19.7 (refusal of a transaction form
+  above the coin's maximum) was added on 2026-10-16 by a context that
+  never read the forbidden corpus. It states this implementation's own
+  behavior as decided in chapter 35 D35.7 and observed in this
+  repository's source (`coins::nft::withdraw` builds the legacy form;
+  the EIP-1559 signer in `coins::eth` enforces the maximum). It
+  describes no reference behavior and relies on no Dirty Gate
+  clearance.
 
 ## 19.13 CoinProtocol::NFT Variant
 
