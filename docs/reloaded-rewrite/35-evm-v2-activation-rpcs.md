@@ -1539,3 +1539,12 @@ no such claims. Confirming that is a separate pass over §§35.1--35.4.
   measure recorded in §35.6A's *Clearance record* are the second pass's, as
   chapter 01 T1 requires. Every other section of this chapter rests on the
   inputs listed above.
+- *Clean-context additions (forbidden corpus not consulted):* the informative note
+  *Initial policy and shipped configuration* after R35.6.3, the "built-in default"
+  wording of R35.6.3, and the reworded item 2 of R35.6A.18 were added on
+  2026-10-15 and 2026-10-16 (commit `99a38e59b`) by a context that never read the
+  forbidden corpus. They rest on this repository's own source (the activation
+  precedence in `coins_activation` and `coins`, the signing path) and on the
+  public coins configuration, which sets `swap_gas_fee_policy` for six EVM
+  coins. The *Forbidden corpus* entry above does not apply to these lines, and
+  the Dirty Gate clearance recorded in §35.6A does not cover them.
