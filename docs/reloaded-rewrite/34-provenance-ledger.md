@@ -570,9 +570,9 @@ GPL-licensed.
 
 ### What this basis does *not* cover
 
-The GPLv2 copyleft theory does not resolve two genuinely open,
+The GPLv2 copyleft theory does not resolve genuinely open,
 separately-sourced compatibility items (they are not GPLv2-lineage
-derivatives):
+derivatives), for example:
 
 - the Apache-2.0 WalletConnect SDK crates, and
 - `mm2src/coins/eth/legacy_tx.rs` (a GPL-3.0 derivative of Parity
