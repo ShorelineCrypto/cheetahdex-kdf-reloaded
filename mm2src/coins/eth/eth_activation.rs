@@ -14,7 +14,7 @@ use crate::hd_wallet_storage::HDWalletCoinStorage;
 use crate::is_wallet_only_conf;
 use crate::rpc_command::get_my_address::PathToAddress;
 use alloy::providers::Provider as _;
-use common::log::warn;
+use common::log::{info, warn};
 use crypto::{Bip44PathToCoin, ChildNumber, DerivationPath, GlobalHDAccountArc};
 
 /// The failure classes of the EVM coin builder.
@@ -79,6 +79,56 @@ pub struct EthCoinActivationParams {
     pub gas_station_policy: GasStationPricePolicy,
     /// The initial swap gas-fee policy; the legacy policy when absent.
     pub swap_gas_fee_policy: Option<SwapGasFeePolicy>,
+    /// Which route set [`Self::swap_gas_fee_policy`]; only used to log it at activation.
+    pub swap_gas_fee_policy_source: SwapGasFeePolicySource,
+}
+
+/// Which route set the initial swap gas-fee policy of a platform coin (CRD R35.1.1: request
+/// parameter, else coin configuration, else the built-in `Legacy` default).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SwapGasFeePolicySource {
+    /// Neither the request nor the coin configuration named a policy.
+    #[default]
+    BuiltInDefault,
+    /// The `swap_gas_fee_policy` activation parameter.
+    RequestParameter,
+    /// The `swap_gas_fee_policy` key of the platform coin's configuration entry.
+    CoinConfig,
+}
+
+impl SwapGasFeePolicySource {
+    fn describe(self) -> &'static str {
+        match self {
+            SwapGasFeePolicySource::BuiltInDefault => "built-in default",
+            SwapGasFeePolicySource::RequestParameter => "request parameter",
+            SwapGasFeePolicySource::CoinConfig => "coin config",
+        }
+    }
+}
+
+/// The initial swap gas-fee policy of a platform coin and the route that set it: the request parameter, else
+/// the `swap_gas_fee_policy` key of the coin configuration, else none (the coin then starts as `Legacy`).
+pub fn resolve_swap_gas_fee_policy(
+    requested: Option<SwapGasFeePolicy>,
+    platform_conf: &Json,
+) -> (Option<SwapGasFeePolicy>, SwapGasFeePolicySource) {
+    if let Some(policy) = requested {
+        return (Some(policy), SwapGasFeePolicySource::RequestParameter);
+    }
+    match json::from_value(platform_conf["swap_gas_fee_policy"].clone()) {
+        Ok(policy) => (Some(policy), SwapGasFeePolicySource::CoinConfig),
+        Err(_) => (None, SwapGasFeePolicySource::BuiltInDefault),
+    }
+}
+
+/// The one-line INFO message logged when an EVM platform coin is built.
+fn swap_gas_fee_policy_log_line(ticker: &str, policy: SwapGasFeePolicy, source: SwapGasFeePolicySource) -> String {
+    format!(
+        "{}: swap gas-fee policy {:?} (source: {})",
+        ticker,
+        policy,
+        source.describe()
+    )
 }
 
 impl EthCoinActivationParams {
@@ -107,6 +157,7 @@ impl EthCoinActivationParams {
             gas_station_decimals,
             gas_station_policy,
             swap_gas_fee_policy: None,
+            swap_gas_fee_policy_source: SwapGasFeePolicySource::BuiltInDefault,
         })
     }
 
@@ -524,6 +575,17 @@ pub(crate) async fn build_eth_coin(
         erc20_tokens_infos: Default::default(),
         custom_token: false,
     };
+    // Every EVM platform activation route (legacy `enable`, v2, task, hardware wallet) ends here.
+    if matches!(coin.coin_type, EthCoinType::Eth) {
+        info!(
+            "{}",
+            swap_gas_fee_policy_log_line(
+                ticker,
+                params.swap_gas_fee_policy.unwrap_or_default(),
+                params.swap_gas_fee_policy_source
+            )
+        );
+    }
     Ok(EthCoin(Arc::new(coin)))
 }
 
@@ -581,6 +643,35 @@ mod tests {
             taker_swap_v2_contract: Address::default(),
         });
         assert!(invalid_payload(zero_v2.validate_swap_contracts(&conf)));
+    }
+
+    #[test]
+    fn swap_gas_fee_policy_source_is_request_then_coin_config_then_default() {
+        let conf = json!({ "swap_gas_fee_policy": "Medium" });
+        assert_eq!(
+            resolve_swap_gas_fee_policy(Some(SwapGasFeePolicy::High), &conf),
+            (Some(SwapGasFeePolicy::High), SwapGasFeePolicySource::RequestParameter)
+        );
+        assert_eq!(
+            resolve_swap_gas_fee_policy(None, &conf),
+            (Some(SwapGasFeePolicy::Medium), SwapGasFeePolicySource::CoinConfig)
+        );
+        assert_eq!(
+            resolve_swap_gas_fee_policy(None, &json!({})),
+            (None, SwapGasFeePolicySource::BuiltInDefault)
+        );
+    }
+
+    #[test]
+    fn swap_gas_fee_policy_log_line_names_value_and_source() {
+        assert_eq!(
+            swap_gas_fee_policy_log_line("MATIC", SwapGasFeePolicy::Medium, SwapGasFeePolicySource::CoinConfig),
+            "MATIC: swap gas-fee policy Medium (source: coin config)"
+        );
+        assert_eq!(
+            swap_gas_fee_policy_log_line("BNB", SwapGasFeePolicy::Legacy, SwapGasFeePolicySource::BuiltInDefault),
+            "BNB: swap gas-fee policy Legacy (source: built-in default)"
+        );
     }
 
     #[test]
