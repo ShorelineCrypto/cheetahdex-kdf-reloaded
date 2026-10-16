@@ -138,6 +138,14 @@ fn the_result_carries_the_lower_case_contract_and_the_token_confirmations() {
     assert_eq!(address, &platform_coin(&ctx).my_address().unwrap());
     assert_eq!(balance["spendable"], "2");
     assert_eq!(balance["unspendable"], "0");
+    let mut keys: Vec<_> = result.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, [
+        "balances",
+        "platform_coin",
+        "required_confirmations",
+        "token_contract_address"
+    ]);
 
     // Registered, and recorded on the platform.
     assert!(block_on(coins::lp_coinfind(&ctx, "USDT-ERC20")).unwrap().is_some());
@@ -265,13 +273,96 @@ fn a_platform_that_is_not_an_evm_coin_is_unsupported_platform_coin() {
     );
 }
 
+/// An HD platform whose first account knows `addresses` external addresses; the scripted node answers every
+/// token balance read with `balance_of`.
+fn hd_platform_with_addresses(addresses: u32, balance_of: u128) -> (MockEvmNode, MmArc) {
+    let node = spawn_node(move |method, params| match method {
+        "eth_getBalance" => Reply::Result(json!("0x0")),
+        _ => healthy_node_reply(method, params, 0, balance_of),
+    });
+    let ctx = ctx_with_platform(hd_ctx(), &node);
+    match &platform_coin(&ctx).derivation_method {
+        DerivationMethod::HDWallet(hd_wallet) => {
+            let mut accounts = block_on(hd_wallet.accounts.lock());
+            let account = accounts.values_mut().next().expect("the default account");
+            account.external_addresses_number = addresses;
+        },
+        DerivationMethod::Iguana(_) => panic!("an HD platform expected"),
+    }
+    (node, ctx)
+}
+
 #[test]
-fn an_hd_platform_needs_the_task_variant() {
+fn enable_erc20_on_an_hd_platform_reports_every_known_address() {
+    let (_node, ctx) = hd_platform_with_addresses(3, 7_000_000);
+    let result = serde_json::to_value(enable(&ctx, erc20("USDT-ERC20")).unwrap_or_else(|e| panic!("{}", e))).unwrap();
+
+    assert_eq!(result["platform_coin"], PLATFORM);
+    assert_eq!(result["token_contract_address"], USDT_CONTRACT.to_lowercase());
+    assert_eq!(result["required_confirmations"], 4);
+    let balances = result["balances"].as_object().unwrap();
+    assert_eq!(balances.len(), 3, "one entry per known address");
+    assert!(balances.contains_key(&platform_coin(&ctx).my_address().unwrap()));
+    for balance in balances.values() {
+        assert!(balance["spendable"].is_string() && balance["unspendable"].is_string());
+    }
+}
+
+#[test]
+fn the_one_shot_hd_token_is_the_coin_the_task_registers() {
+    let (_node, one_shot_ctx) = hd_platform_with_addresses(2, 7_000_000);
+    enable(&one_shot_ctx, erc20("USDT-ERC20")).unwrap_or_else(|e| panic!("{}", e));
+    let (_task_node, task_ctx) = hd_platform_with_addresses(2, 7_000_000);
+    let status = run_task(&task_ctx, json!({ "ticker": "USDT-ERC20", "activation_params": {} }));
+    assert_eq!(status["status"], "Ok", "{}", status);
+
+    let token_of = |ctx: &MmArc| match block_on(coins::lp_coinfind(ctx, "USDT-ERC20")).unwrap() {
+        Some(coins::MmCoinEnum::EthCoin(token)) => token,
+        _ => panic!("the token is registered as an EVM coin"),
+    };
+    let (one_shot, task) = (token_of(&one_shot_ctx), token_of(&task_ctx));
+    // Both paths build the token through the same helper, so the derivation method is the same whatever it is.
+    assert_eq!(
+        format!("{:?}", one_shot.derivation_method),
+        format!("{:?}", task.derivation_method)
+    );
+    assert_eq!(one_shot.my_address().unwrap(), task.my_address().unwrap());
+    assert_eq!(one_shot.required_confirmations(), task.required_confirmations());
+    assert_eq!(
+        format!("{:?}", one_shot.erc20_token_info()),
+        format!("{:?}", task.erc20_token_info())
+    );
+    assert_eq!(
+        platform_coin(&one_shot_ctx).my_address().unwrap(),
+        platform_coin(&task_ctx).my_address().unwrap()
+    );
+    let recorded = |ctx: &MmArc| format!("{:?}", platform_coin(ctx).get_erc20_tokens_infos());
+    assert_eq!(
+        recorded(&one_shot_ctx),
+        recorded(&task_ctx),
+        "the same state recorded on the platform"
+    );
+}
+
+#[test]
+fn enable_erc20_on_an_hd_platform_checks_path_to_address_against_the_enabled_address() {
+    let (_node, ctx) = hd_platform_with_addresses(1, 1);
+    let at = |address_id: u32| {
+        token_request(json!({ "ticker": "USDT-ERC20", "activation_params": {
+            "path_to_address": { "account_id": 0, "chain": "External", "address_id": address_id } } }))
+    };
+    string_error(&failure(&ctx, at(5)), "Internal", StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(block_on(coins::lp_coinfind(&ctx, "USDT-ERC20")).unwrap().is_none());
+    assert!(enable(&ctx, at(0)).is_ok());
+}
+
+#[test]
+fn erc20_hd_activation_false_restores_the_refusal() {
     let node = spawn_node(|method, params| match method {
         "eth_getBalance" => Reply::Result(json!("0x0")),
         _ => healthy_node_reply(method, params, 0, 0),
     });
-    let ctx = ctx_with_platform(hd_ctx(), &node);
+    let ctx = ctx_with_platform(hd_ctx_with_conf(json!({ "erc20_hd_activation": false })), &node);
     assert_error(
         &failure(&ctx, erc20("USDT-ERC20")),
         "UnexpectedDerivationMethod",
@@ -279,6 +370,21 @@ fn an_hd_platform_needs_the_task_variant() {
         StatusCode::INTERNAL_SERVER_ERROR,
     );
     assert!(block_on(coins::lp_coinfind(&ctx, "USDT-ERC20")).unwrap().is_none());
+    assert!(platform_coin(&ctx).get_erc20_tokens_infos().is_empty());
+}
+
+#[test]
+fn only_an_explicit_false_disables_erc20_hd_activation() {
+    for (conf, expected) in [
+        (json!({}), true),
+        (json!({ "erc20_hd_activation": true }), true),
+        (json!({ "erc20_hd_activation": false }), false),
+        (json!({ "erc20_hd_activation": "false" }), true),
+        (json!({ "erc20_hd_activation": null }), true),
+    ] {
+        let ctx = MmCtxBuilder::new().with_conf(conf.clone()).into_mm_arc();
+        assert_eq!(erc20_hd_activation(&ctx), expected, "{}", conf);
+    }
 }
 
 #[test]
