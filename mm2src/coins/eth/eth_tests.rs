@@ -328,78 +328,6 @@ fn test_wei_from_big_decimal() {
 }
 
 #[test]
-#[ignore = "network + funded testnet account: Ropsten is decommissioned (both the Infura and linkpool URLs are dead) and ethgasstation.info is gone; this test also broadcasts a real tx. Re-enabling requires porting to a live testnet (e.g. Sepolia) with a funded key and working gas estimation, run in a network-gated job."]
-fn test_nonce_several_urls() {
-    let key_pair = KeyPair::from_secret_slice(
-        &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
-    )
-    .unwrap();
-    let web3_infura = crate::eth::alloy_compat::build_provider(
-        vec!["https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
-        vec![],
-    )
-    .unwrap();
-    let web3_linkpool =
-        crate::eth::alloy_compat::build_provider(vec!["https://ropsten-rpc.linkpool.io".into()], vec![]).unwrap();
-    let web3_failing =
-        crate::eth::alloy_compat::build_provider(vec!["http://195.201.0.6:8989".into()], vec![]).unwrap();
-
-    let ctx = MmCtxBuilder::new().into_mm_arc();
-    let my_addr = key_pair.address();
-    let coin = EthCoin(Arc::new(EthCoinImpl {
-        ticker: "ETH".into(),
-        coin_type: EthCoinType::Eth,
-        my_address: my_addr,
-        sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
-        signer: EthSigner::Local(key_pair),
-        swap_contract_address: Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap()),
-        fallback_swap_contract: None,
-        web3_instances: vec![
-            Web3Instance {
-                web3: web3_infura.clone(),
-                is_parity: false,
-            },
-            Web3Instance {
-                web3: web3_linkpool,
-                is_parity: false,
-            },
-            Web3Instance {
-                web3: web3_failing,
-                is_parity: false,
-            },
-        ],
-        web3: web3_infura,
-        decimals: 18,
-        gas_station_url: Some("https://ethgasstation.info/json/ethgasAPI.json".into()),
-        gas_station_decimals: ETH_GAS_STATION_DECIMALS,
-        gas_station_policy: GasStationPricePolicy::MeanAverageFast,
-        history_sync_state: Mutex::new(HistorySyncState::NotStarted),
-        ctx: ctx.weak(),
-        required_confirmations: 1.into(),
-        tron_api: None,
-        nft_swap_v2_contract: None,
-        swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
-        erc20_tokens_infos: Default::default(),
-        custom_token: false,
-        chain_id: None,
-        logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
-        derivation_method: DerivationMethod::Iguana(my_addr),
-        swap_v2_contracts: None,
-        gas_limit_v2: EthGasLimitV2::default(),
-    }));
-
-    log!("My address "[coin.my_address]);
-    log!("before payment");
-    let payment = coin.send_to_address(coin.my_address, 200000000.into()).wait().unwrap();
-
-    log!([payment]);
-    let new_nonce = get_addr_nonce(coin.my_address, coin.web3_instances.clone())
-        .wait()
-        .unwrap();
-    log!([new_nonce]);
-}
-
-#[test]
 fn test_wait_for_payment_spend_timeout() {
     EthCoinImpl::spend_events.mock_safe(|_, _, _, _| MockResult::Return(Box::new(futures01::future::ok(vec![]))));
     EthCoin::current_block.mock_safe(|_| MockResult::Return(Box::new(futures01::future::ok(900))));
@@ -938,36 +866,6 @@ fn direct_withdraw_evm_single_key_explicit_from_is_structured_sender_error() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
-fn test_nonce_lock() {
-    use futures::future::join_all;
-    use mm2_test_helpers::for_tests::wait_for_log;
-
-    // send several transactions concurrently to check that they are not using same nonce
-    // using real ETH dev node
-    let (ctx, coin) = eth_coin_for_test(EthCoinType::Eth, vec!["http://195.201.0.6:8565".into()], None);
-    let mut futures = vec![];
-    for _ in 0..5 {
-        futures.push(sign_and_send_transaction_impl(
-            ctx.clone(),
-            coin.clone(),
-            1000000000000u64.into(),
-            Action::Call(coin.my_address),
-            vec![],
-            21000.into(),
-        ));
-    }
-    let results = block_on(join_all(futures));
-    for result in results {
-        result.unwrap();
-    }
-    // Waiting for NONCE_LOCK… might not appear at all if waiting takes less than 0.5 seconds
-    // but all transactions are sent successfully still
-    // wait_for_log(&ctx.log, 1.1, &|line| line.contains("Waiting for NONCE_LOCK…")));
-    block_on(wait_for_log(&ctx, 1.1, |line| line.contains("get_addr_nonce…"))).unwrap();
-}
-
-#[test]
 fn test_add_ten_pct_one_gwei() {
     let num = wei_from_big_decimal(&"0.1".parse().unwrap(), 9).unwrap();
     let expected = wei_from_big_decimal(&"1.1".parse().unwrap(), 9).unwrap();
@@ -1256,75 +1154,6 @@ fn test_get_fee_to_send_taker_fee_insufficient_gas_balance() {
     }
 }
 
-#[test]
-fn validate_dex_fee_invalid_sender_eth() {
-    let (_ctx, coin) = eth_coin_for_test(
-        EthCoinType::Eth,
-        vec!["https://mainnet.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
-        None,
-    );
-    // the real dex fee sent on mainnet
-    // https://etherscan.io/tx/0x7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f
-    let tx = {
-        use alloy::providers::Provider as _;
-        let hash = alloy::primitives::B256::from_slice(
-            &hex::decode("7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f").unwrap(),
-        );
-        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
-        signed_tx_from_alloy_tx(alloy_tx).unwrap()
-    };
-    let tx = tx.into();
-    let amount: BigDecimal = "0.000526435076465".parse().unwrap();
-    let validate_err = coin
-        .validate_fee(ValidateFeeArgs {
-            fee_tx: &tx,
-            expected_sender: test_dex_fee_addr_raw_pubkey(),
-            fee_addr: test_dex_fee_addr_raw_pubkey(),
-            dex_fee: &DexFee::Standard(amount.into()),
-            min_block_number: 0,
-            uuid: &[],
-        })
-        .wait()
-        .unwrap_err();
-    assert!(validate_err.contains("was sent from wrong address"));
-}
-
-#[test]
-fn validate_dex_fee_invalid_sender_erc() {
-    let (_ctx, coin) = eth_coin_for_test(
-        EthCoinType::Erc20 {
-            platform: "ETH".to_string(),
-            token_addr: Address::from_slice(&hex::decode("a1d6df714f91debf4e0802a542e13067f31b8262").unwrap()),
-        },
-        vec!["http://eth1.cipig.net:8555".into()],
-        None,
-    );
-    // the real dex fee sent on mainnet
-    // https://etherscan.io/tx/0xd6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600
-    let tx = {
-        use alloy::providers::Provider as _;
-        let hash = alloy::primitives::B256::from_slice(
-            &hex::decode("d6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600").unwrap(),
-        );
-        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
-        signed_tx_from_alloy_tx(alloy_tx).unwrap()
-    };
-    let tx = tx.into();
-    let amount: BigDecimal = "5.548262548262548262".parse().unwrap();
-    let validate_err = coin
-        .validate_fee(ValidateFeeArgs {
-            fee_tx: &tx,
-            expected_sender: test_dex_fee_addr_raw_pubkey(),
-            fee_addr: test_dex_fee_addr_raw_pubkey(),
-            dex_fee: &DexFee::Standard(amount.into()),
-            min_block_number: 0,
-            uuid: &[],
-        })
-        .wait()
-        .unwrap_err();
-    assert!(validate_err.contains("was sent from wrong address"));
-}
-
 fn sender_compressed_pub(tx: &SignedEthTx) -> [u8; 33] {
     let tx_pubkey = tx.public.unwrap();
     let mut raw_pubkey = [0; 65];
@@ -1332,78 +1161,6 @@ fn sender_compressed_pub(tx: &SignedEthTx) -> [u8; 33] {
     raw_pubkey[1..].copy_from_slice(tx_pubkey.as_bytes());
     let secp_public = PublicKey::from_slice(&raw_pubkey).unwrap();
     secp_public.serialize()
-}
-
-#[test]
-fn validate_dex_fee_eth_confirmed_before_min_block() {
-    let (_ctx, coin) = eth_coin_for_test(
-        EthCoinType::Eth,
-        vec!["https://mainnet.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
-        None,
-    );
-    // the real dex fee sent on mainnet
-    // https://etherscan.io/tx/0x7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f
-    let tx = {
-        use alloy::providers::Provider as _;
-        let hash = alloy::primitives::B256::from_slice(
-            &hex::decode("7e9ca16c85efd04ee5e31f2c1914b48f5606d6f9ce96ecce8c96d47d6857278f").unwrap(),
-        );
-        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
-        signed_tx_from_alloy_tx(alloy_tx).unwrap()
-    };
-    let compressed_public = sender_compressed_pub(&tx);
-    let tx = tx.into();
-    let amount: BigDecimal = "0.000526435076465".parse().unwrap();
-    let validate_err = coin
-        .validate_fee(ValidateFeeArgs {
-            fee_tx: &tx,
-            expected_sender: &compressed_public,
-            fee_addr: test_dex_fee_addr_raw_pubkey(),
-            dex_fee: &DexFee::Standard(amount.into()),
-            min_block_number: 11784793,
-            uuid: &[],
-        })
-        .wait()
-        .unwrap_err();
-    assert!(validate_err.contains("confirmed before min_block"));
-}
-
-#[test]
-fn validate_dex_fee_erc_confirmed_before_min_block() {
-    let (_ctx, coin) = eth_coin_for_test(
-        EthCoinType::Erc20 {
-            platform: "ETH".to_string(),
-            token_addr: Address::from_slice(&hex::decode("a1d6df714f91debf4e0802a542e13067f31b8262").unwrap()),
-        },
-        vec!["http://eth1.cipig.net:8555".into()],
-        None,
-    );
-    // the real dex fee sent on mainnet
-    // https://etherscan.io/tx/0xd6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600
-    let tx = {
-        use alloy::providers::Provider as _;
-        let hash = alloy::primitives::B256::from_slice(
-            &hex::decode("d6403b41c79f9c9e9c83c03d920ee1735e7854d85d94cef48d95dfeca95cd600").unwrap(),
-        );
-        let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
-        signed_tx_from_alloy_tx(alloy_tx).unwrap()
-    };
-
-    let compressed_public = sender_compressed_pub(&tx);
-    let tx = tx.into();
-    let amount: BigDecimal = "5.548262548262548262".parse().unwrap();
-    let validate_err = coin
-        .validate_fee(ValidateFeeArgs {
-            fee_tx: &tx,
-            expected_sender: &compressed_public,
-            fee_addr: test_dex_fee_addr_raw_pubkey(),
-            dex_fee: &DexFee::Standard(amount.into()),
-            min_block_number: 11823975,
-            uuid: &[],
-        })
-        .wait()
-        .unwrap_err();
-    assert!(validate_err.contains("confirmed before min_block"));
 }
 
 #[test]
@@ -2674,5 +2431,261 @@ mod swap_send_path_wire_form {
         let (result, sent) = try_broadcast(SwapGasFeePolicy::High, platform_with_cap(json!(2)), json!({}));
         result.expect("the send succeeds");
         assert_type_2(&sent[0]);
+    }
+}
+
+/// Tests that used to talk to live EVM nodes and now run the same real code against a scripted local
+/// node (see [`scripted_evm_node`]). Do not point them back at a network: the hosts and the Ropsten
+/// chain they used are gone, and a keyless public endpoint refuses the archive reads such tests need.
+mod scripted_node_ports {
+    use super::scripted_evm_node::spawn;
+    use super::*;
+    use mm2_eth::keys::{KeyPair as EthKeyPair, Secret};
+    use serde_json::{json, Value as Json};
+    use std::collections::HashMap;
+
+    const TEST_KEY: &str = "809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f";
+    const TOKEN_ADDR: &str = "a1d6df714f91debf4e0802a542e13067f31b8262";
+    const FEE_BLOCK: u64 = 1_000;
+    const ETH_FEE: &str = "0.000526435076465";
+    const ERC20_FEE: &str = "5.548262548262548262";
+
+    fn fee_addr() -> Address { addr_from_raw_pubkey(test_dex_fee_addr_raw_pubkey()).unwrap() }
+
+    /// The `eth_getTransactionByHash` result a node reports for a legacy transaction mined in `block`.
+    fn rpc_tx(tx: &SignedEthTx, block: u64) -> Json {
+        let to = match &tx.action {
+            Action::Call(addr) => json!(format!("{:#x}", addr)),
+            Action::Create => Json::Null,
+        };
+        json!({
+            "type": "0x0",
+            "hash": format!("{:#x}", tx.tx_hash()),
+            "nonce": format!("{:#x}", tx.nonce),
+            "blockHash": format!("0x{}", "22".repeat(32)),
+            "blockNumber": format!("{:#x}", block),
+            "transactionIndex": "0x0",
+            "from": format!("{:#x}", tx.sender()),
+            "to": to,
+            "value": format!("{:#x}", tx.value),
+            "gas": format!("{:#x}", tx.gas),
+            "gasPrice": format!("{:#x}", tx.gas_price().expect("a legacy transaction")),
+            "input": format!("0x{}", hex::encode(&tx.data)),
+            "v": format!("{:#x}", tx.v),
+            "r": format!("{:#x}", tx.r),
+            "s": format!("{:#x}", tx.s),
+        })
+    }
+
+    /// A dex-fee transaction signed by the test key, as the fee payer would have sent it:
+    /// a plain transfer for ETH, `transfer(fee_addr, amount)` on the token contract for an ERC20.
+    fn fee_tx(erc20: bool) -> SignedEthTx {
+        let (to, value, data) = if erc20 {
+            let amount = wei_from_big_decimal(&ERC20_FEE.parse().unwrap(), 18).unwrap();
+            let data = ERC20_CONTRACT
+                .function("transfer")
+                .unwrap()
+                .encode_input(&[Token::Address(fee_addr()), Token::Uint(amount)])
+                .unwrap();
+            (Address::from_str(TOKEN_ADDR).unwrap(), U256::zero(), data)
+        } else {
+            let amount = wei_from_big_decimal(&ETH_FEE.parse().unwrap(), 18).unwrap();
+            (fee_addr(), amount, vec![])
+        };
+        let secret = Secret::from_str(TEST_KEY).unwrap();
+        let tx = SwapTx::new(
+            SwapFee::Legacy {
+                gas_price: U256::from(50_000_000_000u64),
+            },
+            U256::from(7u64),
+            U256::from(100_000u64),
+            Action::Call(to),
+            value,
+            data,
+        );
+        match tx {
+            SwapTx::Legacy(tx) => tx.sign(&secret, Some(1)),
+            SwapTx::Eip1559(_) => unreachable!("a legacy fee was given"),
+        }
+    }
+
+    /// Runs `validate_fee` for `fee_tx(erc20)` against a node that reports it mined in `FEE_BLOCK`.
+    /// `expected_sender` is `None` for the sender that really signed it.
+    fn validate(erc20: bool, wrong_sender: bool, min_block_number: u64) -> Result<(), String> {
+        let tx = fee_tx(erc20);
+        let reported = rpc_tx(&tx, FEE_BLOCK);
+        let hash = format!("{:#x}", tx.tx_hash());
+        // `validate_fee` reads the transaction by hash and nothing else.
+        let node = spawn(move |method, params| match method {
+            "eth_getTransactionByHash" => {
+                assert_eq!(params[0].as_str().unwrap(), hash);
+                reported.clone()
+            },
+            other => panic!("the scripted node does not serve `{}`", other),
+        });
+        let coin_type = if erc20 {
+            EthCoinType::Erc20 {
+                platform: "ETH".to_string(),
+                token_addr: Address::from_str(TOKEN_ADDR).unwrap(),
+            }
+        } else {
+            EthCoinType::Eth
+        };
+        let (_ctx, coin) = eth_coin_for_test(coin_type, vec![node.url.clone()], None);
+        // As the original tests did: the transaction is fetched back through the node's own answer.
+        let fetched = {
+            use alloy::providers::Provider as _;
+            let hash = alloy::primitives::B256::from_slice(tx.tx_hash().as_bytes());
+            let alloy_tx = block_on(coin.web3.get_transaction_by_hash(hash)).unwrap().unwrap();
+            signed_tx_from_alloy_tx(alloy_tx).unwrap()
+        };
+        let sender = sender_compressed_pub(&fetched);
+        let fetched = fetched.into();
+        let amount: BigDecimal = if erc20 { ERC20_FEE } else { ETH_FEE }.parse().unwrap();
+        let expected_sender: &[u8] = if wrong_sender {
+            test_dex_fee_addr_raw_pubkey()
+        } else {
+            &sender
+        };
+        coin.validate_fee(ValidateFeeArgs {
+            fee_tx: &fetched,
+            expected_sender,
+            fee_addr: test_dex_fee_addr_raw_pubkey(),
+            dex_fee: &DexFee::Standard(amount.into()),
+            min_block_number,
+            uuid: &[],
+        })
+        .wait()
+    }
+
+    // The four tests below used to fetch two real mainnet dex-fee transactions through a hosted
+    // Infura project and a community node; both hosts are gone or keyless-refused. Each now signs an
+    // equivalent fee transaction with the test key and serves it from a scripted node.
+
+    #[test]
+    fn validate_dex_fee_invalid_sender_eth() {
+        let err = validate(false, true, 0).unwrap_err();
+        assert!(err.contains("was sent from wrong address"), "{err}");
+    }
+
+    #[test]
+    fn validate_dex_fee_invalid_sender_erc() {
+        let err = validate(true, true, 0).unwrap_err();
+        assert!(err.contains("was sent from wrong address"), "{err}");
+    }
+
+    #[test]
+    fn validate_dex_fee_eth_confirmed_before_min_block() {
+        // Mined in FEE_BLOCK, so a min_block at or above it must be rejected, one below it accepted.
+        let err = validate(false, false, FEE_BLOCK + 1).unwrap_err();
+        assert!(err.contains("confirmed before min_block"), "{err}");
+        let err = validate(false, false, FEE_BLOCK).unwrap_err();
+        assert!(err.contains("confirmed before min_block"), "{err}");
+        validate(false, false, FEE_BLOCK - 1).unwrap();
+    }
+
+    #[test]
+    fn validate_dex_fee_erc_confirmed_before_min_block() {
+        let err = validate(true, false, FEE_BLOCK + 1).unwrap_err();
+        assert!(err.contains("confirmed before min_block"), "{err}");
+        let err = validate(true, false, FEE_BLOCK).unwrap_err();
+        assert!(err.contains("confirmed before min_block"), "{err}");
+        validate(true, false, FEE_BLOCK - 1).unwrap();
+    }
+
+    /// Several transactions sent at once must each get a distinct, consecutive nonce.
+    ///
+    /// The original sent five transactions at once to a public dev node and only checked that every
+    /// send succeeded and the nonce lookup was logged, which cannot detect a nonce collision on its
+    /// own. The scripted node here behaves like a real one in the one respect that matters: its
+    /// next nonce moves only when a transaction is actually broadcast. Without `NONCE_LOCK` the five
+    /// concurrent sends would all read nonce 0; the assertion is that the nodes saw 0..5 exactly once.
+    #[test]
+    fn test_nonce_lock() {
+        use futures::future::join_all;
+        use mm2_test_helpers::for_tests::wait_for_log;
+
+        let sent: Arc<std::sync::Mutex<Vec<u64>>> = Arc::default();
+        let sent_h = sent.clone();
+        let node = spawn(move |method, params| match method {
+            "parity_nextNonce" | "eth_getTransactionCount" => json!(format!("{:#x}", sent_h.lock().unwrap().len())),
+            "eth_gasPrice" => json!("0x3b9aca00"),
+            "eth_feeHistory" => json!({
+                "oldestBlock": "0x1",
+                "baseFeePerGas": ["0x3b9aca00", "0x3b9aca00"],
+                "gasUsedRatio": [0.5],
+                "reward": [[]],
+            }),
+            "eth_sendRawTransaction" => {
+                let raw = hex::decode(params[0].as_str().unwrap().trim_start_matches("0x")).unwrap();
+                let tx = signed_eth_tx_from_bytes(&raw).unwrap();
+                sent_h.lock().unwrap().push(tx.nonce.as_u64());
+                json!(format!("{:#x}", tx.tx_hash()))
+            },
+            other => panic!("the scripted node does not serve `{}`", other),
+        });
+        let (ctx, coin) = eth_coin_for_test(EthCoinType::Eth, vec![node.url.clone()], None);
+        let futures: Vec<_> = (0..5)
+            .map(|_| {
+                sign_and_send_transaction_impl(
+                    ctx.clone(),
+                    coin.clone(),
+                    1000000000000u64.into(),
+                    Action::Call(coin.my_address),
+                    vec![],
+                    21000.into(),
+                )
+            })
+            .collect();
+        for result in block_on(join_all(futures)) {
+            result.unwrap();
+        }
+        let mut nonces = sent.lock().unwrap().clone();
+        nonces.sort_unstable();
+        assert_eq!(nonces, vec![0, 1, 2, 3, 4], "each transaction must use its own nonce");
+        block_on(wait_for_log(&ctx, 1.1, |line| line.contains("get_addr_nonce…"))).unwrap();
+    }
+
+    /// `get_addr_nonce` asks every configured node and only answers once they agree.
+    ///
+    /// The original (`#[ignore]`d, Ropsten via a hosted project key, a gas station that is gone, and a
+    /// real broadcast) only logged the nonce afterwards. What it was after, several URLs of which one
+    /// is dead and the rest agree, is checked here: one node lags and then catches up, one never
+    /// answers, and the result must be the agreed value, not the lagging or the leading one.
+    #[test]
+    fn test_nonce_several_urls() {
+        let lagging_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let lag = lagging_calls.clone();
+        let behind = spawn(move |method, _| match method {
+            "eth_getTransactionCount" => {
+                // First query: still at 4. Later queries: caught up to 5.
+                let n = lag.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                json!(if n == 0 { "0x4" } else { "0x5" })
+            },
+            other => panic!("the scripted node does not serve `{}`", other),
+        });
+        let ahead = spawn(|method, _| match method {
+            "eth_getTransactionCount" => json!("0x5"),
+            other => panic!("the scripted node does not serve `{}`", other),
+        });
+        // A closed loopback port stands in for the node that never answers.
+        let dead_url = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
+        };
+        let instances: Vec<Web3Instance> = [behind.url.clone(), ahead.url.clone(), dead_url]
+            .into_iter()
+            .map(|url| Web3Instance {
+                web3: crate::eth::alloy_compat::build_provider(vec![url], vec![]).unwrap(),
+                is_parity: false,
+            })
+            .collect();
+        let key = EthKeyPair::from_secret_slice(&hex::decode(TEST_KEY).unwrap()).unwrap();
+        let nonce = get_addr_nonce(key.address(), instances).wait().unwrap();
+        assert_eq!(nonce, U256::from(5u64));
+        assert!(
+            lagging_calls.load(std::sync::atomic::Ordering::SeqCst) >= 2,
+            "the disagreement between the nodes must have forced a second round"
+        );
     }
 }

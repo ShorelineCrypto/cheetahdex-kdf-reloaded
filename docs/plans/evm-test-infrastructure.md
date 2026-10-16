@@ -187,12 +187,9 @@ gated — the same decay that killed the Ropsten tests, on a slower clock.
 
 ## Work queued behind the architecture
 
-- Port `validate_dex_fee_erc_confirmed_before_min_block`,
-  `validate_dex_fee_invalid_sender_erc` and `test_nonce_lock`; remove all four inline
-  Infura URLs in the same pass (three in `eth_tests.rs`, one in
-  `mm2_main/src/mm2_tests.rs`).
-- Decide `test_nonce_several_urls` (`DISABLED_TESTS.md` group 2): it broadcasts a real
-  transaction, so it needs either a local node with funded accounts or deletion.
+- ~~Port the three dex-fee/nonce tests and remove the four inline Infura URLs~~ -- done on
+  `chore/evm-test-port` (also ported the two ETH dex-fee siblings and `test_nonce_several_urls`).
+  Remaining: add a CI selector for `eth::eth_tests::scripted_node_ports`.
 - Install `geth` in CI **and** add a test selector that reaches `eth_swap_dev_tests`.
   Three of its tests match no current CI filter, so installing the binary alone would
   leave them unrun. Until both land, EVM HTLC coverage on a real chain is nil.
