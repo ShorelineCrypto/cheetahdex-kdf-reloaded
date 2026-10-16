@@ -851,6 +851,33 @@ by EIP-1559 fee-history semantics, not by this chapter. Which serialized
 transaction form each policy value produces, and which forms the project must
 read as a consequence, are bound in §35.6A (R35.6A.17, R35.6A.2).
 
+R35.6.7 **The initial policy does not depend on the activation route.** The
+precedence of R35.6.3 -- activation-request parameter, else the
+`swap_gas_fee_policy` key of the coin's own configuration entry (a token falling
+back to its platform coin's entry), else the built-in `Legacy` default -- applies
+to **every** activation route for an EVM platform coin: the legacy `enable` /
+`electrum` route as much as the v2 one-shot and the task family. A coin whose
+configuration names a policy therefore starts on that policy however it was
+activated, and two coins activated through different routes from the same
+configuration emit the same serialized swap-transaction form. The request
+parameter exists on the legacy route too; its wire placement there is
+[Chapter 55](55-coin-activation-wire-contract.md) R55.4.4.
+
+> **Upstream divergence (informative) -- the policy is not read on Reloaded's
+> legacy activation route.** Both reference versions named in §35.6A's
+> derivation record resolve the initial policy with the single precedence
+> R35.6.7 states, applied identically on the legacy route and on the v2 and task
+> routes; the reference shows **no split** by activation method. Reloaded
+> currently resolves the policy only on the v2 and task routes -- on the legacy
+> route it reads neither the configuration key nor the request field -- so a
+> coin the shipped configuration puts on a non-legacy tier starts as `Legacy`
+> when it is activated through `enable` / `electrum` and on the configured tier
+> otherwise -- the same coin, the same configuration, two different emitted
+> transaction forms. The divergence is confined to the *emitting* side: what a
+> build will read is fixed independently of its policy and of the route that
+> activated the coin (R35.6A.19), so no counterparty's transaction becomes
+> unreadable and no swap fails for this reason on either side. Open as D35.6.
+
 > **Code-quality finding (informative) -- the policy was stored but not
 > applied; now implemented.** The policy is accepted by
 > `set_swap_gas_fee_policy`, held per coin, and echoed by
@@ -894,75 +921,140 @@ read as a consequence, are bound in §35.6A (R35.6A.17, R35.6A.2).
 > together with the §35.6 finding, the §35.7 paragraph, the acceptance criteria,
 > §35.8B, §35.8C and this chapter's footer, and with the matching §17.5.1
 > paragraph and footer item of [Chapter 17](17-swap-v2-evm-path.md). The edits
-> made after that clearance were re-gated in a second pass, which is the one the
-> *Clearance record* below carries.
+> made after that clearance were re-gated in a second pass, and the material a
+> third Spec Reader pass added on 2026-10-16 (listed in §35.9's footer) was gated
+> in a third. The *Clearance record* below records each of the three passes
+> separately.
 
-> **Clearance record (chapter 01 T1).** This material was gated **twice**. The
-> first pass cleared the three CRD files this work touches. The second re-gated
-> the edits made after that clearance rather than accepting the assessment that
-> they were mechanical, and in doing so covered five files -- the three CRD
-> files plus the two operator-facing documents (`RELOADED_VS_GLEEC.md` and
-> `docs/GLEEC_COMPATIBILITY.md`) that the first pass had not seen -- and closed
-> the gap the first pass had declared, by opening material that run could not.
-> The second pass is therefore the one that describes the text as it now stands,
-> and its three scope-attestation elements are the ones recorded here, carried
-> forward in corpus-free terms. Two contributions of the first pass are recorded
-> alongside them and attributed to it, and they are opposites: one positive
-> finding the second pass did not repeat, which **stands**, and one declared
-> limit the second pass **retired**.
+> **Clearance record (chapter 01 T1).** This material was gated in **three
+> passes**, and each pass's extent, method and measure are recorded under its
+> own heading below, carried forward in corpus-free terms. No pass stands in for
+> another: each compared a different extent, so a later pass's elements do not
+> replace an earlier one's, and a reader weighing a given section reads the pass
+> that cleared it. The first pass cleared the three CRD files this work touches.
+> The second re-gated the edits made after that clearance rather than accepting
+> the assessment that they were mechanical; it covered five files -- the three
+> CRD files plus the two operator-facing documents (`RELOADED_VS_GLEEC.md` and
+> `docs/GLEEC_COMPATIBILITY.md`) the first pass had not seen -- and closed the
+> gap the first pass had declared, by opening material that run could not. The
+> third gated the third Spec Reader pass's additions, judged in the context of
+> the whole chapter; on one axis its extent is narrower than the second's, as
+> its own entry states. A further pass that gated only an earlier edit of this
+> record, and took no forbidden-class input, is not counted among the three.
 >
-> - *Extent.* It compared the subject matter this document set names in its own
->   terms: the EVM coin layer's decoding of a serialized transaction the project
->   did not construct, its transaction-type model, its reconstruction of a
->   transaction from a node's reply, the application of the per-coin swap
+> *First pass.*
+>
+> - *Extent.* The EVM coin layer's decoding of a serialized transaction the
+>   project did not construct, its reconstruction of a transaction from a node's
+>   reply, its transaction-type model, the application of the per-coin swap
 >   gas-fee policy, the derivation of fee details in transaction history, and
 >   the swap-step paths that read a counterparty's serialized transaction.
->   Reference: the v3 development lineage as held locally, with the published
->   release designations `v3.0.0-beta` and `v2.6.0-beta` as the named reference
->   points; the named releases were **not** each compared separately.
->   Additionally, and unlike the first pass, the third-party dependency outside
->   the principal material that carries the transaction-type model and the two
->   behaviours the informative findings below describe was compared. Quantity:
->   three files of the principal implementation set -- one read in the relevant
->   regions, two consulted only for the dependency declaration -- and four files
->   of that dependency read in the regions carrying type dispatch, identifier
->   derivation and the unsigned-signature convention; seven in total.
->   *Standing finding of the first pass.* That pass additionally confirmed that
->   the four published release designations this chapter names exist as release
->   tags of that lineage. The second pass neither repeated that confirmation nor
->   disturbed it: it **stands as established**, and it is what R35.6A.18's
->   version boundary, D35.3's peer floor and this chapter's footer locator rest
->   on. The extent is therefore the lineage comparison above plus this
->   tag-existence confirmation, and not a per-release comparison.
+>   Reference: the v3 development lineage as held locally, plus a confirmation
+>   that the four published release designations this chapter names exist as
+>   release tags of that lineage; the named releases were **not** each compared
+>   separately. Quantity: one principal coin-layer file read in the relevant
+>   regions and five further files searched for the same subject matter, six in
+>   total.
 > - *Method.* By reading, combined with mechanical token extraction over the
->   added lines only -- bracketed tokens, quoted literals, fenced blocks,
->   code-shaped bare words -- each extracted token put individually to the
->   forced-versus-free test, and targeted search over the compared material.
->   Every token the extraction returned resolved to dictated or public contract:
->   EIP-2718 type bytes and RLP leading-byte markers, mmrpc error-envelope field
->   names, public RPC method strings and their serialized policy values, one
->   trait method on the relicensed base's own public surface, published release
->   designations, and paths inside this repository. The RPC method strings and
->   policy values were confirmed against this repository's own source rather
->   than assumed. The repository's `tools/clean_room_gate.py` was not used: it
->   measures source files and the candidate embeds no fenced code block.
-> - *Measure.* 0.02 on the discretionary-expression basis, derived independently
->   in that pass and not inherited. Read against the standard that
->   dictated-interop and pinned-interface matches are excluded from the measured
->   set however dense they are, and that genuine discretionary expression fails
->   regardless of how much surrounding content is legitimately dictated. The
->   non-nil figure records the near-edge behavioural statements in the
->   informative notes below and their two operator-facing restatements; each was
->   examined individually and found to carry behaviour and consequence rather
->   than expression.
+>   added lines only -- bracketed tokens, quoted literals, fenced blocks and
+>   code-shaped bare words -- and targeted search over the compared material.
+>   `tools/clean_room_gate.py` was not used: it measures source files, and the
+>   candidate embeds no fenced code block.
+> - *Measure.* 0.02 on the discretionary-expression basis, read against the
+>   standard that dictated-interop and pinned-interface matches are excluded
+>   from the measured set however dense they are, and that any genuine
+>   discretionary expression fails regardless of the dictated content around
+>   it. The figure is non-nil because three near-edge statements were each
+>   examined on their own and found to carry no expression.
+> - *Standing finding.* The tag-existence confirmation above was not repeated
+>   by either later pass, and neither later pass disturbed it. It **stands**,
+>   and it is what R35.6A.18's version boundary, D35.3's peer floor and this
+>   chapter's footer locator rest on.
+> - *Declared limit, retired.* That run could not open a third-party dependency
+>   outside the compared material that carries part of the behaviour two of the
+>   informative findings below describe, so those two findings were judged on
+>   this section's own form rather than by comparison. The limit belonged to
+>   that run only: the second pass compared the dependency, and the limit is
+>   **not** live.
 >
-> *Limit of the first pass, retired.* The first pass declared a gap: a
-> third-party dependency outside the material it compared carries part of the
-> behaviour two of the informative findings below describe, and that run could
-> not open it, so those two findings were judged on this section's own form
-> rather than by comparison. That was a true limit of that run only. The second
-> pass compared the dependency, which is what retired the gap; it is **not** a
-> live limitation of this record.
+> *Second pass.*
+>
+> - *Extent.* The same subject matter as the first pass, against the same
+>   lineage and with `v3.0.0-beta` and `v2.6.0-beta` as the named reference
+>   points, again not compared release by release. Unlike the first pass, it
+>   also compared the third-party dependency that carries the transaction-type
+>   model and the two behaviours the informative findings below describe.
+>   Quantity: three files of the principal implementation set -- one read in the
+>   relevant regions, two consulted only for the dependency declaration -- and
+>   four files of that dependency, read in the regions carrying type dispatch,
+>   identifier derivation and the unsigned-signature convention; seven in total.
+> - *Method.* By reading, combined with mechanical token extraction over the
+>   added lines only, each extracted token put individually to the
+>   forced-versus-free test, and targeted search over the compared material.
+>   Every extracted token resolved to dictated or public contract: EIP-2718 type
+>   bytes and RLP leading-byte markers, mmrpc error-envelope field names, public
+>   RPC method strings and their serialized policy values, one trait method on
+>   the relicensed base's own public surface, published release designations,
+>   and paths inside this repository. The method strings and policy values were
+>   checked against this repository's own source rather than assumed.
+>   `tools/clean_room_gate.py` was not used, for the first pass's reason.
+> - *Measure.* 0.02 on the same basis and standard, derived afresh in that pass
+>   rather than inherited from the first. The non-nil figure records the
+>   near-edge behavioural statements in the informative notes below and their
+>   two operator-facing restatements; each was examined on its own and found to
+>   carry behaviour and consequence rather than expression.
+>
+> *Third pass (2026-10-16).*
+>
+> - *Extent.* The subject matter of the third Spec Reader pass's additions and
+>   the sections they bind: how an EVM coin's initial swap gas-fee policy is
+>   resolved, and in what precedence between the activation request, the coin's
+>   own configuration entry and the built-in default, on each of the legacy, v2
+>   one-shot and task routes; the token case of that resolution and of the
+>   per-coin cap on the highest transaction type the coin may send, including a
+>   token's fallback to its platform coin's entry; where that cap is read, what
+>   its absence means, and what happens at signing when a transaction exceeds
+>   it; how a policy tier maps to fee values and so to the form a signed swap
+>   transaction takes; the coin layer's byte-decode entry for a transaction the
+>   project did not build, and whether it consults any coin state; the
+>   reconstruction of a transaction from a node's reply and its type dispatch;
+>   and, as context, the platform-coin-with-tokens and single-token activation
+>   routes. Reference: the same lineage and the same two named reference points,
+>   not compared release by release. Quantity: four files of the principal
+>   implementation set, each read in the regions carrying that behaviour rather
+>   than in full. **Narrower than the second pass on one axis:** this pass did
+>   not re-open the third-party dependency the second pass compared. R35.6A.19's
+>   statement that decoding is independent of coin state was checked at the coin
+>   layer's own byte-decode entry, which this pass did compare, so that
+>   statement was not left unexamined; the dependency itself was last compared
+>   by the second pass.
+> - *Method.* By reading, with the forced-versus-free test applied individually
+>   to every token of the lines identified to the gate as new -- R35.6.7,
+>   R35.6A.19, the two divergence notes after them, the acceptance criterion
+>   citing R35.6A.19, D35.6, D35.7 and the D35.3 clause on the reference's typed emission -- and to
+>   the rest of the chapter on a skim basis. Every token in the new lines
+>   resolved to dictated or public contract: coin-configuration keys and their
+>   value types, public RPC method strings with their request fields and
+>   serialized enum values, EIP-2718 type bytes, published release designations,
+>   public chain identifiers and tickers, one trait method on the relicensed
+>   base's own public surface, and cross-references within this document set.
+>   The one message string the chapter quotes was checked to match, and to be
+>   attributed to, the public documentation rather than the compared material.
+>   **Declared limitation:** mechanical text search over the compared material
+>   was refused by the environment, so the gate navigated it by reading selected
+>   regions directly. This pass's coverage is therefore region-based, not an
+>   exhaustive search. `tools/clean_room_gate.py` was not used: the new material
+>   embeds no fenced code block.
+> - *Measure.* 0.02 on the same basis and standard, derived in this pass and
+>   not inherited from either earlier one. The figure is non-nil because four
+>   near-edge statements in the new material were each examined on their own
+>   before being admitted: that emission is gated at two separate points, the
+>   effective value of an absent configuration key, the mapping of two
+>   configuration keys onto a named set of chains, and the statement that one
+>   neighbouring configuration key is never read. Each carries behaviour, a
+>   configuration-contract value or a consequence, not expression. The leak
+>   report records no finding for the new lines or for any other line of the
+>   chapter, so nothing failed even under the skim.
 
 > **Why the chapter carries it.** §35.6 lets an operator put a coin on any of
 > three EIP-1559 priority tiers. A peer that has done so signs its swap
@@ -1178,6 +1270,47 @@ present from `v2.1.0-beta` onwards and unchanged at `v2.6.0-beta` and
    emitting sides have different compatibility floors and MUST NOT be collapsed
    into one decision. See D35.3.
 
+R35.6A.19 **Acceptance is independent of emission.** The set of forms a build
+will *read* MUST NOT depend on the form it *emits*: not on the coin's swap
+gas-fee policy (R35.6.3), not on any configuration that restricts the form the
+coin may send, and not on which activation route activated the coin. This is the
+reference behaviour at both reference versions named in the derivation record --
+the coin layer's byte-decode entry is a function of the bytes alone and consults
+no coin state, so a reference build that *sends* only untyped legacy
+transactions nevertheless reads, validates, re-serializes and recovers the
+sender of an EIP-2930 or EIP-1559 transaction a counterparty sent, on every path
+of R35.6A.1, the swap steps that read a maker's or a taker's payment included.
+Emission there is separately restricted (see the note below); reading is not.
+With R35.6A.18 this fixes the acceptance set of a reference build at the three
+forms of R35.6A.2 for every build from the public release designation
+`v2.1.0-beta` onwards, whatever its policy and whatever its configuration.
+
+> **Upstream divergence (informative) -- per-coin cap on the emitted
+> transaction type.** The reference lineage gates emission twice, not once. Next
+> to the policy it reads an integer coin-configuration key `max_eth_tx_type`,
+> the highest EIP-2718 transaction type the coin may send, on every activation
+> route and with a token falling back to its platform coin's entry. When the key
+> is absent the effective maximum is `0` -- untyped legacy only. A transaction
+> whose type exceeds the coin's maximum is **refused at signing**: the send
+> fails and does not fall back to a lower type, so a coin configured with a
+> non-legacy policy but without a sufficient maximum cannot send a swap
+> transaction at all. The public coins configuration the project ships sets
+> `"max_eth_tx_type": 2` on each of the six coins that also carry a non-legacy
+> `swap_gas_fee_policy`, and sets it explicitly to `0` on BNB (chain 56), which
+> is how the reference keeps that chain on the untyped form. The cap applies
+> only to transactions the project itself builds; it never reaches decoding
+> (R35.6A.19). Reloaded implements no equivalent key and no such cap, so an
+> operator who moves a coin to a non-legacy tier with `set_swap_gas_fee_policy`
+> obtains a type-`0x02` transaction here where a reference build on the same
+> configuration would refuse to sign one. Open as D35.7.
+>
+> A further shipped key, `use_access_list`, appears on many EVM entries,
+> including three of the six policy coins (AVAX, MATIC, MOVR, but not ETH,
+> ETH-ARB20 or ETH-BASE). The reference's EVM coin layer does not
+> read it and neither reference version emits an EIP-2930 transaction, so
+> R35.6A.17's "the project emits no EIP-2930 transaction" is parity and the key
+> is inert on both sides.
+
 > **Upstream divergence (informative) -- strictness on input no chain can
 > produce.** R35.6A.10 and R35.6A.11 each reject a payload the reference lineage
 > accepts: a transaction followed by trailing bytes (which the reference folds
@@ -1320,6 +1453,10 @@ decomposition is the implementer's choice.
 - A swap completes against a peer whose swap gas-fee policy is a non-legacy tier
   (R35.6.3) -- the case that fails outright when only the untyped legacy form can
   be read.
+- The three forms of R35.6A.2 decode on a coin whose policy is `Legacy` exactly
+  as they do on a coin whose policy is a non-legacy tier, and on a coin
+  activated through `enable` / `electrum` exactly as on one activated through v2
+  or a task (R35.6A.19).
 
 ## 35.8A Wire-shape tests (binding)
 
@@ -1460,11 +1597,16 @@ NOT be added as a side effect of decoding work.
 
 **D35.3** *Outgoing typed emission and the peer floor.* R35.6A.18 records that a
 peer on a reference build at or before `v2.0.0-beta` cannot read a typed
-transaction. Nothing today makes the project emit one by default, because
-R35.6.3's default is the legacy policy. If a future change makes a non-legacy
-tier the default, or sets one per chain, the peer floor becomes load-bearing and
-the question of gating the emitted form on a negotiated peer capability must be
-answered first.
+transaction. The *built-in* default is the legacy policy (R35.6.3), but the
+shipped coins configuration already sets a non-legacy tier per chain on six
+coins (the note after R35.6.3), so on those chains the project emits a typed
+swap transaction without the operator asking for one -- and the reference does
+the same there. The peer floor is therefore already load-bearing on those six
+chains, not hypothetical: a peer on a build at or before `v2.0.0-beta` cannot
+read what we send them on ETH, MATIC, AVAX, ETH-ARB20, ETH-BASE or MOVR. The
+open question is whether the emitted form should be gated on a negotiated peer
+capability; it was not answered when the policy was made effective (D35.4), and
+it is unaffected by which way D35.6 and D35.7 go.
 
 **D35.4** *(Resolved.)* *The swap gas-fee policy had no effect on a transaction.*
 R35.6.6 requires the stored policy to govern how the coin prices gas, and
@@ -1475,9 +1617,10 @@ transaction was an untyped legacy one priced from a single gas price. Resolved:
 that [Chapter 10](10-sse-streaming.md) exposes (configured gas API when present,
 otherwise the internal fee-history estimator), so there is one tier definition;
 (b) a type-`0x02` transaction is constructed and signed, and decodes back
-through the §35.6A decoder with the same sender and identifier; (c) the
-peer-floor decision of D35.3 is unchanged: `Legacy` stays the default, so the
-floor is not load-bearing. Remaining: network acceptance of an emitted typed
+through the §35.6A decoder with the same sender and identifier; (c) `Legacy`
+remains the *built-in* default, but the shipped coins configuration overrides it
+on six coins, so this resolution did make the peer floor of D35.3 load-bearing
+on those chains -- see the corrected D35.3. Remaining: network acceptance of an emitted typed
 swap transaction and the suitability of the tier values under real congestion
 have not been exercised against a live chain.
 
@@ -1487,6 +1630,47 @@ pass, an *Acceptance criteria* section and a *Wire-shape tests* section with no
 closes that gap for the deferrals above; the chapter still carries no
 *Baseline Verifications* section, which R19 permits only when the chapter binds
 no such claims. Confirming that is a separate pass over §§35.1--35.4.
+
+**D35.6** *Maintainer decision -- the policy on the legacy activation route.*
+R35.6.7 states the reference's single precedence, applied on every activation
+route. Reloaded resolves the policy only on the v2 and task routes -- on the
+legacy route it reads neither the coin-configuration key nor the request field
+(ch. 55 R55.4.4) -- so a coin on one of the six chains the shipped configuration
+puts on `Medium`
+emits type-`0x02` swap transactions when activated through v2 or the task family
+and untyped legacy ones when activated through `enable` / `electrum`. Three
+directions are open: (a) resolve the policy on the legacy route too, which
+restores parity and makes the emitted form a property of the coin rather than of
+the caller's choice of activation method; (b) keep the split as a deliberate
+divergence, which leaves the legacy route as the conservative route for an
+operator trading against old peers, and which needs an entry in the
+operator-facing compatibility documents and the scoped opt-back those documents
+require, or an explicit finding that the exception is project-wide; (c) accept
+the request field on the legacy route (restoring the reference's wire surface,
+ch. 55 R55.4.4) while leaving the configuration key unread there, so an operator
+can opt in per activation without the configuration deciding for them. Note that
+the divergence is emission-only (R35.6A.19) and therefore cannot make a
+counterparty's transaction unreadable; its cost is a surprise, not a failed
+swap. Whichever is chosen, the informative note after R35.6.3 and this entry
+must end up agreeing with the code.
+
+**D35.7** *Maintainer decision -- the per-coin cap on the emitted transaction
+type.* The reference's second emission gate, the `max_eth_tx_type`
+coin-configuration key described in the divergence note after R35.6A.19, has no
+counterpart in Reloaded. Consequences of adopting it: a chain the shipped
+configuration pins at `0` (BNB today) stays on the untyped form even if an
+operator sets a non-legacy tier, which is what the reference does and what the
+shipped configuration evidently intends; a coin with no key at all would stop
+emitting typed transactions unless the project overrides the absent-key default,
+so adopting the reference's absent-key value of `0` interacts with the choice in
+D35.6. Consequences of not adopting it: Reloaded can emit a type-`0x02`
+transaction on a chain whose configuration says the project should not, and the
+first way an operator learns this is a rejected or unmined send. A third
+position is to honour the key where present and treat its absence as
+unrestricted, which keeps every chain the shipped configuration speaks about in
+parity while not regressing chains it is silent on. The decision is not settled
+by this chapter, and R35.6A.19 holds in every case: nothing here may narrow what
+the project reads.
 
 ## 35.9 Provenance Footer
 
@@ -1502,7 +1686,10 @@ no such claims. Confirming that is a separate pass over §§35.1--35.4.
   reloaded's existing EVM coin type, activation entrypoints and task substrate
   (§35.7); signed transactions fetched from public EVM chains by identifier,
   with the identifier and sender those chains report, as the vectors §35.8B
-  binds; [Chapter 10](10-sse-streaming.md) (the EIP-1559 fee-per-gas estimate
+  binds; the public coins configuration file the project ships (the
+  `swap_gas_fee_policy`, `max_eth_tx_type` and `use_access_list` keys of its EVM
+  entries, and the chain ids and tickers they sit on);
+  [Chapter 10](10-sse-streaming.md) (the EIP-1559 fee-per-gas estimate
   named as the natural fee source in D35.4);
   [Chapter 17](17-swap-v2-evm-path.md) (V2 swap contracts);
   [Chapter 19](19-nft-module-layout.md) (NFT activation and pseudo-coin);
@@ -1535,10 +1722,28 @@ no such claims. Confirming that is a separate pass over §§35.1--35.4.
   layout, identifier, signing-message and signature-parity rules of §35.6A rest
   on the public specifications listed under *Inputs*. No private implementation
   expression is normative in this chapter. §35.6A and the sections cleared with
-  it have **passed the KDF Dirty Gate**, in two passes; the extent, method and
-  measure recorded in §35.6A's *Clearance record* are the second pass's, as
-  chapter 01 T1 requires. Every other section of this chapter rests on the
-  inputs listed above.
+  it have **passed the KDF Dirty Gate** in two passes. A third Spec Reader pass
+  on 2026-10-16 consulted the same two reference versions for three further
+  behavioural facts: the single
+  precedence by which the initial swap gas-fee policy is resolved on every
+  activation route including the legacy one (R35.6.7 and the divergence note
+  after it); the independence of the acceptance set from the policy, from any
+  emission restriction and from the activation route (R35.6A.19); and the
+  existence and semantics of a public coin-configuration key that caps the
+  highest transaction type a coin may send, including its absent-key value and
+  its refuse-rather-than-downgrade outcome, plus the observation that the
+  neighbouring `use_access_list` key is not read at all (the divergence note
+  after R35.6A.19). Those two rules, those two notes, the acceptance criterion
+  that cites R35.6A.19, D35.6, D35.7 and the clause of the corrected D35.3
+  stating that the reference emits a typed swap transaction on the same six
+  chains **passed the KDF Dirty Gate** in a third pass on 2026-10-16 (PASS,
+  0.02). The two earlier clearances do not cover that material, and the third
+  does not replace them: §35.6A's *Clearance record* records the extent, method
+  and measure of each of the three passes separately, as chapter 01 T1
+  requires. The remainder of the D35.3 and D35.4 corrections made in the same
+  pass rests on this repository's own code and on the public coins
+  configuration. Every other section of this chapter rests on the inputs listed
+  above.
 - *Clean-context additions (forbidden corpus not consulted):* the informative note
   *Initial policy and shipped configuration* after R35.6.3, the "built-in default"
   wording of R35.6.3, and the reworded item 2 of R35.6A.18 were added on
@@ -1547,4 +1752,5 @@ no such claims. Confirming that is a separate pass over §§35.1--35.4.
   precedence in `coins_activation` and `coins`, the signing path) and on the
   public coins configuration, which sets `swap_gas_fee_policy` for six EVM
   coins. The *Forbidden corpus* entry above does not apply to these lines, and
-  the Dirty Gate clearance recorded in §35.6A does not cover them.
+  they rely on none of the clearances recorded in §35.6A; the third pass read
+  them only within its skim of the rest of the chapter.
