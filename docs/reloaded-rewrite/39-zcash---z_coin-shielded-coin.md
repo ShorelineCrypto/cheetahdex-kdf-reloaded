@@ -865,9 +865,13 @@ blocks were cached but before they were scanned into the wallet, the complete
 cached segment from the resolved chain-state anchor through the highest cached
 height at or below the current target shall be revalidated before reuse. A
 valid segment shall resume network fetching at the following height instead of
-downloading those blocks again. An invalid segment shall be preserved for
-diagnosis, replaced with a fresh compact cache, and refetched; its reported
-maximum height alone is never sufficient evidence for reuse.
+downloading those blocks again. An invalid segment shall be discarded, replaced
+with a fresh compact cache, and refetched; its reported maximum height alone is
+never sufficient evidence for reuse. The cache is deleted, not kept as a backup:
+it holds only blocks the backend can serve again, and a failure that repeats on
+every background pass (R39.8.0aa) would otherwise leave one more copy behind each
+time. Wallet-database backups of the rebuild paths (R39.8.0x, R39.8.0al) are
+unaffected.
 
 The dictated Pirate compact-block protobuf does not carry the modern optional
 `ChainMetadata` field. Before handing a bounded batch to a scanner that requires
@@ -1396,7 +1400,10 @@ monotonicity rule of R39.11.10. Chain-continuity recovery is not
 restated here: a background pass uses the same fetch/validate/scan path as
 activation and therefore inherits the sequential-height and hash-link validation
 and the rewind/refetch-on-discontinuity behaviour of R39.8.0n, including the
-handling of a reorg that invalidates already-cached blocks.
+handling of a reorg that invalidates already-cached blocks. A reorg of the block
+the wallet last scanned is detected on every pass and repaired by the rewind or
+sync-start rebuild of R39.8.0al, so a failing pass can never repeat the same
+failure on every later pass.
 
 > **Status update (reloaded, Step C).** Implemented. The background pass and
 > activation fetch only the endpoints admission lets through (R39.11.7a), in
@@ -1529,6 +1536,28 @@ while a background pass is scanning that same database, nor a pass begin against
 a database mid-rebuild (R39.8.0ad). A multi-endpoint fixture shall prove that a
 pass survives the failure of any proper subset of the configured endpoints and
 fails only when all of them fail.
+
+Reorg-recovery tests (R39.8.0al, R39.8.0n) shall run without a network, with the
+backend's tree state supplied by a fixture, and shall prove: (a) a wallet scanned
+through height H with a checkpoint for every block and a note of its own, whose
+in-session chain state is at H and whose tip the chain replaced, detects the
+divergence on the next pass, rewinds below H without rebuilding, clears the cached
+compact blocks above the rewound height, scans the new chain past H, keeps its
+account and balance, and creates no backup file, with the rewind landing on the
+oldest retained checkpoint (inside the window) and the fixture pinning the
+backend's 100-checkpoint window; (b) the same for a sparse-checkpoint wallet,
+where the rewind lands directly, and for a wallet whose first note is mined after
+its first scanned block, where the rewind must still land inside the window rather
+than on the block before that note; (c) a rewind
+the backend refuses below the oldest retained checkpoint is redirected to that
+checkpoint; (d) a divergence beyond the
+retained window rebuilds the wallet at its sync start, asks the backend for no
+height below it (in particular never 0), recreates the account at the original
+birthday, scans the new chain, and leaves exactly one wallet backup and no
+compact-cache backup; (e) a wallet with no recorded sync start, or a backend that
+cannot supply the rebuild anchor, fails the pass and leaves the wallet unmodified;
+(f) an unchanged chain keeps the anchor; (g) a compact cache that fails validation
+is deleted, not renamed to a backup.
 
 T39.8.0g Pending-receipt tests shall use a mempool fixture to prove that a
 wallet-owned unconfirmed shielded output is reported in the non-spendable balance
@@ -1911,20 +1940,74 @@ A light wallet that syncs to the chain tip records the tip block. An ordinary
 one-block reorg then leaves it holding a block the network has dropped, and the
 tree state the backend reports for that height no longer matches what the wallet
 stored. Treating that as an error is unrecoverable by construction: the stored
-state is never repaired, so every later activation repeats the same comparison
-and the wallet can never sync again.
+state is never repaired, so every later pass repeats the same comparison and the
+wallet can never sync again.
+
+The comparison shall therefore be made on **every** fetch, against the tree state
+the backend reports now. The chain state a scan leaves in memory is what the scan
+derived from cached blocks, not what the chain says, and shall never stand in for
+the backend's answer: trusting it skips the comparison for the rest of the session
+and no divergence is ever detected after a scan.
 
 On a mismatch between the stored block hash and the one the backend reports at
-the anchor height, the wallet shall therefore:
+the anchor height, the wallet shall:
 
-- rewind the wallet database by a bounded depth and re-anchor at the lower
-  height, repeating a bounded number of times;
-- rebuild and rescan from scratch if the divergence persists, if the requested
-  rewind is refused, or if the rewind cannot move below the divergence. No
-  shielded value is lost either way, because every note is recoverable from the
-  chain with the wallet's own viewing key;
+- rewind the wallet database to the height `D` blocks below the anchor and
+  re-anchor there, repeating at most `N` times, where `N` is 3 and `D` is one less
+  than the number of commitment-tree checkpoints the wallet database retains
+  (100), i.e. 99. Checkpoints sit at distinct heights at or below the scan tip, so
+  a wallet holding all of them has its oldest at or below `tip - 99`, and a rewind
+  of `D` from the tip always lands on a retained checkpoint: it never leaves the
+  retained window, below which the backend falls back to the block before the
+  wallet's earliest note (next bullet). A depth equal to the window (100) lands
+  exactly one block below the window of a wallet kept current by the background
+  sync, which holds a checkpoint for nearly every block, and would make every
+  one-block reorg rescan that wallet's whole note history. Observed ARRR reorgs
+  were one block deep, and rescanning at most `D` compact blocks is cheap;
+- accept whatever height at or below the request the backend rewinds to. The
+  backend truncates to the newest scanned block at or below the request at which
+  its commitment trees can be cut: a block with a retained checkpoint or, below
+  the retained checkpoints, a block before the wallet's earliest note with a
+  recorded tree position. For a wallet holding notes that can be far below the
+  request; the range between is rescanned like any rewound range;
+- when the backend refuses a rewind because no block at or below the request
+  qualifies, and reports the oldest checkpoint it does hold, rewind to that
+  checkpoint instead of giving up. The first rewind cannot be refused (it lands
+  inside the retained window by construction), but a later attempt, or a young
+  wallet whose window has not filled yet, can ask for a height below everything
+  retained; without this redirect such a refusal went straight to the rebuild
+  below;
+- stop rewinding as soon as a rewind cannot move below the divergence; the loop
+  is bounded by `N` and never unbounded;
+- delete, in the same step, every compact block cached above the height the wallet
+  rewound to. They were fetched for the chain being abandoned; left in place they
+  feed the orphaned block back to the scanner and the wallet fails the same way on
+  every pass;
+- if the divergence persists after `N` rewinds, or the rewind is refused beyond
+  repair, or it cannot move below the divergence, **rebuild** the wallet database.
+  A divergence deeper than the retained window cannot be repaired locally;
 - resume fetching from the height actually anchored at, never from the height
-  originally planned, so the rewound range is rescanned rather than skipped.
+  originally planned, so the rewound range is rescanned rather than skipped. The
+  anchor height the check returns is always the height of a real anchor; no value,
+  including 0, signals "rebuilt".
+
+The rebuild shall re-anchor the wallet at its **sync start** and never at height
+0. The sync start is the birthday of the wallet's account: the height from which
+the wallet originally began scanning (the coin's checkpoint, the activation's
+`sync_params`, or the default recent window, whichever created the wallet,
+R39.8.0g/h). It is read before anything is replaced. The rebuild shall fetch and
+validate the tree state at the block below the sync start before it touches the
+wallet database, so an unreachable or malformed answer leaves the existing wallet
+as it was; then it shall replace the wallet database with a fresh one holding the
+account at that birthday and delete the compact cache, and the next scan resumes
+at the sync start. Notes below the sync start are out of scope, exactly as for any
+wallet anchored there. No shielded value in the covered range is lost, because
+every note in it is recoverable from the chain with the wallet's own viewing key.
+A wallet that records no sync start, or whose sync start leaves no block below it
+to anchor on, shall fail the pass with an error rather than be rebuilt at a
+guessed height; it is not modified. A rebuild shall keep exactly one backup of the
+previous wallet database (`.chain-divergence.<ms>.bak`), never one per pass, and
+shall keep no backup of the compact cache (R39.8.0n).
 
 The divergence shall be reported with both the stored and the reported block
 hash, in display byte order, so the two can be distinguished and looked up.
