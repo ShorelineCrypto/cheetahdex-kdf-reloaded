@@ -1306,26 +1306,26 @@ forms of R35.6A.2 for every build from the public release designation
 > only to transactions the project itself builds; it never reaches decoding
 > (R35.6A.19).
 >
-> Reloaded honours the key (decision D35.7) with **one deliberate divergence:
-> an absent key means unrestricted, not `0`.** Everything else is as the
-> reference: the integer key is read from the coin's own entry and, for a token
-> that has none, from its platform coin's entry; a transaction whose type exceeds
-> the maximum is refused at signing and is neither rebuilt in a lower type nor
-> broadcast. The reason for the divergence is that adopting `0` would silently
-> disable typed transactions on every coin whose configuration is silent about
-> the cap, a large behavior change for chains nobody has expressed an intent
-> about; the shipped configuration sets the key on exactly the coins it means to
-> speak about. An operator who needs the reference's absent-key behavior sets the
-> node-level boolean `max_eth_tx_type_absent_means_untyped` (default `false`) to
-> `true`: an absent key then means `0`, and the refusal is the same as for an
-> explicit `0`. Only the boolean `true` turns it on, so a typo or another value
-> leaves the default. The switch never overrides a key that is present. A value
-> of the key that is not a non-negative integer is treated as absent. The
-> switch is listed in `GLEEC_COMPATIBILITY.md`.
+> Reloaded honours the key (decision D35.7) exactly as the reference does by
+> default: the integer key is read from the coin's own entry and, for a token
+> that has none, from its platform coin's entry; an absent key means `0`; a
+> transaction whose type exceeds the maximum is refused at signing and is neither
+> rebuilt in a lower type nor broadcast. A value of the key that is not a
+> non-negative integer is treated as absent. Reloaded offers **one opt-in
+> divergence**: the node-level boolean `max_eth_tx_type_absent_unrestricted`
+> (default `false`). When it is the boolean `true`, an absent key means
+> unrestricted instead of `0`, so a coin whose configuration is silent about the
+> cap keeps emitting typed transactions. The reason for offering it is that
+> reading the absent key as `0` silently disables typed transactions on every
+> coin whose configuration is silent about the cap; the shipped configuration
+> sets the key on exactly the coins it means to speak about. Only the boolean
+> `true` turns the switch on, so a typo or another value leaves the default. The
+> switch never overrides a key that is present. It is listed in
+> `GLEEC_COMPATIBILITY.md`.
 >
-> **Compatibility:** for behaviour matching the reference lineage (and GLEEC
-> KDF), set `max_eth_tx_type_absent_means_untyped` to `true`. GLEEC KDF has no
-> equivalent switch; its absent-key behavior is fixed.
+> **Compatibility:** the default matches the reference lineage (and GLEEC KDF);
+> no setting is needed for that behaviour. GLEEC KDF has no equivalent of the
+> switch; its absent-key behavior is fixed.
 >
 > A further shipped key, `use_access_list`, appears on many EVM entries,
 > including three of the six policy coins (AVAX, MATIC, MOVR, but not ETH,
@@ -1673,24 +1673,23 @@ reject it (R35.1.1). The leniency is the specified behavior on that route and th
 two parses are not unified. The divergence was emission-only (R35.6A.19) and
 could not make a counterparty's transaction unreadable.
 
-**D35.7** *(Resolved -- maintainer decision, 2026-10-16.)* *The per-coin cap on the
+**D35.7** *(Resolved -- maintainer decision, 2026-10-16; default inverted the same day.)* *The per-coin cap on the
 emitted transaction type.* The reference's second emission gate, the
 `max_eth_tx_type` coin-configuration key described in the divergence note after
-R35.6A.19, is honoured where the configuration sets it and ignored where it does
-not. Three positions had been open: adopt the reference exactly (an absent key
-means `0`), do not adopt it at all, or honour the key where present and treat its
-absence as unrestricted. The maintainer chose the third. A chain the shipped
-configuration pins at `0` (BNB today) therefore stays on the untyped form even if
-an operator sets a non-legacy tier, and a coin whose configuration is silent
-about the cap keeps emitting typed transactions as before. A send whose type
-exceeds the cap is refused at signing, in the signer, so every typed construction
-path is covered; the send fails and no lower type is substituted. Because an
-operator migrating from a reference build could be surprised by the absent-key
-difference, the project's compatibility rule requires an opt-back: the
-node-level boolean `max_eth_tx_type_absent_means_untyped`, default `false`, which
-when `true` makes an absent key mean `0`. Activation logs the effective cap and
-its source next to the policy. R35.6A.19 holds throughout: nothing here narrows
-what the project reads.
+R35.6A.19, is honoured. Three positions had been open: adopt the reference
+exactly (an absent key means `0`), do not adopt it at all, or honour the key
+where present and treat its absence as unrestricted. The maintainer first chose
+the third, then ruled that a compatibility switch exists to opt into a
+divergence, so its default must be the reference behaviour at least before 1.0.
+The default is therefore the reference reading: an absent key means `0`. A chain
+the shipped configuration pins at `0` (BNB today) stays on the untyped form even
+if an operator sets a non-legacy tier. A send whose type exceeds the cap is
+refused at signing, in the signer, so every typed construction path is covered;
+the send fails and no lower type is substituted. The divergence is opt-in: the
+node-level boolean `max_eth_tx_type_absent_unrestricted`, default `false`, which
+when `true` makes an absent key mean unrestricted. Activation logs the effective
+cap and its source next to the policy. R35.6A.19 holds throughout: nothing here
+narrows what the project reads.
 
 ## 35.9 Provenance Footer
 

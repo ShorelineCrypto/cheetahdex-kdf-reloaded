@@ -2363,9 +2363,16 @@ mod swap_send_path_wire_form {
         (spawn(move |method, params| answer(method, params, &sent_h)), sent)
     }
 
-    /// An ERC-20 token coin on a chain-137 platform with `policy` as its stored swap gas-fee policy.
+    /// An ERC-20 token coin on a chain-137 platform with `policy` as its stored swap gas-fee policy. The
+    /// platform carries `"max_eth_tx_type": 2`, as every shipped coin with a non-legacy policy does.
     fn polygon_token(url: &str, policy: SwapGasFeePolicy, token_addr: Address) -> (MmArc, EthCoin) {
-        polygon_token_with_conf(url, policy, token_addr, json!([]), json!({}))
+        polygon_token_with_conf(
+            url,
+            policy,
+            token_addr,
+            json!([{"coin": "MATIC", "max_eth_tx_type": 2}]),
+            json!({}),
+        )
     }
 
     /// As [`polygon_token`], with `extra_coins` appended to the coins file and `node_conf` merged into the
@@ -2599,21 +2606,13 @@ mod swap_send_path_wire_form {
     }
 
     #[test]
-    fn an_absent_cap_is_unrestricted() {
-        // The token and its platform are both silent: our deliberate divergence from the reference,
-        // which would treat the absent key as 0.
-        let (result, sent) = try_broadcast(SwapGasFeePolicy::Medium, json!([{"coin": "MATIC"}]), json!({}));
-        result.expect("the send succeeds");
-        assert_type_2(&sent[0]);
-    }
-
-    #[test]
-    fn the_switch_makes_an_absent_cap_mean_untyped_only() {
-        let switch = json!({ "max_eth_tx_type_absent_means_untyped": true });
+    fn an_absent_cap_is_refused_by_default() {
+        // The token and its platform are both silent: the default matches the reference, where the absent
+        // key reads as 0.
         let absent = assert_refused_without_broadcast(try_broadcast(
             SwapGasFeePolicy::Medium,
             json!([{"coin": "MATIC"}]),
-            switch.clone(),
+            json!({}),
         ));
         // The refusal is the one an explicit cap of 0 gets, down to the stated maximum.
         let explicit_zero = assert_refused_without_broadcast(try_broadcast(
@@ -2625,11 +2624,28 @@ mod swap_send_path_wire_form {
             absent.contains("is 0 ") && explicit_zero.contains("is 0 "),
             "{absent} / {explicit_zero}"
         );
+        // An untyped send is unaffected by the default.
+        let (result, sent) = try_broadcast(SwapGasFeePolicy::Legacy, json!([{"coin": "MATIC"}]), json!({}));
+        result.expect("the send succeeds");
+        assert_untyped_legacy(&sent[0]);
+    }
+
+    #[test]
+    fn the_switch_makes_an_absent_cap_unrestricted() {
+        let switch = json!({ "max_eth_tx_type_absent_unrestricted": true });
+        let (result, sent) = try_broadcast(SwapGasFeePolicy::Medium, json!([{"coin": "MATIC"}]), switch.clone());
+        result.expect("the send succeeds");
+        assert_type_2(&sent[0]);
         // An untyped send is unaffected by the switch.
         let (result, sent) = try_broadcast(SwapGasFeePolicy::Legacy, json!([]), switch.clone());
         result.expect("the send succeeds");
         assert_untyped_legacy(&sent[0]);
         // The switch never overrides a key that is present.
+        assert_refused_without_broadcast(try_broadcast(
+            SwapGasFeePolicy::Medium,
+            platform_with_cap(json!(0)),
+            switch.clone(),
+        ));
         let (result, sent) = try_broadcast(SwapGasFeePolicy::Medium, platform_with_cap(json!(2)), switch);
         result.expect("the send succeeds");
         assert_type_2(&sent[0]);
@@ -2637,14 +2653,12 @@ mod swap_send_path_wire_form {
 
     #[test]
     fn anything_but_the_boolean_true_leaves_the_switch_off() {
-        for off in [json!("true"), json!(1), json!(false)] {
-            let (result, sent) = try_broadcast(
+        for off in [json!("true"), json!(1), json!(false), json!(null)] {
+            assert_refused_without_broadcast(try_broadcast(
                 SwapGasFeePolicy::Medium,
                 json!([]),
-                json!({ "max_eth_tx_type_absent_means_untyped": off }),
-            );
-            result.expect("an unrecognised switch value leaves the default behavior");
-            assert_type_2(&sent[0]);
+                json!({ "max_eth_tx_type_absent_unrestricted": off }),
+            ));
         }
     }
 

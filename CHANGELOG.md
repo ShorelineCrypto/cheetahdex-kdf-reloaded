@@ -28,13 +28,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   coins it means to speak about (`2` on the six `"Medium"` coins, `0` on BNB Chain), and an
   operator who moves BNB to a non-legacy tier with `set_swap_gas_fee_policy` now gets a refused
   send where before the type-2 transaction would have gone out. **A coin with no
-  `max_eth_tx_type` key at all is treated as unrestricted, not as `0`**, which differs from the
-  reference: reading an absent key as `0` would have silently turned typed transactions off on
-  every chain whose configuration says nothing about the cap. **Compatibility note:** an operator
-  who wants the reference's absent-key behavior sets the node-level boolean
-  `max_eth_tx_type_absent_means_untyped` to `true` (default `false`; any other value, including the
-  string `"true"`, leaves the default). A coin without the key is then capped at `0`, and a typed
-  swap send is refused exactly as for an explicit `0`. A key that is present is honoured either
+  `max_eth_tx_type` key at all is treated as `0`, as in the reference**, so a typed swap send for
+  it is refused exactly as for an explicit `0`. **Compatibility note:** an operator who prefers
+  Reloaded's divergence, an absent key meaning unrestricted, sets the node-level boolean
+  `max_eth_tx_type_absent_unrestricted` to `true` (default `false`; any other value, including the
+  string `"true"`, leaves the default). A key that is present is honoured either
   way. The activation INFO line now also reports the effective cap and where it came from, for
   example `MATIC: swap gas-fee policy Medium (source: coin config); max tx type 2 (source: coin
   config)`, so "why did this coin emit that form?" is one grep. What a node can read is unchanged:

@@ -121,17 +121,18 @@ pub fn resolve_swap_gas_fee_policy(
     }
 }
 
-/// The `MM2.json` key of the compatibility switch for a coin whose configuration has no `max_eth_tx_type`.
-pub const MAX_ETH_TX_TYPE_ABSENT_MEANS_UNTYPED_KEY: &str = "max_eth_tx_type_absent_means_untyped";
+/// The `MM2.json` key of the compatibility switch that lifts the cap for a coin whose configuration has no
+/// `max_eth_tx_type`.
+pub const MAX_ETH_TX_TYPE_ABSENT_UNRESTRICTED_KEY: &str = "max_eth_tx_type_absent_unrestricted";
 
-/// Whether an absent `max_eth_tx_type` coin-configuration key means `0` (untyped transactions only), CRD D35.7.
+/// Whether an absent `max_eth_tx_type` coin-configuration key means *unrestricted*, CRD D35.7.
 ///
-/// Reloaded treats an absent key as unrestricted, so a coin whose configuration is silent about the cap can
-/// still send an EIP-1559 swap transaction. The reference lineage treats an absent key as `0`. Setting this
-/// switch to the boolean `true` restores that reference behavior; any other value, including the string
+/// The default matches the reference lineage: an absent key reads as `0` (untyped transactions only). Setting
+/// this switch to the boolean `true` opts into Reloaded's divergence, under which a coin whose configuration is
+/// silent about the cap can still send an EIP-1559 swap transaction. Any other value, including the string
 /// `"true"`, leaves the default.
-pub fn max_eth_tx_type_absent_means_untyped(ctx: &MmArc) -> bool {
-    ctx.conf[MAX_ETH_TX_TYPE_ABSENT_MEANS_UNTYPED_KEY].as_bool() == Some(true)
+pub fn max_eth_tx_type_absent_unrestricted(ctx: &MmArc) -> bool {
+    ctx.conf[MAX_ETH_TX_TYPE_ABSENT_UNRESTRICTED_KEY].as_bool() == Some(true)
 }
 
 /// Where the effective cap on the emitted transaction type of a coin came from.
@@ -139,9 +140,9 @@ pub fn max_eth_tx_type_absent_means_untyped(ctx: &MmArc) -> bool {
 pub enum TxTypeCapSource {
     /// The `max_eth_tx_type` key of the coin's own configuration entry, or of its platform coin's entry.
     CoinConfig,
-    /// No key anywhere: no cap applies.
+    /// No key anywhere, and the compatibility switch makes the absent key mean no cap.
     Unrestricted,
-    /// No key anywhere, and the compatibility switch makes the absent key mean `0`.
+    /// No key anywhere: the default reading, as in the reference, is `0`.
     AbsentKeyIsZero,
 }
 
@@ -149,10 +150,10 @@ impl TxTypeCapSource {
     fn describe(self) -> &'static str {
         match self {
             TxTypeCapSource::CoinConfig => "coin config",
-            TxTypeCapSource::Unrestricted => "no max_eth_tx_type key, unrestricted",
-            TxTypeCapSource::AbsentKeyIsZero => {
-                "no max_eth_tx_type key, treated as 0 by max_eth_tx_type_absent_means_untyped"
+            TxTypeCapSource::Unrestricted => {
+                "no max_eth_tx_type key, unrestricted by max_eth_tx_type_absent_unrestricted"
             },
+            TxTypeCapSource::AbsentKeyIsZero => "no max_eth_tx_type key, treated as 0",
         }
     }
 }
@@ -161,15 +162,16 @@ impl TxTypeCapSource {
 ///
 /// `confs` lists the coin's own configuration entry first and, for a token, its platform coin's entry second;
 /// the first entry holding a non-negative integer `max_eth_tx_type` decides. A value that is not a
-/// non-negative integer counts as absent. `None` means unrestricted.
-pub fn resolve_max_eth_tx_type(confs: &[&Json], absent_means_untyped: bool) -> (Option<u64>, TxTypeCapSource) {
+/// non-negative integer counts as absent; an absent key is `0` unless `absent_unrestricted`. `None` means
+/// unrestricted.
+pub fn resolve_max_eth_tx_type(confs: &[&Json], absent_unrestricted: bool) -> (Option<u64>, TxTypeCapSource) {
     if let Some(max) = confs.iter().find_map(|conf| conf["max_eth_tx_type"].as_u64()) {
         return (Some(max), TxTypeCapSource::CoinConfig);
     }
-    if absent_means_untyped {
-        (Some(0), TxTypeCapSource::AbsentKeyIsZero)
-    } else {
+    if absent_unrestricted {
         (None, TxTypeCapSource::Unrestricted)
+    } else {
+        (Some(0), TxTypeCapSource::AbsentKeyIsZero)
     }
 }
 
@@ -184,7 +186,7 @@ impl EthCoinImpl {
             },
             _ => Json::Null,
         };
-        resolve_max_eth_tx_type(&[&own, &platform], max_eth_tx_type_absent_means_untyped(ctx))
+        resolve_max_eth_tx_type(&[&own, &platform], max_eth_tx_type_absent_unrestricted(ctx))
     }
 }
 
@@ -765,23 +767,23 @@ mod tests {
                 "BNB",
                 SwapGasFeePolicy::Legacy,
                 SwapGasFeePolicySource::BuiltInDefault,
-                (None, TxTypeCapSource::Unrestricted)
+                (Some(0), TxTypeCapSource::AbsentKeyIsZero)
             ),
-            "BNB: swap gas-fee policy Legacy (source: built-in default); max tx type none \
-             (source: no max_eth_tx_type key, unrestricted)"
+            "BNB: swap gas-fee policy Legacy (source: built-in default); max tx type 0 \
+             (source: no max_eth_tx_type key, treated as 0)"
         );
         let line = swap_gas_fee_policy_log_line(
             "ETH",
             SwapGasFeePolicy::Legacy,
             SwapGasFeePolicySource::BuiltInDefault,
-            (Some(0), TxTypeCapSource::AbsentKeyIsZero),
+            (None, TxTypeCapSource::Unrestricted),
         );
-        assert!(line.contains("max tx type 0"), "{line}");
-        assert!(line.contains("max_eth_tx_type_absent_means_untyped"), "{line}");
+        assert!(line.contains("max tx type none"), "{line}");
+        assert!(line.contains("max_eth_tx_type_absent_unrestricted"), "{line}");
     }
 
     #[test]
-    fn max_eth_tx_type_is_own_entry_then_platform_entry_then_unrestricted() {
+    fn max_eth_tx_type_is_own_entry_then_platform_entry_then_zero_unless_the_switch_is_on() {
         let own = json!({ "max_eth_tx_type": 1 });
         let platform = json!({ "max_eth_tx_type": 2 });
         let silent = json!({ "coin": "X" });
@@ -800,13 +802,15 @@ mod tests {
             resolve_max_eth_tx_type(&[&zero, &platform], false),
             (Some(0), TxTypeCapSource::CoinConfig)
         );
+        // Absent everywhere: the default reads 0, as in the reference.
         assert_eq!(
             resolve_max_eth_tx_type(&[&silent, &silent], false),
-            (None, TxTypeCapSource::Unrestricted)
+            (Some(0), TxTypeCapSource::AbsentKeyIsZero)
         );
+        // The switch opts into the unrestricted reading.
         assert_eq!(
             resolve_max_eth_tx_type(&[&silent, &silent], true),
-            (Some(0), TxTypeCapSource::AbsentKeyIsZero)
+            (None, TxTypeCapSource::Unrestricted)
         );
         // The switch never overrides a key that is present.
         assert_eq!(
@@ -818,7 +822,7 @@ mod tests {
             let conf = json!({ "max_eth_tx_type": bad });
             assert_eq!(
                 resolve_max_eth_tx_type(&[&conf], false),
-                (None, TxTypeCapSource::Unrestricted),
+                (Some(0), TxTypeCapSource::AbsentKeyIsZero),
                 "{bad}"
             );
         }
@@ -829,17 +833,15 @@ mod tests {
         use mm2_core::mm_ctx::MmCtxBuilder;
         let switch = |value: Json| {
             let ctx = MmCtxBuilder::new()
-                .with_conf(json!({ MAX_ETH_TX_TYPE_ABSENT_MEANS_UNTYPED_KEY: value }))
+                .with_conf(json!({ MAX_ETH_TX_TYPE_ABSENT_UNRESTRICTED_KEY: value }))
                 .into_mm_arc();
-            max_eth_tx_type_absent_means_untyped(&ctx)
+            max_eth_tx_type_absent_unrestricted(&ctx)
         };
         assert!(switch(json!(true)));
         for off in [json!(false), json!("true"), json!(1), json!("yes"), json!(null)] {
             assert!(!switch(off.clone()), "{off}");
         }
-        assert!(!max_eth_tx_type_absent_means_untyped(
-            &MmCtxBuilder::new().into_mm_arc()
-        ));
+        assert!(!max_eth_tx_type_absent_unrestricted(&MmCtxBuilder::new().into_mm_arc()));
     }
 
     fn legacy_params(req_extra: Json, conf: Json) -> EthCoinActivationParams {

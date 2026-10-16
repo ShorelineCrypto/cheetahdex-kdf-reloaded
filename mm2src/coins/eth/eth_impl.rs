@@ -132,9 +132,7 @@ impl EthCoinImpl {
                 max,
                 match source {
                     TxTypeCapSource::CoinConfig => "max_eth_tx_type of the coin configuration",
-                    TxTypeCapSource::AbsentKeyIsZero => {
-                        "no max_eth_tx_type key and max_eth_tx_type_absent_means_untyped is set"
-                    },
+                    TxTypeCapSource::AbsentKeyIsZero => "no max_eth_tx_type key, so the default of 0 applies",
                     TxTypeCapSource::Unrestricted => "unrestricted",
                 }
             ),
