@@ -263,10 +263,15 @@ pub const TEST_MNEMONIC: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 /// A context with the EVM coins configuration, a global HD account and an in-memory HD wallet database.
-pub fn hd_ctx() -> MmArc {
-    let ctx = MmCtxBuilder::new()
-        .with_conf(json!({ "enable_hd": true, "coins": coins_conf() }))
-        .into_mm_arc();
+pub fn hd_ctx() -> MmArc { hd_ctx_with_conf(json!({})) }
+
+/// The HD test context with the `extra` top-level `MM2.json` settings merged in.
+pub fn hd_ctx_with_conf(extra: serde_json::Value) -> MmArc {
+    let mut conf = json!({ "enable_hd": true, "coins": coins_conf() });
+    if let (Some(conf), Some(extra)) = (conf.as_object_mut(), extra.as_object()) {
+        conf.extend(extra.clone());
+    }
+    let ctx = MmCtxBuilder::new().with_conf(conf).into_mm_arc();
     crypto::CryptoCtx::init_with_global_hd_account(ctx.clone(), TEST_MNEMONIC).expect("initialize the crypto context");
     let connection = db_common::sqlite::rusqlite::Connection::open_in_memory().expect("in-memory database");
     let _ = ctx.sqlite_connection.pin(Arc::new(std::sync::Mutex::new(connection)));

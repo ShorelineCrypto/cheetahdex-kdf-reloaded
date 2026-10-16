@@ -451,12 +451,14 @@ R35.2.3 The success `result` shall carry:
 
 | Field | JSON type | Content | Basis |
 | --- | --- | --- | --- |
-| `balances` | object (map) | exactly one entry: the platform's single wallet address → BalanceInfo `{spendable, unspendable}` of the token | D |
+| `balances` | object (map) | address → BalanceInfo `{spendable, unspendable}` of the token. On a single-address platform: exactly one entry, the platform's wallet address. On an HD platform: one entry per known address of the platform's HD wallet (the same addresses the `task::enable_erc20` report lists), see R35.2.5 | D |
 | `platform_coin` | string | the platform ticker | D |
 | `token_contract_address` | string | the token contract address, 0x-prefixed **lower-case** hex | D |
 | `required_confirmations` | integer | the token's effective swap confirmations | D |
 
 There is no `get_balances` option on this method; the balance is always read.
+
+In HD mode `balances` carries one entry per known address; the result object has no other shape change. The balance of every address is read before the call answers: unlike `task::enable_erc20` there is no task channel, so no progress is reported and a wallet with many addresses simply makes the caller wait.
 
 > **Upstream divergence (informative).** `v3.0.0-beta` renders
 > `token_contract_address` in EIP-55 checksummed (mixed-case) form;
@@ -486,7 +488,7 @@ mmrpc-level.
 | `CustomTokenError` | inline `protocol` rejected (R35.2.7) | externally tagged custom-token sub-error (R35.2.7) | 400 | G |
 | `PlatformCoinIsNotActivated` | the platform named by the token protocol is not active | string: the **platform** ticker | 400 | D |
 | `UnsupportedPlatformCoin` | the platform is active but is not an EVM platform coin | object `{platform_coin_ticker: string, token_ticker: string}` | 500 | G |
-| `UnexpectedDerivationMethod` | the platform is HD-derived (HD mode or hardware policy); the one-shot token call needs a single address | the serialized derivation sub-error: the string `"ExpectedSingleAddress"` for this case | 500 | G |
+| `UnexpectedDerivationMethod` | the platform is HD-derived under the hardware policy; or, for `enable_nft`, any HD-derived platform (HD mode or hardware policy); the one-shot call needs a single address. For an ERC-20 token on a **software** HD platform (HD mode) this error is returned only when `erc20_hd_activation` is `false` (below) | the serialized derivation sub-error: the string `"ExpectedSingleAddress"` for this case | 500 | G |
 | `Transport` | on-chain decimals read or token balance read got no usable answer from the nodes (R35.1.6 conditions); NFT provider unreachable | string | **500** | G |
 | `InvalidPayload` | NFT provider rejected the request; an inventory entry lacks its contract type | string | 400 | G |
 | `PrivKeyPolicyNotAllowed` | reserved (as R35.1.5) | string | 500 | G |
@@ -494,6 +496,35 @@ mmrpc-level.
 | `CouldNotFetchBalance` | reserved (balance failures are reported as `Transport`) | string | 500 | G |
 | `InvalidConfig` | reserved | string | 500 | G |
 | `Internal` | token kind and parameters disagree (an ERC-20 ticker with a well-formed `activation_params.provider`, an NFT ticker without a usable one); NFT chain unsupported; other unexpected failures | string | 500 | G |
+
+> **Upstream divergence: `enable_erc20` on a software HD platform (HD mode only, not hardware policy).** The reference
+> refuses an HD-derived platform on the one-shot ERC-20 call with
+> `UnexpectedDerivationMethod`, so a client that only knows `enable_erc20`
+> cannot add a token after startup in HD mode. Reloaded activates the token
+> instead. A token is enabled on the enabled address of its platform
+> (`activation_params.path_to_address`, when given, is only validated against
+> that address and refused with `Internal` when it selects another), so the
+> one-shot call has no ambiguity to resolve; it reports every known address
+> in `balances` (R35.2.3) and registers exactly the coin `task::enable_erc20`
+> registers. Single-address platforms, `enable_nft` and every other row above
+> are unchanged.
+>
+> **Which half of the old guard survived.** The reference's guard covered two
+> cases, HD mode and hardware policy. Only HD mode is lifted. A
+> hardware-backed platform is still refused on the one-shot call, exactly as
+> before (identical `error_type`, `error_data` and status), so there is nothing
+> divergent to document for it: the task variant exists partly to provide
+> `user_action`, the channel on which a hardware device confirms, and a
+> one-shot call has none, so admitting a hardware platform would hang or fail
+> obscurely. `erc20_hd_activation` has no effect on hardware platforms.
+>
+> **Per-setting documentation, `erc20_hd_activation`** (`MM2.json` boolean,
+> default `true`; not acknowledgement-gated). Only an explicit `false`
+> disables the HD support and restores the refusal described above, with the
+> identical `error_type`, `error_data` and HTTP status; any other value, or
+> its absence, leaves it on.
+> **Compatibility:** for behaviour matching GLEEC KDF (and the upstream
+> pre-divergence Komodo DeFi Framework), set this to `false`.
 
 Note the deliberate difference from R35.1.5: `Transport` on this method is HTTP
 **500**, not 502, and `TokenProtocolParseError` is 500 while

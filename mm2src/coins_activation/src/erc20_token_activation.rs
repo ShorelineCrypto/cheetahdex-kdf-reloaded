@@ -492,17 +492,46 @@ async fn enable_erc20_token(
     .await
     .mm_err(EnableTokenError::from)?;
 
-    // The one-shot token call needs a single address.
-    if !matches!(platform_coin.derivation_method, DerivationMethod::Iguana(_)) {
-        return MmError::err(EnableTokenError::UnexpectedDerivationMethod(
-            TokenDerivationError::ExpectedSingleAddress,
-        ));
-    }
-
-    let balance = token.my_balance().compat().await.mm_err(EnableTokenError::from)?;
-    let my_address = token.my_address().map_to_mm(EnableTokenError::Internal)?;
-    let mut balances = HashMap::new();
-    balances.insert(my_address, balance);
+    let balances = match &platform_coin.derivation_method {
+        DerivationMethod::Iguana(_) => {
+            let balance = token.my_balance().compat().await.mm_err(EnableTokenError::from)?;
+            let my_address = token.my_address().map_to_mm(EnableTokenError::Internal)?;
+            let mut balances = HashMap::new();
+            balances.insert(my_address, balance);
+            balances
+        },
+        DerivationMethod::HDWallet(_) => {
+            // Only a software HD wallet is admitted. A hardware-backed platform keeps the legacy refusal: its
+            // device confirmations travel through the task variant's `user_action` channel, which this call lacks.
+            // The `erc20_hd_activation` opt-out (CRD R35.2.5) restores the refusal for software HD too.
+            if !platform_coin.uses_software_hd_wallet() || !erc20_hd_activation(ctx) {
+                return MmError::err(EnableTokenError::UnexpectedDerivationMethod(
+                    TokenDerivationError::ExpectedSingleAddress,
+                ));
+            }
+            if let Some(path_to_address) = &req.activation_params.path_to_address {
+                let selects_enabled = path_selects_enabled_address(ctx, &platform_coin, path_to_address)
+                    .await
+                    .map_to_mm(enable_error_from_init)?;
+                if !selects_enabled {
+                    return MmError::err(EnableTokenError::Internal(
+                        "A token can be enabled only on the enabled address of its platform coin".to_owned(),
+                    ));
+                }
+            }
+            let token_info = token
+                .erc20_token_info()
+                .or_mm_err(|| EnableTokenError::Internal("The built token has no token info".to_owned()))?;
+            // Unlike `task::enable_erc20` there is no task channel here, so no progress is reported: the balance
+            // of every known address is read over the network and the caller simply waits for all of them. This
+            // asymmetry is what the task variant exists for on a wallet with many addresses.
+            let report = platform_coin
+                .erc20_hd_wallet_balance(&req.ticker, &token_info)
+                .await
+                .mm_err(EnableTokenError::from)?;
+            flatten_hd_report(&req.ticker, report)?
+        },
+    };
     let token_addr = addr_from_str(&protocol.contract_address)
         .map_to_mm(|e| EnableTokenError::Internal(format!("Invalid ERC20 contract address: {}", e)))?;
 
@@ -522,6 +551,35 @@ async fn enable_erc20_token(
         token_contract_address: format!("{:#x}", token_addr),
         required_confirmations: token.required_confirmations(),
     })
+}
+
+/// Whether `enable_erc20` may activate a token on an HD platform. Only an explicit `false` in `MM2.json` restores
+/// the legacy refusal (CRD R35.2.5), so an absent or malformed value keeps the HD support on.
+pub fn erc20_hd_activation(ctx: &MmArc) -> bool { ctx.conf["erc20_hd_activation"].as_bool() != Some(false) }
+
+/// Maps the failure of the shared enabled-address check onto the one-shot call's error set.
+fn enable_error_from_init(err: InitTokenError) -> EnableTokenError {
+    match err {
+        InitTokenError::Internal(e) => EnableTokenError::Internal(e),
+        other => EnableTokenError::Internal(other.to_string()),
+    }
+}
+
+/// Flattens the HD report of a token into the address-to-balance map of the one-shot result.
+fn flatten_hd_report(
+    ticker: &str,
+    report: HDWalletBalance,
+) -> MmResult<HashMap<String, CoinBalance>, EnableTokenError> {
+    let mut balances = HashMap::new();
+    for account in report.accounts {
+        for address in account.addresses {
+            let balance = address.balance.get(ticker).cloned().or_mm_err(|| {
+                EnableTokenError::Internal(format!("The report of {} has no {} balance", address.address, ticker))
+            })?;
+            balances.insert(address.address, balance);
+        }
+    }
+    Ok(balances)
 }
 
 async fn enable_nft_token(

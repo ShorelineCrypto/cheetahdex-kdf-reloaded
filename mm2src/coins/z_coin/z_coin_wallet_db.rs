@@ -38,17 +38,37 @@ const LIGHTWALLETD_GRPC_SERVICE: &str = "pirate.wallet.sdk.rpc.CompactTxStreamer
 /// that is no longer on the chain.
 ///
 /// A wallet that syncs to the chain tip records the tip block, and an ordinary
-/// one-block reorg then leaves it holding a block the network has dropped. Pirate
-/// is notarised, so its reorgs are shallow; 100 blocks is far beyond anything dPoW
-/// permits and costs well under a second to rescan.
-const ZCOIN_REORG_REWIND_DEPTH: u64 = 100;
-
-/// How many times the wallet rewinds before giving up and rebuilding from scratch.
+/// one-block reorg then leaves it holding a block the network has dropped.
 ///
-/// A divergence still present [`ZCOIN_REORG_REWIND_DEPTH`] x this many blocks back
-/// is not a reorg any more; rebuilding is then both correct and cheaper than
-/// walking back block by block. Nothing is lost either way -- every shielded note
-/// is recoverable from the chain with the wallet's own viewing key.
+/// The depth is one less than `PRUNING_DEPTH` (100) of `zcash_client_sqlite`, the
+/// number of commitment-tree checkpoints the wallet database retains. Checkpoints
+/// sit at distinct block heights at or below the scan tip, so a wallet holding all
+/// 100 has its oldest at or below `tip - 99`: a rewind of this depth from the tip
+/// always has a retained checkpoint at or below it to land on. That matters because
+/// below the retained window the backend truncates to the block just before the
+/// wallet's earliest note -- for a long-lived wallet, a rescan of its whole note
+/// history -- or refuses; see [`ZCoinShieldedHistory::truncate_wallet_to_height`].
+/// A depth of 100 lands exactly one block below the window of a wallet the
+/// background sync keeps current (one checkpoint per block), so every routine
+/// one-block reorg would pay that rescan.
+///
+/// Reorgs observed on ARRR were one block deep and Pirate is notarised, so its
+/// reorgs are shallow; a rewind of this depth rescans at most 99 compact blocks,
+/// which costs well under a second. A divergence the wallet cannot rewind past
+/// goes to the rebuild path. The tests pin the 100-checkpoint window against the
+/// real backend, so a dependency bump that changes it fails them.
+const ZCOIN_REORG_REWIND_DEPTH: u64 = 99;
+
+/// How many times the wallet rewinds before giving up and rebuilding at its sync
+/// start.
+///
+/// Each attempt rewinds at most [`ZCOIN_REORG_REWIND_DEPTH`] blocks, and because
+/// that spans the retained checkpoint window a divergence still present after this
+/// many attempts is not a reorg any more; rebuilding is then both correct and
+/// cheaper than walking back block by block. The loop is bounded by this count and
+/// ends at once when a rewind cannot move below the divergence. Nothing is lost
+/// either way -- every shielded note is recoverable from the chain with the
+/// wallet's own viewing key.
 const ZCOIN_MAX_REORG_REWINDS: u32 = 3;
 
 /// Length of a Sapling commitment root, which a lightwalletd `TreeState` must never
@@ -58,6 +78,31 @@ const SAPLING_COMMITMENT_ROOT_LEN: usize = 32;
 
 pub(crate) type LightwalletdClient = z_coin_grpc::compact_tx_streamer_client::CompactTxStreamerClient<Channel>;
 type ReloadedWalletDb = WalletDb<Connection, ZcoinConsensusParams, SystemClock, OsRng>;
+
+/// The chain's view of the Sapling tree state at a given height.
+///
+/// [`ZCoinShieldedHistory::ensure_lightwalletd_chain_state`] compares the wallet's
+/// anchor against it. Production asks lightwalletd; tests substitute a fixture so
+/// the recovery steps can be driven without a gRPC server.
+trait TreeStateSource {
+    async fn tree_state(&mut self, height: u64) -> Result<z_coin_grpc::TreeState, String>;
+}
+
+impl TreeStateSource for LightwalletdClient {
+    async fn tree_state(&mut self, height: u64) -> Result<z_coin_grpc::TreeState, String> {
+        let request = z_coin_grpc::BlockId {
+            height,
+            hash: Vec::new(),
+        };
+        Ok(
+            tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, self.get_tree_state(request))
+                .await
+                .map_err(|_| format!("GetTreeState timed out at height {}", height))?
+                .map_err(|e| lightwalletd_error_with_sources(&e))?
+                .into_inner(),
+        )
+    }
+}
 
 // Serializes wallet-database mutation per database file, across coin instances.
 //
@@ -552,35 +597,9 @@ impl ZCoinShieldedHistory {
             start_height
         };
 
-        let mut fetched_height = start_height.saturating_sub(1);
-        match self.validated_cached_resume_height(start_height, target_height) {
-            Ok(Some(cached_height)) => {
-                fetched_height = cached_height;
-                log::info!(
-                    "ZCoin lightwalletd reusing validated compact cache through height {}",
-                    cached_height
-                );
-            },
-            Ok(None) => {},
-            Err(error) => {
-                log::warn!(
-                    "ZCoin compact cache cannot resume from height {}: {}; preserving it and refetching",
-                    start_height,
-                    error
-                );
-                // Replacing the compact cache is a rebuild path (R39.8.0ad): a
-                // background scan on another instance may be reading it. Scoped to
-                // these two synchronous calls only — the enclosing async fn takes
-                // the same non-reentrant lock via the reset paths above.
-                {
-                    let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
-                    let _guard = mutation_lock.lock();
-                    preserve_database_for_rebuild(&self.compact_blocks_path, "invalid-chain")
-                        .map_err(ShieldedFetchError::DuringSync)?;
-                    initialize_compact_db(&self.compact_blocks_path).map_err(ShieldedFetchError::DuringSync)?;
-                }
-            },
-        }
+        let mut fetched_height = self
+            .compact_cache_resume_height(start_height, target_height)
+            .map_err(ShieldedFetchError::DuringSync)?;
         progress(fetched_height, target_height);
         let mut batch_start = fetched_height
             .checked_add(1)
@@ -608,6 +627,44 @@ impl ZCoinShieldedHistory {
             started.elapsed()
         );
         Ok(fetched_height)
+    }
+
+    /// The height compact fetching resumes after: the top of a cached segment that
+    /// still validates against the wallet's anchor, or `start_height - 1` when
+    /// nothing cached is reusable. A cache that fails validation is discarded and
+    /// recreated empty.
+    fn compact_cache_resume_height(&self, start_height: u64, target_height: u64) -> Result<u64, String> {
+        match self.validated_cached_resume_height(start_height, target_height) {
+            Ok(Some(cached_height)) => {
+                log::info!(
+                    "ZCoin lightwalletd reusing validated compact cache through height {}",
+                    cached_height
+                );
+                Ok(cached_height)
+            },
+            Ok(None) => Ok(start_height.saturating_sub(1)),
+            Err(error) => {
+                log::warn!(
+                    "ZCoin compact cache cannot resume from height {}: {}; discarding it and refetching",
+                    start_height,
+                    error
+                );
+                // Replacing the compact cache is a rebuild path (R39.8.0ad): a
+                // background scan on another instance may be reading it. Held for
+                // these two calls only, because the caller's reset paths take the
+                // same non-reentrant lock.
+                //
+                // The cache is discarded rather than kept as a backup: it holds only
+                // blocks the backend can serve again, and a failure that repeats on
+                // every pass would otherwise leave one more copy behind each time
+                // (R39.8.0n).
+                let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
+                let _guard = mutation_lock.lock();
+                discard_compact_cache(&self.compact_blocks_path)?;
+                initialize_compact_db(&self.compact_blocks_path)?;
+                Ok(start_height.saturating_sub(1))
+            },
+        }
     }
 
     fn wallet_scan_state_is_empty(&self) -> Result<bool, String> {
@@ -641,9 +698,35 @@ impl ZCoinShieldedHistory {
     /// Rewinds the shielded wallet database to `height`, dropping everything
     /// scanned above it, and reports the height actually reached.
     ///
-    /// The note commitment tree constrains how far back a truncation can go, so
-    /// the backend may stop higher than asked; the caller must check the returned
-    /// height rather than assume the request was honoured.
+    /// The note commitment tree constrains where a truncation can land. The backend
+    /// (`zcash_client_sqlite`) truncates to the newest scanned block at or below the
+    /// request that its commitment trees can be cut at: a block with a retained
+    /// checkpoint, or, below the retained checkpoints, a block before the wallet's
+    /// earliest note with a recorded tree position. It therefore stops *lower* than
+    /// asked, never higher, and for a wallet holding notes that can be far lower. The
+    /// caller must check the returned height rather than assume the request was
+    /// honoured.
+    ///
+    /// When no block qualifies the backend refuses and reports the oldest
+    /// checkpoint it retains as the safe rewind height. Such a request is
+    /// redirected to that checkpoint instead of failing, because it is as far back
+    /// as the wallet can rewind locally.
+    ///
+    /// How many blocks the retained checkpoints span depends on how the wallet was
+    /// scanned: a block gets one when it carries Sapling outputs, and every scan
+    /// batch adds one at its start. After an activation scans a long range in one
+    /// batch they are sparse and span far more than [`ZCOIN_REORG_REWIND_DEPTH`]
+    /// blocks. A wallet the background sync keeps current scans each new block as
+    /// its own batch, so nearly every block has one; the window then spans about
+    /// 100 blocks. The recovery loop's first rewind is sized to land inside the
+    /// window either way (see [`ZCOIN_REORG_REWIND_DEPTH`]); the refusal and the
+    /// fall-back below the window apply to later attempts, and to a young wallet
+    /// whose window has not filled yet.
+    ///
+    /// Compact blocks cached above the height reached are deleted in the same step.
+    /// They were fetched for the chain being abandoned, and the cache would
+    /// otherwise feed the orphaned block back to the scanner. The server sends
+    /// them again, so nothing is lost.
     fn truncate_wallet_to_height(&self, height: u64) -> Result<u64, String> {
         let height_u32 = u32::try_from(height)
             .map_err(|_| format!("Shielded wallet rewind height {} does not fit into u32", height))?;
@@ -654,10 +737,62 @@ impl ZCoinShieldedHistory {
         // stale anchor pointing above the wallet's new tip.
         *self.initial_chain_state.lock() = None;
         let mut wallet_db = open_wallet_db(&self.wallet_db_path, self.consensus_params.clone())?;
-        let truncated = wallet_db
-            .truncate_to_height(BlockHeight::from_u32(height_u32))
-            .map_err(|e| format!("Shielded wallet rewind to height {} failed: {}", height, e))?;
+        let requested = BlockHeight::from_u32(height_u32);
+        let truncated = match wallet_db.truncate_to_height(requested) {
+            Ok(truncated) => truncated,
+            Err(SqliteClientError::RequestedRewindInvalid {
+                safe_rewind_height: Some(safe_height),
+                ..
+            }) if safe_height > requested => {
+                log::info!(
+                    "ZCoin shielded wallet keeps no checkpoint at or below height {}; rewinding to its oldest checkpoint {} instead",
+                    height,
+                    safe_height
+                );
+                wallet_db
+                    .truncate_to_height(safe_height)
+                    .map_err(|e| format!("Shielded wallet rewind to height {} failed: {}", safe_height, e))?
+            },
+            Err(e) => return Err(format!("Shielded wallet rewind to height {} failed: {}", height, e)),
+        };
+        drop(wallet_db);
+        self.delete_cached_blocks_above(truncated)?;
         Ok(u64::from(u32::from(truncated)))
+    }
+
+    /// Deletes the compact blocks cached at heights above `height`. The caller holds
+    /// the wallet-database mutation lock.
+    fn delete_cached_blocks_above(&self, height: BlockHeight) -> Result<(), String> {
+        let conn = Connection::open(&self.compact_blocks_path).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM compactblocks WHERE height > ?1", params![u32::from(
+            height
+        )])
+        .map_err(|e| format!("Failed to clear cached compact blocks above height {}: {}", height, e))?;
+        Ok(())
+    }
+
+    /// Replaces the shielded wallet database with a fresh one holding a single
+    /// account anchored at `anchor`, and clears the compact-block cache.
+    ///
+    /// Used when the wallet diverges from the chain by more than it can rewind
+    /// locally. The previous wallet database is kept as exactly one backup (it may
+    /// hold data the chain cannot restore, such as sent-note memos); the compact
+    /// cache is deleted, not backed up, because it holds only blocks the server can
+    /// send again. The account is created in the same locked step as the reset, so
+    /// no pass ever sees an empty database without an account.
+    fn rebuild_wallet_at_anchor(&self, anchor: ChainState) -> Result<(), String> {
+        let ufvk = sapling_ufvk(&self.extfvk)?;
+        let mutation_lock = wallet_db_mutation_lock(&self.wallet_db_path);
+        let _guard = mutation_lock.lock();
+        *self.initial_chain_state.lock() = None;
+        preserve_database_for_rebuild(&self.wallet_db_path, "chain-divergence")?;
+        discard_compact_cache(&self.compact_blocks_path)?;
+        initialize_compact_db(&self.compact_blocks_path)?;
+        initialize_wallet_db(&self.wallet_db_path, self.consensus_params.clone())?;
+        let mut wallet_db = open_wallet_db(&self.wallet_db_path, self.consensus_params.clone())?;
+        import_wallet_account(&mut wallet_db, &ufvk, anchor.clone())?;
+        *self.initial_chain_state.lock() = Some(anchor);
+        Ok(())
     }
 
     fn reset_unscanned_wallet_db(&self) -> Result<(), String> {
@@ -700,28 +835,33 @@ impl ZCoinShieldedHistory {
     /// chain divergence if the wallet has scanned a block the chain has dropped.
     ///
     /// Returns the height actually anchored at, which is **lower** than
-    /// `checkpoint_height` when a rewind was needed and `0` when the wallet had to
-    /// be rebuilt. Callers must resume fetching from the returned height, not from
-    /// the one they asked for.
-    async fn ensure_lightwalletd_chain_state(
+    /// `checkpoint_height` when a rewind or rebuild was needed. Callers must resume
+    /// fetching from the height after the returned one, not from the one they asked
+    /// for. The returned height is always the height of a real anchor with a tree
+    /// state behind it; it is never a sentinel.
+    ///
+    /// The comparison with the chain runs on every call, even when the in-memory
+    /// chain state is already at `checkpoint_height`. That state is what the last
+    /// scan derived from cached blocks, not what the chain says now, so a reorg
+    /// after the scan leaves it stale. Trusting it skipped the divergence check for
+    /// the rest of the session, and every background pass then failed against the
+    /// stale anchor until a restart (R39.8.0al).
+    ///
+    /// A divergence is first repaired by rewinding the wallet (see
+    /// [`ZCOIN_REORG_REWIND_DEPTH`] and [`ZCOIN_MAX_REORG_REWINDS`]). One the wallet
+    /// cannot rewind past is repaired by rebuilding the wallet at its sync start.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the chain cannot be queried or answers inconsistently, when a
+    /// wallet that needs rebuilding has no recorded sync start, and when local
+    /// storage cannot be read or written.
+    async fn ensure_lightwalletd_chain_state<S: TreeStateSource>(
         &self,
-        client: &mut LightwalletdClient,
+        tree_states: &mut S,
         consensus_params: ZcoinConsensusParams,
         checkpoint_height: u64,
     ) -> Result<u64, String> {
-        if self
-            .initial_chain_state
-            .lock()
-            .as_ref()
-            .is_some_and(|state| u64::from(u32::from(state.block_height())) == checkpoint_height)
-        {
-            log::trace!(
-                "ZCoin shielded wallet reusing in-memory chain state at height {}",
-                checkpoint_height
-            );
-            return Ok(checkpoint_height);
-        }
-
         let scanned_height = self.scanned_block_height()?;
         if scanned_height.is_some_and(|height| height != checkpoint_height) {
             return Err(format!(
@@ -752,15 +892,7 @@ impl ZCoinShieldedHistory {
                 "ZCoin lightwalletd requesting wallet checkpoint tree state at height {}",
                 anchor_height
             );
-            let request = z_coin_grpc::BlockId {
-                height: anchor_height,
-                hash: Vec::new(),
-            };
-            let tree_state = tokio::time::timeout(LIGHTWALLETD_REQUEST_TIMEOUT, client.get_tree_state(request))
-                .await
-                .map_err(|_| format!("GetTreeState timed out at height {}", anchor_height))?
-                .map_err(|e| lightwalletd_error_with_sources(&e))?
-                .into_inner();
+            let tree_state = tree_states.tree_state(anchor_height).await?;
             if tree_state.height != anchor_height {
                 return Err(format!(
                     "lightwalletd returned tree state at height {}, expected {}",
@@ -781,9 +913,9 @@ impl ZCoinShieldedHistory {
             if requested == 0 {
                 break;
             }
-            // The backend refuses a rewind to a height it holds no commitment-tree
-            // checkpoint for. That is not fatal -- it only means this wallet cannot
-            // be rewound, so fall through to the rebuild rather than replacing one
+            // A rewind the backend refuses even after the redirect to its oldest
+            // checkpoint is not fatal -- it only means this wallet cannot be
+            // rewound, so fall through to the rebuild rather than replacing one
             // permanent failure with another.
             let truncated = match self.truncate_wallet_to_height(requested) {
                 Ok(truncated) => truncated,
@@ -814,12 +946,68 @@ impl ZCoinShieldedHistory {
             anchor_height = truncated;
         }
 
-        // Rewinding did not reach agreement with the chain. Rebuild and rescan:
-        // correct regardless of how the wallet got here, and lossless, because
-        // every shielded note is recoverable from the chain with the viewing key.
-        log::warn!("ZCoin shielded wallet still diverges from the chain after rewinding; rebuilding and rescanning");
-        self.reset_wallet_scan_state()?;
-        Ok(0)
+        // Rewinding did not reach agreement with the chain. Rebuild at the wallet's
+        // sync start and rescan from there: correct regardless of how the wallet got
+        // here, and lossless within the range the wallet was asked to cover, because
+        // every shielded note in it is recoverable from the chain with the viewing
+        // key.
+        log::warn!("ZCoin shielded wallet still diverges from the chain after rewinding; rebuilding at its sync start");
+        self.rebuild_at_sync_start(tree_states, consensus_params).await
+    }
+
+    /// Rebuilds the wallet at the height it originally began scanning from and
+    /// returns that anchor height (the sync start minus one).
+    ///
+    /// The sync start is the wallet account's birthday, which survives every
+    /// rewind and which this rebuild recreates, so it is read before anything is
+    /// destroyed. The tree state at the anchor is fetched and validated first too:
+    /// a chain that cannot answer leaves the wallet untouched instead of replacing
+    /// it with an empty one. Notes below the sync start stay out of scope, as for
+    /// any wallet anchored there.
+    ///
+    /// # Errors
+    ///
+    /// Fails, without touching the wallet, when no sync start is recorded or it
+    /// leaves no block below it to anchor on; the rebuild never falls back to
+    /// anchoring at height 0.
+    async fn rebuild_at_sync_start<S: TreeStateSource>(
+        &self,
+        tree_states: &mut S,
+        consensus_params: ZcoinConsensusParams,
+    ) -> Result<u64, String> {
+        let sync_start = self.wallet_sync_start_height()?.ok_or_else(|| {
+            "Shielded wallet diverges from the chain and has no recorded sync start to rebuild at; refusing to rebuild without it"
+                .to_owned()
+        })?;
+        let anchor_height = sync_start
+            .checked_sub(1)
+            .filter(|height| *height > 0)
+            .ok_or_else(|| {
+                format!(
+                    "Shielded wallet diverges from the chain and its recorded sync start {} leaves no block to anchor a rebuild on",
+                    sync_start
+                )
+            })?;
+
+        log::info!(
+            "ZCoin lightwalletd requesting rebuild anchor tree state at height {}",
+            anchor_height
+        );
+        let tree_state = tree_states.tree_state(anchor_height).await?;
+        if tree_state.height != anchor_height {
+            return Err(format!(
+                "lightwalletd returned tree state at height {}, expected {}",
+                tree_state.height, anchor_height
+            ));
+        }
+        let chain_state = chain_state_from_tree_state(&consensus_params, &tree_state)?;
+        self.rebuild_wallet_at_anchor(chain_state)?;
+        log::info!(
+            "ZCoin shielded wallet rebuilt at its sync start: anchored at height {}, rescanning from {}",
+            anchor_height,
+            sync_start
+        );
+        Ok(anchor_height)
     }
 
     fn init_wallet_checkpoint_from_tree_state(
@@ -827,36 +1015,8 @@ impl ZCoinShieldedHistory {
         consensus_params: ZcoinConsensusParams,
         tree_state: z_coin_grpc::TreeState,
     ) -> Result<CheckpointOutcome, String> {
-        let hash = decode_display_block_hash("lightwalletd tree-state block hash", &tree_state.hash)?;
-        let sapling_tree = decode_hex_field("lightwalletd tree-state sapling tree", &tree_state.tree)?;
-        let checkpoint_height = BlockHeight::from_u32(tree_state.height.try_into().map_err(|_| {
-            format!(
-                "lightwalletd tree-state height {} does not fit into u32",
-                tree_state.height
-            )
-        })?);
-        // The frontier field, when the server sends one, must carry the same bytes
-        // as the tree field. A divergence is a server-side defect we want visible;
-        // field 5 stays authoritative because every supported server populates it.
-        if !tree_state.sapling_frontier.is_empty() && tree_state.sapling_frontier != tree_state.tree {
-            log::warn!(
-                "lightwalletd tree-state at height {} disagrees with itself: sapling tree is {} hex chars, \
-                 sapling frontier is {} hex chars; using the tree field",
-                checkpoint_height,
-                tree_state.tree.len(),
-                tree_state.sapling_frontier.len()
-            );
-        }
-        let sapling_activation = consensus_params
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap_or(BlockHeight::from_u32(0));
-        let commitment_tree: sapling::CommitmentTree = parse_checkpoint_commitment_tree(
-            &sapling_tree,
-            tree_state.sapling_frontier.is_empty(),
-            checkpoint_height,
-            sapling_activation,
-        )?;
-        let chain_state = ChainState::new(checkpoint_height, BlockHash(hash), commitment_tree.to_frontier());
+        let chain_state = chain_state_from_tree_state(&consensus_params, &tree_state)?;
+        let checkpoint_height = chain_state.block_height();
         let mut wallet_db = open_wallet_db(&self.wallet_db_path, consensus_params)?;
         if wallet_db.get_account_ids().map_err(|e| e.to_string())?.is_empty() {
             let ufvk = sapling_ufvk(&self.extfvk)?;
@@ -1552,6 +1712,48 @@ fn parse_checkpoint_commitment_tree(
         ));
     }
     Ok(tree)
+}
+
+/// Validates a lightwalletd `TreeState` and converts it into the scan anchor it
+/// describes. Touches no wallet or in-memory state (R39.8.0ak).
+fn chain_state_from_tree_state(
+    consensus_params: &ZcoinConsensusParams,
+    tree_state: &z_coin_grpc::TreeState,
+) -> Result<ChainState, String> {
+    let hash = decode_display_block_hash("lightwalletd tree-state block hash", &tree_state.hash)?;
+    let sapling_tree = decode_hex_field("lightwalletd tree-state sapling tree", &tree_state.tree)?;
+    let checkpoint_height = BlockHeight::from_u32(tree_state.height.try_into().map_err(|_| {
+        format!(
+            "lightwalletd tree-state height {} does not fit into u32",
+            tree_state.height
+        )
+    })?);
+    // The frontier field, when the server sends one, must carry the same bytes
+    // as the tree field. A divergence is a server-side defect we want visible;
+    // field 5 stays authoritative because every supported server populates it.
+    if !tree_state.sapling_frontier.is_empty() && tree_state.sapling_frontier != tree_state.tree {
+        log::warn!(
+            "lightwalletd tree-state at height {} disagrees with itself: sapling tree is {} hex chars, \
+             sapling frontier is {} hex chars; using the tree field",
+            checkpoint_height,
+            tree_state.tree.len(),
+            tree_state.sapling_frontier.len()
+        );
+    }
+    let sapling_activation = consensus_params
+        .activation_height(NetworkUpgrade::Sapling)
+        .unwrap_or(BlockHeight::from_u32(0));
+    let commitment_tree: sapling::CommitmentTree = parse_checkpoint_commitment_tree(
+        &sapling_tree,
+        tree_state.sapling_frontier.is_empty(),
+        checkpoint_height,
+        sapling_activation,
+    )?;
+    Ok(ChainState::new(
+        checkpoint_height,
+        BlockHash(hash),
+        commitment_tree.to_frontier(),
+    ))
 }
 
 /// Whether a lightwalletd tree state could be adopted as the wallet's sync anchor.
@@ -2522,6 +2724,30 @@ fn preserve_database_for_rebuild(path: &Path, reason: &str) -> Result<Option<Pat
 }
 
 const DATABASE_SIDECAR_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
+
+/// Deletes a compact-block cache database together with its SQLite sidecars.
+///
+/// Sidecars go first: if deleting the main file then fails, the error propagates
+/// and no stale `-wal` or `-journal` is left to be replayed into the fresh cache
+/// created at the same path.
+fn discard_compact_cache(path: &Path) -> Result<(), String> {
+    for suffix in DATABASE_SIDECAR_SUFFIXES {
+        remove_file_if_exists(&path_with_suffix(path, suffix))?;
+    }
+    remove_file_if_exists(path)
+}
+
+fn remove_file_if_exists(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!(
+            "Failed to discard compact cache file {}: {}",
+            path.display(),
+            e
+        )),
+    }
+}
 
 fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut suffixed = path.as_os_str().to_os_string();
@@ -3540,6 +3766,694 @@ mod tests {
             "the wallet must re-anchor once it has rewound past the divergence"
         );
         assert!(reopened.initial_chain_state.lock().is_some());
+    }
+
+    /// Serves fixed tree states by height and records every height asked for.
+    struct FixtureTreeStates {
+        states: HashMap<u64, z_coin_grpc::TreeState>,
+        requested: Vec<u64>,
+    }
+
+    impl TreeStateSource for FixtureTreeStates {
+        async fn tree_state(&mut self, height: u64) -> Result<z_coin_grpc::TreeState, String> {
+            self.requested.push(height);
+            self.states
+                .get(&height)
+                .cloned()
+                .ok_or_else(|| format!("fixture has no tree state at height {}", height))
+        }
+    }
+
+    /// Height of the checkpoint block every reorg fixture anchors at.
+    const FIXTURE_CHECKPOINT_HEIGHT: u64 = 10;
+    /// The block of the fixture chain that pays the wallet itself, when the
+    /// fixture wants a note. A wallet note with a recorded commitment-tree position
+    /// constrains where the backend can truncate: it cannot rewind to any height at
+    /// or above the note unless that height still has a checkpoint of its own. A
+    /// note in the first scanned block therefore leaves no truncation target below
+    /// the retained checkpoints, so the backend refuses the request; a note in a
+    /// later block lets it fall back to the block just before the note.
+    const FIXTURE_FIRST_BLOCK_HEIGHT: u64 = FIXTURE_CHECKPOINT_HEIGHT + 1;
+    /// In the sparse fixture only heights ending in 2 carry an output.
+    const FIXTURE_OWN_SPARSE_NOTE_HEIGHT: u64 = 12;
+    const FIXTURE_OWN_NOTE_VALUE: u64 = 125_000_000;
+    /// Fork height of a chain that never forks.
+    const FIXTURE_NO_FORK: u64 = u64::MAX;
+
+    /// Hash of the fixture chain's block at `height` on `branch` (0 is the chain
+    /// the wallet scanned, 1 the chain that replaced its tail).
+    fn fixture_hash(height: u64, branch: u8) -> Vec<u8> {
+        let mut hash = deterministic_compact_hash(height);
+        hash[31] = branch;
+        hash
+    }
+
+    /// The block at `height` of a chain that follows branch 0 below `fork_height`
+    /// and branch 1 from it on. `with_output` blocks carry a Sapling output, which
+    /// is what gives a block a commitment-tree checkpoint.
+    fn fixture_block(
+        height: u64,
+        fork_height: u64,
+        own_note_height: u64,
+        with_output: bool,
+    ) -> zcash_compact::CompactBlock {
+        let branch_of = |h: u64| u8::from(h >= fork_height);
+        let mut block = if with_output {
+            let key = if height == own_note_height {
+                test_extfvk(23)
+            } else {
+                test_extfvk(24)
+            };
+            let value = if height == own_note_height {
+                FIXTURE_OWN_NOTE_VALUE
+            } else {
+                1
+            };
+            let mut block = compact_block_with_received_note(height, 0, 0, &key, value);
+            // The fixture hardcodes one txid, which collides across blocks on
+            // `tx_locator_map`'s uniqueness constraint.
+            block.vtx[0].txid = fixture_hash(height + 10_000, branch_of(height));
+            block
+        } else {
+            empty_compact_block(height, 0, 0)
+        };
+        block.hash = fixture_hash(height, branch_of(height));
+        block.prev_hash = if height == FIXTURE_CHECKPOINT_HEIGHT + 1 {
+            vec![9u8; 32]
+        } else {
+            fixture_hash(height - 1, branch_of(height - 1))
+        };
+        block.chain_metadata = None;
+        block
+    }
+
+    fn fixture_blocks(
+        heights: std::ops::RangeInclusive<u64>,
+        fork_height: u64,
+        own_note_height: u64,
+        with_output: impl Fn(u64) -> bool,
+    ) -> Vec<zcash_compact::CompactBlock> {
+        heights
+            .map(|height| fixture_block(height, fork_height, own_note_height, with_output(height)))
+            .collect()
+    }
+
+    /// A tree state as lightwalletd reports it: hash in display order, the
+    /// commitment tree after that block.
+    fn fixture_tree_state(height: u64, hash: &[u8], state: &ChainState) -> z_coin_grpc::TreeState {
+        let tree = sapling::CommitmentTree::from_frontier(state.final_sapling_tree());
+        let mut tree_bytes = Vec::new();
+        zcash_primitives::merkle_tree::write_commitment_tree(&tree, &mut tree_bytes).unwrap();
+        let mut display_hash = hash.to_vec();
+        display_hash.reverse();
+        z_coin_grpc::TreeState {
+            network: "main".to_owned(),
+            height,
+            hash: hex::encode(display_hash),
+            time: height as u32,
+            tree: hex::encode(tree_bytes),
+            ..Default::default()
+        }
+    }
+
+    /// The same block, as the chain reports it after a reorg replaced it.
+    fn reorged_tree_state(state: &z_coin_grpc::TreeState) -> z_coin_grpc::TreeState {
+        let mut reorged = state.clone();
+        let mut display_hash = hex::decode(&state.hash).unwrap();
+        display_hash.reverse();
+        display_hash[31] = 1;
+        display_hash.reverse();
+        reorged.hash = hex::encode(display_hash);
+        reorged
+    }
+
+    struct ScannedFixture {
+        history: ZCoinShieldedHistory,
+        params: ZcoinConsensusParams,
+        db_dir: PathBuf,
+        own_note_height: u64,
+        /// What the chain reports at the checkpoint and at every scanned height,
+        /// all on the original chain.
+        chain: HashMap<u64, z_coin_grpc::TreeState>,
+    }
+
+    /// Scans fixture blocks `11..=tip` in one session and returns the history still
+    /// open -- its in-memory chain state at `tip`, as a running wallet has it.
+    fn scanned_fixture(
+        label: &str,
+        tip: u64,
+        own_note_height: u64,
+        with_output: impl Fn(u64) -> bool,
+    ) -> ScannedFixture {
+        let params = test_params_with_zip212();
+        let extfvk = test_extfvk(23);
+        let empty_tree = empty_sapling_tree_bytes();
+        let check_point = CheckPointBlockInfo {
+            height: FIXTURE_CHECKPOINT_HEIGHT as u32,
+            hash: rpc::v1::types::H256([9u8; 32]),
+            time: 1234,
+            sapling_tree: empty_tree.clone().into(),
+        };
+        let db_dir = test_db_dir(label);
+        let history =
+            ZCoinShieldedHistory::open_or_create("ARRR", db_dir.clone(), params.clone(), &extfvk, Some(&check_point))
+                .unwrap();
+        history
+            .insert_compact_blocks(&fixture_blocks(
+                11..=tip,
+                FIXTURE_NO_FORK,
+                own_note_height,
+                &with_output,
+            ))
+            .unwrap();
+
+        // The chain's tree state at the checkpoint and at each scanned height,
+        // walked forward from the checkpoint over the same blocks the wallet scans.
+        let block_db = BlockDb::for_path(history.compact_blocks_path()).unwrap();
+        let mut state = chain_state_from_checkpoint(&check_point).unwrap();
+        let mut chain = HashMap::new();
+        chain.insert(
+            FIXTURE_CHECKPOINT_HEIGHT,
+            fixture_tree_state(FIXTURE_CHECKPOINT_HEIGHT, &[9u8; 32], &state),
+        );
+        for height in 11..=tip {
+            state = validated_cached_block_chain_state(&block_db, BlockHeight::from_u32(height as u32), &state, 1)
+                .unwrap()
+                .unwrap();
+            chain.insert(height, fixture_tree_state(height, &fixture_hash(height, 0), &state));
+        }
+
+        assert_eq!(
+            history
+                .scan_cached_blocks_to_height(params.clone(), tip, 1_000, 0, |_, _| {})
+                .unwrap(),
+            tip
+        );
+        assert_eq!(
+            in_memory_anchor(&history),
+            Some(tip),
+            "the scan must leave its tip in memory -- the state the anchor check used to trust"
+        );
+        assert_eq!(history.balance(params.clone()).unwrap(), FIXTURE_OWN_NOTE_VALUE);
+        ScannedFixture {
+            history,
+            params,
+            db_dir,
+            own_note_height,
+            chain,
+        }
+    }
+
+    fn in_memory_anchor(history: &ZCoinShieldedHistory) -> Option<u64> {
+        history
+            .initial_chain_state
+            .lock()
+            .as_ref()
+            .map(|state| u64::from(u32::from(state.block_height())))
+    }
+
+    fn checkpoint_ids(history: &ZCoinShieldedHistory) -> Vec<u64> {
+        let conn = Connection::open(history.wallet_db_path()).unwrap();
+        let mut statement = conn
+            .prepare("SELECT checkpoint_id FROM sapling_tree_checkpoints ORDER BY checkpoint_id")
+            .unwrap();
+        statement
+            .query_map([], |row| row.get::<_, u64>(0))
+            .unwrap()
+            .map(|id| id.unwrap())
+            .collect()
+    }
+
+    fn cached_block_heights(history: &ZCoinShieldedHistory) -> Vec<u64> {
+        let conn = Connection::open(history.compact_blocks_path()).unwrap();
+        let mut statement = conn
+            .prepare("SELECT height FROM compactblocks ORDER BY height")
+            .unwrap();
+        statement
+            .query_map([], |row| row.get::<_, u64>(0))
+            .unwrap()
+            .map(|height| height.unwrap())
+            .collect()
+    }
+
+    fn backup_files(db_dir: &Path) -> Vec<String> {
+        std::fs::read_dir(db_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".bak"))
+            .collect()
+    }
+
+    fn wallet_account_count(history: &ZCoinShieldedHistory, params: &ZcoinConsensusParams) -> usize {
+        open_wallet_db(history.wallet_db_path(), params.clone())
+            .unwrap()
+            .get_account_ids()
+            .unwrap()
+            .len()
+    }
+
+    fn wallet_block_hash(history: &ZCoinShieldedHistory, params: &ZcoinConsensusParams, height: u64) -> Vec<u8> {
+        open_wallet_db(history.wallet_db_path(), params.clone())
+            .unwrap()
+            .get_block_hash(BlockHeight::from_u32(height as u32))
+            .unwrap()
+            .unwrap()
+            .0
+            .to_vec()
+    }
+
+    /// What one pass over a wallet whose scan tip was reorged did: where it
+    /// re-anchored, and the oldest checkpoint the wallet held before the pass.
+    struct ReorgedPass {
+        anchor: u64,
+        oldest_checkpoint: u64,
+    }
+
+    /// The observed wedge: an ARRR wallet kept current by the 30-second sync met a
+    /// one-block reorg of its own tip. This drives one pass the way the sync does
+    /// -- anchor check, cache resume, fetch, scan -- against the exact stuck state,
+    /// and demands recovery rather than detection alone. `own_note_height` places
+    /// the wallet's one note, which decides how the backend answers the rewind.
+    fn run_pass_over_a_reorged_scan_tip(label: &str, own_note_height: u64) -> ReorgedPass {
+        let tip = 160;
+        let ScannedFixture {
+            history,
+            params,
+            db_dir,
+            mut chain,
+            ..
+        } = scanned_fixture(label, tip, own_note_height, |_| true);
+        let checkpoints = checkpoint_ids(&history);
+        let oldest_checkpoint = checkpoints[0];
+        assert_eq!(
+            *checkpoints.last().unwrap(),
+            tip,
+            "every block is checkpointed up to the tip"
+        );
+        // The backend keeps exactly 100 checkpoints, one per block here, so the
+        // oldest sits at `tip - 99`. `ZCOIN_REORG_REWIND_DEPTH` relies on this; a
+        // dependency bump that changes the window must fail here, not in the field.
+        assert_eq!(checkpoints.len(), 100, "retained checkpoint window: {:?}", checkpoints);
+        assert_eq!(oldest_checkpoint, tip - 99, "retained checkpoint window moved");
+
+        // The reorg replaced the wallet's tip: the chain's block `tip` differs and
+        // the cache holds the first blocks of the new chain on top of the old tip.
+        chain.insert(tip, reorged_tree_state(&chain[&tip]));
+        history
+            .insert_compact_blocks(&fixture_blocks(tip + 1..=tip + 2, tip, own_note_height, |_| true))
+            .unwrap();
+        let stuck = history
+            .scan_cached_blocks_to_height(params.clone(), tip + 2, 1_000, 0, |_, _| {})
+            .unwrap_err();
+        assert!(
+            stuck.contains(&format!("hash discontinuity at height {}", tip + 1)),
+            "{stuck}"
+        );
+
+        let mut source = FixtureTreeStates {
+            states: chain,
+            requested: Vec::new(),
+        };
+        let anchor =
+            common::block_on(history.ensure_lightwalletd_chain_state(&mut source, params.clone(), tip)).unwrap();
+
+        assert_eq!(
+            source.requested.first(),
+            Some(&tip),
+            "the in-memory state at the scan tip must not stand in for the chain's view"
+        );
+        assert!(
+            anchor > FIXTURE_CHECKPOINT_HEIGHT && anchor < tip,
+            "the wallet must rewind below the reorged block, but anchored at {}",
+            anchor
+        );
+        assert_eq!(
+            source.requested,
+            vec![tip, anchor],
+            "one rewind suffices and nothing is rebuilt (a rebuild would ask for the sync-start anchor)"
+        );
+        assert_eq!(history.scanned_block_height().unwrap(), Some(anchor));
+        assert_eq!(wallet_account_count(&history, &params), 1, "a rewind keeps the account");
+        assert_eq!(in_memory_anchor(&history), Some(anchor));
+        assert_eq!(
+            cached_block_heights(&history),
+            (FIXTURE_FIRST_BLOCK_HEIGHT..=anchor).collect::<Vec<_>>(),
+            "the orphaned block and everything cached above the rewound height must be gone"
+        );
+
+        // The rest of the pass: nothing cached above the anchor, so fetching
+        // resumes right after it, and the server's blocks chain onto the wallet.
+        assert_eq!(
+            history.compact_cache_resume_height(anchor + 1, tip + 2).unwrap(),
+            anchor
+        );
+        history
+            .insert_compact_blocks(&fixture_blocks(anchor + 1..=tip + 2, tip, own_note_height, |_| true))
+            .unwrap();
+        assert_eq!(
+            history
+                .scan_cached_blocks_to_height(params.clone(), tip + 2, 1_000, 0, |_, _| {})
+                .unwrap(),
+            tip + 2
+        );
+        assert_eq!(history.scanned_block_height().unwrap(), Some(tip + 2));
+        assert_eq!(
+            wallet_block_hash(&history, &params, tip),
+            fixture_hash(tip, 1),
+            "the wallet must now hold the new chain's block at the old tip height"
+        );
+        assert_eq!(history.balance(params).unwrap(), FIXTURE_OWN_NOTE_VALUE);
+        assert!(
+            backup_files(&db_dir).is_empty(),
+            "recovery must not leave backups: {:?}",
+            backup_files(&db_dir)
+        );
+        ReorgedPass {
+            anchor,
+            oldest_checkpoint,
+        }
+    }
+
+    /// Regression for the ARRR wedge (R39.8.0al, R39.8.0n). Three defects kept the
+    /// wallet from syncing for days:
+    ///
+    /// - the scan leaves its last block in memory as the chain state, and the anchor
+    ///   check returned early whenever that state sat at the requested height, so
+    ///   the chain was never asked and nothing rewound;
+    /// - the wallet is dense in checkpoints (one per block), so a 100-block rewind
+    ///   from the tip lands just below the retained window; where the backend has no
+    ///   height to truncate to there, it refuses, which recovery treated as fatal
+    ///   and sent to a rebuild;
+    /// - the compact cache still held the orphaned block, which the scanner was fed
+    ///   again on every pass.
+    ///
+    /// Here the wallet's note is in the first scanned block, the case in which a
+    /// rewind below the window would be refused. The rewind must land on the oldest
+    /// retained checkpoint, inside the window, without a rebuild.
+    #[test]
+    fn a_reorged_scan_tip_is_rewound_inside_the_window_and_the_new_chain_scanned_in_one_pass() {
+        let pass = run_pass_over_a_reorged_scan_tip("same-session-reorg-window", FIXTURE_FIRST_BLOCK_HEIGHT);
+        assert_eq!(
+            pass.anchor, pass.oldest_checkpoint,
+            "a one-block reorg must rewind to the oldest retained checkpoint, not rebuild"
+        );
+    }
+
+    /// The same wedge for a wallet whose first note is mined in a later block -- the
+    /// shape of every long-lived field wallet. Below the retained window the backend
+    /// would truncate to the block just before that note, so a rewind that left the
+    /// window turned every one-block reorg into a rescan of the wallet's whole note
+    /// history. The rewind must stay inside the window instead.
+    #[test]
+    fn a_reorged_scan_tip_of_a_wallet_with_older_notes_still_rewinds_inside_the_window() {
+        let note_height = FIXTURE_FIRST_BLOCK_HEIGHT + 1;
+        let pass = run_pass_over_a_reorged_scan_tip("same-session-reorg-older-note", note_height);
+        assert_eq!(
+            pass.anchor,
+            pass.oldest_checkpoint,
+            "the rewind must not fall below the window to the block before the wallet's first note ({})",
+            note_height - 1
+        );
+    }
+
+    /// The other half: asking the chain on every pass must still accept an
+    /// unchanged chain and keep the anchor where it was.
+    #[test]
+    fn an_unchanged_chain_keeps_its_anchor_after_the_check() {
+        let tip = 30;
+        let ScannedFixture {
+            history, params, chain, ..
+        } = scanned_fixture("same-session-agree", tip, FIXTURE_FIRST_BLOCK_HEIGHT, |_| true);
+
+        let mut source = FixtureTreeStates {
+            states: chain,
+            requested: Vec::new(),
+        };
+        let anchor = common::block_on(history.ensure_lightwalletd_chain_state(&mut source, params, tip)).unwrap();
+
+        assert_eq!(anchor, tip);
+        assert_eq!(source.requested, vec![tip]);
+        assert_eq!(history.scanned_block_height().unwrap(), Some(tip));
+        assert_eq!(in_memory_anchor(&history), Some(tip));
+    }
+
+    /// A wallet scanned with sparse checkpoints (an activation scan, where most
+    /// blocks carry no output) has one at or below the rewind target, so the
+    /// rewind lands directly and needs no redirect.
+    #[test]
+    fn a_reorg_in_a_sparse_checkpoint_wallet_rewinds_directly() {
+        let tip = 160;
+        // Only every tenth block carries an output, the wallet's own note among them.
+        let ScannedFixture {
+            history,
+            params,
+            db_dir,
+            own_note_height,
+            mut chain,
+        } = scanned_fixture("sparse-reorg", tip, FIXTURE_OWN_SPARSE_NOTE_HEIGHT, |height| {
+            height % 10 == 2
+        });
+        let checkpoints = checkpoint_ids(&history);
+        let target = tip - ZCOIN_REORG_REWIND_DEPTH;
+        let expected = checkpoints.iter().copied().filter(|id| *id <= target).max();
+        let expected = expected.expect("fixture must keep a checkpoint at or below the rewind target");
+        assert!(
+            checkpoints.len() < (tip - FIXTURE_CHECKPOINT_HEIGHT) as usize,
+            "fixture must be sparse: {:?}",
+            checkpoints
+        );
+
+        chain.insert(tip, reorged_tree_state(&chain[&tip]));
+        let mut source = FixtureTreeStates {
+            states: chain,
+            requested: Vec::new(),
+        };
+        let anchor =
+            common::block_on(history.ensure_lightwalletd_chain_state(&mut source, params.clone(), tip)).unwrap();
+
+        assert_eq!(
+            anchor, expected,
+            "the rewind lands on the newest checkpoint at or below the target"
+        );
+        assert_eq!(source.requested, vec![tip, anchor]);
+        assert_eq!(history.scanned_block_height().unwrap(), Some(anchor));
+        assert!(!cached_block_heights(&history).iter().any(|height| *height > anchor));
+
+        history
+            .insert_compact_blocks(&fixture_blocks(anchor + 1..=tip + 1, tip, own_note_height, |height| {
+                height % 10 == 2
+            }))
+            .unwrap();
+        assert_eq!(
+            history
+                .scan_cached_blocks_to_height(params, tip + 1, 1_000, 0, |_, _| {})
+                .unwrap(),
+            tip + 1
+        );
+        assert!(backup_files(&db_dir).is_empty());
+    }
+
+    /// A rewind below the oldest retained checkpoint lands on that checkpoint
+    /// instead of failing, and the compact cache above it is cleared with it.
+    #[test]
+    fn a_refused_rewind_is_redirected_to_the_oldest_retained_checkpoint() {
+        let tip = 160;
+        let ScannedFixture { history, .. } =
+            scanned_fixture("rewind-window", tip, FIXTURE_FIRST_BLOCK_HEIGHT, |_| true);
+        let oldest_checkpoint = checkpoint_ids(&history)[0];
+        // One block below the retained window. With the wallet's note in the first
+        // scanned block the backend has nothing to truncate to there.
+        let below_window = oldest_checkpoint - 1;
+        // The backend itself refuses the request, naming that checkpoint as safe.
+        {
+            let mut probe = open_wallet_db(history.wallet_db_path(), test_params_with_zip212()).unwrap();
+            match probe.truncate_to_height(BlockHeight::from_u32(below_window as u32)) {
+                Err(SqliteClientError::RequestedRewindInvalid {
+                    safe_rewind_height: Some(safe),
+                    ..
+                }) => assert_eq!(u64::from(u32::from(safe)), oldest_checkpoint),
+                other => panic!("expected the backend to refuse the rewind, got {:?}", other),
+            }
+        }
+
+        let rewound = history.truncate_wallet_to_height(below_window).unwrap();
+        assert_eq!(rewound, oldest_checkpoint);
+        assert_eq!(history.scanned_block_height().unwrap(), Some(oldest_checkpoint));
+        assert_eq!(
+            cached_block_heights(&history),
+            (11..=oldest_checkpoint).collect::<Vec<_>>()
+        );
+    }
+
+    /// A divergence beyond everything the wallet retains cannot be repaired by
+    /// rewinding, so the wallet is rebuilt -- at its sync start, never at height 0.
+    ///
+    /// Before this, the rebuild re-anchored at 0 and refetched the chain from the
+    /// first block into a wallet with no account.
+    #[test]
+    fn a_divergence_beyond_the_retained_window_rebuilds_at_the_sync_start() {
+        let tip = 160;
+        let fork = 20;
+        let ScannedFixture {
+            history,
+            params,
+            db_dir,
+            own_note_height,
+            mut chain,
+        } = scanned_fixture("deep-reorg", tip, FIXTURE_FIRST_BLOCK_HEIGHT, |_| true);
+        let oldest_checkpoint = checkpoint_ids(&history)[0];
+        let sync_start = FIXTURE_CHECKPOINT_HEIGHT + 1;
+        assert_eq!(history.wallet_sync_start_height().unwrap(), Some(sync_start));
+
+        // The chain replaced everything from `fork` on, far below the retained window.
+        for height in fork..=tip {
+            let reorged = reorged_tree_state(&chain[&height]);
+            chain.insert(height, reorged);
+        }
+        let mut source = FixtureTreeStates {
+            states: chain,
+            requested: Vec::new(),
+        };
+        let anchor =
+            common::block_on(history.ensure_lightwalletd_chain_state(&mut source, params.clone(), tip)).unwrap();
+
+        assert_eq!(
+            anchor, FIXTURE_CHECKPOINT_HEIGHT,
+            "the rebuild re-anchors at the sync start"
+        );
+        assert_eq!(
+            source.requested,
+            vec![tip, oldest_checkpoint, FIXTURE_CHECKPOINT_HEIGHT],
+            "one redirected rewind, then the rebuild anchor; height 0 is never asked for"
+        );
+        assert_eq!(
+            wallet_account_count(&history, &params),
+            1,
+            "the rebuilt wallet has its account"
+        );
+        assert_eq!(history.wallet_sync_start_height().unwrap(), Some(sync_start));
+        assert_eq!(history.scanned_height().unwrap(), Some(FIXTURE_CHECKPOINT_HEIGHT));
+        assert_eq!(history.scanned_block_height().unwrap(), None, "nothing is scanned yet");
+        assert_eq!(in_memory_anchor(&history), Some(FIXTURE_CHECKPOINT_HEIGHT));
+        assert_eq!(history.balance(params.clone()).unwrap(), 0);
+        assert!(
+            cached_block_heights(&history).is_empty(),
+            "the compact cache starts empty"
+        );
+        let backups = backup_files(&db_dir);
+        assert_eq!(backups.len(), 1, "exactly one wallet backup per rebuild: {:?}", backups);
+        assert!(
+            backups[0].starts_with("ARRR_RELOADED_WALLET.db.chain-divergence."),
+            "{:?}",
+            backups
+        );
+
+        // Fetching resumes at the sync start, and the new chain scans into the
+        // rebuilt wallet, finding the note again.
+        assert_eq!(
+            history.compact_cache_resume_height(anchor + 1, tip + 5).unwrap(),
+            FIXTURE_CHECKPOINT_HEIGHT
+        );
+        history
+            .insert_compact_blocks(&fixture_blocks(anchor + 1..=tip + 5, fork, own_note_height, |_| true))
+            .unwrap();
+        assert_eq!(
+            history
+                .scan_cached_blocks_to_height(params.clone(), tip + 5, 1_000, 0, |_, _| {})
+                .unwrap(),
+            tip + 5
+        );
+        assert_eq!(history.balance(params).unwrap(), FIXTURE_OWN_NOTE_VALUE);
+        assert_eq!(backup_files(&db_dir), backups, "scanning creates no further backup");
+    }
+
+    /// The rebuild reads the sync start before it destroys anything. A wallet that
+    /// records none is not rebuilt at a guessed height: the pass fails and the
+    /// wallet is left exactly as it was.
+    #[test]
+    fn a_rebuild_without_a_recorded_sync_start_fails_and_leaves_the_wallet_alone() {
+        let history = open_test_history();
+        let db_dir = history.wallet_db_path().parent().unwrap().to_path_buf();
+        assert_eq!(history.wallet_sync_start_height().unwrap(), None);
+        let mut source = FixtureTreeStates {
+            states: HashMap::new(),
+            requested: Vec::new(),
+        };
+
+        let error = common::block_on(history.rebuild_at_sync_start(&mut source, test_params())).unwrap_err();
+
+        assert!(error.contains("no recorded sync start"), "{error}");
+        assert!(source.requested.is_empty(), "no height is guessed or requested");
+        assert!(backup_files(&db_dir).is_empty());
+    }
+
+    /// A backend that cannot answer the rebuild's anchor query leaves the wallet in
+    /// place: the old database is replaced only once the new anchor is in hand.
+    #[test]
+    fn a_rebuild_whose_anchor_cannot_be_fetched_leaves_the_wallet_alone() {
+        let tip = 30;
+        let ScannedFixture {
+            history,
+            params,
+            db_dir,
+            ..
+        } = scanned_fixture("rebuild-no-anchor", tip, FIXTURE_FIRST_BLOCK_HEIGHT, |_| true);
+        let mut source = FixtureTreeStates {
+            states: HashMap::new(),
+            requested: Vec::new(),
+        };
+
+        let error = common::block_on(history.rebuild_at_sync_start(&mut source, params.clone())).unwrap_err();
+
+        assert!(error.contains("no tree state at height 10"), "{error}");
+        assert_eq!(source.requested, vec![FIXTURE_CHECKPOINT_HEIGHT]);
+        assert_eq!(history.scanned_block_height().unwrap(), Some(tip));
+        assert_eq!(history.balance(params).unwrap(), FIXTURE_OWN_NOTE_VALUE);
+        assert!(backup_files(&db_dir).is_empty());
+    }
+
+    /// A compact cache that does not link to the wallet's anchor is replaced, and
+    /// the replaced one is deleted rather than kept beside it.
+    ///
+    /// Regression: each replacement used to be renamed to
+    /// `*.invalid-chain.<ms>.bak`. When the failure repeats on every background
+    /// pass, that left one more copy every 30 seconds -- about 2 GB over three
+    /// days on ARRR mainnet (R39.8.0n).
+    #[test]
+    fn an_invalid_compact_cache_is_discarded_without_leaving_a_backup() {
+        let history = open_checkpointed_test_history(10);
+        // Block 11 does not link to the checkpoint's hash ([9; 32]).
+        history.insert_compact_block(empty_compact_block(11, 11, 5)).unwrap();
+
+        assert_eq!(history.compact_cache_resume_height(11, 20).unwrap(), 10);
+
+        assert!(
+            cached_block_heights(&history).is_empty(),
+            "the invalid segment must not be reused"
+        );
+        let db_dir = history.compact_blocks_path().parent().unwrap();
+        assert!(
+            backup_files(db_dir).is_empty(),
+            "compact cache backups left behind: {:?}",
+            backup_files(db_dir)
+        );
+    }
+
+    #[test]
+    fn discard_compact_cache_removes_the_database_and_its_sidecars() {
+        let path = test_db_dir("discard-compact-cache").join("ARRR_RELOADED_COMPACT_BLOCKS.db");
+        std::fs::write(&path, b"db").unwrap();
+        std::fs::write(path_with_suffix(&path, "-wal"), b"wal").unwrap();
+        std::fs::write(path_with_suffix(&path, "-journal"), b"journal").unwrap();
+
+        discard_compact_cache(&path).unwrap();
+
+        assert!(!path.exists());
+        for suffix in DATABASE_SIDECAR_SUFFIXES {
+            assert!(!path_with_suffix(&path, suffix).exists(), "{} left behind", suffix);
+        }
+        // Nothing to delete is not an error.
+        discard_compact_cache(&path).unwrap();
     }
 
     // Shapes measured against Pirate lightwalletd servers (mainnet activation
