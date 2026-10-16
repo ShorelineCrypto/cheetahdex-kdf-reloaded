@@ -468,87 +468,6 @@ fn test_wait_for_payment_spend_timeout() {
 }
 
 #[test]
-fn test_search_for_swap_tx_spend_was_spent() {
-    let key_pair = KeyPair::from_secret_slice(
-        &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
-    )
-    .unwrap();
-    let web3 = crate::eth::alloy_compat::build_provider(
-        vec!["https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
-        vec![],
-    )
-    .unwrap();
-    let ctx = MmCtxBuilder::new().into_mm_arc();
-
-    let swap_contract_address = Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap());
-    let my_addr = key_pair.address();
-    let coin = EthCoin(Arc::new(EthCoinImpl {
-        coin_type: EthCoinType::Eth,
-        decimals: 18,
-        gas_station_url: None,
-        gas_station_decimals: ETH_GAS_STATION_DECIMALS,
-        gas_station_policy: GasStationPricePolicy::MeanAverageFast,
-        history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
-        my_address: my_addr,
-        sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
-        signer: EthSigner::Local(key_pair),
-        swap_contract_address,
-        fallback_swap_contract: None,
-        ticker: "ETH".into(),
-        web3_instances: vec![Web3Instance {
-            web3: web3.clone(),
-            is_parity: true,
-        }],
-        web3,
-        ctx: ctx.weak(),
-        required_confirmations: 1.into(),
-        tron_api: None,
-        nft_swap_v2_contract: None,
-        swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
-        erc20_tokens_infos: Default::default(),
-        custom_token: false,
-        chain_id: None,
-        logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
-        derivation_method: DerivationMethod::Iguana(my_addr),
-        swap_v2_contracts: None,
-        gas_limit_v2: EthGasLimitV2::default(),
-    }));
-
-    // raw transaction bytes of https://ropsten.etherscan.io/tx/0xb1c987e2ac79581bb8718267b5cb49a18274890494299239d1d0dfdb58d6d76a
-    let payment_tx = [
-        248, 240, 52, 132, 119, 53, 148, 0, 131, 2, 73, 240, 148, 123, 193, 187, 221, 106, 10, 114, 47, 201, 191, 252,
-        73, 201, 33, 182, 133, 236, 184, 75, 148, 135, 71, 13, 228, 223, 130, 0, 0, 184, 132, 21, 44, 243, 175, 188,
-        96, 248, 252, 165, 132, 81, 30, 243, 34, 85, 165, 46, 224, 176, 90, 137, 30, 19, 123, 224, 67, 83, 53, 74, 57,
-        148, 140, 95, 45, 70, 147, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 117, 244, 28, 175, 51, 95, 91, 184, 141, 201,
-        45, 116, 26, 102, 210, 119, 151, 124, 143, 52, 215, 128, 89, 116, 30, 25, 35, 128, 122, 186, 177, 228, 149,
-        250, 55, 53, 62, 196, 51, 72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 93, 56, 62, 80, 28, 160, 65, 22, 195, 212, 184, 202, 226, 151, 224, 111,
-        174, 31, 160, 219, 39, 69, 137, 37, 8, 127, 177, 4, 104, 248, 27, 41, 245, 176, 131, 188, 215, 136, 160, 91,
-        134, 199, 67, 1, 58, 57, 103, 23, 215, 176, 64, 124, 1, 44, 88, 161, 200, 160, 64, 110, 13, 145, 127, 180, 27,
-        171, 131, 253, 90, 48, 147,
-    ];
-    // raw transaction bytes of https://ropsten.etherscan.io/tx/0xcb7c14d3ff309996d582400369393b6fa42314c52245115d4a3f77f072c36da9
-    let spend_tx = [
-        249, 1, 9, 37, 132, 119, 53, 148, 0, 131, 2, 73, 240, 148, 123, 193, 187, 221, 106, 10, 114, 47, 201, 191, 252,
-        73, 201, 33, 182, 133, 236, 184, 75, 148, 128, 184, 164, 2, 237, 41, 43, 188, 96, 248, 252, 165, 132, 81, 30,
-        243, 34, 85, 165, 46, 224, 176, 90, 137, 30, 19, 123, 224, 67, 83, 53, 74, 57, 148, 140, 95, 45, 70, 147, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 71, 13, 228, 223, 130, 0, 0, 168, 151, 11,
-        232, 224, 253, 63, 180, 26, 114, 23, 184, 27, 10, 161, 80, 178, 251, 73, 204, 80, 174, 97, 118, 149, 204, 186,
-        187, 243, 185, 19, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 157, 73, 251, 238, 138, 245, 142, 240, 85, 44, 209, 63, 194, 242,
-        109, 242, 246, 6, 76, 176, 27, 160, 29, 157, 226, 23, 81, 174, 34, 82, 93, 182, 41, 248, 119, 42, 221, 214, 38,
-        243, 128, 2, 235, 208, 193, 192, 74, 208, 242, 26, 221, 83, 54, 74, 160, 111, 29, 92, 8, 75, 61, 97, 103, 199,
-        100, 189, 72, 74, 221, 144, 66, 170, 68, 121, 29, 105, 19, 194, 35, 245, 196, 131, 236, 29, 105, 101, 30,
-    ];
-    let spend_tx = FoundSwapTxSpend::Spent(signed_eth_tx_from_bytes(&spend_tx).unwrap().into());
-
-    let found_tx = block_on(coin.search_for_swap_tx_spend(&payment_tx, swap_contract_address, 6051857))
-        .unwrap()
-        .unwrap();
-    assert_eq!(spend_tx, found_tx);
-}
-
-#[test]
 fn test_gas_station() {
     make_gas_station_request.mock_safe(|_| {
         let data = GasStationData {
@@ -581,58 +500,53 @@ fn test_gas_station() {
     assert_eq!(expected_eth_polygon, res_polygon);
 }
 
-#[test]
-fn test_search_for_swap_tx_spend_was_refunded() {
-    let key_pair = KeyPair::from_secret_slice(
-        &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
-    )
-    .unwrap();
-    let web3 = crate::eth::alloy_compat::build_provider(
-        vec!["https://ropsten.infura.io/v3/c01c1b4cf66642528547624e1d6d9d6b".into()],
-        vec![],
-    )
-    .unwrap();
-    let ctx = MmCtxBuilder::new().into_mm_arc();
+/// `search_for_swap_tx_spend` decides, after a restart, whether the counterparty took the payment or
+/// the payer must refund it, so both outcomes are pinned on an EVM coin.
+///
+/// The two tests that used to live here (`test_search_for_swap_tx_spend_was_spent` and
+/// `..._was_refunded`) queried a public Ropsten endpoint for frozen historical transactions. That
+/// chain no longer exists and the endpoint is gone, so they could never pass again, and a keyless
+/// public endpoint does not serve historical `eth_getLogs` ranges either. They now run the same
+/// real function, over the same recorded raw transactions, against a scripted local node. Do not
+/// point them back at a live network.
+///
+/// The function reads exactly three node methods, all scripted below: `eth_blockNumber`,
+/// `eth_getLogs` (once per window, first for `ReceiverSpent`, then for `SenderRefunded`) and
+/// `eth_getTransactionByHash`.
+mod search_for_swap_tx_spend_scripted {
+    use super::scripted_evm_node::spawn;
+    use super::*;
+    use serde_json::{json, Value as Json};
 
-    let swap_contract_address = Address::from_slice(&hex::decode("7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94").unwrap());
-    let my_addr = key_pair.address();
-    let coin = EthCoin(Arc::new(EthCoinImpl {
-        coin_type: EthCoinType::Erc20 {
-            platform: "ETH".to_string(),
-            token_addr: Address::from_slice(&hex::decode("c0eb7aed740e1796992a08962c15661bdeb58003").unwrap()),
-        },
-        decimals: 18,
-        gas_station_url: None,
-        gas_station_decimals: ETH_GAS_STATION_DECIMALS,
-        gas_station_policy: GasStationPricePolicy::MeanAverageFast,
-        history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
-        my_address: my_addr,
-        sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
-        signer: EthSigner::Local(key_pair),
-        swap_contract_address,
-        fallback_swap_contract: None,
-        ticker: "ETH".into(),
-        web3_instances: vec![Web3Instance {
-            web3: web3.clone(),
-            is_parity: true,
-        }],
-        web3,
-        ctx: ctx.weak(),
-        required_confirmations: 1.into(),
-        tron_api: None,
-        nft_swap_v2_contract: None,
-        swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
-        erc20_tokens_infos: Default::default(),
-        custom_token: false,
-        chain_id: None,
-        logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
-        derivation_method: DerivationMethod::Iguana(my_addr),
-        swap_v2_contracts: None,
-        gas_limit_v2: EthGasLimitV2::default(),
-    }));
+    const SWAP_CONTRACT_ADDR: &str = "7Bc1bBDD6A0a722fC9bffC49c921B685ECB84b94";
+    const CURRENT_BLOCK: u64 = 6_000_000;
 
-    // raw transaction bytes of https://ropsten.etherscan.io/tx/0xe18bbca69dea9a4624e1f5b0b2021d5fe4c8daa03f36084a8ba011b08e5cd938
-    let payment_tx = [
+    // Recorded Ropsten transactions (the chain is gone; only the bytes are kept).
+    const SPENT_PAYMENT_TX: &[u8] = &[
+        248, 240, 52, 132, 119, 53, 148, 0, 131, 2, 73, 240, 148, 123, 193, 187, 221, 106, 10, 114, 47, 201, 191, 252,
+        73, 201, 33, 182, 133, 236, 184, 75, 148, 135, 71, 13, 228, 223, 130, 0, 0, 184, 132, 21, 44, 243, 175, 188,
+        96, 248, 252, 165, 132, 81, 30, 243, 34, 85, 165, 46, 224, 176, 90, 137, 30, 19, 123, 224, 67, 83, 53, 74, 57,
+        148, 140, 95, 45, 70, 147, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 117, 244, 28, 175, 51, 95, 91, 184, 141, 201,
+        45, 116, 26, 102, 210, 119, 151, 124, 143, 52, 215, 128, 89, 116, 30, 25, 35, 128, 122, 186, 177, 228, 149,
+        250, 55, 53, 62, 196, 51, 72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 93, 56, 62, 80, 28, 160, 65, 22, 195, 212, 184, 202, 226, 151, 224, 111,
+        174, 31, 160, 219, 39, 69, 137, 37, 8, 127, 177, 4, 104, 248, 27, 41, 245, 176, 131, 188, 215, 136, 160, 91,
+        134, 199, 67, 1, 58, 57, 103, 23, 215, 176, 64, 124, 1, 44, 88, 161, 200, 160, 64, 110, 13, 145, 127, 180, 27,
+        171, 131, 253, 90, 48, 147,
+    ];
+    const SPEND_TX: &[u8] = &[
+        249, 1, 9, 37, 132, 119, 53, 148, 0, 131, 2, 73, 240, 148, 123, 193, 187, 221, 106, 10, 114, 47, 201, 191, 252,
+        73, 201, 33, 182, 133, 236, 184, 75, 148, 128, 184, 164, 2, 237, 41, 43, 188, 96, 248, 252, 165, 132, 81, 30,
+        243, 34, 85, 165, 46, 224, 176, 90, 137, 30, 19, 123, 224, 67, 83, 53, 74, 57, 148, 140, 95, 45, 70, 147, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 71, 13, 228, 223, 130, 0, 0, 168, 151, 11,
+        232, 224, 253, 63, 180, 26, 114, 23, 184, 27, 10, 161, 80, 178, 251, 73, 204, 80, 174, 97, 118, 149, 204, 186,
+        187, 243, 185, 19, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 157, 73, 251, 238, 138, 245, 142, 240, 85, 44, 209, 63, 194, 242,
+        109, 242, 246, 6, 76, 176, 27, 160, 29, 157, 226, 23, 81, 174, 34, 82, 93, 182, 41, 248, 119, 42, 221, 214, 38,
+        243, 128, 2, 235, 208, 193, 192, 74, 208, 242, 26, 221, 83, 54, 74, 160, 111, 29, 92, 8, 75, 61, 97, 103, 199,
+        100, 189, 72, 74, 221, 144, 66, 170, 68, 121, 29, 105, 19, 194, 35, 245, 196, 131, 236, 29, 105, 101, 30,
+    ];
+    const REFUNDED_PAYMENT_TX: &[u8] = &[
         249, 1, 43, 130, 10, 96, 132, 149, 2, 249, 0, 131, 2, 73, 240, 148, 123, 193, 187, 221, 106, 10, 114, 47, 201,
         191, 252, 73, 201, 33, 182, 133, 236, 184, 75, 148, 128, 184, 196, 155, 65, 91, 42, 192, 158, 192, 175, 210,
         198, 159, 244, 116, 46, 255, 28, 236, 147, 240, 68, 91, 16, 19, 6, 59, 187, 149, 138, 179, 151, 121, 47, 14,
@@ -645,8 +559,7 @@ fn test_search_for_swap_tx_spend_was_refunded() {
         58, 94, 57, 121, 252, 166, 34, 25, 206, 193, 113, 198, 160, 68, 125, 142, 153, 210, 177, 60, 173, 67, 127, 138,
         52, 112, 9, 49, 108, 109, 44, 177, 142, 9, 124, 10, 200, 37, 100, 52, 137, 196, 74, 67, 192,
     ];
-    // raw transaction bytes of https://ropsten.etherscan.io/tx/0x9a50ac4d1737f4f04b94177996da7fa942b09469de52cfdadce891cd85afc37c
-    let refund_tx = [
+    const REFUND_TX: &[u8] = &[
         249, 1, 11, 130, 10, 97, 132, 149, 2, 249, 0, 131, 2, 73, 240, 148, 123, 193, 187, 221, 106, 10, 114, 47, 201,
         191, 252, 73, 201, 33, 182, 133, 236, 184, 75, 148, 128, 184, 164, 70, 252, 2, 148, 192, 158, 192, 175, 210,
         198, 159, 244, 116, 46, 255, 28, 236, 147, 240, 68, 91, 16, 19, 6, 59, 187, 149, 138, 179, 151, 121, 47, 14,
@@ -658,12 +571,159 @@ fn test_search_for_swap_tx_spend_was_refunded() {
         19, 27, 208, 119, 219, 60, 231, 2, 118, 91, 169, 99, 78, 209, 135, 160, 51, 115, 90, 189, 124, 172, 205, 134,
         203, 159, 238, 40, 39, 99, 88, 48, 160, 189, 37, 60, 20, 117, 65, 238, 36, 98, 226, 48, 22, 235, 86, 183,
     ];
-    let refund_tx = FoundSwapTxSpend::Refunded(signed_eth_tx_from_bytes(&refund_tx).unwrap().into());
 
-    let found_tx = block_on(coin.search_for_swap_tx_spend(&payment_tx, swap_contract_address, 5886908))
-        .unwrap()
+    fn coin(url: &str, coin_type: EthCoinType) -> (MmArc, EthCoin) {
+        let key_pair = KeyPair::from_secret_slice(
+            &hex::decode("809465b17d0a4ddb3e4c69e8f23c2cabad868f51f8bed5c765ad1d6516c3306f").unwrap(),
+        )
         .unwrap();
-    assert_eq!(refund_tx, found_tx);
+        let web3 = crate::eth::alloy_compat::build_provider(vec![url.to_owned()], vec![]).unwrap();
+        let ctx = MmCtxBuilder::new().into_mm_arc();
+        let swap_contract_address = Address::from_str(SWAP_CONTRACT_ADDR).unwrap();
+        let my_addr = key_pair.address();
+        let coin = EthCoin(Arc::new(EthCoinImpl {
+            coin_type,
+            decimals: 18,
+            gas_station_url: None,
+            gas_station_decimals: ETH_GAS_STATION_DECIMALS,
+            gas_station_policy: GasStationPricePolicy::MeanAverageFast,
+            history_sync_state: Mutex::new(HistorySyncState::NotEnabled),
+            my_address: my_addr,
+            sign_message_prefix: Some(String::from("Ethereum Signed Message:\n")),
+            signer: EthSigner::Local(key_pair),
+            swap_contract_address,
+            fallback_swap_contract: None,
+            ticker: "ETH".into(),
+            web3_instances: vec![Web3Instance {
+                web3: web3.clone(),
+                is_parity: true,
+            }],
+            web3,
+            ctx: ctx.weak(),
+            required_confirmations: 1.into(),
+            tron_api: None,
+            nft_swap_v2_contract: None,
+            swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
+            erc20_tokens_infos: Default::default(),
+            custom_token: false,
+            chain_id: None,
+            logs_block_range: DEFAULT_LOGS_BLOCK_RANGE,
+            derivation_method: DerivationMethod::Iguana(my_addr),
+            swap_v2_contracts: None,
+            gas_limit_v2: EthGasLimitV2::default(),
+        }));
+        (ctx, coin)
+    }
+
+    /// The `eth_getTransactionByHash` result a node reports for a legacy transaction.
+    fn rpc_tx(tx: &SignedEthTx) -> Json {
+        let to = match &tx.action {
+            Action::Call(addr) => json!(format!("{:#x}", addr)),
+            Action::Create => Json::Null,
+        };
+        let gas_price = tx.gas_price().expect("a legacy transaction");
+        json!({
+            "type": "0x0",
+            "hash": format!("{:#x}", tx.tx_hash()),
+            "nonce": format!("{:#x}", tx.nonce),
+            "blockHash": format!("0x{}", "22".repeat(32)),
+            "blockNumber": "0x5b8d80",
+            "transactionIndex": "0x0",
+            "from": format!("{:#x}", tx.sender()),
+            "to": to,
+            "value": format!("{:#x}", tx.value),
+            "gas": format!("{:#x}", tx.gas),
+            "gasPrice": format!("{:#x}", gas_price),
+            "input": format!("0x{}", hex::encode(&tx.data)),
+            "v": format!("{:#x}", tx.v),
+            "r": format!("{:#x}", tx.r),
+            "s": format!("{:#x}", tx.s),
+        })
+    }
+
+    /// Runs the search with the node reporting `event` ("ReceiverSpent" or "SenderRefunded") for the
+    /// payment's id in `found_tx`, and nothing for the other event.
+    fn search(
+        coin_type: EthCoinType,
+        payment: &[u8],
+        found_event: &'static str,
+        found_tx: &[u8],
+    ) -> Result<Option<FoundSwapTxSpend>, String> {
+        let payment_tx = signed_eth_tx_from_bytes(payment).unwrap();
+        let func = match coin_type {
+            EthCoinType::Erc20 { .. } => "erc20Payment",
+            _ => "ethPayment",
+        };
+        let decoded = SWAP_CONTRACT
+            .function(func)
+            .unwrap()
+            .decode_input(&payment_tx.data[4..])
+            .unwrap();
+        let Token::FixedBytes(id) = decoded[0].clone() else {
+            panic!("the payment id is bytes32")
+        };
+        let found = signed_eth_tx_from_bytes(found_tx).unwrap();
+        let found_hash = found.tx_hash();
+        let found_json = rpc_tx(&found);
+        let event_topic = |name: &str| format!("{:#x}", SWAP_CONTRACT.event(name).unwrap().signature());
+        let wanted_topic = event_topic(found_event);
+
+        let node = spawn(move |method, params| match method {
+            "eth_blockNumber" => json!(format!("{:#x}", CURRENT_BLOCK)),
+            "eth_getLogs" => {
+                // Only the event the test scripts has a log; the other query finds nothing.
+                let asked = params[0]["topics"][0].to_string();
+                if asked.contains(&wanted_topic) {
+                    json!([{
+                        "address": format!("0x{}", SWAP_CONTRACT_ADDR.to_lowercase()),
+                        "topics": [wanted_topic],
+                        "data": format!("0x{}", hex::encode(&id)),
+                        "blockHash": format!("0x{}", "22".repeat(32)),
+                        "blockNumber": "0x5b8d80",
+                        "transactionHash": format!("{:#x}", found_hash),
+                        "transactionIndex": "0x0",
+                        "logIndex": "0x0",
+                        "removed": false,
+                    }])
+                } else {
+                    json!([])
+                }
+            },
+            "eth_getTransactionByHash" => {
+                assert_eq!(params[0].as_str().unwrap(), format!("{:#x}", found_hash));
+                found_json.clone()
+            },
+            other => panic!("the scripted node does not serve `{}`", other),
+        });
+        let (_ctx, coin) = coin(&node.url, coin_type);
+        block_on(coin.search_for_swap_tx_spend(
+            payment,
+            Address::from_str(SWAP_CONTRACT_ADDR).unwrap(),
+            CURRENT_BLOCK - 100,
+        ))
+    }
+
+    #[test]
+    fn search_finds_the_spend_of_an_eth_payment() {
+        let expected = FoundSwapTxSpend::Spent(signed_eth_tx_from_bytes(SPEND_TX).unwrap().into());
+        let found = search(EthCoinType::Eth, SPENT_PAYMENT_TX, "ReceiverSpent", SPEND_TX)
+            .unwrap()
+            .unwrap();
+        assert_eq!(expected, found);
+    }
+
+    #[test]
+    fn search_finds_the_refund_of_an_erc20_payment() {
+        let coin_type = EthCoinType::Erc20 {
+            platform: "ETH".to_string(),
+            token_addr: Address::from_slice(&hex::decode("c0eb7aed740e1796992a08962c15661bdeb58003").unwrap()),
+        };
+        let expected = FoundSwapTxSpend::Refunded(signed_eth_tx_from_bytes(REFUND_TX).unwrap().into());
+        let found = search(coin_type, REFUNDED_PAYMENT_TX, "SenderRefunded", REFUND_TX)
+            .unwrap()
+            .unwrap();
+        assert_eq!(expected, found);
+    }
 }
 
 #[test]
@@ -2171,31 +2231,102 @@ mod swap_gas_fee_policy_tx_form {
     }
 }
 
-/// The serialized form of what the swap send path really broadcasts is pinned against the swap
-/// gas-fee policy: the whole path (`SwapOps` entry point, `sign_and_send_transaction_impl`, signing,
-/// `eth_sendRawTransaction`) runs against a scripted node on a local socket and the assertion reads
-/// the first byte of the broadcast bytes -- the EIP-2718 envelope byte a counterparty parses.
-mod swap_send_path_wire_form {
-    use super::*;
-    use mm2_eth::keys::{public_to_address, KeyPair as EthKeyPair, Secret};
+/// A scripted EVM JSON-RPC node on a local socket, shared by the tests that must run the real
+/// network-facing code without a network: every request is answered by the handler closure
+/// (`method`, `params` -> `result`). Its thread stops when the node is dropped.
+mod scripted_evm_node {
     use serde_json::{json, Value as Json};
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
-    const POLYGON_CHAIN_ID: u64 = 137;
-
-    /// A scripted EVM node: serves the nonce, price and fee-history reads the send path makes and
-    /// records every `eth_sendRawTransaction` payload. Its thread stops on drop.
-    struct ScriptedNode {
-        url: String,
-        sent: Arc<Mutex<Vec<Vec<u8>>>>,
+    pub struct ScriptedNode {
+        pub url: String,
         stop: Arc<AtomicBool>,
     }
 
     impl Drop for ScriptedNode {
         fn drop(&mut self) { self.stop.store(true, Ordering::SeqCst); }
     }
+
+    type Handler = Arc<dyn Fn(&str, &Json) -> Json + Send + Sync>;
+
+    fn serve(mut stream: TcpStream, handler: &Handler) {
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        let body_at = loop {
+            let n = match stream.read(&mut buf) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => n,
+            };
+            raw.extend_from_slice(&buf[..n]);
+            if let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&raw[..end]).to_lowercase();
+                let len = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if raw.len() >= end + 4 + len {
+                    break end + 4;
+                }
+            }
+        };
+        let request: Json = serde_json::from_slice(&raw[body_at..]).unwrap();
+        let reply = |req: &Json| {
+            json!({"jsonrpc": "2.0", "id": req["id"],
+                   "result": handler(req["method"].as_str().unwrap(), &req["params"])})
+        };
+        let body = match request.as_array() {
+            Some(batch) => Json::Array(batch.iter().map(reply).collect()),
+            None => reply(&request),
+        }
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).ok();
+    }
+
+    /// Starts a node answering every request through `handler`. A method the test did not script
+    /// must panic in the handler, so a test never silently depends on an unscripted read.
+    pub fn spawn(handler: impl Fn(&str, &Json) -> Json + Send + Sync + 'static) -> ScriptedNode {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_t = stop.clone();
+        let handler: Handler = Arc::new(handler);
+        std::thread::spawn(move || {
+            while !stop_t.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let handler = handler.clone();
+                        std::thread::spawn(move || serve(stream, &handler));
+                    },
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                }
+            }
+        });
+        ScriptedNode { url, stop }
+    }
+}
+
+/// The serialized form of what the swap send path really broadcasts is pinned against the swap
+/// gas-fee policy: the whole path (`SwapOps` entry point, `sign_and_send_transaction_impl`, signing,
+/// `eth_sendRawTransaction`) runs against a scripted node on a local socket and the assertion reads
+/// the first byte of the broadcast bytes -- the EIP-2718 envelope byte a counterparty parses.
+mod swap_send_path_wire_form {
+    use super::scripted_evm_node::{spawn, ScriptedNode};
+    use super::*;
+    use mm2_eth::keys::{public_to_address, KeyPair as EthKeyPair, Secret};
+    use serde_json::{json, Value as Json};
+
+    const POLYGON_CHAIN_ID: u64 = 137;
 
     fn answer(method: &str, params: &Json, sent: &Mutex<Vec<Vec<u8>>>) -> Json {
         match method {
@@ -2226,65 +2357,10 @@ mod swap_send_path_wire_form {
         }
     }
 
-    fn serve(mut stream: std::net::TcpStream, sent: &Mutex<Vec<Vec<u8>>>) {
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
-        let mut raw = Vec::new();
-        let mut buf = [0u8; 4096];
-        let body_at = loop {
-            let n = match stream.read(&mut buf) {
-                Ok(0) | Err(_) => return,
-                Ok(n) => n,
-            };
-            raw.extend_from_slice(&buf[..n]);
-            if let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
-                let head = String::from_utf8_lossy(&raw[..end]).to_lowercase();
-                let len = head
-                    .lines()
-                    .find_map(|l| l.strip_prefix("content-length:"))
-                    .and_then(|v| v.trim().parse::<usize>().ok())
-                    .unwrap_or(0);
-                if raw.len() >= end + 4 + len {
-                    break end + 4;
-                }
-            }
-        };
-        let request: Json = serde_json::from_slice(&raw[body_at..]).unwrap();
-        let reply = |req: &Json| {
-            json!({"jsonrpc": "2.0", "id": req["id"],
-                   "result": answer(req["method"].as_str().unwrap(), &req["params"], sent)})
-        };
-        let body = match request.as_array() {
-            Some(batch) => Json::Array(batch.iter().map(reply).collect()),
-            None => reply(&request),
-        }
-        .to_string();
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream.write_all(response.as_bytes()).ok();
-    }
-
-    fn spawn_node() -> ScriptedNode {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    fn spawn_send_node() -> (ScriptedNode, Arc<Mutex<Vec<Vec<u8>>>>) {
         let sent = Arc::new(Mutex::new(Vec::new()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (sent_t, stop_t) = (sent.clone(), stop.clone());
-        std::thread::spawn(move || {
-            while !stop_t.load(Ordering::SeqCst) {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let sent = sent_t.clone();
-                        std::thread::spawn(move || serve(stream, &sent));
-                    },
-                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
-                }
-            }
-        });
-        ScriptedNode { url, sent, stop }
+        let sent_h = sent.clone();
+        (spawn(move |method, params| answer(method, params, &sent_h)), sent)
     }
 
     /// An ERC-20 token coin on a chain-137 platform with `policy` as its stored swap gas-fee policy.
@@ -2368,12 +2444,12 @@ mod swap_send_path_wire_form {
     fn broadcast(policy: SwapGasFeePolicy, send: impl Fn(&EthCoin, &[u8]) -> TransactionFut) -> Vec<u8> {
         EthCoin::payment_status
             .mock_safe(|_, _, _| MockResult::Return(Box::new(futures01::future::ok(PAYMENT_STATE_SENT.into()))));
-        let node = spawn_node();
+        let (node, sent) = spawn_send_node();
         let token_addr = Address::from_str("3c499c542cef5e3811e1192ce70d8cc03d5c3359").unwrap();
         let (_ctx, coin) = polygon_token(&node.url, policy, token_addr);
         let payment = counterparty_payment(&coin, token_addr);
         block_on(send(&coin, &payment).compat()).expect("the swap send succeeds");
-        let sent = node.sent.lock().unwrap();
+        let sent = sent.lock().unwrap();
         assert_eq!(sent.len(), 1, "exactly one transaction is broadcast");
         sent[0].clone()
     }
