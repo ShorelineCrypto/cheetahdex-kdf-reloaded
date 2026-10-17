@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **The initial swap gas-fee policy no longer depends on how the coin was activated, and a coin's
+  `max_eth_tx_type` now caps the transaction type it will sign.** Two related behaviors, chosen
+  together. First, the legacy `enable` / `electrum` route used to ignore the coin configuration and
+  start every EVM coin as `Legacy`, so ETH, MATIC, AVAX, ETH-ARB20, ETH-BASE and MOVR (which the
+  shipped coins file puts on `"Medium"`) emitted type-2 swap transactions when activated through
+  `enable_eth_with_tokens` or its task form but untyped ones when activated through `enable`: the
+  same coin from the same configuration, two different serialized forms, depending only on which
+  RPC the caller happened to use. The legacy route now resolves the policy the way the other routes
+  do: the `swap_gas_fee_policy` request field, else the `swap_gas_fee_policy` key of the coin's
+  entry, else `Legacy`. The request field is new on the legacy route and is parsed leniently there:
+  an unrecognised value is ignored in favour of the configured or default policy rather than
+  rejected, whereas `enable_eth_with_tokens` and `task::enable_eth` still reject it with
+  `InvalidRequest`. Second, the integer `max_eth_tx_type` key of a coin's configuration entry (a
+  token falling back to its platform coin's entry) is now honoured: a swap transaction whose
+  EIP-2718 type exceeds the maximum is refused at signing. The send fails; nothing is broadcast and
+  no lower type is substituted, because silently emitting a form the configuration says a chain
+  must not see would be worse than failing. The shipped coins file sets the key on exactly the
+  coins it means to speak about (`2` on the six `"Medium"` coins, `0` on BNB Chain), and an
+  operator who moves BNB to a non-legacy tier with `set_swap_gas_fee_policy` now gets a refused
+  send where before the type-2 transaction would have gone out. **A coin with no
+  `max_eth_tx_type` key at all is treated as `0`, as in the reference**, so a typed swap send for
+  it is refused exactly as for an explicit `0`. **Compatibility note:** an operator who prefers
+  Reloaded's divergence, an absent key meaning unrestricted, sets the node-level boolean
+  `max_eth_tx_type_absent_unrestricted` to `true` (default `false`; any other value, including the
+  string `"true"`, leaves the default). A key that is present is honoured either
+  way. The activation INFO line now also reports the effective cap and where it came from, for
+  example `MATIC: swap gas-fee policy Medium (source: coin config); max tx type 2 (source: coin
+  config)`, so "why did this coin emit that form?" is one grep. What a node can read is unchanged:
+  the cap and the policy only restrict what it sends. Code: `mm2src/coins/eth/eth_activation.rs`,
+  `mm2src/coins/eth/eth_impl.rs`; CRD ch.35 D35.6 and D35.7, ch.55 R55.4.4.
+
 ### Fixed
 
 - **`enable_erc20` now works on an HD wallet.** The one-shot `enable_erc20` refused every
@@ -53,9 +86,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   emit an EIP-1559 (type 2) transaction whose `max_fee_per_gas` / `max_priority_fee_per_gas` are
   the matching tier of the same fee estimate the fee-estimation RPC and stream report (the
   configured gas API when present, otherwise the internal fee-history estimator). If the estimate
-  cannot be obtained the send fails rather than silently falling back to the legacy form. Note
-  that a peer running a reference build at or before `v2.0.0-beta` cannot read a typed
-  transaction, which is why `Legacy` remains the default. Not yet verified against a live
+  cannot be obtained the send fails rather than silently falling back to the legacy form.
+  `Legacy` is the built-in default, and it exists for peers on a reference build at or before
+  `v2.0.0-beta`, which cannot read a typed transaction. It is not what most EVM swaps use: the
+  initial policy of a platform coin activated through `enable_eth_with_tokens` (or its task form)
+  is the `swap_gas_fee_policy` activation parameter, else the `swap_gas_fee_policy` key of the
+  coin's entry in the coins file, else `Legacy`, and the coins file ships `"Medium"` for ETH
+  (chain 1), MATIC (137), AVAX (43114), ETH-ARB20 (42161), ETH-BASE (8453) and MOVR (1285). Swaps
+  of those coins and of their tokens therefore emit type 2 unless the operator overrides the
+  policy at activation or with `set_swap_gas_fee_policy`; BNB Chain, for instance, has no such
+  key and stays untyped. The legacy `enable` and `electrum` routes resolve the initial policy the
+  same way (see below).
+  Activation now logs the effective policy and which route set it at INFO, for example
+  `MATIC: swap gas-fee policy Medium (source: coin config)`. Not yet verified against a live
   network send.
 - **A counterparty's EIP-1559 (type 2) and EIP-2930 (type 1) transaction can now be read.**
   Swap transactions (such as the taker's dex-fee payment) were decoded only as legacy

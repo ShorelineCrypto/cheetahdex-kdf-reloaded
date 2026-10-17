@@ -704,9 +704,18 @@ The flow is:
    or an estimate against the encoded calldata.
 5. Resolve nonce using the platform coin's nonce-resolution
    path.
-6. Build and sign with the keypair-derived signing path
-   appropriate to the platform coin's fee policy (legacy or
-   EIP-1559).
+6. Build the transaction in the untyped legacy form, priced from
+   the single gas price of step 4, and sign it with the
+   keypair-derived legacy signing path. The form does not vary:
+   the request accepts only the `EthGas` fee form (`gas_price`,
+   `gas`) and rejects any other, and the coin's swap gas-fee policy
+   ([Chapter 35](35-evm-v2-activation-rpcs.md) R35.6.3) is not
+   consulted, so no NFT withdrawal is built as an EIP-1559
+   transaction. An untyped transaction is type `0`, which no
+   `max_eth_tx_type` cap (ch. 35 D35.7) can be below, and the
+   legacy signing path does not consult the cap. The refusal of a
+   form above the cap is enforced only on the EIP-1559 signing
+   path, which this flow does not use.
 7. Return transaction details with fee values denominated in
    the platform coin (`ETH`, `BNB`, `MATIC`, `AVAX`, `FTM`).
 
@@ -973,8 +982,8 @@ D7. **Incremental activation snapshot.** Activation currently
   withdrawal path's `safeTransferFrom` and `balanceOf`).
 - The Ethereum JSON-RPC `eth_call` method (used for the
   `balanceOf` query on the ERC-1155 max-balance drain path).
-- The EIP-1559 transaction format (one of the two signing
-  policies selected by the platform coin's fee policy).
+- The EIP-1559 transaction format (named in §19.7 step 6 only as
+  a typed form the withdrawal path does not build).
 - The EVM chain ecosystems named in §19.3 (Ethereum, BNB Smart
   Chain, Polygon, Avalanche, Fantom) and their respective
   platform-coin tickers.
@@ -1041,6 +1050,23 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
   two §19.6.2 cross-reference paragraphs restate Chapter 35, whose
   wire values the KDF Spec Reader established from the upstream
   reference version.
+- *Clean-context additions (forbidden corpus not consulted):* the
+  sentence at the end of step 6 of §19.7 (refusal of a transaction form
+  above the coin's maximum) was added on 2026-10-16 by a context that
+  never read the forbidden corpus. Later the same day, also by a
+  context that never read it, step 6 was rewritten and the EIP-1559
+  entry of §19.10 corrected to match. Since the chapter's first draft
+  both had said the withdrawal signs legacy or EIP-1559 according to
+  the platform coin's fee policy; the source consults no such policy
+  on this path and never builds an EIP-1559 transaction there, so
+  under chapter 01 R23 the chapter was corrected to the source. The
+  rewritten step absorbs the earlier sentence. It states this
+  implementation's own behavior as decided in chapter 35 D35.7 and
+  observed in this repository's source: `coins::nft::withdraw` accepts
+  only the `EthGas` fee form and builds and signs the untyped legacy
+  form, whose signer in `coins::eth` does not consult the maximum; the
+  EIP-1559 signer there enforces it. It describes no reference
+  behavior and relies on no Dirty Gate clearance.
 
 ## 19.13 CoinProtocol::NFT Variant
 

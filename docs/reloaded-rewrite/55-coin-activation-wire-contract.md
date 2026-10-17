@@ -537,8 +537,23 @@ required, at least one), `swap_contract_address` (string, required, not the
 zero address), `fallback_swap_contract` (string, optional, not the zero
 address), `gas_station_url`, `gas_station_decimals` (integer, default 8) and
 `gas_station_policy` (`{"policy": "MeanAverageFast" | "Average"}`), all
-optional. EVM activation semantics are governed by
-[Chapter 35](35-evm-v2-activation-rpcs.md).
+optional; and `swap_gas_fee_policy` (string, optional, one of the four values of
+[Chapter 35](35-evm-v2-activation-rpcs.md) R35.6.3), which sets the coin's
+initial swap gas-fee policy on this route exactly as it does on the v2 and task
+routes (ch. 35 R35.6.7). Absent it, the coin's configuration entry and then the
+built-in default decide, again as on the other routes. EVM activation semantics
+are governed by [Chapter 35](35-evm-v2-activation-rpcs.md).
+
+> **EVM swap gas-fee policy on this route (informative; no remaining
+> divergence from the reference).** Reloaded reads both the request field and
+> the coin configuration on this route, with the precedence of ch. 35 R35.6.7
+> (request field, else the coin-configuration key, else the built-in `Legacy`),
+> exactly as the v2 and task routes do (ch. 35 D35.6, resolved). It also parses
+> the field *leniently* here: an unrecognised value is ignored in favour of the
+> configured or default policy rather than rejected, where the v2 and task
+> routes reject it (ch. 35 R35.1.1). This leniency is the specified behavior of
+> this route and the two parses are deliberately not unified. The field belongs
+> in this table because the reference accepts it here and Reloaded now does too.
 
 > **Upstream divergence (informative).** The public reference documents the
 > three gas-station fields for legacy `enable`; the reference release no longer
@@ -734,6 +749,11 @@ another activation untouched when it is cancelled.
 > R55.1.12 is a decided change, not yet implemented outside the Z-coin, whose
 > activation already holds a per-ticker lock; elsewhere concurrent activations
 > still run in parallel, with the same observable outcome.
+
+> **Numbering (informative).** `R55.5.9` is deliberately unused. Requirements
+> from `R55.5.10` onwards are cited by those identifiers from source comments
+> and tests, from `docs/API_REFERENCE_DEVIATIONS.md` and from chapters 37, 39
+> and 48, so the gap is kept rather than closed by renumbering.
 
 ### 55.5.1 UTXO-family members (`enable_utxo`, `enable_qtum`, `enable_bch`)
 
@@ -1354,4 +1374,42 @@ R55.4.5 and the error body of R55.1.10.
   the request forms and defaults where the reference contradicts itself. No
   source text, private identifier, helper structure, log or error string, or
   per-method internal table was copied; every rule is stated as an externally
-  observable wire or behavioural requirement.
+  observable wire or behavioural requirement. A later pass on 2026-10-16, at the
+  same two reference tags, added the EVM `swap_gas_fee_policy` request field to
+  R55.4.4 and the divergence note after it (the field's acceptance on this
+  route, its precedence relative to the coin configuration, and the lenient
+  parsing of an unrecognised value here). On 2026-10-16, after that pass, the
+  divergence note after R55.4.4 was rewritten by a context that never read the
+  forbidden corpus to record that Reloaded now implements the behavior the
+  earlier note described as missing (ch. 35 D35.6); it states Reloaded's own
+  decided behavior and adds no reference content, and the clearance recorded
+  below does not cover that rewrite. The chapter as a whole, that addition
+  included, **passed the KDF Dirty Gate** on 2026-10-16 (PASS, 0.02, no
+  findings); [Chapter 35](35-evm-v2-activation-rpcs.md)'s record of the same
+  Spec Reader pass does not cover this chapter, which carries its own record:
+  - *Extent.* The whole subject matter this chapter claims: the mmrpc error
+    envelope and its HTTP-status policy, the four shared task-framework
+    methods, the standalone-coin task family and its UTXO-family members, the
+    BCH platform-with-tokens and SLP token one-shot methods, the hardware-wallet
+    initialisation task, and -- the pass's new material -- the legacy EVM
+    activation request and the route by which an initial swap gas-fee policy
+    reaches the coin, with its precedence against configuration and the
+    strictness of value parsing there compared with the v2 and task routes.
+    Reference: `v2.6.0-beta` and `v3.0.0-beta`; the pinned baseline was also
+    checked, to settle which of the chapter's named error-set identifiers are
+    baseline-era (six of seven; the seventh is post-anchor and is a public-API
+    type sourced to the public error-types catalogue). Quantity: about twenty
+    files across the activation, task-framework, hardware-wallet and EVM coin
+    areas, plus the two sweeps below over four subsystem areas.
+  - *Method.* By reading, combined with mechanical comparison; both sweeps ran.
+    One extracted every backtick-delimited or quoted identifier from the
+    chapter (about 240) and put each match individually to the forced-versus-free
+    test. The other extracted every string literal of 18 or more characters from
+    the four areas, normalised placeholders and matched them against the
+    chapter's full text; it returned only wire field names and no error or log
+    wording. `tools/clean_room_gate.py` was not applicable: the chapter embeds
+    no fenced code block.
+  - *Measure.* 0.02 on the discretionary-expression basis, after excluding
+    dictated-interop and public or serialized interface content, and read
+    against the rule that one instance of genuine discretionary expression
+    fails the chapter whatever the figure. No such instance was found.

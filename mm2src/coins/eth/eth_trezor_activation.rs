@@ -53,7 +53,7 @@ pub async fn eth_coin_from_conf_and_request_with_trezor(
     address: Address,
     public: Public,
 ) -> Result<EthCoin, String> {
-    let params = try_s!(EthCoinActivationParams::from_legacy_request(req));
+    let params = try_s!(EthCoinActivationParams::from_legacy_request(req, conf));
     let signer = EthTrezorSigner {
         derivation_path,
         address,

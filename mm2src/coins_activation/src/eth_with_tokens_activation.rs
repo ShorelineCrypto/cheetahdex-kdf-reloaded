@@ -463,9 +463,8 @@ fn activation_params(
         ));
     }
 
-    let swap_gas_fee_policy = request
-        .swap_gas_fee_policy
-        .or_else(|| serde_json::from_value(platform_conf["swap_gas_fee_policy"].clone()).ok());
+    let (swap_gas_fee_policy, swap_gas_fee_policy_source) =
+        coins::eth::resolve_swap_gas_fee_policy(request.swap_gas_fee_policy, platform_conf);
     let params = EthCoinActivationParams {
         urls: request.nodes.iter().flatten().map(|node| node.url.clone()).collect(),
         swap_contract_address: request.swap_contract_address,
@@ -485,6 +484,7 @@ fn activation_params(
         gas_station_decimals: request.gas_station_decimals,
         gas_station_policy: request.gas_station_policy.unwrap_or_default(),
         swap_gas_fee_policy,
+        swap_gas_fee_policy_source,
     };
     params
         .validate_swap_contracts(platform_conf)

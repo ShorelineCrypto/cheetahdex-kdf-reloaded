@@ -26,7 +26,7 @@ KDF Reloaded does **not** define a single global compatibility mode, and does **
 1. Next to the setting itself, a short "set this to `<value>` for GLEEC compatibility" note.
 2. A row in the central admin chapter [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md), which lists every such setting end-to-end.
 
-The developer-facing rule (mandatory for AI assistants, strong recommendation for human contributors) lives in [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md). For v0.1.0-alpha.1 the central chapter is empty — no behavioural divergences require operator configuration yet — but the convention, the central chapter scaffold, and the developer rule are in place.
+The developer-facing rule (mandatory for AI assistants, strong recommendation for human contributors) lives in [`docs/COMPAT_SWITCHES.md`](docs/COMPAT_SWITCHES.md). The central chapter lists every such setting, including those whose default already matches GLEEC KDF and the divergences no setting can reverse; *Settings to set for GLEEC-compatible operation* below points to it and restates the main ones.
 
 ## Summary
 
@@ -88,6 +88,18 @@ The developer-facing rule (mandatory for AI assistants, strong recommendation fo
   and keeps activating them on the legacy methods (CRD ch.21, ch.55 D55.5). A
   client written for GLEEC never sends such a request, so nothing breaks; no
   switch is needed.
+
+- **Opt-in: an absent `max_eth_tx_type` read as unrestricted.** By default
+  Reloaded reads a coin configuration with no `max_eth_tx_type` key as GLEEC KDF
+  does: the coin may send untyped (legacy) transactions only, and an EIP-1559
+  swap transaction is refused at signing, not downgraded. Nothing needs setting
+  for GLEEC-compatible operation. Setting the top-level `MM2.json` boolean
+  `max_eth_tx_type_absent_unrestricted` to `true` opts into Reloaded's own
+  reading, in which an absent key means unrestricted and the coin's swap gas-fee
+  policy alone decides the form; only the boolean `true` turns it on. A key that
+  is present is honoured the same way either way, and the switch changes only
+  what the node sends, never which transactions it can read. See CRD ch.35
+  D35.7 and [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md).
 
 ### Behavioural divergences without a compatibility switch
 
