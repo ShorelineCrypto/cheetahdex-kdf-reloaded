@@ -204,7 +204,8 @@ rustls = { version = "0.20", features = ["dangerous_configuration"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
 tokio = { version = "1.7" }
 tokio-rustls = { version = "0.23" }
-tonic = { version = "0.11", features = ["tls", "tls-webpki-roots", "channel"] }
+tonic = { version = "0.14", default-features = false, features = ["transport", "channel", "codegen", "tls-ring", "tls-webpki-roots"] }
+tonic-prost = "0.14"
 webpki-roots = { version = "0.22" }
 # 0.24 makes `orchard` a default feature; Ironwood actions live behind it and
 # we neither read nor build that bundle, so default features stay off.
@@ -243,4 +244,5 @@ spl-token = { version = "8", default-features = false }
 
 [build-dependencies]
 prost-build = { version = "0.12", default-features = false }
-tonic-build = { version = "0.11", features = ["prost"] }
+prost_build_14 = { package = "prost-build", version = "0.14", default-features = false }
+tonic-prost-build = { version = "0.14", default-features = false }

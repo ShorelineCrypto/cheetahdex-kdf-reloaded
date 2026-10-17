@@ -795,7 +795,24 @@ where
 
 #[cfg(not(target_arch = "wasm32"))]
 fn wss_certs(ctx: &MmArc) -> P2PResult<Option<WssCerts>> {
-    use futures_rustls::rustls;
+    use rustls_pemfile as pemfile;
+
+    // Parsers return raw DER bytes: libp2p's websocket TLS types take plain `Vec<u8>`.
+    fn pkcs8_keys(r: &mut dyn io::BufRead) -> Result<Vec<Vec<u8>>, ()> {
+        pemfile::pkcs8_private_keys(r)
+            .map(|k| k.map(|k| k.secret_pkcs8_der().to_vec()).map_err(|_| ()))
+            .collect()
+    }
+    fn rsa_keys(r: &mut dyn io::BufRead) -> Result<Vec<Vec<u8>>, ()> {
+        pemfile::rsa_private_keys(r)
+            .map(|k| k.map(|k| k.secret_pkcs1_der().to_vec()).map_err(|_| ()))
+            .collect()
+    }
+    fn cert_chain(r: &mut dyn io::BufRead) -> Result<Vec<Vec<u8>>, ()> {
+        pemfile::certs(r)
+            .map(|c| c.map(|c| c.as_ref().to_vec()).map_err(|_| ()))
+            .collect()
+    }
 
     #[derive(Deserialize)]
     struct WssCertsInfo {
@@ -815,14 +832,14 @@ fn wss_certs(ctx: &MmArc) -> P2PResult<Option<WssCerts>> {
     // First, try to extract the all PKCS8 private keys
     let mut server_priv_keys = extract_cert_from_file(
         certs.server_priv_key.clone(),
-        rustls::internal::pemfile::pkcs8_private_keys,
+        pkcs8_keys,
         "Private key, DER-encoded ASN.1 in either PKCS#8 or PKCS#1 format".to_owned(),
     )
     // or try to extract all PKCS1 private keys
     .or_else(|_| {
         extract_cert_from_file(
             certs.server_priv_key.clone(),
-            rustls::internal::pemfile::rsa_private_keys,
+            rsa_keys,
             "Private key, DER-encoded ASN.1 in either PKCS#8 or PKCS#1 format".to_owned(),
         )
     })?;
@@ -831,7 +848,7 @@ fn wss_certs(ctx: &MmArc) -> P2PResult<Option<WssCerts>> {
 
     let certs = extract_cert_from_file(
         certs.certificate,
-        rustls::internal::pemfile::certs,
+        cert_chain,
         "Certificate, DER-encoded X.509 format".to_owned(),
     )?;
     Ok(Some(WssCerts { server_priv_key, certs }))

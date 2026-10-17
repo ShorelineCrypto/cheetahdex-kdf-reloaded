@@ -9,7 +9,6 @@ use futures::{channel::{mpsc::{channel, Receiver, Sender},
                         oneshot},
               future::{abortable, join_all, poll_fn, AbortHandle},
               Future, SinkExt, StreamExt};
-use futures_rustls::rustls;
 use libp2p::core::transport::Boxed as BoxedTransport;
 use libp2p::floodsub::{Floodsub, FloodsubEvent, Topic as FloodsubTopic};
 use libp2p::gossipsub::{Behaviour as Gossipsub, ConfigBuilder as GossipsubConfigBuilder, Event as GossipsubEvent,
@@ -885,9 +884,10 @@ where
     }
 }
 
+/// DER-encoded WSS server key and certificate chain.
 pub struct WssCerts {
-    pub server_priv_key: rustls::PrivateKey,
-    pub certs: Vec<rustls::Certificate>,
+    pub server_priv_key: Vec<u8>,
+    pub certs: Vec<Vec<u8>>,
 }
 
 pub enum NodeType {
@@ -1172,11 +1172,11 @@ fn build_dns_ws_transport(
     let mut ws_dns_tcp = libp2p::websocket::WsConfig::new(new_dns_tcp());
 
     if let Some(certs) = wss_certs {
-        let server_priv_key = libp2p_tls::PrivateKey::new(certs.server_priv_key.0.clone());
+        let server_priv_key = libp2p_tls::PrivateKey::new(certs.server_priv_key.clone());
         let certs = certs
             .certs
             .iter()
-            .map(|cert| libp2p_tls::Certificate::new(cert.0.clone()));
+            .map(|cert| libp2p_tls::Certificate::new(cert.clone()));
         let wss_config = libp2p_tls::Config::new(server_priv_key, certs).unwrap();
         ws_dns_tcp.set_tls_config(wss_config);
     }

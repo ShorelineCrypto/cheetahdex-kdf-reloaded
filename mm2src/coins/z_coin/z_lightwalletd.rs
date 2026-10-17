@@ -47,7 +47,7 @@ use keys::hash::H256;
 use keys::Address;
 use mm2_err_handle::prelude::*;
 use parking_lot::Mutex;
-use prost::Message as _;
+use prost_14::Message as _;
 use rpc::v1::types::{Bytes as BytesJson, Transaction as RpcTransaction, H256 as H256Json};
 use serialization::{deserialize, serialize, CoinVariant};
 use sha2::{Digest, Sha256};

@@ -814,7 +814,7 @@ impl ZCoinShieldedHistory {
             .timeout(LIGHTWALLETD_REQUEST_TIMEOUT);
         let endpoint = if endpoint_url.starts_with("https://") {
             endpoint
-                .tls_config(ClientTlsConfig::new())
+                .tls_config(ClientTlsConfig::new().with_enabled_roots())
                 .map_err(|e| lightwalletd_error_with_sources(&e))?
         } else {
             endpoint
