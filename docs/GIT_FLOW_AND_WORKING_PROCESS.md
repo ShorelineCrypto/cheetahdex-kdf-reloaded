@@ -79,7 +79,14 @@ The deprecated upstream `mm2.1` branch is not used in Reloaded.
 
 ## CI
 
-- Self-hosted Linux runner runs `test.yml` on push.
+- `test.yml` runs on GitHub-hosted runners for every pull request into, and
+  every push to, `dev`, `staging` and `main` (and `reloaded-gplv2-base`).
+  Branch protection requires its `tests-passed` job, which succeeds only when
+  `fmt`, `clippy`, every `unit-tests` leg and `wasm32-check` all succeeded. To
+  make a new test job required, add it to `tests-passed`'s `needs:` list in
+  `test.yml`; repository settings do not change. `docker-tests`,
+  `trezor-emulator-tests` and `external-network-tests` run but are not
+  required, because they depend on third-party services or live networks.
 - Platform builds (Windows, macOS, iOS, Android, WASM) live under
   `.github/workflows/build-*.yml` and are dispatched manually until each
   runner is verified — see [CI_RUNNERS.md](./CI_RUNNERS.md).

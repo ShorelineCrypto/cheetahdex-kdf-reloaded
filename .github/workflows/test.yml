@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ reloaded-gplv2-base, dev, staging, main ]
 
+permissions:
+  contents: read
+
 # Supersede in-flight runs of the same workflow on the same ref so a fast
 # follow-up push cancels the now-stale run instead of queuing behind it.
 # If a push to the base branch ever needs to complete unconditionally,
@@ -527,3 +530,50 @@ jobs:
             /tmp/mm2_*/**/mm2.log
           if-no-files-found: warn
           retention-days: 7
+
+  tests-passed:
+    # The single required status check for dev, staging and main. Branch
+    # protection pins this one stable context name instead of the individual
+    # jobs: the unit-tests matrix legs are named after their commands, so
+    # pinning them would mean the next edit to a matrix command silently renames
+    # a required check, and every PR afterwards hangs on "Expected -- waiting for
+    # status to be reported". A future test job is made required by adding it
+    # to `needs:` below, not by changing repository settings; that indirection
+    # is the point of this job.
+    #
+    # THE TRAP this job guards against: a job whose `needs:` dependency fails is
+    # SKIPPED, not failed, and a skipped job counts as passing for a required
+    # status check. Written naively, this job would turn a red lint or test run
+    # into a green gate. So it runs `if: always()` and then asserts explicitly
+    # that every dependency's result is exactly `success`; failure, cancelled,
+    # skipped and any other result all fail it. `if: always()` also means it
+    # runs (and fails) in a cancelled run instead of being skipped.
+    #
+    # Deliberately NOT in `needs:`: docker-tests and trezor-emulator-tests depend
+    # on third-party availability (Docker Hub images, the trezor-user-env
+    # emulator stack), and external-network-tests runs against live networks and
+    # is `continue-on-error` by design. A required check must be deterministic
+    # given the commit and independent of third-party uptime, or people learn to
+    # bypass the rule. They are phase-2 candidates once there is reliability
+    # data for them.
+    if: always()
+    needs: [fmt, clippy, unit-tests, wasm32-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Assert every dependency succeeded
+        # `needs` arrives through the environment, not spliced into the script,
+        # and is printed in full so a red run is diagnosable from this log alone.
+        # `unit-tests` is a matrix; its result is `failure` if any leg failed.
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        shell: bash
+        run: |
+          echo "$NEEDS_JSON"
+          bad=$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$NEEDS_JSON")
+          if [ -n "$bad" ]; then
+            echo "::error::required jobs did not succeed: $(echo $bad)"
+            exit 1
+          fi
+          echo "all required jobs succeeded"

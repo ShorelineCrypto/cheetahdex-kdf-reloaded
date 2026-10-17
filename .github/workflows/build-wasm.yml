@@ -98,8 +98,9 @@ jobs:
   # .cargo/config.toml's `getrandom_backend="wasm_js"` cfg; only unused-import
   # warnings remain, which do not fail the build). `continue-on-error` has
   # therefore been removed so this job actually guards the WASM leg of
-  # staging-build.yml, dev-build*.yml and release.yml instead of letting a broken
-  # WASM build report success. build-wasm.yml has no PR trigger, so the first
+  # staging-build.yml, dev-build.yml and dev-build-rpc.yml (its only callers;
+  # release.yml has no WASM leg) instead of letting a broken WASM build report
+  # success. build-wasm.yml has no PR trigger, so the first
   # clean-runner confirmation is a `workflow_dispatch`.
   build:
     needs: check
