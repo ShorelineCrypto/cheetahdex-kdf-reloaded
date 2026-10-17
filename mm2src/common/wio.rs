@@ -5,11 +5,14 @@ use futures::executor::ThreadPool;
 use futures01::sync::oneshot::{self, Receiver};
 use futures01::{Async, Future, Poll};
 use gstuff::{duration_to_float, now_float};
-use hyper::client::HttpConnector;
-use hyper::Client;
+use http_body_util::Full;
+use hyper::body::Bytes;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioTimer;
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -160,13 +163,33 @@ pub fn init() {
     super::black_box(&*super::trace_name_buf());
 }
 
+/// Builds the HTTPS connector shared by the native HTTP clients (`HYPER` and the Tendermint RPC client).
+///
+/// The `ring` crypto provider is passed explicitly instead of relying on the process-global default
+/// provider: that default is resolved at runtime on the first handshake and panics when it is ambiguous,
+/// and nothing here should depend on what else in the process installed. Trust anchors are the bundled
+/// `webpki-roots` set, TLS 1.2 and 1.3 are both enabled (`tls12` feature), and HTTP/1.1 and HTTP/2 are
+/// negotiated through ALPN.
+pub fn https_connector() -> HttpsConnector<HttpConnector> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    // Please note there was a problem on iOS if native roots are used instead.
+    HttpsConnectorBuilder::new()
+        .with_provider_and_webpki_roots(provider)
+        .expect("the ring provider supports the default protocol versions")
+        .https_or_http()
+        .enable_http1()
+        .enable_http2()
+        .build()
+}
+
+/// The shared HTTP client type: request bodies are fully buffered.
+pub type HyperClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
+
 lazy_static! {
     /// NB: With a shared client there is a possibility that keep-alive connections will be reused.
-    pub static ref HYPER: Client<HttpsConnector<HttpConnector>> = {
-        // Please note there was a problem on iOS if [`HttpsConnector::with_native_roots`] is used instead.
-        let https = HttpsConnectorBuilder::new().with_webpki_roots().https_or_http().enable_http1().enable_http2().build();
-        Client::builder()
-            .executor(&*CORE)
+    pub static ref HYPER: HyperClient = {
+        Client::builder(&*CORE)
+            .pool_timer(TokioTimer::new())
             // Hyper had a lot of Keep-Alive bugs over the years and I suspect
             // that with the shared client we might be getting errno 10054
             // due to a closed Keep-Alive connection mismanagement.
@@ -178,6 +201,6 @@ lazy_static! {
             // Performance of Keep-Alive in the Hyper client is questionable as well,
             // should measure it on a case-by-case basis when we need it.
             .pool_max_idle_per_host(0)
-            .build(https)
+            .build(https_connector())
     };
 }
