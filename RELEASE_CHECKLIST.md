@@ -52,6 +52,7 @@ For each behavioural divergence from GLEEC KDF introduced in this release (see [
 
 - [ ] Counsel review on file for the licensing posture of this release (or, for an interim release, an explicit counsel waiver).
 - [ ] Release artifacts signed with the published GPG/minisign key. Signature files attached to the GitHub release.
+- [ ] `COPYING`, `LICENSE` and `THIRDPARTY-LICENSES` attached to the GitHub release (added by `release.yml`), and the release notes point to the source at the release tag.
 - [ ] Vulnerability disclosure mailbox active and monitored.
 - [ ] No known unfixed high-severity advisories against direct dependencies (verified via `cargo audit` or equivalent).
 - [ ] No secrets present in the tree (sweep for accidental commits of `MM2.json`, `.env`, mnemonics, private keys).
