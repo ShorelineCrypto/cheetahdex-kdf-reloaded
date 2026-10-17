@@ -163,6 +163,33 @@ pub fn init() {
     super::black_box(&*super::trace_name_buf());
 }
 
+/// Pending-connection queue length of the server listeners.
+///
+/// `std::net::TcpListener::bind` uses 128; the `hyper` 0.14 servers bound through tokio, which uses 1024.
+pub const LISTEN_BACKLOG: u32 = 1024;
+
+/// Binds a listening socket for the HTTP servers, synchronously, so a bind failure reaches the caller.
+///
+/// Built with `TcpSocket` to get a backlog of [`LISTEN_BACKLOG`]. `TcpSocket` does not do what
+/// `std::net::TcpListener::bind` does on Unix, which is to set `SO_REUSEADDR`; without it a restart
+/// can fail with "address already in use" while the old socket sits in `TIME_WAIT`, so it is set
+/// explicitly (and, like `std`, not at all on Windows, where it would allow port hijacking).
+/// `IPV6_V6ONLY` is left at the system default, as `std` leaves it.
+///
+/// The socket is registered with the shared reactor, so this enters the `CORE` runtime itself.
+pub fn bind_listener(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    let _guard = CORE.0.enter();
+    let socket = if addr.is_ipv4() {
+        tokio::net::TcpSocket::new_v4()?
+    } else {
+        tokio::net::TcpSocket::new_v6()?
+    };
+    #[cfg(unix)]
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    socket.listen(LISTEN_BACKLOG)
+}
+
 /// Builds the HTTPS connector shared by the native HTTP clients (`HYPER` and the Tendermint RPC client).
 ///
 /// The `ring` crypto provider is passed explicitly instead of relying on the process-global default
@@ -203,4 +230,42 @@ lazy_static! {
             .pool_max_idle_per_host(0)
             .build(https_connector())
     };
+}
+
+#[cfg(all(test, unix))]
+mod listener_tests {
+    use super::*;
+    use std::io::Read;
+    use std::net::TcpStream;
+
+    /// The server side closes first, so its socket is left in `TIME_WAIT`; a restart must still bind.
+    #[test]
+    fn bind_listener_rebinds_over_time_wait() {
+        let listener = bind_listener("127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        let (server_side, _) = CORE.0.block_on(listener.accept()).unwrap();
+        drop(server_side); // active close on the server: this socket goes to TIME_WAIT
+        assert_eq!(client.read(&mut [0u8; 1]).unwrap(), 0);
+        drop(listener);
+        let again = bind_listener(addr).expect("rebinding the same port right after a restart");
+        assert_eq!(again.local_addr().unwrap(), addr);
+    }
+
+    #[test]
+    fn bind_listener_reports_a_busy_port_synchronously() {
+        let listener = bind_listener("127.0.0.1:0".parse().unwrap()).unwrap();
+        let err = bind_listener(listener.local_addr().unwrap()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+    }
+
+    #[test]
+    fn bind_listener_accepts_ipv6_when_the_host_has_it() {
+        // IPv6 may be disabled on the host (CI containers); only a bind that is possible at all is checked.
+        if std::net::TcpListener::bind("[::1]:0").is_err() {
+            return;
+        }
+        let listener = bind_listener("[::1]:0".parse().unwrap()).unwrap();
+        assert!(listener.local_addr().unwrap().is_ipv6());
+    }
 }

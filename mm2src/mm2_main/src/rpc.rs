@@ -503,10 +503,7 @@ pub fn spawn_rpc(ctx_h: u32) -> Result<(), String> {
     // than unwinds now that the function is a plain Rust fn (its former `extern "C"`
     // qualifier made a panic here undefined behaviour / an abrupt SIGABRT, since it
     // has always had exactly one caller in this crate, not a real FFI boundary).
-    let listener = std::net::TcpListener::bind(rpc_ip_port)
-        .and_then(|listener| listener.set_nonblocking(true).map(|()| listener))
-        .and_then(tokio::net::TcpListener::from_std)
-        .map_err(|e| format!("Can't bind on {rpc_ip_port}: {e}"))?;
+    let listener = common::wio::bind_listener(rpc_ip_port).map_err(|e| format!("Can't bind on {rpc_ip_port}: {e}"))?;
     // The actual bound address: identical to `rpc_ip_port` unless port 0 was
     // requested (R45.5.1: "bind any free port"), in which case the OS chose one.
     let bound_addr = listener

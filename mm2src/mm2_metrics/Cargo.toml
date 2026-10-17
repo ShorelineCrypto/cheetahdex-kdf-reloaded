@@ -19,4 +19,3 @@ http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["server-graceful", "tokio", "http1"] }
 itertools.workspace = true
-tokio = { workspace = true, features = ["net"] }

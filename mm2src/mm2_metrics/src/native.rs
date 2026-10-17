@@ -528,19 +528,10 @@ pub mod prometheus {
         shutdown_detector: impl Future<Output = ()> + 'static + Send,
         credentials: Option<PrometheusCredentials>,
     ) -> Result<(), String> {
-        // Binding is synchronous so that a bind failure is still reported to the caller; the listener is
-        // registered with the reactor inside the spawned task, which always runs on the tokio runtime.
-        let listener = try_s!(std::net::TcpListener::bind(address));
-        try_s!(listener.set_nonblocking(true));
+        // Binding is synchronous so that a bind failure is still reported to the caller.
+        let listener = try_s!(common::wio::bind_listener(address));
 
         spawn(async move {
-            let listener = match tokio::net::TcpListener::from_std(listener) {
-                Ok(listener) => listener,
-                Err(err) => {
-                    log!((err));
-                    return;
-                },
-            };
             let graceful = GracefulShutdown::new();
             let mut shutdown = Box::pin(shutdown_detector);
             loop {

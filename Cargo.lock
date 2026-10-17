@@ -5939,7 +5939,6 @@ dependencies = [
  "itertools 0.10.3",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
