@@ -66,6 +66,36 @@ cargo test --bins --lib
 
 Windows uses the same commands with `--target x86_64-pc-windows-msvc`; macOS/WASM/iOS/Android are only partially documented in `docs/DEV_BUILD.md`.
 
+### Build directories: one per worktree, never inside it
+
+Parallel work here happens in worktrees under `local/worktrees/<name>/`. Each worktree
+builds into its own directory `local/targets/<name>/` of the main checkout, set through
+`CARGO_TARGET_DIR`, and never into a directory inside the worktree:
+
+```sh
+# Run from the worktree root; resolves to <main checkout>/local/targets/<worktree name>
+export CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../local/targets/$(basename "$(git rev-parse --show-toplevel)")"
+```
+
+- **One directory per worktree, never shared.** Two branches must not build into the same
+  target directory. A branch that regenerates code at build time (for example `z_coin`'s
+  protobuf module) leaves its output for the other branch to pick up, which breaks it in
+  either direction. The dangerous case is a build that passes against the wrong generated
+  code. Do not point two worktrees at one `local/targets/` entry, and do not reuse a
+  removed worktree's entry for a new one. Delete the entry when you remove the worktree.
+- **Outside the worktree, because git cannot see it there.** Git treats a worktree's root
+  as the repository root, so the main checkout's `/local/` ignore rule does not apply
+  inside a worktree. A build directory created at a worktree root shows up as an untracked
+  top-level directory that a single `git add -A` would commit. That is how a 1.9 GB cargo
+  output directory once ended up at a worktree root. `local/targets/` lies inside the main
+  checkout's ignored `local/` and outside every worktree, so no worktree's git ever sees
+  it, and it needs no `.gitignore` or `exclude` entry.
+- **The main checkout keeps its own `target-private/`.** That directory at the repository
+  root predates this convention. It is the main checkout's own private target directory,
+  excluded through the local `.git/info/exclude`, and it follows the same
+  one-directory-per-checkout rule. This convention covers worktrees only and does not
+  move it.
+
 ### Before saying a change is verified
 
 `AGENTS.md` §6 "Targets a plain `cargo check` does not cover" is binding here.
