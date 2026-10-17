@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ reloaded-gplv2-base, dev, staging, main ]
 
+permissions:
+  contents: read
+
 # Supersede in-flight runs of the same workflow on the same ref so a fast
 # follow-up push cancels the now-stale run instead of queuing behind it.
 # If a push to the base branch ever needs to complete unconditionally,
