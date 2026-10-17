@@ -101,7 +101,7 @@ futures = { version = "0.3", package = "futures", features = ["compat", "async-a
 gstuff = "0.7"
 hex = "0.4.2"
 hkdf = "0.12.4"
-http = "0.2"
+http = "1"
 itertools = "0.10"
 lazy_static = "1.4"
 # KomodoPlatform rust-libp2p fork (~0.52.x). Pinned by tag; features are

@@ -81,7 +81,7 @@ futures01 = { version = "0.1", package = "futures" }
 futures = { version = "0.3", package = "futures", features = ["compat", "async-await"] }
 gstuff = { version = "0.7" }
 hex = "0.4.2"
-http = "0.2"
+http = "1"
 itertools = { version = "0.10", features = ["use_std"] }
 jsonrpc-core = "8.0.1"
 kdf_walletconnect = { path = "../kdf_walletconnect" }
@@ -177,8 +177,10 @@ zcash_primitives = { version = "=0.30.1", default-features = false, features = [
 # the major versions. Note dirs >= 4 resolves the Windows home via
 # SHGetKnownFolderPath rather than %HOME%/%USERPROFILE%.
 dirs = { version = "6" }
-hyper = { version = "0.14", features = ["client", "http2", "http1"] }
-hyper-rustls = { version = "0.23", default-features = false, features = ["http1", "http2", "webpki-roots", "webpki-tokio"] }
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false }
+hyper-rustls = { version = "0.27", default-features = false }
+hyper-util = { version = "0.1", default-features = false, features = ["client-legacy", "http1", "tokio"] }
 # The `lightning` module (mm2src/coins/lightning/) is itself
 # `#[cfg(not(target_arch = "wasm32"))]` (see lp_coins.rs), so its
 # dependencies belong here rather than in the unconditional block above —

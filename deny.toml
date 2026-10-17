@@ -72,12 +72,10 @@ ignore = [
     # them requires upstream fork modernization. The WSS rustls/ring/webpki line
     # is additionally coupled to reloaded's futures-rustls transport binding.
     # (libp2p-websocket itself is vendored on rustls 0.23 -- see vendor-patches/
-    # libp2p-websocket-0.42.0; the remaining rustls 0.20 consumers are
-    # hyper-rustls in coins and common, and the Electrum TLS path in coins.)
-    "RUSTSEC-2024-0336", # rustls (fork WSS/TLS)
+    # libp2p-websocket-0.42.0. No rustls 0.20 consumer remains; the former
+    # RUSTSEC-2024-0336 (rustls), RUSTSEC-2023-0052 (webpki) and RUSTSEC-2025-0009
+    # (ring) ignores went with it.)
     "RUSTSEC-2026-0049", # rustls-webpki
-    "RUSTSEC-2023-0052", # webpki
-    "RUSTSEC-2025-0009", # ring
     "RUSTSEC-2024-0421", # idna (fork libp2p-dns -> trust-dns-proto 0.22)
 
     # --- Misattributed to the libp2p fork; kept, but for a different reason ---
@@ -107,17 +105,6 @@ ignore = [
     # - secp256k1 0.20 (RUSTSEC-2022-0070): pinned by deeper dependencies.
     "RUSTSEC-2022-0092", # rmp-serde Raw/RawRef unsound
     "RUSTSEC-2022-0070", # secp256k1 0.20 use-after-free in safe code
-
-    # --- hyper 0.14 / h2 0.3 (workspace-wide) ---
-    # RUSTSEC-2026-0258 (low severity: unbounded empty DATA frames -> unbounded
-    # memory or a length-overflow panic if a stream is never drained) is fixed
-    # only in h2 >=0.4.16, which pairs with hyper 1.x -- there is no in-line
-    # 0.3.x patch. hyper 0.14 is the version axum 0.6, tonic 0.11, and this
-    # workspace's own client code are all still built against; moving to h2
-    # 0.4 means moving the whole hyper stack to 1.x across every one of those,
-    # not a `cargo update -p h2`. Scheduled, not upstream-blocked: tracked as
-    # its own migration rather than folded into this ignore silently.
-    "RUSTSEC-2026-0258", # h2 0.3.27 unbounded empty DATA frames
 
     # --- Residual `unsound` advisories: accepted, NOT listed as ignores ---
     # cargo-deny does not match these against the graph (see the CORRECTION at the
