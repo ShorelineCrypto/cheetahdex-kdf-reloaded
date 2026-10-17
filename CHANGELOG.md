@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The wss transport now uses rustls 0.23 (ring), and a malformed wss key file is a startup error
+  instead of a panic.** The libp2p fork's websocket crate was the last holder of rustls 0.20 in the
+  peer-to-peer stack; it is vendored with only its TLS layer ported (`vendor-patches/libp2p-websocket-0.42.0`).
+  This is dependency hygiene (RUSTSEC-2026-0349 is not practically exploitable here: no affected rustls
+  version implements a hybrid key-exchange group). A relay whose configured wss key or certificate cannot
+  be loaded now fails to start with the new `P2PInitError::InvalidWssConfig` rather than aborting.
+  Other rustls 0.20 users remain in `coins` and `common`.
 - **The initial swap gas-fee policy no longer depends on how the coin was activated, and a coin's
   `max_eth_tx_type` now caps the transaction type it will sign.** Two related behaviors, chosen
   together. First, the legacy `enable` / `electrum` route used to ignore the coin configuration and
