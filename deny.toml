@@ -72,8 +72,8 @@ ignore = [
     # them requires upstream fork modernization. The WSS rustls/ring/webpki line
     # is additionally coupled to reloaded's futures-rustls transport binding.
     # (libp2p-websocket itself is vendored on rustls 0.23 -- see vendor-patches/
-    # libp2p-websocket-0.42.0; the remaining rustls 0.20 entries below come from
-    # hyper-rustls/tokio-tungstenite in coins and common.)
+    # libp2p-websocket-0.42.0; the remaining rustls 0.20 consumers are
+    # hyper-rustls in coins and common, and the Electrum TLS path in coins.)
     "RUSTSEC-2024-0336", # rustls (fork WSS/TLS)
     "RUSTSEC-2026-0049", # rustls-webpki
     "RUSTSEC-2023-0052", # webpki
@@ -94,9 +94,6 @@ ignore = [
     # libp2p; cleared only by an upstream Solana SDK bump.
     "RUSTSEC-2022-0093", # ed25519-dalek 1.x (double public key signing oracle)
     "RUSTSEC-2024-0344", # curve25519-dalek (timing variability)
-
-    # --- WalletConnect (via tungstenite) ---
-    "RUSTSEC-2023-0065", # tungstenite DoS on large frames
 
     # --- Unsound advisories (transitive) ---
     # Listed as accepted risk. (These were added believing schema v2 made
