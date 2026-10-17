@@ -71,11 +71,11 @@ ignore = [
     # We must stay on the fork for the relay-mesh gossipsub extension; clearing
     # them requires upstream fork modernization. The WSS rustls/ring/webpki line
     # is additionally coupled to reloaded's futures-rustls transport binding.
+    # (libp2p-websocket itself is vendored on rustls 0.23 -- see vendor-patches/
+    # libp2p-websocket-0.42.0; the remaining rustls 0.20 entries below come from
+    # hyper-rustls/tokio-tungstenite in coins and common.)
     "RUSTSEC-2024-0336", # rustls (fork WSS/TLS)
     "RUSTSEC-2026-0049", # rustls-webpki
-    "RUSTSEC-2026-0098", # rustls-webpki
-    "RUSTSEC-2026-0099", # rustls-webpki
-    "RUSTSEC-2026-0104", # rustls-webpki
     "RUSTSEC-2023-0052", # webpki
     "RUSTSEC-2025-0009", # ring
     "RUSTSEC-2024-0421", # idna (fork libp2p-dns -> trust-dns-proto 0.22)
