@@ -50,6 +50,21 @@ jobs:
       - name: cargo-deny (advisories)
         run: cargo deny check advisories
 
+  licenses:
+    # Fails when a dependency's license is neither in deny.toml's `allow` list
+    # nor covered by a per-crate `exceptions` entry, so a new dependency must be
+    # compatible with the GPL-2.0-only combined work (LEGAL/LICENSING-POLICY.md).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install cargo-deny (pinned)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.19.9
+      - name: cargo-deny (licenses)
+        run: cargo deny check licenses
+
   # cargo-deny reads the RustSec advisory database. The GitHub Advisory Database is
   # a superset of it, and the gap is not theoretical: on 2026-09-23 five open alerts
   # against the root lockfile -- including two remotely reachable gossipsub panics

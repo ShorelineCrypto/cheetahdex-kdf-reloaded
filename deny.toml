@@ -174,49 +174,234 @@ ignore = [
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-# cargo-deny schema v2: the pre-0.16 keys `unlicensed`, `deny`, `copyleft`,
-# `allow-osi-fsf-free` and `default` were removed (see cargo-deny PR #611).
-# Under v2 every license not in `allow` is denied. Our CI only runs
-# `cargo deny check advisories`, so this list is intentionally left empty;
-# populate `allow` before enabling `cargo deny check licenses`.
+# cargo-deny schema v2: every license not in `allow` (or in a per-crate
+# `exceptions` entry) is denied. CI runs `cargo deny check licenses`, so a new
+# dependency must carry a license compatible with the GPL-2.0-only combined
+# work, see LEGAL/LICENSING-POLICY.md. Choosing the compatible alternative of a
+# disjunctive expression (e.g. MIT in `MIT OR Apache-2.0`) is automatic.
 # See https://spdx.org/licenses/ for valid SPDX identifiers.
 allow = [
-    #"MIT",
-    #"Apache-2.0",
-    #"Apache-2.0 WITH LLVM-exception",
+    "0BSD",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "GPL-2.0-only",
+    "GPL-2.0-or-later",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
 ]
+# `GPL-2.0-or-later` is listed ahead of use for first-party crates.
+unused-allowed-license = "allow"
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
 # canonical license text of a valid SPDX license file.
 # [possible values: any between 0.0 and 1.0].
 confidence-threshold = 0.8
-# Allow 1 or more licenses on a per-crate basis, so that particular licenses
-# aren't accepted for every possible crate as with the normal allow list
+# Per-crate allowances. Keep this list from growing: an entry here is a known
+# inherited item that is being reduced over time, not a license grant.
 exceptions = [
-    # Each entry is the crate and version constraint, and its specific allow
-    # list
-    #{ allow = ["Zlib"], name = "adler32", version = "*" },
+    # Root-certificate data under a permissive data license (notice only).
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    # Known inherited dependency-license items, being reduced over time.
+    { allow = ["Apache-2.0"], crate = "bitcoinconsensus" },
+    { allow = ["Apache-2.0"], crate = "cosmos-sdk-proto" },
+    { allow = ["Apache-2.0"], crate = "cosmrs" },
+    { allow = ["Apache-2.0"], crate = "flex-error" },
+    { allow = ["Apache-2.0"], crate = "hash-db" },
+    { allow = ["Apache-2.0"], crate = "hash256-std-hasher" },
+    { allow = ["Apache-2.0"], crate = "memory-db" },
+    { allow = ["Apache-2.0"], crate = "pairing_api" },
+    { allow = ["Apache-2.0"], crate = "parity-scale-codec" },
+    { allow = ["Apache-2.0"], crate = "parity-scale-codec-derive" },
+    { allow = ["Apache-2.0"], crate = "prost" },
+    { allow = ["Apache-2.0"], crate = "prost-build" },
+    { allow = ["Apache-2.0"], crate = "prost-derive" },
+    { allow = ["Apache-2.0"], crate = "prost-types" },
+    { allow = ["Apache-2.0"], crate = "relay_client" },
+    { allow = ["Apache-2.0"], crate = "relay_rpc" },
+    { allow = ["Apache-2.0"], crate = "scale-info" },
+    { allow = ["Apache-2.0"], crate = "scale-info-derive" },
+    { allow = ["Apache-2.0"], crate = "solana-account-info" },
+    { allow = ["Apache-2.0"], crate = "solana-atomic-u64" },
+    { allow = ["Apache-2.0"], crate = "solana-bincode" },
+    { allow = ["Apache-2.0"], crate = "solana-clock" },
+    { allow = ["Apache-2.0"], crate = "solana-commitment-config" },
+    { allow = ["Apache-2.0"], crate = "solana-cpi" },
+    { allow = ["Apache-2.0"], crate = "solana-decode-error" },
+    { allow = ["Apache-2.0"], crate = "solana-define-syscall" },
+    { allow = ["Apache-2.0"], crate = "solana-epoch-rewards" },
+    { allow = ["Apache-2.0"], crate = "solana-epoch-schedule" },
+    { allow = ["Apache-2.0"], crate = "solana-fee-calculator" },
+    { allow = ["Apache-2.0"], crate = "solana-hash" },
+    { allow = ["Apache-2.0"], crate = "solana-instruction" },
+    { allow = ["Apache-2.0"], crate = "solana-instructions-sysvar" },
+    { allow = ["Apache-2.0"], crate = "solana-keypair" },
+    { allow = ["Apache-2.0"], crate = "solana-last-restart-slot" },
+    { allow = ["Apache-2.0"], crate = "solana-message" },
+    { allow = ["Apache-2.0"], crate = "solana-msg" },
+    { allow = ["Apache-2.0"], crate = "solana-native-token" },
+    { allow = ["Apache-2.0"], crate = "solana-program-entrypoint" },
+    { allow = ["Apache-2.0"], crate = "solana-program-error" },
+    { allow = ["Apache-2.0"], crate = "solana-program-memory" },
+    { allow = ["Apache-2.0"], crate = "solana-program-option" },
+    { allow = ["Apache-2.0"], crate = "solana-program-pack" },
+    { allow = ["Apache-2.0"], crate = "solana-pubkey" },
+    { allow = ["Apache-2.0"], crate = "solana-rent" },
+    { allow = ["Apache-2.0"], crate = "solana-sanitize" },
+    { allow = ["Apache-2.0"], crate = "solana-sdk-ids" },
+    { allow = ["Apache-2.0"], crate = "solana-sdk-macro" },
+    { allow = ["Apache-2.0"], crate = "solana-seed-phrase" },
+    { allow = ["Apache-2.0"], crate = "solana-serialize-utils" },
+    { allow = ["Apache-2.0"], crate = "solana-sha256-hasher" },
+    { allow = ["Apache-2.0"], crate = "solana-short-vec" },
+    { allow = ["Apache-2.0"], crate = "solana-signature" },
+    { allow = ["Apache-2.0"], crate = "solana-signer" },
+    { allow = ["Apache-2.0"], crate = "solana-slot-hashes" },
+    { allow = ["Apache-2.0"], crate = "solana-slot-history" },
+    { allow = ["Apache-2.0"], crate = "solana-stable-layout" },
+    { allow = ["Apache-2.0"], crate = "solana-stake-interface" },
+    { allow = ["Apache-2.0"], crate = "solana-system-interface" },
+    { allow = ["Apache-2.0"], crate = "solana-system-transaction" },
+    { allow = ["Apache-2.0"], crate = "solana-sysvar" },
+    { allow = ["Apache-2.0"], crate = "solana-sysvar-id" },
+    { allow = ["Apache-2.0"], crate = "solana-transaction" },
+    { allow = ["Apache-2.0"], crate = "solana-transaction-error" },
+    { allow = ["Apache-2.0"], crate = "sp-core" },
+    { allow = ["Apache-2.0"], crate = "sp-debug-derive" },
+    { allow = ["Apache-2.0"], crate = "sp-runtime-interface" },
+    { allow = ["Apache-2.0"], crate = "sp-runtime-interface-proc-macro" },
+    { allow = ["Apache-2.0"], crate = "sp-std" },
+    { allow = ["Apache-2.0"], crate = "sp-storage" },
+    { allow = ["Apache-2.0"], crate = "sp-tracing" },
+    { allow = ["Apache-2.0"], crate = "sp-trie" },
+    { allow = ["Apache-2.0"], crate = "sp-wasm-interface" },
+    { allow = ["Apache-2.0"], crate = "spl-associated-token-account-client" },
+    { allow = ["Apache-2.0"], crate = "spl-token" },
+    { allow = ["Apache-2.0"], crate = "ss58-registry" },
+    { allow = ["Apache-2.0"], crate = "sync_wrapper" },
+    { allow = ["Apache-2.0"], crate = "tendermint" },
+    { allow = ["Apache-2.0"], crate = "tendermint-config" },
+    { allow = ["Apache-2.0"], crate = "tendermint-proto" },
+    { allow = ["Apache-2.0"], crate = "tendermint-rpc" },
+    { allow = ["Apache-2.0"], crate = "trie-db" },
+    { allow = ["Apache-2.0"], crate = "trie-root" },
+    { allow = ["Apache-2.0"], crate = "wc_common" },
+    { allow = ["Apache-2.0"], crate = "zcash_script" },
+    { allow = ["Apache-2.0", "OpenSSL"], crate = "ring" },
+    { allow = ["GPL-3.0"], crate = "proc-macro-warning" },
+    { allow = ["LGPL-3.0-or-later"], crate = "zbase32" },
+    { allow = ["LicenseRef-unspecified"], crate = "sia-rust" },
 ]
 
-# Some crates don't have (easily) machine readable licensing information,
-# adding a clarification entry for it allows you to manually specify the
-# licensing information
-#[[licenses.clarify]]
-# The name of the crate the clarification applies to
-#name = "ring"
-# The optional version constraint for the crate
-#version = "*"
-# The SPDX expression for the license requirements of the crate
-#expression = "MIT AND ISC AND OpenSSL"
-# One or more files in the crate's source used as the "source of truth" for
-# the license expression. If the contents match, the clarification will be used
-# when running the license check, otherwise the clarification will be ignored
-# and the crate will be checked normally, which may produce warnings or errors
-# depending on the rest of your configuration
-#license-files = [
-    # Each entry is a crate relative path, and the (opaque) hash of its contents
-    #{ path = "LICENSE", hash = 0xbd0eed23 }
-#]
+# `ring` 0.16 declares its terms only through its LICENSE file.
+[[licenses.clarify]]
+crate = "ring@0.16.20"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# The WalletConnect SDK crates carry no manifest license; their repository is
+# Apache-2.0.
+[[licenses.clarify]]
+crate = "pairing_api"
+expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+crate = "wc_common"
+expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+crate = "sia-rust"
+expression = "LicenseRef-unspecified"
+license-files = []
+
+# First-party crates created after the anchor commit have no manifest license
+# yet. They are part of the GPL-2.0-only combined work; their own manifest
+# label (GPL-2.0-or-later where the content is original, see
+# LEGAL/LICENSING-POLICY.md section 2) is set crate by crate.
+[[licenses.clarify]]
+crate = "enum_derives"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "kdf_walletconnect"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_bin_lib"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_eth"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_event_stream"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_git"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_gui_storage"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_metamask"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_metrics"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_net_config"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_number"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_p2p"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_state_machine"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "proxy_signature"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "trading_api"
+expression = "GPL-2.0-only"
+license-files = []
 
 [licenses.private]
 # If true, ignores workspace crates that aren't published, or are only
