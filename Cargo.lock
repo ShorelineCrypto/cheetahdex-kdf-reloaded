@@ -3567,24 +3567,13 @@ dependencies = [
 
 [[package]]
 name = "futures-rustls"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a1387e07917c711fb4ee4f48ea0adb04a3c9739e53ef85bf43ae1edc2937a8b"
-dependencies = [
- "futures-io",
- "rustls 0.19.1",
- "webpki 0.21.3",
-]
-
-[[package]]
-name = "futures-rustls"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e01fe9932a224b72b45336d96040aa86386d674a31d0af27d800ea7bc8ca97fe"
 dependencies = [
  "futures-io",
  "rustls 0.20.4",
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]
@@ -5277,7 +5266,7 @@ source = "git+https://github.com/KomodoPlatform/rust-libp2p.git?tag=k-0.52.12#8b
 dependencies = [
  "either",
  "futures 0.3.32",
- "futures-rustls 0.22.1",
+ "futures-rustls",
  "libp2p-core",
  "libp2p-identity",
  "log 0.4.29",
@@ -5847,7 +5836,6 @@ dependencies = [
  "fomat-macros 0.2.1",
  "futures 0.1.29",
  "futures 0.3.32",
- "futures-rustls 0.21.1",
  "gstuff",
  "hash-db",
  "hash256-std-hasher",
@@ -5893,6 +5881,7 @@ dependencies = [
  "regex",
  "rmp-serde",
  "rpc_task",
+ "rustls-pemfile 2.2.0",
  "secp256k1 0.29.1",
  "ser_error",
  "ser_error_derive",
@@ -6019,7 +6008,6 @@ dependencies = [
  "env_logger",
  "fnv",
  "futures 0.3.32",
- "futures-rustls 0.21.1",
  "futures_codec",
  "getrandom 0.2.17",
  "hex",
@@ -8033,27 +8021,14 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.19.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35edb675feee39aec9c99fa5ff985081995a06d594114ae14cbe797ad7b7a6d7"
-dependencies = [
- "base64 0.13.0",
- "log 0.4.29",
- "ring 0.16.20",
- "sct 0.6.0",
- "webpki 0.21.3",
-]
-
-[[package]]
-name = "rustls"
 version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fbfeb8d0ddb84706bc597a5574ab8912817c52a397f819e5b614e2265206921"
 dependencies = [
  "log 0.4.29",
  "ring 0.16.20",
- "sct 0.7.0",
- "webpki 0.22.0",
+ "sct",
+ "webpki",
 ]
 
 [[package]]
@@ -8307,16 +8282,6 @@ name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
-
-[[package]]
-name = "sct"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3042af939fca8c3453b7af0f1c66e533a15a86169e39de2657310ade8f98d3c"
-dependencies = [
- "ring 0.16.20",
- "untrusted 0.7.1",
-]
 
 [[package]]
 name = "sct"
@@ -10317,7 +10282,7 @@ checksum = "a27d5f2b839802bd8267fa19b0530f5a08b9c08cd417976be2a65d130fe1c11b"
 dependencies = [
  "rustls 0.20.4",
  "tokio",
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]
@@ -10356,7 +10321,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.23.2",
  "tungstenite",
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]
@@ -10763,7 +10728,7 @@ dependencies = [
  "thiserror 1.0.69",
  "url",
  "utf-8",
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]
@@ -11192,16 +11157,6 @@ dependencies = [
 
 [[package]]
 name = "webpki"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab146130f5f790d45f82aeeb09e55a256573373ec64409fc19a6fb82fb1032ae"
-dependencies = [
- "ring 0.16.20",
- "untrusted 0.7.1",
-]
-
-[[package]]
-name = "webpki"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
@@ -11216,7 +11171,7 @@ version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44d8de8415c823c8abd270ad483c6feeac771fad964890779f9a8cb24fbbc1bf"
 dependencies = [
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]
