@@ -226,6 +226,16 @@ libp2p-yamux = { path = "vendor-patches/libp2p-yamux-0.44.0" }
 [patch."https://github.com/komodoplatform/walletconnectrust"]
 relay_rpc = { path = "vendor-patches/relay_rpc-0.1.0" }
 
+# relay_client pins KomodoPlatform/tokio-tungstenite-wasm@8fc7e2f, whose only
+# dependency on a websocket stack is tokio-tungstenite 0.16 (rustls 0.20.4,
+# RUSTSEC-2026-0349; tungstenite 0.16 also carried RUSTSEC-2023-0065). The fork
+# has no commit past that rev, but its crate name is the upstream's, so the
+# upstream 0.4.0 release (tokio-tungstenite 0.24 on rustls 0.23) replaces it
+# unmodified: no vendored copy. Drop this patch if relay_client moves off the
+# fork rev.
+[patch."https://github.com/KomodoPlatform/tokio-tungstenite-wasm.git"]
+tokio-tungstenite-wasm = { version = "=0.4.0" }
+
 [patch.crates-io]
 core2 = { path = "core2-shim" }
 zcash_primitives = { path = "vendor-patches/zcash_primitives-0.30.1" }
