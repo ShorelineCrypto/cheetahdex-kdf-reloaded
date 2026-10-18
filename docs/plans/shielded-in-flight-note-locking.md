@@ -1,6 +1,17 @@
 # Plan: shielded in-flight note locking (ARRR taker swaps)
 
-> **Status:** implemented 2026-09-22; specification is now CRD ch.39 §39.8.0.7
+**Status:** parked (swap paths shipped; the `withdraw` path and most of T39.8.0h are open) — **Last reviewed:** 2026-10-18
+
+> **Re-checked against the tree 2026-10-18.** Selection, construction, broadcast and recording
+> run as one critical section in `ZCoin::send_outputs`
+> (`mm2src/coins/z_coin/z_coin_ops.rs`), and both v1 ARRR swap sends — the dex fee and the
+> HTLC payment (`mm2src/coins/z_coin/z_htlc.rs`) — go through it, so a taker fee followed by a
+> taker payment can no longer pick the same note. The residual gap is the one named below:
+> `withdraw` builds through `gen_tx` and the caller broadcasts, so a withdrawal is not
+> recorded (CRD ch.39 D39.8.0e), and T39.8.0h's broadcast/restart/expiry/concurrency cases
+> are still uncovered (D39.8.0f).
+>
+> **Context:** implemented 2026-09-22; specification is now CRD ch.39 §39.8.0.7
 > (R39.8.0ao–R39.8.0at, T39.8.0h), which supersedes the design sketch below.
 >
 > Created 2026-09-22 after a question about whether reloaded has an equivalent

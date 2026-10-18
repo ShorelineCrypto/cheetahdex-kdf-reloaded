@@ -1,6 +1,8 @@
 # Plan: Tendermint activation features
 
-> **Status:** planned, not started. Created 2026-10-11 on
+**Status:** parked (deferred by maintainer decision 2026-10-11; nothing started) — **Last reviewed:** 2026-10-18
+
+> **Context:** created 2026-10-11 on
 > `fix/activation-api-parity`. That branch brings Tendermint activation to wire
 > parity (error names, `error_data` shapes, HTTP statuses, error placement and
 > failure mapping, CRD ch. 36). The features below are what the reference
