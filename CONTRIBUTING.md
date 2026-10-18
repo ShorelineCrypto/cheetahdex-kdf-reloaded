@@ -7,9 +7,10 @@ See also: [docs/PR_REVIEW_CHECKLIST.md](./docs/PR_REVIEW_CHECKLIST.md),
 [docs/GIT_FLOW_AND_WORKING_PROCESS.md](./docs/GIT_FLOW_AND_WORKING_PROCESS.md),
 [docs/UNIT_TESTS.md](./docs/UNIT_TESTS.md).
 
-Work that carries a decision the code does not record gets a plan under
-[`docs/plans/`](./docs/plans/), and the PR that changes the work updates its
-plan in the same PR — see
+Live or intended work that carries a decision the code does not record gets a
+plan under [`docs/plans/`](./docs/plans/), and any commit that changes the work
+or the plan keeps the two in step — a branch's plan must be current at its tip
+before review — see
 [Plans and the changelog](./docs/GIT_FLOW_AND_WORKING_PROCESS.md#plans-and-the-changelog)
 for the rule, the status vocabulary and what belongs in the changelog.
 

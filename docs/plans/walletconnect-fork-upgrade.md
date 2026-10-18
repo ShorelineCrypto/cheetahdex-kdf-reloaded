@@ -1,6 +1,6 @@
 # Plan: WalletConnect relay transport — tungstenite bump
 
-**Status:** superseded (by [`rustls-and-http-stack-modernization.md`](rustls-and-http-stack-modernization.md), 2026-10-17) — **Last reviewed:** 2026-10-18
+**Status:** superseded (by the rustls 0.23 series, PR #40, 2026-10-17) — **Last reviewed:** 2026-10-18
 
 > **Both advisories this plan existed to clear are gone, and neither was cleared the way the
 > plan proposed.** The route below — fork two Gleec-maintained repositories and carry them
@@ -11,17 +11,20 @@
 >   **upstream crates.io release `=0.4.0`**, which rides `tokio-tungstenite` 0.24 on rustls
 >   0.23. `Cargo.lock` now carries `tungstenite 0.24.0` only, and the `deny.toml` ignore is
 >   removed. No fork, no vendored copy. An earlier analysis that said this group needed
->   vendoring was wrong, and that is recorded in the superseding plan.
+>   vendoring was wrong, and PR #40's description records that reversal.
 > - **`jsonwebtoken` 8.3.0 / GHSA-h395-gr6q-cpjc:** cleared earlier by vendoring `relay_rpc`
 >   at `vendor-patches/relay_rpc-0.1.0/` and replacing its single call site with direct
 >   `ed25519_dalek` verification (`v0.2.0-dependency-hygiene.md` §F2). `jsonwebtoken` is no
 >   longer in the lockfile.
 >
-> Nothing in this plan is left to execute. It is kept because its ownership/risk analysis —
-> why forking the Gleec-maintained chain was judged not worth it — is the reasoning the
-> `[patch]` route was chosen against, and because the WASM-path facts below are still true.
-> Live WalletConnect relay behaviour on the new transport is **unverified**; that risk is
-> tracked in the superseding plan, not here.
+> Nothing in this plan is left to execute, so it is deletable at the next release once its
+> ownership/risk analysis — why forking the Gleec-maintained chain was judged not worth it,
+> which is what the `[patch]` route was chosen against — is confirmed to be recorded in PR
+> #40 or in the CRD (the deletion precondition in
+> [`docs/GIT_FLOW_AND_WORKING_PROCESS.md`](../GIT_FLOW_AND_WORKING_PROCESS.md#plans-and-the-changelog)).
+> One live item it does **not** cover: WalletConnect relay behaviour on the new transport is
+> **unverified**, tracked in
+> [`v0.2.0-dependency-hygiene.md`](v0.2.0-dependency-hygiene.md)'s rustls entry.
 
 ## Goal
 

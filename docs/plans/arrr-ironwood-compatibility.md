@@ -1164,9 +1164,10 @@ Two other things to watch, both known and both cheap to confirm in the field:
 
 They are the first live exercise of the **whole new lightwalletd transport**: `tonic` 0.14 on
 **hyper 1** with rustls 0.23, from PRs #37 and #42. That transport has only ever been
-compiled and unit‑tested — see
-[`rustls-and-http-stack-modernization.md`](rustls-and-http-stack-modernization.md) §4 item 1,
-where it is recorded as an open risk. A sync against a real `https` lightwalletd through a
+compiled and unit‑tested; PR #37's description says so outright ("none of it has been
+exercised against a real lightwalletd server") and names what to expect to differ: a
+different default user‑agent, transport error text that reads differently, and
+`GetBlockRange` streaming through the hyper 1 body path. A sync against a real `https` lightwalletd through a
 multi‑thousand‑block rescan is close to the best test of it available, so transport symptoms
 (connection drops mid‑`GetBlockRange`, idle‑pool behaviour, certificate failures, error text
 that reads differently from before) are worth capturing even when the shielded logic behaves.

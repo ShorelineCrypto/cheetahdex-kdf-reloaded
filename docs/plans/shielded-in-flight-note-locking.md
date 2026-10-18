@@ -1,6 +1,6 @@
 # Plan: shielded in-flight note locking (ARRR taker swaps)
 
-**Status:** done (swap paths covered; withdrawals and most of T39.8.0h are not) — **Last reviewed:** 2026-10-18
+**Status:** parked (swap paths shipped; the `withdraw` path and most of T39.8.0h are open) — **Last reviewed:** 2026-10-18
 
 > **Re-checked against the tree 2026-10-18.** Selection, construction, broadcast and recording
 > run as one critical section in `ZCoin::send_outputs`

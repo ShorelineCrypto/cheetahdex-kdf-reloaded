@@ -1,6 +1,6 @@
 # Plan: secp256k1 0.20 → 0.29.x migration
 
-**Status:** done (CI follow-up closed; the `deny.toml` row stays, see below) — **Last reviewed:** 2026-10-18
+**Status:** done (2026-08-06, CI follow-up closed; deletable once its decisions sit in the CRD) — **Last reviewed:** 2026-10-18
 
 > **Two updates since this plan was written.** The one remaining follow-up named below — the
 > real WASM link step in `.github/workflows/build-wasm.yml` — is **done**: `wasm-pack build

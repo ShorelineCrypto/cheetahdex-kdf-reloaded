@@ -1,6 +1,14 @@
 # Plan: faster transaction visibility (push notifications and pending receipts)
 
-**Status:** done (both workstreams shipped 2026-08-09/11) — **Last reviewed:** 2026-10-18
+**Status:** done (both workstreams shipped 2026-08-09/11, with tests) — **Last reviewed:** 2026-10-18
+
+> **Before deleting this at a release** (the lifecycle in
+> [`docs/GIT_FLOW_AND_WORKING_PROCESS.md`](../GIT_FLOW_AND_WORKING_PROCESS.md#plans-and-the-changelog)):
+> the behaviour is bound in the CRD — ch.38 R38.6.5 for workstream A, ch.39 R39.8.0af–aj for
+> workstream B — but this work predates the project's pull-request flow, so the three resolved
+> decisions in the progress note below (no subscription cap, per-token QRC20 subscription,
+> history refreshing on the same signal) exist **only here**. Move them into ch.38/ch.39 first,
+> or keep this file.
 
 > **The "Current state" section below describes the tree as it was before this plan ran, and
 > is kept for that reason.** Both workstreams are implemented — see the progress note under

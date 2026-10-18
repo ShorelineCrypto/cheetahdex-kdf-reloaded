@@ -2,6 +2,12 @@
 
 **Status:** done — **Last reviewed:** 2026-10-18
 
+> **Before deleting this at a release:** the accepted-risk rationale for everything that stays
+> is duplicated in [`deny.toml`](../../deny.toml)'s comment blocks (including the correction
+> that cargo-deny does **not** hard-error on `unsound` advisories), and the alert dismissals
+> live on the GitHub Security tab. Check both still say so, then this file is an archive and
+> can go.
+
 > **Context:** snapshot triage of all 76 open Dependabot alerts on `dev`,
 > the fixes that came out of it, and the accepted-risk record for what stays.
 > Ongoing dependency work continues to live in

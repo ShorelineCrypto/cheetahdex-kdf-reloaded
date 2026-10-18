@@ -2,6 +2,11 @@
 
 **Status:** done (2026-08-05/11; the stack has since moved again, see the note below) — **Last reviewed:** 2026-10-18
 
+> **Before deleting this at a release:** the schema and compatibility policy it selected are in
+> CRD ch.39 and in `vendor-patches/*/KDF-PATCH.md`, but the candidate comparison and the
+> rejected options behind that selection are only here, and this work predates the pull-request
+> flow. Its live successor is the ARRR step-B re-vendor; nothing here is outstanding work.
+
 > **The selected versions below are no longer the ones in the tree.** ARRR Ironwood step B
 > re-vendored the stack on `zcash_primitives` 0.30.1 / `zcash_transparent` 0.10.0 /
 > `zcash_client_backend` 0.24.0 / `zcash_client_sqlite` 0.22.0 on 2026-10-12 (PR #18), because

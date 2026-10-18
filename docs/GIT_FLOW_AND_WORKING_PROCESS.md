@@ -76,26 +76,38 @@ The deprecated upstream `mm2.1` branch is not used in Reloaded.
 
 - PR title prefix indicates state: `[wip]`, `[r2r]` (ready to review).
 - Reference the relevant phase / plan item in the PR description.
-- A PR that changes work covered by a plan updates that plan in the same PR
-  (rule **P1** below).
+- A plan covering the work must be current at the branch tip before review, and
+  must match what landed when the branch merges (rule **P1** below).
 - See [PR_REVIEW_CHECKLIST.md](./PR_REVIEW_CHECKLIST.md) for review criteria.
 
 ## Plans and the changelog
 
-Adopted 2026-10-18. The rule is one sentence; the four refinements under it are
-what make it hold. Cite them by id (**P0**–**P4**).
+Adopted 2026-10-18 by the maintainer. **P0** is the rule; the four refinements
+under it are what make it hold. Cite them by id (**P0**–**P4**).
 
-**P0 — the rule.** Everything we work on has a plan in [`docs/plans/`](./plans/),
-kept up to date — except small, simple fixes of the kind done in a single
-commit. Everything important is in [`CHANGELOG.md`](../CHANGELOG.md), kept
-brief, derived from commit history.
+**P0 — the rule.** [`docs/plans/`](./plans/) is the register of everything we are
+working on or intend to work on: one plan per work package, carrying its state —
+which parts are already in the tree, which still need analysis, what was
+decided. Everything in one place, forward-looking. Small, simple fixes of the
+kind done in a single commit need no plan, and neither does work that is already
+finished (**P3**). Everything important is in [`CHANGELOG.md`](../CHANGELOG.md),
+kept brief, derived from commit history (**P4**).
 
-**P1 — currency needs a trigger.** The PR that changes the work updates its plan
-**in the same PR**. A rule with no trigger decays, and a stale plan is worse
-than no plan. Reviewers enforce this: if a PR moves work a plan describes and
-the plan is untouched, that is a review comment. The same PR also bumps the
-plan's `Last reviewed` date (**P2**), and that bump is what makes "up to date"
-checkable from outside.
+**P1 — currency, per commit, judged at the branch tip.** Every commit that
+changes a plan's implementation, or anything the plan states, updates the plan
+too — not just the PR that collects those commits. A rule with no trigger
+decays, and a stale plan is worse than no plan.
+
+One practical bound, so the rule does not create its own problem: within a
+single branch what is required is that the plan is **current at the branch
+tip**, not that every commit touches it. Several sessions edit `docs/plans/` in
+parallel, and a thirteen-commit branch that rewrites its plan thirteen times is
+thirteen conflict opportunities for no added accuracy. So fold the plan update
+into the commit that makes the change where that is natural, and otherwise bring
+the plan current before the branch goes up for review. A branch must never merge
+with a plan that does not match what landed. A reviewer who sees implementation
+move while its plan stands still says so, and the plan's `Last reviewed` date
+(**P2**) moves with the update.
 
 **P2 — every plan carries a status and a last-reviewed date.** The second line of
 every plan, immediately after its title, is exactly:
@@ -115,16 +127,45 @@ of six:
 | `in progress` | Being implemented now. |
 | `blocked` | Ready to execute, but waiting on something outside this repository (an upstream release, a third party, a decision someone else owes us). Name the blocker. |
 | `parked` | Approach settled, nothing in flight, not scheduled. Priority is the only thing in the way. |
-| `done` | The work shipped. The plan stays as the record of the decisions behind it. Residual gaps are named in the qualifier or the body. |
-| `superseded` | The approach was abandoned or replaced. **Must** point at what replaced it. |
+| `done` | Complete in **code, documentation and tests** — all three. A **transient** state: see the lifecycle below. |
+| `superseded` | The approach was abandoned or replaced. **Must** point at what replaced it. Transient on the same clock as `done`. |
 
 `Last reviewed` is the date someone last checked the plan against the tree — not
 the date it was written. Where the real status genuinely cannot be determined,
 write `unknown` with a one-line reason rather than guessing; that is a defect to
 clear, not a seventh status.
 
-A plan may be deleted once it is `done` or `superseded` and nothing references
-it; prefer keeping it, because the decisions it records are not in the code.
+### Lifecycle of a finished plan
+
+`done` means the work package is complete in **all three** of code,
+documentation and tests. Any residual item — an unported path, a missing test,
+an undocumented switch, a decision still open — means the plan is **not** `done`:
+use `in progress` or `parked` and name what is left in the qualifier. A
+qualifier that subtracts from the status ("done, except …") is a contradiction;
+rewrite it as the lesser status.
+
+A `done` (or `superseded`) plan is kept **until the nearest release** and may
+then be deleted. "Nearest release" here is the next `v*` tag published from
+`staging` or `main` after the plan reached that state — **pre-release tags
+count**, so for work finishing in the current `0.3.0-alpha.x` line that is the
+upcoming beta. The register stays forward-looking: it holds live and intended
+work, not an archive of shipped work.
+
+**Precondition for deletion — not advice.** Before a `done` or `superseded` plan
+is deleted, confirm its decisions are recorded outside it:
+
+1. **binding behaviour** — in the governing CRD chapter under
+   [`docs/reloaded-rewrite/`](./reloaded-rewrite/) (and, where it is a
+   divergence or a switch, in [`GLEEC_COMPATIBILITY.md`](GLEEC_COMPATIBILITY.md)
+   / [`COMPAT_SWITCHES.md`](COMPAT_SWITCHES.md)); and
+2. **the reasoning** — rejected alternatives, accepted costs, measurements — in
+   the pull request(s) that shipped it.
+
+If neither holds for some decision the plan carries, the plan is **not
+deletable**: record that decision in the CRD first, or keep the plan one more
+release. Deleting on a schedule without this check destroys institutional
+knowledge on a schedule. Deletion is a release-time action and the maintainer's
+call, never a side effect of another change.
 
 Checking by inspection:
 
@@ -135,26 +176,35 @@ grep -L '^\*\*Status:\*\* \(planning\|in progress\|blocked\|parked\|done\|supers
 grep -H '^\*\*Status:\*\*' docs/plans/*.md
 ```
 
-**P3 — the threshold is a decision the code does not record.** "One commit" is
-the rough size cut; the sharp test is whether the work carries a decision the
-code cannot show — a rejected alternative, a why-not, an accepted cost, a
-measurement a later reader would otherwise have to repeat. That is what a plan
-uniquely holds, and it needs one whatever the diff size. A mechanical fix whose
-reasoning is fully visible in the diff needs no plan, however large. A two-line
-change that encodes a choice between two defensible designs does.
+**P3 — a plan is for live or intended work, and the threshold is a decision the
+code does not record.** "One commit" is the rough size cut; the sharp test is
+whether the work carries a decision the code cannot show — a rejected
+alternative, a why-not, an accepted cost, a measurement a later reader would
+otherwise have to repeat. That is what a plan uniquely holds, and such work
+needs one whatever the diff size. A mechanical fix whose reasoning is fully
+visible in the diff needs no plan, however large. A two-line change that encodes
+a choice between two defensible designs does.
 
-Work that has already shipped and carries such decisions gets a plan written
-**retrospectively**, marked `done`. Recording it late is worth more than not
-recording it.
+**Work that has already shipped does not get a plan written for it after the
+fact.** Its reasoning belongs to the pull request(s) that shipped it, and any
+behaviour it binds belongs to its CRD chapter — which is also what makes a
+finished plan deletable (the lifecycle above). The register is forward-looking;
+backfilling it with archives of completed work makes it harder to see what is
+actually live.
 
 **P4 — the changelog is user- and integrator-facing.** `CHANGELOG.md` is filtered
 to what someone running or integrating against KDF Reloaded would notice: RPC
 and wire behaviour, configuration keys, defaults, compatibility switches,
 platform support, security-relevant behaviour. Internal hygiene — refactors,
 test scaffolding, CI, dependency moves with no observable effect — belongs in
-the PR description and, where it carries decisions (**P3**), in a plan. Entries
-stay brief and derive from commit history; the reasoning lives in the plan, and
-the entry may point at it.
+the PR description, and in a plan only while that work is live (**P3**). Entries
+stay brief and derive from commit history.
+
+**The pull request is the vessel for the detail** — explicitly agreed with the
+maintainer. An entry says what a user or integrator would notice; the
+measurements, the alternatives weighed and the costs accepted stay in the PR
+that shipped the change, which is also where they remain readable long after the
+plan is deleted.
 
 ## CI
 
