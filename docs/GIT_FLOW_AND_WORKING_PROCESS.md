@@ -179,13 +179,15 @@ grep -H '^\*\*Status:\*\*' docs/plans/*.md
 ```
 
 **P3 — a plan is for live or intended work, and the threshold is a decision the
-code does not record.** "One commit" is the rough size cut; the sharp test is
-whether the work carries a decision the code cannot show — a rejected
+record does not already hold.** "One commit" is the rough size cut; the sharp
+test is whether the work carries a decision the record cannot show — a rejected
 alternative, a why-not, an accepted cost, a measurement a later reader would
-otherwise have to repeat. That is what a plan uniquely holds, and such work
-needs one whatever the diff size. A mechanical fix whose reasoning is fully
-visible in the diff needs no plan, however large. A two-line change that encodes
-a choice between two defensible designs does.
+otherwise have to repeat. The record is the code **and** the governing CRD
+chapter together: where that chapter already carries the decisions and the
+deferred items, the work package needs no plan of its own. That is what a plan
+uniquely holds, and such work needs one whatever the diff size. A mechanical
+fix whose reasoning is fully visible in the diff needs no plan, however large.
+A two-line change that encodes a choice between two defensible designs does.
 
 **Work that has already shipped does not get a plan written for it after the
 fact.** Its reasoning belongs to the pull request(s) that shipped it, and any
