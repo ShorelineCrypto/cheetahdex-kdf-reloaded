@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Releases and the runtime Docker image now ship the license files.** `COPYING`, `LICENSE` and
+  `THIRDPARTY-LICENSES` are attached to every release and covered by the signed `SHA256SUMS`, and
+  the image carries them in `/usr/share/doc/kdf/`. Detail: PR #36.
+
 ### Changed
 
 - **The initial swap gas-fee policy no longer depends on how the coin was activated, and a coin's
@@ -23,6 +29,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **The wss transport now uses rustls 0.23, and a malformed wss key file is a startup error instead
   of a panic.** A relay whose configured wss key or certificate cannot be loaded now fails to start
   with `P2PInitError::InvalidWssConfig`. Detail: PR #39.
+- **The Electrum TLS client moved to rustls 0.23, with a different trust-anchor set.**
+  `webpki-roots` goes from 0.22 to 1.0, which drops 45 root certificates — among them roots Mozilla
+  marks distrust-after (DigiCert Global Root CA, GlobalSign Root CA, Baltimore and others) and the
+  removed TrustCor — and adds 32. A server whose chain terminates only at a dropped root is now
+  refused where it was accepted; none of the 225 reachable servers in the public Electrum lists is
+  affected, but a privately configured server can be. TLS 1.2 is still offered, and
+  `skip_validation` keeps its previous meaning. Detail: PR #40.
+- **The native HTTP client and the RPC listener moved to hyper 1; rustls 0.20 and hyper 0.14 have
+  left the build.** The RPC port still serves both HTTP/1 and HTTP/2 prior-knowledge, the SSE
+  endpoint and its event format are unchanged, and TLS 1.2 is still offered. Error strings from a
+  failed HTTP fetch now carry the whole source chain (for example `client error (Connect): invalid
+  peer certificate: UnknownIssuer`), so anything that parses or logs them sees longer text. The
+  lightwalletd gRPC transport moved to the same stack earlier in the series, which changes its
+  default user-agent and the wording of its transport errors. Detail: PR #42 and PR #37.
+- **The WalletConnect relay transport moved to `tokio-tungstenite` 0.24 on rustls 0.23.** No
+  protocol or configuration change; not yet exercised against a live relay session. Detail: PR #40.
 
 ### Fixed
 
