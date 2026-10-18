@@ -82,16 +82,17 @@ The deprecated upstream `mm2.1` branch is not used in Reloaded.
 
 ## Plans and the changelog
 
-Adopted 2026-10-18 by the maintainer. **P0** is the rule; the four refinements
-under it are what make it hold. Cite them by id (**P0**–**P4**).
+Adopted 2026-10-18 by the maintainer. **P0** is the rule; **P1**–**P7** under it
+are what make it hold. Cite them by id.
 
-**P0 — the rule.** [`docs/plans/`](./plans/) is the register of everything we are
-working on or intend to work on: one plan per work package, carrying its state —
-which parts are already in the tree, which still need analysis, what was
-decided. Everything in one place, forward-looking. Small, simple fixes of the
-kind done in a single commit need no plan, and neither does work that is already
-finished (**P3**). Everything important is in [`CHANGELOG.md`](../CHANGELOG.md),
-kept brief, derived from commit history (**P4**).
+**P0 — the rule.** Everything we are working on or intend to work on has a plan:
+one plan per work package, each in one place, carrying its state — which parts
+are already in the tree, which still need analysis, what was decided. Each plan
+is forward-looking, and [`docs/plans/`](./plans/) is where most of them live
+(**P5**). Small, simple fixes of the kind done in a single commit need no plan,
+and neither does work that is already finished (**P3**). Everything important is
+in [`CHANGELOG.md`](../CHANGELOG.md), kept brief, derived from commit history
+(**P4**), and every release names the plans it touched (**P7**).
 
 **P1 — currency, per commit, judged at the branch tip.** Every commit that
 changes a plan's implementation, or anything the plan states, updates the plan
@@ -164,10 +165,11 @@ is deleted, confirm its decisions are recorded outside it:
 If neither holds for some decision the plan carries, the plan is **not
 deletable**: record that decision in the CRD first, or keep the plan one more
 release. Deleting on a schedule without this check destroys institutional
-knowledge on a schedule. Deletion is a release-time action and the maintainer's
-call, never a side effect of another change.
+knowledge on a schedule. Deletion is a release-time action, and like every other
+transition it is the maintainer's to make (**P6**), never a side effect of
+another change.
 
-Checking by inspection:
+Checking by inspection, for the plans under `docs/plans/`:
 
 ```bash
 # every plan has a well-formed header
@@ -205,6 +207,60 @@ maintainer. An entry says what a user or integrator would notice; the
 measurements, the alternatives weighed and the costs accepted stay in the PR
 that shipped the change, which is also where they remain readable long after the
 plan is deleted.
+
+**P5 — a plan's location follows its work package.** Each work package keeps its
+plan in the place that suits it. For most, that place is
+[`docs/plans/`](./plans/), which is where to look first. Some belong elsewhere —
+because the material is sensitive, because its distribution is restricted,
+because it sits better next to the artifacts it is about, or because a third
+party's material is involved. Choosing the home is an ordinary part of setting a
+work package up, and it is the maintainer's choice, like the branch name or the
+release line.
+
+Location changes nothing else. **A plan is a plan under this rule wherever it
+lives**, and carries the same obligations: one per work package, kept current
+(**P1**), carrying a status and a last-reviewed date (**P2**), moving through
+the same lifecycle under the same hand (**P6**), and eligible to be named in a
+release's plan list (**P7**). The `grep` checks above read `docs/plans/`, so they
+speak for the plans kept there and for no others; a plan with another home is
+reviewed where it lives.
+
+**P6 — status transitions and deletion are the maintainer's decision.** Starting
+implementation, deferring, pausing, resuming, marking `done`, cancelling,
+superseding and deleting are all the operator's calls. An agent or a contributor
+**proposes** a transition and brings the evidence for it — what landed, what is
+missing, what the tree says — and the maintainer decides. Nothing in **P2**'s
+vocabulary authorises a transition by itself: a commit that moves a status needs
+the operator behind it, and so does one that removes a plan.
+
+> **One standing exception, and this branch is an instance of it rather than a
+> precedent against the rule.** A **bulk reconciliation** — checking every plan's
+> status against the tree and correcting the ones that disagree — is itself an
+> operator-approved action, approved as a batch before it starts. The statuses in
+> `docs/plans/` were assigned that way on 2026-10-18, four of them correcting a
+> plan whose own header contradicted the tree. Read that commit as the batch it
+> was: it is not licence for an agent or a contributor to reassign a status on its
+> own judgement.
+
+**P7 — every release lists the plans it touched.** A release's `CHANGELOG.md`
+entry and its release notes both carry a list of the plans the released version
+touched **in any sense** — advanced, completed, deferred, superseded, or only
+corrected — each with a very brief line saying what was done. It is the quickest
+honest answer to "what moved in this release, and where is the reasoning?", and
+it is the one place a reader learns that a plan changed state at all.
+
+Shape — one line per plan, name then what happened:
+
+```markdown
+### Plans touched
+
+- `arrr-ironwood-compatibility` — field testing green-lit; reorg recovery merged.
+- `walletconnect-fork-upgrade` — superseded; its advisories cleared another way.
+- `clippy-ci-gate` — gate shipped; the vendor-filter follow-up stays open.
+```
+
+The list may include plans whose home is elsewhere (**P5**), at the maintainer's
+sole discretion — nothing requires their inclusion and nothing precludes it.
 
 ## CI
 
