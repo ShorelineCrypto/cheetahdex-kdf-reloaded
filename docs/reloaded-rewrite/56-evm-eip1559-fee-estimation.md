@@ -216,6 +216,18 @@ anchor and leaves the reported `base_fee` unchanged. Reconciling the two
 (either report the anchor, which is the next-block value on mainline
 clients, or relax R36) is deferred and unresolved here.
 
+**D4.** *Empty fee-history arrays: zero degradation versus typed error.*
+An empty `baseFeePerGas` array degrades to a zero base-fee anchor, which
+collapses the tiers to the tip alone, and an empty `reward` array likewise
+yields a zero tip (R2). This behaviour is panic-free and deliberate: it was
+kept over returning an error because both paths end in a rejected send and
+the case needs a non-mainline client that omits the field. The open question
+is whether to return a typed error instead, which would be more honest than
+emitting a knowingly underpriced transaction. Doing so would amend R2; that
+is a behaviour decision and not a re-gating matter, because both recorded
+gate passes pre-date the adoption of R37-R44 and so, under R43, chapter 01 T1
+does not reach this chapter. Deferred by maintainer decision on 2026-10-18.
+
 ## 56.8 Baseline Verifications
 
 **V1.** *No EIP-1559 fee estimator at baseline.*
