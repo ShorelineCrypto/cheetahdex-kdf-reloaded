@@ -88,6 +88,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **An undecodable EVM transaction now says what it is.** The error names the unsupported type byte
   and the supported types, or, for a payload that is not a transaction at all, its length and a
   short prefix — instead of the opaque `unexpected string`. Detail: PR #24.
+- **EIP-1559 swap transactions are no longer priced from a stale base fee.** The fee estimate took
+  the base fee of the oldest block in the fee-history window instead of the newest, so under a
+  rising base fee `max_fee_per_gas` could land below the actual block base fee and the send was
+  rejected; this affects the coins the shipped coins file puts on a non-legacy tier, since those
+  price swaps from these estimates. An `eth_feeHistory` response that omits `baseFeePerGas`, which a
+  conforming client may do, could also panic inside a swap send path and no longer can. Detail: PR #48.
 
 ### Plans touched
 
