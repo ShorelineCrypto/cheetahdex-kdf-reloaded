@@ -89,6 +89,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   and the supported types, or, for a payload that is not a transaction at all, its length and a
   short prefix — instead of the opaque `unexpected string`. Detail: PR #24.
 
+### Plans touched
+
+Plans this cycle moved, in any sense; each plan file carries the detail.
+
+- [`arrr-ironwood-compatibility`](docs/plans/arrr-ironwood-compatibility.md) — the reorg-wedge fix
+  landed (PR #31); the lightwalletd transport moved to tonic 0.14 on hyper 1 (PRs #37, #42).
+- [`v0.2.0-dependency-hygiene`](docs/plans/v0.2.0-dependency-hygiene.md) — the rustls, webpki, ring
+  and tungstenite rows cleared, and the advisory ledger is green (PRs #37–#40, #42, #44).
+- [`walletconnect-fork-upgrade`](docs/plans/walletconnect-fork-upgrade.md) — superseded: the fork
+  bump it proposed gave way to a `[patch]` onto upstream `tokio-tungstenite-wasm` 0.4.0 (PR #40).
+- [`secp256k1-migration`](docs/plans/secp256k1-migration.md) — its last follow-up closed: the real
+  WASM link step is back in CI and no longer `continue-on-error` (PRs #26, #27).
+- [`clippy-ci-gate`](docs/plans/clippy-ci-gate.md) — the gate shipped; the vendor-filter follow-up
+  stays open (PR #27).
+- [`evm-test-infrastructure`](docs/plans/evm-test-infrastructure.md) — opened, and two dead-network
+  EVM tests ported to a scripted local node (PR #30).
+
 ## [0.3.0-alpha.3] — development milestone, not released
 
 ### Fixed
