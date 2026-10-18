@@ -69,13 +69,92 @@ The deprecated upstream `mm2.1` branch is not used in Reloaded.
   touched packages. For WASM-only code add `--target wasm32-unknown-unknown`.
   `AGENTS.md` §6 has the full verification list.
 - For larger work, write or follow a plan under [`docs/plans/`](./plans/)
-  and record progress there as items ship.
+  and record progress there as items ship. The rule, the threshold and the
+  plan header are in [Plans and the changelog](#plans-and-the-changelog) below.
 
 ## PRs
 
 - PR title prefix indicates state: `[wip]`, `[r2r]` (ready to review).
 - Reference the relevant phase / plan item in the PR description.
+- A PR that changes work covered by a plan updates that plan in the same PR
+  (rule **P1** below).
 - See [PR_REVIEW_CHECKLIST.md](./PR_REVIEW_CHECKLIST.md) for review criteria.
+
+## Plans and the changelog
+
+Adopted 2026-10-18. The rule is one sentence; the four refinements under it are
+what make it hold. Cite them by id (**P0**–**P4**).
+
+**P0 — the rule.** Everything we work on has a plan in [`docs/plans/`](./plans/),
+kept up to date — except small, simple fixes of the kind done in a single
+commit. Everything important is in [`CHANGELOG.md`](../CHANGELOG.md), kept
+brief, derived from commit history.
+
+**P1 — currency needs a trigger.** The PR that changes the work updates its plan
+**in the same PR**. A rule with no trigger decays, and a stale plan is worse
+than no plan. Reviewers enforce this: if a PR moves work a plan describes and
+the plan is untouched, that is a review comment. The same PR also bumps the
+plan's `Last reviewed` date (**P2**), and that bump is what makes "up to date"
+checkable from outside.
+
+**P2 — every plan carries a status and a last-reviewed date.** The second line of
+every plan, immediately after its title, is exactly:
+
+```
+**Status:** <status> — **Last reviewed:** YYYY-MM-DD
+```
+
+so that a finished plan is distinguishable from an abandoned one and from a
+current one. A short free-text qualifier may follow the status word in
+parentheses — `parked (T1–T10 shipped; T11–T13 queued)`. The status word is one
+of six:
+
+| Status | Meaning |
+|---|---|
+| `planning` | The approach is not settled yet. The document is input to a design pass, not something to execute. |
+| `in progress` | Being implemented now. |
+| `blocked` | Ready to execute, but waiting on something outside this repository (an upstream release, a third party, a decision someone else owes us). Name the blocker. |
+| `parked` | Approach settled, nothing in flight, not scheduled. Priority is the only thing in the way. |
+| `done` | The work shipped. The plan stays as the record of the decisions behind it. Residual gaps are named in the qualifier or the body. |
+| `superseded` | The approach was abandoned or replaced. **Must** point at what replaced it. |
+
+`Last reviewed` is the date someone last checked the plan against the tree — not
+the date it was written. Where the real status genuinely cannot be determined,
+write `unknown` with a one-line reason rather than guessing; that is a defect to
+clear, not a seventh status.
+
+A plan may be deleted once it is `done` or `superseded` and nothing references
+it; prefer keeping it, because the decisions it records are not in the code.
+
+Checking by inspection:
+
+```bash
+# every plan has a well-formed header
+grep -L '^\*\*Status:\*\* \(planning\|in progress\|blocked\|parked\|done\|superseded\|unknown\)' docs/plans/*.md
+# current statuses and review dates
+grep -H '^\*\*Status:\*\*' docs/plans/*.md
+```
+
+**P3 — the threshold is a decision the code does not record.** "One commit" is
+the rough size cut; the sharp test is whether the work carries a decision the
+code cannot show — a rejected alternative, a why-not, an accepted cost, a
+measurement a later reader would otherwise have to repeat. That is what a plan
+uniquely holds, and it needs one whatever the diff size. A mechanical fix whose
+reasoning is fully visible in the diff needs no plan, however large. A two-line
+change that encodes a choice between two defensible designs does.
+
+Work that has already shipped and carries such decisions gets a plan written
+**retrospectively**, marked `done`. Recording it late is worth more than not
+recording it.
+
+**P4 — the changelog is user- and integrator-facing.** `CHANGELOG.md` is filtered
+to what someone running or integrating against KDF Reloaded would notice: RPC
+and wire behaviour, configuration keys, defaults, compatibility switches,
+platform support, security-relevant behaviour. Internal hygiene — refactors,
+test scaffolding, CI, dependency moves with no observable effect — belongs in
+the PR description and, where it carries decisions (**P3**), in a plan. Entries
+stay brief and derive from commit history; the reasoning lives in the plan, and
+the entry may point at it.
 
 ## CI
 
