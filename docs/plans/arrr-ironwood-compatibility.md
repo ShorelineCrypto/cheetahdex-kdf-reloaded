@@ -1069,6 +1069,135 @@ then mainnet.
 
 ---
 
+## 11. Field testing (green‑lit 2026‑10‑18)
+
+**This is the active work. Everything else in the project is parked until field testing and
+the beta are through.** Every statement in this section was checked against the tree on
+2026‑10‑18; the one correction it produced is in §11.6.
+
+### 11.1 Why now, and what is actually missing
+
+Steps A–E are merged (§10.4, and the progress log below), and so is the last known pre‑beta
+blocker: the **reorg‑wedge fix landed as PR #31**, merge commit `da4c95c90`, 2026‑10‑16. A
+Light‑mode wallet that met a reorg of its own scanned tip used to fail every 30‑second pass
+with `Compact block hash discontinuity …` forever; it now asks lightwalletd on every pass,
+rewinds inside the retained checkpoint window, and falls back to a rebuild when the divergence
+is deeper than that window.
+
+**It has never been exercised against a live chain.** Its evidence is 204 unit tests driving
+the observed shape against the real backend, plus a negative proof (restoring the old
+in‑memory short‑circuit fails five of them, and restoring the 100‑block depth fails the
+later‑note variant). That is good evidence that the logic is right and no evidence at all that
+it survives contact with the network. Field testing is what closes that gap, and it is the
+only thing standing between the current tree and the beta.
+
+### 11.2 The window the ARRR team handed us
+
+The ARRR team green‑lit field testing on **2026‑10‑18**, with a **known chain rollback to
+2026‑10‑14 in progress**. Consequences, accepted deliberately:
+
+- **Transactions sent during the tests vanish** once nodes finish reindexing. The maintainer
+  accepts this: the tests move small amounts between his own wallets, so what is actually lost
+  is the swap and transaction fees, not the funds.
+- A rollback of this size is exactly the event the reorg fix exists for, and it is not
+  reproducible on demand. Testing *now*, while it is happening, is worth more than testing on
+  a quiet chain later.
+
+### 11.3 The rollback does not endanger the Ironwood constants
+
+Checked rather than assumed, because a height‑based gate would have made an Oct 14 rollback a
+real hazard:
+
+- `ARRR_IRONWOOD_ACTIVATION_TIME` is a **timestamp**, not a height:
+  `1_791_054_000` = **2026‑10‑03 19:00 UTC**, in `mm2src/coins/z_coin.rs`. Rolling the chain
+  back does not move it, and nothing in the gate compares it to a stored height.
+- An Oct 14 rollback target is **~10 days after activation**, so every node stays on the
+  Ironwood branch (`0x37A5165B`). The branch‑majority endpoint‑admission rules from step C
+  are therefore not stressed by the rollback: there is no partition between pre‑ and
+  post‑Ironwood endpoints to resolve.
+- Escape hatches exist if a test ever needs them, and neither is needed by default:
+  `ironwood_activation_time` (per‑coin configuration override) and `ironwood_gate_disabled`
+  (suppresses the built‑in time for test and regtest networks). Both are in
+  `ZcoinConsensusParams`; see §10.4 step E and CRD ch.39 R39.6.4a/R39.6.4d.
+
+### 11.4 Expected behaviour: the fallback path, not the rewind
+
+Arithmetic first. ARRR targets **60‑second blocks**, so Oct 14 → Oct 18 is roughly
+**5 760 blocks** — two orders of magnitude beyond the fix's rewind window
+(`ZCOIN_REORG_REWIND_DEPTH = 99`, and at most `ZCOIN_MAX_REORG_REWINDS = 3` further attempts,
+so under ~400 blocks of rewinding in total). **The rewind cannot cover this rollback, and it is
+not supposed to:** the fallback path fires, which is a wallet rebuild at the account birthday
+(the recorded sync start) with **exactly one backup file**, followed by a rescan from there.
+
+So the expected outcome is **a long resync, not a wedge, and not a lost wallet**. Every
+shielded note in range is recoverable from the chain with the wallet's own viewing key, which
+is why the rebuild is lossless within the range the wallet was asked to cover.
+
+The exact log sequence to expect, in order (`mm2src/coins/z_coin/z_coin_wallet_db.rs`):
+
+1. `ZCoin shielded wallet diverges from the chain at height … : wallet has block …,
+   lightwalletd reports …` (WARN) — the divergence is **detected**, which is the part that
+   used to be skipped entirely.
+2. `ZCoin shielded wallet rewound from height … to … after a chain divergence` (INFO), up to
+   four times. **This line is the success signal for an ordinary reorg**; here it is only the
+   first move, because 99‑block steps cannot reach back four days.
+3. `ZCoin shielded wallet still diverges from the chain after rewinding; rebuilding at its
+   sync start` (WARN), then `ZCoin lightwalletd requesting rebuild anchor tree state at
+   height …` and `ZCoin shielded wallet rebuilt at its sync start: anchored at height …,
+   rescanning from …` (INFO).
+4. Normal scanning, and the balance and history coming back.
+
+**Failure signal:** `Compact block hash discontinuity at height …: prev_hash does not match
+the scan anchor`, **repeated** pass after pass with no `requesting wallet checkpoint tree
+state` line in between. That is the original wedge, and it means the fix did not engage.
+
+Two other things to watch, both known and both cheap to confirm in the field:
+
+- **No `.invalid-chain.<ms>.bak` flood.** A compact cache that fails validation is now deleted
+  rather than renamed; the rename is what produced multi‑gigabyte backup files after the
+  2026‑09‑29 reorg. Exactly one wallet‑database backup from the rebuild is expected, and
+  nothing else.
+- **The rebuild anchors at the sync start, never at 0.** If it ever reports an anchor near
+  zero, or fails with "has no recorded sync start", that is a defect, not a long resync.
+
+### 11.5 What else these tests validate, incidentally
+
+They are the first live exercise of the **whole new lightwalletd transport**: `tonic` 0.14 on
+**hyper 1** with rustls 0.23, from PRs #37 and #42. That transport has only ever been
+compiled and unit‑tested — see
+[`rustls-and-http-stack-modernization.md`](rustls-and-http-stack-modernization.md) §4 item 1,
+where it is recorded as an open risk. A sync against a real `https` lightwalletd through a
+multi‑thousand‑block rescan is close to the best test of it available, so transport symptoms
+(connection drops mid‑`GetBlockRange`, idle‑pool behaviour, certificate failures, error text
+that reads differently from before) are worth capturing even when the shielded logic behaves.
+
+### 11.6 Known gaps that could surface mid‑test
+
+- **A withdrawal is still not recorded as an in‑flight spend.** In‑flight shielded note
+  locking itself **is implemented** — selection, construction, broadcast and recording are one
+  critical section in `ZCoin::send_outputs`, and both v1 swap sends, the dex fee and the HTLC
+  payment, go through it (`mm2src/coins/z_coin/z_coin_ops.rs`,
+  `mm2src/coins/z_coin/z_htlc.rs`). The remaining hole is the **withdraw** path: it builds
+  through `gen_tx` and the caller broadcasts, so its notes are not recorded (CRD ch.39
+  D39.8.0e). Practical consequence for the tests: a `withdraw` immediately followed by another
+  shielded send can still pick the same note and lose the second one as a duplicate
+  nullifier. Avoid back‑to‑back withdrawals from the same wallet, or wait for a confirmation
+  between them. See [`shielded-in-flight-note-locking.md`](shielded-in-flight-note-locking.md).
+- **The P2SH / HTLC spend path is deliberately refused**, not silently wrong: the R‑address
+  workaround for Pirate's transparent‑index defect is still unproved on a funded HTLC, so
+  `find_output_spend` / `check_if_my_payment_sent` fail with an explicit error and a P2SH
+  address is refused by balance, UTXO and history (§10.4 step C). Proving that workaround on a
+  funded HTLC is the next piece of real work after the wallet‑level tests pass.
+- **v6 broadcast acceptance is unproven.** Construction is verified offline against a mined
+  v6 transaction, but **network acceptance has never been tested**, and a v6 shielded
+  signature over a transaction with transparent inputs is not covered by the corpus (§10.4
+  step E). A rejected broadcast during the tests is therefore a plausible and informative
+  outcome, not necessarily a regression.
+- **Most of T39.8.0h is uncovered** (broadcast/restart/expiry/concurrency), because no harness
+  can drive a shielded wallet database through those transitions yet (CRD ch.39 D39.8.0f).
+
+---
+
 ## Working rules and log
 
 - Follow `AGENTS.md`: read chapter 39 first; no `unwrap()`/`expect()` in production paths;
@@ -1272,3 +1401,38 @@ then mainnet.
   in the corpus). Not done: the pre‑activation quiet window, persistence of the discovered height,
   native‑mode discovery. CRD ch.39 R39.6.4e added; `RELOADED_VS_GLEEC.md` and
   `docs/GLEEC_COMPATIBILITY.md` updated (no opt‑back exists).
+- **2026‑10‑12 — Step D landed: ARRR transaction parsing routes to the Zcash reader**
+  (`c70542f57`, in `dev` via PR #19). Recorded here late, for completeness: the swap‑path
+  parsing no longer goes through the shared UTXO parser, which **refused** v6 outright rather
+  than mis‑identifying it, and whose identifier rule (double‑SHA256 of the bytes) is not a v6
+  transaction's ZIP‑244 digest in any case. Steps B, C (wallet half), D and E are all in `dev`.
+- **2026‑10‑13 — a future `sync_start` is rejected and a pre‑Ironwood endpoint is never
+  admitted** (PR #22). Closes the two ways a wallet could anchor itself somewhere the chain
+  cannot support: a sync date in the future, and an endpoint still serving the pre‑fork branch.
+- **2026‑10‑16 — the reorg wedge is fixed and merged** (PR #31, merge commit `da4c95c90`).
+  `ensure_lightwalletd_chain_state` now asks lightwalletd on every pass instead of trusting the
+  chain state the scan left in memory; the rewind depth is **99**, which lands inside
+  `zcash_client_sqlite` 0.22's retained one‑checkpoint‑per‑block window (the old `anchor - 100`
+  sat one block below it, so the backend either refused — treated as fatal — or truncated to
+  before the wallet's earliest note); a refused rewind is redirected to the oldest retained
+  checkpoint; compact blocks above the rewound height are deleted so the orphaned block cannot
+  be fed back; a divergence deeper than the window rebuilds at the **account birthday** with
+  exactly one backup rather than at height 0; and a cache that fails validation is deleted
+  instead of renamed, which is what produced the backup flood after the 2026‑09‑29 reorg. 204
+  `z_coin::` tests, with a negative proof for each half. **Not exercised against a live chain
+  — that is §11.**
+- **2026‑10‑18 — field testing green‑lit by the ARRR team; the project refocuses.** ARRR field
+  testing, then beta, then everything else; all other implementation is parked. A chain
+  rollback to **2026‑10‑14** is in progress, so test transactions will vanish once nodes finish
+  reindexing — accepted, because the amounts move between the maintainer's own wallets and only
+  the swap and transaction fees are lost. Re‑checked against the tree before starting: the
+  Ironwood constant is a **timestamp** (`1_791_054_000` = 2026‑10‑03 19:00 UTC) and not a
+  height, so the rollback cannot disturb it, and an Oct 14 target is ~10 days post‑activation,
+  so no node leaves the Ironwood branch and the branch‑majority admission rules are not
+  stressed. The rollback is ~5 760 blocks against a 99‑block rewind window, so the **rebuild‑at‑
+  birthday fallback** is the expected path, not the rewind — a long resync rather than a wedge.
+  Expected and failing log sequences, the gaps that could surface mid‑test, and what these tests
+  incidentally prove about the new hyper 1 lightwalletd transport are in **§11**. One claim
+  checked and **found wrong** while writing that section: in‑flight shielded note locking is
+  *not* missing — it covers both v1 swap sends; only the `withdraw` path remains unrecorded
+  (§11.6).
