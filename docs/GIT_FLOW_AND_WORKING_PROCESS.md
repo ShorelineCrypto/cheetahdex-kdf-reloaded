@@ -109,8 +109,8 @@ with a plan that does not match what landed. A reviewer who sees implementation
 move while its plan stands still says so, and the plan's `Last reviewed` date
 (**P2**) moves with the update.
 
-**P2 — every plan carries a status and a last-reviewed date.** The second line of
-every plan, immediately after its title, is exactly:
+**P2 — every plan carries a status and a last-reviewed date.** The first line
+after every plan's title is exactly:
 
 ```
 **Status:** <status> — **Last reviewed:** YYYY-MM-DD
