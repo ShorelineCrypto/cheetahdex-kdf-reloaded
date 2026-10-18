@@ -45,6 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   default user-agent and the wording of its transport errors. Detail: PR #42 and PR #37.
 - **The WalletConnect relay transport moved to `tokio-tungstenite` 0.24 on rustls 0.23.** No
   protocol or configuration change; not yet exercised against a live relay session. Detail: PR #40.
+- **The `sia-rust` pin now requires `web-sys >= 0.3.70`**, which reqwest 0.12's wasm backend needs;
+  our own lockfile resolves well above that, so only an integrator who vendors or re-resolves for
+  `wasm32` has a floor to raise. Detail: PR #38.
 
 ### Fixed
 
