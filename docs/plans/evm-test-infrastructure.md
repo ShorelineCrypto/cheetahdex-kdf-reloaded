@@ -1,9 +1,10 @@
 # EVM test infrastructure: a real local chain as the default
 
-**Status: planning only.** This document records what already exists, what has been
-decided, and what has been excluded. It deliberately contains **no architecture** —
-designing the next generation is the first task of a dedicated session, and this is
-that session's input.
+**Status:** planning (design pass not started; two tests ported 2026-10-16/17) — **Last reviewed:** 2026-10-18
+
+> **Context:** this document records what already exists, what has been decided, and what
+> has been excluded. It deliberately contains **no architecture** — designing the next
+> generation is the first task of a dedicated session, and this is that session's input.
 
 ## Why this exists
 

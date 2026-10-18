@@ -1,6 +1,16 @@
 # Plan: `librustzcash` upgrade with schema-safe rescan
 
-> **Status (2026-08-05):** The operator selected the stable candidate:
+**Status:** done (2026-08-05/11; the stack has since moved again, see the note below) — **Last reviewed:** 2026-10-18
+
+> **The selected versions below are no longer the ones in the tree.** ARRR Ironwood step B
+> re-vendored the stack on `zcash_primitives` 0.30.1 / `zcash_transparent` 0.10.0 /
+> `zcash_client_backend` 0.24.0 / `zcash_client_sqlite` 0.22.0 on 2026-10-12 (PR #18), because
+> v6 transaction reading is unconditional only from 0.30.1. This plan stays as the record of the
+> port that got the workspace onto a modern librustzcash at all, and of the schema-safe rescan
+> policy that the later re-vendor reuses; for the current pins see
+> [`arrr-ironwood-compatibility.md`](arrr-ironwood-compatibility.md) §10.4 step B.
+>
+> **Context (2026-08-05):** The operator selected the stable candidate:
 > `zcash_client_backend` 0.23.0, `zcash_client_sqlite` 0.21.1, and
 > `zcash_primitives`/`zcash_proofs` 0.28.0. The production port, shared
 > `rusqlite` 0.37 migration, Reloaded-specific database namespace, strict

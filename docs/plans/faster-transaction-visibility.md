@@ -1,8 +1,16 @@
 # Plan: faster transaction visibility (push notifications and pending receipts)
 
-> **Status:** analysis and implementation plan only; not started.
+**Status:** done (both workstreams shipped 2026-08-09/11) — **Last reviewed:** 2026-10-18
+
+> **The "Current state" section below describes the tree as it was before this plan ran, and
+> is kept for that reason.** Both workstreams are implemented — see the progress note under
+> *Sequencing* — so statements like "no `blockchain.scripthash.subscribe` call exists in the
+> tree" are history, not the present: the subscription, the watcher registry, the
+> re-subscription on reconnect, the history/balance wake and the shielded pending receipts
+> are all in `mm2src/coins/utxo/rpc_clients/electrum_rpc_client.rs` and
+> `mm2src/coins/z_coin.rs` today. All three open decisions are resolved there too.
 >
-> Created after the 2026-08-08/09 wallet-log maintenance pass, which showed a
+> **Context:** created after the 2026-08-08/09 wallet-log maintenance pass, which showed a
 > user waiting minutes for a deposit to appear and eventually restarting the
 > wallet to force it. Two independent causes were confirmed: balances are
 > refreshed only on a timer, and unconfirmed shielded receipts are not

@@ -1,6 +1,8 @@
 # Dependabot triage — 2026-09-23
 
-> **Status:** done. Snapshot triage of all 76 open Dependabot alerts on `dev`,
+**Status:** done — **Last reviewed:** 2026-10-18
+
+> **Context:** snapshot triage of all 76 open Dependabot alerts on `dev`,
 > the fixes that came out of it, and the accepted-risk record for what stays.
 > Ongoing dependency work continues to live in
 > [`v0.2.0-dependency-hygiene.md`](v0.2.0-dependency-hygiene.md); this file is the
