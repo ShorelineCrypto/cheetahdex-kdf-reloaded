@@ -51,6 +51,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A second ARRR withdrawal no longer fails with `bad-txns-duplicate-nullifier-requirements-not-met`
+  because the first one's notes were still unspent.** `withdraw` and `task::withdraw` are unchanged
+  (the client still broadcasts), but when the client submits the transaction through
+  `send_raw_transaction` the notes it spends are now reserved until it is mined and scanned, or
+  expires. A withdrawal that is built and never submitted reserves nothing. `withdraw` with `max`
+  now reports an insufficient balance instead of an internal error when the spendable balance does
+  not cover the fee. Two daemons on one seed with separate wallet databases are not protected.
+  Detail: PR #49; CRD ch.39 D39.8.0e.
 - **`enable_erc20` now works on an HD wallet.** The one-shot call refused every HD-derived EVM
   platform with `UnexpectedDerivationMethod`, so a client that knows only this call could not add an
   EVM token after startup in HD mode. It now activates the token on the platform's enabled address
@@ -99,6 +107,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Plans this cycle moved, in any sense; each plan file carries the detail.
 
+- [`shielded-in-flight-note-locking`](docs/plans/shielded-in-flight-note-locking.md) — the
+  withdraw path now records the transaction when the client submits it, and the plan moved to in progress (PR #49).
 - [`arrr-ironwood-compatibility`](docs/plans/arrr-ironwood-compatibility.md) — the reorg-wedge fix
   landed (PR #31); the lightwalletd transport moved to tonic 0.14 on hyper 1 (PRs #37, #42).
 - [`v0.2.0-dependency-hygiene`](docs/plans/v0.2.0-dependency-hygiene.md) — the rustls, webpki, ring

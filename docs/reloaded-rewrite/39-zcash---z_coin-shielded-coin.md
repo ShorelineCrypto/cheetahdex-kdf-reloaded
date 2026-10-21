@@ -1745,9 +1745,11 @@ insufficient-balance error rather than consuming the wait budget.
 > ends in a typed failure. A shortfall that no in-flight spend could cover fails
 > immediately rather than consuming that budget.
 >
-> One path remains uncovered and is tracked as D39.8.0e: a withdrawal is built
-> but not broadcast by this daemon, so nothing on the send path observes its
-> broadcast and no in-flight record is written for it.
+> A withdrawal is built and returned by this daemon but broadcast by its caller
+> through `send_raw_transaction`. That second call is handled by this daemon, so the
+> broadcast is observable after all: the coin's raw-transaction submission records
+> the accepted transaction exactly as the send path does (D39.8.0e, resolved
+> 2026-10-19). A withdrawal that is built and never submitted records nothing.
 
 #### Tests
 
@@ -1778,6 +1780,17 @@ broadcast for reusing a nullifier.
 > needs a harness able to drive a shielded wallet database through
 > broadcast/scan/expiry transitions, which this tree does not yet have. Tracked
 > as D39.8.0f.
+>
+> **Update (2026-10-19).** Three withdrawal-side cases are now covered by deterministic
+> tests against a real shielded wallet database (a scanned note, a real spend proof, a
+> transaction submitted as raw bytes): once a withdrawal's bytes have been accepted, a
+> second build before any scan is not handed its note and is told it is short; a
+> withdrawal that is built and never submitted strands nothing, and the next build
+> reuses its note; and a submitted withdrawal's note is held while its expiry height
+> can still be mined in and is free once the chain passes it. The tests need the
+> Sapling parameter files and say so and return where they are absent. The
+> broadcast-rejection, restart, mined-and-scanned and two-concurrent-send cases remain
+> unwritten.
 
 #### Deferred Work
 
@@ -1787,16 +1800,29 @@ section that covers construction, broadcast and recording, and keeps both the
 sapling-state gate and the wait for an in-flight spend outside it, so the scanner
 can still advance while a send waits and each attempt re-selects.
 
-D39.8.0e The exclusion does not yet cover a withdrawal broadcast outside this
-daemon. A withdrawal is built and returned as a signed transaction for the caller
-to submit, so the send path never observes its broadcast and writes no in-flight
-record for it; a shielded send issued between that external submission and the
-scan of the containing block can therefore still select the withdrawal's inputs
-and be rejected as a duplicate nullifier. Closing this requires the coin to
-observe the broadcast of a transaction it did not send itself, which the generic
-raw-transaction submission path does not currently expose to the shielded layer.
-Swap payments and DEX fees are unaffected: those are broadcast by the send path
-and are recorded (R39.8.0ap).
+D39.8.0e The exclusion did not cover a withdrawal, which is built and returned as a
+signed transaction for the caller to submit. **Resolved 2026-10-19.** The caller's
+submission is a `send_raw_transaction` request that this daemon handles and
+forwards itself, so the shielded coin observes the broadcast: after the backend
+accepts the bytes, the transaction is read back from them (its Sapling spends carry
+the nullifiers; its fee is the value leaving the Sapling pool less the transparent
+outputs it pays) and recorded under R39.8.0ap, with the same release (R39.8.0aq,
+R39.8.0ar). Nothing is recorded at build time, so a withdrawal the user cancels
+strands no notes, and a second build made before any broadcast may reuse the first
+build's notes -- if both are then submitted, the network rejects the second as a
+duplicate nullifier, which is the same outcome as any two conflicting spends and not
+a defect of this daemon. Not covered: two daemons running on one seed with separate
+wallet databases, which cannot see each other's records, and a transaction whose fee
+cannot be derived from its bytes (it has transparent inputs or a non-Sapling shielded
+bundle -- none this daemon builds), which is logged and not recorded.
+
+D39.8.0g A built but unsubmitted withdrawal is invisible to the user. The history
+(`z_coin_tx_history`) is derived from the scanned chain (R39.8.0q, §39.8.0.6), so a
+transaction that has been built and not broadcast appears nowhere, and one that was
+broadcast appears only as a pending receipt of change. Showing built-but-unsent
+transactions is a user-experience gap, deliberately out of scope here: it would need
+a record of unbroadcast builds, which is exactly the state R39.8.0ap declines to
+create.
 
 D39.8.0f T39.8.0h is only partially covered; see the coverage status under that
 rule for what exists and what does not. The missing cases share one prerequisite:
