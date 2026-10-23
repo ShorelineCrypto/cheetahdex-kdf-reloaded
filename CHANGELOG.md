@@ -55,6 +55,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A hostile or corrupt Electrum header response can no longer crash the node.** A header (or
+  header list) whose length fields asked for gigabytes of memory could abort the process or kill the
+  sync task, for any UTXO coin. The Equihash solution, Qtum's block signature and AuxPoW merkle
+  branches now have length limits, and an over-long one is rejected as a malformed header like any
+  other. Detail: PR #52; CRD ch.37 R37.5.6a.
+- **A maker that goes offline now drops out of the orderbook on schedule, whatever its clock says.**
+  The keep-alive expiry used the timestamp the maker put in its own message, so a maker with a fast
+  clock stayed listed for that skew plus 90 s after it died, and one that wrote a far-future
+  timestamp stayed listed indefinitely. The expiry now runs from when this node received the
+  keep-alive (CRD ch.32 R-P3); the wire format is unchanged. Keep-alives also no longer advertise
+  empty trie roots. Detail: PR #52.
 - **A ZCash-family (ARRR) light-server endpoint whose block cache is stale is no longer used.**
   An endpoint can report the current chain height and the right branch while its cache of blocks
   stopped much earlier, so it cannot serve anything newer; it is now excluded at admission, as is
