@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Releases and the runtime Docker image now ship the license files.** `COPYING`, `LICENSE` and
   `THIRDPARTY-LICENSES` are attached to every release and covered by the signed `SHA256SUMS`, and
   the image carries them in `/usr/share/doc/kdf/`. Detail: PR #36.
+- **A shielded (ARRR) withdrawal short only because of an unconfirmed transaction now says so.**
+  Instead of `NotSufficientBalance` with `available: 0` beside a healthy balance, it fails with
+  `BalanceLockedByUnconfirmedTransaction` (HTTP 400) naming the amounts and that it clears when
+  that transaction confirms. After a node restart the bare error is reported again. Detail: PR #50.
 
 ### Changed
 
@@ -62,6 +66,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   timestamp stayed listed indefinitely. The expiry now runs from when this node received the
   keep-alive (CRD ch.32 R-P3); the wire format is unchanged. Keep-alives also no longer advertise
   empty trie roots. Detail: PR #52.
+- **A ZCash-family (ARRR) light-server endpoint whose block cache is stale is no longer used.**
+  An endpoint can report the current chain height and the right branch while its cache of blocks
+  stopped much earlier, so it cannot serve anything newer; it is now excluded at admission, as is
+  one whose cache answers with an error or whose height is more than 40 blocks behind the others.
+  A failed admission now lists every excluded endpoint and why, and its message no longer claims
+  that an endpoint is "not on this coin's chain". Detail: PR #51; CRD ch.39 R39.11.7a(j).
 - **A second ARRR withdrawal no longer fails with `bad-txns-duplicate-nullifier-requirements-not-met`
   because the first one's notes were still unspent.** `withdraw` and `task::withdraw` are unchanged
   (the client still broadcasts), but when the client submits the transaction through
@@ -119,7 +129,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 Plans this cycle moved, in any sense; each plan file carries the detail.
 
 - [`shielded-in-flight-note-locking`](docs/plans/shielded-in-flight-note-locking.md) — the
-  withdraw path now records the transaction when the client submits it, and the plan moved to in progress (PR #49).
+  withdraw path now records the transaction when the client submits it, and the plan moved to in progress (PR #49); the shortfall it causes is now named (PR #50).
 - [`arrr-ironwood-compatibility`](docs/plans/arrr-ironwood-compatibility.md) — the reorg-wedge fix
   landed (PR #31); the lightwalletd transport moved to tonic 0.14 on hyper 1 (PRs #37, #42).
 - [`v0.2.0-dependency-hygiene`](docs/plans/v0.2.0-dependency-hygiene.md) — the rustls, webpki, ring
