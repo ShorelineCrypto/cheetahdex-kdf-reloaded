@@ -63,11 +63,40 @@ impl Serializable for BlockHeaderBits {
     }
 }
 
+/// Upper bound on the number of hashes in an AuxPoW merkle branch. `branch_side_mask` is an `i32`
+/// holding one left/right bit per level, so a branch longer than 32 levels has levels the mask cannot
+/// address; real branches are at most the depth of a block's transaction tree or of the
+/// merged-mining slot tree (a few tens of levels at the very most).
+const MAX_MERKLE_BRANCH_HASHES: usize = 32;
+/// Upper bound on a header's Equihash/Verus `solution` in bytes (1 MiB). The largest known real
+/// solutions are a few KiB (Equihash 200,9 is 1344 bytes; Verus adds merge-mining data); no chain
+/// of this lineage allows a header larger than its block, and a `u8` list of this size is a trivial
+/// allocation. The aim is only to refuse the multi-gigabyte lengths a hostile server can request.
+const MAX_SOLUTION_BYTES: usize = 1 << 20;
+/// Upper bound on Qtum's `vch_block_sig_dlgt` in bytes: a compact signature (65 bytes) plus, for
+/// delegated staking, the delegation fee and delegation signature, i.e. about 130 bytes. 4096 leaves
+/// a wide margin for variable-length encodings.
+const MAX_BLOCK_SIG_DLGT_BYTES: usize = 4096;
+
 /// AuxPoW merkle proof branch (used by Doge/Syscoin merged mining).
-#[derive(Clone, Debug, PartialEq, Deserializable, Serializable)]
+#[derive(Clone, Debug, PartialEq, Serializable)]
 pub struct MerkleBranch {
     branch_hashes: Vec<H256>,
     branch_side_mask: i32,
+}
+
+// Hand-written rather than derived: the derive reads every `Vec` field unbounded (and `Block`'s
+// transaction list legitimately needs a far larger bound than a merkle branch).
+impl Deserializable for MerkleBranch {
+    fn deserialize<T: io::Read>(reader: &mut Reader<T>) -> Result<Self, serialization::Error>
+    where
+        Self: Sized,
+    {
+        Ok(MerkleBranch {
+            branch_hashes: reader.read_list_max(MAX_MERKLE_BRANCH_HASHES)?,
+            branch_side_mask: reader.read()?,
+        })
+    }
 }
 
 /// AuxPoW container — wraps the parent-chain coinbase plus merkle proofs
@@ -350,7 +379,11 @@ impl Deserializable for BlockHeader {
         } else {
             BlockHeaderNonce::U32(reader.read()?)
         };
-        let solution = if version == 4 { Some(reader.read_list()?) } else { None };
+        let solution = if version == 4 {
+            Some(reader.read_list_max(MAX_SOLUTION_BYTES)?)
+        } else {
+            None
+        };
 
         let aux_pow = if version == AUX_POW_VERSION_DOGE || version == AUX_POW_VERSION_SYS {
             // Parent coinbase is always a standard Bitcoin (witness) tx.
@@ -389,7 +422,7 @@ impl Deserializable for BlockHeader {
                     Some(reader.read()?),
                     Some(reader.read()?),
                     Some(reader.read()?),
-                    Some(reader.read_list()?),
+                    Some(reader.read_list_max(MAX_BLOCK_SIG_DLGT_BYTES)?),
                 )
             } else {
                 (None, None, None, None)
@@ -571,5 +604,124 @@ mod tests {
             Err(serialization::Error::UnreadData)
         );
         assert!(BlockHeader::list_from_served_bytes(&hex[..hex.len() - 2], 2, CoinVariant::Standard).is_err());
+    }
+
+    // ---- length bounds on lists read from header bytes ----------------------------------------
+
+    /// Compact-integer encoding of `n`.
+    fn compact(n: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        match n {
+            0..=0xfc => out.push(n as u8),
+            0xfd..=0xffff => {
+                out.push(0xfd);
+                out.extend_from_slice(&(n as u16).to_le_bytes());
+            },
+            0x1_0000..=0xffff_ffff => {
+                out.push(0xfe);
+                out.extend_from_slice(&(n as u32).to_le_bytes());
+            },
+            _ => {
+                out.push(0xff);
+                out.extend_from_slice(&n.to_le_bytes());
+            },
+        }
+        out
+    }
+
+    /// A version-4 (Equihash) header up to, and including, the solution length prefix.
+    fn v4_header_with_solution_len(len: u64) -> Vec<u8> {
+        let mut bytes = 4u32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&[0x11; 32]); // previous hash
+        bytes.extend_from_slice(&[0x22; 32]); // merkle root
+        bytes.extend_from_slice(&[0x33; 32]); // final sapling root
+        bytes.extend_from_slice(&1_700_000_000u32.to_le_bytes());
+        bytes.extend_from_slice(&0x1f07_ffffu32.to_le_bytes());
+        bytes.extend_from_slice(&[0x44; 32]); // 256-bit nonce
+        bytes.extend_from_slice(&compact(len));
+        bytes
+    }
+
+    #[test]
+    fn oversized_solution_length_is_an_error_not_a_panic() {
+        for len in [u64::MAX, u64::MAX / 2, 1 << 40, MAX_SOLUTION_BYTES as u64 + 1] {
+            let bytes = v4_header_with_solution_len(len);
+            assert_eq!(
+                BlockHeader::from_served_bytes(&bytes, CoinVariant::Standard),
+                Err(serialization::Error::MalformedData),
+                "solution length {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn solution_at_the_bound_is_not_rejected_for_its_length() {
+        // The bound itself passes the length check; here the data then runs out.
+        let bytes = v4_header_with_solution_len(MAX_SOLUTION_BYTES as u64);
+        assert_eq!(
+            BlockHeader::from_served_bytes(&bytes, CoinVariant::Standard),
+            Err(serialization::Error::UnexpectedEnd)
+        );
+    }
+
+    #[test]
+    fn equihash_solution_of_real_size_round_trips() {
+        let mut bytes = v4_header_with_solution_len(1344);
+        bytes.extend_from_slice(&[0x55; 1344]);
+        let header = BlockHeader::from_served_bytes(&bytes, CoinVariant::Standard).unwrap();
+        assert_eq!(header.solution.as_ref().map(Vec::len), Some(1344));
+    }
+
+    #[test]
+    fn hostile_header_list_falls_back_to_std80_instead_of_panicking() {
+        // Header 1 has version 4, so the inferred parse runs past its own 80 bytes and takes the
+        // solution length from header 2's merkle-root bytes (offset 140 overall), which are 0xff.
+        let mut served = standard_header(4, H256::default(), 1_700_000_000, 0);
+        let mut second = standard_header(0x2000_0000, H256::default(), 1_700_000_001, 0);
+        second[36..68].fill(0xff);
+        served.extend_from_slice(&second);
+
+        let parsed = BlockHeader::list_from_served_bytes(&served, 2, CoinVariant::Standard).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed.iter().all(|h| h.solution.is_none()));
+        assert_eq!(parsed[0].version, 4);
+    }
+
+    #[test]
+    fn oversized_qtum_block_sig_length_is_an_error_not_a_panic() {
+        let mut bytes = standard_header(QTUM_BLOCK_HEADER_VERSION, H256::default(), 1_700_000_000, 0);
+        bytes.extend_from_slice(&[0x66; 32]); // hash_state_root
+        bytes.extend_from_slice(&[0x77; 32]); // hash_utxo_root
+        bytes.extend_from_slice(&[0x88; 36]); // prevout_stake (32-byte hash + 4-byte index)
+        for len in [u64::MAX, MAX_BLOCK_SIG_DLGT_BYTES as u64 + 1] {
+            let mut with_len = bytes.clone();
+            with_len.extend_from_slice(&compact(len));
+            assert_eq!(
+                BlockHeader::from_served_bytes(&with_len, CoinVariant::Qtum),
+                Err(serialization::Error::MalformedData),
+                "signature length {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn oversized_merkle_branch_is_an_error_not_a_panic() {
+        for len in [u64::MAX, u64::MAX / 2, MAX_MERKLE_BRANCH_HASHES as u64 + 1] {
+            assert_eq!(
+                deserialize::<_, MerkleBranch>(compact(len).as_slice()),
+                Err(serialization::Error::MalformedData),
+                "branch length {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn merkle_branch_at_the_bound_round_trips() {
+        let branch = MerkleBranch {
+            branch_hashes: vec![H256::from([0x99; 32]); MAX_MERKLE_BRANCH_HASHES],
+            branch_side_mask: 5,
+        };
+        let bytes = serialize(&branch);
+        assert_eq!(deserialize::<_, MerkleBranch>(bytes.as_ref()), Ok(branch));
     }
 }
