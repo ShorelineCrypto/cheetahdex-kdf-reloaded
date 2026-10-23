@@ -51,6 +51,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A maker that goes offline now drops out of the orderbook on schedule, whatever its clock says.**
+  The keep-alive expiry used the timestamp the maker put in its own message, so a maker with a fast
+  clock stayed listed for that skew plus 90 s after it died, and one that wrote a far-future
+  timestamp stayed listed indefinitely. The expiry now runs from when this node received the
+  keep-alive (CRD ch.32 R-P3); the wire format is unchanged. Keep-alives also no longer advertise
+  empty trie roots. Detail: PR #51.
 - **A second ARRR withdrawal no longer fails with `bad-txns-duplicate-nullifier-requirements-not-met`
   because the first one's notes were still unspent.** `withdraw` and `task::withdraw` are unchanged
   (the client still broadcasts), but when the client submits the transaction through
