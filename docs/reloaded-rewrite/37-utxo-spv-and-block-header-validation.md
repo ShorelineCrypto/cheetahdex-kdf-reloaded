@@ -383,7 +383,11 @@ Equihash `solution`, 1 MiB; Qtum's `vch_block_sig_dlgt`, 4096 bytes; each
 AuxPoW merkle branch, 32 hashes (the width of its side mask). A bound is a
 sanity ceiling well above any real value, not a validity rule. A rejection
 under this rule takes the same path as any other parse failure, including the
-std-80 fallback of R37.5.6.
+std-80 fallback of R37.5.6. Independently of those bounds, the shared list
+reader shall never trust a wire length for preallocation: it reserves at most
+4096 items up front and grows as items are actually decoded, so an unbounded
+list elsewhere (block transactions, for instance) costs at most the bytes
+really present and a hostile length ends at the first missing byte.
 
 > **Provenance (informative).** R37.5.6a is clean-room-original hardening
 > written without reference to the upstream implementation, in the manner of
