@@ -269,7 +269,8 @@ sole discretion — nothing requires their inclusion and nothing precludes it.
 - `test.yml` runs on GitHub-hosted runners for every pull request into, and
   every push to, `dev`, `staging` and `main` (and `reloaded-gplv2-base`).
   Branch protection requires its `tests-passed` job, which succeeds only when
-  `fmt`, `clippy`, every `unit-tests` leg and `wasm32-check` all succeeded. To
+  `fmt`, `clippy`, every `unit-tests` leg, `wasm32-check` and `evm-geth-tests`
+  (a pinned `geth --dev` node; it fails rather than skips when geth is missing) all succeeded. To
   make a new test job required, add it to `tests-passed`'s `needs:` list in
   `test.yml`; repository settings do not change. `docker-tests`,
   `trezor-emulator-tests` and `external-network-tests` run but are not
