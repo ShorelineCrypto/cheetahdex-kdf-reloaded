@@ -391,7 +391,10 @@ impl Deserializable for BlockHeader {
             let parent_block_hash = reader.read()?;
             let coinbase_branch = reader.read()?;
             let blockchain_branch = reader.read()?;
-            let parent_block_header = Box::new(reader.read()?);
+            // The parent is a header of the parent chain, std-80 by definition (CRD ch.37 §37.5.4);
+            // reading it with the version-inferred layout would let a hostile server nest AuxPoW
+            // headers without limit and overflow the stack.
+            let parent_block_header = Box::new(BlockHeader::read_standard(reader)?);
             Some(AuxPow {
                 coinbase_tx,
                 parent_block_hash,
@@ -723,5 +726,49 @@ mod tests {
         };
         let bytes = serialize(&branch);
         assert_eq!(deserialize::<_, MerkleBranch>(bytes.as_ref()), Ok(branch));
+    }
+
+    /// One AuxPoW-flagged header (std-80 base plus a minimal proof) whose parent header is `parent`.
+    fn auxpow_header_around(parent: &[u8]) -> Vec<u8> {
+        let mut bytes = standard_header(AUX_POW_VERSION_DOGE, H256::default(), 1_700_000_000, 0);
+        // Minimal coinbase transaction: version, one input, one empty output, lock time.
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.push(1);
+        bytes.extend_from_slice(&[0u8; 32]);
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.push(0); // empty script
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.push(1); // one output: zero value, empty script
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&[0x12; 32]); // parent block hash
+        for _ in 0..2 {
+            bytes.push(0); // empty merkle branch
+            bytes.extend_from_slice(&0i32.to_le_bytes());
+        }
+        bytes.extend_from_slice(parent);
+        bytes
+    }
+
+    #[test]
+    fn auxpow_parent_header_is_read_as_std80() {
+        // A parent whose version value collides with the AuxPoW flag is still just 80 bytes.
+        let parent = standard_header(AUX_POW_VERSION_DOGE, H256::default(), 1_699_999_999, 7);
+        let served = auxpow_header_around(&parent);
+        let header = BlockHeader::from_served_bytes(&served, CoinVariant::Standard).unwrap();
+        let aux = header.aux_pow.expect("AuxPoW proof is parsed");
+        assert!(aux.parent_block_header.aux_pow.is_none());
+        assert_eq!(aux.parent_block_header.time, 1_699_999_999);
+    }
+
+    #[test]
+    fn deeply_nested_auxpow_is_an_error_not_a_stack_overflow() {
+        // Each level is the same bytes (an AuxPoW header ending where its parent begins), so the
+        // nesting is the level repeated, then a final plain parent.
+        let level = auxpow_header_around(&[]);
+        let mut served = level.repeat(20_000);
+        served.extend_from_slice(&standard_header(0x2000_0000, H256::default(), 1_700_000_000, 0));
+        assert!(BlockHeader::from_served_bytes(&served, CoinVariant::Standard).is_err());
     }
 }
