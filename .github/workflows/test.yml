@@ -567,7 +567,8 @@ jobs:
       # version, build id and checksum together, deliberately. The checksum is of
       # the release tarball from the official go-ethereum build store
       # (gethstore.blob.core.windows.net), where go-ethereum's own download page
-      # points. If that store is unreachable the job fails at install, by design.
+      # points. The tarball is cached (see the restore step); with a cold cache and
+      # an unreachable store the job fails at install, by design.
       GETH_VERSION: "1.17.2"
       GETH_BUILD: "be4dc0c4"
       GETH_TARBALL_SHA256: "74c83a10f64a8d4c2dbc936bc2088f574d95005d0bf35641ffb092fc39bb968c"
@@ -578,16 +579,37 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
+      - name: Restore cached geth tarball
+        # Closes the job's one third-party dependency: with a warm cache the
+        # download store is not contacted at all. The key carries the version,
+        # build id AND the SHA-256, so bumping any of the three misses and can
+        # never hand back a different artifact. A hit is not trusted: the next
+        # step verifies the checksum on both paths. A miss is not an error; the
+        # tarball is downloaded, verified and saved by this step's post action.
+        # (If an entry is ever found corrupt the verify step fails the job; delete
+        # that cache entry to refresh it, cache keys are immutable.)
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/geth-dl
+          key: geth-tarball-${{ env.GETH_VERSION }}-${{ env.GETH_BUILD }}-${{ env.GETH_TARBALL_SHA256 }}
+
       - name: Install and verify pinned geth
         shell: bash
         run: |
           set -euo pipefail
           name="geth-linux-amd64-${GETH_VERSION}-${GETH_BUILD}"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/geth.tgz" \
-            "https://gethstore.blob.core.windows.net/builds/${name}.tar.gz"
-          echo "${GETH_TARBALL_SHA256}  $RUNNER_TEMP/geth.tgz" | sha256sum -c -
+          tgz="$RUNNER_TEMP/geth-dl/geth.tgz"
+          mkdir -p "$RUNNER_TEMP/geth-dl"
+          if [ -s "$tgz" ]; then
+            echo "using cached geth tarball"
+          else
+            curl -fsSL --retry 3 -o "$tgz" \
+              "https://gethstore.blob.core.windows.net/builds/${name}.tar.gz"
+          fi
+          # Runs on a cache hit and on a fresh download alike.
+          echo "${GETH_TARBALL_SHA256}  $tgz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/geth-bin"
-          tar -xzf "$RUNNER_TEMP/geth.tgz" -C "$RUNNER_TEMP/geth-bin" --strip-components=1 "${name}/geth"
+          tar -xzf "$tgz" -C "$RUNNER_TEMP/geth-bin" --strip-components=1 "${name}/geth"
           echo "$RUNNER_TEMP/geth-bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/geth-bin/geth" version | tee "$RUNNER_TEMP/geth-version.txt"
           grep -q "^Version: ${GETH_VERSION}-" "$RUNNER_TEMP/geth-version.txt"
