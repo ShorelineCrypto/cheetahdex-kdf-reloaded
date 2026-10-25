@@ -195,10 +195,14 @@ impl<'a, Addr: Clone + DisplayAddress + Eq + std::hash::Hash, Tx: Transaction> T
             TransactionType::StakingDelegation
             | TransactionType::RemoveDelegation
             | TransactionType::ClaimDelegationRewards
-            | TransactionType::StandardTransfer => tx_hash.clone(),
+            | TransactionType::StandardTransfer
+            | TransactionType::SiaV1Transaction
+            | TransactionType::SiaV2Transaction
+            | TransactionType::SiaMinerPayout => tx_hash.clone(),
         };
 
         TransactionDetails {
+            tx_json: None,
             coin: self.coin,
             tx_hex: self.tx.tx_hex().into(),
             tx_hash: tx_hash.to_tx_hash(),
@@ -408,7 +412,14 @@ pub async fn my_tx_history_v2_rpc(
     request: MyTxHistoryRequestV2,
 ) -> Result<MyTxHistoryResponseV2, MmError<MyTxHistoryErrorV2>> {
     let coin = lp_coinfind_or_err(&ctx, &request.coin).await.mm_err(Into::into)?;
-    if matches!(coin, MmCoinEnum::UtxoCoin(_) | MmCoinEnum::QtumCoin(_)) {
+    // Sia is served from the coin-generic runtime history store, not the SQL-indexed
+    // path: it is deliberately not classified through `HistoryCoinType` (CRD ch.53
+    // R53.3.1). Accepting it here is the additive extension of R53.2.7, so
+    // `NotSupportedFor` is not observable for an activated Sia coin (R53.2.10).
+    if matches!(
+        coin,
+        MmCoinEnum::UtxoCoin(_) | MmCoinEnum::QtumCoin(_) | MmCoinEnum::SiaCoin(_)
+    ) {
         return build_response_from_runtime_history(ctx, request, coin).await;
     }
 
@@ -568,6 +579,7 @@ mod z_coin_tx_history_tests {
 
     fn tx_details(id: u8, block_height: u64) -> TransactionDetails {
         TransactionDetails {
+            tx_json: None,
             tx_hex: vec![id].into(),
             tx_hash: format!("{id:02x}"),
             from: vec![],
@@ -579,7 +591,7 @@ mod z_coin_tx_history_tests {
             block_height,
             timestamp: 0,
             fee_details: None,
-            coin: "RICK".to_owned(),
+            coin: "DOC".to_owned(),
             internal_id: vec![id].into(),
             kmd_rewards: None,
             transaction_type: TransactionType::StandardTransfer,
@@ -589,7 +601,7 @@ mod z_coin_tx_history_tests {
     #[test]
     fn from_id_not_found_returns_empty_page_with_total_preserved() {
         let request = MyTxHistoryRequestV2 {
-            coin: "RICK".to_owned(),
+            coin: "DOC".to_owned(),
             limit: 2,
             paging_options: PagingOptionsEnum::FromId(vec![99u8].into()),
         };
@@ -607,7 +619,7 @@ mod z_coin_tx_history_tests {
     #[test]
     fn from_id_found_returns_following_records() {
         let request = MyTxHistoryRequestV2 {
-            coin: "RICK".to_owned(),
+            coin: "DOC".to_owned(),
             limit: 2,
             paging_options: PagingOptionsEnum::FromId(vec![2u8].into()),
         };
@@ -630,7 +642,7 @@ mod z_coin_tx_history_tests {
     #[test]
     fn page_number_paging_uses_expected_offset() {
         let request = MyTxHistoryRequestV2 {
-            coin: "RICK".to_owned(),
+            coin: "DOC".to_owned(),
             limit: 2,
             paging_options: PagingOptionsEnum::PageNumber(NonZeroUsize::new(2).unwrap()),
         };
@@ -694,7 +706,7 @@ mod z_coin_tx_history_tests {
         );
         assert_eq!(not_active.status_code(), StatusCode::NOT_FOUND);
 
-        let not_supported = MyTxHistoryErrorV2::NotSupportedFor("RICK".into());
+        let not_supported = MyTxHistoryErrorV2::NotSupportedFor("DOC".into());
         assert_eq!(
             serde_json::to_value(&not_supported).unwrap()["error_type"],
             serde_json::json!("NotSupportedFor")

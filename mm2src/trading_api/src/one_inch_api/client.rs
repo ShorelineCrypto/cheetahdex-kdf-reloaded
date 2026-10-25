@@ -214,6 +214,11 @@ impl ApiClient {
         ]
     }
 
+    // `ApiClientError` is a large error enum; boxing it here would diverge from
+    // the rest of this crate, which returns it by value behind the same allow
+    // (see `build` above and the `classic_swap_types` constructors), and would
+    // ripple through all 14 `MmResult<_, ApiClientError>` call sites for no gain.
+    #[allow(clippy::result_large_err)]
     pub async fn call_api<T>(api_url: Url) -> MmResult<T, ApiClientError>
     where
         T: DeserializeOwned, // crd:pin

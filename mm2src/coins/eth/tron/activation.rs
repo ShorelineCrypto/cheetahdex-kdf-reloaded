@@ -163,6 +163,7 @@ pub async fn tron_coin_from_conf_and_request(
         nft_swap_v2_contract: None,
         swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
         erc20_tokens_infos: Default::default(),
+        custom_token: false,
     };
     Ok(EthCoin(Arc::new(coin)))
 }

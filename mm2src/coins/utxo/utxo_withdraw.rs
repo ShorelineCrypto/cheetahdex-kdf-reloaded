@@ -89,9 +89,9 @@ impl From<RpcTaskError> for WithdrawError {
         match e {
             RpcTaskError::Canceled => WithdrawError::InternalError("Canceled".to_owned()),
             RpcTaskError::Timeout(timeout) => WithdrawError::Timeout(timeout),
-            RpcTaskError::NoSuchTask(_) | RpcTaskError::UnexpectedTaskStatus { .. } => {
-                WithdrawError::InternalError(error)
-            },
+            RpcTaskError::NoSuchTask(_)
+            | RpcTaskError::UnexpectedTaskStatus { .. }
+            | RpcTaskError::UnexpectedUserAction { .. } => WithdrawError::InternalError(error),
             RpcTaskError::Internal(internal) => WithdrawError::InternalError(internal),
         }
     }
@@ -227,6 +227,7 @@ where
             _ => serialize(&signed).into(),
         };
         Ok(TransactionDetails {
+            tx_json: None,
             from: vec![self.sender_address_string()],
             to: vec![req.to.clone()],
             total_amount: big_decimal_from_sat(data.spent_by_me as i64, decimals),

@@ -477,6 +477,24 @@ pub enum WithdrawError {
         available: BigDecimal,
         required: BigDecimal,
     },
+    /// CRD ch.39 D39.8.0e: the withdrawal is short only because notes it would spend are committed
+    /// to an earlier transaction of this daemon that is not confirmed yet. Distinct from
+    /// `NotSufficientBalance` so the cause reaches the user: with the balance showing, a bare
+    /// "not enough funds" cannot be connected to the send that just happened. Temporary.
+    #[display(
+        fmt = "Not enough spendable {} right now: available {}, required at least {}. {} is committed to a \
+               transaction of yours that is not confirmed yet; retry once it confirms",
+        coin,
+        available,
+        required,
+        locked
+    )]
+    BalanceLockedByUnconfirmedTransaction {
+        coin: String,
+        available: BigDecimal,
+        required: BigDecimal,
+        locked: BigDecimal,
+    },
     #[display(fmt = "Balance is zero")]
     ZeroBalanceToWithdrawMax,
     #[display(fmt = "The amount {} is too small, required at least {}", amount, threshold)]
@@ -517,6 +535,16 @@ pub enum WithdrawError {
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
     #[display(fmt = "Unsupported under the Trezor signing policy: {}", _0)]
     UnsupportedUnderTrezor(String),
+    /// CRD ch.39 R39.6.4c: the coin's network has activated an upgrade whose
+    /// transaction format this build cannot produce, so no withdrawal of it can
+    /// be constructed until the build is upgraded.
+    ///
+    /// Distinct from `InternalError`, which this once was: nothing has gone wrong
+    /// inside the process. The condition is foreseeable, permanent until the user
+    /// acts, and the action is theirs — which is also why it maps to 400 rather
+    /// than 500, following the two `UnsupportedUnder*` variants above.
+    #[display(fmt = "Unsupported after a network upgrade: {}", _0)]
+    UnsupportedAfterNetworkUpgrade(String),
 }
 impl HttpStatusCode for WithdrawError {
     fn status_code(&self) -> StatusCode {
@@ -526,13 +554,17 @@ impl HttpStatusCode for WithdrawError {
             WithdrawError::CoinDoesntSupportInitWithdraw { .. }
             | WithdrawError::UnexpectedUserAction { .. }
             | WithdrawError::NotSufficientBalance { .. }
+            | WithdrawError::BalanceLockedByUnconfirmedTransaction { .. }
             | WithdrawError::ZeroBalanceToWithdrawMax
             | WithdrawError::AmountTooLow { .. }
             | WithdrawError::InvalidAddress(_)
             | WithdrawError::InvalidFeePolicy(_)
             | WithdrawError::FromAddressNotFound
             | WithdrawError::UnexpectedFromAddress(_)
-            | WithdrawError::UnknownAccount { .. } => StatusCode::BAD_REQUEST,
+            | WithdrawError::UnknownAccount { .. }
+            // CRD ch.39 R39.6.4c: an upgrade this build cannot transact on is the
+            // user's to resolve, not a server fault.
+            | WithdrawError::UnsupportedAfterNetworkUpgrade(_) => StatusCode::BAD_REQUEST,
             // CRD R47.6.7: unsupported operation under MetaMask maps to 400.
             #[cfg(target_arch = "wasm32")]
             WithdrawError::UnsupportedUnderMetamask(_) => StatusCode::BAD_REQUEST,

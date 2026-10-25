@@ -57,6 +57,9 @@ pub struct TendermintTokenActivationParams {}
 pub enum TendermintTokenInitError {
     #[display(fmt = "Internal error: {}", _0)]
     InternalError(String),
+    /// The token's protocol names a platform other than the one being activated (CRD R36.1.4 step 4).
+    #[display(fmt = "The token protocol names a platform other than the activated one")]
+    PlatformCoinMismatch,
 }
 
 pub struct TendermintTokenImpl {
@@ -558,6 +561,7 @@ impl MmCoin for TendermintToken {
             let tx_hash = hex::encode_upper(sha256(&tx_bytes).as_slice());
 
             let tx_details = TransactionDetails {
+                tx_json: None,
                 tx_hex: tx_bytes.into(),
                 tx_hash: tx_hash.clone(),
                 from: vec![account_id.to_string()],

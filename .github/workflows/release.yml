@@ -24,8 +24,12 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - cheetahdex
+  pull_request:
+    branches:
+      - cheetah
+      - cheetahdex
 
 permissions:
   contents: write # create the GitHub Release and upload assets
@@ -44,6 +48,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Calculate build tag (commit hash) for PR commit
+        if: github.event_name == 'pull_request'
+        run: echo "KDF_BUILD_TAG=$(git rev-parse --short=7 ${{ github.event.pull_request.head.sha }})" >> $GITHUB_ENV
+
+      - name: Calculate build tag (commit hash) for merge commit
+        if: github.event_name != 'pull_request'
+        run: echo "KDF_BUILD_TAG=$(git rev-parse --short=7 HEAD)" >> $GITHUB_ENV
       - id: g
         run: |
           set -eu
@@ -52,7 +63,7 @@ jobs:
           ver="${GITHUB_REF_NAME#v}"
           prerelease=false
           case "$ver" in *-*) prerelease=true;; esac
-          proceed=false
+          proceed=true
           if [ "$prerelease" = true ]; then
             if contains staging || contains main; then proceed=true; fi
           else
@@ -102,6 +113,13 @@ jobs:
         with:
           path: artifacts
 
+      # GPLv2 section 1: recipients get a copy of the license with the program.
+      - name: Check out the license files
+        uses: actions/checkout@v7
+        with:
+          path: src
+          sparse-checkout: LEGAL
+
       - name: Assemble version-tagged release assets
         run: |
           set -eu
@@ -117,6 +135,11 @@ jobs:
             elif [ -f "$dir/kdf" ]; then
               cp "$dir/kdf" "release-assets/kdf-${tag}-${target}"
             fi
+          done
+          # Ship the license texts and third-party notices next to the
+          # binaries; they are covered by the signed checksum manifest too.
+          for f in COPYING LICENSE THIRDPARTY-LICENSES; do
+            cp "src/LEGAL/$f" "release-assets/$f"
           done
           echo "Assembled:"
           ls -l release-assets
@@ -154,7 +177,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          flags=(--draft --verify-tag --generate-notes --title "${GITHUB_REF_NAME}")
+          # The API prepends --notes to the generated notes.
+          notes="KDF Reloaded is distributed under the GNU General Public License, version 2 (GPL-2.0-only); see the attached \`COPYING\`, \`LICENSE\` and \`THIRDPARTY-LICENSES\`. The complete corresponding source code for these binaries is tag \`${GITHUB_REF_NAME}\`: the source code archives attached to this release, or https://github.com/${GITHUB_REPOSITORY}/tree/${GITHUB_REF_NAME}."
+          flags=(--draft --verify-tag --generate-notes --notes "$notes" --title "${GITHUB_REF_NAME}")
           # Mark alpha/beta/rc tags as GitHub pre-releases (never "latest").
           # Final versions get no flag → GitHub marks them latest on publish.
           case "${GITHUB_REF_NAME#v}" in *-*) flags+=(--prerelease);; esac

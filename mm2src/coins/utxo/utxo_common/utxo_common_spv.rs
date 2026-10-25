@@ -12,6 +12,9 @@ pub async fn validate_spv_proof<T: UtxoCommonOps>(
 ) -> Result<(), MmError<SPVError>> {
     let client = match &coin.as_ref().rpc_client {
         UtxoRpcClientEnum::Native(_) => return Ok(()),
+        // No block headers are parsed for a lightwalletd-served coin (CRD ch.39 R39.11.4f).
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => return Ok(()),
         UtxoRpcClientEnum::Electrum(electrum_client) => electrum_client,
     };
     if tx.outputs.is_empty() {
@@ -145,7 +148,7 @@ where
     {
         None => {
             let bytes = client.blockchain_block_header(height).compat().await?;
-            let header: BlockHeader = deserialize(bytes.0.as_slice())?;
+            let header = BlockHeader::from_served_bytes(&bytes.0, CoinVariant::Standard)?;
             let conf = &storage.conf;
             let blocks_limit = NonZeroU64::new(crate::utxo::DIFFICULTY_RETARGET_INTERVAL)
                 .expect("difficulty-retarget interval is non-zero");
@@ -254,6 +257,8 @@ pub async fn block_header_utxo_loop<T: UtxoCommonOps>(weak: UtxoWeak, constructo
             ok_or_continue_after_sleep!(coin.as_ref().rpc_client.get_block_count().compat().await, check_every);
         let client = match &coin.as_ref().rpc_client {
             UtxoRpcClientEnum::Native(_) => break,
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => break,
             UtxoRpcClientEnum::Electrum(client) => client,
         };
         let (block_registry, block_headers) = ok_or_continue_after_sleep!(
@@ -341,7 +346,7 @@ async fn verify_anchor_header(client: &ElectrumClient, anchor: &crate::utxo::SPV
         .compat()
         .await
         .map_err(|e| e.to_string())?;
-    let header: BlockHeader = deserialize(bytes.0.as_slice()).map_err(|e| format!("{:?}", e))?;
+    let header = BlockHeader::from_served_bytes(&bytes.0, CoinVariant::Standard).map_err(|e| format!("{:?}", e))?;
     // The configured hash is in the displayed (big-endian) hex form; reverse it for comparison.
     let configured_hash = anchor
         .hash

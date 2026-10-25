@@ -1,5 +1,7 @@
 use super::*;
+use futures::channel::mpsc as futures_mpsc;
 use script::Script;
+use std::collections::{HashMap, HashSet};
 
 // Response/request data types and the `electrum_script_hash` helper live in
 // the sibling `electrum_types` module (carved out via P13.5 follow-up to keep
@@ -48,20 +50,27 @@ pub fn spawn_electrum(
                 .host()
                 .ok_or(ERRL!("Couldn't retrieve host from addr {}", req.url))?;
 
-            // check the dns name
-            try_s!(DnsNameRef::try_from_ascii_str(host));
+            // check the dns name (IP literals are rejected here, as they always were)
+            try_s!(DnsName::try_from(host));
 
             ElectrumConfig::SSL {
                 dns_name: host.into(),
                 skip_validation: req.disable_cert_verification,
             }
         },
+        // Not a missing feature: 'ws'/'wss' are the browser/WASM transport, the same
+        // way 'TCP'/'SSL' are rejected by the WASM client below.
         ElectrumProtocol::WS | ElectrumProtocol::WSS => {
-            return ERR!("'ws' and 'wss' protocols are not supported yet. Consider using 'TCP' or 'SSL'")
+            return ERR!("'ws' and 'wss' are browser-only Electrum protocols and cannot be used by a native node. Use 'TCP' or 'SSL'")
         },
     };
 
-    Ok(electrum_connect(req.url.clone(), config, event_handlers))
+    Ok(electrum_connect(
+        req.url.clone(),
+        config,
+        event_handlers,
+        req.request_timeout(),
+    ))
 }
 
 /// Attempts to process the request (parse url, etc), build up the config and create new electrum connection
@@ -96,7 +105,7 @@ pub fn spawn_electrum(
         },
     };
 
-    Ok(electrum_connect(url, config, event_handlers))
+    Ok(electrum_connect(url, config, event_handlers, req.request_timeout()))
 }
 
 #[derive(Debug)]
@@ -115,6 +124,8 @@ pub struct ElectrumConnection {
     responses: JsonRpcPendingRequestsShared,
     /// Selected protocol version. The value is initialized after the server.version RPC call.
     protocol_version: AsyncMutex<Option<f32>>,
+    /// The request timeout the server was configured with. The default timeout applies when unset.
+    request_timeout: Option<Duration>,
 }
 
 impl ElectrumConnection {
@@ -201,6 +212,13 @@ pub struct ElectrumClientImpl {
     protocol_version: OrdRange<f32>,
     get_balance_concurrent_map: ConcurrentRequestMap<String, ElectrumBalance>,
     list_unspent_concurrent_map: ConcurrentRequestMap<String, Vec<ElectrumUnspent>>,
+    /// Script hashes this client has asked its servers to watch (R38.6.5).
+    ///
+    /// Held so every subscription can be re-established on a newly connected
+    /// server: a subscription belongs to one TCP session, so a reconnect or a
+    /// server swap silently drops it. Nothing may assume a subscription
+    /// survived either event.
+    watched_script_hashes: AsyncMutex<HashSet<String>>,
 }
 
 async fn electrum_request_multi(
@@ -217,7 +235,9 @@ async fn electrum_request_multi(
                     request.clone(),
                     tx.clone(),
                     connection.responses.clone(),
-                    ELECTRUM_TIMEOUT / (connections.len() - i) as u64,
+                    connection
+                        .request_timeout
+                        .unwrap_or_else(|| Duration::from_secs(ELECTRUM_TIMEOUT / (connections.len() - i) as u64)),
                 )
                 .map(|response| (JsonRpcRemoteAddr(connection_addr), response));
                 futures.push(fut)
@@ -255,7 +275,7 @@ async fn electrum_request_to(
     request: JsonRpcRequestEnum,
     to_addr: String,
 ) -> Result<(JsonRpcRemoteAddr, JsonRpcResponseEnum), String> {
-    let (tx, responses) = {
+    let (tx, responses, request_timeout) = {
         let connections = client.connections.lock().await;
         let connection = connections
             .iter()
@@ -268,13 +288,18 @@ async fn electrum_request_to(
                 None => return ERR!("Connection {} is not established yet", to_addr),
             }
         };
-        (tx, responses)
+        (tx, responses, connection.request_timeout)
     };
 
     let response = try_s!(
-        electrum_request(request.clone(), tx, responses, ELECTRUM_TIMEOUT)
-            .compat()
-            .await
+        electrum_request(
+            request.clone(),
+            tx,
+            responses,
+            request_timeout.unwrap_or_else(|| Duration::from_secs(ELECTRUM_TIMEOUT))
+        )
+        .compat()
+        .await
     );
     Ok((JsonRpcRemoteAddr(to_addr.to_owned()), response))
 }
@@ -367,6 +392,88 @@ impl Deref for ElectrumClient {
 }
 
 const BLOCKCHAIN_HEADERS_SUB_ID: &str = "blockchain.headers.subscribe";
+const BLOCKCHAIN_SCRIPTHASH_SUB_ID: &str = "blockchain.scripthash.subscribe";
+const BLOCKCHAIN_CONTRACT_EVENT_SUB_ID: &str = "blockchain.contract.event.subscribe";
+
+/// Registry key for a Qtum contract-event subscription.
+///
+/// A QRC20 balance lives in contract storage rather than in the address's UTXO
+/// set, so a token transfer need not change the QTUM address's script hash and
+/// cannot be observed through a script-hash subscription. Contract events are
+/// therefore watched per (address, contract, topic) triple rather than per
+/// address, and share the same registry by carrying a distinct key.
+pub fn contract_event_key(address_hash160: &str, contract_addr: &str, topic: &str) -> String {
+    format!("contract:{address_hash160}:{contract_addr}:{topic}")
+}
+
+// Script hash -> the party that asked for it to be watched.
+//
+// Keyed globally rather than per client because a script hash already
+// identifies exactly one address of one coin, and because the notification
+// arrives deep inside a connection read loop that holds no client handle.
+// Threading one through every connection would buy nothing the key does not
+// already give us.
+lazy_static! {
+    static ref SCRIPTHASH_WATCHERS: std::sync::Mutex<HashMap<String, Vec<futures_mpsc::UnboundedSender<String>>>> =
+        std::sync::Mutex::new(HashMap::new());
+}
+
+/// Register `sender` to be woken whenever `script_hash` changes status.
+///
+/// The receiver is a wake signal, not a data feed: it carries the script hash
+/// only so the consumer knows which address to re-read. Balances are always
+/// re-read authoritatively, never inferred from the notification.
+///
+/// More than one consumer may care about the same hash -- the balance streamer
+/// and the transaction-history loop both watch a coin's address -- so watchers
+/// accumulate rather than replace. Storing one sender per hash would let
+/// whichever registered last silently starve the other.
+pub fn watch_scripthash(script_hash: String, sender: futures_mpsc::UnboundedSender<String>) {
+    SCRIPTHASH_WATCHERS
+        .lock()
+        .expect("scripthash watcher registry poisoned")
+        .entry(script_hash)
+        .or_default()
+        .push(sender);
+}
+
+/// Drop any watcher of `script_hash` whose receiver is gone, removing the entry
+/// once none remain. Safe to call for an unregistered hash.
+///
+/// Consumers signal departure by dropping their receiver; this is the sweep
+/// that reclaims the registration. It deliberately does not drop live watchers,
+/// because one consumer going away must not silence the others.
+pub fn unwatch_scripthash(script_hash: &str) {
+    let mut watchers = match SCRIPTHASH_WATCHERS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(senders) = watchers.get_mut(script_hash) {
+        senders.retain(|sender| !sender.is_closed());
+        if senders.is_empty() {
+            watchers.remove(script_hash);
+        }
+    }
+}
+
+/// Deliver a status change to whoever registered for it.
+///
+/// A closed receiver means the consumer went away, so the registration is
+/// dropped rather than retried.
+fn notify_scripthash_change(script_hash: &str) {
+    let mut watchers = match SCRIPTHASH_WATCHERS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(senders) = watchers.get_mut(script_hash) {
+        // Departed consumers are pruned as a side effect, so a registration
+        // cannot outlive its receiver for the life of the process.
+        senders.retain(|sender| sender.unbounded_send(script_hash.to_owned()).is_ok());
+        if senders.is_empty() {
+            watchers.remove(script_hash);
+        }
+    }
+}
 
 impl UtxoJsonRpcClientInfo for ElectrumClient {
     fn coin_name(&self) -> &str { self.coin_ticker.as_str() }
@@ -482,6 +589,39 @@ impl ElectrumClient {
         self.batch_rpc(requests)
     }
 
+    /// Ask the servers to notify us when `script_hash` changes status.
+    ///
+    /// The hash is remembered so it can be re-subscribed on a newly connected
+    /// server (R38.6.5): a subscription lives with one session, so a reconnect
+    /// or a server swap drops it silently.
+    ///
+    /// A failure here is not fatal. The caller keeps its existing polling, so
+    /// the effect of a lost subscription is added latency rather than a stale
+    /// balance.
+    pub async fn subscribe_scripthash(&self, script_hash: String) -> Result<(), String> {
+        let res: Result<Json, _> = rpc_func!(self, BLOCKCHAIN_SCRIPTHASH_SUB_ID, &script_hash)
+            .compat()
+            .await;
+        res.map_err(|e| ERRL!("{}", e))?;
+        self.watched_script_hashes.lock().await.insert(script_hash);
+        Ok(())
+    }
+
+    /// Re-establish every remembered subscription, for use after a connection
+    /// is (re-)established. Failures are logged and skipped so one unusable
+    /// server cannot stall the rest.
+    pub async fn resubscribe_watched_scripthashes(&self) {
+        let hashes: Vec<String> = self.watched_script_hashes.lock().await.iter().cloned().collect();
+        for script_hash in hashes {
+            let res: Result<Json, _> = rpc_func!(self, BLOCKCHAIN_SCRIPTHASH_SUB_ID, &script_hash)
+                .compat()
+                .await;
+            if let Err(e) = res {
+                common::log::debug!("Could not re-subscribe script hash {}: {}", script_hash, e);
+            }
+        }
+    }
+
     /// https://electrumx.readthedocs.io/en/latest/protocol-methods.html#blockchain-headers-subscribe
     pub fn blockchain_headers_subscribe(&self) -> RpcRes<ElectrumBlockHeader> {
         rpc_func!(self, "blockchain.headers.subscribe")
@@ -536,11 +676,10 @@ impl ElectrumClient {
                         if headers.count == 0 {
                             return MmError::err(UtxoRpcError::Internal("No headers available".to_string()));
                         }
-                        let len = CompactInteger::from(headers.count);
-                        let mut serialized = serialize(&len).take();
-                        serialized.extend(headers.hex.0.into_iter());
-                        let mut reader = Reader::new_with_coin_variant(serialized.as_slice(), CoinVariant::Standard);
-                        let maybe_block_headers = reader.read_list::<BlockHeader>();
+                        let count = usize::try_from(headers.count)
+                            .map_to_mm(|e| UtxoRpcError::InvalidResponse(e.to_string()))?;
+                        let maybe_block_headers =
+                            BlockHeader::list_from_served_bytes(&headers.hex.0, count, CoinVariant::Standard);
                         let block_headers = match maybe_block_headers {
                             Ok(headers) => headers,
                             Err(e) => return MmError::err(UtxoRpcError::InvalidResponse(format!("{:?}", e))),
@@ -797,11 +936,9 @@ impl UtxoRpcClientOps for ElectrumClient {
                     if res.count == 0 {
                         return MmError::err(UtxoRpcError::InvalidResponse("Server returned zero count".to_owned()));
                     }
-                    let len = CompactInteger::from(res.count);
-                    let mut serialized = serialize(&len).take();
-                    serialized.extend(res.hex.0.into_iter());
-                    let mut reader = Reader::new_with_coin_variant(serialized.as_slice(), coin_variant);
-                    let headers = reader.read_list::<BlockHeader>()?;
+                    let count =
+                        usize::try_from(res.count).map_to_mm(|e| UtxoRpcError::InvalidResponse(e.to_string()))?;
+                    let headers = BlockHeader::list_from_served_bytes(&res.hex.0, count, coin_variant)?;
                     let mut timestamps: Vec<_> = headers.into_iter().map(|block| block.time).collect();
                     // can unwrap because count is non zero
                     Ok(median(timestamps.as_mut_slice()).unwrap())
@@ -811,8 +948,8 @@ impl UtxoRpcClientOps for ElectrumClient {
 
     async fn get_block_timestamp(&self, height: u64) -> Result<u64, MmError<UtxoRpcError>> {
         let header_bytes = self.blockchain_block_header(height).compat().await?;
-        let header: BlockHeader =
-            deserialize(header_bytes.0.as_slice()).map_to_mm(|e| UtxoRpcError::InvalidResponse(format!("{:?}", e)))?;
+        let header = BlockHeader::from_served_bytes(&header_bytes.0, CoinVariant::Standard)
+            .map_to_mm(|e| UtxoRpcError::InvalidResponse(format!("{:?}", e)))?;
         Ok(header.time as u64)
     }
 }
@@ -829,6 +966,7 @@ impl ElectrumClientImpl {
             protocol_version,
             get_balance_concurrent_map: ConcurrentRequestMap::new(),
             list_unspent_concurrent_map: ConcurrentRequestMap::new(),
+            watched_script_hashes: AsyncMutex::new(HashSet::new()),
         }
     }
 
@@ -875,10 +1013,37 @@ async fn electrum_process_json(raw_json: Json, arc: &JsonRpcPendingRequestsShare
         ElectrumRpcResponseEnum::SingleResponse(single) => JsonRpcResponseEnum::Single(single),
         ElectrumRpcResponseEnum::BatchResponses(batch) => JsonRpcResponseEnum::Batch(batch),
         ElectrumRpcResponseEnum::SubscriptionNotification(req) => {
+            // A script-hash notification is an event, not the answer to a
+            // pending request, so it is dispatched here and never reaches the
+            // request-matching path below.
+            if req.method == BLOCKCHAIN_SCRIPTHASH_SUB_ID {
+                if let Some(script_hash) = req.params.first().and_then(|p| p.as_str()) {
+                    notify_scripthash_change(script_hash);
+                }
+                return;
+            }
+            // A contract-event notification echoes the subscription's own
+            // arguments, so the registry key is rebuilt from them exactly as it
+            // was built when subscribing.
+            if req.method == BLOCKCHAIN_CONTRACT_EVENT_SUB_ID {
+                let arg = |i: usize| req.params.get(i).and_then(|p| p.as_str());
+                if let (Some(address), Some(contract), Some(topic)) = (arg(0), arg(1), arg(2)) {
+                    notify_scripthash_change(&contract_event_key(address, contract, topic));
+                } else {
+                    common::log::debug!(
+                        "Contract-event notification with unexpected parameters: {:?}",
+                        req.params
+                    );
+                }
+                return;
+            }
             let id = match req.method.as_ref() {
                 BLOCKCHAIN_HEADERS_SUB_ID => BLOCKCHAIN_HEADERS_SUB_ID,
+                // Unknown subscription kinds are ignored rather than treated as
+                // errors: a server is free to send notifications we never asked
+                // for, and dropping them must not disturb the connection.
                 _ => {
-                    error!("Couldn't get id of request {:?}", req);
+                    common::log::debug!("Ignoring unrecognised subscription notification {:?}", req.method);
                     return;
                 },
             };
@@ -923,7 +1088,31 @@ fn increase_delay(delay: &AtomicU64) {
     }
 }
 
+fn replace_if_connection_error_changed(last_error: &mut Option<String>, current_error: &str) -> bool {
+    if last_error.as_deref() == Some(current_error) {
+        false
+    } else {
+        *last_error = Some(current_error.to_owned());
+        true
+    }
+}
+
 macro_rules! try_loop {
+    ($e:expr, $addr: ident, $delay: ident, $last_error: ident) => {
+        match $e {
+            Ok(res) => res,
+            Err(e) => {
+                let error_text = format!("{:?}", e);
+                if replace_if_connection_error_changed(&mut $last_error, &error_text) {
+                    error!("{:?} error {}", $addr, error_text);
+                } else {
+                    common::log::debug!("{:?} repeated connection error {}", $addr, error_text);
+                }
+                increase_delay(&$delay);
+                continue;
+            },
+        }
+    };
     ($e:expr, $addr: ident, $delay: ident) => {
         match $e {
             Ok(res) => res,
@@ -1004,27 +1193,36 @@ async fn electrum_last_chunk_loop(last_chunk: Arc<AtomicU64>) {
     }
 }
 
+/// Builds the Electrum TLS client configuration.
+///
+/// The `ring` provider is passed explicitly (`builder_with_provider`) rather than read from the
+/// process-global default, which would panic at the first connection if two providers were ever
+/// compiled in. `tls12` is enabled on the `rustls` dependency and the default protocol versions
+/// are TLS 1.3 and TLS 1.2: Electrum servers in the wild include TLS 1.2-only deployments.
 #[cfg(not(target_arch = "wasm32"))]
 fn rustls_client_config(unsafe_conf: bool) -> Arc<ClientConfig> {
-    let mut cert_store = RootCertStore::empty();
+    let cert_store = RootCertStore {
+        roots: TLS_SERVER_ROOTS.to_vec(),
+    };
+    build_rustls_client_config(unsafe_conf, cert_store)
+}
 
-    cert_store.add_server_trust_anchors(
-        TLS_SERVER_ROOTS
-            .0
-            .iter()
-            .map(|ta| OwnedTrustAnchor::from_subject_spki_name_constraints(ta.subject, ta.spki, ta.name_constraints)),
-    );
+#[cfg(not(target_arch = "wasm32"))]
+fn build_rustls_client_config(unsafe_conf: bool, cert_store: RootCertStore) -> Arc<ClientConfig> {
+    let provider = Arc::new(rustls_ring::default_provider());
 
-    let mut tls_config = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(cert_store)
-        .with_no_client_auth();
+    let builder = ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .expect("the ring provider supports the default protocol versions");
 
-    if unsafe_conf {
-        tls_config
+    let tls_config = if unsafe_conf {
+        builder
             .dangerous()
-            .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
-    }
+            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification::new(provider)))
+            .with_no_client_auth()
+    } else {
+        builder.with_root_certificates(cert_store).with_no_client_auth()
+    };
     Arc::new(tls_config)
 }
 
@@ -1043,6 +1241,7 @@ async fn connect_loop(
     event_handlers: Vec<RpcTransportEventHandlerShared>,
 ) -> Result<(), ()> {
     let delay = Arc::new(AtomicU64::new(0));
+    let mut last_connect_error = None;
 
     loop {
         let current_delay = delay.load(AtomicOrdering::Relaxed);
@@ -1050,7 +1249,7 @@ async fn connect_loop(
             Timer::sleep(current_delay as f64).await;
         };
 
-        let socket_addr = try_loop!(addr_to_socket_addr(&addr), addr, delay);
+        let socket_addr = try_loop!(addr_to_socket_addr(&addr), addr, delay, last_connect_error);
 
         let connect_f = match config.clone() {
             ElectrumConfig::TCP => Either::Left(TcpStream::connect(&socket_addr).map_ok(ElectrumStream::Tcp)),
@@ -1066,18 +1265,22 @@ async fn connect_loop(
 
                 Either::Right(TcpStream::connect(&socket_addr).and_then(move |stream| {
                     // Can use `unwrap` cause `dns_name` is pre-checked.
-                    let dns = ServerName::try_from(dns_name.as_str())
-                        .map_err(|e| fomat!([e]))
-                        .unwrap();
+                    let dns = ServerName::try_from(dns_name).map_err(|e| fomat!([e])).unwrap();
                     tls_connector.connect(dns, stream).map_ok(ElectrumStream::Tls)
                 }))
             },
         };
 
-        let stream = try_loop!(connect_f.await, addr, delay);
-        try_loop!(stream.as_ref().set_nodelay(true), addr, delay);
+        let stream = try_loop!(connect_f.await, addr, delay, last_connect_error);
+        try_loop!(stream.as_ref().set_nodelay(true), addr, delay, last_connect_error);
         info!("Electrum client connected to {}", addr);
-        try_loop!(event_handlers.on_connected(addr.clone()), addr, delay);
+        try_loop!(
+            event_handlers.on_connected(addr.clone()),
+            addr,
+            delay,
+            last_connect_error
+        );
+        last_connect_error = None;
         let last_chunk = Arc::new(AtomicU64::new(now_ms()));
         let mut last_chunk_f = electrum_last_chunk_loop(last_chunk.clone()).boxed().fuse();
 
@@ -1261,6 +1464,7 @@ fn electrum_connect(
     addr: String,
     config: ElectrumConfig,
     event_handlers: Vec<RpcTransportEventHandlerShared>,
+    request_timeout: Option<Duration>,
 ) -> ElectrumConnection {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let responses = Arc::new(AsyncMutex::new(JsonRpcPendingRequests::default()));
@@ -1283,6 +1487,7 @@ fn electrum_connect(
         shutdown_tx: Some(shutdown_tx),
         responses,
         protocol_version: AsyncMutex::new(None),
+        request_timeout,
     }
 }
 
@@ -1290,16 +1495,18 @@ fn electrum_request(
     request: JsonRpcRequestEnum,
     tx: mpsc::Sender<Vec<u8>>,
     responses: JsonRpcPendingRequestsShared,
-    timeout: u64,
+    timeout: Duration,
 ) -> Box<dyn Future<Item = JsonRpcResponseEnum, Error = String> + Send + 'static> {
     let send_fut = async move {
-        let mut json = try_s!(json::to_string(&request));
+        let json = try_s!(json::to_string(&request));
         #[cfg(not(target_arch = "wasm32"))]
-        {
+        let json = {
+            let mut json = json;
             // Electrum request and responses must end with \n
             // https://electrumx.readthedocs.io/en/latest/protocol-basics.html#message-stream
             json.push('\n');
-        }
+            json
+        };
 
         let (req_tx, resp_rx) = async_oneshot::channel();
         responses.lock().await.insert(request.rpc_id(), req_tx);
@@ -1309,7 +1516,7 @@ fn electrum_request(
     };
     let send_fut = send_fut
         .boxed()
-        .timeout(Duration::from_secs(timeout))
+        .timeout(timeout)
         .compat()
         .then(|res| match res {
             Ok(response) => response,
@@ -1333,4 +1540,367 @@ pub(crate) fn address_balance_from_unspent_map(
     unspents.iter().fold(BigDecimal::from(0), |sum, unspent| {
         sum + big_decimal_from_sat_unsigned(unspent.value, decimals)
     })
+}
+
+#[cfg(test)]
+mod connection_error_tests {
+    use super::replace_if_connection_error_changed;
+
+    #[test]
+    fn identical_connection_errors_are_reported_once_until_state_changes() {
+        let mut last_error = None;
+        assert!(replace_if_connection_error_changed(
+            &mut last_error,
+            "certificate error"
+        ));
+        assert!(!replace_if_connection_error_changed(
+            &mut last_error,
+            "certificate error"
+        ));
+        assert!(replace_if_connection_error_changed(
+            &mut last_error,
+            "connection refused"
+        ));
+
+        last_error = None;
+        assert!(replace_if_connection_error_changed(
+            &mut last_error,
+            "certificate error"
+        ));
+    }
+
+    use super::{contract_event_key, futures_mpsc, notify_scripthash_change, unwatch_scripthash, watch_scripthash};
+
+    /// A registered watcher is woken with the hash that changed, so the
+    /// consumer knows which address to re-read.
+    #[test]
+    fn scripthash_notification_reaches_its_watcher() {
+        let (tx, mut rx) = futures_mpsc::unbounded();
+        watch_scripthash("aabb".to_owned(), tx);
+
+        notify_scripthash_change("aabb");
+
+        assert_eq!(rx.try_recv().unwrap(), "aabb".to_owned());
+        unwatch_scripthash("aabb");
+    }
+
+    /// Two consumers watching the same address must both be woken.
+    ///
+    /// The balance streamer and the transaction-history loop both watch a
+    /// coin's address, so a registry holding one sender per hash would let
+    /// whichever registered second silently starve the first -- a failure that
+    /// looks exactly like "that subsystem just never updates".
+    #[test]
+    fn multiple_watchers_of_one_hash_are_all_woken() {
+        let (tx_a, mut rx_a) = futures_mpsc::unbounded();
+        let (tx_b, mut rx_b) = futures_mpsc::unbounded();
+        watch_scripthash("shared".to_owned(), tx_a);
+        watch_scripthash("shared".to_owned(), tx_b);
+
+        notify_scripthash_change("shared");
+
+        assert_eq!(rx_a.try_recv().unwrap(), "shared".to_owned(), "first watcher");
+        assert_eq!(rx_b.try_recv().unwrap(), "shared".to_owned(), "second watcher");
+        unwatch_scripthash("shared");
+    }
+
+    /// One consumer departing must not silence the other.
+    #[test]
+    fn departed_watcher_does_not_silence_its_peer() {
+        let (tx_gone, rx_gone) = futures_mpsc::unbounded();
+        let (tx_live, mut rx_live) = futures_mpsc::unbounded();
+        watch_scripthash("peer".to_owned(), tx_gone);
+        watch_scripthash("peer".to_owned(), tx_live);
+        drop(rx_gone);
+
+        unwatch_scripthash("peer");
+        notify_scripthash_change("peer");
+
+        assert_eq!(
+            rx_live.try_recv().unwrap(),
+            "peer".to_owned(),
+            "the surviving watcher must still be notified"
+        );
+        unwatch_scripthash("peer");
+    }
+
+    /// A notification for a hash nobody registered must be a no-op rather than
+    /// an error: servers may push subscriptions we never asked for, and that
+    /// must not disturb the connection.
+    #[test]
+    fn unwatched_scripthash_notification_is_ignored() {
+        notify_scripthash_change("never-registered");
+
+        let (tx, mut rx) = futures_mpsc::unbounded();
+        watch_scripthash("ccdd".to_owned(), tx);
+        notify_scripthash_change("some-other-hash");
+        assert!(rx.try_recv().is_err(), "an unrelated hash must not wake this watcher");
+        unwatch_scripthash("ccdd");
+    }
+
+    /// If the consumer is gone the registration is dropped, so a departed
+    /// streamer cannot leak an entry for the life of the process.
+    #[test]
+    fn dropped_receiver_deregisters_its_watch() {
+        let (tx, rx) = futures_mpsc::unbounded();
+        watch_scripthash("eeff".to_owned(), tx);
+        drop(rx);
+
+        notify_scripthash_change("eeff");
+
+        let (tx2, mut rx2) = futures_mpsc::unbounded();
+        watch_scripthash("eeff".to_owned(), tx2);
+        notify_scripthash_change("eeff");
+        assert_eq!(rx2.try_recv().unwrap(), "eeff".to_owned());
+        unwatch_scripthash("eeff");
+    }
+
+    /// Unwatching reclaims a departed watcher's registration.
+    ///
+    /// It prunes by receiver liveness rather than by key, because several
+    /// consumers may share a hash and one leaving must not silence the rest.
+    #[test]
+    fn unwatch_reclaims_a_departed_watcher() {
+        let (tx, rx) = futures_mpsc::unbounded();
+        watch_scripthash("1122".to_owned(), tx);
+        drop(rx);
+
+        unwatch_scripthash("1122");
+
+        // With the entry reclaimed, a fresh watcher starts clean and is the
+        // only recipient.
+        let (tx2, mut rx2) = futures_mpsc::unbounded();
+        watch_scripthash("1122".to_owned(), tx2);
+        notify_scripthash_change("1122");
+        assert_eq!(rx2.try_recv().unwrap(), "1122".to_owned());
+        assert!(rx2.try_recv().is_err(), "exactly one delivery, not a duplicate");
+        unwatch_scripthash("1122");
+    }
+
+    /// Contract-event keys are distinct from script-hash keys for the same
+    /// address, so a QRC20 token and its platform coin do not collide.
+    ///
+    /// A QRC20 balance lives in contract storage; if both keyed on the address
+    /// alone, a token notification would wake the platform coin's watcher and
+    /// vice versa, and one would displace the other at registration.
+    #[test]
+    fn contract_event_and_scripthash_keys_do_not_collide() {
+        let address = "abcd";
+        let event_key = contract_event_key(address, "contract1", "topic1");
+        assert_ne!(
+            event_key, address,
+            "a contract-event key must not equal the bare address"
+        );
+
+        let (tx_addr, mut rx_addr) = futures_mpsc::unbounded();
+        let (tx_event, mut rx_event) = futures_mpsc::unbounded();
+        watch_scripthash(address.to_owned(), tx_addr);
+        watch_scripthash(event_key.clone(), tx_event);
+
+        notify_scripthash_change(&event_key);
+
+        assert_eq!(rx_event.try_recv().unwrap(), event_key.clone(), "token watcher woken");
+        assert!(
+            rx_addr.try_recv().is_err(),
+            "the platform coin's watcher must not be woken"
+        );
+
+        unwatch_scripthash(address);
+        unwatch_scripthash(&event_key);
+    }
+
+    /// Different tokens held at the same address must key differently, or one
+    /// token's transfer would be reported as another's.
+    #[test]
+    fn contract_event_keys_differ_per_token() {
+        let a = contract_event_key("addr", "token_a", "topic");
+        let b = contract_event_key("addr", "token_b", "topic");
+        assert_ne!(a, b);
+    }
+
+    /// Stress the watcher registry far past any realistic wallet, to answer
+    /// whether a subscription cap is needed.
+    ///
+    /// Realistic worst case today is one subscription per activated
+    /// Electrum-backed coin, because the balance streamer watches a single
+    /// address per coin. This registers three orders of magnitude more and
+    /// asserts both correctness and that the work stays trivial, so the
+    /// no-cap decision rests on a measurement rather than an assumption.
+    #[test]
+    fn watcher_registry_handles_far_more_than_any_realistic_wallet() {
+        use std::time::Instant;
+
+        const COUNT: usize = 10_000;
+
+        let mut receivers = Vec::with_capacity(COUNT);
+        let hashes: Vec<String> = (0..COUNT).map(|i| format!("stress{i:059}")).collect();
+
+        let registered = Instant::now();
+        for hash in &hashes {
+            let (tx, rx) = futures_mpsc::unbounded();
+            watch_scripthash(hash.clone(), tx);
+            receivers.push(rx);
+        }
+        let register_elapsed = registered.elapsed();
+
+        let notified = Instant::now();
+        for hash in &hashes {
+            notify_scripthash_change(hash);
+        }
+        let notify_elapsed = notified.elapsed();
+
+        // Every watcher must receive exactly its own hash: a registry that
+        // collapsed or cross-wired entries under load would be worse than one
+        // that simply refused the work.
+        for (rx, hash) in receivers.iter_mut().zip(hashes.iter()) {
+            assert_eq!(rx.try_recv().unwrap(), hash.clone());
+        }
+
+        for hash in &hashes {
+            unwatch_scripthash(hash);
+        }
+
+        // Generous bounds: the point is to catch a pathological cost such as a
+        // per-notification scan of the whole registry, not to benchmark.
+        assert!(
+            register_elapsed.as_millis() < 2_000,
+            "registering {COUNT} watchers took {register_elapsed:?}"
+        );
+        assert!(
+            notify_elapsed.as_millis() < 2_000,
+            "notifying {COUNT} watchers took {notify_elapsed:?}"
+        );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tls_tests {
+    use super::*;
+    use rustls::version::{TLS12, TLS13};
+    use rustls::{ProtocolVersion, ServerConfig, SupportedProtocolVersion};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio_rustls::TlsAcceptor;
+
+    struct TestServer {
+        port: u16,
+        cert: CertificateDer<'static>,
+    }
+
+    /// A one-shot loopback TLS server restricted to `versions` that echoes a 4-byte payload.
+    async fn spawn_server(versions: &[&'static SupportedProtocolVersion], names: &[&str]) -> TestServer {
+        let certified = rcgen::generate_simple_self_signed(names.iter().map(|n| n.to_string()).collect::<Vec<_>>())
+            .expect("self-signed certificate");
+        let cert = CertificateDer::from(certified.cert.der().to_vec());
+        let key = rustls::pki_types::PrivateKeyDer::try_from(certified.key_pair.serialize_der()).expect("key");
+        let provider = Arc::new(rustls_ring::default_provider());
+        let config = ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(versions)
+            .expect("protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(vec![cert.clone()], key)
+            .expect("server certificate");
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                if let Ok(mut tls) = acceptor.accept(tcp).await {
+                    let mut buf = [0u8; 4];
+                    if tls.read_exact(&mut buf).await.is_ok() {
+                        let _ = tls.write_all(&buf).await;
+                        let _ = tls.flush().await;
+                    }
+                }
+            }
+        });
+        TestServer { port, cert }
+    }
+
+    /// Connects with `config`, sends a 4-byte payload and returns the negotiated version.
+    async fn connect(
+        config: Arc<ClientConfig>,
+        server: &TestServer,
+        name: &'static str,
+    ) -> std::io::Result<ProtocolVersion> {
+        let tcp = TcpStream::connect(("127.0.0.1", server.port)).await?;
+        let mut tls = TlsConnector::from(config)
+            .connect(ServerName::try_from(name).unwrap(), tcp)
+            .await?;
+        tls.write_all(b"ping").await?;
+        tls.flush().await?;
+        let mut buf = [0u8; 4];
+        tls.read_exact(&mut buf).await?;
+        assert_eq!(&buf, b"ping");
+        Ok(tls.get_ref().1.protocol_version().expect("negotiated version"))
+    }
+
+    fn trusting(cert: &CertificateDer<'static>) -> Arc<ClientConfig> {
+        let mut store = RootCertStore::empty();
+        store.add(cert.clone()).expect("trust anchor");
+        build_rustls_client_config(false, store)
+    }
+
+    fn run<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(f)
+    }
+
+    #[test]
+    fn validating_config_completes_handshake_on_tls12_only_and_tls13() {
+        run(async {
+            let tls12 = spawn_server(&[&TLS12], &["localhost"]).await;
+            assert_eq!(
+                connect(trusting(&tls12.cert), &tls12, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_2
+            );
+            let tls13 = spawn_server(&[&TLS13], &["localhost"]).await;
+            assert_eq!(
+                connect(trusting(&tls13.cert), &tls13, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_3
+            );
+        });
+    }
+
+    #[test]
+    fn validating_config_rejects_untrusted_and_misnamed_certificates() {
+        run(async {
+            let server = spawn_server(&[&TLS12, &TLS13], &["localhost"]).await;
+            // Only the bundled webpki roots: a self-signed certificate is not trusted.
+            let roots_only = rustls_client_config(false);
+            assert!(connect(roots_only, &server, "localhost").await.is_err());
+            // Trusted certificate, wrong server name.
+            assert!(connect(trusting(&server.cert), &server, "example.test").await.is_err());
+        });
+    }
+
+    #[test]
+    fn skip_validation_accepts_self_signed_and_misnamed_certificates_on_both_versions() {
+        run(async {
+            let config = rustls_client_config(true);
+            let tls12 = spawn_server(&[&TLS12], &["localhost"]).await;
+            assert_eq!(
+                connect(config.clone(), &tls12, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_2
+            );
+            // Name mismatch is also tolerated, as it was with rustls 0.20.
+            assert!(connect(config.clone(), &tls12, "example.test").await.is_ok());
+            let tls13 = spawn_server(&[&TLS13], &["localhost"]).await;
+            assert_eq!(
+                connect(config, &tls13, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_3
+            );
+        });
+    }
+
+    #[test]
+    fn host_precheck_accepts_hostnames_and_rejects_ip_literals() {
+        assert!(DnsName::try_from("electrum.example.org").is_ok());
+        assert!(DnsName::try_from("localhost").is_ok());
+        assert!(DnsName::try_from("127.0.0.1").is_err());
+        assert!(DnsName::try_from("").is_err());
+    }
 }

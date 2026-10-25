@@ -160,9 +160,7 @@ impl MmCoin for Qrc20Coin {
         utxo_common::set_requires_notarization(&self.utxo, requires_nota)
     }
 
-    fn swap_contract_address(&self) -> Option<BytesJson> {
-        Some(BytesJson::from(self.swap_contract_address.0.as_ref()))
-    }
+    fn swap_contract_address(&self) -> Option<BytesJson> { Some(BytesJson::from(&self.swap_contract_address.0[..])) }
 
     fn mature_confirmations(&self) -> Option<u32> { Some(self.utxo.conf.mature_confirmations) }
 
@@ -255,6 +253,7 @@ pub(crate) async fn qrc20_withdraw(coin: Qrc20Coin, req: WithdrawRequest) -> Wit
         total_gas_fee: utxo_common::big_decimal_from_sat(gas_fee as i64, coin.utxo.decimals),
     };
     Ok(TransactionDetails {
+        tx_json: None,
         from: vec![my_address_string],
         to: vec![to_address],
         total_amount: qrc20_amount.clone(),

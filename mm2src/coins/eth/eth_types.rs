@@ -17,6 +17,13 @@ pub(crate) const _PAYMENT_STATE_SPENT: u8 = 2;
 pub(crate) const _PAYMENT_STATE_REFUNDED: u8 = 3;
 // Ethgasstation API returns response in 10^8 wei units. So 10 from their API mean 1 gwei
 pub(crate) const ETH_GAS_STATION_DECIMALS: u8 = 8;
+/// Gas fees are denominated in the platform coin, which is 18-decimal on every
+/// EVM chain regardless of the traded token's own decimals.
+pub(crate) const ETH_DECIMALS: u8 = 18;
+/// The EVM's fixed intrinsic gas cost of any transaction. Used as an
+/// unarguable lower bound when reporting how much gas money is missing after
+/// `estimate_gas` failed outright — never to actually send a transaction.
+pub(crate) const MIN_TX_GAS_LIMIT: u64 = 21_000;
 pub(crate) const GAS_PRICE_PERCENT: u64 = 10;
 /// It can change 12.5% max each block according to https://www.blocknative.com/blog/eip-1559-fees
 pub(crate) const BASE_BLOCK_FEE_DIFF_PCT: u64 = 13;
@@ -427,6 +434,9 @@ pub struct EthCoinImpl {
     /// Populated during V2 platform-with-tokens activation so the activation
     /// result can report per-token balances (CRD §35.1.3).
     pub(crate) erc20_tokens_infos: Arc<Mutex<std::collections::HashMap<String, Erc20TokenInfo>>>,
+    /// The token was activated from an inline `protocol` instead of the coins config. Such a custom
+    /// token is a wallet-only coin and has no coins-config entry to say so (CRD ch.35 R35.2.7).
+    pub(crate) custom_token: bool,
 }
 
 // ─── V2 swap types ──────────────────────────────────────────────────────────

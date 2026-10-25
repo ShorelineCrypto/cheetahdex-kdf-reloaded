@@ -151,6 +151,66 @@ R21. The superset has been removed; all three shapes now agree.
   and the corrected R21. Done on `dev` (commit `fd075e66e`); the shared struct and
   all activation handlers compile and the streaming_activations tests pass.
 
+## #6 — KMD swaps (issue #11): reward rule, fee split, no-fee waiver, V2 layout — **OPEN**
+
+CRD references:
+- [`38-utxo-coin-maintenance-and-features.md`](./38-utxo-coin-maintenance-and-features.md)
+  §38.4 (R38.4.1–R38.4.3);
+- [`08-fee-routing-engine.md`](./08-fee-routing-engine.md) R8, R15A, R15B,
+  R15C, T5A, T5B, T7;
+- [`16-swap-v2-pre-burn-output.md`](./16-swap-v2-pre-burn-output.md) R7,
+  R12A, R12B, R13–R20, T4A–T9, D5;
+- [`15-swap-v2-utxo-path.md`](./15-swap-v2-utxo-path.md) R16, R17, R21,
+  R22, R26–R28, R40;
+- [`52-swap-v2-state-machine.md`](./52-swap-v2-state-machine.md) R17, R27,
+  R76, R77;
+- [`06-network-id-seed-node.md`](./06-network-id-seed-node.md), accessor
+  table.
+
+The chapters were corrected on 2026-09-27. The code has not been changed yet.
+Each chapter carries an "Implementation obligations" note listing the files
+and tests to change.
+
+- [ ] **KMD reward (R38.4.1).** Apply the KIP-0001 ÷500 reduction for UTXOs
+  confirmed at or after height 3,484,958. Without it, any KMD spend of an
+  eligible post-fork UTXO over-claims and is rejected with
+  `bad-txns-in-belowout`. This covers taker fees, swap payments and
+  withdraws on both netids.
+- [ ] **KMD direct-burn split (ch.08 R8).** Implement the three ranges:
+  `Standard(dust)` at or below dust; a fee leg clamped to dust when 75% of
+  the total is below dust; 75/25 above that. Withdraw the builder's
+  under-dust exemption (ch.08 R15A). Without this fix, reloaded and
+  `v2.6.0-beta` peers on netid 8762 reject each other's KMD taker fees for
+  trades up to about 0.0115 KMD.
+- [ ] **No-fee waiver (ch.08 R15C, ch.16 R7; maintainer decision
+  2026-09-27: adopt).** A non-privacy taker whose key equals the network
+  burn key pays no fee, on both protocols. The keys are `0369aa…3153` on
+  8762 and `03a778…bf5c` on 6133. Netid 8762 needs its burn key configured.
+- [ ] **Version-two KMD-pair exemption (ch.16 R12B).** On netid 8762, a
+  version-two swap with KMD on either side carries no dex fee. There is no
+  such exemption on 6133, and none on the legacy protocol. This needs a new
+  network-config ticker set (ch.06).
+- [ ] **Version-two UTXO taker-payment-spend contract (ch.16 R13–R20,
+  ch.15 R26–R28).** The project's current implementation differs on every
+  point, so version-two UTXO swaps with reference nodes fail on both
+  netids for any ticker. The required contract:
+  - the fee-first `Standard` preimage, signed `SINGLE` by the taker, with
+    the maker appending its payout and signing `ALL`;
+  - fee, then burn, then maker order for `WithBurn`;
+  - a bare `OP_RETURN` carrying the burn value;
+  - exact preimage equality in validation;
+  - the funding amount including the burn (ch.15 R16);
+  - a 496-byte, proportional spend-fee estimate (ch.16 R14A).
+- [ ] **Deferred, non-blocking: funding-spend preimage tolerance (ch.16
+  D5, ch.15 R22).** The references check the fee ratio within [0.9, 1.1]
+  and then require exact equality. The project uses a value-relative 10%
+  tolerance, which only makes its own side more permissive.
+- [ ] **Recorded only, maintainer decision 2026-09-27: dormant
+  burn-account split.** When the fee share is below dust, the references
+  clamp the fee leg to dust and burn the rest, as long as the rest is not
+  dust. The project's ch.16 R9 falls back to `Standard` instead. The path
+  is inactive on both production netids and is left unchanged.
+
 ## Runtime-stub backlog — unfinished / TODO
 
 The following items were found during the runtime-stub and wallet-log hardening
@@ -188,6 +248,22 @@ the signer can represent it.
   structured `hardware_wallet:unsupported_script_signing_mode` error and never
   falls back to host private keys.
 
+### Legacy `enable` for EVM coins under an HD wallet — **TODO**
+
+CRD reference: [`35-evm-v2-activation-rpcs.md`](./35-evm-v2-activation-rpcs.md),
+[`55-coin-activation-wire-contract.md`](./55-coin-activation-wire-contract.md) §55.4.
+
+Since `fix/activation-api-parity`, the mmrpc 2.0 EVM activation under an HD
+wallet uses the address at the coin's `derivation_path` plus `path_to_address`.
+Legacy `enable` for EVM coins under an HD wallet still binds the daemon's
+internal-path key, so the two activation paths report different addresses for
+the same seed phrase. Left unchanged by maintainer decision (2026-10-11).
+
+- [ ] Establish which key the reference binds on legacy EVM `enable` under an HD
+  wallet (Spec Reader question) and bind it in ch. 55 §55.4.
+- [ ] Align the legacy path, with an upgrade note like the one for the mmrpc 2.0
+  path in `CHANGELOG.md`.
+
 ### Solana / SPL swap and history surface — **TODO**
 
 CRD reference: [`40-solana-coin.md`](./40-solana-coin.md).
@@ -197,6 +273,13 @@ operations, swap operations, history, raw transaction handling, and fee
 preimage/conversion flows.
 
 - [ ] Decide whether Solana/SPL is in scope for the current release.
+- [ ] **Activation compatibility surface (decided 2026-10-11, deferred).**
+  Reloaded's `enable_solana_with_tokens` / `enable_spl` stay the primary
+  activation surface. The reference's `experimental::enable_solana_with_assets`
+  / `experimental::enable_solana_token` methods and its `SOLANA` /
+  `SOLANATOKEN` coin-configuration forms (ch. 40 §40.1-§40.3) are not routed or
+  parsed yet, Solana is native-only, and the primary surface's wire shapes are
+  not yet bound in the CRD. Work package: `docs/plans/solana-support.md`.
 - [ ] If in scope, run a clean-room CRD pass before implementation.
 - [ ] If out of scope, mark the unsupported RPC/swap paths explicitly and return
   structured errors instead of panics.

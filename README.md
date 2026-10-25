@@ -3,7 +3,7 @@
 > **GPLv2 continuation of the Komodo DeFi Framework — peer-to-peer atomic swaps, no central authority.**
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](LEGAL/LICENSE)
-[![Status: Beta](https://img.shields.io/badge/status-beta-yellow.svg)](#beta-disclaimer)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-yellow.svg)](#alpha-disclaimer)
 
 KDF Reloaded is an open-source [atomic-swap](https://en.wikipedia.org/wiki/Atomic_swap) engine for trustless peer-to-peer trading across blockchains, derived from the Komodo DeFi Framework / AtomicDEX-API codebase as it stood under the GPLv2 license.
 
@@ -11,7 +11,7 @@ KDF Reloaded is an open-source [atomic-swap](https://en.wikipedia.org/wiki/Atomi
 
 ## Heritage
 
-This project is a **continuation**, not a fork-of-current-upstream. It is anchored to the last commit of the upstream Komodo DeFi Framework that was unambiguously distributed under GPLv2-only (commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, dated 2022-06-03). Post-anchor development is **hybrid**: it includes independently authored (clean-room) work, code adapted from permissively-licensed upstreams, and — for some subsystems — **lineage-derived code from the upstream/GLEEC KDF work product carried under GPLv2 copyleft** (for example, post-anchor additions in the relocated `lp_ordermatch` modules under `mm2src/mm2_main/src/lp_ordermatch/`). The right to redistribute rests on GPLv2 copyleft (GPLv2 §2(b)/§6), not on a clean-room claim for every file. Per-file provenance and the license basis for each class are tracked in [`docs/reloaded-rewrite/34-provenance-ledger.md`](docs/reloaded-rewrite/34-provenance-ledger.md). The repository as a whole is distributed under GPLv2-only; two inherited third-party license tensions (a GPL-3.0 file and the Apache-2.0 WalletConnect SDK dependencies) are openly tracked as deferred items in [`LEGAL/LICENSING-POLICY.md`](LEGAL/LICENSING-POLICY.md) §4.
+This project is a **continuation**, not a fork-of-current-upstream. It is anchored to the last commit of the upstream Komodo DeFi Framework that was unambiguously distributed under GPLv2-only (commit `c1d46c0c1592faa0860f704008b2b2381bc3840f`, dated 2022-06-03). Post-anchor development is **hybrid**: it includes independently authored (clean-room) work, code adapted from permissively-licensed upstreams, and — for some subsystems — **lineage-derived code from the upstream/GLEEC KDF work product carried under GPLv2 copyleft** (for example, post-anchor additions in the relocated `lp_ordermatch` modules under `mm2src/mm2_main/src/lp_ordermatch/`). The right to redistribute rests on GPLv2 copyleft (GPLv2 §2(b)/§6), not on a clean-room claim for every file. Per-file provenance and the license basis for each class are tracked in [`docs/reloaded-rewrite/34-provenance-ledger.md`](docs/reloaded-rewrite/34-provenance-ledger.md). The repository as a whole is distributed under GPLv2-only; inherited third-party license tensions (for example a GPL-3.0 file and the Apache-2.0 WalletConnect SDK dependencies) are openly tracked as deferred items in [`LEGAL/LICENSING-POLICY.md`](LEGAL/LICENSING-POLICY.md) §4.
 
 For readers who want the shortest safe summary: this repository continues the
 last clearly GPLv2-only upstream baseline, keeps the combined work under
@@ -22,9 +22,9 @@ clean-room rewrite. For the full technical derivation record, read the
 
 For the relationship to other downstream projects (notably the GLEEC fork), see [`RELOADED_VS_GLEEC.md`](RELOADED_VS_GLEEC.md).
 
-## Beta disclaimer
+## Alpha disclaimer
 
-KDF Reloaded is currently in **public beta**. APIs, on-disk formats, and the network protocol may still change between pre-1.0 releases. Use only with funds you can afford to lose.
+KDF Reloaded is currently in **public alpha** (see [`ROADMAP.md`](ROADMAP.md)). APIs, on-disk formats, and the network protocol may still change between pre-1.0 releases. Use only with funds you can afford to lose.
 
 - The `kdf` binary is provided for evaluation, testing, and review.
 - Mainnet swaps function on netid `8762` (AtomicDEX network) and netid `6133` (GLEEC network), but you are running unaudited pre-release software.
@@ -39,12 +39,12 @@ KDF Reloaded is currently in **public beta**. APIs, on-disk formats, and the net
 
 ## Networks
 
-| netid | Network | Status in beta |
+| netid | Network | Status in alpha |
 |------:|---------|-----------------|
 | 8762  | AtomicDEX (default upstream network) | Supported |
 | 6133  | GLEEC                                | Supported |
 
-Other netids (including 7777, 8100, 8999, 9000, 9998) are not part of the supported beta surface. Test-only netids exist in the codebase under the `regtest-netid` Cargo feature, off by default. See [`docs/NETWORK_CONFIG.md`](docs/NETWORK_CONFIG.md).
+Other netids (including 7777, 8100, 8999, 9000, 9998) are not part of the supported alpha surface. Test-only netids exist in the codebase under the `regtest-netid` Cargo feature, off by default. See [`docs/NETWORK_CONFIG.md`](docs/NETWORK_CONFIG.md).
 
 ## Building from source
 
@@ -86,7 +86,7 @@ Minimal example:
 > GLEEC KDF); set it to `none` to disable session persistence. See
 > [`docs/GLEEC_COMPATIBILITY.md`](docs/GLEEC_COMPATIBILITY.md) for details.
 
-iOS builds are not currently part of the beta release matrix.
+iOS builds are not currently part of the alpha release matrix.
 
 ## Usage
 
@@ -130,7 +130,7 @@ auditing, or redistributing the project:
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [PR review checklist](docs/PR_REVIEW_CHECKLIST.md). All contributors must agree to the [Developer Agreement](LEGAL/DEVELOPER-AGREEMENT) and abide by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-For the project roadmap beyond the beta, see [`ROADMAP.md`](ROADMAP.md). For the change log, see [`CHANGELOG.md`](CHANGELOG.md).
+For the project roadmap beyond the current alpha, see [`ROADMAP.md`](ROADMAP.md). For the change log, see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 

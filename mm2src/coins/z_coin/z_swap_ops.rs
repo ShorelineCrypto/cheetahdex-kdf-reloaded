@@ -1,4 +1,5 @@
 use super::*;
+use crate::z_coin::z_tx_read;
 
 #[async_trait]
 impl SwapOps for ZCoin {
@@ -62,7 +63,7 @@ impl SwapOps for ZCoin {
         htlc_privkey: &[u8],
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        let tx = try_tx_fus!(ZTransaction::read(taker_payment_tx));
+        let tx = try_tx_fus!(ZTransaction::read(taker_payment_tx, BranchId::Sapling));
         let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
         let redeem_script = payment_script(
             time_lock,
@@ -100,7 +101,7 @@ impl SwapOps for ZCoin {
         htlc_privkey: &[u8],
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        let tx = try_tx_fus!(ZTransaction::read(maker_payment_tx));
+        let tx = try_tx_fus!(ZTransaction::read(maker_payment_tx, BranchId::Sapling));
         let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
         let redeem_script = payment_script(
             time_lock,
@@ -138,7 +139,7 @@ impl SwapOps for ZCoin {
         htlc_privkey: &[u8],
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        let tx = try_tx_fus!(ZTransaction::read(taker_payment_tx));
+        let tx = try_tx_fus!(ZTransaction::read(taker_payment_tx, BranchId::Sapling));
         let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
         let redeem_script = payment_script(
             time_lock,
@@ -173,7 +174,7 @@ impl SwapOps for ZCoin {
         htlc_privkey: &[u8],
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        let tx = try_tx_fus!(ZTransaction::read(maker_payment_tx));
+        let tx = try_tx_fus!(ZTransaction::read(maker_payment_tx, BranchId::Sapling));
         let key_pair = try_tx_fus!(key_pair_from_secret(htlc_privkey));
         let redeem_script = payment_script(
             time_lock,
@@ -211,24 +212,21 @@ impl SwapOps for ZCoin {
 
         let coin = self.clone();
         let fut = async move {
-            let tx_hash = H256::from(z_tx.txid().0).reversed();
-            let tx_from_rpc = try_s!(
-                coin.rpc_client()
-                    .get_verbose_transaction(&tx_hash.into())
-                    .compat()
-                    .await
-            );
+            let tx_hash = H256::from(*z_tx.txid().as_ref()).reversed();
+            // Bytes and mined height only: a Light coin's backend decodes nothing (R39.11.4e).
+            let (rpc_bytes, rpc_height) = try_s!(coin.raw_transaction_with_height(&tx_hash.into()).await);
             let mut encoded = Vec::with_capacity(1024);
             z_tx.write(&mut encoded).expect("Writing should not fail");
-            if encoded != tx_from_rpc.hex.0 {
+            if encoded != rpc_bytes {
                 return ERR!(
-                    "Encoded transaction {:?} does not match the tx {:?} from RPC",
+                    "Encoded transaction {:?} does not match the tx {:?} from RPC (height {:?})",
                     encoded,
-                    tx_from_rpc
+                    rpc_bytes,
+                    rpc_height
                 );
             }
 
-            let block_height = match tx_from_rpc.height {
+            let block_height = match rpc_height {
                 Some(h) => {
                     if h < min_block_number {
                         return ERR!("Dex fee tx {:?} confirmed before min block {}", z_tx, min_block_number);
@@ -239,12 +237,20 @@ impl SwapOps for ZCoin {
                 None => H0,
             };
 
-            for shielded_out in z_tx.shielded_outputs.iter() {
+            let Some(sapling_bundle) = z_tx.sapling_bundle() else {
+                return ERR!("The dex fee tx {:?} has no Sapling bundle", z_tx);
+            };
+            for shielded_out in sapling_bundle.shielded_outputs() {
                 if let Some((note, address, memo)) = try_sapling_output_recovery(
-                    &coin.z_fields.consensus_params,
-                    block_height,
                     &DEX_FEE_OVK,
                     shielded_out,
+                    // Decryption-only parameters: the dex-fee output is built by
+                    // the counterparty, which may be a modern Pirate wallet using
+                    // the post-ZIP-212 note plaintext (R39.8.0am).
+                    zcash_primitives::transaction::components::sapling::zip212_enforcement(
+                        &crate::z_coin::ZcoinDecryptionParams::new(coin.z_fields.consensus_params.clone()),
+                        block_height,
+                    ),
                 ) {
                     if address != coin.z_fields.dex_fee_addr {
                         let hrp = coin.z_fields.consensus_params.hrp_sapling_payment_address();
@@ -257,11 +263,15 @@ impl SwapOps for ZCoin {
                         );
                     }
 
-                    if note.value != amount_sat {
-                        return ERR!("Dex fee has invalid amount {}, expected {}", note.value, amount_sat);
+                    if note.value().inner() != amount_sat {
+                        return ERR!(
+                            "Dex fee has invalid amount {}, expected {}",
+                            note.value().inner(),
+                            amount_sat
+                        );
                     }
 
-                    if memo != expected_memo {
+                    if memo.as_slice() != expected_memo.as_array() {
                         return ERR!("Dex fee has invalid memo {:?}, expected {:?}", memo, expected_memo);
                     }
 
@@ -279,11 +289,13 @@ impl SwapOps for ZCoin {
     }
 
     fn validate_maker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        utxo_common::validate_maker_payment(self, input)
+        let (first_pub, second_pub) = (input.maker_pub.clone(), input.taker_pub.clone());
+        z_tx_read::validate_payment(self, input, first_pub, second_pub)
     }
 
     fn validate_taker_payment(&self, input: ValidatePaymentInput) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        utxo_common::validate_taker_payment(self, input)
+        let (first_pub, second_pub) = (input.taker_pub.clone(), input.maker_pub.clone());
+        z_tx_read::validate_payment(self, input, first_pub, second_pub)
     }
 
     fn check_if_my_payment_sent(
@@ -292,10 +304,17 @@ impl SwapOps for ZCoin {
         my_pub: &[u8],
         other_pub: &[u8],
         secret_hash: &[u8],
-        _search_from_block: u64,
+        search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Box<dyn Future<Item = Option<TransactionEnum>, Error = String> + Send> {
-        utxo_common::check_if_my_payment_sent(self.clone(), time_lock, my_pub, other_pub, secret_hash)
+        z_tx_read::check_if_my_payment_sent(
+            self.clone(),
+            time_lock,
+            my_pub,
+            other_pub,
+            secret_hash,
+            search_from_block,
+        )
     }
 
     async fn search_for_swap_tx_spend_my(
@@ -307,13 +326,14 @@ impl SwapOps for ZCoin {
         search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        utxo_common::search_for_swap_tx_spend_my(
-            self.as_ref(),
+        let my_public = *try_s!(self.as_ref().priv_key_policy.key_pair_or_err()).public();
+        z_tx_read::search_for_swap_tx_spend(
+            self,
             time_lock,
-            other_pub,
+            &my_public,
+            &try_s!(Public::from_slice(other_pub)),
             secret_hash,
             tx,
-            utxo_common::DEFAULT_SWAP_VOUT,
             search_from_block,
         )
         .await
@@ -328,20 +348,21 @@ impl SwapOps for ZCoin {
         search_from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> Result<Option<FoundSwapTxSpend>, String> {
-        utxo_common::search_for_swap_tx_spend_other(
-            self.as_ref(),
+        let my_public = *try_s!(self.as_ref().priv_key_policy.key_pair_or_err()).public();
+        z_tx_read::search_for_swap_tx_spend(
+            self,
             time_lock,
-            other_pub,
+            &try_s!(Public::from_slice(other_pub)),
+            &my_public,
             secret_hash,
             tx,
-            utxo_common::DEFAULT_SWAP_VOUT,
             search_from_block,
         )
         .await
     }
 
     fn extract_secret(&self, secret_hash: &[u8], spend_tx: &[u8]) -> Result<Vec<u8>, String> {
-        utxo_common::extract_secret(secret_hash, spend_tx)
+        z_tx_read::extract_secret(secret_hash, spend_tx)
     }
 
     fn negotiate_swap_contract_addr(

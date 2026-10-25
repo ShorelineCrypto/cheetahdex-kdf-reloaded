@@ -88,6 +88,7 @@ impl From<AddressDerivingError> for HDAccountBalanceRpcError {
             AddressDerivingError::Bip32Error(bip32) => {
                 HDAccountBalanceRpcError::ErrorDerivingAddress(bip32.to_string())
             },
+            AddressDerivingError::Ed25519Bip32Error(e) => HDAccountBalanceRpcError::ErrorDerivingAddress(e),
         }
     }
 }
@@ -97,9 +98,9 @@ impl From<RpcTaskError> for HDAccountBalanceRpcError {
         match e {
             RpcTaskError::Canceled => HDAccountBalanceRpcError::Internal("Canceled".to_owned()),
             RpcTaskError::Timeout(timeout) => HDAccountBalanceRpcError::Timeout(timeout),
-            RpcTaskError::NoSuchTask(_) | RpcTaskError::UnexpectedTaskStatus { .. } => {
-                HDAccountBalanceRpcError::Internal(e.to_string())
-            },
+            RpcTaskError::NoSuchTask(_)
+            | RpcTaskError::UnexpectedTaskStatus { .. }
+            | RpcTaskError::UnexpectedUserAction { .. } => HDAccountBalanceRpcError::Internal(e.to_string()),
             RpcTaskError::Internal(internal) => HDAccountBalanceRpcError::Internal(internal),
         }
     }

@@ -498,10 +498,11 @@ not justify deleting the saved record or marking the swap finished. The
 preferred failure mode is to retain the raw saved history and surface that the
 swap cannot be replayed by this binary.
 
-> **Upstream divergence (informative).** The active RELOADED tree's legacy
-> event parser may be narrower than the historical persisted event family. This
-> chapter binds the broader persisted JSON family so existing saved swaps can
-> be loaded, replayed, or retained without data loss.
+> **Implementation note (informative).** The RELOADED compatibility parser
+> accepts the broader historical persisted event family bound above, including
+> unit refund-start and refund-finish milestones. It also tolerates the known
+> maker refund-start form carrying a `wait_until` payload, preserving that
+> deadline as the wait-refund milestone.
 
 ## 44.9 Creation/Migration Interaction
 
@@ -572,8 +573,33 @@ lineage and a conversion rule for existing `MM2.db` files.
   `MakerPaymentSpendConfirmed` loads without an unknown-variant failure; replay
   either resumes from the last accepted event or preserves the raw history when
   replay is not possible.
+- Legacy maker saved-swap JSON containing data-less `MakerPaymentRefundStarted`
+  or `MakerPaymentRefundFinished` milestones loads without a missing-`data`
+  failure. The historical payload-bearing refund-start form preserves its
+  `wait_until` deadline.
 - Native live swap/order/stats persistence is exercised only after migration
   completion and succeeds against the state-15 schema.
 - Completion-fiat snapshots are stored in `stats_swaps`; `my_swaps` does not
   contain RELOADED-only `maker_coin_usd_price` or `taker_coin_usd_price`
   columns.
+
+## 44.11 Provenance Footer
+
+- *Inputs:* the project's own revision history and current tree (the
+  shipped `MM2.db` migration ledger, version-1 bootstrap schema, and
+  version-by-version migrations through state 15 -- by table/column/
+  migration-number shape only, no code transcribed); the GLEEC-compatible
+  shared schema baseline (state 15) and the dictated-interop rule that
+  RELOADED-local persistence changes must not claim future shared
+  `MM2.db` migration numbers (both explicitly named as this chapter's
+  binding-scope source of truth); [Chapter 25](25-sql-query-builder.md)
+  (the SQLite gateway substrate this chapter's native path uses);
+  [Chapter 26](26-cross-platform-and-wasm.md) (the native/WebAssembly
+  persistence split this chapter is scoped native-only against).
+- *Permitted-input classes used:* baseline/as-built source (the shipped
+  migration ledger and schema); dictated interop (the GLEEC-compatible
+  shared schema/migration-number contract, R29/R31); cross-chapter
+  contracts (Chapters 25, 26).
+- *Sibling-allowlist consultations:* [Chapter 25](25-sql-query-builder.md),
+  [Chapter 26](26-cross-platform-and-wasm.md).
+- *Forbidden corpus:* not consulted.

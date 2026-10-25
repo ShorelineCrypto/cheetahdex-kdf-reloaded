@@ -50,6 +50,42 @@ impl EthCoinImpl {
         self.erc20_tokens_infos.lock().unwrap().clone()
     }
 
+    /// Forgets an ERC-20 token registered on this platform coin by [`Self::add_erc20_token_info`].
+    pub fn remove_erc20_token_info(&self, ticker: &str) { self.erc20_tokens_infos.lock().unwrap().remove(ticker); }
+
+    /// The address the coin is enabled on.
+    pub fn enabled_address(&self) -> Address { self.my_address }
+
+    /// Whether this coin is the native gas coin of an EVM chain (not a token, not TRON).
+    pub fn is_evm_platform_coin(&self) -> bool { matches!(self.coin_type, EthCoinType::Eth) }
+
+    /// Whether this coin signs with a hardware wallet.
+    pub fn uses_hardware_signer(&self) -> bool {
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+        if matches!(self.signer, EthSigner::Trezor(_)) {
+            return true;
+        }
+        false
+    }
+
+    /// Whether this coin is derived from a software HD wallet: an HD wallet whose keys the node itself holds.
+    /// A hardware-backed coin is never software HD, however it derives its enabled address, because every
+    /// signature and address confirmation needs the device.
+    pub fn uses_software_hd_wallet(&self) -> bool {
+        matches!(self.derivation_method, DerivationMethod::HDWallet(_))
+            && !self.uses_hardware_signer()
+            && self.hardware_derivation_path().is_none()
+    }
+
+    /// The derivation path of the enabled address of a hardware-wallet coin.
+    pub fn hardware_derivation_path(&self) -> Option<crypto::DerivationPath> {
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+        if let EthSigner::Trezor(signer) = &self.signer {
+            return Some(signer.derivation_path.clone());
+        }
+        None
+    }
+
     /// Returns this coin's own ERC-20 token info (contract address + decimals)
     /// when it is an ERC-20 token coin; `None` for the native gas coin.
     pub fn erc20_token_info(&self) -> Option<Erc20TokenInfo> {
@@ -65,6 +101,10 @@ impl EthCoinImpl {
     /// Returns the wallet public key as a hex string (informative; used to
     /// populate the V2 activation result address-info records).
     pub fn display_public_key(&self) -> String { format!("0x{:02x}", self.signer.public()) }
+
+    /// The uncompressed secp256k1 public key of the wallet address as reported by the V2 activation
+    /// result (CRD R35.1.3): lower-case hex with the leading `04` byte and without a `0x` prefix.
+    pub fn activation_public_key(&self) -> String { format!("04{}", hex::encode(self.signer.public().as_ref())) }
 
     /// Signs `tx` with the local signing key for the offline-then-broadcast
     /// send path used by atomic swaps (`sign_and_send_transaction_impl`). For
@@ -86,6 +126,40 @@ impl EthCoinImpl {
             // MetaMask.
             #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
             EthSigner::Trezor(_) => Err(EthSignerError::SwapSendUnsupported),
+        }
+    }
+
+    /// Refuses a transaction of EIP-2718 type `tx_type` when the coin's `max_eth_tx_type` cap is lower
+    /// (CRD D35.7). The send fails; it is not rebuilt in a lower type. Legacy (type `0`) can never exceed a cap.
+    fn ensure_tx_type_within_cap(&self, tx_type: u64) -> Result<(), String> {
+        let ctx = MmArc::from_weak(&self.ctx).ok_or_else(|| "The MM context is gone".to_owned())?;
+        match self.max_eth_tx_type(&ctx) {
+            (Some(max), source) if tx_type > max => ERR!(
+                "{}: refusing to sign a type-{} transaction: the maximum transaction type for this coin is {} ({})",
+                self.ticker,
+                tx_type,
+                max,
+                match source {
+                    TxTypeCapSource::CoinConfig => "max_eth_tx_type of the coin configuration",
+                    TxTypeCapSource::AbsentKeyIsZero => "no max_eth_tx_type key, so the default of 0 applies",
+                    TxTypeCapSource::Unrestricted => "unrestricted",
+                }
+            ),
+            _ => Ok(()),
+        }
+    }
+
+    /// Signs an EIP-1559 swap transaction (CRD R35.6A.17) with the same local key and the same
+    /// policy gate as [`Self::sign_tx_for_send`]: MetaMask and Trezor reject swap sends in this form
+    /// exactly as they do in the legacy form.
+    pub(crate) fn sign_eip1559_tx_for_send(&self, tx: Eip1559Transaction) -> Result<SignedEthTx, String> {
+        self.ensure_tx_type_within_cap(EIP1559_TX_TYPE)?;
+        match &self.signer {
+            EthSigner::Local(key_pair) => tx.sign(key_pair.secret()),
+            #[cfg(target_arch = "wasm32")]
+            EthSigner::Metamask(_) => Err(EthSignerError::SwapSendUnsupported.to_string()),
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+            EthSigner::Trezor(_) => Err(EthSignerError::SwapSendUnsupported.to_string()),
         }
     }
 
@@ -427,6 +501,7 @@ pub async fn get_raw_transaction_impl(coin: EthCoin, req: RawTransactionRequest)
     let alloy_tx = alloy_tx.or_mm_err(|| RawTransactionError::HashNotExist(req.tx_hash))?;
     let raw = signed_tx_from_alloy_tx(alloy_tx).map_to_mm(RawTransactionError::InternalError)?;
     Ok(RawTransactionRes {
+        tx_json: None,
         tx_hex: BytesJson(rlp::encode(&raw)),
     })
 }
@@ -771,6 +846,7 @@ pub(crate) fn build_evm_withdraw_details(
         spent_by_me += &fee_details.total_fee;
     }
     Ok(TransactionDetails {
+        tx_json: None,
         to: vec![checksum_address(&format!("{:#02x}", plan.to_addr))],
         from: vec![from_checksum],
         total_amount: amount_decimal,
@@ -980,12 +1056,49 @@ pub async fn sign_raw_eth_tx_impl(coin: EthCoin, args: SignRawTransactionRequest
     let bytes = rlp::encode(&signed);
 
     Ok(RawTransactionRes {
+        tx_json: None,
         tx_hex: BytesJson::from(bytes.to_vec()),
     })
 }
 
+/// Names an EIP-2718 transaction type byte for diagnostics.
+fn eip2718_type_name(type_byte: u8) -> &'static str {
+    match type_byte {
+        0x01 => "EIP-2930",
+        0x02 => "EIP-1559",
+        0x03 => "EIP-4844",
+        0x04 => "EIP-7702",
+        _ => "unknown type",
+    }
+}
+
+/// Decodes a signed transaction: legacy (EIP-155), EIP-2930 or EIP-1559.
+///
+/// Other EIP-2718 types (EIP-4844, EIP-7702, unknown) are rejected with an error naming the type.
+/// A payload that is not a transaction at all fails with its length and a short prefix, so the two
+/// cases are distinguishable on sight.
 pub fn signed_eth_tx_from_bytes(bytes: &[u8]) -> Result<SignedEthTx, String> {
-    let tx: UnverifiedTransaction = try_s!(rlp::decode(bytes));
+    const PREFIX_LEN: usize = 10;
+    // Types 1 (EIP-2930) and 2 (EIP-1559) are decoded; every other EIP-2718 type is rejected with a
+    // precise error rather than a bare RLP failure.
+    if let Some(&type_byte) = bytes.first().filter(|b| (0x03..=0x7f).contains(*b)) {
+        return ERR!(
+            "typed EIP-2718 transaction (type 0x{:02x}, {}) is not supported, only legacy, EIP-2930 and EIP-1559 transactions can be decoded; payload length {} bytes",
+            type_byte,
+            eip2718_type_name(type_byte),
+            bytes.len()
+        );
+    }
+    let tx: UnverifiedTransaction = rlp::decode(bytes).map_err(|e| {
+        let prefix = &bytes[..bytes.len().min(PREFIX_LEN)];
+        format!(
+            "cannot decode payload as a legacy, EIP-2930 or EIP-1559 transaction: {}; payload length {} bytes, first {} bytes 0x{}",
+            e,
+            bytes.len(),
+            prefix.len(),
+            hex::encode(prefix)
+        )
+    })?;
     let signed = try_s!(SignedEthTx::new(tx));
     Ok(signed)
 }
@@ -996,6 +1109,90 @@ pub fn signed_eth_tx_from_bytes(bytes: &[u8]) -> Result<SignedEthTx, String> {
 // So we would need to handle shared locks anyway.
 lazy_static! {
     pub(crate) static ref NONCE_LOCK: TimedAsyncMutex<()> = TimedAsyncMutex::new(());
+}
+
+/// Resolved pricing of a swap transaction; the variant fixes the serialized form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SwapFee {
+    /// A single gas price: the untyped EIP-155 legacy form.
+    Legacy { gas_price: U256 },
+    /// An EIP-1559 fee pair in wei: the type `0x02` form.
+    Eip1559 {
+        chain_id: u64,
+        max_fee_per_gas: U256,
+        max_priority_fee_per_gas: U256,
+    },
+}
+
+/// The EIP-2718 type byte of an EIP-1559 transaction.
+const EIP1559_TX_TYPE: u64 = 2;
+
+/// A swap transaction in the serialized form chosen by the swap gas-fee policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SwapTx {
+    /// Untyped EIP-155 legacy transaction with a single gas price (`SwapGasFeePolicy::Legacy`).
+    Legacy(UnSignedEthTx),
+    /// EIP-1559 (type `0x02`) transaction (`Low` / `Medium` / `High`).
+    Eip1559(Eip1559Transaction),
+}
+
+impl SwapTx {
+    pub(crate) fn new(fee: SwapFee, nonce: U256, gas: U256, action: Action, value: U256, data: Vec<u8>) -> SwapTx {
+        match fee {
+            SwapFee::Legacy { gas_price } => SwapTx::Legacy(UnSignedEthTx {
+                nonce,
+                gas_price,
+                gas,
+                action,
+                value,
+                data,
+            }),
+            SwapFee::Eip1559 {
+                chain_id,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+            } => SwapTx::Eip1559(Eip1559Transaction {
+                chain_id,
+                nonce,
+                max_priority_fee_per_gas,
+                max_fee_per_gas,
+                gas,
+                action,
+                value,
+                data,
+            }),
+        }
+    }
+}
+
+/// The EIP-1559 fee pair of the policy's tier taken from an EIP-1559 fee estimate -- the same
+/// estimate the fee-estimation RPC and streamer expose, so there is one tier definition
+/// (`Low` -> `estimate.low`, `Medium` -> `estimate.medium`, `High` -> `estimate.high`). `Legacy` has
+/// no tier and is rejected: it is priced by `get_gas_price`.
+pub(crate) fn eip1559_swap_fee(
+    policy: SwapGasFeePolicy,
+    chain_id: u64,
+    estimate: &fee_estimation::eip1559::FeePerGasEstimated,
+) -> Result<SwapFee, String> {
+    let level = match policy {
+        SwapGasFeePolicy::Legacy => return ERR!("The Legacy swap gas-fee policy has no EIP-1559 tier"),
+        SwapGasFeePolicy::Low => &estimate.low,
+        SwapGasFeePolicy::Medium => &estimate.medium,
+        SwapGasFeePolicy::High => &estimate.high,
+    };
+    if level.max_fee_per_gas < level.max_priority_fee_per_gas {
+        return ERR!(
+            "Fee estimate for {:?} is inconsistent: max_fee_per_gas {} < max_priority_fee_per_gas {}",
+            policy,
+            level.max_fee_per_gas,
+            level.max_priority_fee_per_gas
+        );
+    }
+    Ok(SwapFee::Eip1559 {
+        chain_id,
+        max_fee_per_gas: level.max_fee_per_gas,
+        max_priority_fee_per_gas: level.max_priority_fee_per_gas,
+    })
 }
 
 pub type EthTxFut = Box<dyn Future<Item = SignedEthTx, Error = TransactionErr> + Send + 'static>;
@@ -1031,17 +1228,26 @@ pub async fn sign_and_send_transaction_impl(
             .compat()
             .await
     );
-    status.status(tags!(), "get_gas_price…");
-    let gas_price = try_tx_s!(coin.get_gas_price().compat().await);
-    let tx = UnSignedEthTx {
-        nonce,
-        gas_price,
-        gas,
-        action,
-        value,
-        data,
+    // CRD R35.6.6 / R35.6A.17: the stored policy decides both the pricing and the serialized form.
+    let policy = coin.swap_gas_fee_policy();
+    let fee = if policy == SwapGasFeePolicy::Legacy {
+        status.status(tags!(), "get_gas_price…");
+        SwapFee::Legacy {
+            gas_price: try_tx_s!(coin.get_gas_price().compat().await),
+        }
+    } else {
+        status.status(tags!(), "get_eip1559_gas_fee…");
+        let chain_id = try_tx_s!(coin
+            .chain_id
+            .ok_or_else(|| ERRL!("An EIP-1559 swap transaction requires a chain id")));
+        let estimate = try_tx_s!(coin.get_eip1559_gas_fee(false).await.map_err(|e| ERRL!("{}", e)));
+        try_tx_s!(eip1559_swap_fee(policy, chain_id, &estimate))
     };
-    let signed = try_tx_s!(coin.sign_tx_for_send(tx));
+    let tx = SwapTx::new(fee, nonce, gas, action, value, data);
+    let signed = match tx {
+        SwapTx::Legacy(tx) => try_tx_s!(coin.sign_tx_for_send(tx)),
+        SwapTx::Eip1559(tx) => try_tx_s!(coin.sign_eip1559_tx_for_send(tx)),
+    };
     let bytes = rlp::encode(&signed).to_vec();
     status.status(tags!(), "send_raw_transaction…");
 
@@ -1090,6 +1296,42 @@ pub async fn sign_and_send_transaction_impl(
 }
 
 impl EthCoin {
+    /// Queries the on-chain balance of `address` for one ERC-20 token (`balanceOf`).
+    pub async fn erc20_balance_of(
+        &self,
+        info: &Erc20TokenInfo,
+        address: Address,
+    ) -> Result<CoinBalance, MmError<BalanceError>> {
+        let function = ERC20_CONTRACT
+            .function("balanceOf")
+            .map_to_mm(|e| BalanceError::Internal(e.to_string()))?;
+        let data = function
+            .encode_input(&[Token::Address(address)])
+            .map_to_mm(|e| BalanceError::Internal(e.to_string()))?;
+        let res = self
+            .call_request(info.token_addr, None, Some(data.into()))
+            .compat()
+            .await
+            .mm_err(BalanceError::from)?;
+        let decoded = function
+            .decode_output(&res.0)
+            .map_to_mm(|e| BalanceError::Internal(e.to_string()))?;
+        let wei: U256 = match decoded.into_iter().next() {
+            Some(Token::Uint(number)) => number,
+            other => {
+                return MmError::err(BalanceError::InvalidResponse(format!(
+                    "Expected U256 as balanceOf result but got {:?}",
+                    other
+                )))
+            },
+        };
+        let spendable = u256_to_big_decimal(wei, info.decimals).mm_err(|e| BalanceError::Internal(e.to_string()))?;
+        Ok(CoinBalance {
+            spendable,
+            unspendable: BigDecimal::from(0),
+        })
+    }
+
     /// Queries the on-chain balances of every ERC-20 token registered on this
     /// platform coin (via `balanceOf`), keyed by token ticker (CRD §35.1.3).
     pub async fn get_tokens_balance_list(
@@ -1098,35 +1340,7 @@ impl EthCoin {
         let infos = self.get_erc20_tokens_infos();
         let mut result = std::collections::HashMap::new();
         for (ticker, info) in infos {
-            let function = ERC20_CONTRACT
-                .function("balanceOf")
-                .map_to_mm(|e| BalanceError::Internal(e.to_string()))?;
-            let data = function
-                .encode_input(&[Token::Address(self.my_address)])
-                .map_to_mm(|e| BalanceError::Internal(e.to_string()))?;
-            let res = self
-                .call_request(info.token_addr, None, Some(data.into()))
-                .compat()
-                .await
-                .mm_err(BalanceError::from)?;
-            let decoded = function
-                .decode_output(&res.0)
-                .map_to_mm(|e| BalanceError::Internal(e.to_string()))?;
-            let wei: U256 = match decoded.into_iter().next() {
-                Some(Token::Uint(number)) => number,
-                other => {
-                    return MmError::err(BalanceError::InvalidResponse(format!(
-                        "Expected U256 as balanceOf result but got {:?}",
-                        other
-                    )))
-                },
-            };
-            let spendable =
-                u256_to_big_decimal(wei, info.decimals).mm_err(|e| BalanceError::Internal(e.to_string()))?;
-            result.insert(ticker, CoinBalance {
-                spendable,
-                unspendable: BigDecimal::from(0),
-            });
+            result.insert(ticker, self.erc20_balance_of(&info, self.my_address).await?);
         }
         Ok(result)
     }
@@ -1147,20 +1361,34 @@ impl EthCoin {
     /// The token decimals are taken from the coin configuration when present.
     /// If the configuration omits them, fall back to the ERC-20 `decimals()`
     /// contract method like the legacy standalone ERC-20 activator does.
+    ///
+    /// # Errors
+    ///
+    /// [`Erc20BuildError::Transport`] when the decimals must be read on-chain and the nodes give no
+    /// usable answer (CRD R35.1.6).
     pub async fn erc20_token_from_conf_or_contract(
         &self,
         ticker: String,
         token_addr: Address,
         required_confirmations: u64,
-    ) -> Result<EthCoin, String> {
-        let ctx = MmArc::from_weak(&self.ctx).ok_or_else(|| "MM context has been dropped".to_string())?;
+        custom_token: bool,
+    ) -> Result<EthCoin, MmError<Erc20BuildError>> {
+        let ctx = MmArc::from_weak(&self.ctx)
+            .or_mm_err(|| Erc20BuildError::Internal("MM context has been dropped".to_owned()))?;
         let conf = crate::coin_conf(&ctx, &ticker);
         let decimals = match conf["decimals"].as_u64() {
             Some(d) if d > 0 && d <= 19 => d as u8,
-            None | Some(0) => get_token_decimals(&self.web3, token_addr).await?,
-            Some(d) => return Err(format!("Token {} decimals {} is not supported", ticker, d)),
+            None | Some(0) => get_token_decimals(&self.web3, token_addr)
+                .await
+                .map_to_mm(Erc20BuildError::Transport)?,
+            Some(d) => {
+                return MmError::err(Erc20BuildError::UnsupportedDecimals(format!(
+                    "Token {} decimals {} is not supported",
+                    ticker, d
+                )))
+            },
         };
-        Ok(self.erc20_token_from_decimals(ticker, token_addr, required_confirmations, decimals))
+        Ok(self.erc20_token_from_decimals(ticker, token_addr, required_confirmations, decimals, custom_token))
     }
 
     fn erc20_token_from_decimals(
@@ -1169,6 +1397,7 @@ impl EthCoin {
         token_addr: Address,
         required_confirmations: u64,
         decimals: u8,
+        custom_token: bool,
     ) -> EthCoin {
         let token_impl = EthCoinImpl {
             signer: self.signer.clone(),
@@ -1199,6 +1428,7 @@ impl EthCoin {
             nft_swap_v2_contract: self.nft_swap_v2_contract,
             swap_gas_fee_policy: Mutex::new(self.swap_gas_fee_policy()),
             erc20_tokens_infos: Default::default(),
+            custom_token,
         };
         EthCoin(Arc::new(token_impl))
     }
@@ -1481,7 +1711,12 @@ impl EthCoin {
                     EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details: Option<EthTxFeeDetails> = match receipt {
-                    Some(r) => Some(EthTxFeeDetails::new(U256::from(r.gas_used), raw.gas_price, fee_coin).unwrap()),
+                    Some(r) => {
+                        // EIP-1559 transactions carry only fee caps, not a price; the receipt's effective
+                        // gas price is what was actually paid. Legacy/EIP-2930 keep their own gas price.
+                        let paid_price = raw.gas_price().unwrap_or_else(|| U256::from(r.effective_gas_price));
+                        Some(EthTxFeeDetails::new(U256::from(r.gas_used), paid_price, fee_coin).unwrap())
+                    },
                     None => None,
                 };
 
@@ -1545,6 +1780,7 @@ impl EthCoin {
                 };
 
                 let details = TransactionDetails {
+                    tx_json: None,
                     my_balance_change: &received_by_me - &spent_by_me,
                     spent_by_me,
                     received_by_me,
@@ -1892,7 +2128,12 @@ impl EthCoin {
                     EthCoinType::Trc20 { platform, .. } => platform.as_str(),
                 };
                 let fee_details = match receipt {
-                    Some(r) => Some(EthTxFeeDetails::new(U256::from(r.gas_used), raw.gas_price, fee_coin).unwrap()),
+                    Some(r) => {
+                        // EIP-1559 transactions carry only fee caps, not a price; the receipt's effective
+                        // gas price is what was actually paid. Legacy/EIP-2930 keep their own gas price.
+                        let paid_price = raw.gas_price().unwrap_or_else(|| U256::from(r.effective_gas_price));
+                        Some(EthTxFeeDetails::new(U256::from(r.gas_used), paid_price, fee_coin).unwrap())
+                    },
                     None => None,
                 };
                 let block_number = event.block_number.unwrap();
@@ -1934,6 +2175,7 @@ impl EthCoin {
                 };
 
                 let details = TransactionDetails {
+                    tx_json: None,
                     my_balance_change: &received_by_me - &spent_by_me,
                     spent_by_me,
                     received_by_me,
@@ -2903,7 +3145,10 @@ impl EthCoin {
                         .first()
                         .map(|val| increase_by_percent_one_gwei(*val, BASE_BLOCK_FEE_DIFF_PCT)),
                     Err(e) => {
-                        error!("Error {} on eth_feeHistory request", e);
+                        common::log::debug!(
+                            "Optional eth_feeHistory gas-price source is unavailable: {}; using remaining sources",
+                            e
+                        );
                         None
                     },
                 }
@@ -3076,16 +3321,29 @@ impl Transaction for SignedEthTx {
 ///   the `v` field.
 /// - `hash`: alloy `B256` is bit-for-bit `H256`; copied via
 ///   `H256::from_slice(...)`.
-/// - `gas_price`: alloy returns `Option<u128>` (None for type-2 / 1559
-///   txs). The legacy struct expects `U256`; we coerce via
-///   `unwrap_or(0)`. Type-2 txs would not survive RLP-decoding through
-///   this struct anyway — the existing code path is legacy-only.
+/// - `gas_price`: legacy envelopes only (typed envelopes are handled before this point by decoding
+///   their EIP-2718 bytes, so the `unwrap_or(0)` below never stands in for a missing price).
 /// - `gas`, `nonce`: alloy `u64` → `U256`.
 /// - `value`, `data`, `to`: direct mapping.
 pub fn signed_tx_from_alloy_tx(transaction: alloy::rpc::types::eth::Transaction) -> Result<SignedEthTx, String> {
     use alloy::consensus::Transaction as _;
 
     let envelope = transaction.into_inner();
+    if !matches!(envelope, alloy::consensus::TxEnvelope::Legacy(_)) {
+        // Typed transactions are re-decoded from their EIP-2718 encoding so the id, signing hash and
+        // sender recovery follow the typed rules; the id must match the one the node reported.
+        use alloy::eips::eip2718::Encodable2718;
+        let alloy_hash = *envelope.tx_hash();
+        let signed = signed_eth_tx_from_bytes(&envelope.encoded_2718())?;
+        if signed.tx_hash().as_bytes() != alloy_hash.as_slice() {
+            return ERR!(
+                "typed transaction id mismatch: node reported 0x{}, decoded envelope hashes to {:?}",
+                hex::encode(alloy_hash.as_slice()),
+                signed.tx_hash()
+            );
+        }
+        return Ok(signed);
+    }
     let signature = envelope.signature();
     let alloy_hash = *envelope.tx_hash();
 
@@ -3120,13 +3378,15 @@ pub fn signed_tx_from_alloy_tx(transaction: alloy::rpc::types::eth::Transaction)
         s: s_legacy,
         v: v_legacy,
         hash: H256::from_slice(alloy_hash.as_slice()),
-        unsigned: UnSignedEthTx {
+        body: TxBody {
             data: envelope.input().to_vec(),
-            gas_price: U256::from_big_endian(&gas_price_bytes),
             gas: U256::from(envelope.gas_limit()),
             value: value_legacy,
             nonce: U256::from(envelope.nonce()),
             action,
+        },
+        kind: TxKind::Legacy {
+            gas_price: U256::from_big_endian(&gas_price_bytes),
         },
     };
 
@@ -3258,8 +3518,10 @@ pub async fn eth_coin_from_conf_and_request(
     priv_key: &[u8],
     protocol: CoinProtocol,
 ) -> Result<EthCoin, String> {
-    let key_pair: KeyPair = try_s!(KeyPair::from_secret_slice(priv_key));
-    eth_coin_from_conf_and_request_with_signer(ctx, ticker, conf, req, EthSigner::Local(key_pair), protocol).await
+    let params = try_s!(EthCoinActivationParams::from_legacy_request(req, conf));
+    eth_coin_from_params_with_priv_key(ctx, ticker, conf, &params, priv_key, protocol)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// MetaMask-policy EVM activation (CRD §47.5.A). Builds an [`EthCoin`] whose
@@ -3276,148 +3538,10 @@ pub async fn eth_coin_from_conf_and_request_with_metamask(
     metamask_arc: crypto::MetamaskArc,
     protocol: CoinProtocol,
 ) -> Result<EthCoin, String> {
-    eth_coin_from_conf_and_request_with_signer(ctx, ticker, conf, req, EthSigner::Metamask(metamask_arc), protocol)
+    let params = try_s!(EthCoinActivationParams::from_legacy_request(req, conf));
+    eth_coin_from_params_with_metamask(ctx, ticker, conf, &params, metamask_arc, protocol)
         .await
-}
-
-/// Shared EVM-coin builder body: identical for every signing policy except how
-/// the [`EthSigner`] is constructed and where the coin address comes from
-/// (`signer.address()`). The `Local` path is byte-identical to the prior
-/// `eth_coin_from_conf_and_request` behaviour.
-pub(crate) async fn eth_coin_from_conf_and_request_with_signer(
-    ctx: &MmArc,
-    ticker: &str,
-    conf: &Json,
-    req: &Json,
-    signer: EthSigner,
-    protocol: CoinProtocol,
-) -> Result<EthCoin, String> {
-    // Defensive: TRON activates through a dedicated builder
-    // (`tron::tron_coin_from_conf_and_request`); reject any attempt to route
-    // TRX/TRC20 through the EVM legacy activator.
-    if matches!(protocol, CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. }) {
-        return ERR!("TRON protocol must activate through tron_coin_from_conf_and_request, not the EVM activator");
-    }
-
-    let mut urls: Vec<String> = try_s!(json::from_value(req["urls"].clone()));
-    if urls.is_empty() {
-        return ERR!("Enable request for ETH coin must have at least 1 node URL");
-    }
-    let mut rng = small_rng();
-    urls.as_mut_slice().shuffle(&mut rng);
-
-    let swap_contract_address: Address = try_s!(json::from_value(req["swap_contract_address"].clone()));
-    if swap_contract_address == Address::default() {
-        return ERR!("swap_contract_address can't be zero address");
-    }
-
-    let fallback_swap_contract: Option<Address> = try_s!(json::from_value(req["fallback_swap_contract"].clone()));
-    if let Some(fallback) = fallback_swap_contract {
-        if fallback == Address::default() {
-            return ERR!("fallback_swap_contract can't be zero address");
-        }
-    }
-
-    let my_address = signer.address();
-
-    let mut web3_instances = vec![];
-    let event_handlers = rpc_event_handlers_for_eth_transport(ctx, ticker.to_string());
-    for url in urls.iter() {
-        // LP-17: alloy provider per URL + alloy raw web3_clientVersion.
-        let provider = match super::alloy_compat::build_provider(vec![url.clone()], event_handlers.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                log!("Failed to build alloy provider for url " (url) ", " (e));
-                continue;
-            },
-        };
-        let version: String = match provider.client().request_noparams("web3_clientVersion").await {
-            Ok(v) => v,
-            Err(e) => {
-                log!("Couldn't get client version for url " (url) ", " (e));
-                continue;
-            },
-        };
-        web3_instances.push(Web3Instance {
-            web3: provider,
-            is_parity: version.contains("Parity") || version.contains("parity"),
-        })
-    }
-
-    if web3_instances.is_empty() {
-        return ERR!("Failed to get client version for all urls");
-    }
-
-    let web3 = try_s!(super::alloy_compat::build_provider(urls, event_handlers));
-
-    let (coin_type, decimals) = match protocol {
-        CoinProtocol::ETH { .. } => (EthCoinType::Eth, 18),
-        CoinProtocol::ERC20 {
-            platform,
-            contract_address,
-        } => {
-            let token_addr = try_s!(valid_addr_from_str(&contract_address));
-            let decimals = match conf["decimals"].as_u64() {
-                None | Some(0) => try_s!(get_token_decimals(&web3, token_addr).await),
-                Some(d) => d as u8,
-            };
-            (EthCoinType::Erc20 { platform, token_addr }, decimals)
-        },
-        _ => return ERR!("Expect ETH or ERC20 protocol"),
-    };
-
-    // param from request should override the config
-    let required_confirmations = req["required_confirmations"]
-        .as_u64()
-        .unwrap_or_else(|| conf["required_confirmations"].as_u64().unwrap_or(1))
-        .into();
-
-    if req["requires_notarization"].as_bool().is_some() {
-        log!("Warning: requires_notarization doesn't take any effect on ETH/ERC20 coins");
-    }
-
-    let sign_message_prefix: Option<String> = json::from_value(conf["sign_message_prefix"].clone()).unwrap_or(None);
-
-    let initial_history_state = if req["tx_history"].as_bool().unwrap_or(false) {
-        HistorySyncState::NotStarted
-    } else {
-        HistorySyncState::NotEnabled
-    };
-
-    let gas_station_decimals: Option<u8> = try_s!(json::from_value(req["gas_station_decimals"].clone()));
-    let gas_station_policy: GasStationPricePolicy =
-        json::from_value(req["gas_station_policy"].clone()).unwrap_or_default();
-
-    let coin = EthCoinImpl {
-        signer,
-        my_address,
-        coin_type,
-        sign_message_prefix,
-        swap_contract_address,
-        fallback_swap_contract,
-        decimals,
-        ticker: ticker.into(),
-        gas_station_url: try_s!(json::from_value(req["gas_station_url"].clone())),
-        gas_station_decimals: gas_station_decimals.unwrap_or(ETH_GAS_STATION_DECIMALS),
-        gas_station_policy,
-        web3,
-        web3_instances,
-        history_sync_state: Mutex::new(initial_history_state),
-        ctx: ctx.weak(),
-        required_confirmations,
-        chain_id: conf["chain_id"].as_u64(),
-        logs_block_range: conf["logs_block_range"].as_u64().unwrap_or(DEFAULT_LOGS_BLOCK_RANGE),
-        derivation_method: DerivationMethod::Iguana(my_address),
-        swap_v2_contracts: None,
-        gas_limit_v2: EthGasLimitV2::default(),
-        // ETH/ERC20 coins never use the TRON HTTP API; populated only by the
-        // dedicated TRON activation path.
-        tron_api: None,
-        nft_swap_v2_contract: None,
-        swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
-        erc20_tokens_infos: Default::default(),
-    };
-    Ok(EthCoin(Arc::new(coin)))
+        .map_err(|e| e.to_string())
 }
 
 /// Displays the address in mixed-case checksum form
