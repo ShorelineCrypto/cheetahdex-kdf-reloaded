@@ -2623,6 +2623,44 @@ fn test_orderbook_pubkey_sync_request() {
     }
 }
 
+/// CRD ch.32 R-P3: a keep-alive records the receiver's own receipt time, never the sender's timestamp.
+#[test]
+fn test_keep_alive_records_local_receipt_time_not_sender_timestamp() {
+    let (ctx, ..) = make_ctx_for_tests();
+    let ordermatch_ctx = OrdermatchContext::from_ctx(&ctx).unwrap();
+    let pubkey = "pubkey";
+    let before = now_ms() / 1000;
+    let far_future = before + 10 * 365 * 24 * 3600;
+
+    let message = PubkeyKeepAlive {
+        trie_roots: HashMap::new(),
+        timestamp: far_future,
+    };
+    let mut trie_store = ordermatch_ctx.trie_store.lock();
+    trie_store.prepare_sync_request_for_keep_alive(pubkey, message, false, |_| false);
+    let after = now_ms() / 1000;
+
+    let stored = trie_store.pubkeys_state.get(pubkey).unwrap().last_keep_alive;
+    assert!(
+        (before..=after).contains(&stored),
+        "stored {stored} must be local receipt time in {before}..={after}"
+    );
+}
+
+/// Zero and empty-trie roots must not be advertised in outgoing keep-alives.
+#[test]
+fn test_keep_alive_skips_zero_and_null_trie_roots() {
+    let mut all_roots = HashMap::new();
+    all_roots.insert("A:B".to_owned(), H64::default());
+    all_roots.insert("C:D".to_owned(), hashed_null_node::<Layout>());
+    all_roots.insert("E:F".to_owned(), [1; 8]);
+
+    let (roots, topics) = keep_alive_roots_and_topics(&all_roots);
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots.get("E:F"), Some(&[1; 8]));
+    assert_eq!(topics.len(), 1);
+}
+
 #[test]
 fn test_orderbook_pubkey_sync_request_relay() {
     let (ctx, ..) = make_ctx_for_tests();
@@ -3761,4 +3799,44 @@ fn test_match_by_pubkeys_serde() {
     let json = serde_json::to_string(&mb).unwrap();
     let restored: MatchBy = serde_json::from_str(&json).unwrap();
     assert!(matches!(restored, MatchBy::Pubkeys(_)));
+}
+
+/// CRD ch.35 R35.2.7 / kdf-reloaded#16: the order paths (`setprice`, `sell`, `buy`) reject a coin whose
+/// `MmCoin::wallet_only` is true with the wallet-only error. A custom ERC-20 token reports `wallet_only` true
+/// without a coins-config entry (proved against the real activation in `coins_activation`); this test drives the
+/// real order-placement functions with a registered coin whose `wallet_only` is true. A real custom `EthCoin`
+/// cannot be built offline from `mm2_main`, so the coin here is a `TestCoin` made wallet-only by its config entry.
+#[test]
+fn order_placement_rejects_a_wallet_only_coin() {
+    use coins::{lp_register_coin, RegisterCoinParams};
+
+    let ctx = MmCtxBuilder::new()
+        .with_conf(json::json!({ "coins": [{ "coin": "WALLET", "wallet_only": true }, { "coin": "TRADE" }] }))
+        .into_mm_arc();
+    for ticker in ["WALLET", "TRADE"] {
+        block_on(lp_register_coin(
+            &ctx,
+            TestCoin::new(ticker).into(),
+            RegisterCoinParams {
+                ticker: ticker.to_owned(),
+                tx_history: false,
+            },
+        ))
+        .unwrap_or_else(|e| panic!("cannot register {ticker}: {e}"));
+    }
+
+    for (base, rel, wallet_coin) in [("WALLET", "TRADE", "Base"), ("TRADE", "WALLET", "Rel")] {
+        let expected = format!("{wallet_coin} coin WALLET is wallet only");
+
+        let set_price: SetPriceReq =
+            json::from_value(json::json!({ "base": base, "rel": rel, "price": 1, "volume": 1 })).unwrap();
+        let err = block_on(create_maker_order(&ctx, set_price)).unwrap_err();
+        assert!(err.ends_with(&expected), "{err}");
+
+        let order = |method: &str| json::json!({ "method": method, "base": base, "rel": rel, "price": 1, "volume": 1 });
+        let err = block_on(sell(ctx.clone(), order("sell"))).unwrap_err();
+        assert!(err.ends_with(&expected), "{err}");
+        let err = block_on(buy(ctx.clone(), order("buy"))).unwrap_err();
+        assert!(err.ends_with(&expected), "{err}");
+    }
 }

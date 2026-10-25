@@ -164,19 +164,25 @@ are part of the external API contract:
 | --- | --- |
 | `task::enable_sia::init` | Begin Sia activation (long-running task) |
 | `task::enable_sia::status` | Poll activation status |
-| `task::enable_sia::user_action` | Supply user action (e.g. HW interaction) |
+| `task::enable_sia::user_action` | Shared task user-action method (a Sia task never waits for one) |
 | `task::enable_sia::cancel` | Cancel activation |
-| `enable_sia` | Legacy one-shot activation |
+| `enable_sia` | Flat alias of `task::enable_sia::init` (returns a task id, not a one-shot result) |
+| `enable` (legacy v1) | Synchronous legacy activation of a Sia-protocol coin |
 
 > **Binding scope (R36).** The method strings above are dictated
 > public API (R33). The activation-request shape is a public
-> deserialization contract: it MUST carry at least the walletd
-> client configuration (base URL and auth, owned by the client)
-> and the required-confirmations setting, and it MAY carry a
-> single-address-mode gap-limit field that is currently accepted
-> but not yet acted upon. The concrete Rust type name and field
-> identifiers of that request are discretionary except where a
-> field name is itself part of the JSON contract a caller sends.
+> deserialization contract: it MUST carry the walletd client
+> configuration (base URL and auth, owned by the client) and MAY
+> carry the required-confirmations setting, the `tx_history`
+> switch, and a single-address-mode gap-limit field that is
+> currently accepted but not yet acted upon. The concrete Rust
+> type name and field identifiers of that request are
+> discretionary except where a field name is itself part of the
+> JSON contract a caller sends. The complete activation wire
+> contract (request members and defaults, in-progress values,
+> result shape, error discriminants and their HTTP statuses, the
+> walletd-unreachable mapping, and the legacy `enable` leg) is
+> bound by [Chapter 46](46-sia-v2-activation-rpcs.md).
 
 **R-A1 (activation flow).** Activation MUST:
 
@@ -722,9 +728,12 @@ rather than defects. None is a correctness claim.
   (`HDWalletRpcOps`/`AccountBalanceRpcOps`/`InitCreateHDAccountRpcOps`)
   now consume this module: `SiaCoinGeneric` carries a
   `derivation_method` field, and activation (`sia_activation.rs`)
-  reports `wallet_balance` via the same generic
-  `EnableCoinBalanceOps` shape UTXO/ETH use (ch.46 R46.2.4), branching
-  automatically on Iguana vs. HD-wallet mode. Per ch.46 R46.1.3,
+  currently reports `wallet_balance` via the same generic
+  `EnableCoinBalanceOps` shape UTXO/ETH use, branching automatically
+  on Iguana vs. HD-wallet mode. That HD branch is a wire deviation:
+  ch.46 R46.2.4 binds the activation result to the single-address
+  `"Iguana"` form in both modes (the HD account data stays reachable
+  through the post-activation HD RPC surface). Per ch.46 R46.1.3,
   activation itself never grows the wallet past account 0; multi-
   account growth happens entirely through the post-activation HD RPC
   surface. `InitCreateHDAccountRpcOps` could not delegate to the
@@ -940,7 +949,14 @@ V3. The unit ratio, ed25519 scheme, address encoding, walletd
   R-A-series rule was added for it. R-S10 embeds no
   further corpus fact beyond what chapter 51 already records; it
   is a cross-reference stating this module's obligation given
-  chapter 51's R72. No discretionary
+  chapter 51's R72. In the activation-wire-parity revision, the
+  §20.4 method table and binding-scope note and the §20.10 D1
+  `wallet_balance` remark were aligned with chapter 46, whose
+  facts (the flat `enable_sia` alias returning a task id, legacy
+  `enable` support for Sia-protocol coins, and the single-address
+  activation balance form) were checked at the `v3.0.0-beta` and
+  `v2.6.0-beta` release tags; chapter 46's footer records that
+  consultation. No discretionary
   expression from the post-2022 module -- no struct field lists,
   internal type or enum definitions, private method names or
   bodies, transaction-builder/satisfier call chains, local

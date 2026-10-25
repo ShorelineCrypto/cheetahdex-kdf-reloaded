@@ -71,13 +71,10 @@ ignore = [
     # We must stay on the fork for the relay-mesh gossipsub extension; clearing
     # them requires upstream fork modernization. The WSS rustls/ring/webpki line
     # is additionally coupled to reloaded's futures-rustls transport binding.
-    "RUSTSEC-2024-0336", # rustls (fork WSS/TLS)
-    "RUSTSEC-2026-0049", # rustls-webpki
-    "RUSTSEC-2026-0098", # rustls-webpki
-    "RUSTSEC-2026-0099", # rustls-webpki
-    "RUSTSEC-2026-0104", # rustls-webpki
-    "RUSTSEC-2023-0052", # webpki
-    "RUSTSEC-2025-0009", # ring
+    # (libp2p-websocket itself is vendored on rustls 0.23 -- see vendor-patches/
+    # libp2p-websocket-0.42.0. No rustls 0.20 consumer remains; the former
+    # RUSTSEC-2024-0336 (rustls), RUSTSEC-2023-0052 (webpki) and RUSTSEC-2025-0009
+    # (ring) ignores went with it.)
     "RUSTSEC-2024-0421", # idna (fork libp2p-dns -> trust-dns-proto 0.22)
 
     # --- Misattributed to the libp2p fork; kept, but for a different reason ---
@@ -95,9 +92,6 @@ ignore = [
     "RUSTSEC-2022-0093", # ed25519-dalek 1.x (double public key signing oracle)
     "RUSTSEC-2024-0344", # curve25519-dalek (timing variability)
 
-    # --- WalletConnect (via tungstenite) ---
-    "RUSTSEC-2023-0065", # tungstenite DoS on large frames
-
     # --- Unsound advisories (transitive) ---
     # Listed as accepted risk. (These were added believing schema v2 made
     # `unsound` a hard error; it does not -- see the CORRECTION at the top of this
@@ -110,17 +104,6 @@ ignore = [
     # - secp256k1 0.20 (RUSTSEC-2022-0070): pinned by deeper dependencies.
     "RUSTSEC-2022-0092", # rmp-serde Raw/RawRef unsound
     "RUSTSEC-2022-0070", # secp256k1 0.20 use-after-free in safe code
-
-    # --- hyper 0.14 / h2 0.3 (workspace-wide) ---
-    # RUSTSEC-2026-0258 (low severity: unbounded empty DATA frames -> unbounded
-    # memory or a length-overflow panic if a stream is never drained) is fixed
-    # only in h2 >=0.4.16, which pairs with hyper 1.x -- there is no in-line
-    # 0.3.x patch. hyper 0.14 is the version axum 0.6, tonic 0.11, and this
-    # workspace's own client code are all still built against; moving to h2
-    # 0.4 means moving the whole hyper stack to 1.x across every one of those,
-    # not a `cargo update -p h2`. Scheduled, not upstream-blocked: tracked as
-    # its own migration rather than folded into this ignore silently.
-    "RUSTSEC-2026-0258", # h2 0.3.27 unbounded empty DATA frames
 
     # --- Residual `unsound` advisories: accepted, NOT listed as ignores ---
     # cargo-deny does not match these against the graph (see the CORRECTION at the
@@ -174,49 +157,234 @@ ignore = [
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-# cargo-deny schema v2: the pre-0.16 keys `unlicensed`, `deny`, `copyleft`,
-# `allow-osi-fsf-free` and `default` were removed (see cargo-deny PR #611).
-# Under v2 every license not in `allow` is denied. Our CI only runs
-# `cargo deny check advisories`, so this list is intentionally left empty;
-# populate `allow` before enabling `cargo deny check licenses`.
+# cargo-deny schema v2: every license not in `allow` (or in a per-crate
+# `exceptions` entry) is denied. CI runs `cargo deny check licenses`, so a new
+# dependency must carry a license compatible with the GPL-2.0-only combined
+# work, see LEGAL/LICENSING-POLICY.md. Choosing the compatible alternative of a
+# disjunctive expression (e.g. MIT in `MIT OR Apache-2.0`) is automatic.
 # See https://spdx.org/licenses/ for valid SPDX identifiers.
 allow = [
-    #"MIT",
-    #"Apache-2.0",
-    #"Apache-2.0 WITH LLVM-exception",
+    "0BSD",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "GPL-2.0-only",
+    "GPL-2.0-or-later",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
 ]
+# `GPL-2.0-or-later` is listed ahead of use for first-party crates.
+unused-allowed-license = "allow"
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
 # canonical license text of a valid SPDX license file.
 # [possible values: any between 0.0 and 1.0].
 confidence-threshold = 0.8
-# Allow 1 or more licenses on a per-crate basis, so that particular licenses
-# aren't accepted for every possible crate as with the normal allow list
+# Per-crate allowances. Keep this list from growing: an entry here is a known
+# inherited item that is being reduced over time, not a license grant.
 exceptions = [
-    # Each entry is the crate and version constraint, and its specific allow
-    # list
-    #{ allow = ["Zlib"], name = "adler32", version = "*" },
+    # Root-certificate data under a permissive data license (notice only).
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    # Known inherited dependency-license items, being reduced over time.
+    { allow = ["Apache-2.0"], crate = "bitcoinconsensus" },
+    { allow = ["Apache-2.0"], crate = "cosmos-sdk-proto" },
+    { allow = ["Apache-2.0"], crate = "cosmrs" },
+    { allow = ["Apache-2.0"], crate = "flex-error" },
+    { allow = ["Apache-2.0"], crate = "hash-db" },
+    { allow = ["Apache-2.0"], crate = "hash256-std-hasher" },
+    { allow = ["Apache-2.0"], crate = "memory-db" },
+    { allow = ["Apache-2.0"], crate = "pairing_api" },
+    { allow = ["Apache-2.0"], crate = "parity-scale-codec" },
+    { allow = ["Apache-2.0"], crate = "parity-scale-codec-derive" },
+    { allow = ["Apache-2.0"], crate = "prost" },
+    { allow = ["Apache-2.0"], crate = "prost-build" },
+    { allow = ["Apache-2.0"], crate = "prost-derive" },
+    { allow = ["Apache-2.0"], crate = "prost-types" },
+    { allow = ["Apache-2.0"], crate = "relay_client" },
+    { allow = ["Apache-2.0"], crate = "relay_rpc" },
+    { allow = ["Apache-2.0"], crate = "scale-info" },
+    { allow = ["Apache-2.0"], crate = "scale-info-derive" },
+    { allow = ["Apache-2.0"], crate = "solana-account-info" },
+    { allow = ["Apache-2.0"], crate = "solana-atomic-u64" },
+    { allow = ["Apache-2.0"], crate = "solana-bincode" },
+    { allow = ["Apache-2.0"], crate = "solana-clock" },
+    { allow = ["Apache-2.0"], crate = "solana-commitment-config" },
+    { allow = ["Apache-2.0"], crate = "solana-cpi" },
+    { allow = ["Apache-2.0"], crate = "solana-decode-error" },
+    { allow = ["Apache-2.0"], crate = "solana-define-syscall" },
+    { allow = ["Apache-2.0"], crate = "solana-epoch-rewards" },
+    { allow = ["Apache-2.0"], crate = "solana-epoch-schedule" },
+    { allow = ["Apache-2.0"], crate = "solana-fee-calculator" },
+    { allow = ["Apache-2.0"], crate = "solana-hash" },
+    { allow = ["Apache-2.0"], crate = "solana-instruction" },
+    { allow = ["Apache-2.0"], crate = "solana-instructions-sysvar" },
+    { allow = ["Apache-2.0"], crate = "solana-keypair" },
+    { allow = ["Apache-2.0"], crate = "solana-last-restart-slot" },
+    { allow = ["Apache-2.0"], crate = "solana-message" },
+    { allow = ["Apache-2.0"], crate = "solana-msg" },
+    { allow = ["Apache-2.0"], crate = "solana-native-token" },
+    { allow = ["Apache-2.0"], crate = "solana-program-entrypoint" },
+    { allow = ["Apache-2.0"], crate = "solana-program-error" },
+    { allow = ["Apache-2.0"], crate = "solana-program-memory" },
+    { allow = ["Apache-2.0"], crate = "solana-program-option" },
+    { allow = ["Apache-2.0"], crate = "solana-program-pack" },
+    { allow = ["Apache-2.0"], crate = "solana-pubkey" },
+    { allow = ["Apache-2.0"], crate = "solana-rent" },
+    { allow = ["Apache-2.0"], crate = "solana-sanitize" },
+    { allow = ["Apache-2.0"], crate = "solana-sdk-ids" },
+    { allow = ["Apache-2.0"], crate = "solana-sdk-macro" },
+    { allow = ["Apache-2.0"], crate = "solana-seed-phrase" },
+    { allow = ["Apache-2.0"], crate = "solana-serialize-utils" },
+    { allow = ["Apache-2.0"], crate = "solana-sha256-hasher" },
+    { allow = ["Apache-2.0"], crate = "solana-short-vec" },
+    { allow = ["Apache-2.0"], crate = "solana-signature" },
+    { allow = ["Apache-2.0"], crate = "solana-signer" },
+    { allow = ["Apache-2.0"], crate = "solana-slot-hashes" },
+    { allow = ["Apache-2.0"], crate = "solana-slot-history" },
+    { allow = ["Apache-2.0"], crate = "solana-stable-layout" },
+    { allow = ["Apache-2.0"], crate = "solana-stake-interface" },
+    { allow = ["Apache-2.0"], crate = "solana-system-interface" },
+    { allow = ["Apache-2.0"], crate = "solana-system-transaction" },
+    { allow = ["Apache-2.0"], crate = "solana-sysvar" },
+    { allow = ["Apache-2.0"], crate = "solana-sysvar-id" },
+    { allow = ["Apache-2.0"], crate = "solana-transaction" },
+    { allow = ["Apache-2.0"], crate = "solana-transaction-error" },
+    { allow = ["Apache-2.0"], crate = "sp-core" },
+    { allow = ["Apache-2.0"], crate = "sp-debug-derive" },
+    { allow = ["Apache-2.0"], crate = "sp-runtime-interface" },
+    { allow = ["Apache-2.0"], crate = "sp-runtime-interface-proc-macro" },
+    { allow = ["Apache-2.0"], crate = "sp-std" },
+    { allow = ["Apache-2.0"], crate = "sp-storage" },
+    { allow = ["Apache-2.0"], crate = "sp-tracing" },
+    { allow = ["Apache-2.0"], crate = "sp-trie" },
+    { allow = ["Apache-2.0"], crate = "sp-wasm-interface" },
+    { allow = ["Apache-2.0"], crate = "spl-associated-token-account-client" },
+    { allow = ["Apache-2.0"], crate = "spl-token" },
+    { allow = ["Apache-2.0"], crate = "ss58-registry" },
+    { allow = ["Apache-2.0"], crate = "sync_wrapper" },
+    { allow = ["Apache-2.0"], crate = "tendermint" },
+    { allow = ["Apache-2.0"], crate = "tendermint-config" },
+    { allow = ["Apache-2.0"], crate = "tendermint-proto" },
+    { allow = ["Apache-2.0"], crate = "tendermint-rpc" },
+    { allow = ["Apache-2.0"], crate = "trie-db" },
+    { allow = ["Apache-2.0"], crate = "trie-root" },
+    { allow = ["Apache-2.0"], crate = "wc_common" },
+    { allow = ["Apache-2.0"], crate = "zcash_script" },
+    { allow = ["Apache-2.0", "OpenSSL"], crate = "ring" },
+    { allow = ["GPL-3.0"], crate = "proc-macro-warning" },
+    { allow = ["LGPL-3.0-or-later"], crate = "zbase32" },
+    { allow = ["LicenseRef-unspecified"], crate = "sia-rust" },
 ]
 
-# Some crates don't have (easily) machine readable licensing information,
-# adding a clarification entry for it allows you to manually specify the
-# licensing information
-#[[licenses.clarify]]
-# The name of the crate the clarification applies to
-#name = "ring"
-# The optional version constraint for the crate
-#version = "*"
-# The SPDX expression for the license requirements of the crate
-#expression = "MIT AND ISC AND OpenSSL"
-# One or more files in the crate's source used as the "source of truth" for
-# the license expression. If the contents match, the clarification will be used
-# when running the license check, otherwise the clarification will be ignored
-# and the crate will be checked normally, which may produce warnings or errors
-# depending on the rest of your configuration
-#license-files = [
-    # Each entry is a crate relative path, and the (opaque) hash of its contents
-    #{ path = "LICENSE", hash = 0xbd0eed23 }
-#]
+# `ring` 0.16 declares its terms only through its LICENSE file.
+[[licenses.clarify]]
+crate = "ring@0.16.20"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+# The WalletConnect SDK crates carry no manifest license; their repository is
+# Apache-2.0.
+[[licenses.clarify]]
+crate = "pairing_api"
+expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+crate = "wc_common"
+expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+crate = "sia-rust"
+expression = "LicenseRef-unspecified"
+license-files = []
+
+# First-party crates created after the anchor commit have no manifest license
+# yet. They are part of the GPL-2.0-only combined work; their own manifest
+# label (GPL-2.0-or-later where the content is original, see
+# LEGAL/LICENSING-POLICY.md section 2) is set crate by crate.
+[[licenses.clarify]]
+crate = "enum_derives"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "kdf_walletconnect"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_bin_lib"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_eth"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_event_stream"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_git"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_gui_storage"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_metamask"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_metrics"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_net_config"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_number"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_p2p"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "mm2_state_machine"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "proxy_signature"
+expression = "GPL-2.0-only"
+license-files = []
+
+[[licenses.clarify]]
+crate = "trading_api"
+expression = "GPL-2.0-only"
+license-files = []
 
 [licenses.private]
 # If true, ignores workspace crates that aren't published, or are only
@@ -233,8 +401,13 @@ registries = [
 # More documentation about the 'bans' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]
-# Lint level for when multiple versions of the same crate are detected
-multiple-versions = "deny"
+# Lint level for when multiple versions of the same crate are detected.
+# DELIBERATELY "allow": the tree carries many pre-existing duplicate versions
+# (bech32, bitcoin_hashes, bitflags, ...) and no duplicate-version cleanup is
+# scoped. This section is a targeted ban list (see `deny` below), not a
+# duplicate-version gate. Do not read a green `cargo deny check bans` as "no
+# duplicates".
+multiple-versions = "allow"
 # Lint level for when a crate version requirement is `*`
 wildcards = "allow"
 # The graph highlighting used when creating dotgraphs for crates
@@ -249,129 +422,24 @@ allow = [
 ]
 # List of crates to deny
 deny = [
-    # Each entry the name of a crate and a version range. If version is
-    # not specified, all versions will be matched.
-    #{ name = "ansi_term", version = "=0.11.0" },
-    #
-    # Wrapper crates can optionally be specified to allow the crate when it
-    # is a direct dependency of the otherwise banned crate
-    #{ name = "ansi_term", version = "=0.11.0", wrappers = [] },
+    # A second rustls CryptoProvider panics at runtime on first connect ("could
+    # not automatically determine the process-level CryptoProvider"), not at
+    # build time. The tree uses ring only. aws-lc-rs and its -sys crate are
+    # separate packages, so each has its own entry.
+    { name = "aws-lc-rs" },
+    { name = "aws-lc-sys" },
+    { name = "aws-lc-fips-sys" },
+    # rustls 0.23.46 is the patched floor for RUSTSEC-2026-0349.
+    { name = "rustls", version = "<0.23.46" },
 ]
+# NOTE: a curated `skip` list of ~110 entries was removed from here because it is
+# inert under multiple-versions = "allow" and warned once per entry. It survives
+# in git as deny.toml at bc47dc07d (parent of the removing commit): the starting
+# point if a duplicate-version cleanup is scoped. Flipping multiple-versions to
+# "warn"/"deny" without reinstating or re-triaging it surfaces every duplicate.
 # Certain crates/versions that will be skipped when doing duplicate detection.
 # The goal is to reduce this list as much as possible
 skip = [
-    { name = "aes", version = "*" },
-    { name = "ahash", version = "*" },
-    { name = "arrayvec", version = "*" },
-    { name = "autocfg", version = "*" },
-    { name = "base64", version = "*" },
-    { name = "bitvec", version = "*" },
-    { name = "block-buffer", version = "*" },
-    { name = "block-padding", version = "*" },
-    { name = "byteorder", version = "*" },
-    { name = "bytes", version = "*" },
-    { name = "cfg-if", version = "*" },
-    { name = "cipher", version = "*" },
-    { name = "cloudabi", version = "*" },
-    { name = "cpufeatures", version = "*" },
-    { name = "crossbeam-channel", version = "*" },
-    { name = "crossbeam-deque", version = "*" },
-    { name = "crossbeam-epoch", version = "*" },
-    { name = "crossbeam-utils", version = "*" },
-    { name = "crunchy", version = "*" },
-    { name = "crypto-mac", version = "*" },
-    { name = "cuckoofilter", version = "*" },
-    { name = "curve25519-dalek", version = "*" },
-    { name = "derivation-path", version = "*" },
-    { name = "digest", version = "*" },
-    { name = "ed25519-dalek-bip32", version = "*" },
-    { name = "env_logger", version = "*" },
-    { name = "ethbloom", version = "*" },
-    { name = "ethereum-types", version = "*" },
-    { name = "ff", version = "*" },
-    { name = "fixed-hash", version = "*" },
-    { name = "fixedbitset", version = "*" },
-    { name = "fomat-macros", version = "*" },
-    { name = "funty", version = "*" },
-    { name = "futures", version = "*" },
-    { name = "futures-rustls", version = "*" },
-    { name = "generic-array", version = "*" },
-    { name = "getrandom", version = "*" },
-    { name = "group", version = "*" },
-    { name = "hashbrown", version = "*" },
-    { name = "hdrhistogram", version = "*" },
-    { name = "heck", version = "*" },
-    { name = "hex", version = "*" },
-    { name = "hmac", version = "*" },
-    { name = "http", version = "*" },
-    { name = "http-body", version = "*" },
-    { name = "humantime", version = "*" },
-    { name = "idna", version = "*" },
-    { name = "impl-codec", version = "*" },
-    { name = "itoa", version = "*" },
-    { name = "jsonrpc-core", version = "*" },
-    { name = "libp2p-floodsub", version = "*" },
-    { name = "libsecp256k1", version = "*" },
-    { name = "libsecp256k1-core", version = "*" },
-    { name = "libsecp256k1-gen-ecmult", version = "*" },
-    { name = "libsecp256k1-gen-genmult", version = "*" },
-    { name = "lock_api", version = "*" },
-    { name = "log", version = "*" },
-    { name = "memoffset", version = "*" },
-    { name = "miniz_oxide", version = "*" },
-    { name = "mio", version = "*" },
-    { name = "num-bigint", version = "*" },
-    { name = "opaque-debug", version = "*" },
-    { name = "parking_lot", version = "*" },
-    { name = "parking_lot_core", version = "*" },
-    { name = "pbkdf2", version = "*" },
-    { name = "percent-encoding", version = "*" },
-    { name = "petgraph", version = "*" },
-    { name = "pin-project", version = "*" },
-    { name = "pin-project-internal", version = "*" },
-    { name = "pin-project-lite", version = "*" },
-    { name = "proc-macro-crate", version = "*" },
-    { name = "proc-macro2", version = "*" },
-    { name = "prost", version = "*" },
-    { name = "prost-build", version = "*" },
-    { name = "prost-derive", version = "*" },
-    { name = "prost-types", version = "*" },
-    { name = "quote", version = "*" },
-    { name = "radium", version = "*" },
-    { name = "rand", version = "*" },
-    { name = "rand_chacha", version = "*" },
-    { name = "rand_core", version = "*" },
-    { name = "rand_hc", version = "*" },
-    { name = "rand_pcg", version = "*" },
-    { name = "redox_syscall", version = "*" },
-    { name = "redox_users", version = "*" },
-    { name = "rlp", version = "*" },
-    { name = "rustc-hex", version = "*" },
-    { name = "rustc_version", version = "*" },
-    { name = "rustls", version = "*" },
-    { name = "scopeguard", version = "*" },
-    { name = "sct", version = "*" },
-    { name = "semver", version = "*" },
-    { name = "send_wrapper", version = "*" },
-    { name = "sha2", version = "*" },
-    { name = "slab", version = "*" },
-    { name = "smallvec", version = "*" },
-    { name = "socket2", version = "*" },
-    { name = "subtle", version = "*" },
-    { name = "syn", version = "*" },
-    { name = "time", version = "*" },
-    { name = "tiny-keccak", version = "*" },
-    { name = "tokio-rustls", version = "*" },
-    { name = "trie-root", version = "*" },
-    { name = "trie-root", version = "*" },
-    { name = "uint", version = "*" },
-    { name = "unicode-xid", version = "*" },
-    { name = "unsigned-varint", version = "*" },
-    { name = "url", version = "*" },
-    { name = "wasi", version = "*" },
-    { name = "webpki", version = "*" },
-    { name = "webpki-roots", version = "*" },
-    { name = "wyz", version = "*" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 

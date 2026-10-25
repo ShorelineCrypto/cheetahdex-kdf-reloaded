@@ -114,6 +114,22 @@ pub enum UtxoCoinBuildError {
         ticker: String,
     },
     ElectrumProtocolVersionCheckError(String),
+    /// A Light-mode shielded coin needs at least one lightwalletd endpoint (CRD ch.39 R39.11.5).
+    #[display(
+        fmt = "{}: `light_wallet_d_servers` must list at least one lightwalletd endpoint",
+        ticker
+    )]
+    NoLightwalletdServers {
+        ticker: String,
+    },
+    /// lightwalletd exposes no fee estimation, so `txfee: 0` (estimate) is refused (CRD ch.39 R39.11.1).
+    #[display(
+        fmt = "{}: `txfee: 0` requests fee estimation, which lightwalletd cannot do; declare a fixed `txfee` or omit it",
+        ticker
+    )]
+    NoFixedFeeDeclared {
+        ticker: String,
+    },
     #[display(fmt = "Can not detect the user home directory")]
     CantDetectUserHome,
     #[display(fmt = "Unexpected derivation method: {}", _0)]
@@ -254,24 +270,26 @@ pub trait UtxoFieldsWithGlobalHDBuilder: UtxoCoinBuilderCommonOps + UtxoFieldsWi
             .build()
             .mm_err(Into::into)?;
 
-        // Derive key pair at the default activated address: m/44'/coin_type'/0'/0/0
+        // Derive key pair at the activated address: `path_to_address` of the request,
+        // defaulting to account 0, the external chain and address 0 (m/44'/coin_type'/0'/0/0).
         let derivation_path = self.derivation_path().mm_err(Into::into)?;
+        let path_to_address = self.activation_params().path_to_address.clone().unwrap_or_default();
 
-        // Build the full derivation path to the first receiving address.
+        // Build the full derivation path to the activated address.
         let mut full_path = derivation_path.to_derivation_path();
-        // account 0' (hardened)
+        // account (hardened)
         full_path.push(
-            crypto::ChildNumber::new(0, true)
+            crypto::ChildNumber::new(path_to_address.account_id, true)
                 .map_err(|_| UtxoCoinBuildError::Internal("failed to create hardened child number".to_owned()))?,
         );
-        // external chain 0 (non-hardened)
+        // chain (non-hardened)
         full_path.push(
-            crypto::ChildNumber::new(0, false)
+            crypto::ChildNumber::new(path_to_address.chain as u32, false)
                 .map_err(|_| UtxoCoinBuildError::Internal("failed to create child number".to_owned()))?,
         );
-        // address index 0 (non-hardened)
+        // address index (non-hardened)
         full_path.push(
-            crypto::ChildNumber::new(0, false)
+            crypto::ChildNumber::new(path_to_address.address_id, false)
                 .map_err(|_| UtxoCoinBuildError::Internal("failed to create child number".to_owned()))?,
         );
 
@@ -554,11 +572,22 @@ pub trait UtxoCoinBuilderCommonOps {
     }
 
     async fn tx_fee(&self, rpc_client: &UtxoRpcClientEnum) -> UtxoCoinBuildResult<TxFee> {
+        // lightwalletd has no fee estimation: an explicit request for it (`txfee: 0`) is refused.
+        // An undeclared fee keeps the shared fixed default below, as the published ARRR entry relies
+        // on (CRD ch.39 R39.11.1).
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(rpc_client, UtxoRpcClientEnum::LightWalletD(_)) && self.conf()["txfee"].as_u64() == Some(0) {
+            return MmError::err(UtxoCoinBuildError::NoFixedFeeDeclared {
+                ticker: self.ticker().to_owned(),
+            });
+        }
         let tx_fee = match self.conf()["txfee"].as_u64() {
             None => TxFee::FixedPerKb(1000),
             Some(0) => {
                 let fee_method = match &rpc_client {
                     UtxoRpcClientEnum::Electrum(_) => EstimateFeeMethod::Standard,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    UtxoRpcClientEnum::LightWalletD(_) => EstimateFeeMethod::Standard,
                     UtxoRpcClientEnum::Native(client) => client
                         .detect_fee_method()
                         .compat()

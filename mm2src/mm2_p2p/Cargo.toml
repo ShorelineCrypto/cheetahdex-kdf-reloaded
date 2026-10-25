@@ -20,7 +20,6 @@ derive_more = { workspace = true }
 fnv = "1.0.6"
 futures = { workspace = true }
 futures_codec = "0.4.0"
-futures-rustls = { version = "0.21.1" }
 hex = { workspace = true }
 # The fork's gossipsub uses `PeerId::random()`, which the crates.io `libp2p-identity`
 # gates behind its `rand` feature. Enable it here so the shared identity crate compiles.

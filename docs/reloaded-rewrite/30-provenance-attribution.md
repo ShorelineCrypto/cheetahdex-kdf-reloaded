@@ -88,7 +88,7 @@ and a one-sentence capsule of what the chapter documents.
 | 32 | [Orderbook Patricia-Trie and P2P Surface](32-orderbook-p2p-and-trie.md)                              | orderbook Patricia-trie substrate, keep-alive root advertisement, sync-delta request surface             | The per-pubkey/per-pair Patricia-trie orderbook substrate and its P2P root-advertisement plus delta-synchronisation surface.                                          |
 | 33 | [Bound Swap V2 P2P Wire Schema (B-gleec Embedding)](33-swap-v2-wire-schema-embedding.md)            | swap-v2 protobuf wire schema (`swap_v2.proto`)                                                           | Verbatim embedded wire descriptor for swap-v2 P2P messages, with fresh CRD commentary binding interoperability constraints.                                            |
 | 34 | [Provenance Ledger](34-provenance-ledger.md)                                                          | (meta — companion ledger)                                                                                | Per-file classification and source/constraint ledger companion referenced by the chapter set.                                                                           |
-| 35 | [EVM (Ethereum) V2 Activation & Token RPC Surface](35-evm-v2-activation-rpcs.md) | EVM platform-coin-with-tokens activation, ERC-20 child-token RPCs | The platform-coin-with-tokens activation surface for EVM chains and the ERC-20 token RPCs layered on it. |
+| 35 | [EVM (Ethereum) V2 Activation & Token RPC Surface](35-evm-v2-activation-rpcs.md) | EVM platform-coin-with-tokens activation, ERC-20 child-token RPCs, swap gas-fee policy, foreign-transaction byte decoding | The platform-coin-with-tokens activation surface for EVM chains and the ERC-20 token RPCs layered on it, plus the two EVM coin-layer contracts the chapter carries: the per-coin swap gas-fee policy and the EIP-2718 contract for reading a counterparty's serialized transaction. |
 | 36 | [Tendermint (Cosmos) V2 Activation & Token RPC Surface](36-tendermint-v2-activation-rpcs.md) | Tendermint platform-coin-with-tokens activation, IBC and native token RPCs | The platform-coin-with-tokens activation surface for Cosmos-SDK chains and their IBC and native asset RPCs. |
 | 37 | [UTXO SPV & Block-Header Validation](37-utxo-spv-and-block-header-validation.md) | SPV activation configuration, block-header storage, header proof-of-work validation | Simplified payment verification for UTXO coins: header storage, validation against proof-of-work, and per-coin SPV configuration. |
 | 38 | [UTXO Coin Maintenance & Features](38-utxo-coin-maintenance-and-features.md) | UTXO feature surface (as-built and deferred split) | A broad UTXO feature surface, split between capabilities verified present and those recorded as gaps. |
@@ -108,6 +108,7 @@ and a one-sentence capsule of what the chapter documents.
 | 52 | [Version-Two Atomic-Swap State Machine](52-swap-v2-state-machine.md) | V2 maker and taker state graphs, bidirectional refusal contract, reserved-amount ledger semantics | The V2 maker and taker state machines: states, events, resume mapping, the refusal and abort contract, message budgets, and reserved-funds rules. |
 | 53 | [Siacoin Transaction History](53-sia-transaction-history.md) | walletd address-event projection, coin-generic runtime history store, Sia transaction-type wire values | Sia transaction history as a projection of walletd's per-address event log into the shared transaction-details record, served through the framework's history RPC surface. |
 | 54 | [Siacoin Atomic-Swap Version-Two Path](54-sia-swap-v2-path.md) | Sia V2 swap path over the coin-generic V2 trait surface | DRAFT, not yet approved for implementation: binds the coin-generic V2 trait surface to Siacoin's V1 primitives and the shared V2 state-machine substrate; closes chapter 20 §20.10 D5. |
+| 55 | [Coin Activation Wire Contract](55-coin-activation-wire-contract.md) | coin-activation RPC error envelope, task-framework method errors, per-family unresponsive-backend outcomes, baseline activation families | The cross-family wire contract of coin activation, and the full contracts of the activation families that no other chapter owns. |
 
 ## 30.4 Aggregated Input Register
 
@@ -172,6 +173,9 @@ citation.
 - External DEX-aggregator API — cited in Chapter 23.
 - Hardware-wallet wire protocol and protobuf schemas — referenced from
   Chapter 05 and Chapter 27.
+- The public Komodo DeFi Framework API reference (coin-activation, task-managed
+  activation, common-structures and error-types pages) — cited in Chapters
+  35, 36, 39, 40, 41, 46, 48 and 55.
 
 ### 30.4.8 Sibling open-source repositories
 
@@ -236,7 +240,7 @@ subject, the citation is marked *(ref)*.
 | Tendermint coin substrate                                              | 18                                                  |
 | UTXO coin substrate                                                    | 15, 16                                              |
 | Zcash-family coin substrate                                            | 29                                                  |
-| coin-activation substrate                                              | 18 *(ref)*                                          |
+| coin-activation substrate                                              | 18 *(ref)*, 35, 36, 39, 40, 41, 46, 48, 55          |
 | shared-utility substrate (Chapter 27 §27.x)                            | 03 *(ref)*, 14, 26, 29                              |
 | ref-counter diagnostics substrate                                      | 27                                                  |
 | HD / mnemonic crypto substrate                                         | 05, 07                                              |
@@ -292,7 +296,7 @@ preserved-for-history substrate retained for git-archaeology continuity
 ## 30.6 Document-Set Composition (binding rules)
 
 **R1.** *Per-chapter self-containment.* Each substantive chapter (03
-through 28, 31 through 33, and 35 through 54) MUST
+through 28, 31 through 33, and 35 through 55) MUST
 satisfy the project's chapter-shape rules (Chapter 01 §6): executive
 summary, subsystem shape, the binding-rule sections appropriate to the
 chapter's substrate, tests / deferred work / external references /
@@ -356,7 +360,8 @@ other chapter's own automated-tooling gap resolves to when it names
 tracking a separate open item of its own: chapter 00's D1 (automated lint
 enforcement of its R5/R6 per-chapter-shape rules), chapter 01's D1
 (automated linting of R11 identifier hygiene, R13–R15 citation discipline,
-R16/R19/R20 per-chapter shape, and the R35 residual-similarity gate),
+R16/R19/R20 per-chapter shape, the §1.4A documentary checks T1–T3, and
+the R35 residual-similarity gate),
 chapter 02's D1 (a mechanical verification harness re-deriving the R4
 workspace-member registry, the R5 patched-dependency registry, and the
 §2.8 module layout from the anchor commit), and chapter 34's D2 (automated

@@ -6,6 +6,7 @@ use crate::prelude::*;
 use crate::prelude::{CoinAddressInfo, TokenBalances, TryFromCoinProtocol, TxHistory};
 use crate::spl_token_activation::SplActivationRequest;
 use async_trait::async_trait;
+use coins::hd_pubkey::HDXPubExtractor;
 use coins::my_tx_history_v2::TxHistoryStorage;
 use coins::solana::spl::{SplProtocolConf, SplTokenCreationError};
 use coins::{solana_coin_from_conf_and_params, BalanceError, CoinBalance, CoinProtocol, MarketCoinOps,
@@ -182,7 +183,15 @@ impl PlatformWithTokensActivationOps for SolanaCoin {
         })]
     }
 
-    async fn get_activation_result(&self) -> Result<Self::ActivationResult, MmError<Self::ActivationError>> {
+    async fn get_activation_result<XPubExtractor>(
+        &self,
+        _ctx: &MmArc,
+        _activation_request: &Self::ActivationRequest,
+        _xpub_extractor: Option<&XPubExtractor>,
+    ) -> Result<Self::ActivationResult, MmError<Self::ActivationError>>
+    where
+        XPubExtractor: HDXPubExtractor + Sync,
+    {
         let my_address = self
             .my_address()
             .map_to_mm(Self::ActivationError::UnableToRetrieveMyAddress)?;

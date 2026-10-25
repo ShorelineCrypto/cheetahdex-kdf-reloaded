@@ -59,6 +59,8 @@ async fn electrum_subscription_targets(coin: &MmCoinEnum) -> Option<(ElectrumCli
     let electrum = |fields: &UtxoCoinFields| match &fields.rpc_client {
         UtxoRpcClientEnum::Electrum(client) => Some(client.clone()),
         UtxoRpcClientEnum::Native(_) => None,
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => None,
     };
 
     match coin {
@@ -109,6 +111,8 @@ fn qrc20_subscription_target(coin: &MmCoinEnum) -> Option<(ElectrumClient, H160J
     let electrum = match &c.as_ref().rpc_client {
         UtxoRpcClientEnum::Electrum(client) => client.clone(),
         UtxoRpcClientEnum::Native(_) => return None,
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => return None,
     };
     let my_address = c.utxo.derivation_method.iguana()?;
     let address = contract_addr_into_rpc_format(&contract_addr_from_utxo_addr(my_address.clone()).ok()?);

@@ -106,7 +106,6 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
             let token = SlpToken::new(*decimals, ticker.into(), (*token_id).into(), platform_coin, confs);
             token.into()
         },
-        #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC(_) => return ERR!("ZHTLC protocol is not supported by lp_coininit"),
         #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::LIGHTNING { .. } => return ERR!("Lightning protocol is not supported by lp_coininit"),
@@ -118,8 +117,14 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
         CoinProtocol::SPLTOKEN { .. } => {
             return ERR!("SplToken protocol is not supported by lp_coininit - use enable_spl instead")
         },
+        // The legacy `enable` method activates a Sia-protocol coin synchronously: the Sia members sit at
+        // the top level of the legacy request, next to `coin`, and construction (including the walletd
+        // reachability probe) is the one `task::enable_sia::init` uses (CRD ch.46 R46.6.3, ch.55 R55.4.8).
+        // Any failure is reported through the legacy error envelope.
         CoinProtocol::SIA => {
-            return ERR!("SIA protocol is not supported by lp_coininit - use task::enable_sia::init instead")
+            let request = try_s!(siacoin::SiaCoinActivationRequest::from_legacy_req(req));
+            let priv_key_policy = try_s!(PrivKeyBuildPolicy::detect_priv_key_policy(ctx));
+            try_s!(siacoin::SiaCoin::new(ctx, coins_en.clone(), &request, priv_key_policy).await).into()
         },
         CoinProtocol::TENDERMINT { .. } => {
             return ERR!(
@@ -136,6 +141,10 @@ pub async fn lp_coininit(ctx: &MmArc, ticker: &str, req: &Json) -> Result<MmCoin
         },
         // TRON activation routes through a dedicated builder that populates
         // `EthCoin.tron_api`. P10.2 wiring.
+        // Docs vs reference (CRD ch.55 R55.4.7, D55.5): the reference release rejects TRX and TRC20 on the
+        // legacy path and requires an mmrpc 2.0 activation. Reloaded has no mmrpc 2.0 TRON activation, so
+        // rejecting them here would remove TRON activation entirely; it keeps them as a documented extension
+        // (maintainer decision 2026-10-11). A client written for the reference never sends such a request.
         CoinProtocol::TRX { .. } | CoinProtocol::TRC20 { .. } => try_s!(
             crate::eth::tron::tron_coin_from_conf_and_request(ctx, ticker, &coins_en, req, &secret, protocol).await
         )
@@ -840,7 +849,6 @@ pub fn address_by_coin_conf_and_pubkey_str(
         CoinProtocol::SOLANA | CoinProtocol::SPLTOKEN { .. } => {
             ERR!("Solana pubkey is the public address - you do not need to use this rpc call.")
         },
-        #[cfg(not(target_arch = "wasm32"))]
         CoinProtocol::ZHTLC(_) => ERR!("address_by_coin_conf_and_pubkey_str is not supported for ZHTLC protocol!"),
         CoinProtocol::SIA => ERR!("address_by_coin_conf_and_pubkey_str is not supported for SIA protocol!"),
         CoinProtocol::TENDERMINT { .. } | CoinProtocol::TENDERMINTTOKEN { .. } => {

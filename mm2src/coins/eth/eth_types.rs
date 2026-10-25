@@ -434,6 +434,9 @@ pub struct EthCoinImpl {
     /// Populated during V2 platform-with-tokens activation so the activation
     /// result can report per-token balances (CRD §35.1.3).
     pub(crate) erc20_tokens_infos: Arc<Mutex<std::collections::HashMap<String, Erc20TokenInfo>>>,
+    /// The token was activated from an inline `protocol` instead of the coins config. Such a custom
+    /// token is a wallet-only coin and has no coins-config entry to say so (CRD ch.35 R35.2.7).
+    pub(crate) custom_token: bool,
 }
 
 // ─── V2 swap types ──────────────────────────────────────────────────────────

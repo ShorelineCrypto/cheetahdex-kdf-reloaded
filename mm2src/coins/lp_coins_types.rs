@@ -184,6 +184,9 @@ pub enum NegotiateSwapContractAddrErr {
     #[display(fmt = "UnexpectedOtherAddr, addr supplied {:?}", _0)]
     UnexpectedOtherAddr(BytesJson),
     NoOtherAddrAndNoFallback,
+    /// The coin was activated without a swap contract (a wallet-only coin), so it cannot take part in a swap.
+    #[display(fmt = "The coin has no swap contract")]
+    NoSwapContract,
 }
 /// Width of a per-coin hash-time-locked-contract public key, at the coin layer
 /// and on the legacy swap wire alike (CRD ch.51 R62, R63).

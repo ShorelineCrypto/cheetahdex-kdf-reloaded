@@ -16,6 +16,9 @@ use mm2_core::mm_ctx::MmArc;
 use mm2_err_handle::prelude::*;
 use serde_json::Value as Json;
 
+/// The largest number of decimal places a Tendermint coin may declare (CRD R36.3.1).
+const MAX_TENDERMINT_DECIMALS: u8 = 18;
+
 /// Initialise a list of HTTP RPC clients from configuration nodes.
 ///
 /// Each `RpcNode` is validated and turned into an `HttpClient`.
@@ -78,6 +81,14 @@ pub async fn tendermint_coin_from_conf_and_request(
                 "Could not parse Tendermint protocol data: {e}"
             )))
         })?;
+
+    // The bound is checked here and not while parsing the coin protocol, so that an out-of-range value fails
+    // the activation as a platform-coin creation error (CRD R36.3.2).
+    if protocol_info.decimals > MAX_TENDERMINT_DECIMALS {
+        return MmError::err(init_err(TendermintInitErrorKind::DecimalsAboveMaximum(
+            protocol_info.decimals,
+        )));
+    }
 
     let account_id = account_id_from_privkey(priv_key, &protocol_info.account_prefix).mm_err(&init_err)?;
 

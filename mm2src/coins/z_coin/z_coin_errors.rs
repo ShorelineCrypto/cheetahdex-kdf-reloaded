@@ -28,9 +28,28 @@ pub enum GenTxError {
         available: BigDecimal,
         required: BigDecimal,
     },
+    /// The request is short only because notes it would have spent are committed to a transaction
+    /// of this process's that is not yet scanned (CRD ch.39 D39.8.0e).
+    #[display(
+        fmt = "Not enough spendable {} right now: available {}, required at least {}. {} is committed to a \
+               transaction of yours that is not confirmed yet; retry once it confirms",
+        coin,
+        available,
+        required,
+        locked
+    )]
+    BalanceLockedByUnconfirmedTransaction {
+        coin: String,
+        available: BigDecimal,
+        required: BigDecimal,
+        locked: BigDecimal,
+    },
     NumConversion(NumConversError),
     Rpc(UtxoRpcError),
     PrevTxNotConfirmed,
+    /// The builder's target height could not be established (R39.11.11).
+    #[display(fmt = "{}", _0)]
+    BuilderHeight(BuilderHeightError),
     #[cfg(not(target_arch = "wasm32"))]
     TxBuilderError(ZTxBuilderError),
     #[display(fmt = "Failed to read ZCash tx from bytes {:?} with error {}", hex, err)]
@@ -51,6 +70,35 @@ pub enum GenTxError {
         coin: String,
         activation_time: u32,
     },
+}
+
+/// Why a shielded construction path could not obtain its builder target height (CRD ch.39
+/// R39.11.11). A path that cannot corroborate the height refuses to build; it never falls back to
+/// the wallet database's own target height, a last known tip or the scanned height.
+#[derive(Debug, Display, PartialEq)]
+pub enum BuilderHeightError {
+    #[display(fmt = "the chain tip could not be read: {}", _0)]
+    TipUnavailable(String),
+    #[display(fmt = "{}", _0)]
+    StaleTip(String),
+    /// The Ironwood activation could not be established, so the transaction version is unknown
+    /// (R39.6.4e). Refused rather than guessed: the wrong version is rejected by the network.
+    #[display(fmt = "the transaction version could not be chosen: {}", _0)]
+    IronwoodActivation(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<super::LightwalletdError> for BuilderHeightError {
+    fn from(err: super::LightwalletdError) -> BuilderHeightError {
+        match err {
+            super::LightwalletdError::StaleTip { .. } => BuilderHeightError::StaleTip(err.to_string()),
+            other => BuilderHeightError::TipUnavailable(other.to_string()),
+        }
+    }
+}
+
+impl From<BuilderHeightError> for GenTxError {
+    fn from(err: BuilderHeightError) -> GenTxError { GenTxError::BuilderHeight(err) }
 }
 
 impl From<GetUnspentWitnessErr> for GenTxError {
@@ -82,7 +130,25 @@ impl From<GenTxError> for WithdrawError {
                 available,
                 required,
             },
+            GenTxError::BalanceLockedByUnconfirmedTransaction {
+                coin,
+                available,
+                required,
+                locked,
+            } => WithdrawError::BalanceLockedByUnconfirmedTransaction {
+                coin,
+                available,
+                required,
+                locked,
+            },
             GenTxError::Rpc(e) => WithdrawError::Transport(e.to_string()),
+            GenTxError::BuilderHeight(BuilderHeightError::TipUnavailable(e)) => WithdrawError::Transport(e),
+            GenTxError::BuilderHeight(BuilderHeightError::IronwoodActivation(_)) => {
+                WithdrawError::InternalError(gen_tx.to_string())
+            },
+            GenTxError::BuilderHeight(BuilderHeightError::StaleTip(_)) => {
+                WithdrawError::InternalError(gen_tx.to_string())
+            },
             GenTxError::DecryptedOutputNotFound
             | GenTxError::FailedToGetMerklePath
             | GenTxError::PrevTxNotConfirmed
@@ -92,7 +158,9 @@ impl From<GenTxError> for WithdrawError {
             | GenTxError::TxReadError { .. } => WithdrawError::InternalError(gen_tx.to_string()),
             // Actionable by the user (upgrade), so it keeps its own message rather
             // than being flattened into an internal error.
-            GenTxError::IronwoodUpgradeUnsupported { .. } => WithdrawError::InternalError(gen_tx.to_string()),
+            GenTxError::IronwoodUpgradeUnsupported { .. } => {
+                WithdrawError::UnsupportedAfterNetworkUpgrade(gen_tx.to_string())
+            },
             #[cfg(not(target_arch = "wasm32"))]
             GenTxError::TxBuilderError(_) => WithdrawError::InternalError(gen_tx.to_string()),
         }
@@ -156,6 +224,22 @@ pub enum GetUnspentWitnessErr {
 #[cfg(not(target_arch = "wasm32"))]
 impl From<SqliteError> for GetUnspentWitnessErr {
     fn from(err: SqliteError) -> GetUnspentWitnessErr { GetUnspentWitnessErr::StorageError(err.to_string()) }
+}
+
+/// Why a lightwalletd compact-block fetch failed, split by whether the shielded sync had started.
+///
+/// Activation maps the two differently (CRD ch.39 R39.10.14): a failure before the sync started
+/// (no endpoint can be connected, the endpoint list is empty, the initial chain-state query or the
+/// local wallet storage fails) ends the task, while a failure after it started is retried.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Display, PartialEq)]
+pub enum ShieldedFetchError {
+    /// Nothing was downloaded yet.
+    #[display(fmt = "{}", _0)]
+    BeforeSync(String),
+    /// The download or the scan had started.
+    #[display(fmt = "{}", _0)]
+    DuringSync(String),
 }
 
 #[derive(Debug, Display)]

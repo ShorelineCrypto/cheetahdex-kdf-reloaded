@@ -59,6 +59,7 @@ async fn test_send() {
         nft_swap_v2_contract: None,
         swap_gas_fee_policy: Mutex::new(SwapGasFeePolicy::default()),
         erc20_tokens_infos: Default::default(),
+        custom_token: false,
     }));
     let tx = coin
         .send_maker_payment(

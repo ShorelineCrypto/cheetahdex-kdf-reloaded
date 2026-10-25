@@ -8,6 +8,378 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Releases and the runtime Docker image now ship the license files.** `COPYING`, `LICENSE` and
+  `THIRDPARTY-LICENSES` are attached to every release and covered by the signed `SHA256SUMS`, and
+  the image carries them in `/usr/share/doc/kdf/`. Detail: PR #36.
+- **A shielded (ARRR) withdrawal short only because of an unconfirmed transaction now says so.**
+  Instead of `NotSufficientBalance` with `available: 0` beside a healthy balance, it fails with
+  `BalanceLockedByUnconfirmedTransaction` (HTTP 400) naming the amounts and that it clears when
+  that transaction confirms. After a node restart the bare error is reported again. Detail: PR #50.
+
+### Changed
+
+- **The initial swap gas-fee policy no longer depends on how the coin was activated, and a coin's
+  `max_eth_tx_type` now caps the transaction type it will sign.** The legacy `enable` / `electrum`
+  route resolves the policy the way the other routes do — the `swap_gas_fee_policy` request field,
+  else the `swap_gas_fee_policy` key of the coin's entry, else `Legacy` — and that request field is
+  new on the legacy route and parsed leniently there: an unrecognised value is ignored, whereas
+  `enable_eth_with_tokens` and `task::enable_eth` still reject it with `InvalidRequest`. A swap send
+  whose EIP-2718 type exceeds the coin's `max_eth_tx_type` (a token falls back to its platform
+  coin's entry) is now refused at signing, with nothing broadcast and no lower type substituted.
+  **A coin with no `max_eth_tx_type` key counts as `0`**, so a typed swap send for it is refused
+  too; an operator who wants an absent key to mean unrestricted sets the node-level boolean
+  `max_eth_tx_type_absent_unrestricted` to `true` (default `false`). Activation logs the effective
+  policy and cap and where each came from. Detail: PR #30; CRD ch.35 D35.6 and D35.7.
+- **The wss transport now uses rustls 0.23, and a malformed wss key file is a startup error instead
+  of a panic.** A relay whose configured wss key or certificate cannot be loaded now fails to start
+  with `P2PInitError::InvalidWssConfig`. Detail: PR #39.
+- **The Electrum TLS client moved to rustls 0.23, with a different trust-anchor set.**
+  `webpki-roots` goes from 0.22 to 1.0, which drops 45 root certificates — among them roots Mozilla
+  marks distrust-after (DigiCert Global Root CA, GlobalSign Root CA, Baltimore and others) and the
+  removed TrustCor — and adds 32. A server whose chain terminates only at a dropped root is now
+  refused where it was accepted; none of the 225 reachable servers in the public Electrum lists is
+  affected, but a privately configured server can be. TLS 1.2 is still offered, and
+  `skip_validation` keeps its previous meaning. Detail: PR #40.
+- **The native HTTP client and the RPC listener moved to hyper 1; rustls 0.20 and hyper 0.14 have
+  left the build.** The RPC port still serves both HTTP/1 and HTTP/2 prior-knowledge, the SSE
+  endpoint and its event format are unchanged, and TLS 1.2 is still offered. Error strings from a
+  failed HTTP fetch now carry the whole source chain (for example `client error (Connect): invalid
+  peer certificate: UnknownIssuer`), so anything that parses or logs them sees longer text. The
+  lightwalletd gRPC transport moved to the same stack earlier in the series, which changes its
+  default user-agent and the wording of its transport errors. Detail: PR #42 and PR #37.
+- **The WalletConnect relay transport moved to `tokio-tungstenite` 0.24 on rustls 0.23.** No
+  protocol or configuration change; not yet exercised against a live relay session. Detail: PR #40.
+- **The `sia-rust` pin now requires `web-sys >= 0.3.70`**, which reqwest 0.12's wasm backend needs;
+  our own lockfile resolves well above that, so only an integrator who vendors or re-resolves for
+  `wasm32` has a floor to raise. Detail: PR #38.
+
+### Fixed
+
+- **A hostile or corrupt Electrum header response can no longer crash the node.** A header (or
+  header list) whose length fields asked for gigabytes of memory could abort the process or kill the
+  sync task, for any UTXO coin. The Equihash solution, Qtum's block signature and AuxPoW merkle
+  branches now have length limits, and an over-long one is rejected as a malformed header like any
+  other. Detail: PR #52; CRD ch.37 R37.5.6a.
+- **A maker that goes offline now drops out of the orderbook on schedule, whatever its clock says.**
+  The keep-alive expiry used the timestamp the maker put in its own message, so a maker with a fast
+  clock stayed listed for that skew plus 90 s after it died, and one that wrote a far-future
+  timestamp stayed listed indefinitely. The expiry now runs from when this node received the
+  keep-alive (CRD ch.32 R-P3); the wire format is unchanged. Keep-alives also no longer advertise
+  empty trie roots. Detail: PR #52.
+- **A ZCash-family (ARRR) light-server endpoint whose block cache is stale is no longer used.**
+  An endpoint can report the current chain height and the right branch while its cache of blocks
+  stopped much earlier, so it cannot serve anything newer; it is now excluded at admission, as is
+  one whose cache answers with an error or whose height is more than 40 blocks behind the others.
+  A failed admission now lists every excluded endpoint and why, and its message no longer claims
+  that an endpoint is "not on this coin's chain". Detail: PR #51; CRD ch.39 R39.11.7a(j).
+- **A second ARRR withdrawal no longer fails with `bad-txns-duplicate-nullifier-requirements-not-met`
+  because the first one's notes were still unspent.** `withdraw` and `task::withdraw` are unchanged
+  (the client still broadcasts), but when the client submits the transaction through
+  `send_raw_transaction` the notes it spends are now reserved until it is mined and scanned, or
+  expires. A withdrawal that is built and never submitted reserves nothing. `withdraw` with `max`
+  now reports an insufficient balance instead of an internal error when the spendable balance does
+  not cover the fee. Two daemons on one seed with separate wallet databases are not protected.
+  Detail: PR #49; CRD ch.39 D39.8.0e.
+- **`enable_erc20` now works on an HD wallet.** The one-shot call refused every HD-derived EVM
+  platform with `UnexpectedDerivationMethod`, so a client that knows only this call could not add an
+  EVM token after startup in HD mode. It now activates the token on the platform's enabled address
+  and returns one `balances` entry per known address — the same response shape as before, and
+  byte-identical on a single-address platform. A `path_to_address` selecting another address is
+  still refused, as is a hardware-backed platform, and only `task::enable_erc20` reports progress.
+  The MM2.json boolean `erc20_hd_activation` set to `false` (default `true`) restores the former
+  refusal. Detail: PR #28; CRD ch.35 R35.2.5.
+- **A shielded (ARRR) wallet that met a reorg of its own scan tip no longer wedges forever.** Every
+  sync pass failed with `Compact block hash discontinuity` and the wallet never rewound. The scan
+  now re-checks its anchor against lightwalletd on every pass, rewinds within the commitment-tree
+  checkpoints the wallet retains, clears compact blocks cached above the rewound height, and, for a
+  divergence deeper than it can rewind, rebuilds at the wallet's sync start rather than at height 0.
+  A compact cache that fails validation is deleted instead of renamed to `.invalid-chain.<ms>.bak`,
+  which also ends the multi-gigabyte backup flood. No RPC or wire change. Detail: PR #31; CRD ch.39
+  R39.8.0al and R39.8.0n.
+- **The swap gas-fee policy now takes effect.** `set_swap_gas_fee_policy` stored a policy and
+  `get_swap_gas_fee_policy` echoed it, but nothing read it, so every swap transaction was signed in
+  the legacy form and `High` behaved exactly like `Legacy`. `Low`, `Medium` and `High` now emit an
+  EIP-1559 (type 2) transaction priced from the matching tier of the same fee estimate the
+  fee-estimation RPC reports, and the send fails rather than falling back to the legacy form if no
+  estimate can be obtained. `Legacy` stays the built-in default, for peers on a reference build at
+  or before `v2.0.0-beta` that cannot read a typed transaction — but the shipped coins file puts
+  ETH, MATIC, AVAX, ETH-ARB20, ETH-BASE and MOVR on `"Medium"`, so swaps of those coins and of
+  their tokens now emit type 2 unless the policy is overridden at activation or with
+  `set_swap_gas_fee_policy`. Not yet verified against a live network send. Detail: PR #25.
+- **A counterparty's EIP-1559 (type 2) and EIP-2930 (type 1) transaction can now be read.** Typed
+  transactions — most Polygon traffic — failed to decode with `unexpected string` and took the swap
+  with them (issue #14). They are now decoded through the EIP-2718 envelope, in swaps and in the
+  node-RPC paths (transaction history, spend search), where the sender was previously recovered
+  wrongly and the gas price reported as zero. A decoded EIP-1559 transaction exposes no single gas
+  price (`gas_price()` is `None`) and transaction history reports the fee actually paid from the
+  receipt instead; EIP-4844 and EIP-7702 are rejected with an error naming the type. Legacy
+  decoding, encoding and ids are unchanged. Detail: PR #24.
+- **An undecodable EVM transaction now says what it is.** The error names the unsupported type byte
+  and the supported types, or, for a payload that is not a transaction at all, its length and a
+  short prefix — instead of the opaque `unexpected string`. Detail: PR #24.
+- **EIP-1559 swap transactions are no longer priced from a stale base fee.** The fee estimate took
+  the base fee of the oldest block in the fee-history window instead of the newest, so under a
+  rising base fee `max_fee_per_gas` could land below the actual block base fee and the send was
+  rejected; this affects the coins the shipped coins file puts on a non-legacy tier, since those
+  price swaps from these estimates. An `eth_feeHistory` response that omits `baseFeePerGas`, which a
+  conforming client may do, could also panic inside a swap send path and no longer can. Detail: PR #48.
+
+### Plans touched
+
+Plans this cycle moved, in any sense; each plan file carries the detail.
+
+- [`shielded-in-flight-note-locking`](docs/plans/shielded-in-flight-note-locking.md) — the
+  withdraw path now records the transaction when the client submits it, and the plan moved to in progress (PR #49); the shortfall it causes is now named (PR #50).
+- [`arrr-ironwood-compatibility`](docs/plans/arrr-ironwood-compatibility.md) — the reorg-wedge fix
+  landed (PR #31); the lightwalletd transport moved to tonic 0.14 on hyper 1 (PRs #37, #42).
+- [`v0.2.0-dependency-hygiene`](docs/plans/v0.2.0-dependency-hygiene.md) — the rustls, webpki, ring
+  and tungstenite rows cleared, and the advisory ledger is green (PRs #37–#40, #42, #44).
+- [`walletconnect-fork-upgrade`](docs/plans/walletconnect-fork-upgrade.md) — superseded: the fork
+  bump it proposed gave way to a `[patch]` onto upstream `tokio-tungstenite-wasm` 0.4.0 (PR #40).
+- [`secp256k1-migration`](docs/plans/secp256k1-migration.md) — its last follow-up closed: the real
+  WASM link step is back in CI and no longer `continue-on-error` (PRs #26, #27).
+- [`clippy-ci-gate`](docs/plans/clippy-ci-gate.md) — the gate shipped; the vendor-filter follow-up
+  stays open (PR #27).
+- [`evm-test-infrastructure`](docs/plans/evm-test-infrastructure.md) — opened, and two dead-network
+  EVM tests ported to a scripted local node (PR #30).
+
+## [0.3.0-alpha.3] — development milestone, not released
+
+### Fixed
+
+- **A shielded wallet no longer binds to a lightwalletd endpoint that never followed the
+  Ironwood upgrade.** Once the Ironwood activation time has passed, an endpoint still
+  reporting the pre-Ironwood consensus branch is excluded outright, however many endpoints
+  share that view; if no current endpoint is reachable the wallet fails closed instead of
+  building against a frozen tip and broadcasting a v6 transaction to a node that cannot
+  decode it (`TX decode failed`, code -22). A wallet whose recorded branch is the
+  pre-Ironwood one (every wallet that synced before the upgrade) is released from that
+  binding after activation, which previously excluded every current endpoint and left only
+  the stale ones (CRD ch.39 R39.11.7a(h)).
+- **Endpoint admission is now logged.** Each evaluation logs the endpoints probed with
+  their reported chain, branch and height, every exclusion with its reason, unreachable
+  endpoints and the admitted set (R39.11.7a(i)).
+- **A shielded-coin sync date in the future is rejected instead of clamped.** A
+  `sync_params` `date` later than **both** the wall clock and the chain tip's block time
+  now ends activation with `CoinCreationError`, matching the reference. The two
+  reference points are both needed: a date minutes after the tip is ordinary on a chain
+  that has not mined since, so the tip's time alone would reject it, while block times
+  can run ahead of the clock, so the clock alone would reject a date a real block
+  already covers. A date between the two resolves to the tip. A start given as a
+  **height** beyond the tip is unaffected and still clamps to the tip (CRD ch.39
+  R39.10.11, R39.8.0h).
+- **A shielded-coin sync date before the genesis block no longer hangs activation.** The
+  binary search that resolves a date to a height could not terminate when the target
+  preceded block 0's timestamp: the window stayed pinned at `0..=0` and the search
+  re-fetched block 0 over the network indefinitely. Such a date now resolves to height 0.
+- **Custom ERC20 tokens are wallet-only.** A token activated from an inline
+  `protocol` (`enable_eth_with_tokens` / `enable_erc20`, a token absent from the
+  coins file) now reports itself wallet-only, so `buy`, `sell` and `setprice`
+  reject it. Previously the wallet-only check read the coins file, which has no
+  entry for such a token, so an unvetted token could be offered in swaps. This
+  matches the reference behavior bound in CRD ch.35 R35.2.7 (issue #16).
+
+## [0.3.0-alpha.2] — development milestone, not released
+
+### Upgrade note: EVM address under an HD wallet
+
+**If you use an HD wallet (`enable_hd: true`) and activated ETH, another EVM
+coin or ERC20 tokens with `enable_eth_with_tokens` or `task::enable_eth` on an
+earlier KDF Reloaded build, the activated address changes with this release.**
+
+Earlier builds activated EVM coins under an HD wallet at the address of the
+daemon's internal identity key instead of the address at the coin's
+`derivation_path` (`m/44'/60'/...`) plus `path_to_address`. GLEEC KDF and every
+BIP-44 wallet use the derivation-path address, so the same seed phrase showed a
+different EVM address in Reloaded than elsewhere. This release activates the
+derivation-path address (CRD ch.35).
+
+Funds received at the old address are not lost -- its key is still derived from
+your seed phrase -- but the wallet no longer shows them. To move them:
+
+1. Start KDF Reloaded in single-address mode: `enable_hd: false` in `MM2.json`,
+   with the **same seed phrase** as `passphrase`.
+2. Activate the EVM coin. The address it reports is the old address; check its
+   balance.
+3. Withdraw the funds to your HD address (the address the HD wallet now shows
+   for that coin), then restart in HD mode.
+
+Legacy `enable` for EVM coins under an HD wallet is not changed by this release.
+
+### Changed
+
+- **A Light-mode ZHTLC (shielded) coin is served by `lightwalletd` alone.** Electrum
+  support for the coin is removed; there is no switch to restore it (see
+  `RELOADED_VS_GLEEC.md` and `docs/GLEEC_COMPATIBILITY.md`). `light_wallet_d_servers` is
+  now mandatory and non-empty; `electrum_servers` is accepted and ignored. Configured
+  endpoints are admitted by `GetLightdInfo` (network, Sapling height, consensus branch)
+  before use, so an endpoint on another fork can no longer pull the wallet onto its
+  chain. Every shielded construction path -- including HTLC spend and refund, which
+  previously took their height from the Electrum client -- now takes its builder target
+  height from the one lightwalletd tip and refuses to build when it cannot be
+  corroborated. **A fresh wallet whose configuration cannot name the active network
+  upgrade needs two agreeing reachable endpoints**: the branch is decided by strict
+  majority and recorded with the sync state, so a single reachable endpoint cannot
+  establish it. A wallet that has already scanned blocks needs only one, and stays on
+  the branch recorded with them. Swap-path HTLC spend detection over lightwalletd is
+  implemented: the transparent index is queried under both address encodings, because
+  Pirate files a pay-to-script-hash row under the pubkey-hash key type, and a negative
+  answer requires a demonstrably healthy endpoint -- "not spent" is never reported when
+  the truth is "could not tell" (CRD ch.39 §39.11, ARRR Ironwood plan Step C).
+- **ARRR transaction parsing is routed to the Zcash reader.** The shared UTXO parser
+  applies the version-4 layout with double-SHA256 identifiers and **refuses** a
+  version-6 transaction outright, so the swap step failed rather than proceeding on a
+  wrong identifier. Every ZHTLC swap-path parse now goes through
+  `zcash_primitives::Transaction::read`, which keeps the version-4 history an old wallet
+  still needs when restoring from a pre-fork birthday (CRD ch.39 §39.11 R39.11.16,
+  ARRR Ironwood plan Step D).
+- **The Zcash crate stack is re-vendored on `zcash_primitives` 0.30.1** (with
+  `zcash_transparent` 0.10.0, `zcash_client_backend` 0.24.0, `zcash_client_sqlite`
+  0.22.0 and `zcash_protocol` 0.10.6), because version-6 reading was behind the
+  `zcash_unstable = "nu7"` rustc cfg in 0.28.0 and is unconditional in 0.30.1. The
+  `zcash_client_backend` vendor copy is dropped: its only patch was an exact `time-core`
+  pin that upstream has since removed. `orchard` is a default feature of the new
+  `zcash_client_backend` and `zcash_client_sqlite`, so both are taken with
+  `default-features = false` -- no Orchard or Ironwood bundle is built
+  (ARRR Ironwood plan Step B).
+
+### Added
+
+- **Coin-activation wire contract, wave 1 (CRD chapter 55).** The task
+  activation families now answer with the bound wire shapes:
+  - `cancel` of every task family answers `NoSuchTask` (integer task id,
+    HTTP 404) for an unknown, forgotten or already cancelled task,
+    `TaskFinished` (integer task id, HTTP 409) for a finished task whose
+    result has not been forgotten, and `Internal` (string, HTTP 500)
+    otherwise; the Lightning task no longer maps every failure to `Internal`.
+    A cancelled activation deregisters a coin it had already registered, and
+    a cancelled task is no longer observable by `status`. Every `init`
+    accepts the optional `client_id` (accepted and ignored; streaming of task
+    events is deferred).
+  - `task::init_trezor::init` accepts no parameters, `null`, `{}`, a
+    `device_pubkey` and a `client_id`; its success details are the device
+    object (`type`, `model`, `device_name`, `device_id`, `device_pubkey`); its
+    errors are `HwContextInitializingAlready`, `HwError` (string vocabulary,
+    HTTP 410), `UnexpectedUserAction`, `Timeout` and `Internal`; and the new
+    `task::init_trezor::cancel` returns the hardware-wallet context to the
+    not-initialised state.
+  - `task::enable_utxo`, `task::enable_qtum` and the new
+    `task::enable_bch` share the bound standalone-coin error set (including
+    `HwError` and `Transport`, without the private-key and
+    derivation-method discriminants), report a lost registration race as
+    `CoinIsAlreadyActivated`, put `ticker` and ticker-keyed balances in the
+    success object, report `FollowHwDeviceInstructions`, accept
+    `priv_key_policy` as a string or as `{"type": ...}`, honor
+    `path_to_address` for a software HD account, accept a per-server
+    `timeout_sec` and default the WebAssembly Electrum protocol to `WSS`.
+    `task::enable_bch` activates the BCH coin only, for a single address.
+- **Tendermint and Lightning activation wire contract (CRD chapters 36, 41).**
+  Tendermint platform activation reports an empty node list, an unusable node
+  URL, `decimals` above 18 and unreachable nodes as `PlatformCoinCreationError`
+  (HTTP 500) instead of `AtLeastOneNodeRequired` / `Transport` (502);
+  `tokens_params` is required; a token naming another platform is
+  `PlatformCoinMismatch`; `enable_tendermint_token` answers
+  `CouldNotFetchBalance` for a balance failure. A request carrying
+  `activation_params` is now rejected with `PlatformCoinCreationError` instead
+  of silently activating with the local key, until public-key and WalletConnect
+  activation are implemented. The Lightning task uses the documented error names
+  (`L2IsAlreadyActivated`, `L2ConfigIsNotFound`, `UnexpectedL2Protocol` with its
+  `protocol`, `InvalidPlatformConfiguration`, ...), checks the platform's
+  `avg_blocktime` at `init`, and its default node colour is the documented
+  `2b6680`. A protocol without parameters is reported in `error_data` without a
+  `protocol_data` key.
+- **Z-coin, Sia, legacy and BCH/SLP activation wire contract (CRD chapters 39,
+  46, 55).** `task::enable_z_coin` accepts an optional `mode`, the `"Electrum"`
+  and `servers` synonyms and `min_connected` / `max_connected`, reports a
+  lightwalletd outage after the sync has started as the in-progress value
+  `{"TemporaryError": ...}` and keeps retrying, and reports post-build height
+  and balance failures as `Transport`; it is routed on WebAssembly but answers
+  `CoinCreationError` there (no shielded wallet database). Sia reports an
+  unsupported key policy as `CoinCreationError` and post-build failures as
+  `Transport`, and legacy `enable` activates Sia coins. Legacy `electrum` bounds
+  its balance read to 20 s, and both legacy methods deregister a coin whose
+  balance read failed. `enable_bch_with_tokens` honours `get_balances`, checks
+  the token platform and rejects a hardware key policy; `enable_slp` records the
+  token on its platform coin. The mmrpc 2.0 EVM activation defaults
+  `required_confirmations` to 3 when neither the request nor the coin config
+  sets it.
+- **Two compatibility switches** (see `docs/GLEEC_COMPATIBILITY.md`):
+  `sia_activation_single_address_balance` (Sia activation result under an HD
+  wallet) and `legacy_enable_keeps_coin_on_balance_failure` (legacy `enable`
+  after a failed balance read).
+- **EVM activation wire contract, wave 2 (CRD chapter 35).**
+  `enable_eth_with_tokens` and `task::enable_eth`:
+  - every request field of the chapter is honored: both forms of `nft_req`
+    (inline owned-inventory fetch, reported in the always-present
+    `nfts_infos`), `get_balances` (with `tickers` instead of balances),
+    `swap_v2_contracts`, `swap_gas_fee_policy`, the gas-station fields,
+    `rpc_mode` (WebAssembly only, paired with the MetaMask policy),
+    `priv_key_policy` as an object (`ContextPrivKey`, `Trezor`, `WalletConnect`
+    with `params.session_topic`, `Metamask` on WebAssembly), inline `protocol`
+    custom tokens, and a missing `swap_contract_address` for a wallet-only
+    coin;
+  - an HD daemon now activates the address at the coin's `derivation_path`
+    plus `path_to_address` (it used to bind the daemon's internal identity
+    key) and answers the HD shape (`ticker`, `wallet_balance`, `nfts_infos`);
+    the Trezor task answers the HD shape too; `pubkey` is the `04`-prefixed
+    uncompressed key without `0x`;
+  - every node unresponsive, or a failing chain-height, decimals or balance
+    read, is `Transport` (string, HTTP 502) instead of
+    `PlatformCoinCreationError`/`Internal`; invalid node URLs and swap
+    contracts are `InvalidPayload`; absent `nodes` is `AtLeastOneNodeRequired`
+    (string); the hardware policy on the one-shot call is
+    `UnexpectedDeviceActivationPolicy`; `PrivKeyNotAllowed` is now
+    `PrivKeyPolicyNotAllowed`; tokens are enabled in three passes
+    (resolution, platform consistency, construction), so the first failing
+    token of the earliest failing pass decides;
+  - `task::enable_eth::init` answers an already active ticker at mmrpc level;
+    the device confirmation is reported as `FollowHwDeviceInstructions`.
+
+  `enable_erc20` and `enable_nft` share one single-token handler with the
+  bound discriminants (`Transport` is HTTP 500 there), on-chain decimals,
+  EIP-55 contract validation, lower-case `token_contract_address`, token
+  confirmations from the token config, and custom tokens (`CustomTokenError`).
+  The new `task::enable_erc20::{init,status,user_action,cancel}` family runs on
+  a token task substrate with its own registry, answers the HD wallet report on
+  an HD platform, and deregisters a token on cancel.
+- **The Ironwood swap freeze and build refusal now actually engage — CRD ch.39 R39.6.4d.** Both gates read `ironwood_activation_time` from the coin configuration, and **no published coin configuration declares it** — the field is an extension introduced here, and in `GLEECBTC/coins` no coin mentions Ironwood at all. So as previously shipped the entire 3 Oct safety net was inert on every deployment but a developer's own, which the last release documented but did not fix. Pirate Chain's maintainer confirmed on 2026-09-28 that there will be **no standardness grace period** and recommended disabling ARRR swaps from 2 Oct, so the gates could not keep waiting on a third party's configuration change. This build therefore carries the activation time for ARRR (1 791 054 000 — 3 Oct 2026 19:00 UTC, read from the chain's own `KOMODO_IRONWOOD_ACTIVATION`) and applies it when the configuration supplies none. Consequently **ARRR stops accepting new swaps from 1 Oct 2026 22:28 UTC and stops building transactions from 3 Oct 19:00 UTC on a default installation**; receiving, balance, address derivation and history are unaffected, and swaps already under way are never interrupted. The earlier objection to a compiled-in date — that it could not follow a moved activation — is answered by precedence rather than abstention: a configured `ironwood_activation_time` still overrides the built-in value, so a moved date stays a data change and never needs a release; the built-in value is withheld from test and regtest parameters, which activate Ironwood at a height with no timestamp; and a coin whose ticker this build does not know is unaffected. **Compatibility note:** omitting `ironwood_activation_time` is no longer an opt-out — set `ironwood_gate_disabled: true` in `protocol.protocol_data.consensus_params` for GLEEC-equivalent behaviour. Four tests pin the resolution rules, each verified to fail against a deliberately broken implementation. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`.
+- **ARRR version-6 (Ironwood) transaction construction.** `NetworkUpgrade::Nu6_3` maps
+  to the Ironwood activation height, taken from the coin configuration or discovered at
+  runtime, and the builder then selects version 6 and consensus branch `0x37A5165B`
+  itself. Runtime discovery is required rather than convenient, because the Pirate team
+  publishes no activation height: `GetLightdInfo` supplies the branch and tip and, where
+  an activation time is known, the first block past it is found by bisection, with a
+  30-block depth requirement before an upcoming transition is trusted. A disagreement
+  between the server and the timestamp rule refuses the build rather than defaulting.
+  `IRONWOOD_V6_SUPPORTED` is now true, which makes the R39.6.4b and R39.6.4c gates inert
+  by their own terms (CRD ch.39 R39.6.4e, ARRR Ironwood plan Step E).
+
+### Fixed
+
+- **An existing ARRR shielded wallet is migrated instead of being refused.**
+  `zcash_client_sqlite` 0.22.0 adds 23 unconditional migrations, so a wallet created by
+  an earlier build no longer matched the current schema and activation failed with
+  "unrecognized shielded wallet schema". The wallet is now copied to
+  `<wallet db>.pre-upgrade.<ms>.bak`, migrated and verified **on a working copy**, and
+  only then renamed over the original, so no half-migrated wallet can exist at the real
+  path; any failure after the backup falls back to preserving the file and rebuilding
+  fresh. Note that an earlier build cannot read the migrated schema afterwards -- the
+  backup is the way back (CRD ch.39 R39.8.0ba).
+- **`sync_params: "earliest"` could not activate a shielded coin.** A scan from the
+  Sapling activation height asks the server for the commitment tree one block below it,
+  and there `lightwalletd` substitutes a bare 32-byte commitment root for the serialized
+  tree. The wallet refused to anchor on it, which was right in itself but made an
+  ordinary request fail. The substitution is now recognised by its empty
+  `saplingFrontier` -- not by the tree's length, since a legitimately empty tree is also
+  short -- and below the activation height it is read as the empty tree, which is correct
+  by consensus rule, since no Sapling commitment can exist there. At or above activation
+  it is still refused, and the message now names the height to use
+  (CRD ch.39 R39.8.0ak).
+
+## [0.3.0-alpha.1] — development milestone, not released
+
+### Added
+
 - **Version-two (V2) UTXO swap wire contract corrected to match deployed
   peers (issue #11 batch 2).** The version-two taker-payment-spend preimage
   now matches the reference `v2.6.0-beta`/v3-lineage contract instead of an
@@ -53,9 +425,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   Code: `mm2src/coins/utxo/utxo_common/utxo_common_swap.rs`.
 
 - **Siacoin swap payment validation is now covered by tests — CRD ch.20 R-H1.** Nine cases around the check `validate_maker_payment`/`validate_taker_payment` make before a swap commits to a counterparty's on-chain payment: eight of them rejection properties (roles swapped, wrong amount, different secret hash, different counterparty key, different timelock, no outputs, HTLC funded at a decoy index). **Known limitation:** SC still has no automated end-to-end swap test — one that boots a containerised Sia node and settles a real swap on both legs — so SC swaps rest on these logic tests plus manual testing. Deferred to the next release; tracked with the rest of the Siacoin deferred work in CRD ch.20 §20.10. Code: `mm2src/coins/siacoin/siacoin_swap_ops.rs`.
-- **A shielded coin now refuses to build transactions once a network upgrade it cannot transact on has activated — CRD ch.39 R39.6.4c.** The swap freeze added alongside it stops *new swaps* ahead of Pirate Chain's Ironwood upgrade, but a withdrawal passes none of the swap gates — so after activation it would still have built a version-4 transaction and failed at broadcast, surfacing as an opaque network rejection. Every ARRR transaction is now refused from the activation time onwards, at the single point they are all constructed, with an error naming the coin, the activation time and the need to upgrade. The check runs before the path's blocking wait, so a caller is refused promptly rather than made to wait first. The two cut-offs are deliberately staggered and are not merged: the freeze starts ~44.5 h earlier and blocks only *entering* swaps, because between the two a swap begun before the freeze must still be able to spend or refund itself — a build refusal starting at the freeze would strand exactly the swaps the freeze exists to protect. A test pins that ordering. Receiving, balance, address derivation and history are unaffected throughout. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_errors.rs`.
+- **A shielded coin now refuses to build transactions once a network upgrade it cannot transact on has activated — CRD ch.39 R39.6.4c.** The swap freeze added alongside it stops *new swaps* ahead of Pirate Chain's Ironwood upgrade, but a withdrawal passes none of the swap gates — so after activation it would still have built a version-4 transaction and failed at broadcast, surfacing as an opaque network rejection. Every ARRR transaction is now refused from the activation time onwards, at the single point they are all constructed, with an error naming the coin, the activation time and the need to upgrade. The check runs before the path's blocking wait, so a caller is refused promptly rather than made to wait first. The two cut-offs are deliberately staggered and are not merged: the freeze starts ~44.5 h earlier and blocks only *entering* swaps, because between the two a swap begun before the freeze must still be able to spend or refund itself — a build refusal starting at the freeze would strand exactly the swaps the freeze exists to protect. A test pins that ordering. Receiving, balance, address derivation and history are unaffected throughout. The refusal reaches callers as `UnsupportedAfterNetworkUpgrade` with HTTP **400**, not as an internal error with HTTP 500 as it first did: nothing has gone wrong inside the process, the condition is foreseeable and permanent until the user upgrades, and after 3 Oct *every* ARRR withdrawal takes this path — a GUI rendering “Internal error” there would read as a broken wallet rather than an actionable prompt. This follows the existing `UnsupportedUnderTrezor`/`UnsupportedUnderMetamask` precedent, which map unsupported operations to 400 (CRD R47.6.7/R50.20). Verified end to end against a running node: before activation a withdrawal reaches the balance check downstream of the guard, and with an activation time in the past it is refused by the guard with the coin and time named. Code: `mm2src/coins/z_coin.rs`, `mm2src/coins/z_coin/z_coin_ops.rs`, `mm2src/coins/z_coin/z_coin_errors.rs`, `mm2src/coins/lp_coins_errors.rs`.
 - **A shielded coin now stops accepting new swaps ahead of a network upgrade it cannot yet transact on — CRD ch.39 R39.6.4b.** Pirate Chain's Ironwood upgrade (3 Oct 2026 19:00 UTC) makes only version-6 transactions standard; a build that cannot construct them would be unable to spend *or refund* an HTLC funded shortly before activation, stranding one side of any swap that straddles it. A coin declaring `ironwood_activation_time` therefore reports itself wallet-only from a cut-off ahead of activation, which `buy`, `sell` and `setprice` already gate on, and additionally declines incoming peer matches — the wallet-only report is never consulted on that path, so a remote taker could otherwise still match an order already posted. The cut-off is 160 300 s (44 h 32 m): the longest maker payment lock this framework can produce (156 000 s — `PAYMENT_LOCKTIME` x 10 for the legacy slow-coin rule, x 2 for the maker leg), plus the 3 700 s refund grace the swap machines wait before acting, plus ~10 blocks for the refund to be mined. For ARRR that means trading pauses at **1 Oct 2026 22:28 UTC**. Receiving, balance, address, `withdraw`, history and every swap already in flight are untouched, and a coin declaring no Ironwood activation is never affected. Because the locktime rules live in the swap layer, which depends on the coin layer rather than the reverse, the margin is a constant in `coins` guarded by a test in `mm2_main` that fails if the two drift — that guard is what caught the first draft, which covered the lock but not the refund grace. Code: `mm2src/coins/z_coin.rs`, `mm2src/mm2_main/src/lp_swap.rs`.
-- **Shielded coin configurations may now declare the Ironwood network upgrade — CRD ch.39 R39.6.4a.** `protocol.protocol_data.consensus_params` accepts two optional members, `ironwood_activation_time` (the wall-clock timestamp the upgrade activates from) and `ironwood_activation_height` (the height, once the network has derived and published it). Two members rather than one because Pirate does not fix the height in advance: every node derives it at runtime from the first block whose time exceeds the timestamp, so only the timestamp can be published ahead of the upgrade while only the height is usable as a consensus-parameter lookup. Both are optional in both directions — an existing coin file parses on a build that understands them, and a file carrying them parses on a build that does not. This release only carries the values: no network-upgrade lookup changes, so the transaction version and consensus branch ID this build signs with are untouched, and a test pins that. **Both members are an extension introduced here, and no published coin configuration declares either of them** — upstream KDF's `ZcoinConsensusParams` has no equivalent, and in `GLEECBTC/coins` no coin mentions Ironwood (ARRR is the only coin carrying `consensus_params` at all). **So in this release the two gates below ship dormant: on a default installation ARRR is expected to stop transacting when Ironwood activates on 3 Oct 2026 19:00 UTC, building version-4 transactions that the post-upgrade mempool rejects, and ARRR swaps should be avoided from about 1 Oct onwards** — a swap funded shortly before activation could be left unable to spend *or* refund its HTLC, which is the one case here that risks value rather than merely failing. Supplying `ironwood_activation_time` in any coin configuration the build loads arms both gates with no code change. The values are left to configuration rather than compiled in deliberately: Pirate derives the activation height at runtime and the published timestamp could still move, and a compiled-in date that fired early would refuse every ARRR transaction until a new binary shipped — a worse failure than the one the gates prevent. Code: `mm2src/coins/z_coin.rs`.
+- **Shielded coin configurations may now declare the Ironwood network upgrade — CRD ch.39 R39.6.4a.** `protocol.protocol_data.consensus_params` accepts two optional members, `ironwood_activation_time` (the wall-clock timestamp the upgrade activates from) and `ironwood_activation_height` (the height, once the network has derived and published it). Two members rather than one because Pirate does not fix the height in advance: every node derives it at runtime from the first block whose time exceeds the timestamp, so only the timestamp can be published ahead of the upgrade while only the height is usable as a consensus-parameter lookup. Both are optional in both directions — an existing coin file parses on a build that understands them, and a file carrying them parses on a build that does not. This release only carries the values: no network-upgrade lookup changes, so the transaction version and consensus branch ID this build signs with are untouched, and a test pins that. **Both members are an extension introduced here, and no published coin configuration declares either of them** — in `GLEECBTC/coins` no coin mentions Ironwood (ARRR is the only coin carrying `consensus_params` at all). **So in this release the two gates below ship dormant: on a default installation ARRR is expected to stop transacting when Ironwood activates on 3 Oct 2026 19:00 UTC, building version-4 transactions that the post-upgrade mempool rejects, and ARRR swaps should be avoided from about 1 Oct onwards** — a swap funded shortly before activation could be left unable to spend *or* refund its HTLC, which is the one case here that risks value rather than merely failing. Supplying `ironwood_activation_time` in any coin configuration the build loads arms both gates with no code change. The values are left to configuration rather than compiled in deliberately: Pirate derives the activation height at runtime and the published timestamp could still move, and a compiled-in date that fired early would refuse every ARRR transaction until a new binary shipped — a worse failure than the one the gates prevent. Code: `mm2src/coins/z_coin.rs`.
 
 ### Security
 
@@ -367,6 +739,13 @@ Highlights:
 - EVM ABI encoding/decoding migrated from `ethabi` to `alloy` (`alloy-dyn-abi` / `alloy-json-abi` / `alloy-primitives`), guarded by a byte-identity golden regression suite.
 - Tag-driven, GPG-signed release pipeline: signed `SHA256SUMS` manifest and drafted GitHub Releases — pre-releases from `staging` (`-alpha/-beta/-rc` tags), finals from `main`. Linux binaries build inside a Debian 11 container (glibc 2.31) for broad backwards-compatibility; unsigned all-platform snapshots via manual `dev-build.yml` and automatic `staging-build.yml`.
 
-[Unreleased]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.2...HEAD
+Tag `v0.2.0-beta.1` (2026-08-05) was cut from `staging`, which has since diverged from the
+development line; it has no section in this file, and neither `0.3.0-alpha` milestone descends
+from it.
+
+[Unreleased]: https://github.com/kdf-reloaded/kdf/compare/ddb87a4849f91400b1b4aa120090f1acb12aa7bf...HEAD
+[0.3.0-alpha.3]: https://github.com/kdf-reloaded/kdf/compare/49a46bc54fc16761796ed0bad53a472b8183ed9b...ddb87a4849f91400b1b4aa120090f1acb12aa7bf
+[0.3.0-alpha.2]: https://github.com/kdf-reloaded/kdf/compare/7a18f94b2f5de1ff7ba2ae69c4b445132d305a3f...49a46bc54fc16761796ed0bad53a472b8183ed9b
+[0.3.0-alpha.1]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.2...7a18f94b2f5de1ff7ba2ae69c4b445132d305a3f
 [0.1.0-beta.2]: https://github.com/kdf-reloaded/kdf/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/kdf-reloaded/kdf/releases/tag/v0.1.0-beta.1

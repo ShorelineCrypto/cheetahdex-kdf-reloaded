@@ -50,8 +50,8 @@ pub fn spawn_electrum(
                 .host()
                 .ok_or(ERRL!("Couldn't retrieve host from addr {}", req.url))?;
 
-            // check the dns name
-            try_s!(DnsNameRef::try_from_ascii_str(host));
+            // check the dns name (IP literals are rejected here, as they always were)
+            try_s!(DnsName::try_from(host));
 
             ElectrumConfig::SSL {
                 dns_name: host.into(),
@@ -65,7 +65,12 @@ pub fn spawn_electrum(
         },
     };
 
-    Ok(electrum_connect(req.url.clone(), config, event_handlers))
+    Ok(electrum_connect(
+        req.url.clone(),
+        config,
+        event_handlers,
+        req.request_timeout(),
+    ))
 }
 
 /// Attempts to process the request (parse url, etc), build up the config and create new electrum connection
@@ -100,7 +105,7 @@ pub fn spawn_electrum(
         },
     };
 
-    Ok(electrum_connect(url, config, event_handlers))
+    Ok(electrum_connect(url, config, event_handlers, req.request_timeout()))
 }
 
 #[derive(Debug)]
@@ -119,6 +124,8 @@ pub struct ElectrumConnection {
     responses: JsonRpcPendingRequestsShared,
     /// Selected protocol version. The value is initialized after the server.version RPC call.
     protocol_version: AsyncMutex<Option<f32>>,
+    /// The request timeout the server was configured with. The default timeout applies when unset.
+    request_timeout: Option<Duration>,
 }
 
 impl ElectrumConnection {
@@ -228,7 +235,9 @@ async fn electrum_request_multi(
                     request.clone(),
                     tx.clone(),
                     connection.responses.clone(),
-                    ELECTRUM_TIMEOUT / (connections.len() - i) as u64,
+                    connection
+                        .request_timeout
+                        .unwrap_or_else(|| Duration::from_secs(ELECTRUM_TIMEOUT / (connections.len() - i) as u64)),
                 )
                 .map(|response| (JsonRpcRemoteAddr(connection_addr), response));
                 futures.push(fut)
@@ -266,7 +275,7 @@ async fn electrum_request_to(
     request: JsonRpcRequestEnum,
     to_addr: String,
 ) -> Result<(JsonRpcRemoteAddr, JsonRpcResponseEnum), String> {
-    let (tx, responses) = {
+    let (tx, responses, request_timeout) = {
         let connections = client.connections.lock().await;
         let connection = connections
             .iter()
@@ -279,13 +288,18 @@ async fn electrum_request_to(
                 None => return ERR!("Connection {} is not established yet", to_addr),
             }
         };
-        (tx, responses)
+        (tx, responses, connection.request_timeout)
     };
 
     let response = try_s!(
-        electrum_request(request.clone(), tx, responses, ELECTRUM_TIMEOUT)
-            .compat()
-            .await
+        electrum_request(
+            request.clone(),
+            tx,
+            responses,
+            request_timeout.unwrap_or_else(|| Duration::from_secs(ELECTRUM_TIMEOUT))
+        )
+        .compat()
+        .await
     );
     Ok((JsonRpcRemoteAddr(to_addr.to_owned()), response))
 }
@@ -1179,27 +1193,36 @@ async fn electrum_last_chunk_loop(last_chunk: Arc<AtomicU64>) {
     }
 }
 
+/// Builds the Electrum TLS client configuration.
+///
+/// The `ring` provider is passed explicitly (`builder_with_provider`) rather than read from the
+/// process-global default, which would panic at the first connection if two providers were ever
+/// compiled in. `tls12` is enabled on the `rustls` dependency and the default protocol versions
+/// are TLS 1.3 and TLS 1.2: Electrum servers in the wild include TLS 1.2-only deployments.
 #[cfg(not(target_arch = "wasm32"))]
 fn rustls_client_config(unsafe_conf: bool) -> Arc<ClientConfig> {
-    let mut cert_store = RootCertStore::empty();
+    let cert_store = RootCertStore {
+        roots: TLS_SERVER_ROOTS.to_vec(),
+    };
+    build_rustls_client_config(unsafe_conf, cert_store)
+}
 
-    cert_store.add_server_trust_anchors(
-        TLS_SERVER_ROOTS
-            .0
-            .iter()
-            .map(|ta| OwnedTrustAnchor::from_subject_spki_name_constraints(ta.subject, ta.spki, ta.name_constraints)),
-    );
+#[cfg(not(target_arch = "wasm32"))]
+fn build_rustls_client_config(unsafe_conf: bool, cert_store: RootCertStore) -> Arc<ClientConfig> {
+    let provider = Arc::new(rustls_ring::default_provider());
 
-    let mut tls_config = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(cert_store)
-        .with_no_client_auth();
+    let builder = ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .expect("the ring provider supports the default protocol versions");
 
-    if unsafe_conf {
-        tls_config
+    let tls_config = if unsafe_conf {
+        builder
             .dangerous()
-            .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
-    }
+            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification::new(provider)))
+            .with_no_client_auth()
+    } else {
+        builder.with_root_certificates(cert_store).with_no_client_auth()
+    };
     Arc::new(tls_config)
 }
 
@@ -1242,9 +1265,7 @@ async fn connect_loop(
 
                 Either::Right(TcpStream::connect(&socket_addr).and_then(move |stream| {
                     // Can use `unwrap` cause `dns_name` is pre-checked.
-                    let dns = ServerName::try_from(dns_name.as_str())
-                        .map_err(|e| fomat!([e]))
-                        .unwrap();
+                    let dns = ServerName::try_from(dns_name).map_err(|e| fomat!([e])).unwrap();
                     tls_connector.connect(dns, stream).map_ok(ElectrumStream::Tls)
                 }))
             },
@@ -1443,6 +1464,7 @@ fn electrum_connect(
     addr: String,
     config: ElectrumConfig,
     event_handlers: Vec<RpcTransportEventHandlerShared>,
+    request_timeout: Option<Duration>,
 ) -> ElectrumConnection {
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let responses = Arc::new(AsyncMutex::new(JsonRpcPendingRequests::default()));
@@ -1465,6 +1487,7 @@ fn electrum_connect(
         shutdown_tx: Some(shutdown_tx),
         responses,
         protocol_version: AsyncMutex::new(None),
+        request_timeout,
     }
 }
 
@@ -1472,7 +1495,7 @@ fn electrum_request(
     request: JsonRpcRequestEnum,
     tx: mpsc::Sender<Vec<u8>>,
     responses: JsonRpcPendingRequestsShared,
-    timeout: u64,
+    timeout: Duration,
 ) -> Box<dyn Future<Item = JsonRpcResponseEnum, Error = String> + Send + 'static> {
     let send_fut = async move {
         let json = try_s!(json::to_string(&request));
@@ -1493,7 +1516,7 @@ fn electrum_request(
     };
     let send_fut = send_fut
         .boxed()
-        .timeout(Duration::from_secs(timeout))
+        .timeout(timeout)
         .compat()
         .then(|res| match res {
             Ok(response) => response,
@@ -1747,5 +1770,137 @@ mod connection_error_tests {
             notify_elapsed.as_millis() < 2_000,
             "notifying {COUNT} watchers took {notify_elapsed:?}"
         );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tls_tests {
+    use super::*;
+    use rustls::version::{TLS12, TLS13};
+    use rustls::{ProtocolVersion, ServerConfig, SupportedProtocolVersion};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio_rustls::TlsAcceptor;
+
+    struct TestServer {
+        port: u16,
+        cert: CertificateDer<'static>,
+    }
+
+    /// A one-shot loopback TLS server restricted to `versions` that echoes a 4-byte payload.
+    async fn spawn_server(versions: &[&'static SupportedProtocolVersion], names: &[&str]) -> TestServer {
+        let certified = rcgen::generate_simple_self_signed(names.iter().map(|n| n.to_string()).collect::<Vec<_>>())
+            .expect("self-signed certificate");
+        let cert = CertificateDer::from(certified.cert.der().to_vec());
+        let key = rustls::pki_types::PrivateKeyDer::try_from(certified.key_pair.serialize_der()).expect("key");
+        let provider = Arc::new(rustls_ring::default_provider());
+        let config = ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(versions)
+            .expect("protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(vec![cert.clone()], key)
+            .expect("server certificate");
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                if let Ok(mut tls) = acceptor.accept(tcp).await {
+                    let mut buf = [0u8; 4];
+                    if tls.read_exact(&mut buf).await.is_ok() {
+                        let _ = tls.write_all(&buf).await;
+                        let _ = tls.flush().await;
+                    }
+                }
+            }
+        });
+        TestServer { port, cert }
+    }
+
+    /// Connects with `config`, sends a 4-byte payload and returns the negotiated version.
+    async fn connect(
+        config: Arc<ClientConfig>,
+        server: &TestServer,
+        name: &'static str,
+    ) -> std::io::Result<ProtocolVersion> {
+        let tcp = TcpStream::connect(("127.0.0.1", server.port)).await?;
+        let mut tls = TlsConnector::from(config)
+            .connect(ServerName::try_from(name).unwrap(), tcp)
+            .await?;
+        tls.write_all(b"ping").await?;
+        tls.flush().await?;
+        let mut buf = [0u8; 4];
+        tls.read_exact(&mut buf).await?;
+        assert_eq!(&buf, b"ping");
+        Ok(tls.get_ref().1.protocol_version().expect("negotiated version"))
+    }
+
+    fn trusting(cert: &CertificateDer<'static>) -> Arc<ClientConfig> {
+        let mut store = RootCertStore::empty();
+        store.add(cert.clone()).expect("trust anchor");
+        build_rustls_client_config(false, store)
+    }
+
+    fn run<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(f)
+    }
+
+    #[test]
+    fn validating_config_completes_handshake_on_tls12_only_and_tls13() {
+        run(async {
+            let tls12 = spawn_server(&[&TLS12], &["localhost"]).await;
+            assert_eq!(
+                connect(trusting(&tls12.cert), &tls12, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_2
+            );
+            let tls13 = spawn_server(&[&TLS13], &["localhost"]).await;
+            assert_eq!(
+                connect(trusting(&tls13.cert), &tls13, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_3
+            );
+        });
+    }
+
+    #[test]
+    fn validating_config_rejects_untrusted_and_misnamed_certificates() {
+        run(async {
+            let server = spawn_server(&[&TLS12, &TLS13], &["localhost"]).await;
+            // Only the bundled webpki roots: a self-signed certificate is not trusted.
+            let roots_only = rustls_client_config(false);
+            assert!(connect(roots_only, &server, "localhost").await.is_err());
+            // Trusted certificate, wrong server name.
+            assert!(connect(trusting(&server.cert), &server, "example.test").await.is_err());
+        });
+    }
+
+    #[test]
+    fn skip_validation_accepts_self_signed_and_misnamed_certificates_on_both_versions() {
+        run(async {
+            let config = rustls_client_config(true);
+            let tls12 = spawn_server(&[&TLS12], &["localhost"]).await;
+            assert_eq!(
+                connect(config.clone(), &tls12, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_2
+            );
+            // Name mismatch is also tolerated, as it was with rustls 0.20.
+            assert!(connect(config.clone(), &tls12, "example.test").await.is_ok());
+            let tls13 = spawn_server(&[&TLS13], &["localhost"]).await;
+            assert_eq!(
+                connect(config, &tls13, "localhost").await.unwrap(),
+                ProtocolVersion::TLSv1_3
+            );
+        });
+    }
+
+    #[test]
+    fn host_precheck_accepts_hostnames_and_rejects_ip_literals() {
+        assert!(DnsName::try_from("electrum.example.org").is_ok());
+        assert!(DnsName::try_from("localhost").is_ok());
+        assert!(DnsName::try_from("127.0.0.1").is_err());
+        assert!(DnsName::try_from("").is_err());
     }
 }

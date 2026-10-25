@@ -271,6 +271,21 @@ Two provenance statements were tightened after an external audit:
   needed to preserve deployed KDF transaction bytes. Chapter 39 binds the
   resulting schema, scan, and transaction compatibility tests.
 
+### 2026-10-17 — notice and row-accuracy pass
+
+- Vendored-subtree rows brought in line with the tree: the Zcash patch rows
+  now name the re-vendored `zcash_primitives 0.30.1` / `zcash_transparent
+  0.10.0` directories (the `zcash_client_backend` patch no longer exists), and
+  rows were added for the `libp2p-gossipsub`, `libp2p-yamux` and `relay_rpc`
+  vendor patches.
+- `mm2src/testcontainers-vendored/` now carries the upstream MIT notice
+  (`LICENSE-MIT`) for the MIT option it is used under; `mm2src/mm2_net/src/grpc_web.rs`
+  gained a per-file header and an adapted-source row, with the tonic MIT notice
+  reproduced in `THIRDPARTY-LICENSES`.
+- `cargo deny check licenses` now runs in CI (`deny.toml` `[licenses]`), so a
+  dependency with an incompatible or missing license fails the build unless it
+  is an existing, listed exception.
+
 ## 34.3 Entries
 
 ### Generated artifacts
@@ -369,6 +384,7 @@ clean-room divergence.
 |---|---|---|---|---|
 | `mm2src/db_common/src/async_sql_conn.rs` | adapted-source | `programatik29/tokio-rusqlite` — background-thread async `rusqlite` wrapper (`CallFn`, `Message::Execute`/`Close`, `call`/`call_unwrap`/`open_*` API, `Display` formatting, doc-comments). | MIT (GPLv2-compatible). | Adaptation: upstream `Connection` renamed `AsyncConnection`; `Internal(InternalError)` variant added. Upstream provenance (R14 closed): the `CallFn`/`Message` core originates at v0.1.0 (`a09c68af5617ce9f0a49668c196644d02a017f83`, 2022-04-25); the `Close((Connection, Error))` variant and `Result`-returning `call` at `d97e88dff22b54c88634f4ad80ecccaf946d2945` (2023-04-02); `call_unwrap` at `1c5a322d92f0a8d6c26f221fabc9fab3409bc1ab` (2023-06-22, `v0.4.0-2-g1c5a322`). The adapted surface therefore corresponds to the upstream **v0.4.x era** (state at `1c5a322`). Introduced here in `531634ebe` (2026-05-01). MIT attribution recorded in `THIRDPARTY-LICENSES`; per-file header added to both files. |
 | `mm2src/db_common/src/async_conn_tests.rs` | adapted-source | `programatik29/tokio-rusqlite` test suite (`open_in_memory`/`call`/`call_unwrap` exercises). | MIT (GPLv2-compatible). | Same provenance and citation as `async_sql_conn.rs`. Uses the early rusqlite `NO_PARAMS` API. |
+| `mm2src/mm2_net/src/grpc_web.rs` | adapted-source | `hyperium/tonic` gRPC-Web client example, commit `ddab65ede90f503360b7adb0d7afe6d5b7bb8b02`, `examples/src/grpc-web/client.rs` (named in the file's own header). | MIT (GPLv2-compatible). | Baseline carryforward: present before the anchor (first introduced 2021-10-08, at this path since 2022-05-19), adapted upstream "with minor refactoring". MIT notice (Copyright (c) 2020 Lucio Franco) reproduced in `THIRDPARTY-LICENSES`; per-file header added. |
 
 ### Refactor-relocated baseline content (mixed: descent + post-anchor)
 
@@ -456,10 +472,13 @@ Distinct from the in-tree fragment scheme.
 
 | Destination | Classification | Source reference | License basis | Notes |
 |---|---|---|---|---|
-| `mm2src/testcontainers-vendored/` | vendored-subtree | Upstream `testcontainers-rs` lineage (see in-tree crate metadata). | Upstream permissive licensing per crate metadata. | Vendored for deterministic CI behaviour. |
-| `vendor-patches/zcash_client_backend-0.23.0/` | vendored-subtree | Published crates.io `zcash_client_backend 0.23.0`. | MIT OR Apache-2.0; both license texts retained in-tree. | Manifest-only removal of the obsolete exact `time-core 0.1.2` dependency; see `KDF-PATCH.md`. |
-| `vendor-patches/zcash_primitives-0.28.0/` | vendored-subtree | Published crates.io `zcash_primitives 0.28.0`. | MIT OR Apache-2.0; both license texts retained in-tree. | Narrow transaction-builder compatibility extension; see `KDF-PATCH.md`. |
-| `vendor-patches/zcash_transparent-0.8.0/` | vendored-subtree | Published crates.io `zcash_transparent 0.8.0`. | MIT OR Apache-2.0; both license texts retained in-tree. | Narrow KDF P2SH/raw-output compatibility extension; see `KDF-PATCH.md`. |
+| `mm2src/testcontainers-vendored/` | vendored-subtree | `artemii235/testcontainers-rs` commit `65e7380`, a fork of `testcontainers-rs` 0.7.0 (see in-tree crate metadata). Vendored in `6c83fec81` (2026-05-28). | MIT, chosen from upstream `MIT OR Apache-2.0`; upstream MIT notice (Copyright 2018 CoBloX) retained in `LICENSE-MIT`. | Vendored for deterministic CI behaviour. Test-only. |
+| `vendor-patches/zcash_primitives-0.30.1/` | vendored-subtree | Published crates.io `zcash_primitives 0.30.1`. Re-vendored from 0.28.0 in `3f2f2bcc0` (2026-10-12). | MIT, chosen from `MIT OR Apache-2.0`; both license texts retained in-tree. | Narrow transaction-builder compatibility extension; see `KDF-PATCH.md`. |
+| `vendor-patches/zcash_transparent-0.10.0/` | vendored-subtree | Published crates.io `zcash_transparent 0.10.0`. Re-vendored from 0.8.0 in `3f2f2bcc0` (2026-10-12). | MIT, chosen from `MIT OR Apache-2.0`; both license texts retained in-tree. | Narrow KDF P2SH/raw-output compatibility extension; see `KDF-PATCH.md`. |
+| `vendor-patches/libp2p-gossipsub-0.45.0/` | vendored-subtree | `KomodoPlatform/rust-libp2p` tag `k-0.52.12` (commit `8bcc1fda79d56a2f398df3d45a29729b8ce0148d`), `protocols/gossipsub`. Introduced in `9b18d4140` (2026-09-23). | MIT; upstream per-file MIT notices retained. | Security patch (PRUNE backoff overflow); see `PATCH-NOTES.md`. |
+| `vendor-patches/libp2p-yamux-0.44.0/` | vendored-subtree | `KomodoPlatform/rust-libp2p` tag `k-0.52.12` (commit `8bcc1fda79d56a2f398df3d45a29729b8ce0148d`), `muxers/yamux`. Introduced in `a57e9b834` (2026-09-23). | MIT; upstream per-file MIT notices retained. | Removes the yamux 0.12 path; see `PATCH-NOTES.md`. |
+| `vendor-patches/libp2p-websocket-0.42.0/` | vendored-subtree | `KomodoPlatform/rust-libp2p` tag `k-0.52.12` (commit `8bcc1fda79d56a2f398df3d45a29729b8ce0148d`), `transports/websocket`. | MIT; upstream per-file MIT notices retained. | TLS layer (`tls.rs`, one type in `framed.rs`) ported to rustls 0.23 with the ring provider; `PrivateKey::new` returns a `Result`; see `PATCH-NOTES.md`. The `tests/` directory and `tests/fixtures/` (a throwaway RSA test key) are original to this repository. |
+| `vendor-patches/relay_rpc-0.1.0/` | vendored-subtree | `komodoplatform/walletconnectrust` tag `k-0.1.3` (commit `e2fb03a`), `relay_rpc`. Introduced in `a57e9b834` (2026-09-23). | Apache-2.0, per crate metadata; part of the WalletConnect SDK open item in §34.5. | Removes the `jsonwebtoken` dependency; see `PATCH-NOTES.md`. |
 
 ## 34.4 Operating rules
 
@@ -552,9 +571,9 @@ GPL-licensed.
 
 ### What this basis does *not* cover
 
-The GPLv2 copyleft theory does not resolve two genuinely open,
+The GPLv2 copyleft theory does not resolve genuinely open,
 separately-sourced compatibility items (they are not GPLv2-lineage
-derivatives):
+derivatives), for example:
 
 - the Apache-2.0 WalletConnect SDK crates, and
 - `mm2src/coins/eth/legacy_tx.rs` (a GPL-3.0 derivative of Parity

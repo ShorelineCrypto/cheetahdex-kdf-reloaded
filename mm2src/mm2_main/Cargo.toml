@@ -6,6 +6,7 @@
 [package]
 name = "mm2_main"
 version = "0.1.0"
+license = "GPL-2.0-only"
 edition = "2021"
 default-run = "kdf"
 
@@ -86,7 +87,7 @@ gstuff = { version = "0.7" }
 hash256-std-hasher = "0.15.2"
 hash-db = "0.15.2"
 hex = "0.4.2"
-http = "0.2"
+http = "1"
 hw_common = { path = "../hw_common" }
 itertools = "0.10"
 keys = { package = "kdf_keys", path = "../kdf_keys" }
@@ -141,9 +142,11 @@ instant = {version = "0.1.12", features = ["wasm-bindgen"]}
 # the major versions. Note dirs >= 4 resolves the Windows home via
 # SHGetKnownFolderPath rather than %HOME%/%USERPROFILE%.
 dirs = { version = "6" }
-hyper = { version = "0.14.11", features = ["client", "http2", "server", "tcp"] }
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", default-features = false, features = ["server-auto", "server-graceful", "tokio", "http1", "http2"] }
 tokio = { version = "1.7", features = ["io-util", "rt-multi-thread", "net", "signal"] }
-futures-rustls = { version = "0.21.1" }
+rustls-pemfile = "2.2"
 
 [dev-dependencies]
 crypto = { path = "../crypto", features = ["test-helpers"] }

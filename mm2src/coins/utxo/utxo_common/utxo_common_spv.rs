@@ -12,6 +12,9 @@ pub async fn validate_spv_proof<T: UtxoCommonOps>(
 ) -> Result<(), MmError<SPVError>> {
     let client = match &coin.as_ref().rpc_client {
         UtxoRpcClientEnum::Native(_) => return Ok(()),
+        // No block headers are parsed for a lightwalletd-served coin (CRD ch.39 R39.11.4f).
+        #[cfg(not(target_arch = "wasm32"))]
+        UtxoRpcClientEnum::LightWalletD(_) => return Ok(()),
         UtxoRpcClientEnum::Electrum(electrum_client) => electrum_client,
     };
     if tx.outputs.is_empty() {
@@ -254,6 +257,8 @@ pub async fn block_header_utxo_loop<T: UtxoCommonOps>(weak: UtxoWeak, constructo
             ok_or_continue_after_sleep!(coin.as_ref().rpc_client.get_block_count().compat().await, check_every);
         let client = match &coin.as_ref().rpc_client {
             UtxoRpcClientEnum::Native(_) => break,
+            #[cfg(not(target_arch = "wasm32"))]
+            UtxoRpcClientEnum::LightWalletD(_) => break,
             UtxoRpcClientEnum::Electrum(client) => client,
         };
         let (block_registry, block_headers) = ok_or_continue_after_sleep!(

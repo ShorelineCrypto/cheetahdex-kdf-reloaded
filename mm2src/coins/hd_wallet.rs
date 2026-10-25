@@ -292,9 +292,9 @@ impl From<RpcTaskError> for HDWalletRpcError {
         match e {
             RpcTaskError::Canceled => HDWalletRpcError::Internal("Canceled".to_owned()),
             RpcTaskError::Timeout(timeout) => HDWalletRpcError::Timeout(timeout),
-            RpcTaskError::NoSuchTask(_) | RpcTaskError::UnexpectedTaskStatus { .. } => {
-                HDWalletRpcError::Internal(error)
-            },
+            RpcTaskError::NoSuchTask(_)
+            | RpcTaskError::UnexpectedTaskStatus { .. }
+            | RpcTaskError::UnexpectedUserAction { .. } => HDWalletRpcError::Internal(error),
             RpcTaskError::Internal(internal) => HDWalletRpcError::Internal(internal),
         }
     }

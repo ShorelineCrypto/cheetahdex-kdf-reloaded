@@ -615,7 +615,9 @@ at least:
 - The resolved platform coin is not an EVM platform coin
   (unsupported-platform error).
 - Caller-supplied provider URL syntactically invalid, or the
-  provider discriminant unrecognised (client-input error).
+  provider discriminant unrecognised. The wire discriminant is
+  `Internal` (HTTP 500), not a request-parse failure, as Chapter 35
+  R35.2.8 binds.
 - The initial inventory fetch failed to reach the indexer, or the
   indexer returned a non-success status or an unparseable
   envelope (upstream-dependency error). This condition is
@@ -623,6 +625,37 @@ at least:
   tell a misconfigured request from a misbehaving indexer.
 - The NFT protocol's declared platform does not match the
   resolved platform coin (configuration consistency error).
+
+**Wire error contract (binding, cross-reference).** `enable_nft` is
+dispatched to the same single-token activation handler as
+`enable_erc20`, so its wire error contract -- the `error_type` set,
+the `error_data` shape and the HTTP status of each failure class
+listed above -- is the single-token contract of
+[Chapter 35](35-evm-v2-activation-rpcs.md) R35.2.5, with the
+NFT-specific failure mapping of R35.2.8 (for example: backing
+platform not active → `PlatformCoinIsNotActivated` with the platform
+ticker as a string; NFT already active → `TokenIsAlreadyActivated`
+with the NFT ticker as a string; provider unreachable → `Transport`,
+HTTP 500). Chapter 35 is authoritative for those wire values; this
+section remains authoritative for the request/response shapes, the
+activation scope and the graded failure semantics.
+
+**Inline activation (cross-reference).** The NFT pseudo-coin of an
+EVM platform can also be activated together with the platform, by
+supplying `nft_req` (an `NftProvider`, bare or wrapped in
+`provider`) to `enable_eth_with_tokens` or `task::enable_eth::init`
+([Chapter 35](35-evm-v2-activation-rpcs.md) R35.1.4b). Inline
+activation performs the same initial owned-inventory fetch for the
+platform's single address and reports the snapshot in the platform
+result's always-present `nfts_infos` map, keyed and shaped like the
+`nfts` member above. It is unavailable when the platform address is
+HD-derived; there, `enable_nft` is used after activation.
+
+> **Reloaded status (informative).** Since `fix/activation-api-parity`,
+> `enable_nft` is served by the single-token handler with the
+> discriminants and shapes of Chapter 35 R35.2.5 / R35.2.8, and inline
+> `nft_req` activation is supported; remaining deviations are listed in
+> the status notes of Chapter 35 §35.1 and §35.2.
 
 ## 19.7 EVM Withdrawal Path
 
@@ -671,9 +704,18 @@ The flow is:
    or an estimate against the encoded calldata.
 5. Resolve nonce using the platform coin's nonce-resolution
    path.
-6. Build and sign with the keypair-derived signing path
-   appropriate to the platform coin's fee policy (legacy or
-   EIP-1559).
+6. Build the transaction in the untyped legacy form, priced from
+   the single gas price of step 4, and sign it with the
+   keypair-derived legacy signing path. The form does not vary:
+   the request accepts only the `EthGas` fee form (`gas_price`,
+   `gas`) and rejects any other, and the coin's swap gas-fee policy
+   ([Chapter 35](35-evm-v2-activation-rpcs.md) R35.6.3) is not
+   consulted, so no NFT withdrawal is built as an EIP-1559
+   transaction. An untyped transaction is type `0`, which no
+   `max_eth_tx_type` cap (ch. 35 D35.7) can be below, and the
+   legacy signing path does not consult the cap. The refusal of a
+   form above the cap is enforced only on the EIP-1559 signing
+   path, which this flow does not use.
 7. Return transaction details with fee values denominated in
    the platform coin (`ETH`, `BNB`, `MATIC`, `AVAX`, `FTM`).
 
@@ -940,8 +982,8 @@ D7. **Incremental activation snapshot.** Activation currently
   withdrawal path's `safeTransferFrom` and `balanceOf`).
 - The Ethereum JSON-RPC `eth_call` method (used for the
   `balanceOf` query on the ERC-1155 max-balance drain path).
-- The EIP-1559 transaction format (one of the two signing
-  policies selected by the platform coin's fee policy).
+- The EIP-1559 transaction format (named in §19.7 step 6 only as
+  a typed form the withdrawal path does not build).
 - The EVM chain ecosystems named in §19.3 (Ethereum, BNB Smart
   Chain, Polygon, Avalanche, Fantom) and their respective
   platform-coin tickers.
@@ -1001,8 +1043,30 @@ V4. The ABI fragments embedded in §19.7 are byte-identical to
   specification documents; R4 counterparty-defined inter-operability
   shapes; R6 publicly observable endpoint behaviour; R7 independent
   work. Public ticker-symbol documentation under R3.
-- *Sibling-allowlist consultations:* none.
-- *Forbidden corpus:* not consulted.
+- *Sibling-allowlist consultations:* [Chapter 35](35-evm-v2-activation-rpcs.md)
+  (the shared single-token wire error contract and inline `nft_req`
+  activation cross-referenced from §19.6.2).
+- *Forbidden corpus:* not consulted for this chapter's own rules; the
+  two §19.6.2 cross-reference paragraphs restate Chapter 35, whose
+  wire values the KDF Spec Reader established from the upstream
+  reference version.
+- *Clean-context additions (forbidden corpus not consulted):* the
+  sentence at the end of step 6 of §19.7 (refusal of a transaction form
+  above the coin's maximum) was added on 2026-10-16 by a context that
+  never read the forbidden corpus. Later the same day, also by a
+  context that never read it, step 6 was rewritten and the EIP-1559
+  entry of §19.10 corrected to match. Since the chapter's first draft
+  both had said the withdrawal signs legacy or EIP-1559 according to
+  the platform coin's fee policy; the source consults no such policy
+  on this path and never builds an EIP-1559 transaction there, so
+  under chapter 01 R23 the chapter was corrected to the source. The
+  rewritten step absorbs the earlier sentence. It states this
+  implementation's own behavior as decided in chapter 35 D35.7 and
+  observed in this repository's source: `coins::nft::withdraw` accepts
+  only the `EthGas` fee form and builds and signs the untyped legacy
+  form, whose signer in `coins::eth` does not consult the maximum; the
+  EIP-1559 signer there enforces it. It describes no reference
+  behavior and relies on no Dirty Gate clearance.
 
 ## 19.13 CoinProtocol::NFT Variant
 

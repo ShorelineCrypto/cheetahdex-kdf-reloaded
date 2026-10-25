@@ -57,6 +57,9 @@ pub struct TendermintTokenActivationParams {}
 pub enum TendermintTokenInitError {
     #[display(fmt = "Internal error: {}", _0)]
     InternalError(String),
+    /// The token's protocol names a platform other than the one being activated (CRD R36.1.4 step 4).
+    #[display(fmt = "The token protocol names a platform other than the activated one")]
+    PlatformCoinMismatch,
 }
 
 pub struct TendermintTokenImpl {

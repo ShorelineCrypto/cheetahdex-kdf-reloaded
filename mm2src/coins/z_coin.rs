@@ -2,8 +2,8 @@
 use crate::rpc_command::init_withdraw::{InitWithdrawCoin, WithdrawInProgressStatus, WithdrawTaskHandle};
 use crate::utxo::rpc_clients::{UnspentInfo, UtxoRpcClientEnum, UtxoRpcClientOps, UtxoRpcError, UtxoRpcFut,
                                UtxoRpcResult};
-use crate::utxo::utxo_builder::{UtxoCoinBuilderCommonOps, UtxoCoinWithIguanaPrivKeyBuilder,
-                                UtxoFieldsWithIguanaPrivKeyBuilder};
+use crate::utxo::utxo_builder::{UtxoCoinBuildError, UtxoCoinBuildResult, UtxoCoinBuilderCommonOps,
+                                UtxoCoinWithIguanaPrivKeyBuilder, UtxoFieldsWithIguanaPrivKeyBuilder};
 use crate::utxo::utxo_common::{big_decimal_from_sat_unsigned, payment_script};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::utxo::zcash_params_path;
@@ -47,18 +47,19 @@ use script::{Builder as ScriptBuilder, Opcode, Script, TransactionInputSigner};
 use serde_json::{json, Value as Json};
 use serialization::{deserialize, CoinVariant};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, Weak};
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_client_backend::data_api::{wallet::ConfirmationsPolicy, InputSource, SentTransaction, TargetValue,
-                                     WalletCommitmentTrees, WalletRead, WalletWrite};
+use zcash_client_backend::data_api::{wallet::{input_selection::LockFilter, ConfirmationsPolicy},
+                                     InputSource, SentTransaction, TargetValue, WalletCommitmentTrees, WalletRead,
+                                     WalletWrite};
 use zcash_client_backend::decrypt_transaction;
 use zcash_keys::encoding::{decode_payment_address, encode_extended_spending_key, encode_payment_address};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::merkle_tree::read_commitment_tree;
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_primitives::transaction::builder::{BuildConfig, Builder as ZTxBuilder};
+use zcash_primitives::transaction::builder::{BuildConfig, Builder as ZTxBuilder, BundlePadding};
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_primitives::transaction::fees::fixed::FeeRule as FixedFeeRule;
 use zcash_primitives::transaction::Transaction as ZTransaction;
@@ -67,7 +68,7 @@ use zcash_protocol::constants::mainnet as z_mainnet_constants;
 use zcash_protocol::memo::MemoBytes;
 use zcash_protocol::value::Zatoshis as Amount;
 #[cfg(not(target_arch = "wasm32"))]
-use zcash_protocol::ShieldedProtocol;
+use zcash_protocol::ShieldedPool;
 #[cfg(not(target_arch = "wasm32"))]
 use zcash_transparent::builder::TransparentSigningSet;
 use zcash_transparent::bundle::TxOut;
@@ -84,6 +85,8 @@ use zcash_client_sqlite::WalletDb;
 use zcash_proofs::prover::LocalTxProver;
 
 #[cfg(not(target_arch = "wasm32"))] mod z_htlc;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod z_htlc_live_probe;
 #[cfg(not(target_arch = "wasm32"))]
 use z_htlc::{z_p2sh_spend, z_send_dex_fee, z_send_htlc};
 
@@ -104,6 +107,10 @@ use z_coin_sapling_cache::{SaplingBlockState, SaplingStateCacheOps, ZCoinSapling
 pub(crate) mod z_coin_wallet_db;
 #[cfg(not(target_arch = "wasm32"))]
 use z_coin_wallet_db::ZCoinShieldedHistory;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod z_lightwalletd;
+#[cfg(not(target_arch = "wasm32"))]
+pub use z_lightwalletd::{LightwalletdClient, LightwalletdError};
 
 /// `ZP2SHSpendError` compatible `TransactionErr` handling macro.
 #[cfg(not(target_arch = "wasm32"))]
@@ -126,7 +133,14 @@ macro_rules! try_ztx_s {
 }
 
 mod z_coin_ops;
+#[cfg(not(target_arch = "wasm32"))] mod z_ironwood;
 #[cfg(not(target_arch = "wasm32"))] mod z_swap_ops;
+#[cfg(target_arch = "wasm32")] mod z_swap_ops_wasm;
+#[cfg(not(target_arch = "wasm32"))] mod z_tx_read;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod z_tx_read_fixtures;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod z_v6_construction_tests;
 
 #[cfg(all(test, feature = "zhtlc-native-tests"))]
 mod z_coin_tests;
@@ -134,12 +148,84 @@ mod z_coin_tests;
 /// Whether this build can construct the transaction format the Ironwood network
 /// upgrade requires.
 ///
-/// `false` until the shielded transaction builder is able to emit version-6
-/// transactions. While it is `false`, a coin that declares an Ironwood upgrade
-/// stops accepting *new* swaps ahead of activation and stops building
-/// transactions once activation passes; receiving, balance and history are
-/// unaffected, and swaps already under way are never interrupted.
-const IRONWOOD_V6_SUPPORTED: bool = false;
+/// `true`: the shielded transaction builder emits version-6 transactions from the Ironwood
+/// activation height on (R39.6.4e) and the swap-path parsers read them (R39.11.16), so the swap
+/// freeze (R39.6.4b) and the build refusal (R39.6.4c) are inert. The gates and their rules are
+/// kept, and tested with this flag modelled as `false`, because they are the behaviour of a build
+/// that cannot construct the format. Do not set this back without also leaving the builder able to
+/// emit version 4 before activation.
+const IRONWOOD_V6_SUPPORTED: bool = true;
+
+/// Pirate Chain mainnet Ironwood activation: Sat 3 Oct 2026 19:00:00 UTC.
+///
+/// Read from Pirate's own `KOMODO_IRONWOOD_ACTIVATION` (`src/komodo_defs.h`) and
+/// confirmed by the Pirate maintainer on 2026-09-28, who also confirmed that no
+/// activation *height* will be published ahead of the upgrade and that there will
+/// be no standardness grace period.
+const ARRR_IRONWOOD_ACTIVATION_TIME: u32 = 1_791_054_000;
+
+/// Sapling activation height of the real ARRR chain, which identifies it among chains that present
+/// the same address prefixes (see [`builtin_ironwood_activation_time`]).
+const ARRR_SAPLING_ACTIVATION_HEIGHT: u32 = 152_855;
+
+/// The Ironwood activation time this build knows for a coin, used when the coin
+/// configuration does not supply one.
+///
+/// Every published ARRR coin configuration omits `ironwood_activation_time` — the
+/// field is an extension introduced by this project, and upstream KDF has no
+/// equivalent — so without a built-in value the two gates below would never engage
+/// on any deployment but our own. The upgrade is a fact about the network rather
+/// than an operator preference, so the value is carried here and a configuration
+/// entry overrides it (R39.6.4d).
+///
+/// Keyed on ticker **and on the chain's identity** (R39.6.4d). A ticker alone is not enough, and
+/// neither are the address prefixes: Pirate's own Ironwood test chain presents exactly as mainnet
+/// (mainnet prefixes `zs` and `pirate`, `chainName` `main`) while running a different history, so
+/// "mainnet-shaped parameters" does not mean "the real ARRR chain". What does differ, and cannot be
+/// shared by two chains that diverge from genesis, is the Sapling activation height, so that is part
+/// of the key.
+fn builtin_ironwood_activation_time(ticker: &str, params: &ZcoinConsensusParams) -> Option<u32> {
+    match ticker {
+        "ARRR" if params.sapling_activation_height == ARRR_SAPLING_ACTIVATION_HEIGHT => {
+            Some(ARRR_IRONWOOD_ACTIVATION_TIME)
+        },
+        _ => None,
+    }
+}
+
+/// The Ironwood activation time in force for a coin: the configured value, else the
+/// built-in one, unless the configuration opts out.
+///
+/// Precedence is configuration over built-in so that a moved activation time stays a
+/// data change — the Pirate maintainer restated 3 Oct 2026 19:00 UTC as fixed, but a
+/// compiled-in date that could not be overridden would refuse every transaction of
+/// the coin, and freeze its market, until a new binary shipped.
+///
+/// The built-in value is withheld unless the parameters describe the chain it was read from
+/// ([`builtin_ironwood_activation_time`]). That covers the test and regtest networks, which
+/// activate Ironwood at a *height* with no timestamp at all, and also Pirate's own test chain, which
+/// carries mainnet address prefixes and so cannot be told from the real chain by them.
+fn effective_ironwood_activation_time(params: &ZcoinConsensusParams, ticker: &str) -> Option<u32> {
+    if params.ironwood_gate_disabled() {
+        return None;
+    }
+    configured_or_builtin_ironwood_time(params, ticker)
+}
+
+/// The Ironwood activation time used to *discover* the activation height: the configured value,
+/// else the built-in one for the real chain, regardless of `ironwood_gate_disabled`. That switch
+/// opts a coin out of the swap freeze and the build refusal; with v6 construction supported neither
+/// exists, and a coin that opts out must still be able to build the transaction format its network
+/// requires.
+fn configured_or_builtin_ironwood_time(params: &ZcoinConsensusParams, ticker: &str) -> Option<u32> {
+    params.ironwood_activation_time().or_else(|| {
+        if matches!(params.network_type_hint(), NetworkType::Main) {
+            builtin_ironwood_activation_time(ticker, params)
+        } else {
+            None
+        }
+    })
+}
 
 /// How far ahead of Ironwood activation a coin that cannot build v6 transactions
 /// stops entering new swaps, in seconds.
@@ -240,18 +326,41 @@ pub struct ZcoinConsensusParams {
     /// can be published ahead of time. Optional and additive; absent for every
     /// coin that has no Ironwood upgrade, and ignored by builds that predate it.
     ///
+    /// When present this value is used; when absent, a built-in value for the
+    /// coin's ticker applies on mainnet (R39.6.4d) — for ARRR, 3 Oct 2026
+    /// 19:00 UTC. Configuration therefore *overrides* rather than *enables*, so a
+    /// moved activation time remains a data change.
+    ///
     /// **Compatibility:** GLEEC KDF has no equivalent and applies no upgrade
-    /// gating. Omit this field to retain GLEEC-equivalent behaviour for a coin;
-    /// when present it drives both the swap freeze and the build refusal. See
-    /// `docs/GLEEC_COMPATIBILITY.md`.
+    /// gating. Because a built-in value applies when this field is absent, omitting
+    /// it is *not* sufficient to match GLEEC KDF — set `ironwood_gate_disabled` to
+    /// `true` for that. See `docs/GLEEC_COMPATIBILITY.md`.
     #[serde(default)]
     ironwood_activation_time: Option<u32>,
+    /// Suppresses the Ironwood swap freeze and build refusal for this coin
+    /// entirely, including the built-in activation time (R39.6.4d).
+    ///
+    /// The escape hatch for an operator who would rather meet the network's own
+    /// rejection than this build's refusal — and the switch that restores
+    /// GLEEC-equivalent behaviour, since simply omitting
+    /// `ironwood_activation_time` no longer does so.
+    ///
+    /// **Compatibility:** set to `true` to match GLEEC KDF exactly. Defaults to
+    /// `false`. See `docs/GLEEC_COMPATIBILITY.md`.
+    #[serde(default)]
+    ironwood_gate_disabled: bool,
     /// Ironwood activation height, once the network has derived and published it.
     ///
     /// Optional: the height is unknown until the upgrade is imminent, and a
     /// wallet shipping an older coin configuration will not carry it at all.
     #[serde(default)]
     ironwood_activation_height: Option<u32>,
+    /// The Ironwood activation height learned at runtime (0 = not known), shared by every copy of
+    /// these parameters so a height discovered after the coin was built reaches the transaction
+    /// builder and the wallet database alike. Never serialized: it is a fact about the live chain,
+    /// not configuration (R39.6.4e).
+    #[serde(skip)]
+    ironwood_discovered_height: Arc<AtomicU32>,
     /// SLIP-44 coin type used in shielded HD derivation.
     coin_type: u32,
     /// Bech32 human-readable prefix for extended spending keys.
@@ -297,6 +406,28 @@ impl ZcoinConsensusParams {
     #[allow(dead_code)] // Consumed by the Ironwood build guard and swap freeze.
     pub(crate) fn ironwood_activation_height(&self) -> Option<u32> { self.ironwood_activation_height }
 
+    /// The Ironwood activation height in force: the configured one, else the one discovered at
+    /// runtime. `None` means the upgrade is not known to have a height yet, so the builder stays on
+    /// the pre-Ironwood transaction version.
+    pub(crate) fn effective_ironwood_activation_height(&self) -> Option<u32> {
+        self.ironwood_activation_height
+            .or_else(|| match self.ironwood_discovered_height.load(AtomicOrdering::SeqCst) {
+                0 => None,
+                discovered => Some(discovered),
+            })
+    }
+
+    /// Records a height discovered at runtime. A configured height always wins, and zero is not a
+    /// height the chain can activate at.
+    pub(crate) fn record_discovered_ironwood_height(&self, height: u32) {
+        if height != 0 {
+            self.ironwood_discovered_height.store(height, AtomicOrdering::SeqCst);
+        }
+    }
+
+    /// Whether this coin opts out of Ironwood gating altogether.
+    pub(crate) fn ironwood_gate_disabled(&self) -> bool { self.ironwood_gate_disabled }
+
     fn hrp_sapling_extended_spending_key(&self) -> &str { &self.hrp_sapling_extended_spending_key }
 
     fn hrp_sapling_extended_full_viewing_key(&self) -> &str { &self.hrp_sapling_extended_full_viewing_key }
@@ -319,6 +450,10 @@ impl consensus::Parameters for ZcoinConsensusParams {
             NetworkUpgrade::Heartwood => self.heartwood_activation_height.map(BlockHeight::from_u32),
             NetworkUpgrade::Canopy => self.canopy_activation_height.map(BlockHeight::from_u32),
             NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu6_2 => None,
+            // Ironwood (NU6.3) is the one post-Sapling upgrade a Pirate chain has. Until its height
+            // is configured or discovered it reports `None`, which keeps the builder on the
+            // Sapling-era versions; from the height on, the builder selects version 6 (R39.6.4e).
+            NetworkUpgrade::Nu6_3 => self.effective_ironwood_activation_height().map(BlockHeight::from_u32),
         }
     }
 }
@@ -505,7 +640,57 @@ fn verify_zcash_params_integrity(params_dir: &Path) -> MmResult<(), ZCoinBuildEr
     Ok(())
 }
 
+/// Which backend serves a shielded coin (CRD ch.39 R39.11.4g).
+///
+/// The coin carries this explicitly. Every Light-only behaviour (the shielded balance source, the
+/// background sync task, the pending-receipt surface, skipping the native commitment-tree
+/// maintenance) is selected by it, never by which arm of the UTXO RPC client enumeration the coin
+/// happens to hold: a discriminator that silently stops matching would select the Native path for a
+/// Light coin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZcoinMode {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Native,
+    Light,
+}
+
+impl ZcoinMode {
+    pub fn is_light(self) -> bool { self == ZcoinMode::Light }
+}
+
+/// How a shielded coin is to reach the chain, as requested at activation.
+#[derive(Clone, Debug)]
+pub enum ZcoinBackend {
+    /// A full node reached through its RPC. Native builds only.
+    #[cfg(not(target_arch = "wasm32"))]
+    Native,
+    /// The configured `light_wallet_d_servers` and nothing else. `electrum_servers` is accepted on
+    /// the activation wire and ignored: no Electrum connection is opened for a ZHTLC coin
+    /// (R39.11.5, R39.11.7).
+    Light { light_wallet_d_servers: Vec<String> },
+}
+
+impl ZcoinBackend {
+    fn mode(&self) -> ZcoinMode {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            ZcoinBackend::Native => ZcoinMode::Native,
+            ZcoinBackend::Light { .. } => ZcoinMode::Light,
+        }
+    }
+}
+
+/// What an in-flight shielded spend has committed: the value of the notes it
+/// spends and the height after which it can no longer be mined.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InFlightSpend {
+    pub(crate) value: u64,
+    pub(crate) expiry_height: u32,
+}
+
 pub struct ZCoinFields {
+    mode: ZcoinMode,
     dex_fee_addr: PaymentAddress,
     my_z_addr: PaymentAddress,
     my_z_addr_encoded: String,
@@ -517,22 +702,34 @@ pub struct ZCoinFields {
     /// Serializes note selection, construction, broadcast and in-flight recording
     /// into one critical section per shielded wallet (CRD ch.39 R39.8.0at).
     z_unspent_mutex: AsyncMutex<()>,
-    /// Value in zatoshi of the notes each transaction this process broadcast
-    /// committed, keyed by txid, retained until the transaction is observed as
-    /// scanned. The authoritative exclusion is the wallet database record written
-    /// by R39.8.0ap; this map exists only to tell a shortfall that an in-flight
-    /// spend will clear from one that no amount of waiting can fix, so a request
-    /// that is unfundable even with every note unexcluded fails at once instead of
-    /// consuming the wait budget (R39.8.0at). Being process-local costs nothing
-    /// after a restart: the map is empty, so a shortfall simply fails fast.
+    /// The notes each transaction this process broadcast, or built for a caller to
+    /// broadcast (including a withdrawal the caller submits, D39.8.0e), committed, keyed by txid, retained until
+    /// the transaction is observed as scanned or its expiry height has passed. The
+    /// authoritative exclusion is the wallet database record written by R39.8.0ap;
+    /// this map exists only to tell a shortfall that an in-flight spend will clear
+    /// from one that no amount of waiting can fix, so a request that is unfundable
+    /// even with every note unexcluded fails at once instead of consuming the wait
+    /// budget (R39.8.0at), and to name the in-flight spend when a withdrawal is
+    /// refused for it. Being process-local costs nothing after a restart: the map
+    /// is empty, so a shortfall simply fails fast.
     #[cfg(not(target_arch = "wasm32"))]
-    in_flight_spends: Mutex<HashMap<[u8; 32], u64>>,
+    in_flight_spends: Mutex<HashMap<[u8; 32], InFlightSpend>>,
     /// Message from the most recent shielded sync failure, cleared by the next
     /// successful scan. Without it a failed scan is reported as a scan still in
     /// progress, because both leave `wallet_db_scan_complete` false (R39.8.0au).
     #[cfg(not(target_arch = "wasm32"))]
     shielded_sync_error: Mutex<Option<String>>,
     sapling_state_synced: AtomicBool,
+    /// Message from the most recent failure of the commitment-tree sync loop (the chain tip or a
+    /// block could not be read), cleared as soon as the loop reads from the backend again. It
+    /// lets activation report the failure as a retriable `TemporaryError` instead of silently
+    /// waiting (CRD ch.39 R39.10.14). Kept apart from `shielded_sync_error`, which describes the
+    /// wallet-database scan and drives the reported history-sync state.
+    sapling_loop_error: Mutex<Option<String>>,
+    /// Set once the commitment-tree sync loop has ended, whether it finished, bailed out on bad
+    /// data or panicked. A stopped loop that never reported completion is what activation reports
+    /// as an `Internal` error (CRD ch.39 R39.10.14, "shielded sync process stops").
+    sapling_loop_stopped: Arc<AtomicBool>,
     /// Platform-agnostic sapling state cache (SQLite on native, IndexedDB on WASM).
     sapling_cache: Arc<dyn SaplingStateCacheOps + Send + Sync>,
     /// Native zcash_client_sqlite-compatible compact-block cache and wallet database.
@@ -795,15 +992,22 @@ mod zip212_decryption_tests {
 mod ironwood_swap_freeze_tests {
     use super::*;
 
+    /// What the gate functions are given to model a build that cannot construct version 6. The
+    /// production build can, so the gates never engage in it (`IRONWOOD_V6_SUPPORTED`); these tests
+    /// pin the rules for the build the gates exist for.
+    const BUILD_WITHOUT_V6: bool = false;
+
     /// Pirate mainnet Ironwood activation: Sat 3 Oct 2026 19:00:00 UTC.
-    const ARRR_IRONWOOD_ACTIVATION: u32 = 1_791_054_000;
+    ///
+    /// Aliases the production constant so the two cannot drift.
+    const ARRR_IRONWOOD_ACTIVATION: u32 = ARRR_IRONWOOD_ACTIVATION_TIME;
     /// The moment the freeze engages for that activation: 1 Oct 2026 23:40:00 UTC.
     const ARRR_FREEZE_START: u64 = ARRR_IRONWOOD_ACTIVATION as u64 - IRONWOOD_SWAP_FREEZE_MARGIN_SECS;
 
     fn frozen_at(now_sec: u64) -> bool {
         ironwood_swap_freeze_active_at(
             Some(ARRR_IRONWOOD_ACTIVATION),
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
             now_sec,
         )
@@ -816,7 +1020,7 @@ mod ironwood_swap_freeze_tests {
         for now in [0, ARRR_FREEZE_START, u64::MAX] {
             assert!(!ironwood_swap_freeze_active_at(
                 None,
-                IRONWOOD_V6_SUPPORTED,
+                BUILD_WITHOUT_V6,
                 IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
                 now
             ));
@@ -890,7 +1094,7 @@ mod ironwood_swap_freeze_tests {
     /// build without it must refuse rather than emit something unspendable.
     #[test]
     fn building_is_refused_from_activation_onwards() {
-        let refused = |now| ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), IRONWOOD_V6_SUPPORTED, now);
+        let refused = |now| ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), BUILD_WITHOUT_V6, now);
         assert!(
             !refused(ARRR_IRONWOOD_ACTIVATION as u64 - 1),
             "a second before activation must still build"
@@ -908,7 +1112,7 @@ mod ironwood_swap_freeze_tests {
     #[test]
     fn building_is_never_refused_without_an_upgrade_or_with_v6_support() {
         for now in [0, ARRR_IRONWOOD_ACTIVATION as u64, u64::MAX] {
-            assert!(!ironwood_build_refused_at(None, IRONWOOD_V6_SUPPORTED, now));
+            assert!(!ironwood_build_refused_at(None, BUILD_WITHOUT_V6, now));
             assert!(!ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), true, now));
         }
     }
@@ -928,12 +1132,12 @@ mod ironwood_swap_freeze_tests {
         let midpoint = freeze_start + (build_stop - freeze_start) / 2;
         assert!(ironwood_swap_freeze_active_at(
             Some(ARRR_IRONWOOD_ACTIVATION),
-            IRONWOOD_V6_SUPPORTED,
+            BUILD_WITHOUT_V6,
             IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
             midpoint
         ));
         assert!(
-            !ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), IRONWOOD_V6_SUPPORTED, midpoint),
+            !ironwood_build_refused_at(Some(ARRR_IRONWOOD_ACTIVATION), BUILD_WITHOUT_V6, midpoint),
             "an in-flight swap must still be able to spend or refund during the freeze window"
         );
         // And the window is wide enough for the longest payment lock to expire.
@@ -949,7 +1153,7 @@ mod ironwood_swap_freeze_tests {
     fn an_activation_time_inside_the_margin_clamps_instead_of_wrapping() {
         for now in [0, 1, ARRR_FREEZE_START] {
             assert!(
-                ironwood_swap_freeze_active_at(Some(10), IRONWOOD_V6_SUPPORTED, IRONWOOD_SWAP_FREEZE_MARGIN_SECS, now),
+                ironwood_swap_freeze_active_at(Some(10), BUILD_WITHOUT_V6, IRONWOOD_SWAP_FREEZE_MARGIN_SECS, now),
                 "an activation already in the past must freeze, not wrap (now={})",
                 now
             );
@@ -960,6 +1164,9 @@ mod ironwood_swap_freeze_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod ironwood_consensus_param_tests {
     use super::*;
+
+    /// See `ironwood_swap_freeze_tests::BUILD_WITHOUT_V6`.
+    const BUILD_WITHOUT_V6: bool = false;
 
     /// The ARRR mainnet `consensus_params` as published in `GLEECBTC/coins`, which
     /// carries no Ironwood keys. It must keep parsing, with both fields absent.
@@ -1009,12 +1216,175 @@ mod ironwood_consensus_param_tests {
         assert_eq!(parsed.ironwood_activation_height(), None);
     }
 
-    /// A2 only carries the data. Until Step 3 maps it, no post-Sapling upgrade may
-    /// report an activation height, because the transaction builder derives the
-    /// consensus branch ID from exactly these lookups: a premature mapping would
-    /// change the transactions this build signs.
+    /// Every published ARRR coin configuration omits `ironwood_activation_time`, so
+    /// without a built-in value neither gate would ever engage in production. The
+    /// built-in one must arm them from the coin file as it actually ships.
     #[test]
-    fn carrying_the_ironwood_height_does_not_yet_move_the_branch_id() {
+    fn builtin_activation_time_arms_the_gates_when_the_coin_file_omits_it() {
+        let params: ZcoinConsensusParams = serde_json::from_value(arrr_params_without_ironwood()).unwrap();
+        // The field really is absent — the point of the test.
+        assert_eq!(params.ironwood_activation_time(), None);
+
+        let effective = effective_ironwood_activation_time(&params, "ARRR");
+        assert_eq!(effective, Some(ARRR_IRONWOOD_ACTIVATION_TIME));
+
+        // And the gates fire off it, on the same schedule as a configured value.
+        let freeze_start = ARRR_IRONWOOD_ACTIVATION_TIME as u64 - IRONWOOD_SWAP_FREEZE_MARGIN_SECS;
+        assert!(!ironwood_swap_freeze_active_at(
+            effective,
+            BUILD_WITHOUT_V6,
+            IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
+            freeze_start - 1,
+        ));
+        assert!(ironwood_swap_freeze_active_at(
+            effective,
+            BUILD_WITHOUT_V6,
+            IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
+            freeze_start,
+        ));
+        assert!(!ironwood_build_refused_at(
+            effective,
+            BUILD_WITHOUT_V6,
+            ARRR_IRONWOOD_ACTIVATION_TIME as u64 - 1
+        ));
+        assert!(ironwood_build_refused_at(
+            effective,
+            BUILD_WITHOUT_V6,
+            ARRR_IRONWOOD_ACTIVATION_TIME as u64
+        ));
+    }
+
+    /// Configuration overrides the built-in, so a moved activation time stays a data
+    /// change rather than a release.
+    #[test]
+    fn configured_activation_time_overrides_the_builtin() {
+        let moved = ARRR_IRONWOOD_ACTIVATION_TIME + 86_400;
+        let mut cfg = arrr_params_without_ironwood();
+        cfg["ironwood_activation_time"] = json!(moved);
+        let params: ZcoinConsensusParams = serde_json::from_value(cfg).unwrap();
+
+        assert_eq!(effective_ironwood_activation_time(&params, "ARRR"), Some(moved));
+        // The built-in must not win, or a delayed upgrade could not be followed.
+        assert_ne!(
+            effective_ironwood_activation_time(&params, "ARRR"),
+            Some(ARRR_IRONWOOD_ACTIVATION_TIME)
+        );
+    }
+
+    /// The opt-out that restores GLEEC-equivalent behaviour. It must beat both the
+    /// built-in value and an explicitly configured one, otherwise an operator who
+    /// asked for no gating would still be gated.
+    #[test]
+    fn ironwood_gate_disabled_suppresses_both_the_builtin_and_a_configured_time() {
+        let mut off = arrr_params_without_ironwood();
+        off["ironwood_gate_disabled"] = json!(true);
+        let params: ZcoinConsensusParams = serde_json::from_value(off).unwrap();
+        assert!(params.ironwood_gate_disabled());
+        assert_eq!(effective_ironwood_activation_time(&params, "ARRR"), None);
+
+        let mut off_with_time = arrr_params_without_ironwood();
+        off_with_time["ironwood_gate_disabled"] = json!(true);
+        off_with_time["ironwood_activation_time"] = json!(ARRR_IRONWOOD_ACTIVATION_TIME);
+        let params: ZcoinConsensusParams = serde_json::from_value(off_with_time).unwrap();
+        assert_eq!(effective_ironwood_activation_time(&params, "ARRR"), None);
+
+        // Defaulting matters as much as the switch: an existing coin file that says
+        // nothing must not be read as opting out.
+        let silent: ZcoinConsensusParams = serde_json::from_value(arrr_params_without_ironwood()).unwrap();
+        assert!(!silent.ironwood_gate_disabled());
+    }
+
+    /// The built-in value is keyed on ticker, so a shielded coin with no Ironwood
+    /// upgrade must not inherit Pirate's activation time from ARRR-shaped parameters.
+    #[test]
+    fn builtin_applies_only_to_known_tickers() {
+        let params: ZcoinConsensusParams = serde_json::from_value(arrr_params_without_ironwood()).unwrap();
+        for ticker in ["ZOMBIE", "ARRR-segwit", "arrr", "", "KMD"] {
+            assert_eq!(
+                effective_ironwood_activation_time(&params, ticker),
+                None,
+                "{ticker} must not inherit Pirate's activation time"
+            );
+        }
+    }
+
+    /// Pirate's test and regtest networks activate Ironwood at a *height* with no
+    /// timestamp (testnet at 297), so the mainnet timestamp describes neither. A
+    /// build-time default must not gate them off a value that does not apply.
+    #[test]
+    fn builtin_is_withheld_from_test_and_regtest_parameters() {
+        use zcash_protocol::constants::{regtest, testnet};
+
+        for (hrp_addr, hrp_key) in [
+            (
+                testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+                testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            ),
+            (
+                regtest::HRP_SAPLING_PAYMENT_ADDRESS,
+                regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
+            ),
+        ] {
+            let mut cfg = arrr_params_without_ironwood();
+            cfg["hrp_sapling_payment_address"] = json!(hrp_addr);
+            cfg["hrp_sapling_extended_spending_key"] = json!(hrp_key);
+            let params: ZcoinConsensusParams = serde_json::from_value(cfg).unwrap();
+            assert!(!matches!(params.network_type_hint(), NetworkType::Main));
+            assert_eq!(
+                effective_ironwood_activation_time(&params, "ARRR"),
+                None,
+                "{hrp_addr} parameters must not take the mainnet built-in"
+            );
+        }
+
+        // An explicit configured value still applies on those networks — the
+        // withholding is of the *default*, not of the feature.
+        let mut cfg = arrr_params_without_ironwood();
+        cfg["hrp_sapling_payment_address"] = json!(testnet::HRP_SAPLING_PAYMENT_ADDRESS);
+        cfg["hrp_sapling_extended_spending_key"] = json!(testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY);
+        cfg["ironwood_activation_time"] = json!(1_700_000_000u32);
+        let params: ZcoinConsensusParams = serde_json::from_value(cfg).unwrap();
+        assert_eq!(effective_ironwood_activation_time(&params, "ARRR"), Some(1_700_000_000));
+    }
+
+    /// The refusal is a condition the user resolves by upgrading, not a server
+    /// fault, so it must not reach a caller as an internal error / HTTP 500 --
+    /// which is how it first shipped. After 3 Oct every ARRR withdrawal takes this
+    /// path, and a GUI showing "Internal error" would read as a broken wallet
+    /// rather than an actionable prompt.
+    #[test]
+    fn the_ironwood_refusal_is_reported_as_unsupported_not_as_an_internal_error() {
+        use crate::lp_coins_errors::WithdrawError;
+        use common::HttpStatusCode;
+
+        let refusal = GenTxError::IronwoodUpgradeUnsupported {
+            coin: "ARRR".to_owned(),
+            activation_time: ARRR_IRONWOOD_ACTIVATION_TIME,
+        };
+        let message = refusal.to_string();
+        let withdraw: WithdrawError = refusal.into();
+
+        assert!(
+            matches!(withdraw, WithdrawError::UnsupportedAfterNetworkUpgrade(_)),
+            "expected UnsupportedAfterNetworkUpgrade, got {withdraw:?}"
+        );
+        assert_eq!(withdraw.status_code(), common::StatusCode::BAD_REQUEST);
+        // The reason must survive the conversion: it names the coin and the time.
+        let reported = withdraw.to_string();
+        assert!(reported.contains("ARRR"), "{reported}");
+        assert!(
+            reported.contains(&ARRR_IRONWOOD_ACTIVATION_TIME.to_string()),
+            "{reported}"
+        );
+        assert!(reported.contains(&message), "{reported}");
+    }
+
+    /// Step E binds `Nu6_3` to the Ironwood height, and only that upgrade: the unused Zcash
+    /// upgrades (Nu5 .. Nu6_2) stay unmapped, because the builder derives the consensus branch ID
+    /// from exactly these lookups and Pirate has none of them. Below the height the branch is
+    /// Sapling's, from it Ironwood's.
+    #[test]
+    fn the_ironwood_height_moves_the_branch_id_and_nothing_else_does() {
         let mut with_height = arrr_params_without_ironwood();
         with_height["ironwood_activation_time"] = json!(1_791_054_000u32);
         with_height["ironwood_activation_height"] = json!(4_141_710u32);
@@ -1032,9 +1402,26 @@ mod ironwood_consensus_param_tests {
             params.activation_height(NetworkUpgrade::Sapling),
             Some(BlockHeight::from_u32(152_855))
         );
-        // Far above the declared Ironwood height, the branch in force is still Sapling.
         assert_eq!(
-            BranchId::for_height(&params, BlockHeight::from_u32(4_200_000)),
+            params.activation_height(NetworkUpgrade::Nu6_3),
+            Some(BlockHeight::from_u32(4_141_710))
+        );
+        assert_eq!(
+            BranchId::for_height(&params, BlockHeight::from_u32(4_141_709)),
+            BranchId::Sapling
+        );
+        assert_eq!(
+            BranchId::for_height(&params, BlockHeight::from_u32(4_141_710)),
+            BranchId::Nu6_3
+        );
+
+        // The activation *time* alone moves nothing: it is data for discovery, not a height.
+        let mut time_only = arrr_params_without_ironwood();
+        time_only["ironwood_activation_time"] = json!(1_791_054_000u32);
+        let time_only: ZcoinConsensusParams = serde_json::from_value(time_only).unwrap();
+        assert_eq!(time_only.activation_height(NetworkUpgrade::Nu6_3), None);
+        assert_eq!(
+            BranchId::for_height(&time_only, BlockHeight::from_u32(4_200_000)),
             BranchId::Sapling
         );
     }
@@ -1109,6 +1496,143 @@ mod shielded_history_status_tests {
     }
 }
 
+/// CRD ch.39 §39.11: a Light-mode coin is built with lightwalletd as its only backend (T39.11.a,
+/// T39.11.b, R39.11.4g).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod light_backend_tests {
+    use super::*;
+    use common::block_on;
+    use mm2_core::mm_ctx::MmCtxBuilder;
+
+    fn arrr_protocol_info() -> ZcoinProtocolInfo {
+        serde_json::from_value(json!({
+            "consensus_params": {
+                "overwinter_activation_height": 152855,
+                "sapling_activation_height": 152855,
+                "blossom_activation_height": null,
+                "heartwood_activation_height": null,
+                "canopy_activation_height": null,
+                "coin_type": 133,
+                "hrp_sapling_extended_spending_key": "secret-extended-key-main",
+                "hrp_sapling_extended_full_viewing_key": "zxviews",
+                "hrp_sapling_payment_address": "zs",
+                "b58_pubkey_address_prefix": [0x1c, 0xb8],
+                "b58_script_address_prefix": [0x1c, 0xbd]
+            },
+            "z_derivation_path": "m/32'/133'"
+        }))
+        .unwrap()
+    }
+
+    fn builder_for<'a>(
+        ctx: &'a MmArc,
+        conf: &'a Json,
+        params: &'a UtxoActivationParams,
+        backend: ZcoinBackend,
+    ) -> ZCoinBuilder<'a> {
+        ZCoinBuilder::new(
+            ctx,
+            "ARRR",
+            conf,
+            params,
+            &[1; 32],
+            PathBuf::from("./for_tests"),
+            None,
+            ExtendedSpendingKey::master(&[7; 32]),
+            arrr_protocol_info(),
+            backend,
+        )
+    }
+
+    /// The request still carries Electrum servers (deployed wallets send them unconditionally), but
+    /// the client built for the coin is the lightwalletd one: nothing in the build path can open an
+    /// Electrum connection for a ZHTLC coin.
+    #[test]
+    fn a_light_coin_is_built_on_lightwalletd_whatever_the_request_says_about_electrum() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let conf = json!({ "coin": "ARRR", "txfee": 10000 });
+        let params = UtxoActivationParams::from_legacy_req(&json!({
+            "method": "electrum",
+            "servers": [{ "url": "unreachable.invalid:10008" }]
+        }))
+        .unwrap();
+        assert!(matches!(params.mode, crate::utxo::UtxoRpcMode::Electrum { .. }));
+
+        let backend = ZcoinBackend::Light {
+            light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()],
+        };
+        assert!(backend.mode().is_light());
+        let builder = builder_for(&ctx, &conf, &params, backend);
+        let client = block_on(builder.rpc_client()).unwrap();
+        assert!(matches!(client, UtxoRpcClientEnum::LightWalletD(_)), "{client:?}");
+
+        // A fixed fee is declared, so it is kept.
+        let fee = block_on(builder.tx_fee(&client)).unwrap();
+        assert!(matches!(fee, crate::utxo::TxFee::FixedPerKb(10000)));
+    }
+
+    /// The published mainnet ARRR entry has no `txfee`: it must build and keep the shared fixed
+    /// default (no estimation is involved).
+    #[test]
+    fn a_light_coin_with_no_txfee_key_keeps_the_fixed_default() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let params = UtxoActivationParams::from_legacy_req(&json!({ "method": "enable" })).unwrap();
+        let conf = json!({ "coin": "ARRR" });
+        let backend = ZcoinBackend::Light {
+            light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()],
+        };
+        let builder = builder_for(&ctx, &conf, &params, backend);
+        let client = block_on(builder.rpc_client()).unwrap();
+        let fee = block_on(builder.tx_fee(&client)).unwrap();
+        assert!(matches!(fee, crate::utxo::TxFee::FixedPerKb(1000)));
+    }
+
+    /// lightwalletd has no fee estimation: an explicit request for it (`txfee: 0`) is refused.
+    #[test]
+    fn a_light_coin_requesting_fee_estimation_is_refused() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let params = UtxoActivationParams::from_legacy_req(&json!({ "method": "enable" })).unwrap();
+        for conf in [json!({ "coin": "ARRR", "txfee": 0 })] {
+            let backend = ZcoinBackend::Light {
+                light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()],
+            };
+            let builder = builder_for(&ctx, &conf, &params, backend);
+            let client = block_on(builder.rpc_client()).unwrap();
+            let err = block_on(builder.tx_fee(&client)).unwrap_err();
+            assert!(
+                matches!(err.get_inner(), UtxoCoinBuildError::NoFixedFeeDeclared { .. }),
+                "{err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_light_coin_without_a_lightwalletd_endpoint_is_not_built() {
+        let ctx = MmCtxBuilder::default().into_mm_arc();
+        let conf = json!({ "coin": "ARRR", "txfee": 10000 });
+        let params = UtxoActivationParams::from_legacy_req(&json!({ "method": "enable" })).unwrap();
+        let builder = builder_for(&ctx, &conf, &params, ZcoinBackend::Light {
+            light_wallet_d_servers: Vec::new(),
+        });
+        let err = block_on(builder.rpc_client()).unwrap_err();
+        assert!(
+            matches!(err.get_inner(), UtxoCoinBuildError::NoLightwalletdServers { .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn the_mode_is_carried_by_the_backend_and_not_inferred_from_the_client() {
+        assert_eq!(ZcoinBackend::Native.mode(), ZcoinMode::Native);
+        assert!(!ZcoinBackend::Native.mode().is_light());
+        assert!(ZcoinBackend::Light {
+            light_wallet_d_servers: vec!["https://lightd1.example:443".to_owned()]
+        }
+        .mode()
+        .is_light());
+    }
+}
+
 impl AsRef<UtxoCoinFields> for ZCoin {
     fn as_ref(&self) -> &UtxoCoinFields { &self.utxo_arc }
 }
@@ -1122,6 +1646,7 @@ pub async fn z_coin_from_conf_and_params(
     account: u32,
     #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
     protocol_info: ZcoinProtocolInfo,
+    backend: ZcoinBackend,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
     let z_key = shielded_spending_key_for_policy(ctx, secp_priv_key, account, &protocol_info)?;
     z_coin_from_conf_and_params_with_z_key(
@@ -1136,6 +1661,7 @@ pub async fn z_coin_from_conf_and_params(
         zcash_params_path,
         z_key,
         protocol_info,
+        backend,
     )
     .await
 }
@@ -1227,7 +1753,26 @@ mod hd_shielded_key_tests {
     }
 }
 
+/// Marks the commitment-tree sync loop as ended when dropped (normal return, early exit or panic).
+struct SaplingLoopStoppedGuard(Arc<AtomicBool>);
+
+impl Drop for SaplingLoopStoppedGuard {
+    fn drop(&mut self) { self.0.store(true, AtomicOrdering::SeqCst); }
+}
+
 async fn sapling_state_cache_loop(coin: ZCoin) {
+    // A Light coin has no commitment-tree cache to maintain: its tree comes from lightwalletd and
+    // its notes from the shielded wallet database. Decided by the coin's explicit mode, not by the
+    // identity of its RPC client (R39.11.4g).
+    if coin.is_light() {
+        log::debug!(
+            "Light-mode ZCoin legacy commitment-tree cache loop skipped for {}; \
+             wallet-history scanning is handled by the modern lightwalletd wallet scanner",
+            coin.ticker()
+        );
+        coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
+        return;
+    }
     // Determine the starting height and tree state from the cache (R39.6.1).
     let query = coin.z_fields.sapling_cache.query_latest_block().await;
     let (mut processed_height, mut current_tree) = match query {
@@ -1257,7 +1802,7 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
         //
         // Light mode seeds the modern shielded wallet scanner directly from
         // `check_point_block`; this legacy commitment-tree cache loop exits for
-        // Electrum-backed activations and is not the lightwalletd scan path.
+        // Light-mode activations and is not the lightwalletd scan path.
         Ok(None) | Err(_) => match coin.z_fields.check_point_block.as_ref() {
             Some(check_point) => match read_commitment_tree(check_point.sapling_tree.0.as_slice()) {
                 Ok(tree) => (check_point.height + 1, tree),
@@ -1289,20 +1834,21 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
             Ok(b) => b,
             Err(e) => {
                 log::error!("Error {} on getting block count", e);
+                coin.set_sapling_loop_error(format!("could not get the block count: {e}"));
                 Timer::sleep(10.).await;
                 continue;
             },
         };
+        coin.clear_sapling_loop_error();
 
         let native_client = match coin.rpc_client() {
             UtxoRpcClientEnum::Native(n) => n,
-            UtxoRpcClientEnum::Electrum(_) => {
-                log::debug!(
-                    "Light-mode ZCoin legacy commitment-tree cache loop skipped for {}; \
-                     wallet-history scanning is handled by the modern lightwalletd wallet scanner",
-                    coin.ticker()
+            other => {
+                log::error!(
+                    "ZCoin {} is in Native mode but holds a {:?} RPC client; the commitment-tree loop cannot run",
+                    coin.ticker(),
+                    other
                 );
-                coin.z_fields.sapling_state_synced.store(true, AtomicOrdering::Relaxed);
                 return;
             },
         };
@@ -1320,10 +1866,12 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                     Ok(b) => b,
                     Err(e) => {
                         log::error!("Error {} on getting block", e);
+                        coin.set_sapling_loop_error(format!("could not get block {processed_height}: {e}"));
                         Timer::sleep(1.).await;
                         continue;
                     },
                 };
+                coin.clear_sapling_loop_error();
                 let root_bytes = current_tree.root().to_bytes();
 
                 let current_sapling_root = Some(H256::from(root_bytes).reversed().into());
@@ -1336,9 +1884,22 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                             .compat()
                             .await
                             .expect("Panic here to avoid storing invalid tree state to the DB");
-                        let tx: UtxoTx = deserialize(tx.as_slice()).expect("Panic here to avoid invalid tree state");
-                        for output in tx.shielded_outputs {
-                            let node = match Option::from(Node::from_bytes(output.cmu.take())) {
+                        // The Zcash reader, not the shared UTXO parser: the latter misreads version 5 and 6,
+                        // and a misread here would corrupt the commitment tree (R39.11.16a).
+                        let tx = ZTransaction::read(tx.as_slice(), BranchId::Sapling)
+                            .expect("Panic here to avoid invalid tree state");
+                        let cmus_of_tx = tx
+                            .sapling_bundle()
+                            .map(|bundle| {
+                                bundle
+                                    .shielded_outputs()
+                                    .iter()
+                                    .map(|output| output.cmu().to_bytes())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        for cmu in cmus_of_tx {
+                            let node = match Option::from(Node::from_bytes(cmu)) {
                                 Some(node) => node,
                                 None => {
                                     log::error!(
@@ -1357,7 +1918,7 @@ async fn sapling_state_cache_loop(coin: ZCoin) {
                                 );
                                 return;
                             }
-                            cmus.push(output.cmu);
+                            cmus.push(H256::from(cmu));
                         }
                     }
 
@@ -1404,14 +1965,14 @@ const SHIELDED_SYNC_POLL_PERIOD_SECS: f64 = 30.;
 /// the database stays anchored at that height for the rest of the session and
 /// incoming shielded transactions stay invisible until the coin is activated
 /// again. Native mode is served by its own commitment-tree task, which returns
-/// early for Electrum-backed activations.
+/// early for Light-mode activations.
 ///
 /// Each pass resumes from the wallet's own local sync state
 /// (`requested_start_height: None` plus `skip_sync_params: true`), so it tops up
 /// from the last scanned height and never re-anchors the wallet — anchor changes
 /// remain activation-only per R39.8.0g/h.
 #[cfg(not(target_arch = "wasm32"))]
-async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<String>) {
+async fn post_activation_shielded_sync(coin: ZCoin) {
     let ticker = coin.ticker().to_owned();
     let (utxo_weak, z_fields_weak) = coin.into_weak_parts();
 
@@ -1439,7 +2000,7 @@ async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<
 
         let no_progress = |_: u64, _: u64| {};
         if let Err(e) = coin
-            .fetch_lightwalletd_compact_blocks_to_height(&light_wallet_d_servers, tip, None, true, &no_progress)
+            .fetch_lightwalletd_compact_blocks_to_height(tip, None, true, &no_progress)
             .await
         {
             log::warn!("ZCoin periodic sync for {ticker}: compact block fetch to height {tip} failed: {e}");
@@ -1454,7 +2015,7 @@ async fn post_activation_shielded_sync(coin: ZCoin, light_wallet_d_servers: Vec<
                 // two reads is then already excluded by the scanned-state
                 // check below, so its value can never be counted from both the
                 // wallet database and the pending set (R39.8.0ah).
-                coin.refresh_pending_receipts(&light_wallet_d_servers, tip).await;
+                coin.refresh_pending_receipts(tip).await;
             },
             // `scan_shielded_wallet_db_to_height` clears the scan-complete flag on
             // failure, which blocks spending until a later pass succeeds. That is
@@ -1477,7 +2038,7 @@ impl ZCoin {
     /// network now requires.
     pub(crate) fn ironwood_build_refused(&self) -> bool {
         ironwood_build_refused_at(
-            self.z_fields.consensus_params.ironwood_activation_time(),
+            self.effective_ironwood_activation_time(),
             IRONWOOD_V6_SUPPORTED,
             now_ms() / 1000,
         )
@@ -1485,11 +2046,17 @@ impl ZCoin {
 
     fn ironwood_swap_freeze_active(&self) -> bool {
         ironwood_swap_freeze_active_at(
-            self.z_fields.consensus_params.ironwood_activation_time(),
+            self.effective_ironwood_activation_time(),
             IRONWOOD_V6_SUPPORTED,
             IRONWOOD_SWAP_FREEZE_MARGIN_SECS,
             now_ms() / 1000,
         )
+    }
+
+    /// The Ironwood activation time in force for this coin — configured value,
+    /// else the built-in one for its ticker, unless gating is switched off.
+    pub(crate) fn effective_ironwood_activation_time(&self) -> Option<u32> {
+        effective_ironwood_activation_time(&self.z_fields.consensus_params, &self.utxo_arc.conf.ticker)
     }
 }
 
@@ -1498,9 +2065,7 @@ impl ZCoin {
     /// Starts the periodic light-mode shielded wallet sync described on
     /// [`post_activation_shielded_sync`]. Call once, after the activation scan has
     /// completed, for Light-mode activations only.
-    pub fn spawn_post_activation_shielded_sync(&self, light_wallet_d_servers: Vec<String>) {
-        spawn(post_activation_shielded_sync(self.clone(), light_wallet_d_servers));
-    }
+    pub fn spawn_post_activation_shielded_sync(&self) { spawn(post_activation_shielded_sync(self.clone())); }
 
     /// Re-derive the pending-receipt set from the backend's current mempool.
     ///
@@ -1509,11 +2074,20 @@ impl ZCoin {
     /// or expired simply does not reappear (R39.8.0ah). Receipts whose
     /// transaction the wallet database has already scanned are excluded here so
     /// their value is never counted from both sources.
-    async fn refresh_pending_receipts(&self, light_wallet_d_servers: &[String], tip: u64) {
+    async fn refresh_pending_receipts(&self, tip: u64) {
+        // The pending view is advisory and degrades to zero (R39.8.0ai): with no admitted endpoint
+        // there is nothing to poll.
+        let servers = match self.admitted_lightwalletd_servers().await {
+            Ok(servers) => servers,
+            Err(e) => {
+                log::debug!("ZCoin pending receipts for {}: {e}", self.ticker());
+                Vec::new()
+            },
+        };
         let observed = self
             .z_fields
             .shielded_history
-            .fetch_pending_receipts(light_wallet_d_servers, tip)
+            .fetch_pending_receipts(&servers, tip)
             .await;
 
         let mut rebuilt = HashMap::with_capacity(observed.len());
@@ -1565,8 +2139,10 @@ pub struct ZCoinBuilder<'a> {
     zcash_params_path: Option<PathBuf>,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
+    backend: ZcoinBackend,
 }
 
+#[async_trait]
 impl<'a> UtxoCoinBuilderCommonOps for ZCoinBuilder<'a> {
     fn ctx(&self) -> &MmArc { self.ctx }
 
@@ -1575,6 +2151,44 @@ impl<'a> UtxoCoinBuilderCommonOps for ZCoinBuilder<'a> {
     fn activation_params(&self) -> &UtxoActivationParams { self.params }
 
     fn ticker(&self) -> &str { self.ticker }
+
+    /// The RPC client is selected by the requested backend, never by `activation_params().mode`: a
+    /// Light-mode coin is served by lightwalletd alone and no Electrum connection is built for it
+    /// (R39.11.1, R39.11.5).
+    async fn rpc_client(&self) -> UtxoCoinBuildResult<UtxoRpcClientEnum> {
+        match &self.backend {
+            #[cfg(not(target_arch = "wasm32"))]
+            ZcoinBackend::Native => Ok(UtxoRpcClientEnum::Native(self.native_client()?)),
+            ZcoinBackend::Light { light_wallet_d_servers } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = light_wallet_d_servers;
+                    MmError::err(UtxoCoinBuildError::NativeRpcNotSupportedInWasm)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if light_wallet_d_servers.is_empty() {
+                        return MmError::err(UtxoCoinBuildError::NoLightwalletdServers {
+                            ticker: self.ticker.to_owned(),
+                        });
+                    }
+                    Ok(UtxoRpcClientEnum::LightWalletD(LightwalletdClient::connect(
+                        light_wallet_d_servers.clone(),
+                        &self.protocol_info.consensus_params,
+                        configured_or_builtin_ironwood_time(&self.protocol_info.consensus_params, self.ticker),
+                        z_lightwalletd::HtlcAddressing {
+                            p2sh_prefix: self.p2sh_address_prefix(),
+                            p2sh_t_prefix: self.conf()["taddr"].as_u64().unwrap_or(0) as u8,
+                            pubkey_prefix: self.pub_addr_prefix(),
+                            pubkey_t_prefix: self.conf()["taddr"].as_u64().unwrap_or(0) as u8,
+                            // Every shielded-coin family is double-SHA256.
+                            checksum_type: kdf_crypto::ChecksumType::DSHA256,
+                        },
+                    )))
+                }
+            },
+        }
+    }
 }
 
 #[async_trait]
@@ -1662,6 +2276,7 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
         );
 
         let z_fields = ZCoinFields {
+            mode: self.backend.mode(),
             dex_fee_addr,
             my_z_addr,
             my_z_addr_encoded,
@@ -1674,6 +2289,8 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
             #[cfg(not(target_arch = "wasm32"))]
             shielded_sync_error: Mutex::new(None),
             sapling_state_synced: AtomicBool::new(false),
+            sapling_loop_error: Mutex::new(None),
+            sapling_loop_stopped: Arc::new(AtomicBool::new(false)),
             sapling_cache,
             #[cfg(not(target_arch = "wasm32"))]
             shielded_history,
@@ -1710,7 +2327,23 @@ impl<'a> UtxoCoinWithIguanaPrivKeyBuilder for ZCoinBuilder<'a> {
                     .mm_err(Into::into)?;
             }
         }
-        spawn(sapling_state_cache_loop(z_coin.clone()));
+        // The Light backend decides which endpoints may be used from the chain the wallet already
+        // follows, so it needs the wallet database (R39.11.7a).
+        #[cfg(not(target_arch = "wasm32"))]
+        if let UtxoRpcClientEnum::LightWalletD(client) = z_coin.rpc_client() {
+            client
+                .backend()
+                .bind_wallet(Arc::new(z_lightwalletd::FileBranchStore::new(
+                    (*z_coin.z_fields.shielded_history).clone(),
+                )));
+        }
+        let loop_stopped = z_coin.z_fields.sapling_loop_stopped.clone();
+        let loop_coin = z_coin.clone();
+        spawn(async move {
+            // Drop guard: the flag is also set when the loop panics.
+            let _stopped = SaplingLoopStoppedGuard(loop_stopped);
+            sapling_state_cache_loop(loop_coin).await;
+        });
         Ok(z_coin)
     }
 }
@@ -1726,6 +2359,7 @@ impl<'a> ZCoinBuilder<'a> {
         #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
         z_spending_key: ExtendedSpendingKey,
         protocol_info: ZcoinProtocolInfo,
+        backend: ZcoinBackend,
     ) -> ZCoinBuilder<'a> {
         ZCoinBuilder {
             ctx,
@@ -1739,6 +2373,7 @@ impl<'a> ZCoinBuilder<'a> {
             zcash_params_path,
             z_spending_key,
             protocol_info,
+            backend,
         }
     }
 }
@@ -1753,6 +2388,7 @@ async fn z_coin_from_conf_and_params_with_z_key(
     #[cfg(not(target_arch = "wasm32"))] zcash_params_path: Option<PathBuf>,
     z_spending_key: ExtendedSpendingKey,
     protocol_info: ZcoinProtocolInfo,
+    backend: ZcoinBackend,
 ) -> Result<ZCoin, MmError<ZCoinBuildError>> {
     let builder = ZCoinBuilder::new(
         ctx,
@@ -1766,6 +2402,7 @@ async fn z_coin_from_conf_and_params_with_z_key(
         zcash_params_path,
         z_spending_key,
         protocol_info,
+        backend,
     );
     builder.build().await
 }
@@ -1799,7 +2436,7 @@ impl MarketCoinOps for ZCoin {
         {
             let coin = self.clone();
             let fut = async move {
-                if let UtxoRpcClientEnum::Electrum(_) = coin.rpc_client() {
+                if coin.is_light() {
                     if !coin.shielded_wallet_db_scan_complete() {
                         log::warn!(
                             "ZCoin light-mode balance requested before shielded wallet DB scan completed for {}",
@@ -1855,14 +2492,36 @@ impl MarketCoinOps for ZCoin {
 
     fn platform_ticker(&self) -> &str { self.ticker() }
 
-    #[inline(always)]
     fn send_raw_tx(&self, tx: &str) -> Box<dyn Future<Item = String, Error = String> + Send> {
-        utxo_common::send_raw_tx(self.as_ref(), tx)
+        let bytes = try_fus!(hex::decode(tx));
+        self.send_raw_tx_bytes(&bytes)
     }
 
-    #[inline(always)]
+    /// Broadcasts through the shared UTXO path, then records what the backend accepted.
+    ///
+    /// This is where a withdrawal's second step lands (`send_raw_transaction`), so it is the one
+    /// place this daemon observes that broadcast. The hook lives on `ZCoin` rather than in
+    /// `utxo_common`, which is shared by every UTXO coin and knows nothing of shielded notes
+    /// (R39.8.0ap, D39.8.0e). Recording happens only after the backend accepted the transaction,
+    /// and a failure to record never fails the broadcast.
     fn send_raw_tx_bytes(&self, tx: &[u8]) -> Box<dyn Future<Item = String, Error = String> + Send> {
-        utxo_common::send_raw_tx_bytes(self.as_ref(), tx)
+        let fut = utxo_common::send_raw_tx_bytes(self.as_ref(), tx);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let coin = self.clone();
+            let bytes = tx.to_vec();
+            Box::new(
+                async move {
+                    let hash = fut.compat().await?;
+                    coin.record_broadcast_shielded_tx(&bytes);
+                    Ok(hash)
+                }
+                .boxed()
+                .compat(),
+            )
+        }
+        #[cfg(target_arch = "wasm32")]
+        fut
     }
 
     fn wait_for_confirmations(
@@ -1873,7 +2532,23 @@ impl MarketCoinOps for ZCoin {
         wait_until: u64,
         check_every: u64,
     ) -> Box<dyn Future<Item = (), Error = String> + Send> {
-        utxo_common::wait_for_confirmations(self.as_ref(), tx, confirmations, requires_nota, wait_until, check_every)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Read through the Zcash reader: the shared UTXO parser misreads version 5 and 6
+            // (R39.11.16a).
+            z_tx_read::wait_for_confirmations(self, tx, confirmations, requires_nota, wait_until, check_every)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            utxo_common::wait_for_confirmations(
+                self.as_ref(),
+                tx,
+                confirmations,
+                requires_nota,
+                wait_until,
+                check_every,
+            )
+        }
     }
 
     fn wait_for_tx_spend(
@@ -1883,13 +2558,20 @@ impl MarketCoinOps for ZCoin {
         from_block: u64,
         _swap_contract_address: &Option<BytesJson>,
     ) -> TransactionFut {
-        utxo_common::wait_for_output_spend(
-            self.as_ref(),
-            transaction,
-            utxo_common::DEFAULT_SWAP_VOUT,
-            from_block,
-            wait_until,
-        )
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            z_tx_read::wait_for_tx_spend(self, transaction, from_block, wait_until)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            utxo_common::wait_for_output_spend(
+                self.as_ref(),
+                transaction,
+                utxo_common::DEFAULT_SWAP_VOUT,
+                from_block,
+                wait_until,
+            )
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1943,7 +2625,6 @@ impl InitWithdrawCoin for ZCoin {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl MmCoin for ZCoin {
     /// Reports the coin as non-tradeable while the Ironwood swap freeze is in
@@ -1955,6 +2636,11 @@ impl MmCoin for ZCoin {
     /// already in flight are untouched, because nothing re-checks this once a swap
     /// has begun.
     fn wallet_only(&self, ctx: &MmArc) -> bool {
+        // The WASM build can hold, sync and report the shielded coin but cannot build the
+        // shielded transactions a swap needs (CRD ch. 39 R39.6.1), so it is never tradeable there.
+        if cfg!(target_arch = "wasm32") {
+            return true;
+        }
         if self.ironwood_swap_freeze_active() {
             return true;
         }
@@ -1964,6 +2650,7 @@ impl MmCoin for ZCoin {
 
     fn is_asset_chain(&self) -> bool { self.utxo_arc.conf.asset_chain }
 
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
     fn withdraw(&self, req: WithdrawRequest) -> WithdrawFut {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1981,6 +2668,18 @@ impl MmCoin for ZCoin {
                 let amount = if req.max {
                     let fee = coin.get_one_kbyte_tx_fee().await.mm_err(Into::into)?;
                     let balance = coin.my_balance().compat().await.mm_err(Into::into)?;
+                    // Nothing to send when the spendable balance does not cover the fee; subtracting
+                    // anyway yields a negative amount that only fails later, as an internal error.
+                    if balance.spendable <= BigDecimal::from(0u8) {
+                        return MmError::err(WithdrawError::ZeroBalanceToWithdrawMax);
+                    }
+                    if balance.spendable <= fee {
+                        return MmError::err(WithdrawError::NotSufficientBalance {
+                            coin: coin.ticker().to_owned(),
+                            available: balance.spendable,
+                            required: fee,
+                        });
+                    }
                     balance.spendable - fee
                 } else {
                     req.amount

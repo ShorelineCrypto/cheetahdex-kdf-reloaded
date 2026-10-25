@@ -415,6 +415,10 @@ impl SwapOps for EthCoin {
         &self,
         other_side_address: Option<&[u8]>,
     ) -> Result<Option<BytesJson>, MmError<NegotiateSwapContractAddrErr>> {
+        // A wallet-only coin may be activated without a swap contract (the zero address); it can never trade.
+        if self.swap_contract_address == Address::default() {
+            return MmError::err(NegotiateSwapContractAddrErr::NoSwapContract);
+        }
         match other_side_address {
             Some(bytes) => {
                 if bytes.len() != 20 {

@@ -214,7 +214,7 @@ impl Default for ElectrumProtocol {
 
 #[cfg(target_arch = "wasm32")]
 impl Default for ElectrumProtocol {
-    fn default() -> Self { ElectrumProtocol::WS }
+    fn default() -> Self { ElectrumProtocol::WSS }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -233,4 +233,16 @@ pub struct ElectrumRpcRequest {
     pub protocol: ElectrumProtocol,
     #[serde(default)]
     pub disable_cert_verification: bool,
+    /// The time to wait for this server to answer a request, in seconds. The default applies when unset.
+    #[serde(default)]
+    pub timeout_sec: Option<f64>,
+}
+
+impl ElectrumRpcRequest {
+    /// The per-server request timeout, if the request set a usable one (finite and positive).
+    pub fn request_timeout(&self) -> Option<Duration> {
+        self.timeout_sec
+            .filter(|secs| secs.is_finite() && *secs > 0.)
+            .map(Duration::from_secs_f64)
+    }
 }

@@ -211,6 +211,36 @@ pub async fn bch_coin_from_conf_and_params(
     Ok(coin)
 }
 
+/// Builds the BCH coin for `task::enable_bch` (CRD ch. 55 §55.8) with the requested key policy.
+///
+/// Unlike [`bch_coin_from_conf_and_params`] it does not decide the SLP-safety rule or stringify the error,
+/// so the activation layer can map the failure classes onto its error set.
+pub async fn bch_coin_from_conf_params_and_policy(
+    ctx: &MmArc,
+    ticker: &str,
+    conf: &Json,
+    params: &BchActivationRequest,
+    slp_addr_prefix: CashAddrPrefix,
+    priv_key_policy: PrivKeyBuildPolicy,
+) -> Result<BchCoin, MmError<crate::utxo::utxo_builder::UtxoCoinBuildError>> {
+    let bchd_urls = params.bchd_urls.clone();
+    let slp_tokens_infos = Arc::new(Mutex::new(HashMap::new()));
+    let constructor = move |utxo_arc| BchCoin {
+        utxo_arc,
+        slp_addr_prefix: slp_addr_prefix.clone(),
+        bchd_urls: bchd_urls.clone(),
+        slp_tokens_infos: slp_tokens_infos.clone(),
+    };
+    UtxoArcBuilder::new(ctx, ticker, conf, &params.utxo_params, priv_key_policy, constructor)
+        .build()
+        .await
+}
+
+impl BchActivationRequest {
+    /// Whether the request lets the coin be built without SLP validation servers.
+    pub fn has_unsafe_slp_configuration(&self) -> bool { self.bchd_urls.is_empty() && !self.allow_slp_unsafe_conf }
+}
+
 #[derive(Debug)]
 pub enum BchActivationError {
     CoinInitError(String),

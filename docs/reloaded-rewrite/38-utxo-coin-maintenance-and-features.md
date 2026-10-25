@@ -325,6 +325,20 @@ use a bounded timeout and retry if the tx is not yet on chain. Acceptance: with 
 list of servers, connections are bounded and ordered by priority; a downed server
 does not stall block-count discovery.
 
+> **Shielded coins are carved out of this client.** R38.6.4 binds every
+> Electrum-backed UTXO coin. A ZHTLC (Zcash-family shielded) coin is not one: it
+> is served entirely by its `lightwalletd` endpoints, opens no Electrum
+> connection, and therefore has no connection pool for this requirement's
+> floor/ceiling and prioritisation semantics to govern. What serves each of its
+> functions instead is [chapter 39](39-zcash---z_coin-shielded-coin.md) §39.11.1.
+>
+> **Status update (reloaded).** The carve-out is a **required change, not
+> implemented.** Today a Light-mode shielded coin's transparent side *is* backed
+> by this client under this requirement's policy, so R38.6.4 does currently bind
+> it. The removal is specified in chapter 39 R39.11.1, R39.11.3 and R39.11.7, and
+> none of it exists yet; chapter 39's §39.11 status notes record the boundary.
+> Nothing about R38.6.4 itself changes either way.
+
 ### 38.6.5 UTXO balance event streaming
 R38.6.5 For Electrum-backed UTXO coins the project shall emit balance-change
 events over the streaming infrastructure, registering the addresses to be watched
@@ -432,6 +446,14 @@ empty-account representation is therefore a one-entry ticker-keyed map whose
 value is a zero `CoinBalance`, not an untyped empty object. This preserves the
 wire shape consumed by wallet SDKs and keeps an intentionally empty HD wallet
 distinguishable from a malformed balance response.
+
+> **Cross-reference (informative).** The full wire contract of the UTXO-family
+> task activations (`task::enable_utxo`, `task::enable_qtum`,
+> `task::enable_bch`) -- request fields, success object including the Iguana
+> form, progress values, error set and failure mapping -- and of the legacy
+> `enable`/`electrum` methods is bound in
+> [Chapter 55](55-coin-activation-wire-contract.md) §55.4–§55.8; the HD
+> semantics above are what its success object reports.
 
 R38.8.6 **Tests (two-direction, observable).**
 - *Segwit (BIP-84) software-HD activation & advance.* A software-HD UTXO segwit
